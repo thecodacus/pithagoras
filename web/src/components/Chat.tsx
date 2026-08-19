@@ -4,6 +4,29 @@ import { api, type PiCommand, type PortalEvent, type Session } from "../api";
 import { buildTranscript } from "../transcript";
 import { ComposerBar } from "./ComposerBar";
 
+const COMPOSER_HEIGHT_KEY = "pithagoras.composerHeight";
+const DEFAULT_COMPOSER_HEIGHT = 72;
+const MIN_COMPOSER_HEIGHT = 56;
+
+function storedComposerHeight(): number {
+  try {
+    const stored = Number.parseInt(localStorage.getItem(COMPOSER_HEIGHT_KEY) ?? "", 10);
+    return Number.isFinite(stored) && stored >= MIN_COMPOSER_HEIGHT
+      ? stored
+      : DEFAULT_COMPOSER_HEIGHT;
+  } catch {
+    return DEFAULT_COMPOSER_HEIGHT;
+  }
+}
+
+function persistComposerHeight(height: number) {
+  try {
+    localStorage.setItem(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
+  } catch {
+    // Resizing should still work when browser storage is unavailable.
+  }
+}
+
 /**
  * Context the portal attaches to a message, and what to call it.
  *
@@ -82,6 +105,9 @@ export function Chat({
   const [sending, setSending] = useState(false);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
   const items = useMemo(() => buildTranscript(events), [events]);
   const running = session.status === "running";
 
@@ -106,6 +132,44 @@ export function Chat({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [items.length, events.length]);
+
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  const startComposerResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    resizeCleanupRef.current?.();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startY = event.clientY;
+    const maxHeight = Math.round(window.innerHeight * 0.45);
+    const startHeight = Math.min(
+      maxHeight,
+      composerRef.current?.getBoundingClientRect().height ?? composerHeight,
+    );
+
+    const move = (moveEvent: PointerEvent) => {
+      const nextHeight = Math.max(
+        MIN_COMPOSER_HEIGHT,
+        Math.min(maxHeight, startHeight + startY - moveEvent.clientY),
+      );
+      setComposerHeight(nextHeight);
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      resizeCleanupRef.current = null;
+    };
+    const finish = () => {
+      cleanup();
+      const height = composerRef.current?.getBoundingClientRect().height ?? composerHeight;
+      persistComposerHeight(height);
+    };
+
+    resizeCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+  };
 
   const send = async () => {
     const msg = input.trim();
@@ -289,7 +353,32 @@ export function Chat({
             ))}
           </div>
         )}
+        <button
+          type="button"
+          onPointerDown={startComposerResize}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+            event.preventDefault();
+            const maxHeight = Math.round(window.innerHeight * 0.45);
+            const direction = event.key === "ArrowUp" ? 16 : -16;
+            const nextHeight = Math.max(
+              MIN_COMPOSER_HEIGHT,
+              Math.min(maxHeight, composerHeight + direction),
+            );
+            setComposerHeight(nextHeight);
+            persistComposerHeight(nextHeight);
+          }}
+          aria-label="Resize message composer vertically"
+          aria-valuemin={MIN_COMPOSER_HEIGHT}
+          aria-valuemax={Math.round(window.innerHeight * 0.45)}
+          aria-valuenow={Math.round(composerHeight)}
+          title="Drag up or down to resize"
+          className="group flex h-3 w-full touch-none cursor-ns-resize items-center justify-center"
+        >
+          <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
+        </button>
         <textarea
+          ref={composerRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -299,6 +388,8 @@ export function Chat({
             }
           }}
           rows={2}
+          aria-label="Message composer"
+          style={{ height: composerHeight, minHeight: MIN_COMPOSER_HEIGHT, maxHeight: "45vh" }}
           placeholder={running ? "pi is working — send to queue a follow-up…" : "Describe the task…"}
           className="w-full resize-none rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
         />
