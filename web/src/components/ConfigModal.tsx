@@ -22,7 +22,7 @@ import { api, type ExtensionInfo, type GlobalSettings, type ReportTarget, type R
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
-import { KeepRecent, formatTokens } from "./KeepRecent";
+import { KeepRecent, formatTokens, useKeepRecentSave } from "./KeepRecent";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
@@ -396,21 +396,19 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
    * the panel opened, so a value set from the context popup in the meantime
    * would be silently rolled back by a save of unrelated fields.
    */
-  const saveKeepRecent = async (tokens: number) => {
-    try {
-      const r = await api.saveSettings({ keepRecentTokens: tokens });
-      setKeepRecent(r.compaction.keepRecentTokens);
+  const saveKeepRecent = useKeepRecentSave(
+    (compaction, refreshed) => {
+      setKeepRecent(compaction.keepRecentTokens);
       setApplied(
-        r.refreshed > 0
-          ? `Applied to ${r.refreshed} open session${r.refreshed === 1 ? "" : "s"}`
-          : "Saved",
+        refreshed > 0 ? `Applied to ${refreshed} open session${refreshed === 1 ? "" : "s"}` : "Saved",
       );
       setTimeout(() => setApplied(null), 3000);
-    } catch (e) {
-      onError((e as Error).message);
-      await load();
-    }
-  };
+    },
+    (error) => {
+      onError(error.message);
+      void load();
+    },
+  );
 
   if (!stored || !defaults) return <p className="text-sm text-fg-subtle">Loading…</p>;
 

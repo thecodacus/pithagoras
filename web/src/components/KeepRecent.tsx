@@ -1,3 +1,6 @@
+import { useCallback, useRef } from "react";
+import { api, type CompactionSettings } from "../api";
+
 /**
  * How much of a conversation compaction leaves alone.
  *
@@ -76,4 +79,40 @@ export function KeepRecent({
       </div>
     </div>
   );
+}
+
+/**
+ * Save the value, ignoring anything a newer save has already superseded.
+ *
+ * A slider driven from the keyboard fires a commit per keypress, so several
+ * saves can be in flight at once and they do not have to come back in order.
+ * An earlier reply landing last would set the control to a value the server no
+ * longer holds — the number would appear to jump backwards on its own. Only
+ * the newest request is allowed to touch state, for failures as well as
+ * successes.
+ *
+ * Shared because both places that offer this control had the same race, and a
+ * fix in one of them is a fix that drifts.
+ */
+export function useKeepRecentSave(
+  onSaved: (compaction: CompactionSettings, refreshed: number) => void,
+  onFailed: (error: Error) => void,
+) {
+  const latest = useRef(0);
+  const saved = useRef(onSaved);
+  const failed = useRef(onFailed);
+  saved.current = onSaved;
+  failed.current = onFailed;
+
+  return useCallback(async (tokens: number) => {
+    const mine = ++latest.current;
+    try {
+      const r = await api.saveSettings({ keepRecentTokens: tokens });
+      if (latest.current !== mine) return;
+      saved.current(r.compaction, r.refreshed);
+    } catch (e) {
+      if (latest.current !== mine) return;
+      failed.current(e as Error);
+    }
+  }, []);
 }

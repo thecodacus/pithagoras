@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LuChevronRight, LuRefreshCw } from "react-icons/lu";
 import { api, type PiConfig } from "../api";
-import { KeepRecent } from "./KeepRecent";
+import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -99,15 +99,10 @@ export function ContextPill({
    * Saved when the drag ends, not on every step, and applied to open sessions
    * by the server — including this one, so the next compaction uses it.
    */
-  const saveKeepRecent = async (tokens: number) => {
-    setNote(null);
-    try {
-      const r = await api.saveSettings({ keepRecentTokens: tokens });
-      setKeepRecent(r.compaction.keepRecentTokens);
-    } catch (e) {
-      setNote({ text: (e as Error).message, error: true });
-    }
-  };
+  const saveKeepRecent = useKeepRecentSave(
+    (compaction) => setKeepRecent(compaction.keepRecentTokens),
+    (error) => setNote({ text: error.message, error: true }),
+  );
 
   const toggleAuto = async () => {
     setBusy("auto");

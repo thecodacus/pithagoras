@@ -122,6 +122,22 @@ app.put("/api/settings", async (req, res) => {
   // too: a number that silently becomes a different number is worse than being
   // told it was wrong.
   const keep = req.body?.keepRecentTokens;
+
+  // The two live in different stores — the portal's database and pi's own
+  // settings file — and there is no way to write both or neither. Committing
+  // one and failing the other would answer with an error after half the change
+  // had landed, so a request is not allowed to ask for both. Nothing sends
+  // one: the sliders save on release, on their own, and Save defaults carries
+  // only the fields above it.
+  const wantsDefaults = ["provider", "model", "thinkingLevel"].some(
+    (k) => typeof req.body?.[k] === "string",
+  );
+  if (keep !== undefined && wantsDefaults) {
+    return res.status(400).json({
+      error: "Save the session defaults and the compaction setting separately — they are stored in different files",
+    });
+  }
+
   let tokens: number | undefined;
   if (keep !== undefined) {
     tokens = Number(keep);
