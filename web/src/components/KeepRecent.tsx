@@ -11,9 +11,17 @@
  * many tokens" but "how much of my window", and that is a shape, not a figure.
  */
 
-const MIN = 2_000;
+/** The API's own floor, so a stored value can always be shown as what it is. */
+const MIN = 1_000;
 const STEP = 1_000;
-/** Enough headroom for a large window without making the useful end unusable. */
+/**
+ * Where the slider ends when the window is unknown.
+ *
+ * Not the API's ceiling of 500,000: a slider spanning that would put every
+ * useful value in its first few pixels. A value already above this raises the
+ * end instead, so a setting made elsewhere is never misrepresented or clamped
+ * by a control that merely cannot draw it.
+ */
 const FALLBACK_MAX = 48_000;
 
 export const formatTokens = (n: number) =>
@@ -34,7 +42,9 @@ export function KeepRecent({
   contextWindow?: number;
   disabled?: boolean;
 }) {
-  const max = contextWindow && contextWindow > MIN ? Math.min(contextWindow, 200_000) : FALLBACK_MAX;
+  const ceiling =
+    contextWindow && contextWindow > MIN ? Math.min(contextWindow, 200_000) : FALLBACK_MAX;
+  const max = Math.max(ceiling, value);
   const clamped = Math.min(Math.max(value, MIN), max);
   const share = contextWindow ? (clamped / contextWindow) * 100 : null;
 
@@ -57,6 +67,7 @@ export function KeepRecent({
         onChange={(e) => onChange(Number(e.target.value))}
         onPointerUp={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
         onKeyUp={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
+        aria-label="Tokens kept verbatim by compaction"
         className="mt-1.5 h-1 w-full cursor-pointer appearance-none rounded-full bg-raised accent-accent disabled:opacity-40"
       />
       <div className="mt-1 flex justify-between text-[10px] text-fg-faint">

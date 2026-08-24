@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -62,14 +62,47 @@ export function readCompactionSettings(): CompactionSettings {
 }
 
 /**
- * Merged into whatever else is in the file. pi writes here too, and the portal
- * has no business dropping a key it does not know about.
+ * Change pi's settings file without losing what else is in it.
+ *
+ * Read-modify-write on a file pi also owns, so two precautions. The write is a
+ * temp file and a rename, which is atomic on the same filesystem — a reader
+ * arriving mid-write sees the old file whole rather than half of the new one.
+ * And the portal's own writes are serialised, so a slider released at the same
+ * moment as a Save cannot interleave and drop one of the two changes.
+ *
+ * What this cannot do is coordinate with pi itself: pi has no setter for most
+ * of these fields, so the portal writes the file directly, and a pi write
+ * landing between the read and the rename would still be lost. That window is
+ * milliseconds wide and pi only writes on a deliberate action, so it is a
+ * smaller risk than the alternative of reaching into its internals.
  */
-export function writeCompactionSettings(patch: Partial<CompactionSettings>): CompactionSettings {
-  const all = readPiSettings();
-  const current = all.compaction && typeof all.compaction === "object" ? all.compaction : {};
-  all.compaction = { ...current, ...patch };
-  mkdirSync(path.dirname(piSettingsPath()), { recursive: true });
-  writeFileSync(piSettingsPath(), JSON.stringify(all, null, 2) + "\n", "utf8");
+let writeChain: Promise<unknown> = Promise.resolve();
+
+export function updatePiSettings(
+  mutate: (settings: Record<string, unknown>) => void,
+): Promise<Record<string, unknown>> {
+  const next = writeChain.then(() => {
+    const all = readPiSettings();
+    mutate(all);
+    const file = piSettingsPath();
+    mkdirSync(path.dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify(all, null, 2) + "\n", "utf8");
+    renameSync(temp, file);
+    return all;
+  });
+  // Kept unbroken by a failure, or one bad write would wedge every later one.
+  writeChain = next.catch(() => {});
+  return next;
+}
+
+/** Merged, never replaced: the portal has no business dropping a key it does not know. */
+export async function writeCompactionSettings(
+  patch: Partial<CompactionSettings>,
+): Promise<CompactionSettings> {
+  await updatePiSettings((all) => {
+    const current = all.compaction && typeof all.compaction === "object" ? all.compaction : {};
+    all.compaction = { ...current, ...patch };
+  });
   return readCompactionSettings();
 }

@@ -116,32 +116,41 @@ app.put("/api/settings", async (req, res) => {
   if (typeof provider === "string") patch.provider = provider.trim();
   if (typeof model === "string") patch.model = model.trim();
   if (typeof thinkingLevel === "string") patch.thinkingLevel = thinkingLevel.trim();
-  const settings = setSettings(patch);
-
-  // Compaction lives in pi's file rather than the portal's, because pi is what
-  // reads it. Rejected rather than clamped: a number typed by hand into a box
-  // that silently becomes a different number is worse than being told.
+  // Checked before anything is written. Rejecting half way through left the
+  // provider changed on a request that answered 400, which is a worse outcome
+  // than either accepting or refusing the lot. Rejected rather than clamped
+  // too: a number that silently becomes a different number is worse than being
+  // told it was wrong.
   const keep = req.body?.keepRecentTokens;
-  let compaction = readCompactionSettings();
+  let tokens: number | undefined;
   if (keep !== undefined) {
-    const tokens = Number(keep);
+    tokens = Number(keep);
     if (!Number.isFinite(tokens) || tokens < 1000 || tokens > 500_000) {
       return res.status(400).json({ error: "Keep recent must be between 1,000 and 500,000 tokens" });
     }
-    compaction = writeCompactionSettings({ keepRecentTokens: Math.round(tokens) });
+    tokens = Math.round(tokens);
   }
+
+  const settings = setSettings(patch);
+
+  // Compaction lives in pi's file rather than the portal's, because pi is what
+  // reads it.
+  const compaction =
+    tokens !== undefined
+      ? await writeCompactionSettings({ keepRecentTokens: tokens })
+      : readCompactionSettings();
 
   // The provider and model defaults apply to sessions started from here on,
   // which matches how the TUI treats a changed default. Compaction is pushed
   // into open sessions as well — the session you are looking at when you
   // change it is the one you meant it for.
-  const refreshed = keep !== undefined ? await sessions.refreshSettings() : 0;
+  const refreshed = tokens !== undefined ? await sessions.refreshSettings() : 0;
   res.json({
     settings,
     compaction,
     refreshed,
     note:
-      keep !== undefined
+      tokens !== undefined
         ? `Compaction applied to ${refreshed} open session${refreshed === 1 ? "" : "s"}. Model and effort apply to newly started sessions.`
         : "Applies to newly started sessions",
   });
