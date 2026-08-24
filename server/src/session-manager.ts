@@ -588,6 +588,11 @@ class SessionManager extends EventEmitter {
       // still going to run, and the session already shows as working with a
       // Stop button. Remembered so it is cancelled the moment it could begin.
       if (this.compacting.has(sessionId)) this.cancelPending.add(sessionId);
+      // Then waited for, like the path below. Returning here reported the Stop
+      // as done while the session went on showing itself as compacting until pi
+      // had finished starting — the same bounded wait, so the answer arrives
+      // when the thing it describes is actually over.
+      await this.settleCompaction(sessionId);
       return;
     }
     await live.client.abort().catch(() => {});
