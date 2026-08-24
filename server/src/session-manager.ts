@@ -281,6 +281,10 @@ class SessionManager extends EventEmitter {
     // Same reason as in abort(): a session mid-compaction is detached from
     // agent events, and a prompt started there is invisible.
     await this.settleCompaction(sessionId);
+    // The compaction published idle on its way out, after this prompt had
+    // already claimed the session. Without this the composer loses its Stop
+    // and isBusy() reads false for however long pi takes to answer.
+    this.mark(sessionId, "running");
     try {
       await this.submit(sessionId, message);
     } catch (e) {
@@ -610,26 +614,33 @@ class SessionManager extends EventEmitter {
   /**
    * Resolves once any in-flight compaction has finished unwinding.
    *
-   * Bounded, because both callers are the ones you reach for when something is
-   * already wrong: waiting forever on a compaction that never returns would
-   * take Stop down with it and leave the session unusable until a restart.
-   * Giving up puts us back where this started, which is survivable.
+   * Bounded, and it gives up by failing rather than by carrying on. A race
+   * does not cancel what it lost to: the compaction is still running, the
+   * session is still detached from agent events, and proceeding anyway would
+   * start a turn that reaches nobody — which is the thing this wait exists to
+   * prevent. Saying so leaves the session honestly busy, and the cancellation
+   * Stop already issued still lands when the compaction finally unwinds.
    */
   private async settleCompaction(sessionId: string, timeoutMs = 60_000): Promise<void> {
     const inFlight = this.compacting.get(sessionId);
     if (!inFlight) return;
     let timer: NodeJS.Timeout | undefined;
-    try {
-      await Promise.race([
-        // Waiting for it to be over, not for it to have worked. The failure
-        // belongs to whoever asked for the compaction.
-        inFlight.catch(() => {}),
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
+    const settled = await Promise.race([
+      // Waiting for it to be over, not for it to have worked. The failure
+      // belongs to whoever asked for the compaction.
+      inFlight.then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!settled) {
+      throw new Error(
+        "The conversation is still being compacted. Nothing else can run until it finishes.",
+      );
     }
   }
 
