@@ -82,36 +82,64 @@ export function KeepRecent({
 }
 
 /**
- * Save the value, ignoring anything a newer save has already superseded.
+ * Save the value, in order, and only the value that is still current.
  *
  * A slider driven from the keyboard fires a commit per keypress, so several
- * saves can be in flight at once and they do not have to come back in order.
- * An earlier reply landing last would set the control to a value the server no
- * longer holds — the number would appear to jump backwards on its own. Only
- * the newest request is allowed to touch state, for failures as well as
- * successes.
+ * saves are asked for in quick succession. Two problems, and guarding the
+ * callbacks only solves the visible one.
  *
- * Shared because both places that offer this control had the same race, and a
- * fix in one of them is a fix that drifts.
+ * Requests do not have to come back in the order they were sent. An earlier
+ * reply landing last would repaint the control with a value the server no
+ * longer holds — the number appears to jump backwards on its own. Worse, an
+ * earlier request can *arrive* last, and then the server ends up storing the
+ * older value while the control quite correctly shows the newer one. No amount
+ * of care on the client's side of the reply fixes that; the writes themselves
+ * have to be ordered.
+ *
+ * So they run one at a time, and a value that a newer commit has already
+ * replaced is dropped when its turn comes rather than sent — the newer one is
+ * behind it in the queue and will write. Dragging a slider across twenty steps
+ * makes two requests, not twenty, and the last one holds the value you left it
+ * on.
+ *
+ * All of this is module level rather than per component: it is one setting,
+ * and the two places that offer it must not race each other either.
  */
+let queue: Promise<unknown> = Promise.resolve();
+let newest = 0;
+
+/** Skipped rather than sent, when something newer is already waiting behind it. */
+const SUPERSEDED = Symbol("superseded");
+
 export function useKeepRecentSave(
   onSaved: (compaction: CompactionSettings, refreshed: number) => void,
   onFailed: (error: Error) => void,
 ) {
-  const latest = useRef(0);
   const saved = useRef(onSaved);
   const failed = useRef(onFailed);
   saved.current = onSaved;
   failed.current = onFailed;
 
   return useCallback(async (tokens: number) => {
-    const mine = ++latest.current;
+    const mine = ++newest;
+    const run = async () => {
+      if (mine !== newest) return SUPERSEDED;
+      return api.saveSettings({ keepRecentTokens: tokens });
+    };
+    // Chained off the previous save whether it worked or not, or one failure
+    // would stop every later save from ever being sent.
+    const next = queue.then(run, run);
+    queue = next.then(
+      () => {},
+      () => {},
+    );
+
     try {
-      const r = await api.saveSettings({ keepRecentTokens: tokens });
-      if (latest.current !== mine) return;
+      const r = await next;
+      if (r === SUPERSEDED || mine !== newest) return;
       saved.current(r.compaction, r.refreshed);
     } catch (e) {
-      if (latest.current !== mine) return;
+      if (mine !== newest) return;
       failed.current(e as Error);
     }
   }, []);
