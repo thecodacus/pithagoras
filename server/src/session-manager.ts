@@ -117,6 +117,25 @@ class SessionManager extends EventEmitter {
     this.emit(`session:${sessionId}`, row);
   }
 
+  /**
+   * Compact on request.
+   *
+   * Marked running for the same reason a prompt is: it takes a model call and
+   * a minute, and without it the composer showed nothing, the transcript
+   * showed nothing, and there was no Stop to press — a long compaction was
+   * indistinguishable from a hung portal.
+   */
+  async compact(sessionId: string): Promise<void> {
+    const client = await this.ensureClient(sessionId);
+    this.mark(sessionId, "running");
+    try {
+      await client.compact();
+    } finally {
+      // No agent run, so no agent_settled arrives to clear it.
+      this.mark(sessionId, "idle");
+    }
+  }
+
   /** How far llama.cpp has got through the prompt. Straight out to the browser. */
   reportPrefill(sessionId: string, prefill: unknown): void {
     this.record(sessionId, "portal_prefill", prefill);

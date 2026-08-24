@@ -459,6 +459,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   }
 
   async abort(): Promise<void> {
+    // Compaction runs on a controller of its own, so session.abort() stops an
+    // agent run and leaves a summarisation going — the one case where Stop
+    // looks like it did nothing at all.
+    if (this.session.isCompacting) this.session.abortCompaction();
     await this.session.abort();
   }
 

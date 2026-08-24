@@ -461,10 +461,12 @@ app.post("/api/sessions/:id/compact", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   try {
-    const client = await sessions.client(session.id);
-    await client.compact();
+    await sessions.compact(session.id);
     res.json({ ok: true });
   } catch (e) {
+    // The message alone reaches the browser, and "Cannot read properties of
+    // undefined" says nothing about where. The stack stays here.
+    console.error(`[portal] compaction failed for ${session.id}:`, e);
     res.status(500).json({ error: (e as Error).message });
   }
 });
