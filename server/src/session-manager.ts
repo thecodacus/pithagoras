@@ -181,10 +181,34 @@ class SessionManager extends EventEmitter {
     this.record(sessionId, "portal_prefill", prefill);
   }
 
-  private async ensureClient(sessionId: string): Promise<PiClient> {
+  /**
+   * Start pi for a session, once.
+   *
+   * Two callers arriving on a cold session both used to get past the check
+   * below and both launch. The later `live.set()` then dropped the first on
+   * the floor: a pi session still running, still subscribed to its own events,
+   * with an executor nobody would ever clean up — and a Stop that reached
+   * whichever one happened to be in the map.
+   *
+   * askNow() makes it easy to hit, because it starts a client of its own
+   * before it prompts, and any two requests landing together on a session
+   * nobody has opened yet will do it.
+   */
+  private ensureClient(sessionId: string): Promise<PiClient> {
     const existing = this.live.get(sessionId);
-    if (existing?.client.running) return existing.client;
+    if (existing?.client.running) return Promise.resolve(existing.client);
 
+    const starting = this.starting.get(sessionId);
+    if (starting) return starting;
+
+    // Cleared whether it worked or not, so a failed start does not leave the
+    // session unable to try again.
+    const launch = this.startClient(sessionId).finally(() => this.starting.delete(sessionId));
+    this.starting.set(sessionId, launch);
+    return launch;
+  }
+
+  private async startClient(sessionId: string): Promise<PiClient> {
     const session = getSession(sessionId);
     if (!session) throw new Error(`Unknown session ${sessionId}`);
 
@@ -281,6 +305,9 @@ class SessionManager extends EventEmitter {
 
   /** A Stop that arrived before there was anything to stop. */
   private cancelPending = new Set<string>();
+
+  /** Client startup in flight, so two callers cannot launch two of them. */
+  private starting = new Map<string, Promise<PiClient>>();
 
   /** Move a session's status and tell whoever is watching, in that order. */
   private mark(sessionId: string, status: "running" | "idle"): void {
