@@ -126,11 +126,22 @@ class SessionManager extends EventEmitter {
    * indistinguishable from a hung portal.
    */
   async compact(sessionId: string): Promise<void> {
-    const client = await this.ensureClient(sessionId);
+    // Before starting pi, not after: on a cold session that takes seconds, and
+    // those are exactly the seconds with no activity line and no Stop.
     this.mark(sessionId, "running");
-    try {
+    const run = (async () => {
+      const client = await this.ensureClient(sessionId);
       await client.compact();
+    })();
+    // Held so a Stop can wait for it — see abort().
+    this.compacting.set(sessionId, run.then(
+      () => {},
+      () => {},
+    ));
+    try {
+      await run;
     } finally {
+      this.compacting.delete(sessionId);
       // No agent run, so no agent_settled arrives to clear it.
       this.mark(sessionId, "idle");
     }
@@ -233,6 +244,12 @@ class SessionManager extends EventEmitter {
     return client;
   }
 
+  /**
+   * Compaction in flight, per session. A cancelled one is still running until
+   * pi has unwound it, and both Stop and the next prompt have to wait.
+   */
+  private compacting = new Map<string, Promise<void>>();
+
   /** Move a session's status and tell whoever is watching, in that order. */
   private mark(sessionId: string, status: "running" | "idle"): void {
     if (getSession(sessionId)?.status === status) return;
@@ -249,6 +266,9 @@ class SessionManager extends EventEmitter {
    */
   async prompt(sessionId: string, message: string): Promise<void> {
     this.mark(sessionId, "running");
+    // Same reason as in abort(): a session mid-compaction is detached from
+    // agent events, and a prompt started there is invisible.
+    await this.settleCompaction(sessionId);
     try {
       await this.submit(sessionId, message);
     } catch (e) {
@@ -553,8 +573,39 @@ class SessionManager extends EventEmitter {
     const live = this.live.get(sessionId);
     if (!live?.client.running) return;
     await live.client.abort().catch(() => {});
+    // Cancelling a compaction does not end it. pi detaches the session from
+    // agent events for the whole of compact() and reattaches in its own
+    // finally, so between abortCompaction() returning and that finally running
+    // the session is deaf. Publishing idle there lets the next prompt start
+    // against a detached session — it would run with nothing reaching the
+    // transcript, which is the failure this whole area keeps producing.
+    await this.settleCompaction(sessionId);
     updateSession(sessionId, { status: "idle" });
     this.record(sessionId, "portal_status", { status: "idle", aborted: true });
+  }
+
+  /**
+   * Resolves once any in-flight compaction has finished unwinding.
+   *
+   * Bounded, because both callers are the ones you reach for when something is
+   * already wrong: waiting forever on a compaction that never returns would
+   * take Stop down with it and leave the session unusable until a restart.
+   * Giving up puts us back where this started, which is survivable.
+   */
+  private async settleCompaction(sessionId: string, timeoutMs = 60_000): Promise<void> {
+    const inFlight = this.compacting.get(sessionId);
+    if (!inFlight) return;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        inFlight,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async stop(sessionId: string): Promise<void> {
