@@ -126,22 +126,31 @@ class SessionManager extends EventEmitter {
    * indistinguishable from a hung portal.
    */
   async compact(sessionId: string): Promise<void> {
+    // One at a time. A second request used to overwrite the tracked promise,
+    // and whichever finished first then cleared it and published idle while
+    // the other was still going — which is exactly the state prompt() checks
+    // for before deciding it is safe to start.
+    const inFlight = this.compacting.get(sessionId);
+    if (inFlight) return inFlight;
+
     // Before starting pi, not after: on a cold session that takes seconds, and
     // those are exactly the seconds with no activity line and no Stop.
     this.mark(sessionId, "running");
     const run = (async () => {
       const client = await this.ensureClient(sessionId);
+      // Stop pressed while pi was still starting. There was nothing to abort
+      // at the time, so it is honoured here instead of starting a compaction
+      // that the user has already asked not to happen.
+      if (this.cancelPending.delete(sessionId)) return;
       await client.compact();
     })();
-    // Held so a Stop can wait for it — see abort().
-    this.compacting.set(sessionId, run.then(
-      () => {},
-      () => {},
-    ));
+    // Held so a Stop, and the next prompt, can wait for it — see abort().
+    this.compacting.set(sessionId, run);
     try {
       await run;
     } finally {
       this.compacting.delete(sessionId);
+      this.cancelPending.delete(sessionId);
       // No agent run, so no agent_settled arrives to clear it.
       this.mark(sessionId, "idle");
     }
@@ -249,6 +258,9 @@ class SessionManager extends EventEmitter {
    * pi has unwound it, and both Stop and the next prompt have to wait.
    */
   private compacting = new Map<string, Promise<void>>();
+
+  /** A Stop that arrived before there was anything to stop. */
+  private cancelPending = new Set<string>();
 
   /** Move a session's status and tell whoever is watching, in that order. */
   private mark(sessionId: string, status: "running" | "idle"): void {
@@ -571,7 +583,13 @@ class SessionManager extends EventEmitter {
 
   async abort(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId);
-    if (!live?.client.running) return;
+    if (!live?.client.running) {
+      // Nothing to abort yet — but a compaction waiting on pi to start is
+      // still going to run, and the session already shows as working with a
+      // Stop button. Remembered so it is cancelled the moment it could begin.
+      if (this.compacting.has(sessionId)) this.cancelPending.add(sessionId);
+      return;
+    }
     await live.client.abort().catch(() => {});
     // Cancelling a compaction does not end it. pi detaches the session from
     // agent events for the whole of compact() and reattaches in its own
@@ -598,7 +616,9 @@ class SessionManager extends EventEmitter {
     let timer: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
-        inFlight,
+        // Waiting for it to be over, not for it to have worked. The failure
+        // belongs to whoever asked for the compaction.
+        inFlight.catch(() => {}),
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, timeoutMs);
         }),
