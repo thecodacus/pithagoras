@@ -114,6 +114,12 @@ export interface Workspace {
   isGit: boolean;
 }
 
+export interface CompactionSettings {
+  enabled: boolean;
+  /** The floor a compaction cannot go below — kept verbatim, never summarised. */
+  keepRecentTokens: number;
+}
+
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -391,11 +397,20 @@ export const api = {
       /** What an unset field falls back to: env, else pi's settings.json. */
       defaults: GlobalSettings;
       piSettingsPath: string;
+      /** pi's own compaction tuning, which lives in its settings.json not ours. */
+      compaction: CompactionSettings;
+      compactionDefaults: CompactionSettings;
       executor: string;
       workspaceRoot: string;
     }>("/api/settings"),
-  saveSettings: (patch: Partial<GlobalSettings>) =>
-    json<{ settings: GlobalSettings; note: string }>("/api/settings", {
+  saveSettings: (patch: Partial<GlobalSettings> & { keepRecentTokens?: number }) =>
+    json<{
+      settings: GlobalSettings;
+      compaction: CompactionSettings;
+      /** How many open sessions took the new compaction settings. */
+      refreshed: number;
+      note: string;
+    }>("/api/settings", {
       method: "PUT",
       body: JSON.stringify(patch),
     }),

@@ -584,6 +584,19 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     this.session.setThinkingLevel(level);
   }
 
+  /**
+   * Re-read pi's settings file into this session.
+   *
+   * A session takes a copy of the settings when it starts, so a compaction
+   * tuned in the UI would otherwise not reach anything already open — and the
+   * session you are looking at when you change it is exactly the one you meant.
+   * Only the file is re-read; anything set on this session was written there
+   * too, so nothing is lost.
+   */
+  async refreshSettings(): Promise<void> {
+    await this.session.settingsManager?.reload?.();
+  }
+
   async setAutoCompaction(enabled: boolean): Promise<void> {
     this.session.setAutoCompactionEnabled(enabled);
   }

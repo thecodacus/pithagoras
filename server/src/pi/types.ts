@@ -57,6 +57,8 @@ export interface PiClient extends EventEmitter {
   setModel(provider: string, modelId: string): Promise<void>;
   setThinkingLevel(level: string): Promise<void>;
   setAutoCompaction(enabled: boolean): Promise<void>;
+  /** Re-read pi's settings file. Optional: not every executor can. */
+  refreshSettings?(): Promise<void>;
   setAutoRetry(enabled: boolean): Promise<void>;
   compact(): Promise<void>;
   reload(): Promise<void>;

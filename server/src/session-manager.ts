@@ -156,6 +156,26 @@ class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * Push a change to pi's settings file into every session already open.
+   *
+   * Without this, tuning compaction would apply to sessions started later and
+   * to nothing you can currently see. Failures are swallowed per session: one
+   * client that cannot reload is not a reason to fail the save.
+   */
+  async refreshSettings(): Promise<number> {
+    const live = [...this.live.values()];
+    const done = await Promise.all(
+      live.map((s) =>
+        s.client
+          .refreshSettings?.()
+          .then(() => true)
+          .catch(() => false) ?? Promise.resolve(false),
+      ),
+    );
+    return done.filter(Boolean).length;
+  }
+
   /** How far llama.cpp has got through the prompt. Straight out to the browser. */
   reportPrefill(sessionId: string, prefill: unknown): void {
     this.record(sessionId, "portal_prefill", prefill);

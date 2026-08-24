@@ -22,6 +22,7 @@ import { api, type ExtensionInfo, type GlobalSettings, type ReportTarget, type R
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
+import { KeepRecent, formatTokens } from "./KeepRecent";
 import { PeoplePanel } from "./PeoplePanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal } from "./Modal";
@@ -366,6 +367,8 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
   } | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [keepRecent, setKeepRecent] = useState<number | null>(null);
+  const [applied, setApplied] = useState<string | null>(null);
 
   const load = () =>
     api
@@ -373,6 +376,7 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
       .then((r) => {
         setStored(r.stored);
         setDefaults(r.defaults);
+        setKeepRecent(r.compaction.keepRecentTokens);
         setMeta({
           executor: r.executor,
           workspaceRoot: r.workspaceRoot,
@@ -391,11 +395,19 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
     setBusy(true);
     try {
       // Sent even when blank: an empty value clears the override server-side.
-      await api.saveSettings({
+      const r = await api.saveSettings({
         provider: stored.provider ?? "",
         model: stored.model ?? "",
         thinkingLevel: stored.thinkingLevel ?? "",
+        ...(keepRecent !== null ? { keepRecentTokens: keepRecent } : {}),
       });
+      // Worth saying out loud: unlike the model default, this one reaches
+      // sessions that are already open.
+      setApplied(
+        r.refreshed > 0
+          ? `Applied to ${r.refreshed} open session${r.refreshed === 1 ? "" : "s"}`
+          : null,
+      );
       await load();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -473,6 +485,24 @@ function GeneralPanel({ onError }: { onError: (e: string) => void }) {
               "Save defaults"
             )}
           </button>
+        </div>
+      </Section>
+
+      <Section
+        title="Compaction"
+        hint="What a compaction leaves untouched. The most recent stretch of a conversation is kept word for word; only what is older is replaced by a summary."
+      >
+        <div className="rounded-xl border border-line bg-raised/40 p-3">
+          {keepRecent !== null && (
+            <KeepRecent value={keepRecent} onChange={setKeepRecent} disabled={busy} />
+          )}
+          <p className="mt-2 text-xs text-fg-faint">
+            This is the floor a compacted session settles at, before the summary is added — pi's
+            default of {formatTokens(20000)} is a third of a 64k window, which is why compacting can
+            look as though it did nothing. Saved with the defaults above, and unlike them it reaches
+            sessions that are already open.
+          </p>
+          {applied && <p className="mt-1 text-xs text-ok">{applied}</p>}
         </div>
       </Section>
 
