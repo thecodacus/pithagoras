@@ -48,8 +48,6 @@ export interface SessionRow {
   role: "primary" | "colleague" | "guest" | "unknown";
   /** Who last spoke here, surviving a restart that empties the in-memory map. */
   last_person_key: string | null;
-  /** May this session drive the agent's browser? Off unless turned on. */
-  browser: number;
 }
 
 export interface EventRow {
@@ -144,12 +142,6 @@ export function getDb(): Database.Database {
       instructions TEXT NOT NULL DEFAULT '',
       -- Start each run in a clean session instead of the routine's own.
       fresh_session INTEGER NOT NULL DEFAULT 0,
-      -- Whether the injection guard's blocking rules apply to this routine's
-      -- runs. On by default. Work that reads logs and then fixes what it found
-      -- trips them honestly: fetching the logs taints the session, and a fix
-      -- that pushes, or a grep for the word "token", is exactly what the rules
-      -- exist to stop when the content is hostile.
-      guard INTEGER NOT NULL DEFAULT 1,
       -- Where a run's report goes. NULL inherits the portal default; '' means
       -- this routine never reports, whatever the default is.
       report_channel TEXT,
@@ -246,22 +238,6 @@ export function getDb(): Database.Database {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- What the guard did, and why. Refusals were going to the container log,
-    -- which answers "is it working" and not "what has my agent been asked to do
-    -- this week" — the question somebody actually has.
-    CREATE TABLE IF NOT EXISTS audit (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      at TEXT NOT NULL DEFAULT (datetime('now')),
-      -- refused | allowed-by-rule | allowed-by-approval | stranger | answered
-      kind TEXT NOT NULL,
-      tool TEXT NOT NULL DEFAULT '',
-      -- The command or path it was about, as the guard saw it.
-      subject TEXT NOT NULL DEFAULT '',
-      reason TEXT NOT NULL DEFAULT '',
-      person_key TEXT,
-      session_id TEXT
-    );
-
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -296,9 +272,6 @@ function migrate(d: Database.Database): void {
   // The lowest role this session has ever served. Ratchets down and never up:
   // once a guest has spoken in a conversation, the private context files stay
   // out of it even if the next message is from the primary user.
-  if (!names.includes("browser")) {
-    d.exec("ALTER TABLE sessions ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
-  }
   if (!names.includes("last_person_key")) {
     d.exec("ALTER TABLE sessions ADD COLUMN last_person_key TEXT");
   }
@@ -354,16 +327,9 @@ function migrate(d: Database.Database): void {
       d.exec(`ALTER TABLE routines ADD COLUMN ${col} TEXT`);
     }
   }
-  if (routineCols.length && !routineCols.includes("guard")) {
-    d.exec("ALTER TABLE routines ADD COLUMN guard INTEGER NOT NULL DEFAULT 1");
-  }
-  if (routineCols.length && !routineCols.includes("browser")) {
-    d.exec("ALTER TABLE routines ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
-  }
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_slug ON routines(slug)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
-  d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");
   const ruleCols = (d.prepare("PRAGMA table_info(tool_rules)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -492,22 +458,6 @@ export function deleteSession(id: string): void {
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
 }
 
-/**
- * When an event happened, in epoch milliseconds.
- *
- * SQLite writes `datetime('now')` as UTC with no zone marker, which JS parses
- * as local time — an hour or ten out, depending on where the portal runs. The
- * live path writes a real ISO string, so both shapes turn up in the same table.
- */
-export function eventTime(createdAt: string | undefined): number | undefined {
-  if (!createdAt) return undefined;
-  const iso = /[Zz]|[+-]\d\d:?\d\d$/.test(createdAt)
-    ? createdAt
-    : createdAt.replace(" ", "T") + "Z";
-  const ms = Date.parse(iso);
-  return Number.isNaN(ms) ? undefined : ms;
-}
-
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
   const info = getDb()
     .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
@@ -522,34 +472,6 @@ export function appendEvent(sessionId: string, type: string, payload: unknown): 
 }
 
 /** Events after `since`, for replaying what a disconnected browser missed. */
-/**
- * Where to start replaying so a session gets its own last `keep` events.
- *
- * Counted within the session, not across the table. seq is a single sequence
- * shared by every session, so "the last 20,000 seq" is "whatever this
- * conversation happened to do while the portal was busy with others" — on a
- * busy box that can be almost nothing.
- */
-export function replayStart(sessionId: string, keep: number): number {
-  const row = getDb()
-    .prepare(
-      "SELECT seq FROM events WHERE session_id = ? ORDER BY seq DESC LIMIT 1 OFFSET ?"
-    )
-    .get(sessionId, keep) as { seq: number } | undefined;
-  return row?.seq ?? 0;
-}
-
-/** The page before a cursor, oldest first — what a transcript scrolls back into. */
-export function eventsBefore(sessionId: string, before: number, limit = 1500): EventRow[] {
-  return getDb()
-    .prepare(
-      `SELECT * FROM (
-         SELECT * FROM events WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?
-       ) ORDER BY seq ASC`
-    )
-    .all(sessionId, before, limit) as EventRow[];
-}
-
 export function eventsSince(sessionId: string, since = 0, limit = 5000): EventRow[] {
   return getDb()
     .prepare(
@@ -749,86 +671,4 @@ export function useGrant(sessionId: string, tool: string, subject: string): bool
   if (!row) return false;
   getDb().prepare("UPDATE grants SET used_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
   return true;
-}
-
-export interface AuditRow {
-  id: number;
-  at: string;
-  kind: string;
-  tool: string;
-  subject: string;
-  reason: string;
-  person_key: string | null;
-  session_id: string | null;
-}
-
-/** Keeps the log from growing without bound; old entries are not evidence. */
-const AUDIT_KEEP = 2000;
-
-export function recordAudit(entry: {
-  kind: string;
-  tool?: string;
-  subject?: string;
-  reason?: string;
-  personKey?: string | null;
-  sessionId?: string | null;
-}): void {
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO audit (kind, tool, subject, reason, person_key, session_id)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    entry.kind,
-    entry.tool ?? "",
-    (entry.subject ?? "").slice(0, 2000),
-    entry.reason ?? "",
-    entry.personKey ?? null,
-    entry.sessionId ?? null
-  );
-  db.prepare(
-    `DELETE FROM audit WHERE id <= (SELECT MAX(id) FROM audit) - ?`
-  ).run(AUDIT_KEEP);
-}
-
-export const listAudit = (limit = 200): AuditRow[] =>
-  getDb().prepare("SELECT * FROM audit ORDER BY id DESC LIMIT ?").all(limit) as AuditRow[];
-
-/** Does this routine's runs get the guard's blocking rules? Unknown means yes. */
-export function routineGuards(slug: string | null | undefined): boolean {
-  if (!slug) return true;
-  const row = getDb().prepare("SELECT guard FROM routines WHERE slug = ?").get(slug) as
-    | { guard: number }
-    | undefined;
-  return row ? row.guard === 1 : true;
-}
-
-/** Does this session get the browser? Routines answer for their own runs. */
-export function browserAllowed(session: SessionRow): boolean {
-  if (session.kind === "routine" && session.routine_slug) {
-    const row = getDb().prepare("SELECT browser FROM routines WHERE slug = ?").get(
-      session.routine_slug
-    ) as { browser: number } | undefined;
-    return row ? row.browser === 1 : false;
-  }
-  return session.browser === 1;
-}
-
-/**
- * Domains the browser may be pointed at, as globs. Empty means no restriction —
- * the on/off switch is the gate, and a list nobody filled in should not quietly
- * block everything.
- */
-export function browserAllowlist(): string[] {
-  const raw = (getStoredSettings() as Record<string, string>).browser_allowlist ?? "";
-  return raw
-    .split(/[\n,]/)
-    .map((d) => d.trim())
-    .filter(Boolean);
-}
-
-export function setBrowserAllowlist(domains: string): void {
-  const upsert = getDb().prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  );
-  upsert.run("browser_allowlist", domains.trim());
 }

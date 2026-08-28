@@ -2,7 +2,6 @@ import {
   addGrant,
   addNote,
   addToolRule,
-  recordAudit,
   findChannelSession,
   getDb,
   getDefaultReportTo,
@@ -354,12 +353,6 @@ class ChannelSupervisor {
       : null;
 
     if (person && person.role === "unknown" && hasPrimary()) {
-      recordAudit({
-        kind: "stranger",
-        reason: `Turned away on ${row.slug}`,
-        subject: text.slice(0, 200),
-        personKey: person.key,
-      });
       // Refused before a session exists: an unclassified sender never reaches
       // the agent at all, so there is nothing for them to talk it into.
       await this.announce(person, row.slug);
@@ -411,18 +404,6 @@ class ChannelSupervisor {
         } catch (e) {
           return `Could not get that back to ${question.person_name}: ${(e as Error).message}`;
         }
-        recordAudit({
-          kind: "answered",
-          tool: question.action_tool || "",
-          subject: question.action || question.question.slice(0, 200),
-          reason: always
-            ? `Always allowed for ${question.person_name}`
-            : approves
-              ? `Approved once for ${question.person_name}`
-              : `Refused for ${question.person_name}`,
-          personKey: question.person_key,
-          sessionId: asking?.id ?? null,
-        });
         recordAnswer(question.id, answer);
 
         // Carry on where it left off. Without this the answer lands in a

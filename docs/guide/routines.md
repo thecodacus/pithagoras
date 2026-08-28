@@ -58,32 +58,6 @@ says nothing happened trains you to ignore the next one — and the next one mig
 be the one that mattered.
 :::
 
-## The injection guard
-
-By default a run that reads something untrusted — logs pulled over the network,
-a web page, mail — cannot then push, write onto `PATH`, upload data or read
-credentials. That is the [guard](/guide/security), and for most routines it
-never comes up.
-
-It gets in the way of one honest shape of work: **read the logs, then fix what
-they say**. Fetching the logs taints the session, and the fix is a push. Grepping
-those logs for the word `token` looks like reading credentials. Nothing is
-wrong, and the run stops anyway.
-
-**Injection guard** on a routine's page turns the blocking off for that routine
-alone. Two things stay:
-
-- Untrusted content is still labelled as untrusted, so the agent knows what it
-  is reading. That half never gets in the way.
-- Anything it does that the rules would have stopped is recorded in **Audit** as
-  `allowed-by-exemption`, with the rule that would have fired.
-
-::: warning Turn it off for the routine, not the habit
-The rules exist for when the log line was written by somebody who wanted the
-agent to read it. Exempt the routine that needs it, leave the rest alone, and
-read the audit occasionally.
-:::
-
 ## Letting the agent manage them
 
 Sessions reached through a channel get `routines_list`, `routine_create`,

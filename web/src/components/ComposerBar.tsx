@@ -1,4 +1,3 @@
-import { LuGlobe } from "react-icons/lu";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
 import { ContextPill } from "./ContextPill";
@@ -11,33 +10,6 @@ import { ContextPill } from "./ContextPill";
  * Replaced by whatever pi actually reports once that arrives.
  */
 const DEFAULT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-/**
- * The model catalogue, kept between sessions and reloads.
- *
- * Fetching it starts pi and enumerates a few hundred models, which is slow
- * enough that opening the picker sat on "Loading models…" every time. The
- * providers are portal-wide, so one cache serves every session, and it is only
- * refetched when somebody asks — a model list does not change on its own.
- */
-const CATALOGUE_KEY = "modelCatalogue.v1";
-
-function cachedModels(): PiModel[] {
-  try {
-    const raw = localStorage.getItem(CATALOGUE_KEY);
-    return raw ? (JSON.parse(raw) as PiModel[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-const cacheModels = (models: PiModel[]) => {
-  try {
-    if (models.length) localStorage.setItem(CATALOGUE_KEY, JSON.stringify(models));
-  } catch {
-    // A full quota is not worth failing a dropdown over.
-  }
-};
 
 const RECENTS_KEY = "pithagoras.recentModels";
 const MAX_RECENTS = 4;
@@ -63,35 +35,6 @@ function pushRecent(id: string): string[] {
 
 /** "Anthropic: Claude Sonnet 5" reads better as "Claude Sonnet 5". */
 const shortName = (m: { name: string }) => m.name.split(":").pop()!.trim();
-
-/**
- * Where a model actually runs.
- *
- * A local provider is spelled `llama-server=http://host:port`, so the interesting
- * part is the scheme rather than the name — anything pointing at a URL is
- * something you are hosting, and everything else is somebody else's API.
- */
-function origin(provider: string): { label: string; local: boolean } {
-  if (/^(llama|llamacpp|llama-server|local|ollama|lmstudio|vllm)/i.test(provider) || provider.includes("://")) {
-    return { label: provider.split("=")[0] || "local", local: true };
-  }
-  return { label: provider, local: false };
-}
-
-/** A word saying whose machine answers, because the model name never says. */
-function OriginTag({ provider }: { provider: string }) {
-  const o = origin(provider);
-  return (
-    <span
-      title={provider}
-      className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
-        o.local ? "bg-ok/10 text-ok" : "bg-fg/5 text-fg-subtle"
-      }`}
-    >
-      {o.local ? "local" : o.label}
-    </span>
-  );
-}
 
 /**
  * Toolbar under the composer: the session's live model and effort level as
@@ -122,28 +65,14 @@ export function ComposerBar({
       thinkingLevel: s.thinking_level ?? "medium",
     },
     thinking: { levels: DEFAULT_LEVELS },
-    models: { models: cachedModels() },
+    models: { models: [] },
     stats: null,
   });
 
   const [cfg, setCfg] = useState<PiConfig>(() => seed(session));
-  /** True while a catalogue fetch is in flight — not "has one ever run". */
-  const [loadingCatalogue, setLoadingCatalogue] = useState(false);
+  /** The catalogue is fetched separately, the first time a picker is opened. */
+  const [catalogue, setCatalogue] = useState(false);
   const [open, setOpen] = useState<null | "model" | "effort">(null);
-  const [browser, setBrowser] = useState(false);
-  const [hasBrowser, setHasBrowser] = useState(false);
-
-  // The browser is optional and its answer changes only when somebody starts a
-  // container, so this is asked once per session rather than polled.
-  useEffect(() => {
-    api
-      .browser()
-      .then((b) => {
-        setHasBrowser(b.running || b.sessions.length > 0);
-        setBrowser(b.sessions.some((x) => x.id === sessionId));
-      })
-      .catch(() => setHasBrowser(false));
-  }, [sessionId]);
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState("");
   const [recents, setRecents] = useState<string[]>(readRecents);
@@ -168,27 +97,21 @@ export function ComposerBar({
 
   useEffect(() => {
     setCfg(seed(session));
+    setCatalogue(false);
     setOpen(null);
     setDragEffort(null);
     load();
   }, [sessionId]);
 
-  const refreshCatalogue = () => {
-    setLoadingCatalogue(true);
+  // Only when a picker is actually opened, since this is the call that starts
+  // pi to read the model catalogue.
+  useEffect(() => {
+    if (!open || catalogue) return;
+    setCatalogue(true);
     api
       .models(sessionId)
-      .then((next) => {
-        setCfg(next);
-        cacheModels(next.models?.models ?? []);
-      })
-      .catch(() => {})
-      .finally(() => setLoadingCatalogue(false));
-  };
-
-  // Only when there is nothing cached at all. After that the list is what you
-  // last saw until you ask for a new one — this call starts pi.
-  useEffect(() => {
-    if (open === "model" && !cfg.models.models.length && !loadingCatalogue) refreshCatalogue();
+      .then(setCfg)
+      .catch(() => setCatalogue(false));
   }, [open]);
 
   // Refresh once a run ends so token and cost figures stay current.
@@ -279,12 +202,7 @@ export function ComposerBar({
           }`}
           title={cfg.state.model.id}
         >
-          <span className="inline-flex items-center gap-1.5">
-            {origin(cfg.state.model.provider).local && (
-              <span className="h-1.5 w-1.5 rounded-full bg-ok" title="Running locally" />
-            )}
-            {shortName(cfg.state.model)}
-          </span>
+          {shortName(cfg.state.model)}
         </button>
         <button
           type="button"
@@ -297,31 +215,6 @@ export function ComposerBar({
         >
           {cfg.state.thinkingLevel}
         </button>
-        {/* Only where there is a browser to grant. On a deployment without the
-            optional service this is not a disabled control, it is nothing. */}
-        {hasBrowser && (
-          <button
-            onClick={async () => {
-              const next = !browser;
-              setBrowser(next);
-              try {
-                await api.setSessionBrowser(sessionId, next);
-              } catch {
-                setBrowser(!next);
-              }
-            }}
-            className={`rounded-lg px-2 py-1 transition ${
-              browser ? "bg-accent/12 text-accent" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
-            }`}
-            title={
-              browser
-                ? "Browser on for this session — takes effect on its next start"
-                : "Let this session drive the agent's browser"
-            }
-          >
-            <LuGlobe className="h-3.5 w-3.5" />
-          </button>
-        )}
         {cfg.stats && (
           <ContextPill
             sessionId={sessionId}
@@ -338,18 +231,7 @@ export function ComposerBar({
       {/* Models */}
       {open === "model" && (
         <div className="absolute bottom-full right-0 mb-2 w-72 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-pop">
-          <div className="flex items-center gap-2 px-3 py-1">
-            <p className="text-[11px] text-fg-subtle">Models</p>
-            <button
-              type="button"
-              onClick={refreshCatalogue}
-              disabled={loadingCatalogue}
-              title="Re-read the list from pi — needed after starting a local server"
-              className="ml-auto rounded px-1 text-[11px] text-fg-faint transition hover:text-fg disabled:opacity-50"
-            >
-              {loadingCatalogue ? "refreshing…" : "refresh"}
-            </button>
-          </div>
+          <p className="px-3 py-1 text-[11px] text-fg-subtle">Models</p>
           {!showAll ? (
             <>
               {quick.map((m) => (
@@ -361,8 +243,9 @@ export function ComposerBar({
                   title={m.id}
                 >
                   <span className="truncate">{shortName(m)}</span>
-                  {m.id === cfg.state.model.id && <span className="text-fg-muted">✓</span>}
-                  <OriginTag provider={m.provider} />
+                  {m.id === cfg.state.model.id && (
+                    <span className="ml-auto text-fg-muted">✓</span>
+                  )}
                 </button>
               ))}
               <div className="my-1 border-t border-line" />
@@ -372,7 +255,7 @@ export function ComposerBar({
                 onClick={() => setShowAll(true)}
                 className="flex w-full items-center px-3 py-1.5 text-left text-sm text-fg-muted transition hover:bg-fg/5 disabled:opacity-50"
               >
-                {models.length ? "More models" : loadingCatalogue ? "Loading models…" : "No models — refresh"}
+                {models.length ? "More models" : "Loading models…"}
                 {models.length > 0 && <span className="ml-auto text-fg-subtle">›</span>}
               </button>
             </>
@@ -395,8 +278,9 @@ export function ComposerBar({
                     title={m.id}
                   >
                     <span className="truncate">{shortName(m)}</span>
-                    {m.id === cfg.state.model.id && <span className="text-fg-muted">✓</span>}
-                    <OriginTag provider={m.provider} />
+                    {m.id === cfg.state.model.id && (
+                      <span className="ml-auto text-fg-muted">✓</span>
+                    )}
                   </button>
                 ))}
                 {filtered.length === 0 && (

@@ -28,6 +28,4 @@ features:
     details: Reach the agent from Telegram, Slack, Discord, a webhook, or anything you write yourself. Channel types are packages, installable from a GitHub repo.
   - title: pi's own extensions
     details: Packages installed through pi contribute their slash commands to the portal, dialogs and all — /models opens the same menu the TUI draws.
-  - title: A base prompt under 4k tokens
-    details: A fresh agent session starts at roughly 3.8k tokens — the agent's identity and memory, its tools, and a listing of installed skills. Skill bodies load when used, not before, so the window you paid for is mostly still yours.
 ---

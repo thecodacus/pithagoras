@@ -24,10 +24,6 @@ export interface RoutineRow {
   run_at: string | null;
   instructions: string;
   fresh_session: number;
-  /** 0 turns off the injection guard's blocking rules for this routine's runs. */
-  guard: number;
-  /** 1 lets this routine's runs drive the agent's browser. */
-  browser: number;
   /**
    * Where this routine's reports go. null inherits the portal default; the
    * empty string means it never reports, whatever the default is.

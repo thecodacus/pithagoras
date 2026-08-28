@@ -40,12 +40,6 @@ export interface PiClient extends EventEmitter {
 
   prompt(message: string): Promise<void>;
   abort(): Promise<void>;
-  /**
-   * Whether the agent has stopped for good — not merely between turns.
-   * Optional: an executor that cannot see inside pi leaves it out, and
-   * the run's own lifecycle events are then the only signal.
-   */
-  isIdle?(): boolean;
   dispose(): void;
 
   getState(): Promise<PiState>;
@@ -57,8 +51,6 @@ export interface PiClient extends EventEmitter {
   setModel(provider: string, modelId: string): Promise<void>;
   setThinkingLevel(level: string): Promise<void>;
   setAutoCompaction(enabled: boolean): Promise<void>;
-  /** Re-read pi's settings file. Optional: not every executor can. */
-  refreshSettings?(): Promise<void>;
   setAutoRetry(enabled: boolean): Promise<void>;
   compact(): Promise<void>;
   reload(): Promise<void>;

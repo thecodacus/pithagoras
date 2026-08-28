@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
+import { listToolRules, useGrant, type ToolRule } from "../db.js";
 
 /**
  * A blast-radius limiter for prompt injection.
@@ -145,117 +145,6 @@ const envelope = (id: string) => ({
 const READ_ONLY = new Set(["read", "grep", "find", "ls", "ask_primary"]);
 
 /**
- * Driving the agent's browser, in either of the two shapes the MCP adapter
- * offers: a directly registered tool named for its server, or the proxy tool
- * carrying the same thing as an argument.
- *
- * The browser is signed into the agent's own accounts, so a session holding it
- * can act as the agent anywhere it has a login. That is a capability, not a
- * read — it is off unless somebody turned it on.
- */
-/**
- * A snapshot prints refs as `[ref=f1e17]`, and pasting that in whole is the
- * obvious thing to do. Playwright reads a bracketed value as a CSS attribute
- * selector, matches nothing, and reports it as "does not match any elements" —
- * which reads like the ref expired, so the next move is to take another
- * snapshot and get the same result. Agents have burned whole sessions on it.
- *
- * Telling the model the convention did not hold. This normalises the argument
- * on the way past instead, which is deterministic.
- */
-/**
- * Playwright's own ref shape: frame then element, `f1e17`, or bare `e17`.
- * Distinctive enough to tell a ref from an attribute selector — nobody writes
- * `[e17]` meaning an element with an `e17` attribute.
- */
-const REF_TOKEN = /^(?:f\d+)?e\d+$/;
-
-/**
- * Peel off the decoration and keep it only if a ref is what is underneath.
- *
- * Shape-based rather than a list of known mistakes: the first version matched
- * `[ref=x]` exactly, the model moved to `[x]` the next day, and the same error
- * came back. Anything that does not reduce to a ref is returned exactly as it
- * arrived, so real selectors — `[disabled]`, `a[href="..."]`, `#id` — are
- * never touched.
- */
-function bareRef(value: string): string {
-  const stripped = value
-    .trim()
-    .replace(/^\[|\]$/g, "")
-    .trim()
-    .replace(/^["']|["']$/g, "")
-    .trim()
-    .replace(/^(?:aria-)?ref\s*=\s*/i, "")
-    .trim()
-    .replace(/^["']|["']$/g, "")
-    .trim();
-  return REF_TOKEN.test(stripped) ? stripped : value;
-}
-
-/**
- * Playwright's element argument, whatever shape it arrives in.
- *
- * `target` is current; `ref` was its name until @playwright/mcp changed the
- * signature, and a model that learned the old one keeps sending it. Both are
- * accepted here rather than failing on a difference of spelling.
- */
-function normaliseTarget(input: unknown): void {
-  if (!input || typeof input !== "object") return;
-  const o = input as Record<string, unknown>;
-  // A single-element array turns up too, from a model reading the snapshot's
-  // `[ref=x]` as list syntax.
-  if (Array.isArray(o.target) && o.target.length === 1 && typeof o.target[0] === "string") {
-    o.target = o.target[0];
-  }
-  if (typeof o.target === "string") o.target = bareRef(o.target);
-  else if (typeof o.ref === "string") o.target = bareRef(o.ref);
-  // fill_form carries one of these per field.
-  if (Array.isArray(o.fields)) for (const field of o.fields) normaliseTarget(field);
-}
-
-function browserCall(
-  toolName: string,
-  input: Record<string, unknown>
-): { isBrowser: boolean; url?: string } {
-  // Matched anywhere, not anchored. Playwright's own tools are browser_navigate,
-  // browser_click and so on, so the server prefix puts the telling part in the
-  // middle: browser_browser_navigate, playwright_browser_navigate. Anchoring
-  // meant a second browser server slipped the gate entirely.
-  const direct = /(^|[_.])browser[_.]/i.test(toolName);
-  const viaProxy =
-    toolName === "mcp" &&
-    ["server", "connect", "tool", "describe"].some((k) =>
-      typeof input[k] === "string" ? /browser/i.test(input[k] as string) : false
-    );
-  if (!direct && !viaProxy) return { isBrowser: false };
-
-  // The URL, wherever this shape happens to put it.
-  const args = (input.args ?? input) as Record<string, unknown>;
-  const url = typeof args?.url === "string" ? args.url : undefined;
-  return { isBrowser: true, url };
-}
-
-/** Does a host match one of the allowlist globs? `*.example.com` covers a sub. */
-function hostAllowed(url: string, allow: string[]): boolean {
-  if (!allow.length) return true;
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  return allow.some((pattern) => {
-    const p = pattern.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-    if (p.startsWith("*.")) {
-      const base = p.slice(2);
-      return host === base || host.endsWith(`.${base}`);
-    }
-    return host === p;
-  });
-}
-
-/**
  * Chaining, redirection and substitution.
  *
  * A prefix pattern over a shell command is only meaningful if the command is a
@@ -307,42 +196,11 @@ export function ruleAllows(
   );
 }
 
-/** A rule permitting this call, recorded so the log shows why it went through. */
-function allowedByRule(
-  role: string,
-  toolName: string,
-  input: Record<string, unknown>,
-  key: string | undefined,
-  note: (kind: string, reason: string) => void
-): boolean {
-  const rules = listToolRules();
-  if (!ruleAllows(rules, role, toolName, input, key)) return false;
-  note("allowed-by-rule", "A standing rule permits this");
-  return true;
-}
-
 /** An ExtensionFactory — see pi's InlineExtension. One instance per session. */
 export function guardExtension(
   sessionId: string,
   whoNow: () => { role: string; key?: string } = () => ({ role: "primary" }),
-  portalSessionId?: string,
-  /**
-   * Whether the taint rules block. Off for work that legitimately reads
-   * something untrusted and then acts on it — a routine that reads logs and
-   * fixes what it found trips them honestly, because fetching the logs taints
-   * the session and the fix is a push. The envelope still marks the content:
-   * labelling costs nothing and is the half that never gets in the way.
-   */
-  enforceTaint = true,
-  /**
-   * Whether this session may drive the browser, read at each call rather than
-   * fixed at launch — turning it on should work now, not after a restart
-   * nobody knows to perform.
-   */
-  browserNow: () => { allowed: boolean; allowlist: string[] } = () => ({
-    allowed: false,
-    allowlist: [],
-  })
+  portalSessionId?: string
 ) {
   return (pi: any): void => {
     // Per session, not global: a taint belongs to the conversation that read the
@@ -371,66 +229,21 @@ export function guardExtension(
 
     pi.on("tool_call", (event: any) => {
       const { role, key } = whoNow();
-      const subject = subjectOf(event.toolName, event.input ?? {}).trim();
-      const note = (kind: string, reason: string) =>
-        recordAudit({
-          kind,
-          tool: event.toolName,
-          subject,
-          reason,
-          personKey: key,
-          sessionId: portalSessionId,
-        });
-
-      // The browser is gated on the session, not on who is speaking: the agent
-      // has its own accounts and uses them as itself, including when it is
-      // helping somebody else.
-      const asBrowser = browserCall(event.toolName, event.input ?? {});
-      if (asBrowser.isBrowser) {
-        // Mutated in place — that is how pi takes an argument change.
-        normaliseTarget(event.input);
-        const browser = browserNow();
-        if (!browser.allowed) {
-          note("refused", "The browser is not enabled for this session");
-          return {
-            block: true,
-            reason:
-              "Refused: this session cannot drive the browser. It is enabled per session and " +
-              "per routine, and nobody has enabled it here. Say so rather than looking for " +
-              "another way to reach the page.",
-          };
-        }
-        if (asBrowser.url && !hostAllowed(asBrowser.url, browser.allowlist)) {
-          note("refused", `Outside the browser allowlist: ${asBrowser.url}`);
-          return {
-            block: true,
-            reason:
-              `Refused: ${asBrowser.url} is not on the browser allowlist. Tell whoever asked ` +
-              "which domain you needed; do not try a different route to the same place.",
-          };
-        }
-        // Allowed, and recorded. Where the agent has been is the thing worth
-        // being able to read back later.
-        if (asBrowser.url) note("browsed", asBrowser.url);
-      }
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
-      const granted = () => {
-        const ok = Boolean(
-          portalSessionId && useGrant(portalSessionId, event.toolName, subject)
+      const granted = () =>
+        Boolean(
+          portalSessionId &&
+            useGrant(portalSessionId, event.toolName, subjectOf(event.toolName, event.input ?? {}).trim())
         );
-        if (ok) note("allowed-by-approval", "One-off approval, now spent");
-        return ok;
-      };
 
       if (
         role !== "primary" &&
         !READ_ONLY.has(event.toolName) &&
-        !allowedByRule(role, event.toolName, event.input ?? {}, key, note) &&
+        !ruleAllows(listToolRules(), role, event.toolName, event.input ?? {}, key) &&
         !granted()
       ) {
         console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}`);
-        note("refused", `Not permitted for a ${role}`);
         return {
           block: true,
           reason:
@@ -449,15 +262,7 @@ export function guardExtension(
       const rule = RULES.find((r) => r.hit(event.toolName, event.input ?? {}));
       if (!rule) return undefined;
 
-      // Recorded even when it does not block: "this ran with the guard off" is
-      // the thing you want to find later, and it is invisible otherwise.
-      if (!enforceTaint) {
-        note("allowed-by-exemption", `${rule.name} — the guard is off here`);
-        return undefined;
-      }
-
       console.warn(`[guard ${sessionId}] blocked ${event.toolName}: ${rule.name}`);
-      note("refused", `${rule.name} — ${rule.why}`);
       return {
         block: true,
         reason:

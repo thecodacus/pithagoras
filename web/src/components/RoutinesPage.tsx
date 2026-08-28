@@ -466,8 +466,6 @@ function RoutineDetail({
   const [runAt, setRunAt] = useState(toLocalInput(r.runAt));
   const [instructions, setInstructions] = useState(r.instructions);
   const [fresh, setFresh] = useState(r.freshSession);
-  const [guard, setGuard] = useState(r.guard);
-  const [browser, setBrowser] = useState(r.browser);
   // "" = inherit the portal default, "off" = stay quiet, else "channel\u0000target".
   const [report, setReport] = useState(reportValue(r));
   const [targets, setTargets] = useState<ReportTarget[]>([]);
@@ -483,8 +481,6 @@ function RoutineDetail({
     setRunAt(toLocalInput(r.runAt));
     setInstructions(r.instructions);
     setFresh(r.freshSession);
-    setGuard(r.guard);
-    setBrowser(r.browser);
     setReport(reportValue(r));
   }, [r.id, r.updatedAt]);
 
@@ -511,8 +507,6 @@ function RoutineDetail({
     (mode === "repeats" ? schedule !== r.schedule : toLocalInput(r.runAt) !== runAt) ||
     instructions !== r.instructions ||
     fresh !== r.freshSession ||
-    guard !== r.guard ||
-    browser !== r.browser ||
     report !== reportValue(r);
 
   const act = async (which: "save" | "run", fn: () => Promise<unknown>) => {
@@ -620,59 +614,6 @@ function RoutineDetail({
           </span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setGuard(!guard)}
-          className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
-        >
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-fg">Injection guard</p>
-            <p className="text-[11px] text-fg-subtle">
-              On: after reading anything untrusted — logs fetched over the network, a web page,
-              mail — this run cannot push, write onto PATH, upload or read credentials. Turn it
-              off for work that reads those things and then has to act on them. Content is still
-              labelled as untrusted, and anything it does that the rules would have stopped is
-              recorded in Audit.
-            </p>
-          </div>
-          <span
-            className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-              guard ? "bg-accent" : "bg-raised"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                guard ? "left-[1.125rem]" : "left-0.5"
-              }`}
-            />
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setBrowser(!browser)}
-          className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
-        >
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-fg">Browser</p>
-            <p className="text-[11px] text-fg-subtle">
-              Lets this routine drive the agent's browser, which is signed into the agent's own
-              accounts. Off by default. Every page it opens is recorded in Audit.
-            </p>
-          </div>
-          <span
-            className={`relative h-5 w-9 shrink-0 rounded-full transition ${
-              browser ? "bg-accent" : "bg-raised"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                browser ? "left-[1.125rem]" : "left-0.5"
-              }`}
-            />
-          </span>
-        </button>
-
         <label className="block pt-1">
           <span className="mb-1 block text-xs text-fg-subtle">Report to</span>
           <select
@@ -761,8 +702,6 @@ function RoutineDetail({
                   : { schedule: "", runAt: new Date(runAt).toISOString() }),
                 instructions,
                 freshSession: fresh,
-                guard,
-                browser,
                 ...reportPatch(report),
               });
               setSaved(true);

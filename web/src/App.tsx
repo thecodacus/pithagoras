@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { api, type PortalEvent, type Session, type SessionStatus, type Workspace } from "./api";
+import { api, type PortalEvent, type Session, type Workspace } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
 import { Login } from "./components/Login";
@@ -9,8 +9,6 @@ import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
 import { SessionsPage } from "./components/SessionsPage";
 import { AgentPage } from "./components/AgentPage";
 import { RoutinesPage } from "./components/RoutinesPage";
-import { AuditPage } from "./components/AuditPanel";
-import { BrowserPage } from "./components/BrowserPage";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
@@ -51,8 +49,7 @@ export default function App() {
       <Route path="/sessions" element={<Shell view="sessions" />} />
       <Route path="/agent" element={<Shell view="agent" />} />
       <Route path="/routines" element={<Shell view="routines" />} />
-      <Route path="/browser" element={<Shell view="browser" />} />
-      <Route path="/audit" element={<Shell view="audit" />} />
+
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
       <Route path="/s/:sessionId/settings/:tab" element={<Shell settings />} />
@@ -68,25 +65,15 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "agent" | "routines" | "browser" | "audit";
+  view?: "chat" | "sessions" | "agent" | "routines";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
 
   const [sessions, setSessions] = useState<Session[]>([]);
-  // The task list deliberately excludes agent and routine sessions, but their
-  // URLs still have to open — the Agent and Routines pages link straight to
-  // them, and without this those links landed on the empty state.
-  const [other, setOther] = useState<Session | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [executor, setExecutor] = useState("host");
-  // Asked once: the browser is optional, and the answer only changes when
-  // somebody starts or stops a container.
-  const [hasBrowser, setHasBrowser] = useState(false);
   const [events, setEvents] = useState<PortalEvent[]>([]);
-  /** Whether anything older than what we hold is still on the server. */
-  const [moreBefore, setMoreBefore] = useState(false);
-  const [loadingBefore, setLoadingBefore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -113,10 +100,6 @@ function Shell({
       .workspaces()
       .then((r) => setWorkspaces(r.workspaces))
       .catch(() => {});
-    api
-      .browser()
-      .then((b) => setHasBrowser(b.running || b.sessions.length > 0 || b.routines.length > 0))
-      .catch(() => setHasBrowser(false));
     const t = setInterval(() => refreshSessions().catch(() => {}), 5000);
     return () => clearInterval(t);
   }, [refreshSessions, sessionId, settings, view, navigate]);
@@ -125,7 +108,6 @@ function Shell({
   useEffect(() => {
     esRef.current?.close();
     setEvents([]);
-    setMoreBefore(false);
     setUiQueue([]);
     if (!sessionId) return;
 
@@ -141,23 +123,7 @@ function Shell({
         // resume cursor, or reconnecting would skip real history.
         if (ev.seq > 0) seq = ev.seq;
         setEvents((prev) => [...prev, ev]);
-        // Applied straight from the event, not by re-fetching: the round trip
-        // is what made the Stop button appear a beat late, or not at all when
-        // the reply came back before the list did.
-        if (ev.type === "portal_status") {
-          const status = (ev.payload as { status?: SessionStatus }).status;
-          if (status) {
-            setSessions((prev) =>
-              prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
-            );
-            // An agent or routine session is not in that list at all — it is
-            // fetched once, on its own. Without this it kept whatever status
-            // the fetch happened to catch, so a chat either never started
-            // working or never stopped, and the activity line ran forever.
-            setOther((prev) => (prev?.id === sessionId ? { ...prev, status } : prev));
-          }
-          refreshSessions().catch(() => {});
-        }
+        if (ev.type === "portal_status") refreshSessions().catch(() => {});
         // Dialogs an extension is blocking on. notify/setStatus/setWidget are
         // one-way and must not open a modal.
         if (ev.type === "extension_ui_request") {
@@ -171,19 +137,6 @@ function Shell({
           setUiQueue((q) => q.filter((x) => x.id !== id));
         }
       };
-      es.addEventListener("caught-up", () => {
-        // Only now do we know where the replayed window starts, and therefore
-        // whether the conversation continues above it.
-        setEvents((prev) => {
-          const oldest = prev.find((e) => e.seq > 0)?.seq;
-          if (oldest === undefined) return prev;
-          api
-            .olderEvents(sessionId, oldest, 1)
-            .then((r) => setMoreBefore(r.events.length > 0))
-            .catch(() => {});
-          return prev;
-        });
-      });
       es.onerror = () => {
         es.close();
         setTimeout(connect, 2000);
@@ -196,24 +149,21 @@ function Shell({
     };
   }, [sessionId, refreshSessions]);
 
+  // The task list deliberately excludes agent and routine sessions, but their
+  // URLs still have to open — the Agent and Routines pages link straight to
+  // them, and without this those links landed on the empty state.
+  const [other, setOther] = useState<Session | null>(null);
   const listed = sessions.find((s) => s.id === sessionId) ?? null;
 
   useEffect(() => {
     if (!sessionId || listed) return setOther(null);
     let cancelled = false;
-    const load = () =>
-      api
-        .session(sessionId)
-        .then((s) => !cancelled && setOther(s))
-        .catch(() => !cancelled && setOther(null));
-    load();
-    // The same five seconds the task list gets. Events keep this current
-    // between ticks; the poll is what stops a dropped one from stranding the
-    // session on a status it left long ago.
-    const t = setInterval(load, 5000);
+    api
+      .session(sessionId)
+      .then((s) => !cancelled && setOther(s))
+      .catch(() => !cancelled && setOther(null));
     return () => {
       cancelled = true;
-      clearInterval(t);
     };
   }, [sessionId, listed]);
 
@@ -227,7 +177,6 @@ function Shell({
         executor={executor}
         activeId={sessionId ?? null}
         view={view}
-        hasBrowser={hasBrowser}
         onNavigate={(to) => navigate(`/${to}`)}
         onSelect={(id) => navigate(`/s/${id}`)}
         onCreate={async (workspacePath) => {
@@ -278,30 +227,10 @@ function Shell({
           <AgentPage onSelect={(id) => navigate(`/s/${id}`)} />
         ) : view === "routines" ? (
           <RoutinesPage onOpenSession={(id) => navigate(`/s/${id}`)} />
-        ) : view === "browser" ? (
-          <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
-        ) : view === "audit" ? (
-          <AuditPage />
         ) : active ? (
           <Chat
             session={active}
             events={events}
-            hasEarlier={moreBefore}
-            loadingEarlier={loadingBefore}
-            onLoadEarlier={async () => {
-              const oldest = events.find((e) => e.seq > 0)?.seq;
-              if (!oldest || loadingBefore) return;
-              setLoadingBefore(true);
-              try {
-                const r = await api.olderEvents(active.id, oldest);
-                setEvents((prev) => [...r.events, ...prev]);
-                setMoreBefore(r.more);
-              } catch {
-                // Leave the button where it is; trying again is free.
-              } finally {
-                setLoadingBefore(false);
-              }
-            }}
             onSend={async (msg) => {
               await api.prompt(active.id, msg);
               refreshSessions();

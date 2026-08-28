@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { createServer as createHttpServer } from "node:http";
-import { createServer as createHttpsServer } from "node:https";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -9,9 +7,7 @@ import { nanoid } from "nanoid";
 import {
   createSession,
   deleteSession,
-  eventsBefore,
   eventsSince,
-  replayStart,
   getSession,
   listAgentSessions,
   listSessions,
@@ -31,23 +27,15 @@ import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
 import { routinesRouter } from "./api/routines.js";
 import { skillsRouter } from "./api/skills.js";
+
+import { filesRouter } from "./api/files.js";
 import { mcpRouter } from "./api/mcp.js";
 import { peopleRouter } from "./api/people.js";
-import { browserRouter } from "./api/browser.js";
-import { terminalRouter } from "./api/terminal.js";
-import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
-import { watchBrowserFrames } from "./extensions/browser-frames.js";
-import { startLlamaProxy } from "./llama-progress.js";
-import { pinConnection } from "./api/browser.js";
+
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
-import {
-  COMPACTION_DEFAULTS,
-  piSettingsPath,
-  readCompactionSettings,
-  writeCompactionSettings,
-} from "./pi-settings.js";
-import { eventTime, getDb } from "./db.js";
+import { piSettingsPath } from "./pi-settings.js";
+import { getDb } from "./db.js";
 import { getBuiltinCommands } from "./pi/builtins.js";
 import { isValidSlug, slugify } from "./slug.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
@@ -57,15 +45,6 @@ const WORKSPACE_ROOT = path.resolve(
   process.env.WORKSPACE_ROOT || process.env.WORKSPACE_ROOT || "/workspaces"
 );
 const PORT = Number(process.env.PORT || 4100);
-/**
- * How much of a long conversation a fresh page load replays.
- *
- * Small on purpose. Not a correctness limit — a reconnect with a cursor still
- * receives everything it missed, and older events are fetched on demand as you
- * scroll back. Replaying twenty thousand meant a refresh rendered the entire
- * history and then visibly scrolled through it.
- */
-const REPLAY_EVENTS = 1_200;
 /** Persistent place for CLIs, kept on PATH so pi and its tools can reach them. */
 const BIN_DIR = path.resolve(process.env.BIN_DIR || "/data/bin");
 
@@ -101,75 +80,21 @@ app.get("/api/settings", (_req, res) => {
     stored: getStoredSettings(),
     defaults: getSettingDefaults(),
     piSettingsPath: piSettingsPath(),
-    // pi's own, not the portal's — kept separate in the response so the UI can
-    // say which file a value lives in.
-    compaction: readCompactionSettings(),
-    compactionDefaults: COMPACTION_DEFAULTS,
     executor: EXECUTOR_KIND,
     workspaceRoot: WORKSPACE_ROOT,
   });
 });
 
-app.put("/api/settings", async (req, res) => {
+app.put("/api/settings", (req, res) => {
   const { provider, model, thinkingLevel } = req.body ?? {};
   const patch: Record<string, string> = {};
   if (typeof provider === "string") patch.provider = provider.trim();
   if (typeof model === "string") patch.model = model.trim();
   if (typeof thinkingLevel === "string") patch.thinkingLevel = thinkingLevel.trim();
-  // Checked before anything is written. Rejecting half way through left the
-  // provider changed on a request that answered 400, which is a worse outcome
-  // than either accepting or refusing the lot. Rejected rather than clamped
-  // too: a number that silently becomes a different number is worse than being
-  // told it was wrong.
-  const keep = req.body?.keepRecentTokens;
-
-  // The two live in different stores — the portal's database and pi's own
-  // settings file — and there is no way to write both or neither. Committing
-  // one and failing the other would answer with an error after half the change
-  // had landed, so a request is not allowed to ask for both. Nothing sends
-  // one: the sliders save on release, on their own, and Save defaults carries
-  // only the fields above it.
-  const wantsDefaults = ["provider", "model", "thinkingLevel"].some(
-    (k) => typeof req.body?.[k] === "string",
-  );
-  if (keep !== undefined && wantsDefaults) {
-    return res.status(400).json({
-      error: "Save the session defaults and the compaction setting separately — they are stored in different files",
-    });
-  }
-
-  let tokens: number | undefined;
-  if (keep !== undefined) {
-    tokens = Number(keep);
-    if (!Number.isFinite(tokens) || tokens < 1000 || tokens > 500_000) {
-      return res.status(400).json({ error: "Keep recent must be between 1,000 and 500,000 tokens" });
-    }
-    tokens = Math.round(tokens);
-  }
-
   const settings = setSettings(patch);
-
-  // Compaction lives in pi's file rather than the portal's, because pi is what
-  // reads it.
-  const compaction =
-    tokens !== undefined
-      ? await writeCompactionSettings({ keepRecentTokens: tokens })
-      : readCompactionSettings();
-
-  // The provider and model defaults apply to sessions started from here on,
-  // which matches how the TUI treats a changed default. Compaction is pushed
-  // into open sessions as well — the session you are looking at when you
-  // change it is the one you meant it for.
-  const refreshed = tokens !== undefined ? await sessions.refreshSettings() : 0;
-  res.json({
-    settings,
-    compaction,
-    refreshed,
-    note:
-      tokens !== undefined
-        ? `Compaction applied to ${refreshed} open session${refreshed === 1 ? "" : "s"}. Model and effort apply to newly started sessions.`
-        : "Applies to newly started sessions",
-  });
+  // Existing sessions keep their own settings; this applies to sessions started
+  // from here on, which matches how the TUI treats a changed default.
+  res.json({ settings, note: "Applies to newly started sessions" });
 });
 
 // --- workspaces ---
@@ -520,12 +445,10 @@ app.post("/api/sessions/:id/compact", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
   try {
-    await sessions.compact(session.id);
+    const client = await sessions.client(session.id);
+    await client.compact();
     res.json({ ok: true });
   } catch (e) {
-    // The message alone reaches the browser, and "Cannot read properties of
-    // undefined" says nothing about where. The stack stays here.
-    console.error(`[portal] compaction failed for ${session.id}:`, e);
     res.status(500).json({ error: (e as Error).message });
   }
 });
@@ -557,12 +480,9 @@ app.use("/api", extensionsRouter());
 app.use("/api", channelsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());
+app.use("/api", filesRouter());
 app.use("/api", mcpRouter());
 app.use("/api", peopleRouter());
-app.use("/api", browserRouter());
-app.use("/api", terminalRouter());
-// Before the SPA fallback, which answers everything that is not /api.
-mountBrowserProxy(app);
 
 // --- event stream ---
 
@@ -571,25 +491,6 @@ mountBrowserProxy(app);
  * after minutes or days delivers exactly what was missed and then continues
  * live — no gap, no duplicates.
  */
-/** What came before a cursor: the transcript scrolling back rather than forward. */
-app.get("/api/sessions/:id/events/before", (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: "Not found" });
-  const before = Number(req.query.before ?? 0) || 0;
-  const limit = Math.min(Number(req.query.limit) || 1200, 3000);
-  const rows = eventsBefore(session.id, before, limit);
-  res.json({
-    events: rows.map((r) => ({
-      seq: r.seq,
-      type: r.type,
-      at: eventTime(r.created_at),
-      payload: JSON.parse(r.payload),
-    })),
-    // Whether asking again would return anything, so the UI knows to stop.
-    more: rows.length === limit,
-  });
-});
-
 app.get("/api/sessions/:id/events", (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
@@ -603,39 +504,22 @@ app.get("/api/sessions/:id/events", (req, res) => {
     "X-Accel-Buffering": "no",
   });
 
-  const write = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
+  const write = (row: { seq: number; type: string; payload: string }) => {
     res.write(`id: ${row.seq}\ndata: ${JSON.stringify({
       seq: row.seq,
       type: row.type,
-      // What the activity line counts from, so a refresh mid-run still knows
-      // how long the agent has been on this rather than starting from zero.
-      at: eventTime(row.created_at),
       payload: JSON.parse(row.payload),
     })}\n\n`);
   };
 
-  // A fresh load gets the end of the conversation, not the beginning. Replaying
-  // from zero and stopping at the batch limit is how a long session came back
-  // from a refresh showing its first few thousand events and nothing since —
-  // the transcript ended mid-turn, on whatever the cap happened to land on.
-  const cursor = since === 0 ? replayStart(session.id, REPLAY_EVENTS) : since;
-
-  // Paged to the end rather than one batch: a reconnect after a long run has
-  // more to catch up on than a single query returns, and stopping early loses
-  // exactly the part it was reconnecting for.
-  let lastSent = cursor;
-  for (;;) {
-    const batch = eventsSince(session.id, lastSent);
-    if (!batch.length) break;
-    for (const row of batch) {
-      write(row);
-      lastSent = row.seq;
-    }
-    if (batch.length < 5000) break;
+  let lastSent = since;
+  for (const row of eventsSince(session.id, since)) {
+    write(row);
+    lastSent = row.seq;
   }
   res.write(`event: caught-up\ndata: ${JSON.stringify({ seq: lastSent })}\n\n`);
 
-  const onEvent = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
+  const onEvent = (row: { seq: number; type: string; payload: string }) => {
     // Live-only events carry a negative seq: deliver them, but never let one
     // move the replay cursor, or a reconnect would skip stored history.
     if (row.seq < 0) {
@@ -669,25 +553,8 @@ if (existsSync(webDist)) {
 // PATH entry pointing at nothing.
 mkdirSync(BIN_DIR, { recursive: true });
 
-/**
- * TLS when a certificate is supplied, plain HTTP otherwise.
- *
- * Optional because most deployments sit on a LAN or a tailnet and do not want
- * to think about certificates. Needed for the embedded browser, which refuses
- * to run unless every page above it is a secure context.
- */
-const tlsCert = process.env.PORTAL_TLS_CERT;
-const tlsKey = process.env.PORTAL_TLS_KEY;
-const tls =
-  tlsCert && tlsKey && existsSync(tlsCert) && existsSync(tlsKey)
-    ? { cert: readFileSync(tlsCert), key: readFileSync(tlsKey) }
-    : null;
-
-const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-  console.log(`pithagoras listening on :${PORT}${tls ? " (https)" : ""}`);
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`pithagoras listening on :${PORT}`);
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
@@ -703,16 +570,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
     .sync()
     .then(() => console.log(`  channels: ${channelSupervisor.summary()}`))
     .catch((e) => console.error(`[portal] channel startup failed: ${e.message}`));
-  }
-);
-
-attachBrowserUpgrade(server);
-// Keeps the agent's browser rendering when nobody has the panel open.
-watchBrowserFrames();
-// Reports how far llama.cpp has got through a prompt, which is otherwise a
-// silent minute or two before the first token.
-startLlamaProxy((sessionId, prefill) => sessions.reportPrefill(sessionId, prefill));
-pinConnection();
+});
 
 async function shutdown(signal: string) {
   console.log(`${signal} received — stopping running sessions`);

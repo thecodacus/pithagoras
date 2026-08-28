@@ -6,8 +6,6 @@ services:
     network_mode: host
     volumes:
       - portal-data:/data
-      # Certificates, when you have them. Empty by default.
-      - ${PORTAL_TLS_DIR:-/dev/null}:/certs:ro
       # Workspaces pi works in. Read-write: the whole point is that it edits code.
       - ${WORKSPACES_DIR:-/root/repos}:/workspaces
       # Only needed when EXECUTOR=container.
@@ -26,14 +24,6 @@ services:
       PI_MODEL: ${PI_MODEL:-}
       PI_THINKING_LEVEL: ${PI_THINKING_LEVEL:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      # Serve the portal over TLS when both are given. Needed for the embedded
-      # browser: the VNC client refuses to run unless every page above it is
-      # secure.
-      PORTAL_TLS_CERT: ${PORTAL_TLS_CERT:-}
-      PORTAL_TLS_KEY: ${PORTAL_TLS_KEY:-}
-      # Where a local llama.cpp server is listening. Host networking means the
-      # box's own address works from inside the container unchanged.
-      LLAMA_BASE_URL: ${LLAMA_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
 volumes:

@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { forgetPerson, getPerson, listPeople, setRole, type Role } from "../people.js";
-import { addToolRule, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
+import { addToolRule, deleteToolRule, getDb, listToolRules } from "../db.js";
 import { nanoid } from "nanoid";
 
 /**
@@ -41,24 +41,6 @@ export function peopleRouter(): Router {
       getDb().prepare("UPDATE people SET name = ? WHERE key = ?").run(name.trim(), key);
     }
     res.json({ person: getPerson(key) });
-  });
-
-  /**
-   * What the guard has been deciding.
-   *
-   * Names are joined in rather than stored, so renaming somebody in the roster
-   * renames them through the history too — the log records who, not what they
-   * were called that week.
-   */
-  router.get("/audit", (req, res) => {
-    const limit = Math.min(Number(req.query.limit) || 200, 1000);
-    const people = new Map(listPeople().map((p) => [p.key, p.name]));
-    res.json({
-      entries: listAudit(limit).map((e) => ({
-        ...e,
-        person_name: e.person_key ? (people.get(e.person_key) ?? e.person_key) : null,
-      })),
-    });
   });
 
   /** Exceptions: what a non-primary role is allowed to run despite the default. */

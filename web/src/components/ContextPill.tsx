@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { LuChevronRight, LuRefreshCw } from "react-icons/lu";
 import { api, type PiConfig } from "../api";
-import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 
 /**
  * Context fill is the number that decides whether a long session keeps working,
@@ -53,19 +52,9 @@ export function ContextPill({
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | "compact" | "auto">(null);
-  /** Read when the popup opens rather than with the transcript — it is pi's file. */
-  const [keepRecent, setKeepRecent] = useState<number | null>(null);
   /** pi refuses to compact a short session, so its reason has to be visible. */
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open || keepRecent !== null) return;
-    api
-      .settings()
-      .then((r) => setKeepRecent(r.compaction.keepRecentTokens))
-      .catch(() => {});
-  }, [open, keepRecent]);
 
   useEffect(() => {
     if (!open) return;
@@ -94,15 +83,6 @@ export function ContextPill({
       setBusy(null);
     }
   };
-
-  /**
-   * Saved when the drag ends, not on every step, and applied to open sessions
-   * by the server — including this one, so the next compaction uses it.
-   */
-  const saveKeepRecent = useKeepRecentSave(
-    (compaction) => setKeepRecent(compaction.keepRecentTokens),
-    (error) => setNote({ text: error.message, error: true }),
-  );
 
   const toggleAuto = async () => {
     setBusy("auto");
@@ -181,22 +161,6 @@ export function ContextPill({
               />
             </span>
           </button>
-
-          {keepRecent !== null && (
-            <div className="mt-2 rounded-lg bg-raised/40 px-2 py-2">
-              <KeepRecent
-                value={keepRecent}
-                contextWindow={usage.contextWindow}
-                onChange={setKeepRecent}
-                onCommit={saveKeepRecent}
-                disabled={busy !== null}
-              />
-              <p className="mt-1.5 text-[11px] text-fg-faint">
-                Kept word for word; only what is older is summarised. This is where a compaction
-                lands, before the summary is added.
-              </p>
-            </div>
-          )}
 
           <button
             type="button"
