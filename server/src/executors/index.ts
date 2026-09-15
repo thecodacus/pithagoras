@@ -1,3 +1,4 @@
+import { mkdirSync, accessSync, constants } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { PiRpcClient } from "../pi/rpc-client.js";
@@ -102,6 +103,11 @@ export class ContainerExecutor implements Executor {
   async launch(opts: LaunchOptions): Promise<PiClient> {
     const containerName = `pithagoras-${opts.sessionId}`;
     const sessionDir = path.join(this.sessionRoot, opts.sessionId);
+    // Create it as the portal user, rather than letting Docker create a root-owned bind source.
+    mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    accessSync(sessionDir, constants.W_OK);
+    if (!process.getuid || !process.getgid) throw new Error("Container executor requires a POSIX user identity");
+    const runnerUser = `${process.getuid()}:${process.getgid()}`;
 
     const passthrough = [
       "OPENROUTER_API_KEY",
@@ -115,6 +121,8 @@ export class ContainerExecutor implements Executor {
       "run",
       "-i",
       "--rm",
+      "--user",
+      runnerUser,
       "--name",
       containerName,
       "--label",

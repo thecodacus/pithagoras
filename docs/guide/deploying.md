@@ -165,3 +165,9 @@ domain, where the site sits at the root, override it:
   env:
     DOCS_BASE: /
 ```
+
+## Runner session permissions
+
+The container executor creates each session directory before starting Docker and runs the runner with the portal process's numeric UID:GID. This overrides an image's `USER` directive so the process writing session files matches the owner of the mounted directory. It is root only when the portal itself runs as root. Capability dropping and `no-new-privileges` remain enabled.
+
+Existing session directories must be writable by that portal user. For a custom non-root runner, ensure its executable and required configuration are readable by the portal UID, and any additional cache/home paths are writable. Fix ownership on the host rather than making the session directory world-writable.
