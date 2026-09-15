@@ -20,6 +20,8 @@ services:
       PORTAL_SECRET: ${PORTAL_SECRET:-}
       # host = pi runs in this container | container = one container per task
       EXECUTOR: ${EXECUTOR:-host}
+      # Must match container_name; translates nested-executor mounts to host paths.
+      PORTAL_CONTAINER_NAME: pithagoras
       # Overrides only — left empty so pi's own settings.json (defaultProvider,
       # defaultModel) decides. Baking values in here made those unreachable.
       PI_PROVIDER: ${PI_PROVIDER:-}

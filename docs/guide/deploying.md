@@ -165,3 +165,11 @@ domain, where the site sits at the root, override it:
   env:
     DOCS_BASE: /
 ```
+
+## Container executor mounts
+
+When the portal itself runs in Docker, set `PORTAL_CONTAINER_NAME` to its Docker container name. Both shipped Compose files set it to `pithagoras`, matching `container_name`. Update both values if you rename the container.
+
+With `EXECUTOR=container`, the portal inspects its own mounts and translates workspace and session paths to their actual host locations, including named volumes and nested bind mounts. Paths outside those mounts are rejected rather than silently creating an empty host directory. The runtime image includes the Docker CLI and needs the Docker socket mount.
+
+For a native portal talking to a Docker daemon on the same machine, leave `PORTAL_CONTAINER_NAME` unset: its paths already refer to the host. A remote daemon needs the same filesystem available on that daemon; local paths are not uploaded automatically. Set `PI_IMAGE` to an available runner image containing the `pi` CLI.

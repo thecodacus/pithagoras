@@ -1,4 +1,6 @@
-import { spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { hostMountPath, type DockerMount } from "./host-mounts.js";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { PiRpcClient } from "../pi/rpc-client.js";
 import { SdkPiClient } from "../pi/sdk-client.js";
@@ -102,6 +104,15 @@ export class ContainerExecutor implements Executor {
   async launch(opts: LaunchOptions): Promise<PiClient> {
     const containerName = `pithagoras-${opts.sessionId}`;
     const sessionDir = path.join(this.sessionRoot, opts.sessionId);
+    let workspaceMount = opts.workspacePath;
+    let sessionMount = sessionDir;
+    if (process.env.PORTAL_CONTAINER_NAME) {
+      const { stdout } = await promisify(execFile)("docker", ["inspect", "--format", "{{json .Mounts}}", process.env.PORTAL_CONTAINER_NAME]);
+      const mounts = JSON.parse(stdout) as DockerMount[];
+      workspaceMount = hostMountPath(opts.workspacePath, mounts);
+      sessionMount = hostMountPath(sessionDir, mounts);
+    }
+
 
     const passthrough = [
       "OPENROUTER_API_KEY",
@@ -124,9 +135,9 @@ export class ContainerExecutor implements Executor {
       "-w",
       "/workspace",
       "-v",
-      `${opts.workspacePath}:/workspace`,
+      `${workspaceMount}:/workspace`,
       "-v",
-      `${sessionDir}:/sessions`,
+      `${sessionMount}:/sessions`,
       // Same hardening posture as the sandboxes: no extra capabilities, no
       // privilege escalation, and hard resource ceilings.
       "--cap-drop",
