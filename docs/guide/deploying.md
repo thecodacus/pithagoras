@@ -132,7 +132,18 @@ variables.
 
 ## Running from source
 
-Node 22.19 or newer — pi requires it.
+Node 22.19 or newer — pi requires it. The SQLite dependency supports Node 26
+as well. After changing Node versions, run `npm ci` again before starting the
+server so dependencies match the selected runtime.
+
+To check that SQLite loads with your Node installation, run this from the
+repository root after installing dependencies:
+
+```bash
+node --input-type=module -e 'import Database from "better-sqlite3"; const db = new Database(":memory:"); console.log(db.prepare("SELECT 1 AS ok").get()); db.close();'
+```
+
+A working installation prints `{ ok: 1 }`.
 
 ```bash
 npm install
