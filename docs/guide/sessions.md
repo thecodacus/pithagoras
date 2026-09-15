@@ -37,6 +37,16 @@ updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
 Hovering a session gives you pin and delete. Double-clicking its name renames it.
 
+## Using a phone
+
+Tap the navigation icon in the header to open the sidebar, then choose a
+session or **New** to pick a workspace. Selecting an item closes the drawer;
+you can also close it with its close button or by tapping the dimmed backdrop.
+
+Use the send arrow beside the composer to submit a message. The keyboard's
+Return key can still insert a new line. Long slash-command lists scroll inside
+the picker, keeping the composer and navigation in view.
+
 ## Model and effort
 
 The pills under the composer show the session's live model and effort level.
