@@ -703,8 +703,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
   // Enabled channels come up with the server, so a restart does not silently
   // leave the agent unreachable.
-  // Schedules resume with the server; a routine due while it was down does not
-  // fire retroactively, it simply waits for its next slot.
+  // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
 
   channelSupervisor

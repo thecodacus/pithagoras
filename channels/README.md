@@ -33,7 +33,7 @@ my-channel/
   index.js
 ```
 
-`package.json` must carry the marker, or the loader will not consider it:
+Use the package marker below. The loader also accepts package names starting with `pithagoras-channel-`:
 
 ```json
 {
@@ -113,10 +113,6 @@ const reply = await ctx.ask("Deploy the staging branch", {
 await sendBack(reply);
 ```
 
-## Status
+## Runtime status
 
-The loader, the installer and the settings UI are in place. The runtime that
-calls `start()` is not — it needs the agent session, which does not exist yet,
-so `start()` is currently defined but never invoked and channels report
-"not connected". Write against this contract now; it is what the runtime will
-call.
+The channel supervisor starts enabled channels when the portal starts and calls their `start()` function. It supplies the agent-session context, relays messages through the turn queue, and calls the returned `stop()` during shutdown or reconfiguration. The settings UI reports connection and startup errors.

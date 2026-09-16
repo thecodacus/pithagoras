@@ -1,3 +1,4 @@
+import { executorLimits } from "./limits.js";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { PiRpcClient } from "../pi/rpc-client.js";
@@ -165,11 +166,7 @@ export function buildExecutor(kind: ExecutorKind, sessionRoot: string): Executor
     return new ContainerExecutor(
       process.env.PI_IMAGE || "pithagoras-runner:latest",
       sessionRoot,
-      {
-        memoryMb: Number(process.env.TASK_MEMORY_MB) || 2048,
-        cpus: Number(process.env.TASK_CPUS) || 2,
-        pidsLimit: Number(process.env.TASK_PIDS_LIMIT) || 512,
-      }
+      executorLimits()
     );
   }
   return new HostExecutor(sessionRoot);

@@ -778,7 +778,7 @@ export interface AuditRow {
 }
 
 /** Keeps the log from growing without bound; old entries are not evidence. */
-const AUDIT_KEEP = 2000;
+export const AUDIT_KEEP = 2000;
 
 export function recordAudit(entry: {
   kind: string;
