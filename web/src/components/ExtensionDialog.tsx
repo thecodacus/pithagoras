@@ -28,14 +28,21 @@ export function ExtensionDialog({
 }) {
   const [value, setValue] = useState(request.defaultValue ?? "");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const respond = async (payload: { value?: unknown; cancelled?: boolean }) => {
+    if (busy) return;
+    if (payload.cancelled && error) { onDone(); return; }
     setBusy(true);
+    setError("");
     try {
-      await api.respondUi(sessionId, request.id, payload);
+      const result = await api.respondUi(sessionId, request.id, payload);
+      if (!result.ok) { setError(result.note || "This question has expired. Your answer was not delivered."); return; }
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setBusy(false);
-      onDone();
     }
   };
 
@@ -43,7 +50,7 @@ export function ExtensionDialog({
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && respond({ cancelled: true });
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [request.id]);
+  }, [request.id, busy, error]);
 
   return (
     <div
@@ -69,6 +76,7 @@ export function ExtensionDialog({
           </button>
         </header>
 
+        {error && <p role="alert" className="border-b border-line px-4 py-3 text-sm text-danger">{error}</p>}
         <div className="max-h-[55vh] overflow-y-auto p-3">
           {request.method === "select" && (
             <ul className="space-y-1">

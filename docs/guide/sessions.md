@@ -25,6 +25,18 @@ not wait for the work to finish. Close the tab if you like.
 While a run is in progress you can keep typing; further messages are queued.
 **Stop** aborts the current run.
 
+## Queued channel messages and questions
+
+Channel messages wait for the current run to finish before applying a new
+speaker or role. Pending notes are included when that queued turn starts and
+are removed only after pi accepts the prompt. A failed startup leaves the
+notes available for the next attempt.
+
+When an extension asks a question, submitting a response closes the dialog only
+after the server accepts it. If submission fails, the dialog stays open with an
+error so you can retry or dismiss it. A timeout or cancellation resolves the
+original question; it does not cancel a newer question that has replaced it.
+
 ## Sidebar and the sessions page
 
 The sidebar opens with New, Sessions and Agents, then **Pinned**, then

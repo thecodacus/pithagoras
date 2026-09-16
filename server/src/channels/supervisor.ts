@@ -5,10 +5,12 @@ import {
   recordAudit,
   findChannelSession,
   getDb,
+  getSession,
   getDefaultReportTo,
   listToolRules,
   takeDeliveries,
-  takeNotes,
+  pendingNotes,
+  consumeNotes,
 } from "../db.js";
 import { resolveChannelSession, scopeKey } from "../agent.js";
 import { sessions, EXECUTOR_KIND, stripThinkingMarkers } from "../session-manager.js";
@@ -276,15 +278,14 @@ class ChannelSupervisor {
       "</answer-from-primary>",
     ].join("\n");
 
-    // Wrapped, not appended. Loose in the prompt they read as the other person
-    // speaking, and the agent answered its own last message back to them.
-    const pending = takeNotes(sessionId);
-    const full = pending.length
-      ? `${prompt}\n\n<sent-since-you-last-spoke>\n${pending.join("\n\n---\n\n")}\n</sent-since-you-last-spoke>`
-      : prompt;
-
     try {
-      const reply = stripThinkingMarkers((await sessions.ask(sessionId, full)) ?? "");
+      const reply = stripThinkingMarkers((await sessions.ask(sessionId, () => {
+        const pending = pendingNotes(sessionId);
+        const full = pending.length
+          ? `${prompt}\n\n<sent-since-you-last-spoke>\n${pending.map(n => n.text).join("\n\n---\n\n")}\n</sent-since-you-last-spoke>`
+          : prompt;
+        return { message: full, onAccepted: () => consumeNotes(sessionId, pending.map(n => n.id)) };
+      })) ?? "");
       if (reply) await this.send(question.channel_slug, question.channel_key, reply);
     } catch (e) {
       console.error(`[portal] could not resume ${sessionId}: ${(e as Error).message}`);
@@ -467,21 +468,6 @@ class ChannelSupervisor {
     // Before a primary is named nobody is a stranger, so nothing is downgraded
     // either — otherwise the upgrade itself would quietly strip context from
     // every existing conversation.
-    if (person && hasPrimary()) {
-      const settled = lower(session.role, person.role);
-      if (settled !== session.role) {
-        getDb().prepare("UPDATE sessions SET role = ? WHERE id = ?").run(settled, session.id);
-        // The running pi process loaded context for the old role, so it has to
-        // go before the next turn rather than after.
-        await sessions.shutdownSession(session.id);
-      }
-      sessions.setSpeaker(session.id, person);
-      // Persisted as well as held in memory: the in-memory speaker is empty
-      // after a restart, and a question raised then was attributed to "Someone".
-      getDb()
-        .prepare("UPDATE sessions SET last_person_key = ? WHERE id = ?")
-        .run(person.key, session.id);
-    }
 
     // Everything below jumps the queue on purpose. ask() serialises per
     // session, so anything meant to affect the run in progress has to be
@@ -531,7 +517,28 @@ class ChannelSupervisor {
     const owed = takeDeliveries(session.id);
     if (owed.length && packageReply) void packageReply(owed.join("\n\n"));
 
-    const reply = await sessions.ask(session.id, withInstructions(text, row.instructions, person, takeNotes(session.id)), {
+    const reply = await sessions.ask(session.id, () => {
+      const pending = pendingNotes(session.id);
+      return {
+        message: withInstructions(text, row.instructions, person, pending.map(n => n.text)),
+        onAccepted: () => consumeNotes(session.id, pending.map(n => n.id)),
+      };
+    }, {
+      beforeTurn: async () => {
+        if (person && hasPrimary()) {
+          const current = getSession(session.id);
+          if (!current) throw new Error("Session no longer exists");
+          const settled = lower(current.role, person.role);
+          if (settled !== current.role) {
+            getDb().prepare("UPDATE sessions SET role = ? WHERE id = ?").run(settled, session.id);
+            // The previous turn has finished; reload its context before this one.
+            await sessions.shutdownSession(session.id);
+          }
+          sessions.setSpeaker(session.id, person);
+          getDb().prepare("UPDATE sessions SET last_person_key = ? WHERE id = ?")
+            .run(person.key, session.id);
+        }
+      },
       onReply:
         relaying && packageReply
           ? (chunk: string) => packageReply(stripThinkingMarkers(chunk))
@@ -542,6 +549,7 @@ class ChannelSupervisor {
       // means the command hangs until it times out.
       onUi: (request) => {
         if (request?.cancelled) {
+          if (this.pendingUi.get(session.id)?.id !== request.id) return;
           this.pendingUi.delete(session.id);
           void packageReply?.("That question timed out.");
           return;
