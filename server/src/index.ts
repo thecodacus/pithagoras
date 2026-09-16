@@ -1,3 +1,4 @@
+import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -81,7 +82,7 @@ app.get("/api/auth/status", (req, res) => {
   res.json({ authRequired: authEnabled, authed: isAuthed(req) });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", loginThrottle(), (req, res) => {
   if (!authEnabled) return res.json({ ok: true });
   if (!checkPassword(req.body?.password)) {
     return res.status(401).json({ error: "Wrong password" });
@@ -668,6 +669,7 @@ app.get("/api/sessions/:id/events", (req, res) => {
 
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 if (existsSync(webDist)) {
+  app.use(portalSecurityHeaders);
   app.use(express.static(webDist));
   app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }
@@ -693,7 +695,7 @@ const tls =
 
 const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(
   PORT,
-  "0.0.0.0",
+  bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN),
   () => {
   console.log(`pithagoras listening on :${PORT}${tls ? " (https)" : ""}`);
   console.log(`  local bin: ${BIN_DIR}`);

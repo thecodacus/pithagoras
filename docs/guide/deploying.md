@@ -165,3 +165,11 @@ domain, where the site sits at the root, override it:
   env:
     DOCS_BASE: /
 ```
+
+## Passwordless local development
+
+Without `PORTAL_PASSWORD`, the portal binds only to `127.0.0.1`. Set a password before exposing it on your LAN or through a reverse proxy. `ALLOW_OPEN=1` explicitly permits an unauthenticated network listener; anyone who can reach it can run commands. Docker Compose still requires a password.
+
+Login attempts are limited per direct network source. A reverse proxy shares that limit across its clients; untrusted forwarding headers do not bypass it. The production UI sends a Content Security Policy that permits the local browser, microphone processing, and configured HTTP/WebSocket services.
+
+Channel credentials are stored in the SQLite data volume without application-level encryption. Protect the volume and backups with filesystem permissions and disk encryption.
