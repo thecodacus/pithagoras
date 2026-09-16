@@ -32,6 +32,17 @@ The portal listens on `:4100`. Compose uses `network_mode: host`, so it binds
 that port directly on the host — which is also what lets pi reach a llama-server
 running on the same machine at `localhost`.
 
+## Workspace paths
+
+For a native installation, set `WORKSPACE_ROOT` to the directory containing your
+projects. The legacy `WORKSPACES_DIR` variable is also accepted when
+`WORKSPACE_ROOT` is unset. If both are set, `WORKSPACE_ROOT` wins; with neither
+set, the server uses `/workspaces`.
+
+With the supplied Compose files, `WORKSPACES_DIR` selects the **host** directory
+mounted at `/workspaces`. Keep the portal's `WORKSPACE_ROOT=/workspaces` so it
+uses the path visible inside its container.
+
 ## Installing add-ons
 
 To install Browser or Voice from Settings:

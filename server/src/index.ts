@@ -54,9 +54,9 @@ import { getBuiltinCommands } from "./pi/builtins.js";
 import { isValidSlug, slugify } from "./slug.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
 
-// WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
+// WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys.
 const WORKSPACE_ROOT = path.resolve(
-  process.env.WORKSPACE_ROOT || process.env.WORKSPACE_ROOT || "/workspaces"
+  process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces"
 );
 const PORT = Number(process.env.PORT || 4100);
 /**
