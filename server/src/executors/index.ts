@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { removeStoppedRunner } from "./stale-container.js";
 import { PiRpcClient } from "../pi/rpc-client.js";
 import { SdkPiClient } from "../pi/sdk-client.js";
 import type { PiClient } from "../pi/types.js";
@@ -147,6 +148,7 @@ export class ContainerExecutor implements Executor {
       ...piArgs({ ...opts }, "/sessions"),
     ];
 
+    await removeStoppedRunner(opts.sessionId);
     const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
     return new PiRpcClient(child);
   }

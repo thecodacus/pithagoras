@@ -41,6 +41,17 @@ To install Browser or Voice from Settings:
 
 Follow [Docker add-ons](/guide/add-ons) for installation, controls, storage and cleanup.
 
+## Resuming container sessions
+
+The container executor automatically removes completed runners. Before starting
+a session, it also removes a leftover stopped runner with the same name, but
+only when its ownership labels match that session.
+
+A running runner is left alone. Wait for its current task to finish before
+resuming. If an unrelated container uses the same name, the portal reports the
+collision; inspect that container and rename or remove it yourself once you
+have identified it. The portal does not force-delete it.
+
 ## Updating
 
 ```bash
