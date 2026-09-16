@@ -1,12 +1,13 @@
 import { ActivityProgress } from './ActivityProgress';
 import { useWorkPanels } from "../use-work-panels";
+import { FilesPanel } from "./FilesPanel";
 import { CanvasPanel } from "./CanvasPanel";
 import { displaySpeechText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
+import { LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
 import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -96,6 +97,8 @@ export function Chat({
 }) {
   const [input, setInput] = useState("");
   const [voiceMode, setVoiceMode] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const workspaceName = session.workspace.split("/").filter(Boolean).pop() ?? "";
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
   const [sending, setSending] = useState(false);
@@ -303,6 +306,10 @@ export function Chat({
           >
             <LuSquareTerminal className="h-3.5 w-3.5" />
           </button>
+          <button onClick={() => setShowFiles(v => !v)} aria-label="Workspace files" title="Workspace files" aria-expanded={showFiles}
+            className={`rounded-lg border px-2 py-1 text-xs transition ${showFiles ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-fg-muted hover:bg-fg/5 hover:text-fg'}`}>
+            <LuFolderOpen className="h-3.5 w-3.5" />
+          </button>
           <button onClick={() => setCanvasOpen(v => !v)} aria-label="Session canvases" title="Session canvases" aria-expanded={canvasOpen}
             className={`rounded-lg border px-2 py-1 text-xs transition ${canvasOpen ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-fg-muted hover:bg-fg/5 hover:text-fg'}`}>
             <LuFileText className="h-3.5 w-3.5" />
@@ -495,6 +502,8 @@ export function Chat({
         </div>
       </form>
       </div>
+
+      {showFiles && <FilesPanel key={session.workspace} workspace={workspaceName} />}
 
       {/* Beside the conversation rather than above it: the page changing while
           the agent explains what it is doing is the thing worth seeing, and a
