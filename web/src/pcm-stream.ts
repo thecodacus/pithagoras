@@ -23,11 +23,16 @@ export async function readPcmStream(
   const bytes = new Uint8Array(length);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-  const buffer = audio.createBuffer(1, length / 2, 24000);
-  const samples = buffer.getChannelData(0);
-  const view = new DataView(bytes.buffer);
-  for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
   signal.throwIfAborted();
+  return pcmBuffer(bytes, audio);
+}
+
+/** 24 kHz s16le mono PCM as an AudioBuffer. */
+export function pcmBuffer(bytes: Uint8Array, audio: BaseAudioContext): AudioBuffer {
+  const buffer = audio.createBuffer(1, bytes.length >> 1, 24000);
+  const samples = buffer.getChannelData(0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
   return buffer;
 }
 

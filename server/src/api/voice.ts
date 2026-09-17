@@ -4,6 +4,10 @@ import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { VoiceClips } from "../voice-clips.js";
+import { phraseLanguage } from "../voice-phrases.js";
 import path from "node:path";
 import express, { type Router } from "express";
 import { getDb, getStoredSettings } from "../db.js";
@@ -85,10 +89,106 @@ leaseTimer.unref();
 // Wait until module initialization finishes before accessing configuration.
 setImmediate(maintain);
 
+/** Everything that changes how speech sounds, so rendered clips follow the voice. */
+function voiceVersion() {
+  const { vad, enabled, lazyLoad, whisperUrl, ...speech } = config() as VoiceConfig & Record<string, unknown>;
+  delete speech.sttModel;
+  const hash = createHash("sha256").update(JSON.stringify(speech));
+  try {
+    if (speech.voice === "aria") {
+      const directory = path.join(process.env.DATA_DIR || "./data", "voices");
+      hash.update(readFileSync(path.join(directory, "aria.wav"))).update(readFileSync(path.join(directory, "aria.txt")));
+    } else if (speech.voice !== "design") {
+      const preset = readVoice(speech.voice);
+      hash.update(preset.instruction).update(preset.transcript);
+      if (preset.audio) hash.update(preset.audio);
+    }
+  } catch { /* A missing voice fails at render time; the version only has to differ. */ }
+  return hash.digest("hex").slice(0, 32);
+}
+const clips = new VoiceClips({
+  root: path.join(process.env.DATA_DIR || "./data", "voice-clips"),
+  version: voiceVersion,
+  enabled: () => config().enabled && process.env.VOICE_STATUS_SPEECH !== "false" && process.env.VOICE_PIPELINE_MODE !== "sequential",
+  render: (text, signal) => speechPcm(text, AbortSignal.any([signal, AbortSignal.timeout(120000)])),
+  hold: async () => {
+    if (!managedVoice()) return async () => {};
+    // A lease like a voice tab's, renewed so a long batch outlives its expiry.
+    const key = "voice-clips";
+    await leases.acquire(key);
+    const renew = setInterval(() => { void leases.acquire(key).catch(() => {}); }, 25000);
+    return async () => { clearInterval(renew); await leases.release(key, config().lazyLoad !== false); };
+  },
+  log: message => console.log(`[voice] ${message}`),
+});
+/** Render clips as soon as voice is set up, for the saved language and those clients asked for. */
+async function warmClips() {
+  const language = config().language;
+  const languages = new Set([...(language && language !== "auto" ? [language] : []), ...await clips.known()]);
+  await clips.warm(...languages);
+}
+const warm = () => { void warmClips().catch(e => console.error("[voice] filler clips:", (e as Error).message)); };
+setImmediate(warm);
+
 function connectManagedVoice() {
   const saved = { ...config(), enabled: true, runtime: 'audio-cpp', whisperUrl: voiceService.whisperUrl, breezeUrl: voiceService.breezeUrl };
   getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));
+  warm();
   return {...saved, managed:true};
+}
+/**
+ * One speech request to the configured runtime, retried while it is busy. The
+ * response is validated as 24 kHz PCM but not yet read.
+ */
+async function upstreamSpeech(text: string, signal: AbortSignal) {
+  let busyMs = 0;
+  const settings = config();
+  const form = new FormData();
+  form.set("text", text); form.set("instruction", settings.instruction); form.set("cfg_scale", String(settings.cfgScale));
+  const native: Record<string, unknown> = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction: settings.instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
+  if (!['design','aria'].includes(settings.voice)) {
+    const preset=readVoice(settings.voice);
+    form.set('instruction',preset.instruction);
+    (native.options as Record<string,string>).instruction=preset.instruction;
+    if(preset.audio){
+      form.set('ref_audio',new Blob([new Uint8Array(preset.audio)],{type:'audio/wav'}),'reference.wav');form.set('ref_text',preset.transcript);
+      native.voice_ref={type:'base64',data:preset.audio.toString('base64')};native.reference_text=preset.transcript;
+    }
+  }
+  if (settings.voice === "aria") {
+    const directory = path.join(process.env.DATA_DIR || "./data", "voices");
+    const [audio, transcript] = await Promise.all([
+      readFile(path.join(directory, "aria.wav")),
+      readFile(path.join(directory, "aria.txt"), "utf8"),
+    ]).catch(() => { throw new Error("Install the Aria reference audio and transcript in the portal voices directory"); });
+    if (!audio.length || !transcript.trim()) throw new Error("Aria reference audio and transcript must not be empty");
+    form.set("ref_audio", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "aria.wav");
+    form.set("ref_text", transcript.trim());
+    native.voice_ref = { type: "base64", data: audio.toString("base64") };
+    native.reference_text = transcript.trim();
+  }
+  let upstream: Response;
+  // Cancellation may leave Breeze finishing its current GPU operation.
+  // Keep one browser request pending instead of exposing normal contention.
+  do {
+    const attemptStarted=performance.now();
+    upstream = await fetch(settings.breezeUrl, { method: "POST", body: settings.runtime === "audio-cpp" ? JSON.stringify(native) : form, headers: settings.runtime === "audio-cpp" ? { "Content-Type": "application/json" } : undefined, redirect: "error", signal });
+    if (upstream.status !== 409) break;
+    await upstream.body?.cancel();
+    await delay(750, undefined, { signal });
+    busyMs+=performance.now()-attemptStarted;
+  } while (true);
+  if (!upstream.ok) throw new Error(`Breeze returned HTTP ${upstream.status}`);
+  if (!upstream.headers.get("content-type")?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && upstream.headers.get("content-type")?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
+  const rate = upstream.headers.get("x-sample-rate");
+  if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
+  return { upstream, settings, busyMs };
+}
+/** A whole phrase as 24 kHz s16le PCM, for clips rendered ahead of time. */
+async function speechPcm(text: string, signal: AbortSignal) {
+  const pcm = Buffer.from(await (await upstreamSpeech(text, signal)).upstream.arrayBuffer());
+  if (!pcm.length || pcm.length % 2) throw new Error("Breeze returned invalid PCM audio");
+  return pcm;
 }
 export function voiceRouter(): Router {
   const router = express.Router();
@@ -125,8 +225,25 @@ export function voiceRouter(): Router {
     try {
       const saved = validateConfig(req.body);
       getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));
+      warm();
       res.json(saved);
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  router.get("/voice/clips", async (req, res) => {
+    if (!config().enabled) return res.status(409).json({ error: "Enable Voice in Settings → Add-ons first" });
+    const requested = String(req.query.languages ?? "").split(",").filter(tag => /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(tag)).slice(0, 8);
+    const language = phraseLanguage(config().language, requested);
+    try {
+      const list = await clips.list(language);
+      if (list.clips.some(clip => !clip.ready)) { await clips.remember(language); void clips.warm(language).catch(() => {}); }
+      res.json(list);
+    } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+  });
+  router.get("/voice/clips/:version/:hash", async (req, res) => {
+    const pcm = await clips.read(req.params.version, req.params.hash);
+    if (!pcm) return res.sendStatus(404);
+    // The URL names the voice and text, so the content can never change.
+    res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "private, max-age=31536000, immutable" }).send(pcm);
   });
   router.use("/sessions/:id/voice", (req, res, next) => {
     if (!config().enabled) return res.status(409).json({ error: "Enable Voice in Settings → Add-ons first" });
@@ -153,6 +270,7 @@ export function voiceRouter(): Router {
     form.set("language", config().language);
     const controller = new AbortController();
     res.on("close", () => controller.abort());
+    const live = clips.liveRequest();
     try {
       const sttStarted=performance.now();
       const upstream = await fetch(config().whisperUrl, { method: "POST", body: form, redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
@@ -162,57 +280,18 @@ export function voiceRouter(): Router {
       res.set("Server-Timing", `whisper_upstream;dur=${(performance.now()-sttStarted).toFixed(1)}`);
       res.json({ text: result.text.trim() });
     } catch (e) { if (!res.destroyed) res.status(502).json({ error: (e as Error).message }); }
+    finally { live(); }
   });
   router.post("/sessions/:id/voice/speech", async (req, res) => {
     const speechStarted=performance.now();
-    let busyMs=0;
     const text = req.body?.text;
     if (typeof text !== "string" || !text.trim() || text.length > 600)
       return res.status(400).json({ error: "Speech text must contain 1–600 characters" });
-    const settings = config();
-    const form = new FormData();
-    form.set("text", text); form.set("instruction", settings.instruction); form.set("cfg_scale", String(settings.cfgScale));
-    const native: Record<string, unknown> = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction: settings.instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
     const controller = new AbortController();
     res.on("close", () => controller.abort());
+    const live = clips.liveRequest();
     try {
-      if (!['design','aria'].includes(settings.voice)) {
-        const preset=readVoice(settings.voice);
-        form.set('instruction',preset.instruction);
-        (native.options as Record<string,string>).instruction=preset.instruction;
-        if(preset.audio){
-          form.set('ref_audio',new Blob([new Uint8Array(preset.audio)],{type:'audio/wav'}),'reference.wav');form.set('ref_text',preset.transcript);
-          native.voice_ref={type:'base64',data:preset.audio.toString('base64')};native.reference_text=preset.transcript;
-        }
-      }
-      if (settings.voice === "aria") {
-        const directory = path.join(process.env.DATA_DIR || "./data", "voices");
-        const [audio, transcript] = await Promise.all([
-          readFile(path.join(directory, "aria.wav")),
-          readFile(path.join(directory, "aria.txt"), "utf8"),
-        ]).catch(() => { throw new Error("Install the Aria reference audio and transcript in the portal voices directory"); });
-        if (!audio.length || !transcript.trim()) throw new Error("Aria reference audio and transcript must not be empty");
-        form.set("ref_audio", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "aria.wav");
-        form.set("ref_text", transcript.trim());
-        native.voice_ref = { type: "base64", data: audio.toString("base64") };
-        native.reference_text = transcript.trim();
-      }
-      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]);
-      let upstream: Response;
-      // Cancellation may leave Breeze finishing its current GPU operation.
-      // Keep one browser request pending instead of exposing normal contention.
-      do {
-        const attemptStarted=performance.now();
-        upstream = await fetch(settings.breezeUrl, { method: "POST", body: settings.runtime === "audio-cpp" ? JSON.stringify(native) : form, headers: settings.runtime === "audio-cpp" ? { "Content-Type": "application/json" } : undefined, redirect: "error", signal });
-        if (upstream.status !== 409) break;
-        await upstream.body?.cancel();
-        await delay(750, undefined, { signal });
-        busyMs+=performance.now()-attemptStarted;
-      } while (true);
-      if (!upstream.ok) throw new Error(`Breeze returned HTTP ${upstream.status}`);
-      if (!upstream.headers.get("content-type")?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && upstream.headers.get("content-type")?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
-      const rate = upstream.headers.get("x-sample-rate");
-      if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
+      const { upstream, settings, busyMs } = await upstreamSpeech(text, AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]));
       if (req.get("accept") === "audio/pcm") {
         if (!upstream.body) throw new Error("Breeze returned no audio stream");
         res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
@@ -240,7 +319,7 @@ export function voiceRouter(): Router {
         if (res.headersSent) res.destroy(e as Error);
         else res.status(502).json({ error: (e as Error).message });
       }
-    }
+    } finally { live(); }
   });
   return router;
 }

@@ -148,12 +148,18 @@ export interface VoiceConfig {
   enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp";
 }
 
+export type FillerKind = "ackQuestion" | "ackRequest" | "slowCommand" | "slowTests" | "slowInstall" | "slowBuild" | "slowBrowser" | "slowSearch" | "slow" | "toolFailed" | "toolDone" | "still";
+/** Spoken status notices in the voice language, rendered live when needed. */
+export interface VoiceNotices { think: string[]; compacting: string[]; compactionWait: string; compactionDone: string; compactionStopped: string }
+export interface VoiceClipList { version: string; language: string; notices: VoiceNotices; clips: { kind: FillerKind; text: string; hash: string; ready: boolean }[] }
+
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
 export const api = {
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
   voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
   voice: () => json<VoiceConfig>("/api/voice"),
+  voiceClips: (languages: readonly string[], signal?: AbortSignal) => json<VoiceClipList>(`/api/voice/clips?languages=${encodeURIComponent(languages.join(","))}`, { signal }),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
   authStatus: () => json<{ authRequired: boolean; authed: boolean }>("/api/auth/status"),
   login: (password: string) =>
