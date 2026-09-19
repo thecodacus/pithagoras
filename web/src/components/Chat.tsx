@@ -6,7 +6,7 @@ import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser"
 import { VoiceControl } from "./VoiceControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
+import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
 import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -78,6 +78,8 @@ export function Chat({
   session,
   events,
   onSend,
+  onEditMessage,
+  onDeleteMessage,
   onAbort,
   onClientCommand,
   hasEarlier,
@@ -90,6 +92,10 @@ export function Chat({
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
   onSend: (message: string, options?: { voice?: boolean }) => Promise<void>;
+  /** Replace a sent message: it and everything after it are dropped, and the new text is sent. */
+  onEditMessage: (seq: number, message: string) => Promise<void>;
+  /** Remove a sent message and the agent's answer to it. */
+  onDeleteMessage: (seq: number) => Promise<void>;
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
@@ -99,6 +105,10 @@ export function Chat({
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
   const [sending, setSending] = useState(false);
+  // Which sent message is being rewritten, and what went wrong with the last
+  // thing done to one — shown in the transcript, where the message is.
+  const [editing, setEditing] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   // Whether there is a browser to watch, and whether you are watching it. Asked
   // once — the answer only changes when somebody installs or removes one.
@@ -157,6 +167,15 @@ export function Chat({
   const bottomRef = useRef<HTMLDivElement>(null);
   const settled = useRef(false);
   const items = useMemo(() => buildTranscript(events), [events]);
+  // The last thing the person said. Retrying it replaces it and what came of
+  // it, which is only safe where nothing follows that would go too.
+  const lastSaid = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.kind === "user" && splitContext(it.text).text) return it.id;
+    }
+    return undefined;
+  }, [items]);
 
 
   // Diagrams: the plugin is only fetched once a reply actually contains a
@@ -261,6 +280,15 @@ export function Chat({
     }
   };
 
+  const attempt = async (fn: () => Promise<void>) => {
+    setActionError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setActionError((e as Error).message);
+    }
+  };
+
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
       <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} open={canvasOpen} setOpen={setCanvasOpen}/>
@@ -348,8 +376,24 @@ export function Chat({
                 </div>
               );
             }
+            if (editing === item.seq) {
+              return (
+                <div key={item.id} className="flex justify-end">
+                  <MessageEditor
+                    initial={text}
+                    onCancel={() => setEditing(null)}
+                    onSave={(next) =>
+                      attempt(async () => {
+                        await onEditMessage(item.seq, next);
+                        setEditing(null);
+                      })
+                    }
+                  />
+                </div>
+              );
+            }
             return (
-              <div key={item.id} className="flex justify-end">
+              <div key={item.id} className="group flex flex-col items-end gap-1">
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
                   {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
                   <div className="whitespace-pre-wrap">{text}</div>
@@ -360,6 +404,54 @@ export function Chat({
                       ))}
                     </div>
                   )}
+                </div>
+                {/* Only where it can be done: taking a message out from under a
+                    run that is answering it leaves the agent replying to
+                    something that no longer exists. Sending it again is fine —
+                    it just queues, like any other message. */}
+                <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                  {item.id === lastSaid ? (
+                    // Retry: the same as editing without changing a word. After
+                    // a Stop this is what clears the half-finished answer out of
+                    // the agent's memory instead of stacking a second question
+                    // on top of it.
+                    <MessageAction
+                      label={
+                        running
+                          ? "Stop the run to retry"
+                          : "Retry — drops the reply and sends this message again"
+                      }
+                      disabled={running}
+                      onClick={() => attempt(() => onEditMessage(item.seq, text))}
+                    >
+                      <LuRotateCw className="h-3 w-3" />
+                    </MessageAction>
+                  ) : (
+                    <MessageAction
+                      label="Send again as a new message"
+                      onClick={() => attempt(() => onSend(text))}
+                    >
+                      <LuRotateCw className="h-3 w-3" />
+                    </MessageAction>
+                  )}
+                  <MessageAction
+                    label={running ? "Stop the run to edit" : "Edit — replaces this message and everything after it"}
+                    disabled={running}
+                    onClick={() => setEditing(item.seq)}
+                  >
+                    <LuPencil className="h-3 w-3" />
+                  </MessageAction>
+                  <MessageAction
+                    label={running ? "Stop the run to delete" : "Delete this message and the reply to it"}
+                    disabled={running}
+                    danger
+                    onClick={() => {
+                      if (confirm("Delete this message and the agent's reply to it? The agent forgets it too."))
+                        attempt(() => onDeleteMessage(item.seq));
+                    }}
+                  >
+                    <LuTrash2 className="h-3 w-3" />
+                  </MessageAction>
                 </div>
               </div>
             );
@@ -430,6 +522,9 @@ export function Chat({
           );
         })}
 
+          {actionError && (
+            <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
+          )}
           {running && phase && <ActivityLine phase={phase} now={now} />}
           <div ref={bottomRef} />
         </div>
@@ -575,6 +670,98 @@ export function Chat({
           </aside>
         </>
       )}
+      </div>
+    </div>
+  );
+}
+
+function MessageAction({
+  label,
+  onClick,
+  disabled,
+  danger,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded p-1.5 text-fg-faint transition disabled:cursor-not-allowed disabled:opacity-40 ${
+        danger ? "hover:text-danger" : "hover:text-accent"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** A sent message, opened for rewriting in place. */
+function MessageEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (text: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const changed = value.trim() !== initial.trim();
+
+  const save = async () => {
+    if (!value.trim() || !changed || saving) return;
+    setSaving(true);
+    try {
+      await onSave(value.trim());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-[80%] rounded-2xl bg-accent/10 p-2 ring-1 ring-inset ring-accent/30">
+      <textarea
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCancel();
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            save();
+          }
+        }}
+        rows={Math.min(10, Math.max(2, value.split("\n").length))}
+        aria-label="Edit message"
+        className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
+      />
+      <div className="mt-1 flex items-center gap-2 px-1">
+        <span className="text-[11px] text-fg-faint">Replaces this message and everything after it.</span>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="ml-auto rounded-lg px-2.5 py-1 text-xs text-fg-muted transition hover:bg-fg/5"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !changed || !value.trim()}
+          className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/25 disabled:opacity-40"
+        >
+          {saving ? "Sending…" : "Send"}
+        </button>
       </div>
     </div>
   );

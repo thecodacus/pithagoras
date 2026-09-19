@@ -6,9 +6,11 @@ import {
   LuFolder,
   LuMessageSquare,
   LuMonitor,
+  LuPencil,
   LuPlus,
   LuRadio,
   LuRefreshCw,
+  LuTrash2,
 } from "react-icons/lu";
 import { api, type AgentSession, type AgentSetup as Setup, type SessionStatus } from "../api";
 import { AgentSetup } from "./AgentSetup";
@@ -47,6 +49,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
   const [setup, setSetup] = useState<Setup | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
 
   const load = () =>
     api
@@ -64,6 +67,41 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, []);
+
+  /**
+   * Rename and delete, as the sidebar does them: these are the same sessions,
+   * and the same two routes. Deleting one that arrived through a channel does
+   * not block the chat — the next message in it simply starts a new
+   * conversation, which is the reason to say so first.
+   */
+  const rename = async (s: AgentSession) => {
+    const next = prompt("Rename conversation", s.title)?.trim();
+    if (!next || next === s.title) return;
+    setError("");
+    try {
+      await api.renameSession(s.id, next);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const remove = async (s: AgentSession) => {
+    const fresh = s.channel && s.channel.slug !== BROWSER;
+    const ok = confirm(
+      fresh
+        ? `Delete "${s.title}"? The agent forgets this conversation, and the next message in that chat starts a new one.`
+        : `Delete "${s.title}"? This stops it if it is running.`,
+    );
+    if (!ok) return;
+    setError("");
+    try {
+      await api.deleteSession(s.id);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   // Grouped by the door each conversation came through.
   const groups = useMemo(() => {
@@ -156,6 +194,10 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
 
           {setup?.initialised && <AgentFiles setup={setup} onSaved={setSetup} />}
 
+          {error && (
+            <div className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
+          )}
+
           {loading ? (
             <p className="py-12 text-center text-sm text-fg-subtle">Loading…</p>
           ) : sessions.length === 0 ? (
@@ -197,7 +239,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
 
                   <ul className="mt-1.5 space-y-1">
                     {group.items.map((s) => (
-                      <li key={s.id}>
+                      <li key={s.id} className="group relative">
                         <button
                           onClick={() => onSelect(s.id)}
                           className="flex w-full items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2.5 text-left transition hover:bg-fg/5"
@@ -212,10 +254,30 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
                             </p>
                           </div>
                           <LuMessageSquare className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
-                          <span className="shrink-0 text-[11px] text-fg-faint">
+                          <span className="shrink-0 text-[11px] text-fg-faint group-hover:invisible group-focus-within:invisible [@media(hover:none)]:hidden">
                             {when(s.updated_at)}
                           </span>
                         </button>
+                        {/* Over the timestamp rather than beside it: the row is a
+                            button, and one button cannot hold another. */}
+                        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                          <button
+                            onClick={() => rename(s)}
+                            title="Rename"
+                            aria-label={`Rename ${s.title}`}
+                            className="rounded p-1.5 text-fg-subtle transition hover:text-accent"
+                          >
+                            <LuPencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => remove(s)}
+                            title="Delete conversation"
+                            aria-label={`Delete ${s.title}`}
+                            className="rounded p-1.5 text-fg-subtle transition hover:text-danger"
+                          >
+                            <LuTrash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>

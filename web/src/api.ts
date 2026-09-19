@@ -175,6 +175,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
     }),
+  /** Removes a message and the agent's answer to it — from the agent's memory too. */
+  deleteMessage: (id: string, seq: number) =>
+    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),
+  /** Replaces a message: it and everything after it are dropped, and the new text is sent. */
+  editMessage: (id: string, seq: number, message: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/edit`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
     json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-response`, {
       method: "POST",

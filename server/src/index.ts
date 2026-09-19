@@ -51,6 +51,7 @@ import {
 } from "./pi-settings.js";
 import { eventTime, getDb } from "./db.js";
 import { getBuiltinCommands } from "./pi/builtins.js";
+import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
 
@@ -384,6 +385,36 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
     res.json({ ok: true, status: "running" });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// --- editing the conversation ---
+
+const editStatus = { busy: 409, missing: 404 } as const;
+
+/** Removes a message and the agent's answer to it. */
+app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
+  try {
+    await sessions.removeMessage(req.params.id, Number(req.params.seq), "turn");
+    res.json({ ok: true });
+  } catch (e) {
+    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
+    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
+  }
+});
+
+/** Replaces a message: it and everything after it are dropped, and the new text is sent. */
+app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
+  const message = req.body?.message;
+  if (typeof message !== "string" || !message.trim()) {
+    return res.status(400).json({ error: "message required" });
+  }
+  try {
+    await sessions.editMessage(req.params.id, Number(req.params.seq), message);
+    res.json({ ok: true, status: "running" });
+  } catch (e) {
+    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
+    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
   }
 });
 

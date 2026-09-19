@@ -1,7 +1,7 @@
 import type { PortalEvent } from "./api";
 
 export type Item =
-  | { kind: "user"; id: string; text: string; audio?: boolean }
+  | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
   | { kind: "tool"; id: string; name: string; status: "running" | "done" | "error"; detail?: string }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
@@ -34,7 +34,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         const raw = String(p.message ?? "");
         const tagged = raw.startsWith("[Audio mode]\n");
         audioReply = p.voice === true || tagged;
-        items.push({ kind: "user", id: `u${ev.seq}`, text: tagged ? raw.slice("[Audio mode]\n".length) : raw, audio: p.voice === true || tagged });
+        items.push({ kind: "user", id: `u${ev.seq}`, seq: ev.seq, text: tagged ? raw.slice("[Audio mode]\n".length) : raw, audio: p.voice === true || tagged });
         break;
       }
 
