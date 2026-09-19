@@ -121,6 +121,7 @@
 .prompt-action { display: grid; place-items: center; height: 36px; width: 36px; flex-shrink: 0; border-radius: 12px; color: rgb(var(--fg-muted)); transition: color .18s, background .18s, transform .18s; }
 .prompt-action:hover { color: rgb(var(--fg)); background: rgb(var(--fg) / .065); }
 .prompt-action:active { transform: scale(.94); }
+.prompt-action[aria-pressed="true"] { color: rgb(var(--accent)); background: rgb(var(--accent) / .12); }
 .prompt-action svg { width: 19px; height: 19px; stroke-width: 1.8; }
 .prompt-stop { background: rgb(var(--fg) / .045); border: 1px solid rgb(var(--fg) / .09); }
 .prompt-stop svg { width: 12px; height: 12px; stroke-width: 1.5; }

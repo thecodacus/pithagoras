@@ -4,7 +4,10 @@ import { CanvasPanel } from "./CanvasPanel";
 import { displaySpeechText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { DictationButton, DictationStrip } from "./Dictation";
+import { insertAtCaret } from "../dictation";
+import { useDictation } from "../use-dictation";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
@@ -95,6 +98,13 @@ export function Chat({
   onClientCommand: (name: string, args: string) => void | Promise<void>;
 }) {
   const [input, setInput] = useState("");
+  // Where dictated words go. Kept beside the state because several phrases can
+  // arrive before React has drawn the first, and each must land after the last.
+  const box = useRef<HTMLTextAreaElement>(null);
+  const draft = useRef(input);
+  draft.current = input;
+  const caret = useRef<{ start: number; end: number } | null>(null);
+  const caretTo = useRef<number | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
@@ -235,10 +245,8 @@ export function Chat({
     settled.current = true;
   }, [items.length, events.length]);
 
-  const send = async () => {
-    const msg = input.trim();
-    if (!msg || sending) return;
-
+  /** Send `msg` as a message, or run it if it is one of the portal's own commands. */
+  const submit = async (msg: string, fromBox: boolean) => {
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
     const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
@@ -246,20 +254,69 @@ export function Chat({
       ? commands.find((c) => c.name === parsed[1] && c.where === "client")
       : undefined;
     if (client && parsed) {
-      setInput("");
+      if (fromBox) clearBox();
       if (client.name === "model") setPanelRequest("model");
       else await onClientCommand(client.name, parsed[2]);
       return;
     }
 
     setSending(true);
-    setInput("");
+    if (fromBox) clearBox();
     try {
       await onSend(msg, voiceMode ? { voice: true } : undefined);
     } finally {
       setSending(false);
     }
   };
+
+  const send = async () => {
+    const msg = input.trim();
+    if (!msg || sending) return;
+    await submit(msg, true);
+  };
+
+  const clearBox = () => {
+    caret.current = null;
+    setInput("");
+  };
+
+  /** Dictated words, put in the box where the cursor was and the cursor left after them. */
+  const insertSpoken = (text: string) => {
+    const at = caret.current ?? { start: draft.current.length, end: draft.current.length };
+    const next = insertAtCaret(draft.current, at.start, at.end, text);
+    draft.current = next.value;
+    caret.current = { start: next.caret, end: next.caret };
+    caretTo.current = next.caret;
+    setInput(next.value);
+  };
+  useLayoutEffect(() => {
+    if (caretTo.current === null) return;
+    box.current?.setSelectionRange(caretTo.current, caretTo.current);
+    caretTo.current = null;
+  }, [input]);
+
+  // Phrases sent as they are said go one at a time: a second must not overtake
+  // the first, and one that fails goes back in the box rather than being lost.
+  const spoken = useRef<Promise<unknown>>(Promise.resolve());
+  const sendSpoken = (text: string) => {
+    spoken.current = spoken.current.then(async () => {
+      try {
+        await submit(text, false);
+      } catch {
+        insertSpoken(text);
+      }
+    });
+  };
+  const dictation = useDictation({
+    sessionId: session.id,
+    disabled: voiceMode,
+    onText: insertSpoken,
+    onSend: sendSpoken,
+  });
+  // One microphone: voice mode takes over from dictation.
+  useEffect(() => {
+    if (voiceMode) void dictation.stop();
+  }, [voiceMode, dictation.stop]);
 
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
@@ -451,6 +508,7 @@ export function Chat({
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
+                  caret.current = null;
                   setInput(`/${c.name} `);
                 }}
                 className="flex w-full items-baseline gap-2 px-3 py-2 text-left transition hover:bg-fg/5"
@@ -462,9 +520,17 @@ export function Chat({
             ))}
           </div>
         )}
+        <DictationStrip dictation={dictation} />
         <textarea
+          ref={box}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            caret.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+            setInput(e.target.value);
+          }}
+          onSelect={(e) => {
+            caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -472,7 +538,13 @@ export function Chat({
             }
           }}
           rows={2}
-          placeholder={running ? "pi is working — send to queue a follow-up…" : "Describe the task…"}
+          placeholder={
+            dictation.active
+              ? "Speak — your words appear here…"
+              : running
+                ? "pi is working — send to queue a follow-up…"
+                : "Describe the task…"
+          }
           aria-label="Message"
           className="prompt-input"
         />
@@ -483,6 +555,7 @@ export function Chat({
             panelRequest={panelRequest}
             onPanelConsumed={() => setPanelRequest(null)}
             actions={<>
+              <DictationButton dictation={dictation} />
               <VoiceControl canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
               {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation" onClick={onAbort} className="prompt-action prompt-stop">
                 <LuSquare aria-hidden className="h-4 w-4" fill="currentColor" />

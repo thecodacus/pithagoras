@@ -57,6 +57,36 @@ an already accepted agent task. Existing transcript history is never read aloud
 on activation. Status text shows listening, speech detection, transcription,
 and playback; errors remain visible in the voice screen.
 
+## Dictation
+
+Voice mode is a conversation. When you only want to get words into the message
+box, use **dictation**: the **microphone icon** left of the waveform icon. Speak,
+and what you say is transcribed and typed in; the agent never speaks back and a
+run in progress is not interrupted.
+
+It listens the same way voice mode does, with the same in-browser speech
+detection and the same recognition service, so it works as soon as Voice is
+enabled. Speech synthesis is not used and nothing is loaded onto the GPU for it.
+While you talk, a line above the box shows whether you are being heard and the
+words recognised so far. Pausing for about a second ends a phrase, and the next
+phrase follows it.
+
+Choose where the words go with the switch on that line. The choice is remembered.
+
+| | What happens |
+| --- | --- |
+| **Edit first** (default) | Each phrase is typed into the box **at the cursor**, spaced like a word, and the cursor moves to the end of it. Click into the text to dictate in the middle of a sentence, correct a word by keyboard, then send with Enter as usual. Dictation keeps listening after you send. |
+| **Send at once** | A message is sent once you have stopped talking and it has been transcribed. If you start speaking again while a phrase is still being transcribed, the two go out together. A draft already in the box is left alone. If sending fails, the words are put back in the box rather than lost. |
+
+Stopping dictation still delivers a sentence you were in the middle of. Starting
+voice mode turns dictation off, since both use the microphone, and leaving the
+session drops anything not yet transcribed instead of sending it elsewhere.
+Whisper's placeholders for silence, such as `[BLANK_AUDIO]`, are not typed.
+
+Messages sent by dictation are ordinary text messages. Unlike voice-mode turns
+they are not marked as audio and the agent is not asked to reply in speakable
+style.
+
 ## Alternative: manually managed Python services
 
 ::: details Show alternative deployment details

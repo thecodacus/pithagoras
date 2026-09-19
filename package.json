@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build -w server && npm run build -w web",
-    "test": "npm run build -w server && npm test -w server && node --import tsx --test tests/completed-transcript.test.mts",
+    "test": "npm run build -w server && npm test -w server && node --import tsx --test tests/*.test.mts",
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "start": "node server/dist/index.js",
