@@ -1,6 +1,7 @@
 import { LuGlobe } from "react-icons/lu";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type PiConfig, type PiModel, type Session } from "../api";
+import { serialSaver } from "../serial-saver";
 import { ContextPill } from "./ContextPill";
 
 /**
@@ -38,6 +39,45 @@ const cacheModels = (models: PiModel[]) => {
     // A full quota is not worth failing a dropdown over.
   }
 };
+
+/**
+ * What pi last reported for each model.
+ *
+ * The seeded list above is right for no model in particular: one that offers
+ * two levels drew a seven-stop slider until the first response arrived. A
+ * model's levels only change when its config does, so the last answer is a
+ * better first guess than the full list.
+ */
+const LEVELS_KEY = "pithagoras.thinkingLevels";
+
+const levelsKey = (provider: string | undefined, model: string | undefined) => `${provider ?? ""}:${model ?? ""}`;
+
+function readLevels(): Record<string, string[]> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LEVELS_KEY) || "{}");
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/** What was last reported for this model, or undefined when nothing has been. */
+function knownLevels(provider: string | null | undefined, model: string | null | undefined): string[] | undefined {
+  const known = readLevels()[levelsKey(provider ?? "", model ?? "")];
+  return Array.isArray(known) && known.length && known.every((l) => typeof l === "string") ? known : undefined;
+}
+
+const cachedLevels = (provider: string | null | undefined, model: string | null | undefined) =>
+  knownLevels(provider, model) ?? DEFAULT_LEVELS;
+
+function cacheLevels(provider: string, model: string, levels: string[]) {
+  if (!model || !levels.length) return;
+  try {
+    localStorage.setItem(LEVELS_KEY, JSON.stringify({ ...readLevels(), [levelsKey(provider, model)]: levels }));
+  } catch {
+    // Same as the catalogue: a full quota is not worth failing the pill over.
+  }
+}
 
 const RECENTS_KEY = "pithagoras.recentModels";
 const MAX_RECENTS = 4;
@@ -123,7 +163,7 @@ export function ComposerBar({
       model: { id: s.model ?? "", name: s.model ?? "default", provider: s.provider ?? "" },
       thinkingLevel: s.thinking_level ?? "medium",
     },
-    thinking: { levels: DEFAULT_LEVELS },
+    thinking: { levels: cachedLevels(s.provider, s.model) },
     models: { models: cachedModels() },
     stats: null,
   });
@@ -157,15 +197,20 @@ export function ComposerBar({
   const load = () =>
     api
       .config(sessionId)
-      .then((next) =>
+      .then((next) => {
+        cacheLevels(next.state.model.provider, next.state.model.id, next.thinking.levels);
+        // /config is the cheap route and reports neither. The levels are then
+        // what was last reported for the model it names — not for the one the
+        // seed guessed, which for a chat with no model of its own (a fresh /new)
+        // was nothing at all, and drew the full slider for a model that only
+        // switches on and off. Failing that, whatever is already known stays.
+        const known = knownLevels(next.state.model.provider, next.state.model.id);
         setCfg((prev) => ({
           ...next,
-          // /config is the cheap route and reports neither, so anything already
-          // known — seeded levels, a catalogue already fetched — is kept.
-          thinking: next.thinking.levels.length ? next.thinking : prev.thinking,
+          thinking: next.thinking.levels.length ? next.thinking : known ? { levels: known } : prev.thinking,
           models: next.models.models.length ? next.models : prev.models,
-        }))
-      )
+        }));
+      })
       .catch(() => {});
 
   useEffect(() => {
@@ -253,21 +298,56 @@ export function ComposerBar({
   // ended the drag after a single step.
   const effortIndex = dragEffort ?? serverEffort;
 
-  const commitEffort = async (index: number) => {
-    const level = levels[index];
-    if (!level || level === cfg.state.thinkingLevel) {
+  // A model that only switches thinking on or off has no scale to slide along:
+  // its levels are "off" and one other. One level at all leaves nothing to set.
+  const onOff = levels.length === 2 && levels.includes("off");
+  const onLevel = levels.find((l) => l !== "off") ?? "";
+  const thinkingOn = cfg.state.thinkingLevel !== "off";
+  const fixed = levels.length <= 1;
+
+  // Saves go out one at a time, and the last level picked is the one that
+  // stays — see serialSaver. Not one request per move: a drag ends in pointerup
+  // and then very likely a blur or keyup, all reading the same value before the
+  // first save has come back, and the slider is not disabled while a save is
+  // out, so a second level can be picked before the first returns. Held in a
+  // ref-like memo so it is there for the very next event, before any re-render,
+  // and made anew per chat so a level picked in one is never sent to another.
+  const saver = useMemo(
+    () =>
+      serialSaver(
+        (level: string) => api.setConfig(sessionId, { thinkingLevel: level }).then(() => {}),
+        load,
+      ),
+    [sessionId],
+  );
+
+  const applyLevel = async (level: string | undefined) => {
+    if (!level) {
+      setDragEffort(null);
+      return;
+    }
+    // A save is out: leave this level waiting for it, replacing any older one.
+    // The comparison below would be against a level the server may already have left.
+    if (saver.busy) {
+      void saver.request(level);
+      return;
+    }
+    if (level === cfg.state.thinkingLevel) {
       setDragEffort(null);
       return;
     }
     setBusy(true);
     try {
-      await api.setConfig(sessionId, { thinkingLevel: level });
-      await load();
+      await saver.request(level);
     } finally {
+      // Only now: the slider stays where it was dragged, and the controls stay
+      // busy, until the last save has landed.
       setBusy(false);
       setDragEffort(null);
     }
   };
+  const commitEffort = (index: number) => applyLevel(levels[index]);
+  const flipThinking = () => applyLevel(thinkingOn ? "off" : onLevel);
 
   return (
     <div ref={ref} className="composer-toolbar relative text-xs">
@@ -290,14 +370,26 @@ export function ComposerBar({
         </button>
         <button
           type="button"
-          disabled={busy}
-          onClick={() => setOpen(open === "effort" ? null : "effort")}
+          disabled={busy || fixed}
+          // On/off models flip right here; there is no scale to open a panel for.
+          onClick={() => (onOff ? flipThinking() : setOpen(open === "effort" ? null : "effort"))}
+          aria-pressed={onOff ? thinkingOn : undefined}
           className={`rounded-lg px-2 py-1 capitalize transition disabled:opacity-50 ${
-            open === "effort" ? "bg-fg/10 text-fg" : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
+            open === "effort"
+              ? "bg-fg/10 text-fg"
+              : onOff && thinkingOn
+                ? "text-warn hover:bg-fg/5"
+                : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
           }`}
-          title="Effort / thinking level"
+          title={
+            onOff
+              ? "Thinking on / off"
+              : fixed
+                ? "This model has a single thinking level"
+                : "Effort / thinking level"
+          }
         >
-          {cfg.state.thinkingLevel}
+          {onOff ? `thinking ${thinkingOn ? "on" : "off"}` : cfg.state.thinkingLevel}
         </button>
         {/* Only where there is a browser to grant. On a deployment without the
             optional service this is not a disabled control, it is nothing. */}
@@ -412,38 +504,61 @@ export function ComposerBar({
       )}
 
       {/* Effort */}
-      {open === "effort" && levels.length > 0 && (
+      {open === "effort" && levels.length > 1 && (
         <div className="absolute bottom-full right-0 mb-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop">
-          <p className="text-sm text-fg-muted">
-            Effort <span className="capitalize text-fg">{levels[effortIndex] ?? cfg.state.thinkingLevel}</span>
-          </p>
-          <div className="mt-3 flex justify-between text-[11px] text-fg-subtle">
-            <span>Faster</span>
-            <span>Smarter</span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={levels.length - 1}
-            step={1}
-            value={effortIndex}
-            onChange={(e) => setDragEffort(Number(e.target.value))}
-            onPointerUp={(e) => commitEffort(Number(e.currentTarget.value))}
-            onKeyUp={(e) => commitEffort(Number(e.currentTarget.value))}
-            onBlur={(e) => commitEffort(Number(e.currentTarget.value))}
-            className="mt-1 w-full accent-[rgb(var(--warn))]"
-          />
-          <div className="mt-1 flex justify-between">
-            {levels.map((lvl) => (
-              <span
-                key={lvl}
-                title={lvl}
-                className={`h-1 w-1 rounded-full ${
-                  lvl === levels[effortIndex] ? "bg-warn" : "bg-raised"
-                }`}
+          {onOff ? (
+            // Reached through /effort; the pill flips the same switch directly.
+            <button
+              type="button"
+              role="switch"
+              aria-checked={thinkingOn}
+              disabled={busy}
+              onClick={flipThinking}
+              className="flex w-full items-center justify-between text-sm text-fg-muted disabled:opacity-50"
+            >
+              <span>Thinking</span>
+              <span className={`relative h-5 w-9 rounded-full transition ${thinkingOn ? "bg-warn" : "bg-raised"}`}>
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-surface transition-all ${
+                    thinkingOn ? "left-[1.125rem]" : "left-0.5"
+                  }`}
+                />
+              </span>
+            </button>
+          ) : (
+            <>
+              <p className="text-sm text-fg-muted">
+                Effort <span className="capitalize text-fg">{levels[effortIndex] ?? cfg.state.thinkingLevel}</span>
+              </p>
+              <div className="mt-3 flex justify-between text-[11px] text-fg-subtle">
+                <span>Faster</span>
+                <span>Smarter</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={levels.length - 1}
+                step={1}
+                value={effortIndex}
+                onChange={(e) => setDragEffort(Number(e.target.value))}
+                onPointerUp={(e) => commitEffort(Number(e.currentTarget.value))}
+                onKeyUp={(e) => commitEffort(Number(e.currentTarget.value))}
+                onBlur={(e) => commitEffort(Number(e.currentTarget.value))}
+                className="mt-1 w-full accent-[rgb(var(--warn))]"
               />
-            ))}
-          </div>
+              <div className="mt-1 flex justify-between">
+                {levels.map((lvl) => (
+                  <span
+                    key={lvl}
+                    title={lvl}
+                    className={`h-1 w-1 rounded-full ${
+                      lvl === levels[effortIndex] ? "bg-warn" : "bg-raised"
+                    }`}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

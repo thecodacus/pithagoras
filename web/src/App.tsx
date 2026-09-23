@@ -1,3 +1,4 @@
+import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
@@ -73,6 +74,13 @@ function Shell({
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
+  const [mobileNav, setMobileNav] = useState(false);
+  useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
+  useEffect(() => {
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNav(false); };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, []);
 
   const [sessions, setSessions] = useState<Session[]>([]);
   // The task list deliberately excludes agent and routine sessions, but their
@@ -88,6 +96,12 @@ function Shell({
   /** Whether anything older than what we hold is still on the server. */
   const [moreBefore, setMoreBefore] = useState(false);
   const [loadingBefore, setLoadingBefore] = useState(false);
+  /**
+   * Which session's replay has arrived, so it is not drawn half-built. A session
+   * id rather than a flag: the first render after switching still holds the
+   * previous session's events, and must not show them under the new title.
+   */
+  const [loadedSession, setLoadedSession] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uiQueue, setUiQueue] = useState<UiRequest[]>([]);
   const esRef = useRef<EventSource | null>(null);
@@ -128,6 +142,7 @@ function Shell({
     setEvents([]);
     setMoreBefore(false);
     setUiQueue([]);
+    setLoadedSession(null);
     if (!sessionId) return;
 
     let cancelled = false;
@@ -137,38 +152,32 @@ function Shell({
       const es = new EventSource(`/api/sessions/${sessionId}/events?since=${seq}`);
       esRef.current = es;
       es.addEventListener("live-reset", () => setEvents(resetLiveEvents));
-      es.onmessage = (m) => {
-        const ev: PortalEvent = JSON.parse(m.data);
-        // A message was taken out of the conversation: drop what it covered,
-        // rather than reloading everything to find out what is left.
-        if (ev.type === "portal_removed") {
-          const { from, to } = ev.payload as { from: number; to: number | null };
-          setEvents((prev) => prev.filter((e) => !(e.seq >= from && (to == null || e.seq < to))));
-          return;
+      // Until it has caught up, what arrives is history being replayed. It is
+      // gathered and applied in one go: drawing the conversation once per event
+      // is what made a long one open at the top, build downwards over seconds and
+      // then jump to the end.
+      let replay: PortalEvent[] | null = [];
+      // Applied straight from the event, not by re-fetching: the round trip
+      // is what made the Stop button appear a beat late, or not at all when
+      // the reply came back before the list did.
+      const applyStatus = (ev: PortalEvent) => {
+        if (ev.type !== "portal_status") return;
+        const status = (ev.payload as { status?: SessionStatus }).status;
+        if (status) {
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
+          );
+          // An agent or routine session is not in that list at all — it is
+          // fetched once, on its own. Without this it kept whatever status
+          // the fetch happened to catch, so a chat either never started
+          // working or never stopped, and the activity line ran forever.
+          setOther((prev) => (prev?.id === sessionId ? { ...prev, status } : prev));
         }
-        // Live-only events (dialogs) use a negative seq and must not move the
-        // resume cursor, or reconnecting would skip real history.
-        if (ev.seq > 0) seq = ev.seq;
-        setEvents((prev) => appendLiveEvent(prev, ev));
-        // Applied straight from the event, not by re-fetching: the round trip
-        // is what made the Stop button appear a beat late, or not at all when
-        // the reply came back before the list did.
-        if (ev.type === "portal_status") {
-          const status = (ev.payload as { status?: SessionStatus }).status;
-          if (status) {
-            setSessions((prev) =>
-              prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
-            );
-            // An agent or routine session is not in that list at all — it is
-            // fetched once, on its own. Without this it kept whatever status
-            // the fetch happened to catch, so a chat either never started
-            // working or never stopped, and the activity line ran forever.
-            setOther((prev) => (prev?.id === sessionId ? { ...prev, status } : prev));
-          }
-          refreshSessions().catch(() => {});
-        }
-        // Dialogs an extension is blocking on. notify/setStatus/setWidget are
-        // one-way and must not open a modal.
+        refreshSessions().catch(() => {});
+      };
+      // Dialogs an extension is blocking on. notify/setStatus/setWidget are
+      // one-way and must not open a modal.
+      const applyDialog = (ev: PortalEvent) => {
         if (ev.type === "extension_ui_request") {
           const req = ev.payload as UiRequest;
           if (["select", "confirm", "input", "editor"].includes(req.method)) {
@@ -180,7 +189,44 @@ function Shell({
           setUiQueue((q) => q.filter((x) => x.id !== id));
         }
       };
+      const flush = () => {
+        const batch = replay;
+        replay = null;
+        if (!batch?.length) return;
+        setEvents((prev) => batch.reduce(appendLiveEvent, prev));
+        // Only where the session ended up is news; the statuses it passed
+        // through on the way were each a request for the session list.
+        const last = [...batch].reverse().find((e) => e.type === "portal_status");
+        if (last) applyStatus(last);
+        batch.forEach(applyDialog);
+      };
+      es.onmessage = (m) => {
+        const ev: PortalEvent = JSON.parse(m.data);
+        // A message was taken out of the conversation: drop what it covered,
+        // rather than reloading everything to find out what is left. While the
+        // replay is still being gathered that buffer is where they are, so it
+        // is filtered instead of the rendered list.
+        if (ev.type === "portal_removed") {
+          const { from, to } = ev.payload as { from: number; to: number | null };
+          const covered = (at: number) => at >= from && (to == null || at < to);
+          if (replay) replay = replay.filter((e) => !covered(e.seq));
+          else setEvents((prev) => prev.filter((e) => !covered(e.seq)));
+          return;
+        }
+        // Live-only events (dialogs) use a negative seq and must not move the
+        // resume cursor, or reconnecting would skip real history.
+        if (ev.seq > 0) seq = ev.seq;
+        if (replay) {
+          replay.push(ev);
+          return;
+        }
+        setEvents((prev) => appendLiveEvent(prev, ev));
+        applyStatus(ev);
+        applyDialog(ev);
+      };
       es.addEventListener("caught-up", () => {
+        flush();
+        setLoadedSession(sessionId);
         // Only now do we know where the replayed window starts, and therefore
         // whether the conversation continues above it.
         setEvents((prev) => {
@@ -194,6 +240,8 @@ function Shell({
         });
       });
       es.onerror = () => {
+        // Keep what arrived: the resume cursor has already moved past it.
+        flush();
         es.close();
         setTimeout(connect, 2000);
       };
@@ -229,19 +277,24 @@ function Shell({
   const active = listed ?? (other?.id === sessionId ? other : null);
 
   return (
-    <div className="flex h-screen bg-canvas">
+    <div className="flex h-[100dvh] min-h-0 overflow-hidden bg-canvas">
+      {mobileNav && <button aria-label="Dismiss navigation" onClick={() => setMobileNav(false)} className="fixed inset-0 z-40 bg-black/50 md:hidden" />}
+      <div id="mobile-navigation" className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
+      {mobileNav && <button type="button" aria-label="Close navigation" onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
       <Sidebar
+        forceExpanded={mobileNav}
         sessions={sessions}
         workspaces={workspaces}
         executor={executor}
         activeId={sessionId ?? null}
         view={view}
         hasBrowser={hasBrowser}
-        onNavigate={(to) => navigate(`/${to}`)}
-        onSelect={(id) => navigate(`/s/${id}`)}
+        onNavigate={(to) => { setMobileNav(false); navigate(`/${to}`); }}
+        onSelect={(id) => { setMobileNav(false); navigate(`/s/${id}`); }}
         onCreate={async (workspacePath) => {
           const s = await api.createSession(workspacePath);
           await refreshSessions();
+          setMobileNav(false);
           navigate(`/s/${s.id}`);
         }}
         onDelete={async (id) => {
@@ -268,7 +321,12 @@ function Shell({
         }}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      </div>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
+          <button type="button" aria-label="Open navigation" aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
+          <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
+        </header>
         {error && <div className="bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
         {view === "sessions" ? (
           <SessionsPage
@@ -294,8 +352,9 @@ function Shell({
         ) : active ? (
           <Chat
             session={active}
-            events={events}
-            hasEarlier={moreBefore}
+            events={loadedSession === active.id ? events : []}
+            loading={loadedSession !== active.id}
+            hasEarlier={loadedSession === active.id && moreBefore}
             loadingEarlier={loadingBefore}
             onLoadEarlier={async () => {
               const oldest = events.find((e) => e.seq > 0)?.seq;
@@ -332,7 +391,8 @@ function Shell({
               } else if (name === "new") {
                 const s = await api.createSession(active.workspace);
                 await refreshSessions();
-                navigate(`/s/${s.id}`);
+                setMobileNav(false);
+          navigate(`/s/${s.id}`);
               } else if (name === "name" && args.trim()) {
                 await api.renameSession(active.id, args.trim());
                 refreshSessions();

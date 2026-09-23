@@ -1,6 +1,6 @@
 import express, { type Router } from "express";
 import { forgetPerson, getPerson, listPeople, setRole, type Role } from "../people.js";
-import { addToolRule, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
+import { AUDIT_KEEP, addToolRule, deleteToolRule, getDb, listAudit, listToolRules } from "../db.js";
 import { nanoid } from "nanoid";
 
 /**
@@ -51,7 +51,8 @@ export function peopleRouter(): Router {
    * were called that week.
    */
   router.get("/audit", (req, res) => {
-    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    const requested = Number(req.query.limit);
+    const limit = Number.isFinite(requested) && requested > 0 ? Math.min(Math.floor(requested), AUDIT_KEEP) : 200;
     const people = new Map(listPeople().map((p) => [p.key, p.name]));
     res.json({
       entries: listAudit(limit).map((e) => ({

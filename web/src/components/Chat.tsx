@@ -1,10 +1,11 @@
 import { ActivityProgress } from './ActivityProgress';
 import { useWorkPanels } from "../use-work-panels";
+import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
 import { displaySpeechText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
 import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
@@ -13,6 +14,9 @@ import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { TerminalPanel } from "./TerminalPanel";
+
+/** How many messages are drawn at first, and added each time you scroll up to the edge. */
+const PAGE = 40;
 
 /**
  * Context the portal attaches to a message, and what to call it.
@@ -82,12 +86,15 @@ export function Chat({
   onDeleteMessage,
   onAbort,
   onClientCommand,
+  loading,
   hasEarlier,
   loadingEarlier,
   onLoadEarlier,
 }: {
   session: Session;
   events: PortalEvent[];
+  /** The conversation is still arriving; drawing it now would show it half-built. */
+  loading?: boolean;
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
@@ -164,8 +171,8 @@ export function Chat({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const settled = useRef(false);
+  const scroller = useFollowBottom<HTMLDivElement>();
+  const lastSpoken = useRef<string | null>(null);
   const items = useMemo(() => buildTranscript(events), [events]);
   // The last thing the person said. Retrying it replaces it and what came of
   // it, which is only safe where nothing follows that would go too.
@@ -176,6 +183,103 @@ export function Chat({
     }
     return undefined;
   }, [items]);
+
+  // Only the end of a conversation is drawn to begin with. Drawing all of a long
+  // one is what made opening it slow, and the top of it is not what anybody
+  // opens it for. Earlier messages are added as you scroll towards them.
+  const [shown, setShown] = useState(PAGE);
+  // Reading above the end: what is appended must not push the oldest message
+  // drawn out of the window, and with it whatever is being read. The window
+  // grows by what was added instead; at the end it slides along as before.
+  const [tail, setTail] = useState<{ id?: string; count: number }>({ count: 0 });
+  const lastId = items.length ? items[items.length - 1].id : undefined;
+  if (lastId !== tail.id || items.length !== tail.count) {
+    let appended = 0;
+    if (tail.id && lastId !== tail.id) {
+      for (let i = items.length - 1; i >= 0 && items[i].id !== tail.id; i--) appended++;
+      // The one that was last is gone, so this is not something added after it.
+      if (appended === items.length) appended = 0;
+    }
+    if (appended > 0 && !scroller.following.current) setShown((n) => n + appended);
+    setTail({ id: lastId, count: items.length });
+  }
+  const visible = shown >= items.length ? items : items.slice(items.length - shown);
+  const hiddenHere = items.length - visible.length;
+  const topEdge = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  /**
+   * The message being read when earlier ones were requested, and where it sat.
+   * Messages are added above it, and their height keeps changing for a moment
+   * (markdown and code blocks settle after they mount), so the view is kept on
+   * that message rather than on a scroll offset worked out once.
+   */
+  const reading = useRef<{ el: Element; offset: number; first?: string; count: number; until: number } | null>(null);
+  const reveal = () => {
+    const box = scroller.ref.current;
+    if (box && list.current) {
+      const top = box.getBoundingClientRect().top;
+      // A message, not the edge or the button above them: those come and go.
+      const el = [...list.current.children].find(
+        (k) => k !== topEdge.current && !k.hasAttribute("data-earlier") && k.getBoundingClientRect().bottom > top + 1,
+      );
+      reading.current = el
+        ? { el, offset: el.getBoundingClientRect().top - top, first: visible[0]?.id, count: items.length, until: Infinity }
+        : null;
+    }
+    if (hiddenHere > 0) setShown((n) => n + PAGE);
+    else if (hasEarlier && !loadingEarlier) onLoadEarlier?.();
+  };
+  const keepPlace = () => {
+    const box = scroller.ref.current;
+    const r = reading.current;
+    if (!box || !r) return;
+    if (performance.now() > r.until || !r.el.isConnected) {
+      reading.current = null;
+      return;
+    }
+    // Nothing has been added yet — the request is still on its way.
+    if (r.until === Infinity) return;
+    const drift = r.el.getBoundingClientRect().top - box.getBoundingClientRect().top - r.offset;
+    if (Math.abs(drift) >= 1) box.scrollTop += drift;
+  };
+  const revealNow = useRef(reveal);
+  revealNow.current = reveal;
+  // A different conversation starts from its end again. Only `shown`: what was
+  // last said follows from the events, and clearing it here as well would make
+  // the first update after opening look like a message just sent — and pull the
+  // view to the end from wherever it was being read.
+  useEffect(() => {
+    setShown(PAGE);
+  }, [session.id]);
+  // Added above without moving what is being read.
+  useLayoutEffect(() => {
+    const r = reading.current;
+    // What was asked for has arrived: from here the place is held while it settles.
+    if (r && r.until === Infinity && (visible[0]?.id !== r.first || items.length !== r.count)) {
+      r.until = performance.now() + 1500;
+    }
+    keepPlace();
+  });
+  useEffect(() => {
+    if (!list.current) return;
+    const observer = new ResizeObserver(keepPlace);
+    observer.observe(list.current);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const root = scroller.ref.current;
+    const edge = topEdge.current;
+    if (!root || !edge || loading) return;
+    if (hiddenHere === 0 && (!hasEarlier || loadingEarlier)) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) revealNow.current();
+      },
+      { root, rootMargin: "600px 0px 0px 0px" },
+    );
+    observer.observe(edge);
+    return () => observer.disconnect();
+  }, [loading, hiddenHere, hasEarlier, loadingEarlier, shown]);
 
 
   // Diagrams: the plugin is only fetched once a reply actually contains a
@@ -239,7 +343,6 @@ export function Chat({
   useEffect(() => {
     // Only offered where it would work: an iframe needs a secure context, and
     // over plain HTTP the client inside it refuses to start.
-    settled.current = false;
     if (!window.isSecureContext) return;
     api
       .browser()
@@ -247,11 +350,16 @@ export function Chat({
       .catch(() => setBrowserUp(false));
   }, []);
 
-  useEffect(() => {
-    // Jump on the first paint, glide afterwards. Smooth-scrolling through a
-    // whole replayed conversation is the thing that looked broken on refresh.
-    bottomRef.current?.scrollIntoView({ behavior: settled.current ? "smooth" : "auto" });
-    settled.current = true;
+  useLayoutEffect(() => {
+    // Stay at the end while the agent writes — unless you scrolled up to read,
+    // which new output must not undo. Something you just said, and the first
+    // paint of a conversation, always go to the end — before it is painted, so
+    // the top of it is never seen, nor new content at the old scroll position.
+    let said: string | null = null;
+    for (let i = items.length - 1; i >= 0 && !said; i--) if (items[i].kind === "user") said = items[i].id;
+    const fresh = said !== lastSpoken.current;
+    lastSpoken.current = said;
+    scroller.follow(fresh);
   }, [items.length, events.length]);
 
   const send = async () => {
@@ -341,10 +449,20 @@ export function Chat({
 
       <div className={voiceMode ? "hidden" : "flex min-h-0 flex-1"}>
       <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto w-full max-w-3xl space-y-3">
-        {hasEarlier && (
-          <div className="flex justify-center pb-2">
+      <div
+        ref={scroller.ref}
+        onScroll={scroller.onScroll}
+        // Reading takes over from the automatic placement.
+        onWheel={() => (reading.current = null)}
+        onTouchStart={() => (reading.current = null)}
+        onKeyDown={() => (reading.current = null)}
+        onPointerDown={() => (reading.current = null)}
+        className="flex-1 overflow-y-auto px-4 py-6"
+      >
+        <div ref={list} className="mx-auto w-full max-w-3xl space-y-3">
+        <div ref={topEdge} aria-hidden className="h-px" />
+        {!loading && hasEarlier && hiddenHere === 0 && (
+          <div data-earlier="" className="flex justify-center pb-2">
             <button
               onClick={onLoadEarlier}
               disabled={loadingEarlier}
@@ -355,14 +473,20 @@ export function Chat({
           </div>
         )}
 
-        {items.length === 0 && (
+        {loading && (
+          <p role="status" className="pt-16 text-center text-sm text-fg-muted">
+            Loading the conversation…
+          </p>
+        )}
+
+        {!loading && items.length === 0 && (
           <div className="pt-16 text-center">
             <p className="text-sm text-fg-muted">Give pi a task.</p>
             <p className="mt-1 text-xs text-fg-faint">You can close this tab — it keeps working.</p>
           </div>
         )}
 
-        {items.map((item) => {
+        {(loading ? [] : visible).map((item) => {
           if (item.kind === "user") {
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -525,8 +649,7 @@ export function Chat({
           {actionError && (
             <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
           )}
-          {running && phase && <ActivityLine phase={phase} now={now} />}
-          <div ref={bottomRef} />
+          {!loading && running && phase && <ActivityLine phase={phase} now={now} />}
         </div>
       </div>
 
@@ -539,12 +662,12 @@ export function Chat({
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {matches.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
+          <div className="absolute bottom-full left-0 right-0 mb-2 max-h-[min(16rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop">
             {matches.map((c) => (
               <button
                 key={c.name}
                 type="button"
-                onMouseDown={(e) => {
+                onClick={(e) => {
                   e.preventDefault();
                   setInput(`/${c.name} `);
                 }}

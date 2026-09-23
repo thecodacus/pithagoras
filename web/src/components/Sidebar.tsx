@@ -49,6 +49,7 @@ function slugify(input: string): string {
 const NEW = "__new__";
 
 export function Sidebar({
+  forceExpanded = false,
   sessions,
   workspaces,
   executor,
@@ -64,6 +65,7 @@ export function Sidebar({
   onOpenSettings,
   onNavigate,
 }: {
+  forceExpanded?: boolean;
   sessions: Session[];
   workspaces: Workspace[];
   executor: string;
@@ -81,7 +83,8 @@ export function Sidebar({
   onOpenSettings: () => void;
   onNavigate: (to: "sessions" | "agent" | "routines" | "browser" | "audit") => void;
 }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebarCollapsed") === "true");
+  const [storedCollapsed, setCollapsed] = useState(() => localStorage.getItem("sidebarCollapsed") === "true");
+  const collapsed = forceExpanded ? false : storedCollapsed;
   const toggleSidebar = () => {
     setCollapsed(value => {
       localStorage.setItem("sidebarCollapsed", String(!value));
@@ -137,7 +140,7 @@ export function Sidebar({
     <aside aria-label="Sidebar" className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
       <button type="button" onClick={toggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} aria-controls="sidebar-content"
-        className="absolute right-2 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+        className="hidden md:grid absolute right-2 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
         {collapsed ? <LuPanelLeftOpen size={18} /> : <LuPanelLeftClose size={18} />}
       </button>
       <div id="sidebar-content" className={`min-h-0 w-64 flex-1 flex-col ${collapsed ? "hidden" : "flex"}`}>

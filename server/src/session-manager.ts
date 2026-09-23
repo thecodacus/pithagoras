@@ -72,6 +72,9 @@ const EPHEMERAL_EVENTS = new Set([
   "portal_removed",
 ]);
 
+export type PreparedPrompt = { message: string; onAccepted?: () => void };
+type AskMessage = string | (() => PreparedPrompt);
+
 interface LiveSession {
   client: PiClient;
   executor: Executor;
@@ -86,6 +89,7 @@ interface LiveSession {
  */
 class SessionManager extends EventEmitter {
   private live = new Map<string, LiveSession>();
+  private stopping = new WeakSet<PiClient>();
   private stream = new LiveEvents(appendEvent);
 
   liveSnapshot(sessionId: string) { return this.stream.snapshot(sessionId); }
@@ -297,6 +301,8 @@ class SessionManager extends EventEmitter {
     });
 
     client.on("exit", ({ code, signal }: { code: number | null; signal: string | null }) => {
+      if (this.stopping.has(client)) return;
+      if (this.live.get(sessionId)?.client && this.live.get(sessionId)?.client !== client) return;
       this.live.delete(sessionId);
       this.stream.clear(sessionId);
       const current = getSession(sessionId);
@@ -560,8 +566,9 @@ class SessionManager extends EventEmitter {
    */
   ask(
     sessionId: string,
-    message: string,
+    message: AskMessage,
     opts: {
+      beforeTurn?: () => Promise<void> | void;
       timeoutMs?: number;
       /**
        * Relays what happens during the run — assistant prose as each stretch
@@ -588,16 +595,18 @@ class SessionManager extends EventEmitter {
     const previous = this.asking.get(sessionId) ?? Promise.resolve("");
     const next = previous
       .catch(() => "")
-      .then(() =>
-        this.askNow(
+      .then(async () => {
+        await this.waitForIdle(sessionId, opts.timeoutMs ?? 15 * 60_000);
+        await opts.beforeTurn?.();
+        return this.askNow(
           sessionId,
           message,
           opts.timeoutMs ?? 15 * 60_000,
           opts.onReply,
           opts.streamText,
           opts.onUi
-        )
-      );
+        );
+      });
     // Kept only while it is the newest, so a finished chain is not held forever.
     this.asking.set(sessionId, next);
     void next.catch(() => {}).finally(() => {
@@ -606,15 +615,28 @@ class SessionManager extends EventEmitter {
     return next;
   }
 
+  private async waitForIdle(sessionId: string, timeoutMs: number): Promise<void> {
+    if (getSession(sessionId)?.status !== "running") return;
+    await new Promise<void>((resolve, reject) => {
+      const key = `session:${sessionId}`;
+      const finish = (error?: Error) => { clearTimeout(timer); this.off(key, check); error ? reject(error) : resolve(); };
+      const check = () => { if (getSession(sessionId)?.status !== "running") finish(); };
+      const timer = setTimeout(() => finish(new Error("Previous turn is still running")), timeoutMs);
+      this.on(key, check);
+      check();
+    });
+  }
+
   private async askNow(
     sessionId: string,
-    message: string,
+    message: AskMessage,
     timeoutMs: number,
     onReply?: (text: string) => void | Promise<void>,
     streamText = true,
     onUi?: (request: any) => void
   ): Promise<string> {
     await this.ensureClient(sessionId);
+    const prepared = typeof message === "function" ? message() : { message };
 
     // pi emits one assistant message per stretch of talking, broken up by tool
     // calls. Each is flushed as it closes so a channel can relay progress
@@ -726,7 +748,8 @@ class SessionManager extends EventEmitter {
         settle = resolve;
         fail = reject;
       });
-      await this.prompt(sessionId, message);
+      await this.prompt(sessionId, prepared.message);
+      prepared.onAccepted?.();
       await finished;
       // Already relayed piece by piece; handing it back would post it twice.
       // Streamed already, so handing it back would post it twice.
@@ -859,6 +882,7 @@ class SessionManager extends EventEmitter {
   async stop(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId);
     if (!live) return;
+    this.stopping.add(live.client);
     live.client.dispose();
     this.live.delete(sessionId);
     this.stream.clear(sessionId);

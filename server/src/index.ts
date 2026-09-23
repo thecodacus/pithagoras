@@ -1,3 +1,4 @@
+import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -55,9 +56,9 @@ import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
 
-// WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
+// WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys.
 const WORKSPACE_ROOT = path.resolve(
-  process.env.WORKSPACE_ROOT || process.env.WORKSPACE_ROOT || "/workspaces"
+  process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces"
 );
 const PORT = Number(process.env.PORT || 4100);
 /**
@@ -82,7 +83,7 @@ app.get("/api/auth/status", (req, res) => {
   res.json({ authRequired: authEnabled, authed: isAuthed(req) });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", loginThrottle(), (req, res) => {
   if (!authEnabled) return res.json({ ok: true });
   if (!checkPassword(req.body?.password)) {
     return res.status(401).json({ error: "Wrong password" });
@@ -511,7 +512,7 @@ app.post("/api/sessions/:id/config", async (req, res) => {
   try {
     const client = await sessions.client(session.id);
     if (typeof modelId === "string" && modelId) {
-      await client.setModel(provider || getSettings().provider, modelId);
+      await client.setModel(provider || session.provider || getSettings().provider, modelId);
       applied.push("model");
     }
     if (typeof thinkingLevel === "string" && thinkingLevel) {
@@ -699,6 +700,7 @@ app.get("/api/sessions/:id/events", (req, res) => {
 
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 if (existsSync(webDist)) {
+  app.use(portalSecurityHeaders);
   app.use(express.static(webDist));
   app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }
@@ -724,7 +726,7 @@ const tls =
 
 const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(
   PORT,
-  "0.0.0.0",
+  bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN),
   () => {
   console.log(`pithagoras listening on :${PORT}${tls ? " (https)" : ""}`);
   console.log(`  local bin: ${BIN_DIR}`);
@@ -734,8 +736,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
   // Enabled channels come up with the server, so a restart does not silently
   // leave the agent unreachable.
-  // Schedules resume with the server; a routine due while it was down does not
-  // fire retroactively, it simply waits for its next slot.
+  // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
 
   channelSupervisor

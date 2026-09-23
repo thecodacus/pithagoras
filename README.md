@@ -84,7 +84,7 @@ The **Config** button in a task opens the web equivalent of pi's TUI slash comma
 | `PORTAL_SECRET` | random | HMAC key for the auth cookie. Set it so logins survive restarts. |
 | `WORKSPACES_DIR` | `/root/repos` | Host directory holding the workspaces pi may work in. |
 | `EXECUTOR` | `host` | `host` or `container`. |
-| `PI_PROVIDER` / `PI_MODEL` | `openrouter` / `anthropic/claude-sonnet-5` | Passed through to pi. |
+| `PI_PROVIDER` / `PI_MODEL` | inherit / inherit | Session and portal overrides take precedence; pi settings decide when unset. Last-resort provider is `openrouter`, model is left to pi. |
 | `OPENROUTER_API_KEY` etc. | — | Provider credentials, forwarded to pi. |
 | `TASK_MEMORY_MB` / `TASK_CPUS` / `TASK_PIDS_LIMIT` | `2048` / `2` / `512` | Per-task caps in `container` mode. |
 

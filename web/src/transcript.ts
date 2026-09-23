@@ -3,7 +3,7 @@ import type { PortalEvent } from "./api";
 export type Item =
   | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
-  | { kind: "tool"; id: string; name: string; status: "running" | "done" | "error"; detail?: string }
+  | { kind: "tool"; id: string; name: string; callId?: string; status: "running" | "done" | "error"; detail?: string }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
 
 /**
@@ -73,6 +73,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         items.push({
           kind: "tool",
           id: `t${ev.seq}`,
+          callId: typeof p.toolCallId === "string" ? p.toolCallId : undefined,
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
@@ -84,7 +85,8 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         const name = String(p.toolName ?? p.name ?? "tool");
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
-          if (it.kind === "tool" && it.status === "running" && it.name === name) {
+          if (it.kind === "tool" && it.status === "running" &&
+              (p.toolCallId ? it.callId === p.toolCallId : it.name === name)) {
             it.status = p.isError || p.error ? "error" : "done";
             break;
           }

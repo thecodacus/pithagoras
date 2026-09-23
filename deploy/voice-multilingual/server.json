@@ -1,0 +1,30 @@
+{
+  "host": "127.0.0.1",
+  "port": 7871,
+  "backend": "cuda",
+  "device": 0,
+  "threads": 4,
+  "lazy_load": true,
+  "idle_unload_ms": 90000,
+  "max_loaded_models": 2,
+  "models": [
+    {
+      "id": "chatterbox",
+      "family": "chatterbox",
+      "path": "/models/Chatterbox-GGUF/chatterbox-q8_0.gguf",
+      "task": "clon",
+      "mode": "offline",
+      "session_options": {
+        "chatterbox.multilingual_t3": "v3",
+        "chatterbox.conditionals_cache_slots": "2"
+      }
+    },
+    {
+      "id": "qwen3-asr",
+      "family": "qwen3_asr",
+      "path": "/models/Qwen3-ASR-1.7B-GGUF/qwen3-asr-1.7b-q8_0.gguf",
+      "task": "asr",
+      "mode": "offline"
+    }
+  ]
+}

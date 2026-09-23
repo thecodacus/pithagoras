@@ -756,15 +756,20 @@ export function takeDeliveries(sessionId: string): string[] {
   return rows.map((r) => r.text);
 }
 
-/** Take the pending notes for a conversation. Reading them consumes them. */
-export function takeNotes(sessionId: string): string[] {
-  const rows = getDb()
-    .prepare("SELECT id, text FROM notes WHERE session_id = ? AND consumed_at IS NULL ORDER BY id ASC")
+/** Read pending notes without consuming them before the prompt is accepted. */
+export function pendingNotes(sessionId: string): { id: number; text: string }[] {
+  return getDb().prepare("SELECT id, text FROM notes WHERE session_id = ? AND consumed_at IS NULL ORDER BY id ASC")
     .all(sessionId) as { id: number; text: string }[];
-  if (!rows.length) return [];
-  const mark = getDb().prepare("UPDATE notes SET consumed_at = datetime('now') WHERE id = ?");
-  for (const r of rows) mark.run(r.id);
-  return rows.map((r) => r.text);
+}
+export function consumeNotes(sessionId: string, ids: number[]): void {
+  const mark = getDb().prepare("UPDATE notes SET consumed_at = datetime('now') WHERE id = ? AND session_id = ?");
+  getDb().transaction(() => { for (const id of ids) mark.run(id, sessionId); })();
+}
+/** Legacy callers that intentionally consume immediately. */
+export function takeNotes(sessionId: string): string[] {
+  const rows = pendingNotes(sessionId);
+  consumeNotes(sessionId, rows.map(r => r.id));
+  return rows.map(r => r.text);
 }
 
 export interface ToolRule {
@@ -834,7 +839,7 @@ export interface AuditRow {
 }
 
 /** Keeps the log from growing without bound; old entries are not evidence. */
-const AUDIT_KEEP = 2000;
+export const AUDIT_KEEP = 2000;
 
 export function recordAudit(entry: {
   kind: string;

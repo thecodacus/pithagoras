@@ -25,6 +25,18 @@ not wait for the work to finish. Close the tab if you like.
 While a run is in progress you can keep typing; further messages are queued.
 **Stop** aborts the current run.
 
+## Queued channel messages and questions
+
+Channel messages wait for the current run to finish before applying a new
+speaker or role. Pending notes are included when that queued turn starts and
+are removed only after pi accepts the prompt. A failed startup leaves the
+notes available for the next attempt.
+
+When an extension asks a question, submitting a response closes the dialog only
+after the server accepts it. If submission fails, the dialog stays open with an
+error so you can retry or dismiss it. A timeout or cancellation resolves the
+original question; it does not cancel a newer question that has replaced it.
+
 ## Sent messages
 
 Hovering one of your messages gives it these actions:
@@ -76,6 +88,16 @@ Hovering a session gives you pin and delete. Double-clicking its name renames it
 The Agent tab's conversations can be renamed and deleted the same way, from the
 row.
 
+## Using a phone
+
+Tap the navigation icon in the header to open the sidebar, then choose a
+session or **New** to pick a workspace. Selecting an item closes the drawer;
+you can also close it with its close button or by tapping the dimmed backdrop.
+
+Use the send arrow beside the composer to submit a message. The keyboard's
+Return key can still insert a new line. Long slash-command lists scroll inside
+the picker, keeping the composer and navigation in view.
+
 ## Model and effort
 
 The pills under the composer show the session's live model and effort level.
@@ -86,10 +108,16 @@ portal default when unset — see
 The model pill lists models you have used recently, with the full catalogue
 behind **More models**. Only models with working credentials appear.
 
-Effort is a slider from `off` through `max`. pi coerces it on a model that does
-not reason — ask for `high` on a non-reasoning model and it lands on `off`. What
-gets stored is the level pi resolved to, not the one you asked for, so a rejected
-value is not reapplied on every restart.
+Effort is a slider over the levels the current model offers, from `off` through
+`max` at most. A model can narrow that list with a `thinkingLevelMap` in pi's
+`models.json`, and the pill follows it: a model with just `off` and one other
+level turns the pill into an on/off switch, and one with a single level shows it
+without a control.
+
+pi coerces the level on a model that does not reason — ask for `high` on a
+non-reasoning model and it lands on `off`. What gets stored is the level pi
+resolved to, not the one you asked for, so a rejected value is not reapplied on
+every restart.
 
 ## Context
 
