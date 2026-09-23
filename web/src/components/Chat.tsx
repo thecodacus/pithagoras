@@ -1,5 +1,6 @@
 import { ActivityProgress } from './ActivityProgress';
 import { useWorkPanels } from "../use-work-panels";
+import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
 import { displaySpeechText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
@@ -9,13 +10,16 @@ import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
+import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
 import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
 import { TerminalPanel } from "./TerminalPanel";
+
+/** How many messages are drawn at first, and added each time you scroll up to the edge. */
+const PAGE = 40;
 
 /**
  * Context the portal attaches to a message, and what to call it.
@@ -81,18 +85,27 @@ export function Chat({
   session,
   events,
   onSend,
+  onEditMessage,
+  onDeleteMessage,
   onAbort,
   onClientCommand,
+  loading,
   hasEarlier,
   loadingEarlier,
   onLoadEarlier,
 }: {
   session: Session;
   events: PortalEvent[];
+  /** The conversation is still arriving; drawing it now would show it half-built. */
+  loading?: boolean;
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
   onSend: (message: string, options?: { voice?: boolean }) => Promise<void>;
+  /** Replace a sent message: it and everything after it are dropped, and the new text is sent. */
+  onEditMessage: (seq: number, message: string) => Promise<void>;
+  /** Remove a sent message and the agent's answer to it. */
+  onDeleteMessage: (seq: number) => Promise<void>;
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
@@ -109,6 +122,10 @@ export function Chat({
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
   const [sending, setSending] = useState(false);
+  // Which sent message is being rewritten, and what went wrong with the last
+  // thing done to one — shown in the transcript, where the message is.
+  const [editing, setEditing] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   // Whether there is a browser to watch, and whether you are watching it. Asked
   // once — the answer only changes when somebody installs or removes one.
@@ -164,9 +181,115 @@ export function Chat({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const settled = useRef(false);
+  const scroller = useFollowBottom<HTMLDivElement>();
+  const lastSpoken = useRef<string | null>(null);
   const items = useMemo(() => buildTranscript(events), [events]);
+  // The last thing the person said. Retrying it replaces it and what came of
+  // it, which is only safe where nothing follows that would go too.
+  const lastSaid = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.kind === "user" && splitContext(it.text).text) return it.id;
+    }
+    return undefined;
+  }, [items]);
+
+  // Only the end of a conversation is drawn to begin with. Drawing all of a long
+  // one is what made opening it slow, and the top of it is not what anybody
+  // opens it for. Earlier messages are added as you scroll towards them.
+  const [shown, setShown] = useState(PAGE);
+  // Reading above the end: what is appended must not push the oldest message
+  // drawn out of the window, and with it whatever is being read. The window
+  // grows by what was added instead; at the end it slides along as before.
+  const [tail, setTail] = useState<{ id?: string; count: number }>({ count: 0 });
+  const lastId = items.length ? items[items.length - 1].id : undefined;
+  if (lastId !== tail.id || items.length !== tail.count) {
+    let appended = 0;
+    if (tail.id && lastId !== tail.id) {
+      for (let i = items.length - 1; i >= 0 && items[i].id !== tail.id; i--) appended++;
+      // The one that was last is gone, so this is not something added after it.
+      if (appended === items.length) appended = 0;
+    }
+    if (appended > 0 && !scroller.following.current) setShown((n) => n + appended);
+    setTail({ id: lastId, count: items.length });
+  }
+  const visible = shown >= items.length ? items : items.slice(items.length - shown);
+  const hiddenHere = items.length - visible.length;
+  const topEdge = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  /**
+   * The message being read when earlier ones were requested, and where it sat.
+   * Messages are added above it, and their height keeps changing for a moment
+   * (markdown and code blocks settle after they mount), so the view is kept on
+   * that message rather than on a scroll offset worked out once.
+   */
+  const reading = useRef<{ el: Element; offset: number; first?: string; count: number; until: number } | null>(null);
+  const reveal = () => {
+    const box = scroller.ref.current;
+    if (box && list.current) {
+      const top = box.getBoundingClientRect().top;
+      // A message, not the edge or the button above them: those come and go.
+      const el = [...list.current.children].find(
+        (k) => k !== topEdge.current && !k.hasAttribute("data-earlier") && k.getBoundingClientRect().bottom > top + 1,
+      );
+      reading.current = el
+        ? { el, offset: el.getBoundingClientRect().top - top, first: visible[0]?.id, count: items.length, until: Infinity }
+        : null;
+    }
+    if (hiddenHere > 0) setShown((n) => n + PAGE);
+    else if (hasEarlier && !loadingEarlier) onLoadEarlier?.();
+  };
+  const keepPlace = () => {
+    const box = scroller.ref.current;
+    const r = reading.current;
+    if (!box || !r) return;
+    if (performance.now() > r.until || !r.el.isConnected) {
+      reading.current = null;
+      return;
+    }
+    // Nothing has been added yet — the request is still on its way.
+    if (r.until === Infinity) return;
+    const drift = r.el.getBoundingClientRect().top - box.getBoundingClientRect().top - r.offset;
+    if (Math.abs(drift) >= 1) box.scrollTop += drift;
+  };
+  const revealNow = useRef(reveal);
+  revealNow.current = reveal;
+  // A different conversation starts from its end again. Only `shown`: what was
+  // last said follows from the events, and clearing it here as well would make
+  // the first update after opening look like a message just sent — and pull the
+  // view to the end from wherever it was being read.
+  useEffect(() => {
+    setShown(PAGE);
+  }, [session.id]);
+  // Added above without moving what is being read.
+  useLayoutEffect(() => {
+    const r = reading.current;
+    // What was asked for has arrived: from here the place is held while it settles.
+    if (r && r.until === Infinity && (visible[0]?.id !== r.first || items.length !== r.count)) {
+      r.until = performance.now() + 1500;
+    }
+    keepPlace();
+  });
+  useEffect(() => {
+    if (!list.current) return;
+    const observer = new ResizeObserver(keepPlace);
+    observer.observe(list.current);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const root = scroller.ref.current;
+    const edge = topEdge.current;
+    if (!root || !edge || loading) return;
+    if (hiddenHere === 0 && (!hasEarlier || loadingEarlier)) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) revealNow.current();
+      },
+      { root, rootMargin: "600px 0px 0px 0px" },
+    );
+    observer.observe(edge);
+    return () => observer.disconnect();
+  }, [loading, hiddenHere, hasEarlier, loadingEarlier, shown]);
 
 
   // Diagrams: the plugin is only fetched once a reply actually contains a
@@ -230,7 +353,6 @@ export function Chat({
   useEffect(() => {
     // Only offered where it would work: an iframe needs a secure context, and
     // over plain HTTP the client inside it refuses to start.
-    settled.current = false;
     if (!window.isSecureContext) return;
     api
       .browser()
@@ -238,11 +360,16 @@ export function Chat({
       .catch(() => setBrowserUp(false));
   }, []);
 
-  useEffect(() => {
-    // Jump on the first paint, glide afterwards. Smooth-scrolling through a
-    // whole replayed conversation is the thing that looked broken on refresh.
-    bottomRef.current?.scrollIntoView({ behavior: settled.current ? "smooth" : "auto" });
-    settled.current = true;
+  useLayoutEffect(() => {
+    // Stay at the end while the agent writes — unless you scrolled up to read,
+    // which new output must not undo. Something you just said, and the first
+    // paint of a conversation, always go to the end — before it is painted, so
+    // the top of it is never seen, nor new content at the old scroll position.
+    let said: string | null = null;
+    for (let i = items.length - 1; i >= 0 && !said; i--) if (items[i].kind === "user") said = items[i].id;
+    const fresh = said !== lastSpoken.current;
+    lastSpoken.current = said;
+    scroller.follow(fresh);
   }, [items.length, events.length]);
 
   /** Send `msg` as a message, or run it if it is one of the portal's own commands. */
@@ -318,6 +445,15 @@ export function Chat({
     if (voiceMode) void dictation.stop();
   }, [voiceMode, dictation.stop]);
 
+  const attempt = async (fn: () => Promise<void>) => {
+    setActionError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setActionError((e as Error).message);
+    }
+  };
+
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
       <CanvasPanel showToggle={false} key={session.id} sessionId={session.id} open={canvasOpen} setOpen={setCanvasOpen}/>
@@ -370,10 +506,20 @@ export function Chat({
 
       <div className={voiceMode ? "hidden" : "flex min-h-0 flex-1"}>
       <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto w-full max-w-3xl space-y-3">
-        {hasEarlier && (
-          <div className="flex justify-center pb-2">
+      <div
+        ref={scroller.ref}
+        onScroll={scroller.onScroll}
+        // Reading takes over from the automatic placement.
+        onWheel={() => (reading.current = null)}
+        onTouchStart={() => (reading.current = null)}
+        onKeyDown={() => (reading.current = null)}
+        onPointerDown={() => (reading.current = null)}
+        className="flex-1 overflow-y-auto px-4 py-6"
+      >
+        <div ref={list} className="mx-auto w-full max-w-3xl space-y-3">
+        <div ref={topEdge} aria-hidden className="h-px" />
+        {!loading && hasEarlier && hiddenHere === 0 && (
+          <div data-earlier="" className="flex justify-center pb-2">
             <button
               onClick={onLoadEarlier}
               disabled={loadingEarlier}
@@ -384,14 +530,20 @@ export function Chat({
           </div>
         )}
 
-        {items.length === 0 && (
+        {loading && (
+          <p role="status" className="pt-16 text-center text-sm text-fg-muted">
+            Loading the conversation…
+          </p>
+        )}
+
+        {!loading && items.length === 0 && (
           <div className="pt-16 text-center">
             <p className="text-sm text-fg-muted">Give pi a task.</p>
             <p className="mt-1 text-xs text-fg-faint">You can close this tab — it keeps working.</p>
           </div>
         )}
 
-        {items.map((item) => {
+        {(loading ? [] : visible).map((item) => {
           if (item.kind === "user") {
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -405,8 +557,24 @@ export function Chat({
                 </div>
               );
             }
+            if (editing === item.seq) {
+              return (
+                <div key={item.id} className="flex justify-end">
+                  <MessageEditor
+                    initial={text}
+                    onCancel={() => setEditing(null)}
+                    onSave={(next) =>
+                      attempt(async () => {
+                        await onEditMessage(item.seq, next);
+                        setEditing(null);
+                      })
+                    }
+                  />
+                </div>
+              );
+            }
             return (
-              <div key={item.id} className="flex justify-end">
+              <div key={item.id} className="group flex flex-col items-end gap-1">
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
                   {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
                   <div className="whitespace-pre-wrap">{text}</div>
@@ -417,6 +585,54 @@ export function Chat({
                       ))}
                     </div>
                   )}
+                </div>
+                {/* Only where it can be done: taking a message out from under a
+                    run that is answering it leaves the agent replying to
+                    something that no longer exists. Sending it again is fine —
+                    it just queues, like any other message. */}
+                <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                  {item.id === lastSaid ? (
+                    // Retry: the same as editing without changing a word. After
+                    // a Stop this is what clears the half-finished answer out of
+                    // the agent's memory instead of stacking a second question
+                    // on top of it.
+                    <MessageAction
+                      label={
+                        running
+                          ? "Stop the run to retry"
+                          : "Retry — drops the reply and sends this message again"
+                      }
+                      disabled={running}
+                      onClick={() => attempt(() => onEditMessage(item.seq, text))}
+                    >
+                      <LuRotateCw className="h-3 w-3" />
+                    </MessageAction>
+                  ) : (
+                    <MessageAction
+                      label="Send again as a new message"
+                      onClick={() => attempt(() => onSend(text))}
+                    >
+                      <LuRotateCw className="h-3 w-3" />
+                    </MessageAction>
+                  )}
+                  <MessageAction
+                    label={running ? "Stop the run to edit" : "Edit — replaces this message and everything after it"}
+                    disabled={running}
+                    onClick={() => setEditing(item.seq)}
+                  >
+                    <LuPencil className="h-3 w-3" />
+                  </MessageAction>
+                  <MessageAction
+                    label={running ? "Stop the run to delete" : "Delete this message and the reply to it"}
+                    disabled={running}
+                    danger
+                    onClick={() => {
+                      if (confirm("Delete this message and the agent's reply to it? The agent forgets it too."))
+                        attempt(() => onDeleteMessage(item.seq));
+                    }}
+                  >
+                    <LuTrash2 className="h-3 w-3" />
+                  </MessageAction>
                 </div>
               </div>
             );
@@ -487,8 +703,10 @@ export function Chat({
           );
         })}
 
-          {running && phase && <ActivityLine phase={phase} now={now} />}
-          <div ref={bottomRef} />
+          {actionError && (
+            <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
+          )}
+          {!loading && running && phase && <ActivityLine phase={phase} now={now} />}
         </div>
       </div>
 
@@ -501,12 +719,12 @@ export function Chat({
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {matches.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
+          <div className="absolute bottom-full left-0 right-0 mb-2 max-h-[min(16rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop">
             {matches.map((c) => (
               <button
                 key={c.name}
                 type="button"
-                onMouseDown={(e) => {
+                onClick={(e) => {
                   e.preventDefault();
                   caret.current = null;
                   setInput(`/${c.name} `);
@@ -648,6 +866,98 @@ export function Chat({
           </aside>
         </>
       )}
+      </div>
+    </div>
+  );
+}
+
+function MessageAction({
+  label,
+  onClick,
+  disabled,
+  danger,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded p-1.5 text-fg-faint transition disabled:cursor-not-allowed disabled:opacity-40 ${
+        danger ? "hover:text-danger" : "hover:text-accent"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** A sent message, opened for rewriting in place. */
+function MessageEditor({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (text: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const changed = value.trim() !== initial.trim();
+
+  const save = async () => {
+    if (!value.trim() || !changed || saving) return;
+    setSaving(true);
+    try {
+      await onSave(value.trim());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-[80%] rounded-2xl bg-accent/10 p-2 ring-1 ring-inset ring-accent/30">
+      <textarea
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCancel();
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            save();
+          }
+        }}
+        rows={Math.min(10, Math.max(2, value.split("\n").length))}
+        aria-label="Edit message"
+        className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
+      />
+      <div className="mt-1 flex items-center gap-2 px-1">
+        <span className="text-[11px] text-fg-faint">Replaces this message and everything after it.</span>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="ml-auto rounded-lg px-2.5 py-1 text-xs text-fg-muted transition hover:bg-fg/5"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !changed || !value.trim()}
+          className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/25 disabled:opacity-40"
+        >
+          {saving ? "Sending…" : "Send"}
+        </button>
       </div>
     </div>
   );

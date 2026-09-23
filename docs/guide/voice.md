@@ -146,6 +146,110 @@ Model weights and self-hosted outputs have a research/non-commercial license;
 see the [model card](https://huggingface.co/BreezeBlue/Breeze-TTS-2).
 :::
 
+## Other languages: Chatterbox and Qwen3-ASR
+
+Breeze speaks English and Chinese, and the managed installer pairs it with
+Whisper. For another language, run [audio.cpp](https://github.com/0xShug0/audio.cpp)
+with **Chatterbox Multilingual** for speech and **Qwen3-ASR** for recognition.
+One process serves both, on one GPU, so the session model can keep the other.
+
+Chatterbox speaks Arabic, Danish, Dutch, English, Finnish, French, German, Greek,
+Hindi, Italian, Korean, Malay, Norwegian, Polish, Portuguese, Spanish, Swahili,
+Swedish and Turkish. Qwen3-ASR covers those and more. Both are MIT/Apache-2.0
+licensed, unlike Breeze's research-only weights.
+
+This is a separate deployment; it does not replace Breeze or the managed
+installer, and both keep working unchanged.
+
+### Download the models
+
+```sh
+mkdir -p voice-runtime/audio-cpp
+hf download audio-cpp/audio.cpp-gguf \
+  Chatterbox-GGUF/chatterbox-q8_0.gguf \
+  Qwen3-ASR-1.7B-GGUF/qwen3-asr-1.7b-q8_0.gguf \
+  --local-dir voice-runtime/audio-cpp
+```
+
+About 4.5 GB. Together the two models occupy roughly 5.5 GB of GPU memory while
+both are loaded.
+
+### Start the runtime
+
+With Compose, on the GPU of your choice:
+
+```sh
+VOICE_GPU=1 docker compose -f docker-compose.yml -f docker-compose.voice.yml \
+  --profile voice-multilingual up -d audiocpp
+curl --fail http://127.0.0.1:7871/health
+```
+
+`server.json` binds loopback, and Compose publishes the container's port on
+`127.0.0.1:7871`: the service has no authentication, so nothing should reach it
+from the network. The Chatterbox entry declares `"task": "clon"`, which is
+audio.cpp's own name for voice cloning — not a truncated `"clone"`.
+
+`deploy/voice-multilingual/` also holds a systemd unit for a native audio.cpp
+build. It reads the same `server.json`, so point `/models` at your GGUF
+directory — a symlink is enough — or edit the two paths in that file. Build the
+server where the unit expects it, next to the existing Breeze unit's binary:
+
+```sh
+cd /opt/audio.cpp
+scripts/build_linux.sh --backend cuda --target audiocpp_server
+```
+
+The unit uses GPU 0 unless `/etc/default/pithagoras-audio-cpp-multilingual`
+sets another, for example `VOICE_GPU=1`.
+
+### Point the portal at it
+
+Open **Settings → Add-ons → Voice → Advanced connection** and set:
+
+| Setting | Value |
+| --- | --- |
+| Speech runtime | **Chatterbox audio.cpp · multilingual** |
+| Speech recognition URL | `http://127.0.0.1:7871/v1/audio/transcriptions` |
+| Speech synthesis URL | `http://127.0.0.1:7871/v1/audio/speech` |
+| Speech recognition model | `qwen3-asr` |
+
+Then choose your **Input language** — it selects the spoken language too — and a
+**Speaking voice**. Chatterbox has no detection mode, so **Auto-detect** is not
+offered for it and the dropdown lists only the nineteen languages above.
+Chatterbox always clones a reference recording: choose Aria or add a voice with
+a recording in the language you want to hear. A designed voice is refused when
+you save, not silently replaced. Use a clean 10-second reference.
+
+**Speech delivery** replaces Breeze's Fast/Expressive choice. It sets
+Chatterbox's emotion exaggeration: calm, natural, or expressive.
+
+Numbers are written out before synthesis for languages that have a pack
+(currently German and English), because Chatterbox otherwise reads digit groups
+unreliably — "4070" came back from recognition as "70". The transcript keeps the
+digits; only synthesis sees the words. Each pack knows how its language groups
+thousands, so German "100.000" is spoken as one number rather than as a decimal.
+Dates, clock times, version strings, ranges and anything with a leading zero
+keep their digits: reading them as quantities would be worse than leaving them.
+Adding a language is one entry in `server/src/voice-numbers.ts`; a language
+without a pack keeps its digits, and the add-on says so under the language.
+
+Chatterbox has no streaming mode in audio.cpp, so each phrase arrives as one
+complete WAV instead of a PCM stream. Playback is unchanged, because the browser
+buffers each phrase before playing it either way, but the first audio of a reply
+waits for its whole first sentence. Measured on an RTX 3060 with a German
+reference: a short sentence took 1.25 s, and 14 s of speech took 5.7 s
+(about 0.4× real time). Qwen3-ASR transcribed 3-second German clips in about
+0.3 s. These are sample measurements, not guarantees.
+
+Recognition uses the OpenAI transcription API, which needs the model name that
+`server.json` gives it. Whisper.cpp has a single model and ignores the field, so
+leaving **Speech recognition model** empty keeps the existing Whisper setup
+byte for byte.
+
+The managed **Install voice** button still installs Breeze and Whisper; it does
+not know about this runtime. Do not run both on the same GPU unless it has the
+memory for both.
+
 ## First spoken response
 
 On the host executor with a llama.cpp provider, each voice prompt disables
@@ -230,7 +334,7 @@ docker compose -f docker-compose.yml -f docker-compose.voice.yml --profile voice
 
 ```sh
 npm run build
-node --import tsx --test tests/voice.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts
+node --import tsx --test tests/voice.test.mts tests/voice-numbers.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts
 npx playwright test
 ```
 

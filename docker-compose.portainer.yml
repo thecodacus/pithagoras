@@ -20,9 +20,21 @@ services:
       PORTAL_PASSWORD: ${PORTAL_PASSWORD:?required}
       PORTAL_SECRET: ${PORTAL_SECRET:-}
       EXECUTOR: ${EXECUTOR:-host}
+<<<<<<< HEAD
+      PI_IMAGE: ${PI_IMAGE:-pithagoras-runner:latest}
+      TASK_MEMORY_MB: ${TASK_MEMORY_MB:-2048}
+      TASK_CPUS: ${TASK_CPUS:-2}
+      TASK_PIDS_LIMIT: ${TASK_PIDS_LIMIT:-512}
+      PI_PROVIDER: ${PI_PROVIDER:-}
+      PI_MODEL: ${PI_MODEL:-}
+      PI_THINKING_LEVEL: ${PI_THINKING_LEVEL:-}
+=======
+      # Must match container_name; translates nested-executor mounts to host paths.
+      PORTAL_CONTAINER_NAME: pithagoras
       PI_PROVIDER: ${PI_PROVIDER:-openrouter}
       PI_MODEL: ${PI_MODEL:-anthropic/claude-sonnet-5}
       PI_THINKING_LEVEL: ${PI_THINKING_LEVEL:-medium}
+>>>>>>> origin/main
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 

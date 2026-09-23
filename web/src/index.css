@@ -403,3 +403,5 @@
 .voice-profile p {margin:10px 0;color:rgb(var(--fg-muted));}
 .voice-profile table {width:100%;margin:12px 0;}.voice-profile td{padding:5px 3px;border-bottom:1px solid rgb(var(--line));}.voice-profile td:not(:first-child){text-align:right;white-space:nowrap;}
 .voice-profile pre {white-space:pre-wrap;font-size:10px;max-height:160px;overflow:auto;}.voice-profile button{padding:6px 10px;border:1px solid rgb(var(--line));border-radius:8px;}
+
+@media (max-width: 767px) { .prompt-input { font-size: 16px; } }
