@@ -4,6 +4,12 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY server/package.json server/
 COPY web/package.json web/
+# better-sqlite3 ships a binding.gyp, and npm defaults to node-gyp for any
+# package that has one without its own install script. This stage is thrown
+# away, so it gets a real toolchain and every dependency's install script runs
+# as its author intended.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm install
 COPY server server
 COPY web web
@@ -32,7 +38,10 @@ RUN npm install -g @earendil-works/pi-coding-agent@latest
 
 COPY package.json package-lock.json* ./
 COPY server/package.json server/
-RUN npm install --omit=dev -w server
+# No toolchain here, and none needed: better-sqlite3 ships prebuilt binaries
+# and resolves them at require time. Skipping install scripts keeps the runtime
+# image slim instead of carrying a compiler for a binary that already exists.
+RUN npm install --omit=dev -w server --ignore-scripts
 
 COPY --from=build /app/server/dist server/dist
 COPY --from=build /app/web/dist web/dist
