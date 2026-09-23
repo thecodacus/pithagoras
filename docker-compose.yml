@@ -13,6 +13,8 @@ services:
       # Required for managed Browser/Voice add-ons and EXECUTOR=container.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      # Must match container_name; managed voice shares this network namespace.
+      PORTAL_CONTAINER_NAME: pithagoras
       # With host networking the portal binds PORT directly on the host.
       PORT: ${PORT:-4100}
       PORTAL_PASSWORD: ${PORTAL_PASSWORD:?set PORTAL_PASSWORD in .env}
@@ -20,6 +22,12 @@ services:
       PORTAL_SECRET: ${PORTAL_SECRET:-}
       # host = pi runs in this container | container = one container per task
       EXECUTOR: ${EXECUTOR:-host}
+      # Must match container_name; translates nested-executor mounts to host paths.
+      PORTAL_CONTAINER_NAME: pithagoras
+      PI_IMAGE: ${PI_IMAGE:-pithagoras-runner:latest}
+      TASK_MEMORY_MB: ${TASK_MEMORY_MB:-2048}
+      TASK_CPUS: ${TASK_CPUS:-2}
+      TASK_PIDS_LIMIT: ${TASK_PIDS_LIMIT:-512}
       # Overrides only — left empty so pi's own settings.json (defaultProvider,
       # defaultModel) decides. Baking values in here made those unreachable.
       PI_PROVIDER: ${PI_PROVIDER:-}

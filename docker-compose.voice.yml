@@ -28,3 +28,23 @@ services:
     volumes:
       - ${BREEZE_MODEL_DIR:-./voice-runtime/Breeze-TTS-2}:/models/breeze:ro
     command: ["python", "-m", "breeze_infer.api", "/models/breeze", "--host", "0.0.0.0", "--port", "7860"]
+  # Multilingual alternative: one audio.cpp process serving Chatterbox speech and
+  # Qwen3-ASR recognition, both of which speak languages Breeze does not.
+  # VOICE_GPU picks the GPU, so the session model can keep the other one.
+  audiocpp:
+    profiles: [voice-multilingual]
+    image: ${AUDIOCPP_IMAGE:-ghcr.io/0xshug0/audio.cpp:full-cuda13}
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${VOICE_GPU:-0}"]
+              capabilities: [gpu]
+    ports:
+      - "127.0.0.1:7871:7871"
+    volumes:
+      - ${AUDIOCPP_MODELS:-./voice-runtime/audio-cpp}:/models:ro
+      - ./deploy/voice-multilingual/server.json:/config/server.json:ro
+    command: ["server", "--config", "/config/server.json", "--host", "0.0.0.0"]

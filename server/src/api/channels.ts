@@ -6,6 +6,7 @@ import { isValidSlug, slugify } from "../slug.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import {
   channelsDir,
+  isPackageName,
   installChannelPackage,
   loadChannels,
   removeChannelPackage,
@@ -279,7 +280,8 @@ export function channelsRouter(): Router {
   });
 
   router.delete("/channel-packages/:name", async (req, res) => {
-    const name = decodeURIComponent(req.params.name);
+    const name = req.params.name;
+    if (!isPackageName(name)) return res.status(400).json({ error: "Invalid package name" });
     const kind = (await loadChannels()).channels.find((k) => k.packageName === name);
     if (kind?.builtin) {
       return res.status(400).json({ error: "Builtin channels ship with the portal" });

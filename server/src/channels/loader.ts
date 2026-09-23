@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -226,14 +226,34 @@ export async function installChannelPackage(spec: string): Promise<string> {
   return (stdout || stderr || "").trim();
 }
 
+export function isPackageName(name: string): boolean {
+  return name.length <= 214 && /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(name);
+}
+
+export function channelPackageTarget(packageName: string): string {
+  if (!isPackageName(packageName)) throw new Error("Invalid package name");
+  const root = path.resolve(channelsDir(), "node_modules");
+  const target = path.resolve(root, packageName);
+  if (!target.startsWith(root + path.sep)) throw new Error("Invalid package path");
+  const parent = path.dirname(target);
+  if (existsSync(parent) && existsSync(root)) {
+    const realRoot = realpathSync(root), realParent = realpathSync(parent);
+    if (realParent !== realRoot && !realParent.startsWith(realRoot + path.sep)) {
+      throw new Error("Package scope escapes node_modules");
+    }
+  }
+  return target;
+}
+
 export async function removeChannelPackage(packageName: string): Promise<void> {
+  const target = channelPackageTarget(packageName);
   const dir = channelsDir();
-  await run("npm", ["remove", packageName], { cwd: dir, timeout: 120_000 }).catch(() => {
+  await run("npm", ["remove", "--", packageName], { cwd: dir, timeout: 120_000 }).catch(() => {
     // npm remove fails if it was never recorded as a dependency; fall through
     // to deleting the directory so a half-installed package can still be
     // cleared rather than being stuck in the list forever.
   });
-  const target = path.join(dir, "node_modules", packageName);
+  channelPackageTarget(packageName); // Recheck after npm may have changed the tree.
   if (existsSync(target)) rmSync(target, { recursive: true, force: true });
   invalidate();
 }

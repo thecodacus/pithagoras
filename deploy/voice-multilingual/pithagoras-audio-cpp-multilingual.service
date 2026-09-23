@@ -1,0 +1,19 @@
+[Unit]
+Description=Pithagoras multilingual speech (Chatterbox TTS + Qwen3-ASR, audio.cpp)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/audio.cpp
+# VOICE_GPU picks the GPU, as in the Compose service. Set it in the optional
+# environment file, e.g. VOICE_GPU=1 to leave GPU 0 to the session model.
+Environment=CUDA_DEVICE_ORDER=PCI_BUS_ID
+Environment=VOICE_GPU=0
+EnvironmentFile=-/etc/default/pithagoras-audio-cpp-multilingual
+ExecStart=/usr/bin/env CUDA_VISIBLE_DEVICES=${VOICE_GPU} /opt/audio.cpp/build/linux-cuda-release/bin/audiocpp_server --config /opt/pithagoras/deploy/voice-multilingual/server.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

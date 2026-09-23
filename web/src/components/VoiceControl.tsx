@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { voiceCue, type VoiceCue } from "../voice-cues";
 import { createPortal } from "react-dom";
 import { VoiceStage, type VoiceLevels } from "./VoiceStage";
-import { LuMic, LuLoaderCircle, LuGauge } from "react-icons/lu";
+import { LuAudioLines, LuLoaderCircle, LuGauge } from "react-icons/lu";
 import type { MicVAD } from "@ricky0123/vad-web";
 import { api, type PortalEvent } from "../api";
 import type { Item } from "../transcript";
@@ -34,12 +34,13 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   if(!profiler.current)profiler.current=new VoiceProfiler(()=>refreshProfile(n=>n+1));
   const eventSeq=useRef(0);eventSeq.current=toolEvents.reduce((n,e)=>Math.max(n,e.seq),0);
   const profileSeq=useRef(Infinity);
+  const profileLiveSeen=useRef(new WeakSet<object>());
   const profileMark=(name:string)=>{if(profiling.current)profiler.current!.mark(name);};
   useEffect(()=>{
     if(!profiling.current)return;
     for(const event of toolEvents){
-      if(event.seq<=profileSeq.current)continue;
-      profileSeq.current=event.seq;
+      if(event.seq < 0) { if(profileLiveSeen.current.has(event))continue; profileLiveSeen.current.add(event); }
+      else { if(event.seq<=profileSeq.current)continue; profileSeq.current=event.seq; }
       const inner=event.payload?.assistantMessageEvent;
       if(event.type==='message_update'&&inner?.delta&&['text_delta','thinking_delta','toolcall_delta'].includes(inner.type))profileMark('first_model_token');
       if(event.type==='message_update'&&inner?.delta&&inner?.type==='text_delta')profileMark('first_text');
@@ -361,7 +362,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       <button type="button" className="prompt-action" aria-label="Profile voice latency" title="Profile voice latency" aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
       {error && !enabled && !starting && <p role="alert" className="absolute bottom-full right-0 mb-3 w-64 rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
       <button ref={startButton} type="button" onClick={start} aria-label="Turn on hands-free voice" title="Start voice conversation" className="prompt-action">
-        {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuMic aria-hidden />}
+        {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuAudioLines aria-hidden />}
       </button>
     </div>
   </>;

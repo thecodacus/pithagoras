@@ -38,6 +38,13 @@ on the Agent tab marked "no channel" until something claims that slug again. The
 same replay, same model handling — and they are listed on the **Agent** tab,
 where clicking one opens it in the normal chat view.
 
+From that list a conversation can be renamed or deleted. Deleting one does not
+block the chat it belonged to: the next message in it starts a new conversation,
+with none of the old memory. That makes it the way to reset a chat the agent has
+got wrong. The messages themselves can be edited or deleted as in any session —
+see [Sent messages](/guide/sessions#sent-messages) — but that changes what the
+agent remembers, not what was already delivered to the channel.
+
 ## Channel types are packages
 
 Nothing about Telegram is hardcoded. A channel type is a package with a

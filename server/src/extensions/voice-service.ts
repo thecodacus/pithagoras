@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { containerState, dockerAvailable, imagePresent, pullImage, request } from './docker.js';
 
 export const CONTAINER = 'pithagoras-voice';
@@ -20,6 +21,16 @@ async function healthy(url: string) {
 export async function status() {
   if (!dockerAvailable()) return { available: false, state: 'unavailable', busy: false, progress: '', error: 'Automatic voice setup requires Docker with NVIDIA GPU support.' };
   const state = await containerState(CONTAINER);
+  if (state.running && !pending) {
+    const detail = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {NetworkMode?: string}}>('GET', `/containers/${CONTAINER}/json`);
+    if (detail.body?.Config?.Labels?.['pithagoras.addon'] === 'voice') {
+      const target = await voiceNetworkMode();
+      if (detail.body.Config.Labels['pithagoras.voice-network'] !== 'shared-v1' || detail.body.HostConfig?.NetworkMode !== target) {
+        await install();
+        return {available:true, state:'installing', busy:true, progress:'Updating managed voice networking; keeping downloaded models', error:''};
+      }
+    }
+  }
   let logs = '';
   if (state.exists) {
     // Tty=true in the container spec makes logs plain text, without Docker multiplex frames.
@@ -31,12 +42,42 @@ export async function status() {
   const failed = !state.running && Boolean(detail?.body?.State?.ExitCode);
   return { available: true, state: pending ? 'installing' : ready ? 'running' : state.running ? 'starting' : failed ? 'failed' : state.exists ? 'stopped' : 'absent', busy: pending, progress: pending ? progress : logs, error: error || (failed ? detail?.body?.State?.Error || 'Voice setup or service exited. Review the log, then retry.' : '') };
 }
-export function containerSpec(script: string) {
-  return { Image: IMAGE, Tty: true, Cmd: ['bash', '-c', script], Labels: { 'pithagoras.addon': 'voice' },
-    ExposedPorts: { '8178/tcp': {}, '7861/tcp': {} },
-    HostConfig: { Binds: [`${VOLUME}:/voice`], DeviceRequests: [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }],
-      PortBindings: { '8178/tcp': [{ HostIp: '127.0.0.1', HostPort: '8188' }], '7861/tcp': [{ HostIp: '127.0.0.1', HostPort: '7862' }] },
+/** Share loopback with the portal; no published host ports or gateway lookup. */
+export async function voiceNetworkMode(): Promise<string> {
+  if (!existsSync('/.dockerenv') && !process.env.PORTAL_CONTAINER_NAME) {
+    if (process.platform !== 'linux') throw new Error('Native managed voice requires Linux. Run the portal in Docker on this platform.');
+    return 'host';
+  }
+  const name = process.env.PORTAL_CONTAINER_NAME || process.env.HOSTNAME;
+  if (!name) throw new Error('Set PORTAL_CONTAINER_NAME to the portal Docker container name.');
+  const detail = await request<{Id?: string; State?: {Running?: boolean}}>('GET', `/containers/${encodeURIComponent(name)}/json`);
+  if (detail.status !== 200 || !detail.body?.Id || !detail.body.State?.Running) {
+    throw new Error('Cannot identify the running portal container. Set PORTAL_CONTAINER_NAME to its Docker name.');
+  }
+  return `container:${detail.body.Id}`;
+}
+export function containerSpec(script: string, networkMode: string) {
+  return { Image: IMAGE, Tty: true, Cmd: ['bash', '-c', script], Labels: { 'pithagoras.addon': 'voice', 'pithagoras.voice-network': 'shared-v1' },
+    HostConfig: { Binds: [`${VOLUME}:/voice`], NetworkMode: networkMode,
+      DeviceRequests: [{ Driver: 'nvidia', Count: 1, Capabilities: [['gpu']] }],
       RestartPolicy: { Name: 'no' }, LogConfig: { Type: 'json-file', Config: { 'max-size': '10m', 'max-file': '2' } } } };
+}
+async function ensureContainer(script: string) {
+  const networkMode = await voiceNetworkMode();
+  const existing = await request<{Config?: {Labels?: Record<string,string>}; HostConfig?: {NetworkMode?: string}; State?: {Running?: boolean}}>('GET', `/containers/${CONTAINER}/json`);
+  if (existing.status !== 404) {
+    if (existing.status >= 400) throw new Error(`Cannot inspect voice container: Docker ${existing.status}`);
+    if (existing.body.Config?.Labels?.['pithagoras.addon'] !== 'voice') throw new Error('The pithagoras-voice container is not a managed voice add-on. Rename it before installing.');
+    const current = existing.body.Config.Labels['pithagoras.voice-network'] === 'shared-v1' && existing.body.HostConfig?.NetworkMode === networkMode;
+    if (current) { await checked('POST', `/containers/${CONTAINER}/start`); return; }
+    // Container config is immutable. Retain /voice and the cached model/build
+    // files while replacing the old published-port container or stale namespace.
+    if (existing.body.State?.Running) await checked('POST', `/containers/${CONTAINER}/stop?t=10`);
+    await checked('DELETE', `/containers/${CONTAINER}`);
+  }
+  await checked('POST', '/volumes/create', { Name: VOLUME });
+  await checked('POST', `/containers/create?name=${CONTAINER}`, containerSpec(script, networkMode));
+  await checked('POST', `/containers/${CONTAINER}/start`);
 }
 export async function install() {
   if (pending) throw new Error('Voice setup is already in progress');
@@ -48,20 +89,14 @@ export async function install() {
   catch (e) { pending = false; throw e; }
   void (async () => {
     try {
-      const existing = await containerState(CONTAINER);
-      if (existing.exists) { await checked('POST', `/containers/${CONTAINER}/start`); return; }
       if (!(await imagePresent(IMAGE))) await pullImage(IMAGE, line => { progress = line; });
-      await checked('POST', '/volumes/create', { Name: VOLUME });
-      await checked('POST', `/containers/create?name=${CONTAINER}`, containerSpec(script));
-      await checked('POST', `/containers/${CONTAINER}/start`);
+      await ensureContainer(script);
     } catch (e) { error = (e as Error).message; }
     finally { pending = false; }
   })();
 }
 export async function start() {
-  if (pending) throw new Error('Voice setup is in progress');
-  error = '';
-  await checked('POST', `/containers/${CONTAINER}/start`);
+  await install();
 }
 export async function stop() {
   if (pending) throw new Error('Wait for the image download to finish before stopping');

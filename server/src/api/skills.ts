@@ -1,6 +1,7 @@
 import express, { type Router } from "express";
 import {
   existsSync,
+  realpathSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -77,7 +78,7 @@ async function loadFromPi(): Promise<{ skills: LoadedSkill[]; diagnostics: any[]
 
 const isEditable = (filePath: string) => {
   const root = skillsRoot();
-  return path.resolve(filePath).startsWith(root + path.sep);
+  try { return realpathSync(filePath).startsWith(realpathSync(root) + path.sep); } catch { return false; }
 };
 
 /** The directory that owns a skill, which is what delete removes. */
@@ -196,6 +197,14 @@ function disabledSkills() {
 
 export function skillsRouter(): Router {
   const router = express.Router();
+  router.param("name", (req, res, next, name) => {
+    if (!isValidSlug(name)) return res.status(400).json({ error: "Invalid skill name" });
+    const root = skillsRoot(), dir = path.join(root, name);
+    if (existsSync(dir) && !realpathSync(dir).startsWith(realpathSync(root) + path.sep)) {
+      return res.status(400).json({ error: "Skill directory escapes its root" });
+    }
+    next();
+  });
 
   /** By loaded name, or by directory for one pi could not parse. */
   const locate = async (name: string) => {
@@ -205,7 +214,7 @@ export function skillsRouter(): Router {
     // Not loaded means broken or disabled — both still editable and deletable.
     for (const candidate of ["SKILL.md", DISABLED]) {
       const file = path.join(skillsRoot(), name, candidate);
-      if (existsSync(file)) return { file, editable: true };
+      if (existsSync(file)) return { file, editable: isEditable(file) };
     }
     return null;
   };

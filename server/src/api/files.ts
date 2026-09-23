@@ -27,7 +27,13 @@ import express, { type Router } from "express";
  * resolved target against the canonical root.
  */
 
-const WORKSPACE_ROOT = canonicalize(path.resolve(process.env.WORKSPACE_ROOT || "/workspaces"));
+// The same fallback the rest of the server uses — see index.ts. Reading only
+// WORKSPACE_ROOT pointed this router at /workspaces on a deploy still using
+// the legacy name, so it would browse a different tree from the one pi works
+// in. (WORKSPACES_DIR was restored in #21, after this branch was written.)
+const WORKSPACE_ROOT = canonicalize(
+  path.resolve(process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces")
+);
 
 /** Excluded from "download whole workspace" — regenerable or huge, not the work itself. */
 const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];

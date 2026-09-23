@@ -1,9 +1,9 @@
 import type { PortalEvent } from "./api";
 
 export type Item =
-  | { kind: "user"; id: string; text: string; audio?: boolean }
+  | { kind: "user"; id: string; seq: number; text: string; audio?: boolean }
   | { kind: "assistant"; id: string; text: string; thinking: string; done: boolean; audio?: boolean }
-  | { kind: "tool"; id: string; name: string; status: "running" | "done" | "error"; detail?: string }
+  | { kind: "tool"; id: string; name: string; callId?: string; status: "running" | "done" | "error"; detail?: string }
   | { kind: "notice"; id: string; text: string; tone: "info" | "error" };
 
 /**
@@ -34,7 +34,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         const raw = String(p.message ?? "");
         const tagged = raw.startsWith("[Audio mode]\n");
         audioReply = p.voice === true || tagged;
-        items.push({ kind: "user", id: `u${ev.seq}`, text: tagged ? raw.slice("[Audio mode]\n".length) : raw, audio: p.voice === true || tagged });
+        items.push({ kind: "user", id: `u${ev.seq}`, seq: ev.seq, text: tagged ? raw.slice("[Audio mode]\n".length) : raw, audio: p.voice === true || tagged });
         break;
       }
 
@@ -43,7 +43,7 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         const delta = typeof inner.delta === "string" ? inner.delta : "";
         if (!delta) break;
         if (!current) {
-          current = { kind: "assistant", id: `a${ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
+          current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
           items.push(current);
         }
         if (inner.type === "thinking_delta") current.thinking += delta;
@@ -51,15 +51,29 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         break;
       }
 
-      case "message_end":
-        closeCurrent();
+      case "message_snapshot":
+      case "message_end": {
+        const message = p.message;
+        if (message?.role === "assistant" && Array.isArray(message.content)) {
+          const text = message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("");
+          const thinking = message.content.filter((c: any) => c?.type === "thinking").map((c: any) => c.thinking ?? "").join("");
+          if (!current) {
+            current = { kind: "assistant", id: `a${p.streamId ?? ev.seq}`, text: "", thinking: "", done: false, audio: audioReply };
+            items.push(current);
+          }
+          current.text = text;
+          current.thinking = thinking;
+        }
+        if (ev.type === "message_end") closeCurrent();
         break;
+      }
 
       case "tool_execution_start":
         closeCurrent();
         items.push({
           kind: "tool",
           id: `t${ev.seq}`,
+          callId: typeof p.toolCallId === "string" ? p.toolCallId : undefined,
           name: String(p.toolName ?? p.name ?? "tool"),
           status: "running",
           detail: summarizeToolInput(p),
@@ -71,7 +85,8 @@ export function buildTranscript(events: PortalEvent[]): Item[] {
         const name = String(p.toolName ?? p.name ?? "tool");
         for (let i = items.length - 1; i >= 0; i--) {
           const it = items[i];
-          if (it.kind === "tool" && it.status === "running" && it.name === name) {
+          if (it.kind === "tool" && it.status === "running" &&
+              (p.toolCallId ? it.callId === p.toolCallId : it.name === name)) {
             it.status = p.isError || p.error ? "error" : "done";
             break;
           }
@@ -181,6 +196,13 @@ export function activity(events: PortalEvent[]): Activity {
       case "turn_end":
       case "compaction_end":
         return { label: "thinking", since: ev.at };
+
+      case "message_snapshot": {
+        const blocks = Array.isArray(p.message?.content) ? p.message.content : [];
+        const last = [...blocks].reverse().find((c: any) => c?.type === 'text' && c.text || c?.type === 'thinking' && c.thinking);
+        if (last) return { label: last.type === 'thinking' ? 'thinking' : 'writing the reply', since: ev.at };
+        break;
+      }
 
       case "message_update":
         if (p.assistantMessageEvent?.delta) {

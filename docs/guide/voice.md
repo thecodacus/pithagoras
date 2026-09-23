@@ -57,6 +57,36 @@ an already accepted agent task. Existing transcript history is never read aloud
 on activation. Status text shows listening, speech detection, transcription,
 and playback; errors remain visible in the voice screen.
 
+## Dictation
+
+Voice mode is a conversation. When you only want to get words into the message
+box, use **dictation**: the **microphone icon** left of the waveform icon. Speak,
+and what you say is transcribed and typed in; the agent never speaks back and a
+run in progress is not interrupted.
+
+It listens the same way voice mode does, with the same in-browser speech
+detection and the same recognition service, so it works as soon as Voice is
+enabled. Speech synthesis is not used and nothing is loaded onto the GPU for it.
+While you talk, a line above the box shows whether you are being heard and the
+words recognised so far. Pausing for about a second ends a phrase, and the next
+phrase follows it.
+
+Choose where the words go with the switch on that line. The choice is remembered.
+
+| | What happens |
+| --- | --- |
+| **Edit first** (default) | Each phrase is typed into the box **at the cursor**, spaced like a word, and the cursor moves to the end of it. Click into the text to dictate in the middle of a sentence, correct a word by keyboard, then send with Enter as usual. Dictation keeps listening after you send. |
+| **Send at once** | A message is sent once you have stopped talking and it has been transcribed. If you start speaking again while a phrase is still being transcribed, the two go out together. A draft already in the box is left alone. If sending fails, the words are put back in the box rather than lost. |
+
+Stopping dictation still delivers a sentence you were in the middle of. Starting
+voice mode turns dictation off, since both use the microphone, and leaving the
+session drops anything not yet transcribed instead of sending it elsewhere.
+Whisper's placeholders for silence, such as `[BLANK_AUDIO]`, are not typed.
+
+Messages sent by dictation are ordinary text messages. Unlike voice-mode turns
+they are not marked as audio and the agent is not asked to reply in speakable
+style.
+
 ## Alternative: manually managed Python services
 
 ::: details Show alternative deployment details
@@ -115,6 +145,110 @@ Choose **Designed voice** to generate a voice without a reference.
 Model weights and self-hosted outputs have a research/non-commercial license;
 see the [model card](https://huggingface.co/BreezeBlue/Breeze-TTS-2).
 :::
+
+## Other languages: Chatterbox and Qwen3-ASR
+
+Breeze speaks English and Chinese, and the managed installer pairs it with
+Whisper. For another language, run [audio.cpp](https://github.com/0xShug0/audio.cpp)
+with **Chatterbox Multilingual** for speech and **Qwen3-ASR** for recognition.
+One process serves both, on one GPU, so the session model can keep the other.
+
+Chatterbox speaks Arabic, Danish, Dutch, English, Finnish, French, German, Greek,
+Hindi, Italian, Korean, Malay, Norwegian, Polish, Portuguese, Spanish, Swahili,
+Swedish and Turkish. Qwen3-ASR covers those and more. Both are MIT/Apache-2.0
+licensed, unlike Breeze's research-only weights.
+
+This is a separate deployment; it does not replace Breeze or the managed
+installer, and both keep working unchanged.
+
+### Download the models
+
+```sh
+mkdir -p voice-runtime/audio-cpp
+hf download audio-cpp/audio.cpp-gguf \
+  Chatterbox-GGUF/chatterbox-q8_0.gguf \
+  Qwen3-ASR-1.7B-GGUF/qwen3-asr-1.7b-q8_0.gguf \
+  --local-dir voice-runtime/audio-cpp
+```
+
+About 4.5 GB. Together the two models occupy roughly 5.5 GB of GPU memory while
+both are loaded.
+
+### Start the runtime
+
+With Compose, on the GPU of your choice:
+
+```sh
+VOICE_GPU=1 docker compose -f docker-compose.yml -f docker-compose.voice.yml \
+  --profile voice-multilingual up -d audiocpp
+curl --fail http://127.0.0.1:7871/health
+```
+
+`server.json` binds loopback, and Compose publishes the container's port on
+`127.0.0.1:7871`: the service has no authentication, so nothing should reach it
+from the network. The Chatterbox entry declares `"task": "clon"`, which is
+audio.cpp's own name for voice cloning — not a truncated `"clone"`.
+
+`deploy/voice-multilingual/` also holds a systemd unit for a native audio.cpp
+build. It reads the same `server.json`, so point `/models` at your GGUF
+directory — a symlink is enough — or edit the two paths in that file. Build the
+server where the unit expects it, next to the existing Breeze unit's binary:
+
+```sh
+cd /opt/audio.cpp
+scripts/build_linux.sh --backend cuda --target audiocpp_server
+```
+
+The unit uses GPU 0 unless `/etc/default/pithagoras-audio-cpp-multilingual`
+sets another, for example `VOICE_GPU=1`.
+
+### Point the portal at it
+
+Open **Settings → Add-ons → Voice → Advanced connection** and set:
+
+| Setting | Value |
+| --- | --- |
+| Speech runtime | **Chatterbox audio.cpp · multilingual** |
+| Speech recognition URL | `http://127.0.0.1:7871/v1/audio/transcriptions` |
+| Speech synthesis URL | `http://127.0.0.1:7871/v1/audio/speech` |
+| Speech recognition model | `qwen3-asr` |
+
+Then choose your **Input language** — it selects the spoken language too — and a
+**Speaking voice**. Chatterbox has no detection mode, so **Auto-detect** is not
+offered for it and the dropdown lists only the nineteen languages above.
+Chatterbox always clones a reference recording: choose Aria or add a voice with
+a recording in the language you want to hear. A designed voice is refused when
+you save, not silently replaced. Use a clean 10-second reference.
+
+**Speech delivery** replaces Breeze's Fast/Expressive choice. It sets
+Chatterbox's emotion exaggeration: calm, natural, or expressive.
+
+Numbers are written out before synthesis for languages that have a pack
+(currently German and English), because Chatterbox otherwise reads digit groups
+unreliably — "4070" came back from recognition as "70". The transcript keeps the
+digits; only synthesis sees the words. Each pack knows how its language groups
+thousands, so German "100.000" is spoken as one number rather than as a decimal.
+Dates, clock times, version strings, ranges and anything with a leading zero
+keep their digits: reading them as quantities would be worse than leaving them.
+Adding a language is one entry in `server/src/voice-numbers.ts`; a language
+without a pack keeps its digits, and the add-on says so under the language.
+
+Chatterbox has no streaming mode in audio.cpp, so each phrase arrives as one
+complete WAV instead of a PCM stream. Playback is unchanged, because the browser
+buffers each phrase before playing it either way, but the first audio of a reply
+waits for its whole first sentence. Measured on an RTX 3060 with a German
+reference: a short sentence took 1.25 s, and 14 s of speech took 5.7 s
+(about 0.4× real time). Qwen3-ASR transcribed 3-second German clips in about
+0.3 s. These are sample measurements, not guarantees.
+
+Recognition uses the OpenAI transcription API, which needs the model name that
+`server.json` gives it. Whisper.cpp has a single model and ignores the field, so
+leaving **Speech recognition model** empty keeps the existing Whisper setup
+byte for byte.
+
+The managed **Install voice** button still installs Breeze and Whisper; it does
+not know about this runtime. Do not run both on the same GPU unless it has the
+memory for both.
 
 ## First spoken response
 
@@ -200,7 +334,7 @@ docker compose -f docker-compose.yml -f docker-compose.voice.yml --profile voice
 
 ```sh
 npm run build
-node --import tsx --test tests/voice.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts
+node --import tsx --test tests/voice.test.mts tests/voice-numbers.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts
 npx playwright test
 ```
 

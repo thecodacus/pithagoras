@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect } from 'react';
 import type { PortalEvent } from '../api';
+import { useFollowBottom } from '../use-follow-bottom';
 
 export function terminalRuns(events: PortalEvent[]) {
   const runs: { id: string; command: string; output: string; running: boolean; error: boolean }[] = [];
@@ -20,10 +21,12 @@ export function terminalRuns(events: PortalEvent[]) {
   return runs.slice(-6);
 }
 export function VoiceTerminal({ events }: { events: PortalEvent[] }) {
-  const host = useRef<HTMLDivElement>(null);
+  const { ref, onScroll, follow } = useFollowBottom<HTMLDivElement>();
   const runs = terminalRuns(events);
-  useEffect(() => { if (host.current) host.current.scrollTop = host.current.scrollHeight; }, [events]);
-  return <div ref={host} className="voice-terminal-output" aria-label="Agent terminal output">
+  // Follows new output, but leaves you where you scrolled to read earlier lines.
+  // Before paint, so new lines are never shown at the old scroll position.
+  useLayoutEffect(() => follow(), [events]);
+  return <div ref={ref} onScroll={onScroll} className="voice-terminal-output" aria-label="Agent terminal output">
     {runs.map(run => <div key={run.id} className="voice-terminal-run">
       <div className="voice-terminal-command"><span aria-hidden>$</span><code>{run.command}</code>{run.running && <i aria-label="Command running" />}</div>
       {run.output && <pre className={run.error ? 'is-error' : ''}>{run.output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')}</pre>}

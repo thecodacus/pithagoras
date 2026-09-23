@@ -523,14 +523,15 @@ export function eventTime(createdAt: string | undefined): number | undefined {
 }
 
 export function appendEvent(sessionId: string, type: string, payload: unknown): EventRow {
+  const encodedPayload = JSON.stringify(payload);
   const info = getDb()
     .prepare("INSERT INTO events (session_id, type, payload) VALUES (?, ?, ?)")
-    .run(sessionId, type, JSON.stringify(payload));
+    .run(sessionId, type, encodedPayload);
   return {
     seq: Number(info.lastInsertRowid),
     session_id: sessionId,
     type,
-    payload: JSON.stringify(payload),
+    payload: encodedPayload,
     created_at: new Date().toISOString(),
   };
 }
@@ -551,6 +552,62 @@ export function replayStart(sessionId: string, keep: number): number {
     )
     .get(sessionId, keep) as { seq: number } | undefined;
   return row?.seq ?? 0;
+}
+
+/** Every message the portal sent to the agent in this session, oldest first. */
+export function sentMessages(sessionId: string): { seq: number; message: string }[] {
+  const rows = getDb()
+    .prepare("SELECT seq, payload FROM events WHERE session_id = ? AND type = 'portal_prompt' ORDER BY seq ASC")
+    .all(sessionId) as { seq: number; payload: string }[];
+  return rows.map((r) => ({ seq: r.seq, message: String(JSON.parse(r.payload)?.message ?? "") }));
+}
+
+/**
+ * Drops a stretch of a session's transcript: `from` up to, not including, `to` — or to the end.
+ * Returns what it removed, so the caller can put it back.
+ */
+export function deleteEventsBetween(sessionId: string, from: number, to: number | null): EventRow[] {
+  const db = getDb();
+  return db.transaction(() => {
+    const rows = db
+      .prepare("SELECT * FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?) ORDER BY seq ASC")
+      .all(sessionId, from, to, to) as EventRow[];
+    db.prepare("DELETE FROM events WHERE session_id = ? AND seq >= ? AND (? IS NULL OR seq < ?)").run(
+      sessionId,
+      from,
+      to,
+      to,
+    );
+    return rows;
+  })();
+}
+
+/** Puts events back under the seq they had — the inverse of deleteEventsBetween. */
+export function restoreEvents(rows: EventRow[]): void {
+  const db = getDb();
+  const insert = db.prepare(
+    "INSERT OR REPLACE INTO events (seq, session_id, type, payload, created_at) VALUES (?, ?, ?, ?, ?)",
+  );
+  db.transaction(() => {
+    for (const r of rows) insert.run(r.seq, r.session_id, r.type, r.payload, r.created_at);
+  })();
+}
+
+/**
+ * The highest seq ever handed out, deleted events included: everything recorded
+ * from now on is greater. Read from the sequence rather than the table, because
+ * the newest rows may be the ones just removed.
+ */
+export function latestSeq(): number {
+  const row = getDb().prepare("SELECT seq FROM sqlite_sequence WHERE name = 'events'").get() as
+    | { seq: number }
+    | undefined;
+  return row?.seq ?? 0;
+}
+
+/** Drops one event. */
+export function deleteEvent(seq: number): void {
+  getDb().prepare("DELETE FROM events WHERE seq = ?").run(seq);
 }
 
 /** The page before a cursor, oldest first — what a transcript scrolls back into. */
@@ -699,15 +756,20 @@ export function takeDeliveries(sessionId: string): string[] {
   return rows.map((r) => r.text);
 }
 
-/** Take the pending notes for a conversation. Reading them consumes them. */
-export function takeNotes(sessionId: string): string[] {
-  const rows = getDb()
-    .prepare("SELECT id, text FROM notes WHERE session_id = ? AND consumed_at IS NULL ORDER BY id ASC")
+/** Read pending notes without consuming them before the prompt is accepted. */
+export function pendingNotes(sessionId: string): { id: number; text: string }[] {
+  return getDb().prepare("SELECT id, text FROM notes WHERE session_id = ? AND consumed_at IS NULL ORDER BY id ASC")
     .all(sessionId) as { id: number; text: string }[];
-  if (!rows.length) return [];
-  const mark = getDb().prepare("UPDATE notes SET consumed_at = datetime('now') WHERE id = ?");
-  for (const r of rows) mark.run(r.id);
-  return rows.map((r) => r.text);
+}
+export function consumeNotes(sessionId: string, ids: number[]): void {
+  const mark = getDb().prepare("UPDATE notes SET consumed_at = datetime('now') WHERE id = ? AND session_id = ?");
+  getDb().transaction(() => { for (const id of ids) mark.run(id, sessionId); })();
+}
+/** Legacy callers that intentionally consume immediately. */
+export function takeNotes(sessionId: string): string[] {
+  const rows = pendingNotes(sessionId);
+  consumeNotes(sessionId, rows.map(r => r.id));
+  return rows.map(r => r.text);
 }
 
 export interface ToolRule {
@@ -777,7 +839,7 @@ export interface AuditRow {
 }
 
 /** Keeps the log from growing without bound; old entries are not evidence. */
-const AUDIT_KEEP = 2000;
+export const AUDIT_KEEP = 2000;
 
 export function recordAudit(entry: {
   kind: string;

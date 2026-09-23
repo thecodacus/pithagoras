@@ -29,7 +29,7 @@ import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
  */
 
 /** Commands whose output is somebody else's words. */
-const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|curl|wget|lynx|w3m)\b/;
+const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|curl|wget|lynx|w3m|ssh|scp)\b|\bgit\s+(?:clone|fetch|pull)\b|\b(?:npm|pnpm|yarn|pip3?|uv)\s+(?:install|add|sync)\b/;
 
 interface Rule {
   name: string;
@@ -50,7 +50,10 @@ const target = (input: Record<string, unknown>) =>
       : "";
 
 /** Directories on PATH: a file here is executed later, by something else. */
-const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/local\/sbin)\//;
+const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/local\/sbin)(?=\/|[\s'"]|$)/;
+
+const PERSIST_PATHS = /(?:\/etc\/(?:cron\.[a-z]+|systemd\/system)|(?:~|\/[^\s]+)\/\.config\/(?:autostart|systemd\/user)|(?:~|\/[^\s]+)\/\.(?:bashrc|bash_profile|zshrc|zprofile|profile))(?=\/|[\s'"]|$)/;
+const writesFiles = (command: string) => /(>|\b(?:cp|mv|install|tee)\b)/.test(command);
 
 const RULES: Rule[] = [
   {
@@ -75,7 +78,7 @@ const RULES: Rule[] = [
     hit: (tool, input) =>
       tool === "bash" &&
       /\b(curl|wget)\b/.test(cmd(input)) &&
-      /(\s-d\b|--data|\s-F\b|--form|--upload-file|\s-T\b|-X\s*(POST|PUT|PATCH)|--post-file)/.test(
+      /(\s-d\b|--data|\s-F\b|--form|--upload-file|\s-T\b|-X\s*(POST|PUT|PATCH)|--post-file|--json)/.test(
         cmd(input),
       ),
   },
@@ -84,7 +87,7 @@ const RULES: Rule[] = [
     why: "reading secrets it was not asked about",
     hit: (tool, input) => {
       const where = tool === "bash" ? cmd(input) : target(input);
-      return /(auth\.json|\.secrets|\.env\b|id_[re]d?sa|\.ssh\/|credentials|\.netrc|token)/i.test(
+      return /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|credentials|\.netrc|token)/i.test(
         where,
       );
     },
@@ -100,7 +103,9 @@ const RULES: Rule[] = [
     hit: (tool, input) =>
       tool === "routine_create" ||
       tool === "routine_update" ||
-      (tool === "bash" && /\b(crontab|systemd-run|at\s+now)\b/.test(cmd(input))),
+      ((tool === "write" || tool === "edit") && PERSIST_PATHS.test(target(input))) ||
+      (tool === "bash" && (/\b(crontab|systemd-run|at\s+now)\b/.test(cmd(input)) ||
+        (PERSIST_PATHS.test(cmd(input)) && writesFiles(cmd(input))))),
   },
 ];
 
@@ -361,7 +366,7 @@ export function guardExtension(
       // MCP tools reach servers the portal does not control, so their output is
       // treated the same way as mail: someone else's words.
       const untrusted = UNTRUSTED_COMMAND.test(source) || /^mcp(_|$)/.test(source);
-      if (!untrusted || event.isError) return compact ? { content: formatted } : undefined;
+      if (!untrusted) return compact ? { content: formatted } : undefined;
 
       tainted = true;
       const { open, close } = envelope(randomBytes(8).toString("hex"));

@@ -12,19 +12,7 @@
       Runs before anything paints. Without it the page renders in the default
       theme and then corrects itself — a white flash on every load in dark mode.
     -->
-    <script>
-      (function () {
-        try {
-          var t = localStorage.getItem("pithagoras.theme") || "system";
-          var dark =
-            t === "dark" ||
-            (t === "system" && !matchMedia("(prefers-color-scheme: light)").matches);
-          document.documentElement.dataset.theme = dark ? "dark" : "light";
-        } catch (e) {
-          document.documentElement.dataset.theme = "dark";
-        }
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>
