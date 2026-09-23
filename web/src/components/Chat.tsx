@@ -567,12 +567,12 @@ export function Chat({
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {matches.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
+          <div className="absolute bottom-full left-0 right-0 mb-2 max-h-[min(16rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop">
             {matches.map((c) => (
               <button
                 key={c.name}
                 type="button"
-                onMouseDown={(e) => {
+                onClick={(e) => {
                   e.preventDefault();
                   setInput(`/${c.name} `);
                 }}

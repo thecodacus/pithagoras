@@ -96,7 +96,7 @@ State is polled every five seconds and pushed over SSE for the open session.
 
 Channel packages are discovered from two roots: the repo's `channels/` directory
 for builtins, and `CHANNELS_DIR/node_modules` for installed ones. A package is
-considered only if `package.json` carries the `pithagoras.channel` marker.
+considered if `package.json` carries the `pithagoras.channel` marker or its package name starts with `pithagoras-channel-`.
 
 Each module is imported with a cache-busting query so a reinstall is picked up
 without a restart, its manifest is validated, and duplicate channel ids are

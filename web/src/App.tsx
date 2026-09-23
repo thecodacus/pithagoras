@@ -1,3 +1,4 @@
+import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
@@ -73,6 +74,13 @@ function Shell({
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
+  const [mobileNav, setMobileNav] = useState(false);
+  useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
+  useEffect(() => {
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNav(false); };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, []);
 
   const [sessions, setSessions] = useState<Session[]>([]);
   // The task list deliberately excludes agent and routine sessions, but their
@@ -258,19 +266,24 @@ function Shell({
   const active = listed ?? (other?.id === sessionId ? other : null);
 
   return (
-    <div className="flex h-screen bg-canvas">
+    <div className="flex h-[100dvh] min-h-0 overflow-hidden bg-canvas">
+      {mobileNav && <button aria-label="Dismiss navigation" onClick={() => setMobileNav(false)} className="fixed inset-0 z-40 bg-black/50 md:hidden" />}
+      <div id="mobile-navigation" className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
+      {mobileNav && <button type="button" aria-label="Close navigation" onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
       <Sidebar
+        forceExpanded={mobileNav}
         sessions={sessions}
         workspaces={workspaces}
         executor={executor}
         activeId={sessionId ?? null}
         view={view}
         hasBrowser={hasBrowser}
-        onNavigate={(to) => navigate(`/${to}`)}
-        onSelect={(id) => navigate(`/s/${id}`)}
+        onNavigate={(to) => { setMobileNav(false); navigate(`/${to}`); }}
+        onSelect={(id) => { setMobileNav(false); navigate(`/s/${id}`); }}
         onCreate={async (workspacePath) => {
           const s = await api.createSession(workspacePath);
           await refreshSessions();
+          setMobileNav(false);
           navigate(`/s/${s.id}`);
         }}
         onDelete={async (id) => {
@@ -297,7 +310,12 @@ function Shell({
         }}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      </div>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
+          <button type="button" aria-label="Open navigation" aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
+          <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
+        </header>
         {error && <div className="bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
         {view === "sessions" ? (
           <SessionsPage
@@ -355,7 +373,8 @@ function Shell({
               } else if (name === "new") {
                 const s = await api.createSession(active.workspace);
                 await refreshSessions();
-                navigate(`/s/${s.id}`);
+                setMobileNav(false);
+          navigate(`/s/${s.id}`);
               } else if (name === "name" && args.trim()) {
                 await api.renameSession(active.id, args.trim());
                 refreshSessions();

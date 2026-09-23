@@ -145,7 +145,7 @@ export interface VoiceConfig {
   statusSpeech?: boolean;
   pipelineMode?: "parallel" | "sequential";
   vad?: typeof DEFAULT_VAD;
-  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp";
+  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox"; sttModel?: string; exaggeration?: number;
 }
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
@@ -176,7 +176,7 @@ export const api = {
       body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
     }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
-    json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-response`, {
+    json<{ ok: boolean; note?: string }>(`/api/sessions/${sessionId}/ui-response`, {
       method: "POST",
       body: JSON.stringify({ id, ...payload }),
     }),

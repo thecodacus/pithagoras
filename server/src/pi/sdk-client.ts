@@ -400,9 +400,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       new Promise((resolve) => {
         const id = randomUUID();
         let settled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const abort = () => finish(fallback);
         const finish = (value: unknown) => {
           if (settled) return;
           settled = true;
+          clearTimeout(timer);
+          opts?.signal?.removeEventListener?.("abort", abort);
           this.pendingUi.delete(id);
           resolve(value);
         };
@@ -410,12 +414,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
         // Never park forever — an unanswered dialog would wedge the session.
         const ms = typeof opts?.timeout === "number" ? opts.timeout : 300_000;
-        const timer = setTimeout(() => {
+        timer = setTimeout(() => {
+          if (settled) return;
           this.emit("event", { type: "extension_ui_cancel", id });
           finish(fallback);
         }, ms);
         if (typeof timer.unref === "function") timer.unref();
-        opts?.signal?.addEventListener?.("abort", () => finish(fallback));
+        opts?.signal?.addEventListener?.("abort", abort, { once: true });
+        if (opts?.signal?.aborted) { abort(); return; }
 
         this.emit("event", { type: "extension_ui_request", id, ...payload });
       });

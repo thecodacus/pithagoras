@@ -17,8 +17,8 @@ export const authEnabled = PASSWORD.length > 0;
 
 if (!authEnabled) {
   console.warn(
-    "\n  WARNING: PORTAL_PASSWORD is not set — the portal is open to anyone who\n" +
-      "  can reach it, and it can run arbitrary commands on this machine.\n" +
+    "\n  WARNING: PORTAL_PASSWORD is not set — authentication is disabled.\n" +
+      "  The portal binds loopback unless ALLOW_OPEN=1 explicitly exposes it.\n" +
       "  Set PORTAL_PASSWORD (and PORTAL_SECRET to keep logins across restarts).\n"
   );
 }
