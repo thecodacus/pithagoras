@@ -13,11 +13,15 @@ services:
       # Required for managed Browser/Voice add-ons and EXECUTOR=container.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      # Must match container_name; managed voice shares this network namespace.
+      PORTAL_CONTAINER_NAME: pithagoras
       # With host networking the portal binds PORT directly on the host.
       PORT: ${PORT:-4100}
       PORTAL_PASSWORD: ${PORTAL_PASSWORD:?required}
       PORTAL_SECRET: ${PORTAL_SECRET:-}
       EXECUTOR: ${EXECUTOR:-host}
+      # Must match container_name; translates nested-executor mounts to host paths.
+      PORTAL_CONTAINER_NAME: pithagoras
       PI_PROVIDER: ${PI_PROVIDER:-openrouter}
       PI_MODEL: ${PI_MODEL:-anthropic/claude-sonnet-5}
       PI_THINKING_LEVEL: ${PI_THINKING_LEVEL:-medium}

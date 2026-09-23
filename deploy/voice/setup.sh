@@ -49,10 +49,10 @@ if [ ! -s models/breeze-q8_0.gguf ]; then
   rm models/breeze-bf16.gguf
 fi
 cat > /voice/server.json <<'JSON'
-{"host":"0.0.0.0","port":7861,"backend":"cuda","device":0,"threads":4,"lazy_load":true,"idle_unload_ms":90000,"ui_management":true,"max_loaded_models":1,"models":[{"id":"breeze","family":"breeze_tts","path":"/voice/models/breeze-q8_0.gguf","task":"tts","mode":"streaming","session_options":{"breeze_tts.reference_cache_slots":"1"}}]}
+{"host":"127.0.0.1","port":7862,"backend":"cuda","device":0,"threads":4,"lazy_load":true,"idle_unload_ms":90000,"ui_management":true,"max_loaded_models":1,"models":[{"id":"breeze","family":"breeze_tts","path":"/voice/models/breeze-q8_0.gguf","task":"tts","mode":"streaming","session_options":{"breeze_tts.reference_cache_slots":"1"}}]}
 JSON
 echo 'VOICE_STAGE: Starting speech services'
-whisper/build/bin/whisper-server --host 0.0.0.0 --port 8178 --model /voice/models/ggml-base.bin --language auto --threads 4 &
+whisper/build/bin/whisper-server --host 127.0.0.1 --port 8188 --model /voice/models/ggml-base.bin --language auto --threads 4 &
 whisper_pid=$!
 audio/build/portal/bin/audiocpp_server --config /voice/server.json &
 speech_pid=$!

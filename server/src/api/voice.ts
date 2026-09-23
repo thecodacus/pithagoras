@@ -69,14 +69,22 @@ export function pcmWav(pcm: Buffer): Buffer {
 }
 const managedVoice = () => config().runtime === 'audio-cpp' && config().breezeUrl === voiceService.breezeUrl;
 const leases = new VoiceLeases(()=>voiceService.modelAction('load'),()=>voiceService.modelAction('unload'));
-const leaseTimer=setInterval(()=>{void (async()=>{
-  if((getStoredSettings() as Record<string,string>).voice_setup_pending==='1' && (await voiceService.status()).state==='running') {
+async function maintainManagedVoice() {
+  // Also reconciles running legacy containers after portal updates, without
+  // requiring the settings modal to be opened. Stopped add-ons stay stopped.
+  const state = await voiceService.status();
+  if ((getStoredSettings() as Record<string,string>).voice_setup_pending === '1' && state.state === 'running') {
     connectManagedVoice();
     getDb().prepare("DELETE FROM settings WHERE key='voice_setup_pending'").run();
   }
-  if(managedVoice())await leases.sweep(config().lazyLoad!==false);
-})().catch(()=>{});},30000);
+  if (managedVoice()) await leases.sweep(config().lazyLoad !== false);
+}
+const maintain = () => { void maintainManagedVoice().catch(e => console.error('[voice] maintenance:', (e as Error).message)); };
+const leaseTimer = setInterval(maintain, 30000);
 leaseTimer.unref();
+// Wait until module initialization finishes before accessing configuration.
+setImmediate(maintain);
+
 function connectManagedVoice() {
   const saved = { ...config(), enabled: true, runtime: 'audio-cpp', whisperUrl: voiceService.whisperUrl, breezeUrl: voiceService.breezeUrl };
   getDb().prepare("INSERT INTO settings (key, value) VALUES ('voice', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(saved));

@@ -32,6 +32,17 @@ The portal listens on `:4100`. Compose uses `network_mode: host`, so it binds
 that port directly on the host — which is also what lets pi reach a llama-server
 running on the same machine at `localhost`.
 
+## Workspace paths
+
+For a native installation, set `WORKSPACE_ROOT` to the directory containing your
+projects. The legacy `WORKSPACES_DIR` variable is also accepted when
+`WORKSPACE_ROOT` is unset. If both are set, `WORKSPACE_ROOT` wins; with neither
+set, the server uses `/workspaces`.
+
+With the supplied Compose files, `WORKSPACES_DIR` selects the **host** directory
+mounted at `/workspaces`. Keep the portal's `WORKSPACE_ROOT=/workspaces` so it
+uses the path visible inside its container.
+
 ## Installing add-ons
 
 To install Browser or Voice from Settings:
@@ -40,6 +51,17 @@ To install Browser or Voice from Settings:
 - For Voice, configure **NVIDIA Container Toolkit** on the host.
 
 Follow [Docker add-ons](/guide/add-ons) for installation, controls, storage and cleanup.
+
+## Resuming container sessions
+
+The container executor automatically removes completed runners. Before starting
+a session, it also removes a leftover stopped runner with the same name, but
+only when its ownership labels match that session.
+
+A running runner is left alone. Wait for its current task to finish before
+resuming. If an unrelated container uses the same name, the portal reports the
+collision; inspect that container and rename or remove it yourself once you
+have identified it. The portal does not force-delete it.
 
 ## Updating
 
@@ -132,7 +154,18 @@ variables.
 
 ## Running from source
 
-Node 22.19 or newer — pi requires it.
+Node 22.19 or newer — pi requires it. The SQLite dependency supports Node 26
+as well. After changing Node versions, run `npm ci` again before starting the
+server so dependencies match the selected runtime.
+
+To check that SQLite loads with your Node installation, run this from the
+repository root after installing dependencies:
+
+```bash
+node --input-type=module -e 'import Database from "better-sqlite3"; const db = new Database(":memory:"); console.log(db.prepare("SELECT 1 AS ok").get()); db.close();'
+```
+
+A working installation prints `{ ok: 1 }`.
 
 ```bash
 npm install
@@ -165,6 +198,14 @@ domain, where the site sits at the root, override it:
   env:
     DOCS_BASE: /
 ```
+
+## Container executor mounts
+
+When the portal itself runs in Docker, set `PORTAL_CONTAINER_NAME` to its Docker container name. Both shipped Compose files set it to `pithagoras`, matching `container_name`. Update both values if you rename the container.
+
+With `EXECUTOR=container`, the portal inspects its own mounts and translates workspace and session paths to their actual host locations, including named volumes and nested bind mounts. Paths outside those mounts are rejected rather than silently creating an empty host directory. The runtime image includes the Docker CLI and needs the Docker socket mount.
+
+For a native portal talking to a Docker daemon on the same machine, leave `PORTAL_CONTAINER_NAME` unset: its paths already refer to the host. A remote daemon needs the same filesystem available on that daemon; local paths are not uploaded automatically. Set `PI_IMAGE` to an available runner image containing the `pi` CLI.
 
 ## Runner session permissions
 

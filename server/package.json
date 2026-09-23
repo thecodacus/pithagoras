@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.82.1",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
     "nanoid": "^5.0.9",
