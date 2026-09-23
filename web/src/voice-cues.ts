@@ -1,8 +1,8 @@
-export type VoiceCue = 'start' | 'end' | 'sent' | 'mute' | 'unmute' | 'focus';
+export type VoiceCue = 'start' | 'end' | 'sent' | 'mute' | 'unmute' | 'focus' | 'done' | 'failed';
 /** Brief, quiet UI tones, synthesized locally without audio downloads. */
 export function voiceCue(audio: AudioContext, kind: VoiceCue) {
   if (audio.state !== 'running') return;
-  const notes: Record<VoiceCue, number[]> = { start: [440, 660], end: [440, 330], sent: [620], mute: [320], unmute: [480, 640], focus: [520, 780] };
+  const notes: Record<VoiceCue, number[]> = { start: [440, 660], end: [440, 330], sent: [620], mute: [320], unmute: [480, 640], focus: [520, 780], done: [660, 990], failed: [360, 270] };
   notes[kind].forEach((frequency, i) => {
     const oscillator = audio.createOscillator(), gain = audio.createGain();
     const at = audio.currentTime + i * 0.07;

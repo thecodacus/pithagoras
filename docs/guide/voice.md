@@ -186,6 +186,47 @@ The first sentence still needs model synthesis time before audio is available.
 Code blocks are
 replaced with a short spoken notice. Thinking and tool output are not spoken.
 
+Long work is not silent. The portal renders short filler clips in the selected
+voice once and keeps them under `DATA_DIR/voice-clips`, so a voice conversation
+never waits for them. Rendering starts in the background when voice is set up or
+its settings are saved, and again at portal start for anything missing, such as
+new phrases after an update. It pauses while live speech or transcription is
+running. A managed voice runtime stays loaded while a batch renders. Changing the
+voice, language or speech settings renders a new set; the four most recently
+used sets are kept, so switching back is instant. With auto-detect, a language is
+rendered the first time a browser asks for it and then kept up to date like the
+saved one. Browsers download ready clips when voice starts and pick up the rest
+as they finish.
+
+Each filler belongs to a moment the listener can place. Fillers never play on
+a timer alone, and a reply that arrives during one waits for it to finish:
+
+- **Acknowledgement**, 0.3 seconds after a request: “Let me see.” for a question
+  and “Okay.” for anything else. One- and two-word replies such as “thanks” get
+  none, and at most one plays every 15 seconds. It replaces the spoken thinking
+  notice for that turn.
+- **Slow tool**, after 6 seconds, naming what is still running where the call
+  shows it: tests, an install, a build, a command, a page load or a search.
+- **Tool result**: “That didn't work.” shortly after a failed call, and
+  “Okay, let's see.” when the agent goes quiet after a tool that took more than
+  4 seconds.
+- **Still on it**, only after 15 seconds of silence, then after 30 and 45.
+
+The agent itself announces each tool call before making it, so fillers do not
+repeat that. Wordless murmurs are not used, because speech runtimes render them
+unpredictably, often twice.
+
+Spoken fillers and status notices use the saved input language. With
+auto-detect, the browser's language is used. Phrases exist for English, German,
+Spanish, French, Italian, Portuguese, Russian, Chinese, Japanese, Korean, Hindi
+and Arabic. Other languages get no fillers, with status notices in English. Speaking over a filler cuts it off. `VOICE_STATUS_SPEECH=false` and
+the sequential pipeline disable spoken fillers with the other status notices.
+
+With interface sounds on, voice mode also plays quiet synthesized work sounds
+while the agent is not speaking: typing during commands and edits, a page rustle
+when reading, searching or browsing, and a soft tone when a tool the listener
+waited on finishes (lower if it failed).
+
 If transcription or sending fails, the error appears beside the controls; a
 failed send leaves the recognized text visible for copying. If Breeze reports
 HTTP 409, another request owns its single-concurrency runtime. End voice in the

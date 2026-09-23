@@ -14,6 +14,9 @@ import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer } from "../pcm-stream";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
+import { FillerSounds } from "../voice-fillers";
+import { WorkSounds } from "../work-sounds";
+import { slowFiller, toolKind, type ToolKind } from "../tool-kind";
 
 export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, items, running, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
   sessionId: string;
@@ -58,6 +61,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const [enabled, setEnabled] = useState(false);
   const [starting, setStarting] = useState(false);
   const [phase, setPhase] = useState<VoicePhase>("Listening");
+  const phaseRef = useRef(phase); phaseRef.current = phase;
   const [error, setError] = useState("");
   const [muted, setMuted] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -69,8 +73,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const levels = useRef<VoiceLevels>({ input: 0, output: 0 });
   const compactionEvent = [...toolEvents].reverse().find(event => event.type === 'compaction_start' || event.type === 'compaction_end');
   const compacting = running && compactionEvent?.type === 'compaction_start';
-  const latest = useRef({ items, running, onSend, onAbort, compacting });
-  latest.current = { items, running, onSend, onAbort, compacting };
+  const latest = useRef({ items, running, onSend, onAbort, compacting, toolEvents });
+  latest.current = { items, running, onSend, onAbort, compacting, toolEvents };
   const epoch = useRef(0);
   const mounted = useRef(false);
   const voice = useRef<HandsFreeVoice | null>(null);
@@ -78,6 +82,13 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const vadSettings = useRef(DEFAULT_VAD);
   const sequential = useRef(false);
   const statusSpeech = useRef(true);
+  const work = useRef<WorkSounds | null>(null);
+  const toolSeq = useRef(Infinity);
+  const toolLiveSeen = useRef(new WeakSet<object>());
+  const runningTools = useRef(new Map<string, { kind: ToolKind; at: number }>());
+  const finishedTools = useRef(new Set<string>());
+  /** Tool calls that overlap count as one stretch of work: when it began and whether any call failed. */
+  const toolBatch = useRef<{ at: number; failed: boolean } | null>(null);
   const [comparison, setComparison] = useState(false);
   const sentenceChunks = useRef(false);
   const ttsPrefetch = useRef(false);
@@ -94,6 +105,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     if(!response.ok)throw new Error((await response.json()).error||'Could not connect voice service');
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
+  const fillerLoading = useRef<AbortController | null>(null);
 
   const stop = () => {
     profiler.current?.close('stopped');
@@ -106,6 +118,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     mutedRef.current = false;
     levels.current = { input: 0, output: 0 };
     clearTimeout(maxTurn.current);
+    fillerLoading.current?.abort(); fillerLoading.current = null;
+    work.current?.stop(); work.current = null;
+    runningTools.current.clear(); finishedTools.current.clear(); toolBatch.current = null;
     voice.current?.stop(); voice.current = null;
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
@@ -141,6 +156,40 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     voice.current?.observe(items);
     if (compacting) transcription.current?.discard();
   }, [items, running, compacting, compactionEvent]);
+  const updateTyping = () => work.current?.setTyping(soundsEnabled.current && phaseRef.current === "Thinking"
+    && [...runningTools.current.values()].some(tool => tool.kind === "command" || tool.kind === "edit"));
+  useEffect(() => {
+    for (const event of toolEvents) {
+      if (event.seq < 0) { if (toolLiveSeen.current.has(event)) continue; toolLiveSeen.current.add(event); }
+      else { if (event.seq <= toolSeq.current) continue; toolSeq.current = event.seq; }
+      const controller = voice.current;
+      if (!controller) continue;
+      // A live event is later replayed from storage; the call ID keeps it from counting twice.
+      const id = String(event.payload?.toolCallId ?? event.seq);
+      if (event.type === "tool_execution_start" && !runningTools.current.has(id) && !finishedTools.current.has(id)) {
+        const kind = toolKind(event.payload);
+        runningTools.current.set(id, { kind, at: performance.now() });
+        toolBatch.current ??= { at: performance.now(), failed: false };
+        controller.toolStart(slowFiller(event.payload));
+        if (soundsEnabled.current && phaseRef.current === "Thinking" && (kind === "read" || kind === "search" || kind === "browser")) work.current?.page();
+      } else if (event.type === "tool_execution_end" && runningTools.current.has(id)) {
+        const tool = runningTools.current.get(id)!;
+        runningTools.current.delete(id); finishedTools.current.add(id);
+        if (event.payload?.isError && toolBatch.current) toolBatch.current.failed = true;
+        if (!runningTools.current.size && toolBatch.current) {
+          controller.toolEnd(toolBatch.current.failed, performance.now() - toolBatch.current.at);
+          toolBatch.current = null;
+        }
+        // Only a tool the listener waited on earns a completion tone.
+        if (performance.now() - tool.at >= 1500 && phaseRef.current === "Thinking") cue(event.payload?.isError ? "failed" : "done");
+      } else if (event.type === "agent_end" && runningTools.current.size) {
+        // An aborted turn ends its tools without results; nothing to react to.
+        runningTools.current.clear(); toolBatch.current = null; controller.toolEnd(false, 0);
+      }
+    }
+    updateTyping();
+  }, [toolEvents]);
+  useEffect(updateTyping, [phase, sounds, enabled]);
   useEffect(() => {
     onModeChange(enabled || starting);
     return () => onModeChange(false);
@@ -256,6 +305,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
         throw new Error("Microphone access requires HTTPS or localhost.");
       const sound = new AudioContext(); soundContext.current = sound;
+      work.current = new WorkSounds(sound);
+      // Tool calls from before voice started are history, not work to voice.
+      toolSeq.current = eventSeq.current;
+      latest.current.toolEvents.forEach(event => { if (event.seq < 0) toolLiveSeen.current.add(event); });
       await sound.resume();
       if (!current()) return;
       const audio = new AudioContext(); context.current = audio;
@@ -286,8 +339,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         return result.text;
       }, text => { if (current()) setTranscript(text); }, !sequential.current);
       transcription.current = live;
+      const fillers = new FillerSounds(audio);
       const controller = new HandsFreeVoice({
         statusSpeech: statusSpeech.current,
+        notices: () => fillers.notices,
         sequential: sequential.current,
         sentenceChunks: sentenceChunks.current,
         ttsPrefetch: ttsPrefetch.current,
@@ -296,6 +351,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         abort: () => latest.current.onAbort(),
         agentRunning: () => latest.current.running,
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
+        filler: (kind, signal) => fillers.play(kind, signal),
         trace: profileMark,
         phase: value => { if (current()) setPhase(value); },
         error: message => { if (current()) {setError(message);profiler.current?.close('error');} },
@@ -344,6 +400,11 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       await detector.start();
       if (!current()) return;
       setEnabled(true); setStarting(false); cue("start");
+      if (statusSpeech.current && !sequential.current) {
+        // The portal renders clips when voice is set up; this only downloads them.
+        const loading = new AbortController(); fillerLoading.current = loading;
+        void fillers.load(navigator.languages?.length ? navigator.languages : [navigator.language], loading.signal);
+      }
     } catch (e) {
       if (current()) { setError((e as Error).message); stop(); }
     }

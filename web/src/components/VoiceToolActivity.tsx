@@ -1,17 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { LuCheck, LuSparkles } from 'react-icons/lu';
 import type { PortalEvent } from '../api';
+import { toolKind } from '../tool-kind';
 
 type Action = { id: number; callId: string; label: string; detail: string; done: boolean; failed: boolean; side?: 'left' | 'right'; lane?: number };
 function action(event: PortalEvent): Action {
   const p = event.payload ?? {}, input = p.input ?? p.args ?? p.parameters ?? {};
   const name = String(p.toolName ?? p.name ?? 'tool');
-  let label = `Using ${name.replace(/[_\.]+/g, ' ')}`;
-  if (/bash|terminal|shell|exec_command/.test(name)) label = 'Running a command';
-  else if (/browser|navigate/.test(name) || /browser/.test(String(input.tool ?? ''))) label = 'Using the browser';
-  else if (/search/.test(name)) label = 'Searching';
-  else if (/read/.test(name)) label = 'Reading a file';
-  else if (/write|edit|patch/.test(name)) label = 'Updating a file';
+  const label = { command: 'Running a command', browser: 'Using the browser', search: 'Searching', read: 'Reading a file', edit: 'Updating a file', tool: `Using ${name.replace(/[_\.]+/g, ' ')}` }[toolKind(p)];
   const detail = [input.description, input.command, input.cmd, input.url, input.path, input.file_path, input.query, input.tool].find(v => typeof v === 'string') ?? '';
   return { id: event.seq, callId: String(p.toolCallId ?? ''), label, detail: detail.replace(/\s+/g, ' ').slice(0, 100), done: false, failed: false };
 }

@@ -7,6 +7,8 @@ import express from 'express';
 import { speechChunks, newSpeech } from '../web/src/voice.js';
 const dir = mkdtempSync(join(tmpdir(), 'pithagoras-voice-'));
 process.env.DATA_DIR = dir;
+// Background filler rendering has its own tests; here it would outlive the database.
+process.env.VOICE_STATUS_SPEECH = 'false';
 const { voiceRouter, pcmWav, validateConfig } = await import('../server/src/api/voice.js');
 const { getDb } = await import('../server/src/db.js');
 const upstream = express();
@@ -175,4 +177,26 @@ test('VAD settings preserve defaults, accept tuning and reject invalid threshold
   for (const vad of [{redemptionMs:0}, {minSpeechMs:NaN}, {preSpeechPadMs:1001}, {positiveSpeechThreshold:0.3,negativeSpeechThreshold:0.4}]) {
     assert.throws(() => validateConfig({...settings,vad}));
   }
+});
+
+test('filler clips are listed in the voice language and served immutably from disk', async () => {
+  await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, language: 'auto' }) });
+  const list = await (await fetch(`${base}/voice/clips?languages=de-DE,en`)).json();
+  assert.equal(list.language, 'de');
+  assert.match(list.version, /^[0-9a-f]{32}$/);
+  assert.ok(list.clips.length && list.clips.every((clip: any) => !clip.ready));
+  assert.equal(list.notices.compactionDone, 'Die Zusammenfassung ist fertig. Ich kann weitermachen.');
+  const clip = list.clips[0];
+  assert.equal((await fetch(`${base}/voice/clips/${list.version}/${clip.hash}`)).status, 404);
+  mkdirSync(join(dir, 'voice-clips', list.version), { recursive: true });
+  writeFileSync(join(dir, 'voice-clips', list.version, `${clip.hash}.pcm`), Buffer.from([0, 0, 255, 127]));
+  const served = await fetch(`${base}/voice/clips/${list.version}/${clip.hash}`);
+  assert.equal(served.headers.get('content-type'), 'audio/pcm');
+  assert.match(served.headers.get('cache-control') ?? '', /immutable/);
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), Buffer.from([0, 0, 255, 127]));
+  assert.ok((await (await fetch(`${base}/voice/clips?languages=de`)).json()).clips[0].ready);
+  // Another voice is another version, so its clips can never be served for this one.
+  await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, language: 'auto', instruction: 'A different voice.' }) });
+  assert.notEqual((await (await fetch(`${base}/voice/clips?languages=de`)).json()).version, list.version);
+  assert.equal((await fetch(`${base}/voice/clips/..%2F..%2Fportal.db/${clip.hash}`)).status, 404);
 });
