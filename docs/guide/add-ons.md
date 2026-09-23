@@ -189,7 +189,7 @@ The managed installer:
 - Builds pinned audio.cpp with CUDA and Whisper.cpp without CUDA. **Whisper runs on CPU**; Breeze uses one NVIDIA GPU.
 - Downloads multilingual Whisper `base` and Breeze-TTS-2 BF16 GGUF, quantizes Breeze to **Q8_0** on CPU, verifies the generated file, then removes the BF16 source file after successful conversion.
 - Retains source trees, compiled binaries and model files in the named volume.
-- Starts both services with loopback-only host ports.
+- Starts both services on the portal’s loopback interface by sharing its Docker network namespace. No voice ports are published on the host.
 :::
 
 ### Service addresses and health checks
@@ -200,12 +200,26 @@ The managed installer:
 | Whisper inference URL | `http://127.0.0.1:8188/inference` |
 | Breeze speech URL | `http://127.0.0.1:7862/v1/audio/speech` |
 
-Check readiness from the host:
+Check readiness from inside the portal container:
 
 ```sh
-curl --fail http://127.0.0.1:8188/health
-curl --fail http://127.0.0.1:7862/health
+docker exec pithagoras node -e 'Promise.all([8188,7862].map(async p => console.log(p, (await fetch(`http://127.0.0.1:${p}/health`)).status)))'
 ```
+
+Voice works with either bridge or host networking for the portal. Set
+`PORTAL_CONTAINER_NAME` to its Docker container name if you use a custom
+hostname; the supplied Compose files set this explicitly. The add-on shares
+that container’s network namespace, so `127.0.0.1` reaches the same services in
+both containers. The browser add-on has its own networking requirements.
+
+After upgrading, a running managed voice container migrates automatically at
+portal startup or within 30 seconds. This replaces only the managed voice
+container and keeps the model/build volume. A deliberately stopped add-on
+stays stopped; its next **Start voice** performs any required migration.
+Recreating the portal is also detected so voice joins its new network namespace.
+
+Native portal installations use host networking and require Linux; on Docker
+Desktop, run the portal itself in Docker.
 
 ::: tip Ready does not mean loaded
 The service can be healthy while the TTS model is unloaded. GPU memory is allocated when needed.

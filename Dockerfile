@@ -10,6 +10,8 @@ COPY web web
 RUN npm run build
 
 FROM node:22-slim
+# The container executor launches sibling containers through the mounted socket.
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 WORKDIR /app
 
 # git and openssh so pi can work with real repos; ca-certificates for HTTPS.
