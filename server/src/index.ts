@@ -55,9 +55,9 @@ import { getBuiltinCommands } from "./pi/builtins.js";
 import { isValidSlug, slugify } from "./slug.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
 
-// WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
+// WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys.
 const WORKSPACE_ROOT = path.resolve(
-  process.env.WORKSPACE_ROOT || process.env.WORKSPACE_ROOT || "/workspaces"
+  process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces"
 );
 const PORT = Number(process.env.PORT || 4100);
 /**
@@ -705,8 +705,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
   // Enabled channels come up with the server, so a restart does not silently
   // leave the agent unreachable.
-  // Schedules resume with the server; a routine due while it was down does not
-  // fire retroactively, it simply waits for its next slot.
+  // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
 
   channelSupervisor
