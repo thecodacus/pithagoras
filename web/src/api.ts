@@ -7,6 +7,8 @@ export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
   id: string;
+  /** Results flagged as a suspected prompt injection that the person trusted (see FlaggedNotice). */
+  trustedResults?: string[];
   title: string;
   workspace: string;
   executor: string;
@@ -538,6 +540,9 @@ export const api = {
   pictureUrl: (id: string, path: string, version?: string | number) =>
     `/api/sessions/${id}/picture?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
+  /** Trusts a result flagged as a suspected prompt injection: it no longer holds the chat back. */
+  trustFlagged: (id: string, result: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/flagged/${result}/trust`, { method: "POST" }),
   deleteMessage: (id: string, seq: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),
   /** Replaces a message: it and everything after it are dropped, and the new text is sent. */

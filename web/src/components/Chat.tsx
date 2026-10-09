@@ -1270,6 +1270,8 @@ export function Chat({
 
   // What the rows can do. Rows are drawn only when what they show changes, so they are handed one object
   // that stays the same, whose functions do what these do now (see useStableActions).
+  // Results trusted while this page is open, before the chat's details say so.
+  const trustedHere = useRef(new Set<string>());
   const rowActions = useStableActions<RowActions>({
     openPicture: pictures.open,
     showInTerminal,
@@ -1305,6 +1307,16 @@ export function Chat({
         void attempt(() => onDeleteMessage(seq));
       }
     },
+    trustFlagged: async (id) => {
+      let done = false;
+      await attempt(async () => {
+        await api.trustFlagged(session.id, id);
+        trustedHere.current.add(id);
+        done = true;
+      });
+      return done;
+    },
+    isTrusted: (id) => trustedHere.current.has(id) || (session.trustedResults ?? []).includes(id),
     switchVersion: (seq, to) => {
       setSwitching(seq);
       void attempt(async () => {

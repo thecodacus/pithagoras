@@ -23,6 +23,8 @@ import {
   getDb,
   getDefaultContextLimit,
   getSession,
+  recordAudit,
+  trustedResults,
   getSettingDefaults,
   getSettings,
   listAgentSessions,
@@ -91,6 +93,7 @@ import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { applyOnStart } from "./sandbox/apply.js";
+import { trustFlagged } from "./pi/guard.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
@@ -728,6 +731,8 @@ const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
+  // The results flagged as a suspected prompt injection that the person trusted, for the chat to say so.
+  trustedResults: [...trustedResults(s.id)],
 });
 
 app.get("/api/sessions", (_req, res) => {
@@ -916,6 +921,20 @@ const editFailure = (res: express.Response, e: unknown) => {
   if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
   res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
 };
+
+/**
+ * The person trusts a result the guard flagged as a suspected prompt injection
+ * in this conversation: it no longer holds the conversation back. Removing the
+ * turn it is in, the other way out, is the message removal below.
+ */
+app.post("/api/sessions/:id/flagged/:result/trust", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "No such conversation" });
+  if (!/^[0-9a-f]{16}$/.test(req.params.result)) return res.status(400).json({ error: "That is not a flagged result" });
+  trustFlagged(session.id, req.params.result);
+  recordAudit({ kind: "trusted", reason: "You looked at a result flagged as a suspected prompt injection and trusted it", sessionId: session.id });
+  res.json({ ok: true });
+});
 
 /** Removes a message and the agent's answer to it. */
 app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {

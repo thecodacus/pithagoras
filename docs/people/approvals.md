@@ -38,8 +38,8 @@ some things from everybody who is not you, whatever is allowed: a write to the
 agent's own instructions, a place where secrets are kept, your private notes (see
 [roles](/people/roles#what-a-colleague-may-do)). A read is never asked for: where
 it is allowed it needs no approval, and an approval does not open the rest. And a
-conversation that has read something untrusted refuses a push, an upload, a
-subagent or a schedule after an approval as before it (see
+conversation in which a result looked like a prompt injection refuses a push, an
+upload, a subagent or a schedule after an approval as before it (see
 [the injection guard](/guide/security#limiting-what-happens-next)), so it is not
 asked for one there, and an approval you gave earlier is not used up on a call
 that is refused. A subagent, and the tools that make, change or run a routine,

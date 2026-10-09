@@ -141,6 +141,8 @@ export type Item =
       details?: unknown;
       /** How many updates it streamed while it ran: a tool that reports as it goes is doing something worth watching. */
       updates?: number;
+      /** The guard flagged what it returned as a suspected prompt injection: its envelope's id, the signs, and the message of the turn it is in. */
+      flagged?: { id: string; signals: string[]; turnSeq?: number };
       /** The run ended with this call still open: it never said how it came out. */
       interrupted?: boolean;
       since?: number;
@@ -205,6 +207,15 @@ function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
 
 /** Text without the colour and cursor codes a terminal would act on. */
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+
+/**
+ * A result the guard flagged as a suspected prompt injection: the first line of
+ * the envelope it put around it (server/src/pi/guard.ts, flaggedResult).
+ */
+export function flaggedOf(text: string): { id: string; signals: string[] } | undefined {
+  const match = /^<<<untrusted:([0-9a-f]{16})>>> \(suspected prompt injection: ([a-z, -]+)\)/.exec(text);
+  return match ? { id: match[1], signals: match[2].split(", ") } : undefined;
+}
 
 /** The text of a tool result, however pi shaped it. */
 export function toolOutputText(result: any): string | undefined {
@@ -529,6 +540,12 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             if (ev.at !== undefined) it.until = ev.at;
             const text = toolOutputText(p.result);
             if (typeof text === "string" && text) setToolOutput(it, text);
+            const flag = typeof text === "string" ? flaggedOf(text) : undefined;
+            if (flag) {
+              let turn: UserItem | undefined;
+              for (let j = items.length - 1; j >= 0 && !turn; j--) { const item = items[j]; if (item.kind === "user") turn = item; }
+              it.flagged = { ...flag, ...(turn ? { turnSeq: turn.seq } : {}) };
+            }
             if (p.result?.details !== undefined) it.details = p.result.details;
             // Its updates were live only; how many there were is kept on its end.
             if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);

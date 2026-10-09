@@ -1,11 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { DiagramPlugin } from "streamdown";
-import { LuAudioLines, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
+import { LuAudioLines, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuPencil, LuRotateCw, LuShieldAlert, LuTrash2 } from "react-icons/lu";
 import { api } from "../api";
 import { copyText } from "../clipboard";
 import { sentPictureId, shownPictureId } from "../chat-pictures";
 import { splitContext } from "../context-blocks";
-import { t, tp, useLanguage } from "../i18n";
+import { msg, t, tp, useLanguage } from "../i18n";
 import { isPictureCall } from "../picture-call";
 import { isEnter, isEscape } from "../shortcuts";
 import type { Item, SentImage } from "../transcript";
@@ -54,7 +54,53 @@ export type RowActions = {
   again: (item: { images?: SentImage[] }, text: string) => Promise<void>;
   remove: (seq: number) => Promise<void>;
   switchVersion: (seq: number, to: number) => void;
+  /** Trusts a result flagged as a suspected prompt injection; resolves once the portal has it. */
+  trustFlagged: (id: string) => Promise<boolean>;
+  /** Whether the person trusted that result already. */
+  isTrusted: (id: string) => boolean;
 };
+
+type ToolItem = Extract<Item, { kind: "tool" }>;
+
+/** What each sign the guard found means, said to the person (server/src/pi/injection.ts). */
+const SIGNS: Record<string, string> = {
+  override: msg("tells the reader to ignore its instructions"),
+  addressed: msg("speaks to an AI reading it"),
+  persona: msg("tries to give the reader a new role or instructions"),
+  "role-markup": msg("contains chat-format markers that pretend to be another speaker"),
+  hidden: msg("hides text in invisible characters"),
+  "secret-request": msg("asks for keys, passwords or private files to be sent somewhere"),
+};
+
+/**
+ * Under a tool result the guard flagged as a suspected prompt injection: why,
+ * what that holds back, and the two ways out. Trusting it says the person read
+ * it and it is fine; removing the turn takes it out of what the agent knows.
+ */
+function FlaggedNotice({ flag, act }: { flag: NonNullable<ToolItem["flagged"]>; act: RowActions }) {
+  const [trusted, setTrusted] = useState(() => act.isTrusted(flag.id));
+  const [busy, setBusy] = useState(false);
+  if (trusted) return <p className="mt-1 text-[11px] text-fg-faint">{t("You trusted this result.")}</p>;
+  const signs = flag.signals.map((s) => (SIGNS[s] ? t(SIGNS[s]) : s)).join("; ");
+  return (
+    <div role="alert" className="mt-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs">
+      <p className="flex items-center gap-1.5 font-medium text-warn"><LuShieldAlert className="h-3.5 w-3.5 shrink-0" />{t("This result looks like a prompt injection")}</p>
+      <p className="mt-1 text-fg-muted">{t("It {signs}. Until you trust it or remove the turn it came in, this chat will not push, upload, read keys, start subagents or set up anything that runs later.", { signs })}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" disabled={busy} className="rounded-lg border border-line px-2.5 py-1 text-xs hover:bg-raised disabled:opacity-50"
+          onClick={async () => { setBusy(true); if (await act.trustFlagged(flag.id)) setTrusted(true); setBusy(false); }}>
+          {t("Trust it")}
+        </button>
+        {flag.turnSeq !== undefined && (
+          <button type="button" disabled={busy} className="rounded-lg border border-line px-2.5 py-1 text-xs text-fg-muted transition hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+            onClick={() => void act.remove(flag.turnSeq!)}>
+            {t("Remove the turn")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * One entry of the conversation: what was said, what came back, what was run.
@@ -338,6 +384,7 @@ export const TranscriptRow = memo(function TranscriptRow({
     return (
       <div data-key={item.id} className={`tool-row${enter}`}>
       <ToolCall item={item} onOpenTerminal={act.showInTerminal} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
+      {item.flagged && <FlaggedNotice flag={item.flagged} act={act} />}
       {item.picture && (
         // In the middle of the column, with as much room above as below. Contained, never cropped: a wide or tall picture is smaller here, and whole in the viewer.
         <div className="chat-picture my-3 flex justify-center">

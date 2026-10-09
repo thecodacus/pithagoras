@@ -836,6 +836,7 @@ function removeSession(id: string): void {
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   setSessionSubagentModel(id, null);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
+  d.prepare("DELETE FROM settings WHERE key = ?").run(trustedKey(id));
   // The pictures stay in the chat's folder, which is not the chat's to take away, and so they stay in the gallery, as pictures of that folder with what they were asked for.
   // Nothing else may name the folder once the chat is gone, so it is kept with them (see image-gallery.ts).
   let real: string | undefined;
@@ -1336,6 +1337,26 @@ const SETTING_DEFAULTS = (): GlobalSettings => ({
 export function getSetting(key: string): string | undefined {
   const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
   return row?.value || undefined;
+}
+
+/** Where a conversation's trusted results are kept: see trustedResults. */
+const trustedKey = (sessionId: string) => `taint_trusted:${sessionId}`;
+
+/**
+ * The results flagged as a suspected prompt injection in a conversation that
+ * the person has looked at and trusted, by the id of the envelope around each
+ * (see pi/guard.ts): they no longer hold the conversation back.
+ */
+export function trustedResults(sessionId: string): Set<string> {
+  try {
+    return new Set(JSON.parse(getSetting(trustedKey(sessionId)) ?? "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function trustResult(sessionId: string, id: string): void {
+  putSetting(trustedKey(sessionId), JSON.stringify([...trustedResults(sessionId), id]));
 }
 
 /**
