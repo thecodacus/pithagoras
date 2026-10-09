@@ -603,7 +603,7 @@ type AgentTab = (typeof AGENT_TABS)[number][0];
 /** The tabs under an agent's header; Activity counts what is unread. */
 function AgentTabs({ tab, onTab, unread }: { tab: AgentTab; onTab: (id: AgentTab) => void; unread: number }) {
   return (
-    <div role="tablist" aria-label={t("Agent sections")} onKeyDown={tabKeys} className="mt-5 flex gap-1 overflow-x-auto border-b border-line">
+    <div role="tablist" aria-label={t("Agent sections")} onKeyDown={tabKeys} className="mt-5 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line">
       {AGENT_TABS.map(([id, label]) => (
         <button
           key={id}
