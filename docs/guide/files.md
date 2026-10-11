@@ -28,7 +28,8 @@ that started there. Nothing outside it can be reached.
   rendered page, with headings, lists, code and tables drawn. A button in its
   header swaps to the source, to edit it, and back. The page follows what you type, even
   before you save, and a picture it names from the chat's folder is shown from
-  the path in the file's own folder. The choice is remembered in the browser.
+  the path in the file's own folder. The choice is remembered in the browser. A new
+  or empty file opens as the source anyway, so you can type into it.
 - **Download** without opening: every row has a download button, for a file or,
   for a folder, as a `.tar.gz`. The button at the top downloads the folder you are
   in (without `node_modules`, `.git`, `dist`, `build` and virtual environments).

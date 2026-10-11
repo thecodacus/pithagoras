@@ -9,10 +9,11 @@ type Put = { content: string; mtime?: number };
  * and `disk` is what a read finds, which a test can change under the panel.
  * A markdown file opens as a page unless the source was chosen before, so the
  * tests that edit start with that choice made; `shown: 'page'` leaves it out.
+ * `content` is what notes.md holds at first.
  */
-async function files(page: Page, put: (n: number) => Parameters<Route['fulfill']>[0] | null = () => null, shown: 'source' | 'page' = 'source') {
+async function files(page: Page, put: (n: number) => Parameters<Route['fulfill']>[0] | null = () => null, shown: 'source' | 'page' = 'source', content = 'one\n') {
   const saves: Put[] = [];
-  const disk = { content: 'one\n', mtime: 1 };
+  const disk = { content, mtime: 1 };
   await page.route('**/api/sessions/*/file*', (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith('/files')) {
@@ -174,4 +175,42 @@ test('a markdown file nobody chose a view for opens as a page, and the source, o
   await row(page).click();
   await expect(box(page)).toHaveValue('one\n');
   await expect(shown).toHaveCount(0);
+});
+
+test('an empty markdown file opens as the source, not as a blank page, and the saved choice stays', async ({ page }) => {
+  await files(page, () => null, 'page', '');
+  await expect(box(page)).toHaveValue('');
+  await box(page).fill('# Typed\n');
+  await expect(box(page)).toHaveValue('# Typed\n');
+  // The choice was never made, so it is not saved: the next file with text is still a page.
+  expect(await page.evaluate(() => localStorage.getItem('filesMarkdownRendered'))).toBeNull();
+  // The button offers the page, and takes the source choice away from the file for good.
+  await page.getByRole('button', { name: 'Show the rendered page' }).click();
+  await expect(page.getByRole('region', { name: 'Rendered notes.md' }).getByRole('heading', { name: 'Typed' })).toBeVisible();
+});
+
+test('a new markdown file is made to be written in: it opens as the source whatever was chosen, and typing works', async ({ page }) => {
+  const { disk } = await files(page, () => null, 'page');
+  await expect(page.getByRole('region', { name: 'Rendered notes.md' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to the folder' }).click();
+  disk.content = '';
+  await page.getByRole('button', { name: 'New file', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Name of the new file' }).fill('todo.md');
+  await page.getByRole('textbox', { name: 'Name of the new file' }).press('Enter');
+  const text = page.getByRole('textbox', { name: 'Contents of todo.md' });
+  await expect(text).toHaveValue('');
+  await text.fill('- first\n');
+  await expect(text).toHaveValue('- first\n');
+  await expect(page.getByTitle('Not saved')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('filesMarkdownRendered'))).toBeNull();
+});
+
+test('pictures in a rendered file are read against the chat folder: one inside is fetched, one outside is left as written', async ({ page }) => {
+  await files(page, () => null, 'page', '![in](/workspaces/pithagoras/a.png)\n\n![out](/etc/b.png)\n\n![rel](img/c.png)\n');
+  const shown = page.getByRole('region', { name: 'Rendered notes.md' });
+  await expect(shown).toBeVisible();
+  const sources = await shown.locator('img').evaluateAll((list) => list.map((i) => i.getAttribute('src')));
+  expect(sources).toContain('/api/sessions/first/picture?path=a.png');
+  expect(sources).toContain('/api/sessions/first/picture?path=img%2Fc.png');
+  expect(sources.some((src) => src?.includes('etc%2Fb.png') && src.includes('/picture'))).toBe(false);
 });

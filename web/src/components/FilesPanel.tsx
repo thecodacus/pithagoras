@@ -134,6 +134,9 @@ export const FilesPanel = memo(function FilesPanel({
   const [following, setFollowing] = useState(!left);
   const [showHidden, setShowHidden] = useState(savedShowHidden);
   const [rendered, setRendered] = useState(savedRendered);
+  // A file made to be written in, or empty, opens as the source whatever the saved choice is: a blank page cannot be typed into. The choice itself is left alone.
+  const [writing, setWriting] = useState(false);
+  const asPage = rendered && !writing;
   // The chat's full path is not drawn in the sidebar or the chat's header any more: it is here, on request.
   const [showPath, setShowPath] = useState(false);
   // The entry being given a name, and the name so far.
@@ -230,8 +233,9 @@ export const FilesPanel = memo(function FilesPanel({
   }, [loadDir, dir]);
 
   const loadFile = useCallback(
-    (path: string) => {
+    (path: string, write = false) => {
       const ask = ++fileAsk.current;
+      setWriting(write);
       setChanged(false);
       setSaveError(null);
       setFile({ path, loading: true, binary: false, size: 0, mtime: 0, saved: "" });
@@ -243,6 +247,7 @@ export const FilesPanel = memo(function FilesPanel({
           const text = r.binary ? "" : r.content;
           setFile({ path, loading: false, binary: r.binary, size: r.size, mtime: r.mtime, saved: text });
           setDraft(text);
+          if (!r.binary && !text) setWriting(true);
         })
         .catch((e) => {
           if (ask !== fileAsk.current) return;
@@ -452,7 +457,7 @@ export const FilesPanel = memo(function FilesPanel({
     // A new file is made to be written in.
     if (kind === "file") {
       setFollowing(false);
-      void loadFile(join(dir, name));
+      void loadFile(join(dir, name), true);
     }
   };
 
@@ -609,14 +614,15 @@ export const FilesPanel = memo(function FilesPanel({
             {!file.binary && !file.loading && !file.error && isMarkdown(file.path) && (
               <button
                 onClick={() => {
-                  local.set(RENDERED_KEY, rendered ? "0" : "1");
-                  setRendered(!rendered);
+                  local.set(RENDERED_KEY, asPage ? "0" : "1");
+                  setRendered(!asPage);
+                  setWriting(false);
                 }}
-                title={rendered ? t("Show the source") : t("Show the rendered page")}
-                aria-label={rendered ? t("Show the source") : t("Show the rendered page")}
+                title={asPage ? t("Show the source") : t("Show the rendered page")}
+                aria-label={asPage ? t("Show the source") : t("Show the rendered page")}
                 className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
               >
-                {rendered ? <LuCode aria-hidden className="h-3.5 w-3.5" /> : <LuBookOpen aria-hidden className="h-3.5 w-3.5" />}
+                {asPage ? <LuCode aria-hidden className="h-3.5 w-3.5" /> : <LuBookOpen aria-hidden className="h-3.5 w-3.5" />}
               </button>
             )}
             {!file.binary && !file.loading && !file.error && (
@@ -656,10 +662,10 @@ export const FilesPanel = memo(function FilesPanel({
             <FilePicture key={`${file.path}@${file.mtime}`} src={api.pictureUrl(sessionId, file.path, file.mtime)} name={file.path} />
           ) : file.binary ? (
             <p className="p-6 text-center text-xs text-fg-subtle">{t("Not text, or too large to show. Download it to open it.")}</p>
-          ) : rendered && isMarkdown(file.path) ? (
+          ) : asPage && isMarkdown(file.path) ? (
             // The draft, not the saved text: what is typed shows at once, and the page is never behind the source.
             <div role="region" aria-label={t("Rendered {path}", { path: file.path })} className="prose prose-sm min-h-0 max-w-none flex-1 overflow-auto p-3">
-              <Markdown>{canvasPictures(draft, "", (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
+              <Markdown>{canvasPictures(draft, folder, (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
             </div>
           ) : (
             <textarea
