@@ -21,6 +21,11 @@ that started there. Nothing outside it can be reached.
   (or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>). A PNG, JPEG, GIF or WebP picture is
   shown as a picture (up to 25 MB). Any other file that is not text, or is over
   1 MB, is not shown; download it instead.
+- **Read markdown as a page.** A `.md`, `.markdown` or `.mdx` file has a button
+  in its header that swaps the source for the rendered page, with headings,
+  lists, code and tables drawn, and back. The page follows what you type, even
+  before you save, and a picture it names from the chat's folder is shown from
+  the path in the file's own folder. The choice is remembered in the browser.
 - **Download** without opening: every row has a download button, for a file or,
   for a folder, as a `.tar.gz`. The button at the top downloads the folder you are
   in (without `node_modules`, `.git`, `dist`, `build` and virtual environments).

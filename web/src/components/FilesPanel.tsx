@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   LuArrowLeft,
+  LuBookOpen,
+  LuCode,
   LuChevronRight,
   LuCircleAlert,
   LuDownload,
@@ -24,6 +26,8 @@ import { flushFileDraft, keepFileDraft, readFileDraft } from "../file-drafts";
 import { local } from "../safe-storage";
 import { bytesLabel } from "../projects";
 import { confirmDialog } from "./ConfirmDialog";
+import { Markdown } from "./Markdown";
+import { canvasPictures } from "../canvas-pictures";
 import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
 import { deleteAsking, unsavedNotes } from "../unsaved";
@@ -43,6 +47,11 @@ interface Open {
 const HIDDEN_KEY = "filesShowHidden";
 /** Whether names that start with a dot are shown. Off unless it was turned on: they are mostly settings and tools' own folders. */
 const savedShowHidden = (): boolean => local.get(HIDDEN_KEY) === "1";
+
+const RENDERED_KEY = "filesMarkdownRendered";
+/** Whether a markdown file is shown as the page it describes rather than as its source. Source unless it was turned on: the panel is first of all where a file is edited. */
+const savedRendered = (): boolean => local.get(RENDERED_KEY) === "1";
+const isMarkdown = (p: string) => /\.(md|markdown|mdx)$/i.test(p);
 
 /** By its name only: whether it is one is the server's to say, from its bytes, and a refusal falls back to the note. */
 const looksLikePicture = (p: string) => /\.(png|jpe?g|gif|webp)$/i.test(p);
@@ -123,6 +132,7 @@ export const FilesPanel = memo(function FilesPanel({
   // The agent's next file would take an edit away from the screen: it follows only when nothing was left open.
   const [following, setFollowing] = useState(!left);
   const [showHidden, setShowHidden] = useState(savedShowHidden);
+  const [rendered, setRendered] = useState(savedRendered);
   // The entry being given a name, and the name so far.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -578,6 +588,19 @@ export const FilesPanel = memo(function FilesPanel({
             <a href={api.fileDownloadUrl(sessionId, file.path)} title={t("Download this file")} aria-label={t("Download this file")} className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
               <LuDownload aria-hidden className="h-3.5 w-3.5" />
             </a>
+            {!file.binary && !file.loading && !file.error && isMarkdown(file.path) && (
+              <button
+                onClick={() => {
+                  local.set(RENDERED_KEY, rendered ? "0" : "1");
+                  setRendered(!rendered);
+                }}
+                title={rendered ? t("Show the source") : t("Show the rendered page")}
+                aria-label={rendered ? t("Show the source") : t("Show the rendered page")}
+                className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
+              >
+                {rendered ? <LuCode aria-hidden className="h-3.5 w-3.5" /> : <LuBookOpen aria-hidden className="h-3.5 w-3.5" />}
+              </button>
+            )}
             {!file.binary && !file.loading && !file.error && (
               <button
                 onClick={() => void save()}
@@ -615,6 +638,11 @@ export const FilesPanel = memo(function FilesPanel({
             <FilePicture key={`${file.path}@${file.mtime}`} src={api.pictureUrl(sessionId, file.path, file.mtime)} name={file.path} />
           ) : file.binary ? (
             <p className="p-6 text-center text-xs text-fg-subtle">{t("Not text, or too large to show. Download it to open it.")}</p>
+          ) : rendered && isMarkdown(file.path) ? (
+            // The draft, not the saved text: what is typed shows at once, and the page is never behind the source.
+            <div role="region" aria-label={t("Rendered {path}", { path: file.path })} className="prose prose-sm min-h-0 max-w-none flex-1 overflow-auto p-3">
+              <Markdown>{canvasPictures(draft, "", (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
+            </div>
           ) : (
             <textarea
               value={draft}

@@ -10,12 +10,16 @@ import { insideFolder } from "./file-activity";
  * one — a web picture, a data: URL, one of the portal's own — is left alone.
  * A path outside the folder is left as written too: the server would refuse
  * it anyway, and this way it is not quietly sent somewhere else.
+ *
+ * `base` is the folder the markdown itself lies in, relative to the chat's
+ * folder (a file in the Files panel): a relative path is read from there, as a
+ * viewer of the file would. A canvas has none.
  */
 
 const IMAGE = /!\[([^\]\n]*)\]\(\s*(<[^>\n]*>|[^()\s]+)(\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/g;
 const ADDRESS = /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/api\/|#)/i;
 
-export function canvasPictures(markdown: string, folder: string, url: (path: string) => string): string {
+export function canvasPictures(markdown: string, folder: string, url: (path: string) => string, base = ""): string {
   if (!markdown.includes("![")) return markdown;
   return markdown.replace(IMAGE, (whole, alt: string, raw: string, title = "") => {
     const target = raw.startsWith("<") ? raw.slice(1, -1).trim() : raw;
@@ -26,7 +30,7 @@ export function canvasPictures(markdown: string, folder: string, url: (path: str
     } catch {
       // Not percent-encoded after all; the path is taken as written.
     }
-    const inside = insideFolder(folder, decoded);
+    const inside = insideFolder(folder, base && !decoded.startsWith("/") ? `${base}/${decoded}` : decoded);
     if (!inside) return whole;
     return `![${alt}](<${url(inside)}>${title})`;
   });

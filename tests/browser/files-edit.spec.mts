@@ -132,3 +132,24 @@ test('an edit survives a reload of the page', async ({ page }) => {
   await expect(box(page)).toHaveValue('two\n');
   await expect(page.getByTitle('Not saved')).toBeVisible();
 });
+
+test('a markdown file can be shown as a page and back, following what is typed, and the choice is kept', async ({ page }) => {
+  await files(page);
+  await box(page).fill('# Title\n\n- item\n');
+  await page.getByRole('button', { name: 'Show the rendered page' }).click();
+  const shown = page.getByRole('region', { name: 'Rendered notes.md' });
+  await expect(shown.getByRole('heading', { name: 'Title' })).toBeVisible();
+  await expect(shown.getByRole('listitem')).toHaveText('item');
+  await expect(box(page)).toHaveCount(0);
+  // Unsaved text is what the page shows, and Save is still there for it.
+  await expect(save(page)).toBeEnabled();
+  // Saved first, so that no unsaved text brings the file back open by itself.
+  await save(page).click();
+  await expect(save(page)).toBeDisabled();
+  await page.reload();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await row(page).click();
+  await expect(page.getByRole('region', { name: 'Rendered notes.md' })).toBeVisible();
+  await page.getByRole('button', { name: 'Show the source' }).click();
+  await expect(box(page)).toBeVisible();
+});
