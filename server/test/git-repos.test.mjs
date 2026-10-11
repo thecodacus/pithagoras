@@ -170,6 +170,9 @@ test("a worktree and a submodule are listed: their .git file names a git dir tha
   assert.deepEqual((await g.findRepos(work)).repos.map((r) => r.path), ["dep-src", "main", "wt"]);
   // The submodule sits inside main, which is listed itself and not looked into.
   assert.equal(await g.isRepoRoot(path.join(main, "sub")), true);
+  // Scanned from the superproject, the submodule is listed: its gitdir is relative (`../.git/modules/sub`), and
+  // it is resolved against the folder of the .git file, not the server's.
+  assert.deepEqual((await g.findRepos(main)).repos.map((r) => r.path), ["", "sub"]);
 });
 
 test("the routes work in the clone ?repo= names, and refuse a path out of the folder", async () => {
