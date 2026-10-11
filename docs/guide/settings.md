@@ -9,7 +9,7 @@ German. Navigation runs down the left edge, in four groups:
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
 | **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
-| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **About**, **Advanced** |
+| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
 
 Plus a page for every extension that exposes configuration.
 
@@ -150,6 +150,21 @@ language it is in, so an English page does not carry the German text.
 Installs the optional parts of the portal itself: Browser, Voice, Subagents and
 Memory, see [Docker add-ons](/guide/add-ons) and
 [Opt-in features](/guide/features).
+
+## Logs
+
+What the portal's server prints, which used to be readable only on the host. The
+newest lines are at the bottom and the list follows them as they come, until you
+scroll up to read something; scroll back down and it follows again. Errors are
+red and warnings amber. **Warnings and errors** and **Errors** hide the rest, and
+the search box keeps the lines that contain what you type. An uncaught exception
+and node's own warnings are in the list too, not only what the portal logs itself.
+
+**Download** saves everything the portal still holds as a text file, one line per
+entry with its time and level, to attach to an issue. The portal keeps the last
+2000 lines in memory, so a restart starts the list again; for what happened before
+one, the host's own log (`docker logs` for a container) is still where to look.
+Lines of the chats' own tools, and of containers, are not in it.
 
 ## About
 
