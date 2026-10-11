@@ -85,6 +85,16 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);
   const [conversation, setConversation] = useState(false), [settings, setSettings] = useState(false);
+  // A failure is said in one short line and written in the conversation, which
+  // opens on it: only an error that came after voice mode began.
+  const errorsSeen = useRef(items.reduce((n, item) => item.kind === "notice" && item.tone === "error" ? Math.max(n, Number(item.id.slice(1)) || 0) : n, 0));
+  useEffect(() => {
+    let newest = errorsSeen.current;
+    for (const item of items) if (item.kind === "notice" && item.tone === "error") newest = Math.max(newest, Number(item.id.slice(1)) || 0);
+    if (newest === errorsSeen.current) return;
+    errorsSeen.current = newest;
+    setConversation(true);
+  }, [items]);
   const settingsToggle = useRef<HTMLButtonElement>(null);
   const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);

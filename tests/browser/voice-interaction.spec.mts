@@ -399,6 +399,16 @@ test('the conversation window renders a reply as markdown, also while it is writ
   }
 });
 
+test('a model error in voice mode opens the conversation on it and says one short line', async ({ page }) => {
+  await start(page);
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  // Opened by itself, with the error written in it.
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
+  await expect(conversation.getByRole('alert')).toHaveText('Model error: the provider is down');
+});
+
 test('Escape in the confirmation of a link in a reply closes it and neither stops the agent nor ends voice mode', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Show the conversation' }).click();

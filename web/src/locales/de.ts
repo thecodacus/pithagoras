@@ -1788,6 +1788,7 @@ const de: Locale = {
     "Start voice conversation": "Sprachgespräch beginnen",
     // components/VoiceConversation.tsx
     "Nothing has been said yet.": "Noch wurde nichts gesagt.",
+    "An error occurred.": "Es ist ein Fehler aufgetreten.",
     // components/VoiceLibrary.tsx
     "Choose an audio file smaller than 20 MB": "Wähle eine Audiodatei unter 20 MB",
     "Choose a recording between 1 and 30 seconds": "Wähle eine Aufnahme zwischen 1 und 30 Sekunden",

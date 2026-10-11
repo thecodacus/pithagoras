@@ -566,12 +566,17 @@ never spoken. The lines below are given in English.
   says so ("Let me do a quick context compaction so I can keep going."), and another
   when it is over ("Context compaction is done. I'm ready to continue.") or when it
   stopped before it finished.
+- **Errors.** When the model fails and the portal gives up on it, a single line
+  says "An error occurred." (once, however many errors came together), and the
+  Conversation window opens with the error written in it. This line is spoken
+  whatever the settings below say, since otherwise a failure would pass unnoticed
+  with the chat put away.
 - **Talking during compaction.** What you say while it compacts is dropped, not
   sent: the agent cannot take it in until the compaction is over. The portal says
   "I'm still compacting our conversation. Please wait a moment; I'll let you know
   when I'm ready.", at most every eight seconds, so say it again afterwards.
 
-All the spoken lines are off in the [sequential baseline](/guide/voice-comparison),
+All the other spoken lines are off in the [sequential baseline](/guide/voice-comparison),
 and `VOICE_STATUS_SPEECH=false` on the portal turns them off everywhere. Only the
 lines go: what you say during compaction is still dropped, with nothing said about
 it.

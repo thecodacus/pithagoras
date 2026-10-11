@@ -55,6 +55,9 @@ export class HandsFreeVoice {
   private held: string[] | null = null;
   private items: Item[] = [];
   private speech: StreamingSpeech;
+  /** Error notices at or before this seq were there before voice mode began. */
+  private afterSeq: number;
+  private announcedErrors = new Set<string>();
   private recordings: Float32Array[] = [];
   private text: string[] = [];
   private processing = false;
@@ -77,7 +80,7 @@ export class HandsFreeVoice {
 
 
   constructor(private io: VoiceIO, initial: Item[]) {
-    const afterSeq = initial.reduce((n, item) => Math.max(n, Number(item.id.slice(1)) || 0), 0);
+    const afterSeq = this.afterSeq = initial.reduce((n, item) => Math.max(n, Number(item.id.slice(1)) || 0), 0);
     this.pipeline = new SpeechPipeline(io.synthesize, () => this.state(), error => this.report(error), io.sequential, io.sentenceChunks, io.ttsPrefetch);
     this.thinkingPipeline = new SpeechPipeline(io.synthesize, () => this.state(), error => this.report(error));
     this.speech = new StreamingSpeech(afterSeq);
@@ -122,10 +125,28 @@ export class HandsFreeVoice {
   observe(items: Item[]) {
     this.items = items;
     if (!this.alive) return;
+    this.announceErrors(items);
     if (!this.acceptingReplies) { if (this.held) this.held.push(...this.speech.observe(items)); else this.ignoreCurrent(); }
     else if (!this.io.sequential || this.io.sentenceChunks || !this.io.agentRunning()) this.output.push(...this.speech.observe(items));
     this.state();
     void this.play();
+  }
+  /**
+   * A failure is written into the chat as an error notice and nothing else, so
+   * with the chat put away voice mode would stay silent. One short line says
+   * it happened, however many errors came; the notice itself is in the
+   * conversation window, which the stage opens.
+   */
+  private announceErrors(items: Item[]) {
+    let fresh = false;
+    for (const item of items) {
+      if (item.kind !== "notice" || item.tone !== "error" || Number(item.id.slice(1)) <= this.afterSeq || this.announcedErrors.has(item.id)) continue;
+      this.announcedErrors.add(item.id);
+      fresh = true;
+    }
+    if (!fresh || !this.acceptingReplies) return;
+    this.thinkingPipeline.cancel();
+    this.pipeline.enqueue([t("An error occurred.")], 'status');
   }
   /** Called after a sustained speech detection, not a single noise frame. */
   speechStart() {
