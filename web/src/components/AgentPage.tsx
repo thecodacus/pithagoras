@@ -181,11 +181,12 @@ function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: s
   );
 }
 
-/** Conversations started here rather than arriving through a channel. */
+/** Conversations started in the portal rather than arriving through a channel. */
 const BROWSER = "browser";
 
 /**
- * The agent's conversations, one per chat rather than one overall.
+ * The agent's conversations, one per chat rather than one overall: the chats in
+ * its home, however they were started, and those that arrived through a channel.
  *
  * A channel package supplies a key for each conversation it sees — a Telegram
  * chat id, a Slack channel — and the portal turns each into its own session.
@@ -320,7 +321,8 @@ function AgentView({
       { name: string; kind: string | null; present: boolean; items: AgentSession[] }
     >();
     for (const s of sessions) {
-      const key = s.channel?.slug ?? "none";
+      // A chat the New or + button started has no channel: it is one of the portal's own.
+      const key = s.channel?.slug ?? BROWSER;
       if (!out.has(key)) {
         out.set(key, {
           name: s.channel?.name ?? "",
@@ -401,7 +403,8 @@ function AgentView({
                   setStarting(true);
                   setError("");
                   try {
-                    onSelect((await api.startAgentChat(agent.id)).id);
+                    // The same chat the + in the sidebar starts, in the agent's home.
+                    onSelect((await api.createSession(agent.home)).id);
                   } catch (e) {
                     setError((e as Error).message);
                   } finally {

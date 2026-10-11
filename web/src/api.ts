@@ -898,8 +898,6 @@ export const api = {
       `/api/sessions/${id}/events/before?before=${before}&limit=${limit}`
     ),
   session: (id: string) => json<Session>(`/api/sessions/${id}`),
-  startAgentChat: (agent: string, title?: string) =>
-    json<Session>("/api/agent/sessions", { method: "POST", body: JSON.stringify({ agent, title }) }),
 
   setHeartbeat: (agent: string, heartbeat: { minutes: number; quietStart: string; quietEnd: string }) =>
     json<Agent>(`/api/agents/${encodeURIComponent(agent)}/heartbeat`, { method: "PUT", body: JSON.stringify(heartbeat) }),

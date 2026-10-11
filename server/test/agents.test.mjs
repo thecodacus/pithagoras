@@ -49,8 +49,9 @@ test("an agent has a home, files and chats of its own", async () => {
   const chats = (await call("GET", "/api/sessions")).body.sessions;
   assert.ok(chats.some((s) => s.id === named.body.id), "a conversation started on the Agent page is listed with the chats");
   const listed = await call("GET", "/api/agent/sessions?agent=research-bot");
-  assert.deepEqual(listed.body.sessions.map((s) => s.id), [named.body.id]);
-  assert.equal((await call("GET", "/api/agent/sessions")).body.sessions.length, 0, "the first agent's list has none of its chats");
+  assert.deepEqual(listed.body.sessions.map((s) => s.id).sort(), [chat.body.id, named.body.id].sort(), "the chat the + starts is a conversation of the agent like the one started on its page");
+  assert.deepEqual((await call("GET", "/api/agent/sessions")).body.sessions.map((s) => s.id), [homeChat.body.id], "the first agent's list has its own chat, and none of the other agent's");
+  assert.equal(listed.body.sessions.find((s) => s.id === chat.body.id).channel, null);
 
   const projects = await call("GET", "/api/projects?bare=1");
   assert.deepEqual(projects.body.agents.map((a) => a.name), ["Nova", "Research Bot"]);

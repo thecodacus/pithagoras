@@ -49,7 +49,7 @@ them. See [Projects](/guide/projects).
 | | |
 | --- | --- |
 | `GET /api/sessions` | `{ sessions, executor }` — pinned first, then most recent. The chats, and the conversations started on an agent's page; not those that came through a channel, nor routine runs. |
-| `GET /api/agent/sessions` | `{ sessions, agentHome }` — one agent's conversations (`?agent=`, the first agent without it), each with the channel that owns it |
+| `GET /api/agent/sessions` | `{ sessions, agentHome }` — one agent's conversations (`?agent=`, the first agent without it): every chat in its home, each with the channel that owns it or `null` for a chat started in the portal |
 | `POST /api/sessions` | `{ workspace?, agent?, title? }` — `agent` starts it in that agent's home; neither means Home, the first agent's; no title means "New chat", replaced by the first message |
 | `GET /api/sessions/:id` | One session |
 | `PATCH /api/sessions/:id` | `{ title?, pinned? }` — a title is cut to 120 characters |

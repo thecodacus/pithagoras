@@ -735,9 +735,11 @@ app.get("/api/sessions", (_req, res) => {
 });
 
 /**
- * Conversations reached through a channel. Each is a real session — same
- * transcript, same replay, same model handling — so the Agent tab opens them
- * with the ordinary chat view rather than a parallel implementation.
+ * One agent's conversations: every chat in its home — those the New and + buttons
+ * start, and those started on the Agent page — and those that arrived through a
+ * channel. Each is a real session — same transcript, same replay, same model
+ * handling — so the Agent tab opens them with the ordinary chat view rather than
+ * a parallel implementation.
  */
 app.get("/api/agent/sessions", (req, res) => {
   // One agent's, given `?agent=`; the first agent's otherwise.
@@ -750,19 +752,21 @@ app.get("/api/agent/sessions", (req, res) => {
 
   res.json({
     agentHome: agent.home,
-    sessions: chatsOf(agent, listAgentSessions()).map((s) => ({
-      ...toApi(s),
-      // Matched on the slug, so a channel deleted and recreated under the same
-      // one still owns its conversations.
-      channel: s.channel_slug
-        ? {
-            slug: s.channel_slug,
-            name: bySlug.get(s.channel_slug)?.name ?? s.channel_slug,
-            kind: bySlug.get(s.channel_slug)?.kind ?? null,
-            present: bySlug.has(s.channel_slug),
-          }
-        : null,
-    })),
+    sessions: chatsOf(agent, [...listSessions(), ...listAgentSessions()])
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .map((s) => ({
+        ...toApi(s),
+        // Matched on the slug, so a channel deleted and recreated under the same
+        // one still owns its conversations.
+        channel: s.channel_slug
+          ? {
+              slug: s.channel_slug,
+              name: bySlug.get(s.channel_slug)?.name ?? s.channel_slug,
+              kind: bySlug.get(s.channel_slug)?.kind ?? null,
+              present: bySlug.has(s.channel_slug),
+            }
+          : null,
+      })),
   });
 });
 

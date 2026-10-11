@@ -26,7 +26,9 @@ agent of another name is left alone: the new one gets the next free name,
 `agents/<name>-2`.
 
 A card opens that agent (`/agents?agent=research-bot`), with **New
-conversation** to start one with it and six tabs: **Conversations**,
+conversation** to start a chat with it, the same as the **+** on its folder in the
+sidebar, and six tabs: **Conversations** (every chat in its home, however it was
+started, and the number above it counts them all),
 **Activity** (what its heartbeat noticed, with the number unread),
 **Heartbeat**, **Tools** (see [below](#tools)), **Skills** and **Files** to edit. The tab is kept in the link (`&tab=files`). Its avatar is at
 the top beside its name; the palette on it opens the avatar customizer. Each
@@ -114,9 +116,10 @@ all the layers.
 
 Each agent's home is a folder in the sidebar and on the Sessions page, named
 after the agent. The first agent's has the house icon, the others a robot. The
-**+** on a folder's line starts a chat with that agent. A conversation started on the Agents page
-is listed there too; conversations that came through a channel are on the Agents
-page only.
+**+** on a folder's line starts a chat with that agent. A chat and a conversation
+are the same thing: a chat started with **+** or **New** in its home is listed on the
+Agents page and counted there, and **New conversation** there starts the same kind of
+chat. Conversations that came through a channel are on the Agents page only.
 
 ## Channels and routines
 

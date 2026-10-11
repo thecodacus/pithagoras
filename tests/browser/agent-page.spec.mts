@@ -168,3 +168,25 @@ test('an agent made in a folder of its own says nothing of the kind, and one tha
   await expect(main.getByRole('heading', { name: 'Ada' })).toBeVisible();
   await expect(main.getByText('folder already had')).toHaveCount(0);
 });
+
+test('New conversation starts the same chat as the + in the sidebar, and a chat started that way is listed and counted', async ({ page }) => {
+  const posts: unknown[] = [];
+  const at = new Date().toISOString();
+  const chat = { id: 'c1', title: 'Started with plus', status: 'idle', workspace: '/a/ada', kind: 'task', pinned: false, updated_at: at, channel_key: '', channel: null };
+  await mockPortal(page, async ({ path: p, method, json }) => {
+    if (p === '/api/agents') return { agents: [agent('home', 'Nova'), agent('ada', 'Ada', { chats: 1 })] };
+    if (p === '/api/agent/sessions') return { sessions: [chat], agentHome: '/a/ada' };
+    if (p === '/api/agents/ada/setup') return { initialised: true, home: '/a/ada', files: [] };
+    if (p === '/api/sessions' && method === 'POST') {
+      posts.push(json());
+      return { ...chat, id: 'c2', title: 'New chat' };
+    }
+  }, { settings: true });
+  await page.goto('/agents?agent=ada');
+  const main = page.getByRole('main');
+  await expect(main.getByText('Started with plus')).toBeVisible();
+  await expect(main.locator('div', { has: page.getByText('conversation', { exact: true }) }).filter({ hasText: /^1conversation$/ })).toHaveCount(1);
+  await main.getByRole('button', { name: 'New conversation' }).click();
+  await expect(page).toHaveURL(/\/s\/c2$/);
+  expect(posts).toEqual([{ workspace: '/a/ada' }]);
+});
