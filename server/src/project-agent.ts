@@ -29,6 +29,19 @@ export function agentLinkedAt(workspace: string | null | undefined): Agent | und
 }
 
 /**
+ * The folder whose SOUL.md, PrimaryUser.md and MEMORY.md a chat working here
+ * carries: the workspace itself, which is the agent's home for a chat there (or
+ * a plain task workspace, which has none of them). A chat in a linked project
+ * reads the agent's home instead. A blank-slate project has no agent files at
+ * all: its folder is the agent's to write, not a place to take a soul from.
+ */
+export function agentFilesAt(workspace: string): string | undefined {
+  if (agentOf(workspace)) return workspace;
+  const project = projectOf(workspace);
+  return project ? linkedAgent(project)?.home : workspace;
+}
+
+/**
  * The agent a chat working here is with: the one whose home it is in, else the
  * one its project is linked to, else the first. Where the avatar, the voice and
  * the skills of a chat come from.
@@ -39,12 +52,14 @@ export function agentFor(workspace: string | null | undefined): Agent {
 
 /**
  * Whether Understory is the memory of a chat working here. It is the
- * portal's, switched on in Settings; a project can say it does not want it,
- * and then its chats neither get the rule for Understory's tools nor leave
- * the agent's MEMORY.md aside.
+ * portal's, switched on in Settings. A blank-slate project has no agent and so
+ * no memory of the person: it does not get it. A project linked to an agent
+ * does unless it says it does not want it, and then its chats neither get the
+ * rule for Understory's tools nor leave the agent's MEMORY.md aside.
  */
 export function understoryAt(workspace: string | null | undefined): boolean {
   if (!understoryOn()) return false;
   const project = !workspace || agentOf(workspace) ? undefined : projectOf(workspace);
-  return !(project && projectAgent(project).understoryOff);
+  if (!project) return true;
+  return !!linkedAgent(project) && !projectAgent(project).understoryOff;
 }

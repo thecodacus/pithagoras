@@ -112,7 +112,9 @@ after `/reload`. If the agent is deleted, its projects are blank slates again.
 
 The files are read from the agent's home and never from the project's folder, which the
 agent may write to: a `SOUL.md` it leaves there is only a file. A project that works with
-no agent keeps what it always did, and reads such files from its own folder if it has any.
+no agent reads none of them, from its folder or anywhere: it has only its AGENTS.md, and
+no [Understory](/guide/features#memory-understory) either, since there is no agent whose
+memory it would be.
 
 **Understory as memory** is one more switch in the same place, shown where the portal has
 [Understory](/guide/features#memory-understory). While it is on, Understory is the

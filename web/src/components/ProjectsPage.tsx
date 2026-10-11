@@ -509,7 +509,8 @@ function AgentChoice({
           options={[{ value: "", label: t("None — a blank slate") }, ...agents.map((a) => ({ value: a.id, label: a.name, text: a.name }))]}
         />
       </Field>
-      {understoryAvailable && (
+      {/* A blank slate has no agent whose memory it would be: it never has Understory, so there is nothing to switch. */}
+      {understoryAvailable && agent && (
         <SwitchRow
           title={t("Understory as memory")}
           detail={t("Off: the chats do not get Understory's memory instructions, and the agent's MEMORY.md is read instead.")}

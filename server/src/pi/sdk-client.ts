@@ -10,7 +10,7 @@ import { sandboxTools } from "../sandbox/tools.js";
 import { sandboxOn } from "../sandbox/policy.js";
 import { projectSkillPaths, withoutFolderMcp } from "../sandbox/project-trust.js";
 import { agentSkillsDir, skillsLine } from "../agent-skills.js";
-import { agentFor, agentLinkedAt, understoryAt } from "../project-agent.js";
+import { agentFilesAt, agentFor, understoryAt } from "../project-agent.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-mcp-rules.js";
 import { browserTools } from "../browser/tools.js";
@@ -64,9 +64,9 @@ const filesFor = (cwd: string, role?: string) =>
  * folder itself, which is the agent's home for a chat there. A chat in a
  * project that is linked to an agent reads the agent's home instead, and the
  * project's folder, which the agent can write to, is not a place to take its
- * soul from.
+ * soul from. A blank-slate project has none: only its AGENTS.md, which pi reads.
  */
-const filesIn = (cwd: string) => agentLinkedAt(cwd)?.home ?? cwd;
+const filesIn = agentFilesAt;
 
 /**
  * pi's own theme, for extensions that style text with it even when nothing
@@ -112,6 +112,7 @@ const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
 export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
   const from = filesIn(cwd);
+  if (!from) return out;
   for (const name of filesFor(cwd, role)) {
     const file = path.join(from, name);
     try {
@@ -131,8 +132,9 @@ export function extraContextFiles(cwd: string, role?: string): { path: string; c
  * material, and the model read its own identity as notes about a third party.
  * One line at system level is enough to change what they are.
  */
-function ownFiles(cwd: string, role?: string): string[] {
+export function ownFiles(cwd: string, role?: string): string[] {
   const from = filesIn(cwd);
+  if (!from) return [];
   const present = filesFor(cwd, role).filter((name) => {
     try {
       return existsSync(path.join(from, name));
