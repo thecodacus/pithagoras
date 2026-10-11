@@ -117,11 +117,13 @@ export function fitBytes(bytes: Buffer, budget: number, mask = false): Promise<S
       const kind = { type: now.type, alpha: now.alpha, mask, lighter: true };
       // A GIF and a mask have no quality to give up; the others try three before they give up pixels.
       const lossy = !mask && now.type !== "image/gif";
+      // The shrink starts from what the last lossy try weighed: the original can be a PNG many times heavier than the JPEG or WebP it becomes.
+      let weight = bytes.length;
       for (const quality of lossy ? [85, 70, 55] : []) {
         const out = await encode(bytes, now.size, kind, quality);
         if (out.length <= budget) return { bytes: out, size: now.size };
+        weight = out.length;
       }
-      let weight = bytes.length;
       let factor = 1;
       for (let attempt = 0; attempt < 8; attempt++) {
         // The weight follows the pixels about as the square of the side does; a little under, so that the next try is likely to be the last.

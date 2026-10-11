@@ -272,7 +272,9 @@ What was decided for it:
   what it was, PNG, JPEG, WebP or GIF, and so does transparency. A picture
   within the box is sent byte for byte. A mask is scaled with the first picture to
   the same size by taking the nearest pixel, so that it stays a mask; a mask of
-  another size is left as it was, for the endpoint to say. `edit_image` says in its
+  another size is not matched to the picture, but is scaled to the box on its own
+  where it is over the box and made lighter where it is over the byte limit, and
+  the endpoint says if the two differ. `edit_image` says in its
   answer what it did ("The image was scaled down from 4000x500 pixels (3 MB) to
   2048x256 pixels (180 KB) to fit what an edit takes."), so the agent can tell you the
   result is smaller; the result is not scaled back up. The Images page shows the

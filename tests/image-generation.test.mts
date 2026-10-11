@@ -1965,6 +1965,18 @@ test("a picture over the byte limits is made lighter in proportion, keeping its 
   }
 });
 
+test("a large PNG with a tight budget is shrunk from what its lossy copy weighs, ending near the budget", async () => {
+  const { fitBytes } = await import("../server/src/picture-scale.ts");
+  const big = await real(2000, 1500, { noise: true });
+  const budget = 350 * 1024;
+  assert.ok(big.length > 20 * budget, `the original is far heavier than the budget (${big.length} bytes)`);
+  const out = await fitBytes(big, budget);
+  assert.ok(out.bytes.length <= budget, `now ${out.bytes.length} bytes`);
+  // The original's weight would have sent the first factor to the 0.3 floor (600x450, about 20 KB).
+  assert.ok(out.size.width >= 1000, `not shrunk to the floor: ${out.size.width}x${out.size.height}`);
+  assert.ok(out.bytes.length > budget / 3, `near the budget, not far under it: ${out.bytes.length} bytes`);
+});
+
 test("a picture that cannot be made to fit is refused with a message, and nothing is sent", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
   try {
