@@ -443,6 +443,30 @@ test('without the kept line the error is shown in writing only, and said so', as
   await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
 });
 
+async function missingErrorLine(page: import('@playwright/test').Page) {
+  await page.route('**/voice/error-line**', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 503' } })
+    : route.fulfill({ status: 404, json: { error: 'The spoken error line has not been made for this voice yet' } }));
+  await start(page);
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible();
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  return page.getByRole('alert').filter({ hasText: 'The spoken error line is not available' });
+}
+
+test('the notice about the missing error line is still there after voice mode ends, then fades by itself', async ({ page }) => {
+  const notice = await missingErrorLine(page);
+  await expect(notice).toBeVisible();
+  await expect(notice).toBeHidden({ timeout: 9000 });
+});
+
+test('the notice about the missing error line goes at once when clicked', async ({ page }) => {
+  const notice = await missingErrorLine(page);
+  await expect(notice).toBeVisible();
+  await notice.click();
+  await expect(notice).toBeHidden({ timeout: 1000 });
+});
+
 test('an error from before voice mode, coming in late, does not open the conversation', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Replay an old error' }).click();

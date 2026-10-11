@@ -108,6 +108,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const [starting, setStarting] = useState(false);
   const [phase, setPhase] = useState<VoicePhase>("Listening");
   const [error, setError] = useState("");
+  // A notice that did not end voice mode (the spoken error line missing, say): once voice mode is over it fades by itself. Failures that ended it stay until dismissed or the next start.
+  const [fadingError, setFadingError] = useState("");
   // Where the controller began, once it has: the stage opens the conversation on errors after it, and the controller says the same ones.
   const [errorsAfter, setErrorsAfter] = useState<number | null>(null);
   const [muted, setMuted] = useState(false);
@@ -176,6 +178,12 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     await json(`/api/sessions/${sessionId}/voice/connection`,{method:'POST',body:JSON.stringify({client,active}),keepalive:!active});
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!error || error !== fadingError || enabled || starting) return;
+    const timer = setTimeout(() => setError(""), 5000);
+    return () => clearTimeout(timer);
+  }, [error, fadingError, enabled, starting]);
 
   const stop = () => {
     profiler.current?.close('stopped');
@@ -556,7 +564,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
         trace: profileMark,
         phase: value => { if (current()) setPhase(value); },
-        error: message => { if (current()) {setError(message);profiler.current?.close('error');} },
+        error: message => { if (current()) {setError(message);setFadingError(message);profiler.current?.close('error');} },
       }, latest.current.items);
       voice.current = controller;
       setErrorsAfter(controller.startedAfter);
@@ -661,7 +669,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     )}
     <div className="relative flex items-center gap-1">
       <button type="button" className="prompt-action" aria-label={t("Profile voice latency")} title={t("Profile voice latency")} aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
-      {error && !enabled && !starting && <p role="alert" className="absolute bottom-full right-0 mb-3 w-64 rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
+      {error && !enabled && !starting && <p role="alert" onClick={() => setError("")} className="absolute bottom-full right-0 mb-3 w-64 cursor-pointer rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
       <button ref={startButton} type="button" onClick={() => { void start(); }} aria-label={t("Turn on hands-free voice")} title={bindings["voice.toggle"] ? t("Start voice conversation ({keys})", { keys: describe(bindings["voice.toggle"], layout) }) : t("Start voice conversation")} className="prompt-action">
         {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuAudioLines aria-hidden />}
       </button>
