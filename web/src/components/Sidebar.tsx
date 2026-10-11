@@ -24,7 +24,7 @@ import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
 import { pick, useFlip } from "../motion";
-import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { HOME, folderKeys, hasMoreThanHome, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t, useLanguage } from "../i18n";
 
@@ -67,7 +67,7 @@ export const Sidebar = memo(function Sidebar({
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
   places?: Places | null;
   onSelect: (id: string) => void;
-  /** A chat in `workspace`, or in Home without one, opened. */
+  /** A chat in `workspace`, or where New starts without one, opened. */
   onNewChat: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
@@ -117,9 +117,9 @@ export const Sidebar = memo(function Sidebar({
 
   // Gathered by folder only where there is more than Home to gather them in.
   const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
-  const hasProjects = !!places && places.projects.length > 0;
+  const hasPlaces = !!places && hasMoreThanHome(places);
   // Until the places are known, the chats are listed as they were: not held back for them.
-  const byFolder = grouping === "folders" && hasProjects;
+  const byFolder = grouping === "folders" && hasPlaces;
   // Each folder is counted, marked running and ordered by all its chats, as
   // on the Sessions page, so that the two agree; pinned ones are listed at the
   // top rather than in it (`listed`).
@@ -281,7 +281,7 @@ export const Sidebar = memo(function Sidebar({
               isOpen={openFolders.isOpen}
               onToggle={openFolders.toggle}
               onMove={searching || !allKeys ? undefined : (shown, key, to) => move(shown, key, to, allKeys)}
-              onNewChat={(f) => newChat(f.key === HOME ? undefined : f.path!)}
+              onNewChat={(f) => newChat(f.path || undefined)}
             >
               {(f) => {
                 const chats = listed.get(f.key)!;
@@ -313,7 +313,7 @@ export const Sidebar = memo(function Sidebar({
         {!byFolder && shownRecents.length > 0 && (
           <>
             <Divider />
-            <ChatsHeading label={t("Recents")} controls={hasProjects} {...headingProps} />
+            <ChatsHeading label={t("Recents")} controls={hasPlaces} {...headingProps} />
             {shownRecents.map(item)}
             {recents.length > shownRecents.length && (
               <button

@@ -5,7 +5,7 @@ Sessions are per-task: one workspace, one job, its own conversation. An
 you talk to continuously. The portal starts with one, and [more](/guide/agents)
 can be added, each with a home of its own.
 
-Chats you start with **New** in the portal work in the first agent's home, so its
+Chats you start with **New** in the portal work in the home of the agent New is set to (the first agent unless you picked another, see [Agents](/guide/agents)), so its
 SOUL.md, PrimaryUser.md and MEMORY.md are there in those as well; a chat started
 on another agent's page works in that agent's home. Chats in a
 [project](/guide/projects) are ordinary per-task sessions and have none of them.

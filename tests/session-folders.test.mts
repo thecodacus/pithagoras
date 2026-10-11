@@ -12,6 +12,7 @@ import {
   readOpenFolders,
   sortFolders,
   folderKeys,
+  hasMoreThanHome,
 } from "../web/src/session-folders.ts";
 
 const places = {
@@ -130,6 +131,29 @@ test("each agent's home is a folder named after it, the first one keeping Home's
     ["Scout", "scout", ["s"]],
   ]);
   assert.ok(folderKeys(withAgents).includes("agent:scout"));
+  // Without the server saying which agent New starts chats with, no folder claims it.
+  assert.deepEqual(folders.slice(0, 2).map((f) => f.newChats), [undefined, undefined]);
   // By name the first agent comes first, then the others, then the projects.
   assert.deepEqual(keys(sortFolders(folders, "name")).slice(0, 3), [HOME, "agent:scout", projectKey("empty")]);
+});
+
+test("the folder of the agent that New starts chats with carries the flag, the others do not", () => {
+  const agents = [
+    { id: "home", name: "Nova", home: "/data/agent", newChats: false },
+    { id: "scout", name: "Scout", home: "/data/agents/scout", newChats: true },
+  ];
+  const folders = groupByFolder([], { ...places, agents });
+  assert.deepEqual(folders.slice(0, 2).map((f) => [f.key, f.newChats]), [
+    [HOME, false],
+    ["agent:scout", true],
+  ]);
+});
+
+test("chats are gathered by folder when there is a project or a second agent, not for one agent alone", () => {
+  const agent = (id: string) => ({ id, name: id, home: `/data/agents/${id}` });
+  const bare = { home: "/data/agent", projects: [] };
+  assert.equal(hasMoreThanHome(bare), false);
+  assert.equal(hasMoreThanHome({ ...bare, agents: [agent("home")] }), false);
+  assert.equal(hasMoreThanHome({ ...bare, agents: [agent("home"), agent("scout")] }), true);
+  assert.equal(hasMoreThanHome({ ...bare, agents: [agent("home")], projects: [{ name: "site", path: "/w/site" }] }), true);
 });

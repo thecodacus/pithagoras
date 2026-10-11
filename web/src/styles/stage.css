@@ -358,6 +358,7 @@
 .voice-said.is-agent > :first-child > :first-child { margin-top: 0; }
 .voice-said.is-agent > :last-child > :last-child { margin-bottom: 0; }
 .voice-said.is-agent :is(pre, table) { max-width: 100%; overflow-x: auto; }
+.voice-said.is-error { align-self: flex-start; padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: rgb(var(--danger) / .1); color: rgb(var(--danger)); white-space: pre-wrap; }
 .voice-said-pictures { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .voice-said-pictures img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; }
 
