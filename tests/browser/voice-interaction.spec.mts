@@ -431,3 +431,32 @@ test('the voice settings card stays inside a short screen and scrolls', async ({
   await card.getByRole('group', { name: 'Speaking speed' }).scrollIntoViewIfNeeded();
   await expect(card.getByRole('group', { name: 'Speaking speed' })).toBeInViewport();
 });
+
+test('with push-to-talk on, the orb can be held to talk, as on a phone', async ({ page }) => {
+  test.setTimeout(60000);
+  await page.addInitScript(() => localStorage.setItem('voicePtt', 'on'));
+  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'Hello from the orb.' } }));
+  // The detector starts a moment after the stage is up, and a press before that is not heard.
+  const ready = page.waitForEvent('console', m => m.text().includes('started micVAD'));
+  await start(page);
+  await ready;
+  const orb = page.locator('.voice-avatar');
+  await expect(orb).toHaveClass(/is-holdable/);
+  const box = (await orb.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // A tap is not a turn.
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  await expect(page.getByTestId('sent')).toHaveText('0');
+  // Held while speaking: sent when let go.
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  // Not a real click: the mouse is down on the orb.
+  await page.getByRole('button', { name: 'Inject speech' }).dispatchEvent('click');
+  await page.waitForTimeout(2800);
+  await page.mouse.up();
+  await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 12000 });
+  await expect(page.getByTestId('last-send')).toHaveText(JSON.stringify({ message: 'Hello from the orb.', images: 0, steer: false }));
+});
