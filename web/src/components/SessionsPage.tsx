@@ -11,7 +11,7 @@ import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
-import { folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { folderFrom, folderKeys, hasMoreThanHome, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { useFlip } from "../motion";
 import { useNow } from "../use-now";
@@ -85,7 +85,7 @@ export const SessionsPage = memo(function SessionsPage({
   const matches = useMemo(() => filterSessions(sessions, query), [sessions, query]);
 
   const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
-  const hasProjects = !!places && places.projects.length > 0;
+  const hasPlaces = !!places && hasMoreThanHome(places);
   const folders = useMemo(() => (places ? sortFolders(groupByFolder(matches, places), sort, order) : []), [matches, places, sort, order]);
   const [params, setParams] = useSearchParams();
   /** The one folder shown, with all its chats, when a link or its filter asked for it. */
@@ -106,7 +106,7 @@ export const SessionsPage = memo(function SessionsPage({
       return next;
     });
   const searching = query.trim() !== "";
-  const byFolder = asked === null && grouping === "folders" && hasProjects;
+  const byFolder = asked === null && grouping === "folders" && hasPlaces;
   // Every folder, not only those a search shows: what is kept for one hidden by it must not be let go.
   const allKeys = useMemo(() => (places ? folderKeys(places) : undefined), [places]);
   const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, allKeys);
@@ -250,7 +250,7 @@ export const SessionsPage = memo(function SessionsPage({
               </span>
             </div>
           ) : (
-            hasProjects && (
+            hasPlaces && (
               <div className="mt-3">
                 <ChatsHeading size="md" label={byFolder ? t("Folders") : t("All chats")} grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />
               </div>

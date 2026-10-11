@@ -207,6 +207,20 @@ test('without projects the sidebar lists the chats as before', async ({ page }) 
   await expect(side.getByRole('button', { name: 'Group the chats by folder' })).toHaveCount(0);
 });
 
+test('with a second agent and no projects the sidebar gathers the chats by agent', async ({ page }) => {
+  await portal(page, [chat('h1', 'Home chat', HOME, 30), chat('a1', 'Scout chat', '/data/agents/scout', 5)]);
+  // Asked after the portal's, so heard first.
+  await page.route('**/api/projects*', (route) => route.fulfill({ json: {
+    root: '/w', home: HOME, projects: [],
+    agents: [{ id: 'home', name: 'Nova', home: HOME }, { id: 'scout', name: 'Scout', home: '/data/agents/scout' }],
+  } }));
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(folder(side, 'Nova')).toBeVisible();
+  await expect(folder(side, 'Scout')).toBeVisible();
+  await expect(side.locator('[data-folder]')).toHaveCount(2);
+});
+
 test('a folder shut while searching is shut only for the search', async ({ page }) => {
   const many = Array.from({ length: 12 }, (_, i) => chat(`h${i}`, `Home chat ${i}`, HOME, i + 1));
   await portal(page, [...many, chat('s1', 'Home and site', '/w/site', 40)]);

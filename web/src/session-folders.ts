@@ -51,6 +51,9 @@ export type Places = { home: string; agents?: readonly PlaceAgent[]; projects: r
 const agentsOf = (places: Places): PlaceAgent[] =>
   places.agents?.length ? [...places.agents] : places.home ? [{ id: "home", name: "", home: places.home }] : [];
 
+/** Whether there is more than one place to gather chats in: a project, or a second agent's home. */
+export const hasMoreThanHome = (places: Places) => places.projects.length > 0 || agentsOf(places).length > 1;
+
 /**
  * The projects that are folders of their own: not one that is an agent's
  * home, which a home made inside the workspace root would be listed as.

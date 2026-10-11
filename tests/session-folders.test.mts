@@ -12,6 +12,7 @@ import {
   readOpenFolders,
   sortFolders,
   folderKeys,
+  hasMoreThanHome,
 } from "../web/src/session-folders.ts";
 
 const places = {
@@ -132,4 +133,13 @@ test("each agent's home is a folder named after it, the first one keeping Home's
   assert.ok(folderKeys(withAgents).includes("agent:scout"));
   // By name the first agent comes first, then the others, then the projects.
   assert.deepEqual(keys(sortFolders(folders, "name")).slice(0, 3), [HOME, "agent:scout", projectKey("empty")]);
+});
+
+test("chats are gathered by folder when there is a project or a second agent, not for one agent alone", () => {
+  const agent = (id: string) => ({ id, name: id, home: `/data/agents/${id}` });
+  const bare = { home: "/data/agent", projects: [] };
+  assert.equal(hasMoreThanHome(bare), false);
+  assert.equal(hasMoreThanHome({ ...bare, agents: [agent("home")] }), false);
+  assert.equal(hasMoreThanHome({ ...bare, agents: [agent("home"), agent("scout")] }), true);
+  assert.equal(hasMoreThanHome({ ...bare, agents: [agent("home")], projects: [{ name: "site", path: "/w/site" }] }), true);
 });
