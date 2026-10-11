@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
 import path from "node:path";
 import { DATA_DIR } from "./data-dir.js";
 import { writeFileAtomic } from "./atomic-write.js";
@@ -29,6 +29,11 @@ export function errorLineKey(identity: unknown): string {
 /** The stored WAV of that line, or undefined where there is none. */
 export function readErrorLine(key: string): Buffer | undefined {
   try { return readFileSync(fileOf(key)); } catch { return undefined; }
+}
+
+/** Marks the line as used, so what is cleared away is what was used longest ago and not what was made first. */
+export function touchErrorLine(key: string): void {
+  try { const now = new Date(); utimesSync(fileOf(key), now, now); } catch { /* A line that has gone is made again. */ }
 }
 
 /** Keeps the line, and clears the oldest of the others beyond a few. */

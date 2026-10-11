@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import express, { type Router } from "express";
 import { getSession, getSetting, putSetting } from "../db.js";
 import { agentOf, defaultAgent } from "../agents.js";
-import { errorLineKey, readErrorLine, saveErrorLine } from "../voice-error-line.js";
+import { errorLineKey, readErrorLine, saveErrorLine, touchErrorLine } from "../voice-error-line.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
 export interface VoiceConfig {
@@ -349,6 +349,13 @@ async function postSpeech(settings: VoiceConfig, request: SpeechRequest, signal:
   } while (true);
   return { upstream, busyMs };
 }
+/** Refuses what Breeze answered with when it is not 24 kHz PCM, before any of it is passed on or kept. */
+function checkBreezePcm(upstream: Response, settings: VoiceConfig) {
+  const type = upstream.headers.get("content-type");
+  if (!type?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && type?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
+  const rate = upstream.headers.get("x-sample-rate");
+  if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
+}
 /** One whole phrase as a WAV, for what is kept rather than streamed. */
 async function speechWav(settings: VoiceConfig, request: SpeechRequest, signal: AbortSignal): Promise<Buffer> {
   const { upstream } = await postSpeech(settings, request, signal);
@@ -360,6 +367,7 @@ async function speechWav(settings: VoiceConfig, request: SpeechRequest, signal: 
     wavPcm(wav, runtimeName);
     return wav;
   }
+  checkBreezePcm(upstream, settings);
   return pcmWav(Buffer.from(await upstream.arrayBuffer()));
 }
 /** The line of a stored phrase: a short one, as the engine is asked for it at every start. */
@@ -373,11 +381,16 @@ const makingLines = new Map<string, Promise<boolean>>();
  * mode begins. A line still missing after the last try is made again at the next start (nothing is stored for it), not at error time.
  */
 export const errorLineRetry = { waitsMs: [1000, 3000] };
+/** How long an error waits for a line that is still being made. */
+export const errorLineWaitMs = 8000;
 /** The stored line, where there is one that a player can read: a half-written or damaged file counts as none. */
 function storedErrorLine(key: string): Buffer | undefined {
   const wav = readErrorLine(key);
   if (!wav) return undefined;
-  try { wavPcm(wav, "The stored error line"); return wav; } catch { return undefined; }
+  try { wavPcm(wav, "The stored error line"); } catch { return undefined; }
+  // Used, so it is among the last to be cleared away.
+  touchErrorLine(key);
+  return wav;
 }
 async function makeErrorLine(settings: VoiceConfig, request: SpeechRequest, key: string): Promise<void> {
   const tries = errorLineRetry.waitsMs.length + 1;
@@ -535,9 +548,7 @@ export function voiceRouter(): Router {
         if (req.get("accept") !== "audio/pcm") return res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
         return res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store" }).send(pcm);
       }
-      if (!upstream.headers.get("content-type")?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && upstream.headers.get("content-type")?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
-      const rate = upstream.headers.get("x-sample-rate");
-      if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
+      checkBreezePcm(upstream, settings);
       if (req.get("accept") === "audio/pcm") {
         if (!upstream.body) throw new Error("Breeze returned no audio stream");
         res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
@@ -594,7 +605,12 @@ export function voiceRouter(): Router {
   router.get("/sessions/:id/voice/error-line", async (req, res) => {
     try {
       const text = lineText(req.query.text);
-      const wav = storedErrorLine(errorLineKey((await speechRequest(speechSettings(req.params.id), text)).identity));
+      const key = errorLineKey((await speechRequest(speechSettings(req.params.id), text)).identity);
+      // The line may still be on its way from the start of voice mode (the engine warming up, or on a later try): wait for it,
+      // for about as long as the tries take, rather than say it was never made.
+      const making = makingLines.get(key);
+      if (making) await Promise.race([making.catch(() => {}), delay(errorLineWaitMs)]);
+      const wav = storedErrorLine(key);
       if (!wav) return res.status(404).json({ error: "The spoken error line has not been made for this voice yet" });
       res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
