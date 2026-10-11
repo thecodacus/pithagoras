@@ -157,13 +157,17 @@ What the portal's server prints, which used to be readable only on the host. The
 newest lines are at the bottom and the list follows them as they come, until you
 scroll up to read something; scroll back down and it follows again. Errors are
 red and warnings amber. **Warnings and errors** and **Errors** hide the rest, and
-the search box keeps the lines that contain what you type. An uncaught exception
-and node's own warnings are in the list too, not only what the portal logs itself.
+the search box keeps the lines that contain what you type. Node's own warnings
+are in the list too, not only what the portal logs itself.
 
 **Download** saves everything the portal still holds as a text file, one line per
-entry with its time and level, to attach to an issue. The portal keeps the last
-2000 lines in memory, so a restart starts the list again; for what happened before
-one, the host's own log (`docker logs` for a container) is still where to look.
+entry with its time and level, to attach to an issue. Read the file first and
+remove what is personal before you attach it: it can hold folder paths on the
+host, chat ids, the identifiers of people who wrote to a channel, and the file
+paths an agent was refused. The portal keeps the last 2000 lines (and no more
+than about 2 MB of text) in memory, so a restart starts the list again; for what
+happened before one, and for a crash, which ends the process and the list with
+it, the host's own log (`docker logs` for a container) is still where to look.
 Lines of the chats' own tools, and of containers, are not in it.
 
 ## About

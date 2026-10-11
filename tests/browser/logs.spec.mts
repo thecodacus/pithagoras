@@ -2,14 +2,14 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
 /** Settings → Logs over a server whose lines are the test's: what the page asks for, and what it shows of the answer. */
-async function portal(page: Page, lines: { id: number; level: string; text: string }[], boot = { value: 'a' }) {
+async function portal(page: Page, lines: { id: number; level: string; text: string }[], boot = { value: 'a' }, gap = { value: false }) {
   const asked: string[] = [];
   await mockPortal(page, ({ path, url }) => {
     if (path !== '/api/logs') return undefined;
     asked.push(url.search);
     const since = url.searchParams.get('since');
     const wanted = lines.filter((l) => since === null || l.id > Number(since));
-    return { boot: boot.value, last: lines.length ? lines[lines.length - 1].id : 0, lines: wanted.map((l) => ({ ...l, at: '2026-10-01T09:00:00Z' })) };
+    return { boot: boot.value, gap: gap.value, last: lines.length ? lines[lines.length - 1].id : 0, lines: wanted.map((l) => ({ ...l, at: '2026-10-01T09:00:00Z' })) };
   }, { settings: true });
   return asked;
 }
@@ -68,4 +68,21 @@ test('a server that started again replaces the list instead of waiting for ids i
   lines.splice(0, lines.length, { id: 1, level: 'info', text: 'new boot' });
   await expect(log).toContainText('new boot', { timeout: 8000 });
   await expect(log).not.toContainText('old boot');
+});
+
+test('lines let go before they were read replace the list rather than joining it', async ({ page }) => {
+  const lines = [{ id: 1, level: 'info', text: 'before the gap' }];
+  const gap = { value: false };
+  const asked = await portal(page, lines, { value: 'a' }, gap);
+  await page.goto('/settings/logs');
+  const log = page.getByRole('log', { name: 'Server logs' });
+  await expect(log).toContainText('before the gap');
+  // The server dropped the lines the page was waiting for; its answer to since= starts later.
+  lines.splice(0, lines.length, { id: 50, level: 'info', text: 'after the gap' });
+  gap.value = true;
+  await expect(log).toContainText('after the gap', { timeout: 8000 });
+  await expect(log).not.toContainText('before the gap');
+  gap.value = false;
+  // The newest lines were asked for again, not only what came after the last id seen.
+  expect(asked.filter((q) => q.includes('limit=')).length).toBeGreaterThanOrEqual(2);
 });

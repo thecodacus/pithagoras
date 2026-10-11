@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { LOG_BOOT, LOG_KEEP, lastLogId, logFileLine, readLogs, type LogLevel } from "../logs.js";
+import { LOG_BOOT, LOG_KEEP, lastLogId, logFileLine, logGap, readLogs, type LogLevel } from "../logs.js";
 
 const LEVELS: LogLevel[] = ["info", "warn", "error"];
 
@@ -11,6 +11,8 @@ export function logsRouter(): Router {
    * `?since=<id>` returns what came after that line, so the page asks every few
    * seconds for the new ones only. `boot` names this start of the server: the
    * ids begin again with each, and a page holding one from before is told so.
+   * `gap` is set when the lines after `since` have partly been let go already:
+   * the answer then starts later than the page expects.
    */
   router.get("/logs", (req, res) => {
     const since = req.query.since === undefined ? undefined : Number(req.query.since);
@@ -21,7 +23,7 @@ export function logsRouter(): Router {
     if (!LEVELS.includes(level as LogLevel)) return res.status(400).json({ error: `level must be one of ${LEVELS.join(", ")}` });
     const requested = Number(req.query.limit);
     const limit = Number.isFinite(requested) && requested > 0 ? Math.min(Math.floor(requested), LOG_KEEP) : 500;
-    res.json({ boot: LOG_BOOT, last: lastLogId(), lines: readLogs({ since, min: level as LogLevel, limit }) });
+    res.json({ boot: LOG_BOOT, last: lastLogId(), gap: since !== undefined && logGap(since), lines: readLogs({ since, min: level as LogLevel, limit }) });
   });
 
   /** All that is kept, as a text file. */

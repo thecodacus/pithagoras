@@ -21,15 +21,22 @@ export interface LogLine {
   text: string;
 }
 
-/** A busy server prints thousands of lines an hour; this is minutes of that, and about a megabyte at the longest. */
+/** A busy server prints thousands of lines an hour; this is minutes of that. */
 export const LOG_KEEP = 2000;
 /** A stack trace or a dumped object is worth reading to the end; a pasted file is not. */
 export const LOG_LINE_MAX = 8000;
+/**
+ * The count alone would let a crash loop of long lines fill 2000 x 8000
+ * characters, 16 MB for the page to download and render; the oldest lines go
+ * once the text held passes this, whatever their number.
+ */
+export const LOG_CHARS_MAX = 2_000_000;
 
 /** Changes with every start, so a page that has been polling can tell that the ids began again. */
 export const LOG_BOOT = randomBytes(6).toString("hex");
 
 let lines: LogLine[] = [];
+let chars = 0;
 let nextId = 1;
 const listeners = new Set<(line: LogLine) => void>();
 
@@ -41,7 +48,11 @@ export function recordLog(level: LogLevel, text: string): LogLine {
     text: text.length > LOG_LINE_MAX ? `${text.slice(0, LOG_LINE_MAX)}… (${text.length - LOG_LINE_MAX} more characters)` : text,
   };
   lines.push(line);
-  if (lines.length > LOG_KEEP) lines = lines.slice(lines.length - LOG_KEEP);
+  chars += line.text.length;
+  // The oldest go until both limits hold; the newest line stays, however long.
+  let drop = 0;
+  while (lines.length - drop > 1 && (lines.length - drop > LOG_KEEP || chars > LOG_CHARS_MAX)) chars -= lines[drop++].text.length;
+  if (drop) lines = lines.slice(drop);
   for (const l of listeners) l(line);
   return line;
 }
@@ -63,9 +74,13 @@ export function readLogs(opts: { since?: number; min?: LogLevel; limit?: number 
 /** The id of the newest line, 0 before there is one. */
 export const lastLogId = () => nextId - 1;
 
+/** Whether lines after `since` have been let go, so that a reader holding it has missed some. */
+export const logGap = (since: number) => since + 1 < (lines.length ? lines[0].id : nextId);
+
 /** For a test: forget everything. */
 export function resetLogs() {
   lines = [];
+  chars = 0;
   nextId = 1;
 }
 
@@ -74,11 +89,15 @@ export const logFileLine = (l: LogLine) => `${l.at} ${l.level.toUpperCase().padE
 
 let installed = false;
 
+/** How node prints its own warnings: `(node:123) DeprecationWarning: …`, with a `[DEP0040] ` before the name for some. */
+const NODE_WARNING = /^\(node:\d+\) (?:\[[A-Z0-9_]+\] )?\w*Warning:/;
+
 /**
- * Starts keeping a copy of the console, and of what the process reports about
- * itself without printing through it: an exception nothing caught, which ends
- * the process, and node's own warnings. Both are watched, not handled — a
- * handler would stop node from ending on the first and from printing the second.
+ * Starts keeping a copy of the console. Node prints its own warnings through
+ * `console.error`, so they arrive here by that way (a `process.on("warning")`
+ * listener would record each a second time); they are warnings, not errors, and
+ * are filed as such. An uncaught exception is not recorded: it ends the process
+ * and the list with it, so what it printed is only in the host's log.
  */
 export function installLogCapture() {
   if (installed) return;
@@ -89,7 +108,8 @@ export function installLogCapture() {
       original(...args);
       // Never let a value that cannot be formatted take the caller down.
       try {
-        recordLog(level, format(...args));
+        const text = format(...args);
+        recordLog(name === "error" && NODE_WARNING.test(text) ? "warn" : level, text);
       } catch {
         /* the original has printed it */
       }
@@ -100,8 +120,4 @@ export function installLogCapture() {
   wrap("debug", "info");
   wrap("warn", "warn");
   wrap("error", "error");
-  process.on("uncaughtExceptionMonitor", (err, origin) => {
-    recordLog("error", `${origin}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
-  });
-  process.on("warning", (w) => recordLog("warn", `${w.name}: ${w.message}`));
 }

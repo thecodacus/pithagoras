@@ -1334,6 +1334,8 @@ export interface LogLine {
 export interface LogsResponse {
   boot: string;
   last: number;
+  /** Lines after `since` were let go before they were read, so `lines` does not join what the page holds. */
+  gap?: boolean;
   lines: LogLine[];
 }
 

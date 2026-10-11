@@ -48,8 +48,8 @@ export function LogsPanel({ onError }: { onError: (message: string | null) => vo
     try {
       const first = !had.current;
       let r = await api.logs(first ? { limit: KEEP } : { since: last.current });
-      // The ids began again: what is held belongs to the server before, and is replaced.
-      const restarted = !first && r.boot !== boot.current;
+      // The ids began again, or lines went by unread: what is held no longer joins the answer, and is replaced.
+      const restarted = !first && (r.boot !== boot.current || r.gap);
       if (restarted) r = await api.logs({ limit: KEEP });
       boot.current = r.boot;
       if (r.lines.length) last.current = r.lines[r.lines.length - 1].id;
