@@ -122,11 +122,15 @@ test("any extension's markup message is shown readably, and words that are not m
     assert.equal(status(word).tone, "info", word);
     assert.equal(status(word).text, `CI for PR 7 (${word})`, word);
   }
-  for (const word of ["failed", "Timed-out", "cancelled", "aborted"]) {
+  for (const word of ["failed", "Timed-out", "timed_out", "timed out", "cancelled", "aborted"]) {
     assert.equal(status(word).tone, "warn", word);
     assert.equal(status(word).text, `CI for PR 7 (${word})`, word);
   }
   // The status is not said twice, and an exit code comes after it.
+  // A status spelled differently from the same words in the summary is not added after them.
+  for (const [summary, word] of [["CI for PR 7 timed out", "timed-out"], ["CI for PR 7 timed out", "timed_out"], ["Deploy cancelled", "canceled"], ["Deploy canceled", "cancelled"]]) {
+    assert.deepEqual(shown(`<ci>\n  <summary>${summary}</summary>\n  <status>${word}</status>\n</ci>`).map(line), [`notice:${summary}`], word);
+  }
   assert.deepEqual(shown("<deploy>\n  <message>Deploy of web</message>\n  <status>timeout</status>\n</deploy>").map(line), ["notice:Deploy of web (timeout)"]);
   assert.deepEqual(shown("<deploy>\n  <message>Deploy of web failed</message>\n  <status>failed</status>\n  <exit-code>3</exit-code>\n</deploy>").map(line), ["notice:Deploy of web failed (exit code 3)"]);
   assert.deepEqual(shown("<deploy>\n  <message>Deploy of web</message>\n  <status>failed</status>\n  <exit-code>3</exit-code>\n</deploy>").map(line), ["notice:Deploy of web (failed, exit code 3)"]);

@@ -230,12 +230,14 @@ function markupNotice(text: string): { text: string; tone: "info" | "warn" } | n
   const code = field("exit-code");
   const exit = code !== undefined && /^-?\d+$/.test(code) ? code : undefined;
   const error = field("error");
-  const warn = (status !== undefined && /^(failed|failure|error|errored|killed|cancelled|canceled|timeout|timed-out|aborted)$/i.test(status)) || !!error || (exit !== undefined && exit !== "0");
+  const warn = (status !== undefined && /^(failed|failure|error|errored|killed|cancelled|canceled|time(?:d)?[-_ ]?out|aborted)$/i.test(status)) || !!error || (exit !== undefined && exit !== "0");
   if (main === undefined) return fields.length ? { text: fields.map(([k, v]) => `${k}: ${v}`).join("\n"), tone: warn ? "warn" : "info" } : null;
   // An error usually says the code itself ("Exited with code 2"), so the code is added only where nothing else says it.
   const extra = error ?? (exit !== undefined && exit !== "0" ? `exit code ${exit}` : "");
   // The summary of pi-background-tasks ends with the status already; a title or message of another extension does not.
-  const saysStatus = status !== undefined && new RegExp(`(^|[^\\w-])${status.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w-])`, "i").test(main);
+  // "timed-out", "timed_out" and "timed out" are one word, and so are "canceled" and "cancelled".
+  const words = (v: string) => v.toLowerCase().replace(/[-_\s]+/g, " ").replace(/\bcanceled\b/g, "cancelled").trim();
+  const saysStatus = status !== undefined && new RegExp(`(^|[^\\w])${words(status).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w])`).test(words(main));
   const notes = [status !== undefined && !saysStatus ? status : "", extra].filter(Boolean).join(", ");
   return { text: notes ? `${main} (${notes})` : main, tone: warn ? "warn" : "info" };
 }
