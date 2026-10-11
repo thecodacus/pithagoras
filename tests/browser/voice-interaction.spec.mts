@@ -505,3 +505,79 @@ test('the voice settings card stays inside a short screen and scrolls', async ({
   await card.getByRole('group', { name: 'Speaking speed' }).scrollIntoViewIfNeeded();
   await expect(card.getByRole('group', { name: 'Speaking speed' })).toBeInViewport();
 });
+
+test('with push-to-talk on, the orb can be held to talk, as on a phone', async ({ page }) => {
+  test.setTimeout(60000);
+  await page.addInitScript(() => localStorage.setItem('voicePtt', 'on'));
+  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'Hello from the orb.' } }));
+  // The detector starts a moment after the stage is up, and a press before that is not heard.
+  const ready = page.waitForEvent('console', m => m.text().includes('started micVAD'));
+  await start(page);
+  await ready;
+  const orb = page.locator('.voice-avatar');
+  await expect(orb).toHaveClass(/is-holdable/);
+  const box = (await orb.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // A tap is not a turn.
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  await expect(page.getByTestId('sent')).toHaveText('0');
+  // Held while speaking: sent when let go.
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  // A second finger lifting is not the first letting go.
+  await orb.dispatchEvent('pointerup', { pointerId: 7 });
+  await orb.dispatchEvent('pointercancel', { pointerId: 7 });
+  await page.waitForTimeout(400);
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  // Not a real click: the mouse is down on the orb.
+  await page.getByRole('button', { name: 'Inject speech' }).dispatchEvent('click');
+  await page.waitForTimeout(2800);
+  await page.mouse.up();
+  await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 12000 });
+  await expect(page.getByTestId('last-send')).toHaveText(JSON.stringify({ message: 'Hello from the orb.', images: 0, steer: false }));
+});
+
+test('turning push-to-talk off during a hold does not leave the orb dead for the next hold', async ({ page }) => {
+  test.setTimeout(60000);
+  await page.addInitScript(() => localStorage.setItem('voicePtt', 'on'));
+  const ready = page.waitForEvent('console', m => m.text().includes('started micVAD'));
+  await start(page);
+  await ready;
+  const orb = page.locator('.voice-avatar');
+  const status = page.getByRole('status');
+  const box = (await orb.boundingBox())!;
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  // The mouse has one pointer id for good: the first press after the switch has to count.
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await expect(status).toContainText('Hearing you');
+  await page.keyboard.press('h');
+  await expect(orb).not.toHaveClass(/is-holdable/);
+  await page.mouse.up();
+  await page.keyboard.press('h');
+  await expect(orb).toHaveClass(/is-holdable/);
+  await page.mouse.down();
+  await expect(status).toContainText('Hearing you');
+  await page.mouse.up();
+  await expect(status).not.toContainText('Hearing you');
+  // Every finger is a new pointer id, so a stale one would block all of them.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+  const touch = async (type: 'touchStart' | 'touchEnd') => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+  await touch('touchStart');
+  await expect(status).toContainText('Hearing you');
+  await page.keyboard.press('h');
+  await expect(orb).not.toHaveClass(/is-holdable/);
+  await touch('touchEnd');
+  await page.keyboard.press('h');
+  await expect(orb).toHaveClass(/is-holdable/);
+  for (let i = 0; i < 2; i++) {
+    await touch('touchStart');
+    await expect(status).toContainText('Hearing you');
+    await touch('touchEnd');
+    await expect(status).not.toContainText('Hearing you');
+  }
+});

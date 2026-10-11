@@ -4,7 +4,7 @@ import { useWorkPanels } from "../use-work-panels";
 import { FilesPanel } from "./FilesPanel";
 import { keepFileActivity, latestFileActivity, type FileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { Item } from "../transcript";
 import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
@@ -253,7 +253,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       if (!ptt || !matches(bindings["voice.hold"], e)) return;
       e.preventDefault(); e.stopPropagation(); onHold(false);
     };
-    const away = () => { if (keys.current.ptt) keys.current.onHold(false); };
+    const away = () => { holder.current = null; if (keys.current.ptt) keys.current.onHold(false); };
     window.addEventListener("keydown", down, true); window.addEventListener("keyup", up, true); window.addEventListener("blur", away);
     return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", away); };
   }, []);
@@ -304,6 +304,15 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         e.preventDefault(); e.stopPropagation(); setBrowserMax(false);
       }, true);
     } catch { /* not the portal's page: its keys stay its own */ }
+  };
+  // A press on the microphone button or the orb holds the key down; the pointer is captured so that sliding off, or a touch the phone turns into a scroll or a long-press menu, still ends it where it began. Only the finger that started the hold ends it: a second one lifting is not the first letting go.
+  const holder = useRef<number | null>(null);
+  // Turning push-to-talk off mid-hold takes the handlers away, so the lift never arrives; the next hold must not find the old one still there.
+  useEffect(() => { holder.current = null; }, [ptt]);
+  const release = (e: ReactPointerEvent<HTMLElement>) => { if (holder.current !== e.pointerId) return; holder.current = null; onHold(false); };
+  const holdHandlers = {
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { e.preventDefault(); if (holder.current !== null) return; holder.current = e.pointerId; e.currentTarget.setPointerCapture(e.pointerId); onHold(true); },
+    onPointerUp: release, onPointerCancel: release, onContextMenu: (e: ReactMouseEvent) => e.preventDefault(),
   };
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
@@ -457,7 +466,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     </section>
     <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} />
     <div className="voice-presence">
-      <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} look={orbStyle} /></div>
+      {/* With push-to-talk on, the orb can be held as well as the microphone button: it is the big target on a phone. */}
+      <div className={`voice-avatar ${ptt ? "is-holdable" : ""}`} {...(ptt && !starting ? holdHandlers : {})}><VoiceOrb mode={mode} levels={levels} look={orbStyle} /></div>
       <div className="voice-dock-center">
         {workPhase && (workPhase.label === 'processing the prompt' || workPhase.label === 'compacting the conversation') ? <ActivityProgress phase={workPhase} /> : <>
         <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? t('Compacting context') : thought && anyPanel ? t("Thinking") : status}</div>
@@ -469,8 +479,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       <div className="voice-stage-controls">
         {ptt
           ? <button type="button" className={`voice-stage-action voice-hold ${holding ? "is-holding" : ""}`} title={`${t("Hold to talk")}${touch ? "" : hint("voice.hold")}`} aria-label={t("Hold to talk")} aria-pressed={holding} disabled={starting}
-              onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); onHold(true); }}
-              onPointerUp={() => onHold(false)} onPointerCancel={() => onHold(false)} onContextMenu={e => e.preventDefault()}><LuMic /></button>
+              {...holdHandlers}><LuMic /></button>
           : <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={`${muted ? t('Unmute microphone') : t('Mute microphone')}${hint('voice.mute')}`} aria-label={muted ? t("Unmute microphone") : t("Mute microphone")} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>}
         <button type="button" className={`voice-stage-action ${attachments.length ? "has-pictures" : ""}`} title={`${t("Add a picture")}${hint("voice.picture")}`} aria-label={t("Add a picture")} disabled={starting} onClick={() => picker.current?.click()}><LuImagePlus />{attachments.length > 0 && <i>{attachments.length}</i>}</button>
         <button type="button" className="voice-stage-action" title={`${t("Repeat the last reply")}${hint("voice.repeat")}`} aria-label={t("Repeat the last reply")} disabled={starting || !canRepeat || speaking} onClick={onRepeat}><LuRotateCcw /></button>

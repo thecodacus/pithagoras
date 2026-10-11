@@ -758,6 +758,8 @@ export const api = {
   uploadPicture: async (file: File): Promise<GalleryPicture> => (await uploadBytes(`/api/images/upload?name=${encodeURIComponent(file.name)}`, file, file.name)).picture,
   /** The picture as the file it is. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
   galleryFileUrl: (id: string) => `/api/images/${id}/file`,
+  /** The small copy of a picture, which the portal makes when it is asked for; for the pictures the gallery says have one (`GalleryPicture.thumb`). */
+  galleryThumbUrl: (id: string) => `/api/images/${id}/thumb`,
   /** Each as asked, files and all: what could not be deleted is said for each. */
   deletePictures: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/images/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
@@ -1444,6 +1446,8 @@ export interface GalleryPicture {
   createdAt: number;
   bytes: number;
   fileName: string;
+  /** The tiles load a small copy of it (see `galleryThumbUrl`), and not the file. */
+  thumb: boolean;
 }
 
 export interface GalleryPage {

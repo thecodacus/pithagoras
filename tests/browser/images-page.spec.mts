@@ -18,6 +18,7 @@ interface Pic {
   createdAt: number;
   bytes: number;
   fileName: string;
+  thumb?: boolean;
 }
 interface Job {
   id: string;
@@ -53,6 +54,7 @@ const pic = (over: Partial<Pic> & { age?: number } = {}): Pic => {
     createdAt: Date.now() - age * 60_000,
     bytes: 120_000,
     fileName: `image-${n}.png`,
+    thumb: false,
     ...rest,
   };
 };
@@ -74,7 +76,7 @@ const feature = (over: Record<string, unknown> = {}) => {
 
 async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
   const pics = [...pictures];
-  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], limit: 4 };
+  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], limit: 4 };
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
@@ -137,6 +139,13 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
       state.deleted.push(ids);
       for (const id of ids) pics.splice(pics.findIndex((x) => x.id === id), 1);
       return { deleted: ids, failed: [] };
+    }
+    if (/^\/api\/images\/[0-9a-f]{12}\/thumb$/.test(p)) {
+      // The portal makes the small copy when it is asked for: here it is a smaller drawing.
+      const id = p.split('/')[3];
+      state.thumbFiles.push(id);
+      await route.fulfill({ body: svg(id, 200, 150), contentType: 'image/svg+xml' });
+      return DONE;
     }
     if (/^\/api\/images\/[0-9a-f]{12}\/file$/.test(p)) {
       const id = p.split('/')[3];
@@ -2357,4 +2366,31 @@ test('the gallery reads in the dark theme as in the light', async ({ page }) => 
     });
     expect(colours.ink).not.toBe(colours.ground);
   }
+});
+
+test('a tile of a big picture loads its small copy, and one of a small file or a GIF loads the file', async ({ page }) => {
+  const big = pic({ prompt: 'A heavy picture', age: 5, thumb: true });
+  const small = pic({ prompt: 'A small file', age: 4, bytes: 2_000 });
+  const animated = pic({ prompt: 'A moving one', age: 3, fileName: 'move.gif' });
+  const p = await portal(page, { pictures: [big, small, animated] });
+  await page.goto('/images');
+  for (const name of ['A heavy picture', 'A small file', 'A moving one']) await loaded(tile(page, name).getByRole('img'));
+  await expect(tile(page, 'A heavy picture').getByRole('img')).toHaveAttribute('src', `/api/images/${big.id}/thumb`);
+  await expect(tile(page, 'A small file').getByRole('img')).toHaveAttribute('src', `/api/images/${small.id}/file`);
+  await expect(tile(page, 'A moving one').getByRole('img')).toHaveAttribute('src', `/api/images/${animated.id}/file`);
+  expect(p.state.thumbFiles).toEqual([big.id]);
+  expect(p.state.files, 'the big picture\'s file is not loaded for its tile').not.toContain(big.id);
+});
+
+test('the pictures of an edit show their small copies in the form', async ({ page }) => {
+  const a = pic({ prompt: 'With a copy', age: 5, thumb: true });
+  const b = pic({ prompt: 'Without one', age: 4 });
+  const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await pick(page, 'With a copy', 'Without one');
+  await expect(thumbs(page)).toHaveCount(2);
+  await loaded(thumbs(page).first());
+  await loaded(thumbs(page).last());
+  expect(await thumbs(page).evaluateAll((els) => els.map((e) => e.getAttribute('src')))).toEqual([`/api/images/${a.id}/thumb`, `/api/images/${b.id}/file`]);
+  expect(p.state.thumbFiles).toContain(a.id);
 });

@@ -125,7 +125,7 @@ settings**:
 | --- | --- |
 | **Speaking speed** | 1×, 1.25×, 1.5× or 1.75×. Speech is made faster in the browser without raising the voice (WSOLA time stretching), so it works with every speech runtime and a streamed reply starts as early as before. |
 | **Talking while the agent works** | **Stops it** (default): speaking interrupts the task, as before. **Adds to the task**: what you say goes into the running task after its current step, and the task carries on; use Stop to stop it. |
-| **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
+| **Push to talk** | Only what you say while holding <kbd>Space</kbd> (outside a text field) or the microphone button is heard; on a phone, hold the microphone button or the orb itself. A tap, or a press with no speech in it, is not sent. Useful with background noise or other people talking. |
 | **Sound effects** | The cues for connection, sending, mute and panels. |
 
 Each setting is remembered in this browser.

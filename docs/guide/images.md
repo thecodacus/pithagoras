@@ -227,6 +227,16 @@ one that was found, how it was made for the others) and how long ago.
 - **Paging.** 48 at a time. The next page is loaded as you near the end of what is
   there, and **Show more** does the same. A picture far down is not fetched until
   it is near the screen, so a gallery of hundreds stays quick.
+- **Small copies.** The tiles, and the pictures in the form of an edit, show a small copy of
+  each picture (at most 480 pixels on a side, a few tens of kilobytes instead of megabytes)
+  instead of the whole file; the viewer still opens the whole file. The portal makes a copy
+  itself the first time a tile asks for it, as a WebP picture, which keeps transparency, and
+  keeps it beside the gallery from then on, so every later view on any device loads the
+  small one. A copy is made again when the file has changed, and goes with the picture. Files
+  of 48 KB or less and GIFs (which would stop moving) have no copy and are shown as they are,
+  and so is an animated picture or one the portal cannot read. At most two copies are made at
+  a time, so a folder of large files makes the first view slower but not heavy on the server.
+  Nothing needs setting up. Pictures in the chat itself are shown as they were.
 - **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*:
   all, made, changed, from this computer, not known. They are in the address
   (`/images?origin=chat&kind=edited`), so a link keeps them and **Back** goes through them.

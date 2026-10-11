@@ -166,50 +166,68 @@ export type DiffOf =
   | { of: "range"; base: string; path?: string; from?: string }
   | { of: "stash"; stash: string };
 
-const base = (id: string) => `/api/sessions/${encodeURIComponent(id)}/git`;
-const post = <T = { ok: true }>(url: string, body: unknown = {}) => json<T>(url, { method: "POST", body: JSON.stringify(body) });
+/** Which repository: the chat's, and the clone in its folder that is meant ("" for the one the folder is in). */
+export interface GitTarget {
+  session: string;
+  repo: string;
+}
+
+/** A repository the chat's folder has, as the server found it. */
+export interface RepoChoice {
+  /** From the chat's folder; "" for the repository the folder itself is in. */
+  path: string;
+  name: string;
+}
+
 const query = (params: Record<string, string | number | undefined>) =>
   Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== "")
     .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
     .join("&");
+/** The URL of `rest` for a repository, with what it is asked in `params`. */
+const at = (t: GitTarget, rest = "", params: Record<string, string | number | undefined> = {}) => {
+  const q = query({ ...params, repo: t.repo });
+  return `/api/sessions/${encodeURIComponent(t.session)}/git${rest}${q ? `?${q}` : ""}`;
+};
+const post = <T = { ok: true }>(url: string, body: unknown = {}) => json<T>(url, { method: "POST", body: JSON.stringify(body) });
 
 export const gitApi = {
-  state: (id: string) => json<GitState>(base(id)),
-  init: (id: string) => post(`${base(id)}/init`),
+  /** The repositories in the chat's folder: the one around it, and the clones below. */
+  repos: (session: string) => json<{ repos: RepoChoice[]; truncated: boolean }>(at({ session, repo: "" }, "/repos")),
+  state: (id: GitTarget) => json<GitState>(at(id)),
+  init: (id: GitTarget) => post(at(id, "/init")),
   /** Asked apart from the state: it asks GitHub, and the state is what is on this disk. */
-  gh: (id: string, fresh = false) => json<GhState>(`${base(id)}/gh${fresh ? "?fresh=1" : ""}`),
-  diff: (id: string, what: DiffOf) => json<Diff>(`${base(id)}/diff?${query(what as Record<string, string>)}`),
-  stage: (id: string, paths: string[] | "all") => post(`${base(id)}/stage`, paths === "all" ? { all: true } : { paths }),
-  unstage: (id: string, paths: string[] | "all") => post(`${base(id)}/unstage`, paths === "all" ? { all: true } : { paths }),
-  discard: (id: string, paths: string[]) => post(`${base(id)}/discard`, { paths }),
-  commit: (id: string, message: string, amend = false) => post<{ sha: string }>(`${base(id)}/commit`, { message, amend }),
-  abort: (id: string) => post(`${base(id)}/abort`),
-  continue: (id: string) => post(`${base(id)}/continue`),
-  log: (id: string, opts: { ref?: string; skip?: number; limit?: number; path?: string } = {}) =>
-    json<{ commits: Commit[] }>(`${base(id)}/log?${query(opts)}`),
-  commitDetail: (id: string, sha: string) => json<CommitDetail>(`${base(id)}/commits/${encodeURIComponent(sha)}`),
-  branches: (id: string) => json<{ branches: Branch[] }>(`${base(id)}/branches`),
-  switch: (id: string, name: string, remote = false) => post(`${base(id)}/switch`, { name, remote }),
-  createBranch: (id: string, name: string, from?: string) => post(`${base(id)}/branches`, { name, from }),
-  deleteBranch: (id: string, name: string, force = false) => post(`${base(id)}/branches/delete`, { name, force }),
-  fetch: (id: string) => post<{ said: string }>(`${base(id)}/fetch`),
-  pull: (id: string) => post<{ said: string }>(`${base(id)}/pull`),
-  push: (id: string) => post<{ said: string }>(`${base(id)}/push`),
-  stashes: (id: string) => json<{ stashes: Stash[] }>(`${base(id)}/stashes`),
-  stash: (id: string, message?: string) => post(`${base(id)}/stashes`, { message }),
+  gh: (id: GitTarget, fresh = false) => json<GhState>(at(id, "/gh", { fresh: fresh ? 1 : undefined })),
+  diff: (id: GitTarget, what: DiffOf) => json<Diff>(at(id, "/diff", what as Record<string, string>)),
+  stage: (id: GitTarget, paths: string[] | "all") => post(at(id, "/stage"), paths === "all" ? { all: true } : { paths }),
+  unstage: (id: GitTarget, paths: string[] | "all") => post(at(id, "/unstage"), paths === "all" ? { all: true } : { paths }),
+  discard: (id: GitTarget, paths: string[]) => post(at(id, "/discard"), { paths }),
+  commit: (id: GitTarget, message: string, amend = false) => post<{ sha: string }>(at(id, "/commit"), { message, amend }),
+  abort: (id: GitTarget) => post(at(id, "/abort")),
+  continue: (id: GitTarget) => post(at(id, "/continue")),
+  log: (id: GitTarget, opts: { ref?: string; skip?: number; limit?: number; path?: string } = {}) => json<{ commits: Commit[] }>(at(id, "/log", opts)),
+  commitDetail: (id: GitTarget, sha: string) => json<CommitDetail>(at(id, `/commits/${encodeURIComponent(sha)}`)),
+  branches: (id: GitTarget) => json<{ branches: Branch[] }>(at(id, "/branches")),
+  switch: (id: GitTarget, name: string, remote = false) => post(at(id, "/switch"), { name, remote }),
+  createBranch: (id: GitTarget, name: string, from?: string) => post(at(id, "/branches"), { name, from }),
+  deleteBranch: (id: GitTarget, name: string, force = false) => post(at(id, "/branches/delete"), { name, force }),
+  fetch: (id: GitTarget) => post<{ said: string }>(at(id, "/fetch")),
+  pull: (id: GitTarget) => post<{ said: string }>(at(id, "/pull")),
+  push: (id: GitTarget) => post<{ said: string }>(at(id, "/push")),
+  stashes: (id: GitTarget) => json<{ stashes: Stash[] }>(at(id, "/stashes")),
+  stash: (id: GitTarget, message?: string) => post(at(id, "/stashes"), { message }),
   /** `sha` is the stash meant: nothing is done when `ref` has come to be another. */
-  stashDo: (id: string, action: "apply" | "pop" | "drop", ref: string, sha: string) => post(`${base(id)}/stashes/${action}`, { ref, sha }),
-  compare: (id: string, baseRef?: string) => json<{ comparison: Comparison | null }>(`${base(id)}/compare?${query({ base: baseRef })}`),
-  pulls: (id: string, state = "open") => json<{ pulls: PullSummary[] }>(`${base(id)}/pulls?state=${state}`),
-  currentPull: (id: string) => json<{ pull: PullDetail | null }>(`${base(id)}/pulls/current`),
-  pullDetail: (id: string, n: number) => json<{ pull: PullDetail }>(`${base(id)}/pulls/${n}`),
-  pullDiff: (id: string, n: number) => json<Diff>(`${base(id)}/pulls/${n}/diff`),
-  createPull: (id: string, opts: { title: string; body: string; base?: string; draft?: boolean }) => post<{ url: string }>(`${base(id)}/pulls`, opts),
-  checkoutPull: (id: string, n: number) => post(`${base(id)}/pulls/${n}/checkout`),
-  mergePull: (id: string, n: number, method: "merge" | "squash" | "rebase", deleteBranch: boolean) =>
-    post<{ said: string }>(`${base(id)}/pulls/${n}/merge`, { method, deleteBranch }),
-  commentPull: (id: string, n: number, body: string) => post(`${base(id)}/pulls/${n}/comment`, { body }),
-  reviewPull: (id: string, n: number, action: "approve" | "request-changes" | "comment", body: string) =>
-    post(`${base(id)}/pulls/${n}/review`, { action, body }),
+  stashDo: (id: GitTarget, action: "apply" | "pop" | "drop", ref: string, sha: string) => post(at(id, `/stashes/${action}`), { ref, sha }),
+  compare: (id: GitTarget, baseRef?: string) => json<{ comparison: Comparison | null }>(at(id, "/compare", { base: baseRef })),
+  pulls: (id: GitTarget, state = "open") => json<{ pulls: PullSummary[] }>(at(id, "/pulls", { state })),
+  currentPull: (id: GitTarget) => json<{ pull: PullDetail | null }>(at(id, "/pulls/current")),
+  pullDetail: (id: GitTarget, n: number) => json<{ pull: PullDetail }>(at(id, `/pulls/${n}`)),
+  pullDiff: (id: GitTarget, n: number) => json<Diff>(at(id, `/pulls/${n}/diff`)),
+  createPull: (id: GitTarget, opts: { title: string; body: string; base?: string; draft?: boolean }) => post<{ url: string }>(at(id, "/pulls"), opts),
+  checkoutPull: (id: GitTarget, n: number) => post(at(id, `/pulls/${n}/checkout`)),
+  mergePull: (id: GitTarget, n: number, method: "merge" | "squash" | "rebase", deleteBranch: boolean) =>
+    post<{ said: string }>(at(id, `/pulls/${n}/merge`), { method, deleteBranch }),
+  commentPull: (id: GitTarget, n: number, body: string) => post(at(id, `/pulls/${n}/comment`), { body }),
+  reviewPull: (id: GitTarget, n: number, action: "approve" | "request-changes" | "comment", body: string) =>
+    post(at(id, `/pulls/${n}/review`), { action, body }),
 };

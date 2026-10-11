@@ -817,7 +817,7 @@ const GalleryTile = memo(function GalleryTile({
       <ImagePreview
         state={state}
         edit={job?.kind === "edit" || picture?.kind === "edited"}
-        src={here ? api.galleryFileUrl(id) : undefined}
+        src={here ? (picture?.thumb ? api.galleryThumbUrl(id) : api.galleryFileUrl(id)) : undefined}
         before={job?.from && making ? api.galleryFileUrl(job.from) : undefined}
         ratio={1}
         title={picture?.prompt || job?.prompt || picture?.fileName}
