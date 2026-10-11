@@ -29,6 +29,7 @@ interface Job {
   startedAt: number;
   finishedAt?: number;
   pictureId?: string;
+  notes?: string[];
   error?: string;
 }
 
@@ -148,11 +149,11 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
     state,
     pics,
     /** A running job is done: its picture is in the gallery, as the portal puts it. */
-    finish(id: string, over: Partial<Pic> = {}) {
+    finish(id: string, over: Partial<Pic> = {}, notes?: string[]) {
       const j = state.jobs.find((x) => x.id === id)!;
       const made = pic({ prompt: j.prompt, kind: j.kind === 'edit' ? 'edited' : 'generated', from: j.from ?? null, ...over });
       pics.push(made);
-      Object.assign(j, { state: 'done', pictureId: made.id, finishedAt: Date.now() });
+      Object.assign(j, { state: 'done', pictureId: made.id, finishedAt: Date.now(), ...(notes ? { notes } : {}) });
       return made;
     },
     fail(id: string, error: string) {
@@ -1062,6 +1063,34 @@ test('Edit it puts the picture in the form, and the change is sent with it', asy
   await expect(page.getByPlaceholder('Describe the picture')).toBeVisible();
   await toEdit(page);
   await expect(maker(page).getByRole('img', { name: 'A fox' })).toBeVisible();
+});
+
+test('an edit that scaled or compressed its picture says so in a warning, until it is put away or the next thing is asked', async ({ page }) => {
+  const made = pic({ prompt: 'A fox' });
+  const p = await portal(page, { pictures: [made] });
+  await page.goto('/images');
+  await tile(page, 'A fox').click();
+  await viewer(page).getByRole('button', { name: 'Edit it' }).click();
+  await page.keyboard.type('Make the fur white');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  const note = 'The image was scaled down from 4000x500 pixels (1.2 MB) to 2048x256 pixels (0.3 MB) to fit what an edit takes. The result is not scaled back up.';
+  p.finish(p.state.jobs[0].id, {}, [note]);
+  const warning = page.getByRole('status').filter({ hasText: 'A picture was changed to fit what an edit takes.' });
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText(note);
+  await warning.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(warning).toHaveCount(0);
+  // Again, and then a change that needed nothing: the old warning is gone with the next thing asked, and no new one comes.
+  await describe(page).fill('Make it blue');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  p.finish(p.state.jobs[0].id, {}, [note]);
+  await expect(warning).toBeVisible();
+  await describe(page).fill('Make it red');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect(warning).toHaveCount(0);
+  p.finish(p.state.jobs[0].id);
+  await expect(tile(page, 'Make it red')).toBeVisible();
+  await expect(warning).toHaveCount(0);
 });
 
 test('in Edit a tick in the box of a picture takes it into the edit, after the ones there, and again takes it out; a click on the picture itself never does, it opens it', async ({ page }) => {

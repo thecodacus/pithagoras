@@ -1467,6 +1467,8 @@ export interface PictureJob {
   startedAt: number;
   finishedAt?: number;
   pictureId?: string;
+  /** What was done to a picture to make it fit an edit (scaled down, compressed), when something was. */
+  notes?: string[];
   error?: string;
 }
 

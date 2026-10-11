@@ -1938,6 +1938,7 @@ const de: Locale = {
     "Tick a picture to use it in the edit. A click on a picture opens it.": "Hake ein Bild an, um es für die Bearbeitung zu verwenden. Ein Klick auf ein Bild öffnet es.",
     "No pictures yet. Put one in from this computer above to change it.": "Noch keine Bilder. Lege oben eines von diesem Computer ein, um es zu ändern.",
     "Run again": "Noch einmal ausführen",
+    "A picture was changed to fit what an edit takes.": "Ein Bild wurde angepasst, damit es in eine Bearbeitung passt.",
     // components/ImageMaker.tsx
     "Make a picture": "Ein Bild erstellen",
     "Generate": "Generieren",

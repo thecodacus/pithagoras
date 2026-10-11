@@ -275,7 +275,9 @@ What was decided for it:
   another size is left as it was, for the endpoint to say. `edit_image` says in its
   answer what it did ("The image was scaled down from 4000x500 pixels (3 MB) to
   2048x256 pixels (180 KB) to fit what an edit takes."), so the agent can tell you the
-  result is smaller; the result is not scaled back up. A picture whose size
+  result is smaller; the result is not scaled back up. The Images page shows the
+  same sentence as a warning above the form when a change it made had to scale or
+  compress a picture, until you close it or ask for the next one. A picture whose size
   cannot be read is still refused, since it cannot be shown to be within the
   limit, and so is one that cannot be read as a picture at all: the message says
   "cannot be made to fit an edit" and "Nothing was sent", and with several pictures

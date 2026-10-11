@@ -359,6 +359,31 @@ test("nothing is made while the add-on is off, and a request is checked before i
   }
 });
 
+test("an edit job carries what was done to make a too-large picture fit, and none when nothing was", async () => {
+  const { origin, server } = await answering(png("edited"));
+  await clearJobs();
+  try {
+    const flat = (width: number, height: number) => sharp({ create: { width, height, channels: 3, background: { r: 200, g: 40, b: 40 } } }).png().toBuffer();
+    const wide = (await call("POST", "/images/upload?name=wide.png", undefined, { raw: await flat(3000, 300) })).body.picture;
+    const small = (await call("POST", "/images/upload?name=small.png", undefined, { raw: await flat(100, 100) })).body.picture;
+    settings({ baseUrl: origin, editEnabled: true, editMaxSize: "1024x1024" });
+    assert.equal((await call("POST", "/images/edit", { prompt: "brighter", sources: [wide.id] })).status, 202);
+    const [scaled] = await settled();
+    assert.equal(scaled.state, "done", scaled.error);
+    assert.equal(scaled.notes.length, 1);
+    assert.match(scaled.notes[0], /^The image was scaled down from 3000x300 pixels .* to 1024x102 pixels/);
+    await clearJobs();
+    assert.equal((await call("POST", "/images/edit", { prompt: "brighter", sources: [small.id] })).status, 202);
+    const [kept] = await settled();
+    assert.equal(kept.state, "done", kept.error);
+    assert.equal("notes" in kept, false, "a picture that fit is not warned about");
+  } finally {
+    server.close();
+    gen.saveImageGeneration({ editMaxSize: "" });
+    gone();
+  }
+});
+
 test("a picture from the person's own files is kept only if its bytes say it is one, and under a name with no place in it", async () => {
   const before = (await listed()).total;
   const bad = await call("POST", "/images/upload?name=x.png", undefined, { raw: SVG, type: "image/png" });

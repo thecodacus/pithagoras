@@ -50,6 +50,8 @@ export interface PictureJob {
   finishedAt?: number;
   /** When it is done: the picture, in the gallery. */
   pictureId?: string;
+  /** When an edit was scaled down or compressed to fit what an edit takes: what was done to which, in words for the person. Left out when nothing was. */
+  notes?: string[];
   /** When it failed: why, in words with no secret in them. */
   error?: string;
 }
@@ -110,15 +112,16 @@ const said = (e: unknown): string => {
 };
 
 /** Runs `make` as a job: it is started now, and what it ends with is kept on the job. */
-function start(job: Omit<PictureJob, "id" | "state" | "startedAt">, make: (signal: AbortSignal) => Promise<string>): PictureJob {
+function start(job: Omit<PictureJob, "id" | "state" | "startedAt">, make: (signal: AbortSignal) => Promise<{ pictureId: string; notes?: string[] }>): PictureJob {
   const held: Held = { ...job, id: randomBytes(6).toString("hex"), state: "running", startedAt: Date.now(), controller: new AbortController() };
   jobs.set(held.id, held);
   void make(held.controller.signal).then(
-    (pictureId) => {
+    ({ pictureId, notes }) => {
       // Stopped meanwhile: the job is gone, and what came back is not wanted.
       if (!jobs.has(held.id)) return;
       held.state = "done";
       held.pictureId = pictureId;
+      if (notes?.length) held.notes = notes;
       held.finishedAt = Date.now();
     },
     (e) => {
@@ -193,7 +196,7 @@ export function startGenerations(request: GenerateJob): PictureJob[] {
     const params = paramsOf({ ...settings, model: settings.model || config.model, size: settings.size || config.size });
     return start({ kind: "generate", prompt: request.prompt, ...(params.size ? { size: params.size } : {}) }, async (signal) => {
       const { bytes, ext } = await generateImage(config, { prompt: request.prompt, ...requestOf(settings) }, { signal });
-      return addPagePicture({ bytes, ext, kind: "generated", prompt: request.prompt, params }).id;
+      return { pictureId: addPagePicture({ bytes, ext, kind: "generated", prompt: request.prompt, params }).id };
     });
   });
 }
@@ -244,8 +247,8 @@ export function startEdit(request: EditJob): PictureJob[] {
     // The size is the request's own: an edit has none of the add-on's, which is the size of a new picture.
     const params: PictureParams = { ...paramsOf({ ...settings, model: settings.model || target.model }), sources: request.sources, ...(request.mask ? { masked: true } : {}) };
     return start({ kind: "edit", prompt: request.prompt, from: request.sources[0] }, async (signal) => {
-      const { bytes, ext } = await editImage(target, { prompt: request.prompt, image: images.length > 1 ? images : images[0], mask: request.mask, ...requestOf(settings) }, { signal });
-      return addPagePicture({ bytes, ext, kind: "edited", prompt: request.prompt, params, sourceId: request.sources[0] }).id;
+      const { bytes, ext, notes } = await editImage(target, { prompt: request.prompt, image: images.length > 1 ? images : images[0], mask: request.mask, ...requestOf(settings) }, { signal });
+      return { pictureId: addPagePicture({ bytes, ext, kind: "edited", prompt: request.prompt, params, sourceId: request.sources[0] }).id, notes };
     });
   });
 }
