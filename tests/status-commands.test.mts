@@ -90,9 +90,22 @@ test("a message of markup written for the model is shown as the sentence it carr
       "</background-task-notification>",
     ].filter(Boolean).join("\n");
   const end = (seq: number, content: string) => ({ seq, type: "message_end", at: 0, payload: { message: { role: "custom", customType: "background-task-notification", content, display: true } } });
-  const items = buildTranscript([end(1, block("completed", "  <exit-code>0</exit-code>")), end(2, block("failed", "  <exit-code>2</exit-code>\n  <error>a &lt; b</error>"))]);
-  assert.deepEqual(items.map(line), ['notice:Background task "Watch PR 103 CI" completed', 'notice:Background task "Watch PR 103 CI" failed (exit code 2: a < b)']);
-  assert.deepEqual(items.map((i: any) => i.tone), ["info", "warn"]);
+  const items = buildTranscript([
+    end(1, block("completed", "  <exit-code>0</exit-code>")),
+    // As the extension writes them: a failing command says its code in its error, a killed or timed-out one has no code.
+    end(2, block("failed", "  <exit-code>2</exit-code>\n  <error>Exited with code 2</error>")),
+    end(3, block("killed", "  <exit-code>null</exit-code>")),
+    end(4, block("failed", "  <exit-code>null</exit-code>\n  <error>Timed out after 30s</error>")),
+    end(5, block("failed", "  <exit-code>3</exit-code>")),
+  ]);
+  assert.deepEqual(items.map(line), [
+    'notice:Background task "Watch PR 103 CI" completed',
+    'notice:Background task "Watch PR 103 CI" failed (Exited with code 2)',
+    'notice:Background task "Watch PR 103 CI" killed',
+    'notice:Background task "Watch PR 103 CI" failed (Timed out after 30s)',
+    'notice:Background task "Watch PR 103 CI" failed (exit code 3)',
+  ]);
+  assert.deepEqual(items.map((i: any) => i.tone), ["info", "warn", "warn", "warn", "warn"]);
 });
 
 test("any extension's markup message is shown readably, and words that are not markup stay as they are", () => {

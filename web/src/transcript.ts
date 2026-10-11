@@ -222,11 +222,14 @@ function markupNotice(text: string): { text: string; tone: "info" | "warn" } | n
   const field = (tag: string) => fields.find(([k]) => k === tag)?.[1];
   const main = field("summary") ?? field("title") ?? field("message");
   const status = field("status");
-  const exit = field("exit-code");
+  // "null" is how a process that ended without a code (killed, timed out) is written.
+  const code = field("exit-code");
+  const exit = code !== undefined && /^-?\d+$/.test(code) ? code : undefined;
   const error = field("error");
   const warn = (status !== undefined && !/^(completed|succeeded|success|ok|done)$/i.test(status)) || !!error || (exit !== undefined && exit !== "0");
   if (main === undefined) return fields.length ? { text: fields.map(([k, v]) => `${k}: ${v}`).join("\n"), tone: warn ? "warn" : "info" } : null;
-  const extra = [exit !== undefined && exit !== "0" ? `exit code ${exit}` : "", error ?? ""].filter(Boolean).join(": ");
+  // An error usually says the code itself ("Exited with code 2"), so the code is added only where nothing else says it.
+  const extra = error ?? (exit !== undefined && exit !== "0" ? `exit code ${exit}` : "");
   return { text: extra ? `${main} (${extra})` : main, tone: warn ? "warn" : "info" };
 }
 
