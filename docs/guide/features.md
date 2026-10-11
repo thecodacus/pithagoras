@@ -383,7 +383,7 @@ The bundle is human-readable and git-diffable.
 
 A [project](/guide/projects#an-agent-for-a-project) can do without it: its **Understory
 as memory** switch is off, and its chats are neither told about Understory nor have it
-instead of the agent's `MEMORY.md`. Home and the other projects keep it.
+instead of the agent's `MEMORY.md`. Home keeps it, and so does a project with an agent unless it is switched off; a blank-slate project has no agent and so no Understory.
 
 ### Running it here
 

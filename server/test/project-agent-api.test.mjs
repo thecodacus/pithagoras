@@ -37,8 +37,8 @@ beforeEach(() => {
   db.getDb().exec("DELETE FROM project_agent");
 });
 
-test("a project that said nothing is a blank slate: no agent, Understory its memory where the portal has it", async () => {
-  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, understory: true, understoryAvailable: false });
+test("a project that said nothing is a blank slate: no agent, and so no Understory as its memory", async () => {
+  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, understory: false, understoryAvailable: false });
 });
 
 test("the agent a project works with and its Understory switch are stored by the project and read back", async () => {
@@ -58,7 +58,7 @@ test("the agent a project works with and its Understory switch are stored by the
   assert.deepEqual(blank, { agent: null, understory: false, understoryAvailable: false });
 
   // Another project has what it had.
-  assert.deepEqual(await json("/api/projects/dev/agent"), { agent: null, understory: true, understoryAvailable: false });
+  assert.deepEqual(await json("/api/projects/dev/agent"), { agent: null, understory: false, understoryAvailable: false });
 });
 
 test("the project list says which agent each project works with, and the chat list's places do too", async () => {
@@ -125,7 +125,7 @@ test("deleting the project forgets its agent; deleting the agent makes its proje
   await json("/api/projects/dev/agent", "PUT", { agent: nova, understory: false });
   await json(`/api/agents/${nova}`, "DELETE");
   assert.equal((await agentIds()).includes(nova), false);
-  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, understory: true, understoryAvailable: false });
+  assert.deepEqual(await json("/api/projects/research/agent"), { agent: null, understory: false, understoryAvailable: false });
   // What it said about Understory is the project's own, and stays.
   assert.deepEqual(await json("/api/projects/dev/agent"), { agent: null, understory: false, understoryAvailable: false });
   assert.equal("agent" in (await json("/api/projects")).projects.find((p) => p.name === "dev"), false);

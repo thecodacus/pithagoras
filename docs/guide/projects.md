@@ -117,12 +117,13 @@ no [Understory](/guide/features#memory-understory) either, since there is no age
 memory it would be.
 
 **Understory as memory** is one more switch in the same place, shown where the portal has
-[Understory](/guide/features#memory-understory). While it is on, Understory is the
+[Understory](/guide/features#memory-understory) and the project has an agent: a blank slate has
+none, and no Understory. While it is on, Understory is the
 project's memory, as it is in Home: the agent is told how to use it and `MEMORY.md`
 is left out. Off, the chats in this project do not get those instructions, and a project
 with an agent has the agent's `MEMORY.md` instead. It decides what the chats are told
 and handed, not what they can reach: the Understory tools stay unless you switch them
-off in the project's [Tools](#tools). Other projects and Home keep Understory.
+off in the project's [Tools](#tools). Home keeps Understory, and so does a project with an agent unless it is switched off.
 
 The choice is kept in the portal's database by the project's name, not as a file in the
 folder, for the reason the tool switches are (see [Tools](#tools)), and goes when the

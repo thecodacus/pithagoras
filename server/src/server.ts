@@ -434,9 +434,11 @@ function agentLinkOf(body: unknown): { agent?: string; understory?: boolean } | 
 /** The agent a project works with and whether Understory is its memory, as its page shows them. */
 function agentOfProject(name: string) {
   const link = projectAgent(name);
+  const agent = linkedAgent(name)?.id ?? null;
   return {
-    agent: linkedAgent(name)?.id ?? null,
-    understory: !link.understoryOff,
+    agent,
+    // What the chats get (see understoryAt): a blank slate has no agent whose memory it would be, whatever the stored switch says.
+    understory: !!agent && !link.understoryOff,
     // Whether the portal has Understory at all: without it there is nothing for the project to do without.
     understoryAvailable: understoryOn(),
   };

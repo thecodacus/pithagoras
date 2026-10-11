@@ -33,7 +33,8 @@ async function portal(page: Page, opts: { agent?: string; understory?: boolean; 
       if (body.agent !== undefined) agent = body.agent;
       if (body.understory !== undefined) understory = body.understory;
     }
-    if (p === '/api/projects/demo/agent') return { agent, understory, understoryAvailable: !!opts.understory };
+    if (p === '/api/projects/demo/agent') // As the server reports it: a blank slate has no Understory, whatever the stored switch says.
+    return { agent, understory: !!agent && understory, understoryAvailable: !!opts.understory };
   }, { settings: true });
   await page.goto('/projects');
   return { made, puts };
@@ -75,6 +76,7 @@ test('Understory is offered as the memory only where the portal has it, and can 
   await portal(page);
   await page.getByRole('button', { name: 'New project' }).click();
   await expect(agentSelect(page)).toBeVisible();
+  await pick(page, 'Scout');
   await expect(understorySwitch(page)).toHaveCount(0);
 });
 
@@ -82,11 +84,35 @@ test('a project made without Understory as its memory says so', async ({ page })
   const { made } = await portal(page, { understory: true });
   await page.getByRole('button', { name: 'New project' }).click();
   await dialog(page).getByRole('textbox', { name: 'Name' }).fill('fresh');
+  await pick(page, 'Scout');
   await expect(understorySwitch(page)).toHaveAttribute('aria-checked', 'true');
   await understorySwitch(page).click();
   await expect(understorySwitch(page)).toHaveAttribute('aria-checked', 'false');
   await dialog(page).getByRole('button', { name: 'Create and open' }).click();
-  await expect.poll(() => made).toEqual([{ name: 'fresh', instructions: '', understory: false }]);
+  await expect.poll(() => made).toEqual([{ name: 'fresh', instructions: '', agent: 'scout', understory: false }]);
+});
+
+test('a blank slate has no Understory switch: New project shows it once an agent is picked, and not for None', async ({ page }) => {
+  await portal(page, { understory: true });
+  await page.getByRole('button', { name: 'New project' }).click();
+  await expect(agentSelect(page)).toContainText('None — a blank slate');
+  await expect(understorySwitch(page)).toHaveCount(0);
+  await pick(page, 'Scout');
+  await expect(understorySwitch(page)).toBeVisible();
+  await pick(page, 'None — a blank slate');
+  await expect(understorySwitch(page)).toHaveCount(0);
+});
+
+test("a project's Agent dialog shows the Understory switch only while an agent is picked", async ({ page }) => {
+  await portal(page, { understory: true });
+  await page.getByRole('button', { name: 'Agent for demo' }).click();
+  await expect(agentSelect(page)).toContainText('None — a blank slate');
+  await expect(understorySwitch(page)).toHaveCount(0);
+  await pick(page, 'Scout');
+  await expect(understorySwitch(page)).toBeVisible();
+  await expect(understorySwitch(page)).toHaveAttribute('aria-checked', 'true');
+  await pick(page, 'None — a blank slate');
+  await expect(understorySwitch(page)).toHaveCount(0);
 });
 
 test('the New project dialog asks before it is closed with an agent picked, and not before', async ({ page }) => {
