@@ -593,6 +593,14 @@ model id (letters, digits, `.`, `:`, `-`, `_`), such as `qwen3-asr` behind
 llama-swap. **Lazy load** and the speech-detection thresholds are saved with the
 rest by **Save voice settings**.
 
+**Dictation model** names the model the microphone button of the message box
+transcribes with, where it should differ from voice mode's: a conversation wants
+the quick model, while a message you dictate can wait for a more accurate one.
+Both talk to the same **Speech recognition URL**, so the service has to serve
+both models (llama-swap loads the one that is asked for). Left empty, dictation
+uses **Speech recognition model**, like voice mode. Installing or connecting
+the managed voice service empties it.
+
 ## Speech speed
 
 **Speech generation → Fast** uses CFG 1, avoiding the extra guidance branch.

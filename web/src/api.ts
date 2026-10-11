@@ -380,7 +380,7 @@ export interface VoiceConfig {
   // False with no speech synthesis (runtime "none"): the page can listen, but replies are not spoken.
   speech?: boolean;
   vad?: typeof DEFAULT_VAD;
-  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
+  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; dictationModel?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
 }
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; /** The saved settings point at the managed service, whether or not its container is there. */ connected?: boolean; }
@@ -440,9 +440,9 @@ export const api = {
   /** Removes the voice container and puts the settings back; `removeData` deletes the downloaded engines and models too. */
   uninstallVoice: (removeData: boolean) => json<{ok:boolean}>('/api/voice/uninstall', {method:'POST', body: JSON.stringify({removeData})}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
-  /** What was said in `samples` (16 kHz mono), in words, and how long the speech server says it took. */
-  transcribe: async (sessionId: string, samples: Float32Array, signal?: AbortSignal): Promise<{ text: string; serverTiming: string }> => {
-    const res = await send(`/api/sessions/${sessionId}/voice/transcribe`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal });
+  /** What was said in `samples` (16 kHz mono), in words, and how long the speech server says it took. Dictation may be set to use another model than voice mode. */
+  transcribe: async (sessionId: string, samples: Float32Array, signal?: AbortSignal, purpose?: "dictation"): Promise<{ text: string; serverTiming: string }> => {
+    const res = await send(`/api/sessions/${sessionId}/voice/transcribe${purpose ? `?purpose=${purpose}` : ""}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new ApiError(body.error || t("Transcription failed"), res.status, body);
     return { text: String(body.text ?? ""), serverTiming: res.headers.get("server-timing") ?? "" };

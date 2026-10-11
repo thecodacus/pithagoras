@@ -1763,6 +1763,9 @@ const de: Locale = {
     "Speech recognition URL": "URL der Spracherkennung",
     "Speech synthesis URL": "URL der Sprachsynthese",
     "Speech recognition model": "Modell der Spracherkennung",
+    "Dictation model": "Modell für das Diktieren",
+    "Empty uses the speech recognition model above": "Leer nutzt das Modell der Spracherkennung oben",
+    "The model the microphone button of the message box transcribes with. Voice mode keeps using the one above, so a conversation can have the quick model and dictation the accurate one.": "Das Modell, mit dem die Mikrofontaste des Nachrichtenfelds transkribiert. Der Sprachmodus nutzt weiter das Modell oben, so kann ein Gespräch das schnelle Modell haben und das Diktieren das genauere.",
     "Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr": "Whisper.cpp braucht keines; audio.cpp nennt sein Modell, z. B. qwen3-asr",
     "Save voice settings": "Spracheinstellungen speichern",
     // components/VoiceControl.tsx

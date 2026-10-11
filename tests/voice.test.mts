@@ -89,6 +89,30 @@ test('a voice that is not in the library is refused rather than spoken in anothe
   assert.throws(() => validateConfig({ ...settings, voice: 'missing' }));
   assert.throws(() => validateConfig({ ...settings, voice: '../other' }));
 });
+test('dictation can name a model of its own; voice mode and an empty setting keep the general one', async () => {
+  const put = (body: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const transcribe = async (query = '') => {
+    const res = await fetch(`${base}/sessions/test/voice/transcribe${query}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: new Uint8Array(pcmWav(Buffer.alloc(32))) });
+    assert.equal(res.status, 200);
+    return transcriptionBody.match(/name="model"\r\n\r\n(.*)\r\n/)?.[1];
+  };
+  const saved = await put({ ...settings, sttModel: 'fast-asr', dictationModel: ' accurate-asr ' });
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).dictationModel, 'accurate-asr');
+  assert.equal(await transcribe(), 'fast-asr');
+  assert.equal(await transcribe('?purpose=dictation'), 'accurate-asr');
+  // "Auto": empty means dictation uses the general model.
+  assert.equal((await put({ ...settings, sttModel: 'fast-asr', dictationModel: '' })).status, 200);
+  assert.equal(await transcribe('?purpose=dictation'), 'fast-asr');
+  // Only the dictation model is set: voice mode sends no model field.
+  assert.equal((await put({ ...settings, sttModel: '', dictationModel: 'accurate-asr' })).status, 200);
+  assert.equal(await transcribe(), undefined);
+  assert.equal(await transcribe('?purpose=dictation'), 'accurate-asr');
+  assert.throws(() => validateConfig({ ...settings, dictationModel: 'a model' }));
+  assert.throws(() => validateConfig({ ...settings, dictationModel: 3 }));
+  // The managed service names its own model, so a leftover one is dropped.
+  assert.equal(connectManagedVoice().dictationModel, '');
+});
 test('selected input language is sent to Whisper and invalid languages are rejected', async () => {
   for (const language of ['en', 'hi', 'bn']) {
     const saved = await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, language }) });
