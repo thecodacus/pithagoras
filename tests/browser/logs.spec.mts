@@ -86,3 +86,21 @@ test('lines let go before they were read replace the list rather than joining it
   // The newest lines were asked for again, not only what came after the last id seen.
   expect(asked.filter((q) => q.includes('limit=')).length).toBeGreaterThanOrEqual(2);
 });
+
+test('the page holds no more text than the server does, the newest lines staying', async ({ page }) => {
+  // Lines at the server's length limit: 150 of them are 1.2 MB, 300 are more than the 2 MB it keeps.
+  const line = (id: number) => ({ id, level: 'info', text: `line-${id} `.padEnd(8000, 'x') });
+  const lines = Array.from({ length: 150 }, (_, i) => line(i + 1));
+  await portal(page, lines);
+  await page.goto('/settings/logs');
+  const log = page.getByRole('log', { name: 'Server logs' });
+  await expect(log).toContainText('line-150 ');
+  for (let id = 151; id <= 300; id++) lines.push(line(id));
+  await expect(log).toContainText('line-300 ', { timeout: 8000 });
+  // The ids of the rows, not their text: a failure should not print megabytes.
+  const held = await log.evaluate((el) => [...el.querySelectorAll('div.flex')].map((r) => Number(/line-(\d+) /.exec(r.textContent ?? '')?.[1])));
+  expect(held[held.length - 1]).toBe(300);
+  expect(held.length).toBeLessThanOrEqual(Math.floor(2_000_000 / 8000));
+  expect(held.length).toBeGreaterThan(200);
+  expect(held[0]).toBe(300 - held.length + 1);
+});

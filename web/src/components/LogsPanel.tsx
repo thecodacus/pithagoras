@@ -5,8 +5,20 @@ import { pollWhileVisible } from "../poll";
 import { msg, t, tp } from "../i18n";
 import { LoadFailed, Section, Segments, ghostCls, inputCls } from "./SettingsUi";
 
-/** The server keeps this many; the page holds no more than that either. */
+/** The server keeps this many lines, and no more than this many characters of them; the page holds no more than that either. */
 const KEEP = 2000;
+const KEEP_CHARS = 2_000_000;
+
+/** The newest lines within both limits; the newest one stays, however long. */
+function newest(lines: LogLine[]): LogLine[] {
+  let from = lines.length;
+  let chars = 0;
+  while (from > 0 && lines.length - from < KEEP && (from === lines.length || chars + lines[from - 1].text.length <= KEEP_CHARS)) {
+    chars += lines[from - 1].text.length;
+    from--;
+  }
+  return lines.slice(from);
+}
 
 const FILTERS: { id: "all" | "warn" | "error"; label: string }[] = [
   { id: "all", label: msg("Everything") },
@@ -55,7 +67,7 @@ export function LogsPanel({ onError }: { onError: (message: string | null) => vo
       if (r.lines.length) last.current = r.lines[r.lines.length - 1].id;
       else if (first || restarted) last.current = r.last;
       if (first || restarted) setLines(r.lines);
-      else if (r.lines.length) setLines((now) => [...now, ...r.lines].slice(-KEEP));
+      else if (r.lines.length) setLines((now) => newest([...now, ...r.lines]));
       had.current = true;
       setFailed(null);
       onError(null);
