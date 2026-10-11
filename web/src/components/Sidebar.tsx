@@ -281,7 +281,7 @@ export const Sidebar = memo(function Sidebar({
               isOpen={openFolders.isOpen}
               onToggle={openFolders.toggle}
               onMove={searching || !allKeys ? undefined : (shown, key, to) => move(shown, key, to, allKeys)}
-              onNewChat={(f) => newChat(f.key === HOME ? undefined : f.path!)}
+              onNewChat={(f) => newChat(f.path || undefined)}
             >
               {(f) => {
                 const chats = listed.get(f.key)!;

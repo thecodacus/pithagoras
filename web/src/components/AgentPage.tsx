@@ -27,7 +27,7 @@ import { AgentSetup } from "./AgentSetup";
 import { ToolSwitches } from "./ToolSwitches";
 import { confirmDeleteSession } from "./SessionActions";
 import { Modal } from "./Modal";
-import { ErrorBanner, LoadFailed, primarySmCls } from "./SettingsUi";
+import { ErrorBanner, LoadFailed, Switch, primarySmCls } from "./SettingsUi";
 import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
@@ -436,6 +436,24 @@ function AgentView({
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1" title={t("The user it runs as when the sandbox is on")}>
                 <LuUser className="h-3 w-3 shrink-0 text-fg-faint" />
                 <span className="truncate font-mono text-[11px] text-fg-subtle">{agent.sandboxUser}</span>
+              </div>
+              <div className="flex min-w-0 items-center gap-2 rounded-lg bg-raised/60 px-2.5 py-1" title={t("The New button starts its chats with this agent")}>
+                <span className="truncate text-[11px] text-fg-subtle">{t("New chats start here")}</span>
+                <Switch
+                  on={agent.newChats}
+                  // The first agent takes new chats back when no other has them: it is turned on from another's page, not off.
+                  disabled={agent.newChats && agent.first}
+                  label={t("New chats start here")}
+                  onChange={async (on) => {
+                    setError("");
+                    try {
+                      await api.setNewChats(agent.id, on);
+                      await onChanged();
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                />
               </div>
             </div>
           </PageHeader>

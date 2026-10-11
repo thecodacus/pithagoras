@@ -5,7 +5,8 @@ folder it works in. It is the normal unit of work in the portal.
 
 ## Where a session works
 
-**New** starts a chat in **Home**, the first agent's own directory; a chat in a
+**New** starts a chat with the agent picked for new chats, in **Home** (the first
+agent's own directory) by default; a chat in a
 project works in that project's folder, and a chat with another agent in that
 agent's home. See [Projects](/guide/projects) and [Agents](/guide/agents). The session is named after its
 first message, and you can rename it.

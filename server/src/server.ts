@@ -57,7 +57,7 @@ import { insideReal, isWithinText } from "./within.js";
 import { agentHome, agentHomePath } from "./agent-home.js";
 import { dataFolder } from "./data-dir.js";
 import { resolveChannelSession } from "./agent.js";
-import { AgentError, agentOf, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
+import { AgentError, agentOf, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, newChatAgent, orbOf } from "./agents.js";
 import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
 import { heartbeat } from "./heartbeat.js";
@@ -816,10 +816,11 @@ app.post("/api/sessions", (req, res) => {
   // `agent` starts it in that agent's home.
   const agent = agentId === undefined ? undefined : typeof agentId === "string" ? getAgent(agentId) : undefined;
   if (agentId !== undefined && !agent) return res.status(404).json({ error: "No such agent" });
-  // Without either, a chat starts in Home: the first agent's own directory,
-  // where its SOUL.md, PrimaryUser.md and MEMORY.md are. Agents' homes are the
-  // only places outside the workspace root a chat may start.
-  const where = agent ? { path: agentHome(agent.home) } : workspace === undefined ? { path: agentHome() } : checkWorkspace(workspace);
+  // Without either, a chat starts in the home of the agent picked for new chats,
+  // the first agent's by default: the directory where its SOUL.md, PrimaryUser.md
+  // and MEMORY.md are. Agents' homes are the only places outside the workspace
+  // root a chat may start.
+  const where = agent ? { path: agentHome(agent.home) } : workspace === undefined ? { path: agentHome(newChatAgent().home) } : checkWorkspace(workspace);
   if ("error" in where) return res.status(400).json({ error: where.error });
   const resolved = where.path;
 

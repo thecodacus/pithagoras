@@ -60,6 +60,8 @@ const de: Locale = {
     "Agent": "Agent",
     "Conversations that reached the agent through a channel. Each chat gets its own session, so a group and a DM never share a memory.": "Gespräche, die den Agenten über einen Kanal erreicht haben. Jeder Chat bekommt seine eigene Sitzung, damit eine Gruppe und eine Direktnachricht nie ein Gedächtnis teilen.",
     "New conversation": "Neues Gespräch",
+    "New chats start here": "Neue Chats starten hier",
+    "The New button starts its chats with this agent": "Der Neu-Button startet seine Chats mit diesem Agenten",
     "conversations": { one: "Gespräch", other: "Gespräche" },
     "running": "aktiv",
     "Could not refresh the conversations — what is shown may be out of date.": "Die Gespräche konnten nicht aktualisiert werden — was hier steht, ist vielleicht nicht mehr aktuell.",

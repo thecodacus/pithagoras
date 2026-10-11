@@ -11,7 +11,7 @@ import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
-import { HOME, folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { useFlip } from "../motion";
 import { useNow } from "../use-now";
@@ -274,7 +274,7 @@ export const SessionsPage = memo(function SessionsPage({
                 isOpen={openFolders.isOpen}
                 onToggle={openFolders.toggle}
                 onMove={searching || !allKeys ? undefined : (keys, key, to) => move(keys, key, to, allKeys)}
-                onNewChat={onNewChat ? (f) => start(f.key === HOME ? undefined : f.path!) : undefined}
+                onNewChat={onNewChat ? (f) => start(f.path || undefined) : undefined}
                 extra={(f) => (
                   <button
                     type="button"

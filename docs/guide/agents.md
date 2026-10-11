@@ -38,6 +38,12 @@ name, with the pencil beside it, renames it; the folder keeps its name, and
 `.agent-name` in it takes the new one.
 **Agents** at the top goes back to the cards.
 
+The **New** button in the sidebar starts a chat with the first agent. To have it
+start with another one, open that agent and turn on **New chats start here**:
+the **New** button then goes to it. The **+** beside a folder in the chat list still starts a chat in that
+folder. Turning the switch off, or turning it on for another agent, gives the
+choice up; deleting the agent hands it back to the first agent.
+
 The **Files** tab edits `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` and `WATCH.md`.
 The agent writes these files too, `MEMORY.md` above all, so a save made from a
 copy the agent has changed since is not applied. The tab says "This file changed

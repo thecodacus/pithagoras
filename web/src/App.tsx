@@ -253,7 +253,7 @@ function Shell({
     return r.sessions;
   }, []);
 
-  /** A chat started in `workspace`, or in Home without one, and opened. */
+  /** A chat started in `workspace`, or where "New" goes (the agent picked for new chats) without one, and opened. */
   const startChat = useStable(async (workspace?: string) => {
     const s = await api.createSession(workspace);
     await refreshSessions();
