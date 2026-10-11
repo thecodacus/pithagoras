@@ -115,5 +115,9 @@ test("any extension's markup message is shown readably, and words that are not m
   const bare = shown("<job-report>\n  <job>nightly</job>\n  <status>failed</status>\n</job-report>");
   assert.deepEqual(bare.map(line), ["notice:job: nightly\nstatus: failed"]);
   assert.equal((bare[0] as any).tone, "warn");
-  for (const plain of ["All green", "a <b>bold</b> word", "Use <tag> like this", "<b>bold</b>"]) assert.deepEqual(shown(plain).map(line), [`notice:${plain}`]);
+  for (const plain of ["All green", "a <b>bold</b> word", "Use <tag> like this", "<b>bold</b>", "<note><b>Heads up:</b> the build server is down until 5pm</note>", "<p>Run <code>npm test</code> before you push.</p>"]) assert.deepEqual(shown(plain).map(line), [`notice:${plain}`]);
+  // Only a failure word warns: a green CI result or a job that has just started is not a warning.
+  const status = (word: string) => shown(`<ci-result>\n  <title>CI for PR 7</title>\n  <status>${word}</status>\n</ci-result>`)[0] as any;
+  for (const word of ["passed", "running", "started", "queued", "complete", "finished", "completed"]) assert.equal(status(word).tone, "info", word);
+  for (const word of ["failed", "Timed-out", "cancelled", "aborted"]) assert.equal(status(word).tone, "warn", word);
 });
