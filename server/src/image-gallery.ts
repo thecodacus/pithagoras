@@ -718,7 +718,7 @@ export function openListed(id: string): { fd: number; size: number; name: string
  */
 export async function openListedThumb(id: string): Promise<ReturnType<typeof openListed>> {
   const whole = openListed(id);
-  return { ...(await openThumb(whole, id)), origin: whole.origin };
+  return { ...(await openThumb(whole, id, () => !!rowOf(id))), origin: whole.origin };
 }
 
 /** The bytes of a picture, for an edit that starts from it; same checks as serving one. */

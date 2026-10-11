@@ -1,7 +1,7 @@
 import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, get } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./helpers.mts";
 
@@ -1321,4 +1321,44 @@ test("only a few small copies are made at the same time", async () => {
   assert.equal(kept().length, 8);
   assert.ok(thumbJobsPeak() >= 1 && thumbJobsPeak() <= 2, `at most 2 at once, saw ${thumbJobsPeak()}`);
   await call("POST", "/images/delete", { ids });
+});
+
+/** Open file descriptors of this process that lead into the folder of the small copies (Linux only: nothing is seen elsewhere). */
+const openCopies = () => {
+  try {
+    return readdirSync("/proc/self/fd").filter((fd) => { try { return readlinkSync(`/proc/self/fd/${fd}`).startsWith(thumbs); } catch { return false; } }).length;
+  } catch {
+    return 0;
+  }
+};
+const settle = async (done: () => boolean) => {
+  for (let i = 0; i < 200 && !done(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+};
+
+test("a request that is dropped while it waits for its small copy does not keep the copy open", { skip: !existsSync("/proc/self/fd") }, async () => {
+  const ids: string[] = [];
+  for (let i = 0; i < 8; i++) ids.push((await upload(await bigPng(2000, 1500))).id);
+  await Promise.all(ids.map((id) => new Promise<void>((resolve) => {
+    const request = get(`${at}/images/${id}/thumb`, (res) => res.resume());
+    request.on("error", () => resolve());
+    request.on("close", () => resolve());
+    setTimeout(() => request.destroy(), 30);
+  })));
+  // The copies are made all the same, for the next view.
+  await settle(() => kept().length === 8 && thumbJobsPeak() >= 1);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(kept().length, 8);
+  assert.equal(openCopies(), 0, "no copy is left open by a request that was gone before it was answered");
+  await call("POST", "/images/delete", { ids });
+});
+
+test("a copy that is still being made when its picture is deleted is not kept", async () => {
+  const ids: string[] = [];
+  for (let i = 0; i < 8; i++) ids.push((await upload(await bigPng(1600, 1200))).id);
+  const asked = Promise.all(ids.map((id) => call("GET", `/images/${id}/thumb`)));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const deleted = await call("POST", "/images/delete", { ids });
+  assert.equal(deleted.body.deleted.length, 8);
+  await asked;
+  assert.deepEqual(kept(), [], "the pictures are gone, and so are the copies that were not done yet");
 });

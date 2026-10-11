@@ -89,7 +89,7 @@ function readWhole(fd: number, size: number): Buffer {
  * WebP, which keeps transparency, so that there is one format for every picture. Whether the
  * copy was kept is the answer; a picture sharp cannot read is none either, and is sent as it is.
  */
-function make(fd: number, size: number, modifiedMs: number, id: string, name: string): Promise<boolean> {
+function make(fd: number, size: number, modifiedMs: number, id: string, name: string, listed: () => boolean): Promise<boolean> {
   const wip = making.get(name);
   if (wip) return wip;
   const job = turn(async () => {
@@ -101,6 +101,8 @@ function make(fd: number, size: number, modifiedMs: number, id: string, name: st
       if (animated(bytes, (await image.metadata()).pages)) return false;
       // The camera's turn is applied, as the metadata that said it is not kept.
       const copy = await image.rotate().resize({ width: THUMB_SIDE, height: THUMB_SIDE, fit: "inside", withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
+      // The picture may have been deleted while the copy was made, which removed the copies that there were then: this one would stay for good.
+      if (!listed()) return false;
       mkdirSync(thumbsDir(), { recursive: true });
       writeFileAtomic(path.join(thumbsDir(), name), copy, 0o644);
       // The copy of the file before is of no use any more.
@@ -119,9 +121,10 @@ function make(fd: number, size: number, modifiedMs: number, id: string, name: st
  * The small copy of the picture whose file is open (the caller has checked that the person may read
  * it), opened to be sent; made first when there is none for this version of the file. Without one,
  * for a GIF, a small file, an animated picture or one that cannot be decoded, the file itself is
- * what comes back. The descriptor of the file is closed unless it is the one returned.
+ * what comes back. The descriptor of the file is closed unless it is the one returned. `listed`
+ * says whether the picture is still in the gallery, which is asked again when a copy is done.
  */
-export async function openThumb(whole: Opened, id: string): Promise<Opened> {
+export async function openThumb(whole: Opened, id: string, listed: () => boolean): Promise<Opened> {
   if (whole.mimeType === "image/gif" || whole.size <= THUMB_WORTH_IT) return whole;
   const modifiedMs = fstatSync(whole.fd).mtimeMs;
   const name = copyName(id, whole.size, modifiedMs);
@@ -132,7 +135,7 @@ export async function openThumb(whole: Opened, id: string): Promise<Opened> {
       return undefined;
     }
   };
-  const kept = open() ?? ((await make(whole.fd, whole.size, modifiedMs, id, name)) ? open() : undefined);
+  const kept = open() ?? ((await make(whole.fd, whole.size, modifiedMs, id, name, listed)) ? open() : undefined);
   if (!kept) return whole;
   closeSync(whole.fd);
   return kept;
