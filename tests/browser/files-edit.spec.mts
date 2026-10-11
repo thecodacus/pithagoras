@@ -7,8 +7,10 @@ type Put = { content: string; mtime?: number };
  * The chat page with its Files panel, over two chats (`first`, then `second`)
  * that each have a notes.md. `put` answers a save; what was sent is returned,
  * and `disk` is what a read finds, which a test can change under the panel.
+ * A markdown file opens as a page unless the source was chosen before, so the
+ * tests that edit start with that choice made; `shown: 'page'` leaves it out.
  */
-async function files(page: Page, put: (n: number) => Parameters<Route['fulfill']>[0] | null = () => null) {
+async function files(page: Page, put: (n: number) => Parameters<Route['fulfill']>[0] | null = () => null, shown: 'source' | 'page' = 'source') {
   const saves: Put[] = [];
   const disk = { content: 'one\n', mtime: 1 };
   await page.route('**/api/sessions/*/file*', (route) => {
@@ -25,11 +27,17 @@ async function files(page: Page, put: (n: number) => Parameters<Route['fulfill']
     }
     return route.fulfill({ json: { content: disk.content, binary: false, size: disk.content.length, mtime: disk.mtime } });
   });
+  if (shown === 'source') {
+    // Only when nothing is saved yet, so that a choice made in the test survives its reload.
+    await page.addInitScript(() => {
+      if (localStorage.getItem('filesMarkdownRendered') === null) localStorage.setItem('filesMarkdownRendered', '0');
+    });
+  }
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.goto('/tests/chat.html?phase=switch');
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await row(page).click();
-  await expect(box(page)).toHaveValue('one\n');
+  if (shown === 'source') await expect(box(page)).toHaveValue('one\n');
   return { saves, disk };
 }
 
@@ -152,4 +160,18 @@ test('a markdown file can be shown as a page and back, following what is typed, 
   await expect(page.getByRole('region', { name: 'Rendered notes.md' })).toBeVisible();
   await page.getByRole('button', { name: 'Show the source' }).click();
   await expect(box(page)).toBeVisible();
+});
+
+test('a markdown file nobody chose a view for opens as a page, and the source, once chosen, is kept', async ({ page }) => {
+  await files(page, () => null, 'page');
+  const shown = page.getByRole('region', { name: 'Rendered notes.md' });
+  await expect(shown).toContainText('one');
+  await expect(box(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show the source' }).click();
+  await expect(box(page)).toHaveValue('one\n');
+  await page.reload();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await row(page).click();
+  await expect(box(page)).toHaveValue('one\n');
+  await expect(shown).toHaveCount(0);
 });

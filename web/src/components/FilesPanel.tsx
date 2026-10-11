@@ -50,8 +50,8 @@ const HIDDEN_KEY = "filesShowHidden";
 const savedShowHidden = (): boolean => local.get(HIDDEN_KEY) === "1";
 
 const RENDERED_KEY = "filesMarkdownRendered";
-/** Whether a markdown file is shown as the page it describes rather than as its source. Source unless it was turned on: the panel is first of all where a file is edited. */
-const savedRendered = (): boolean => local.get(RENDERED_KEY) === "1";
+/** Whether a markdown file is shown as the page it describes rather than as its source. The page unless the source was chosen: most people open a markdown file to read it, and the choice is kept. */
+const savedRendered = (): boolean => local.get(RENDERED_KEY) !== "0";
 const isMarkdown = (p: string) => /\.(md|markdown|mdx)$/i.test(p);
 
 /** By its name only: whether it is one is the server's to say, from its bytes, and a refusal falls back to the note. */
