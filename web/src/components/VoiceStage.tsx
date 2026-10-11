@@ -290,10 +290,12 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       }, true);
     } catch { /* not the portal's page: its keys stay its own */ }
   };
-  // A press on the microphone button or the orb holds the key down; the pointer is captured so that sliding off, or a touch the phone turns into a scroll or a long-press menu, still ends it where it began.
+  // A press on the microphone button or the orb holds the key down; the pointer is captured so that sliding off, or a touch the phone turns into a scroll or a long-press menu, still ends it where it began. Only the finger that started the hold ends it: a second one lifting is not the first letting go.
+  const holder = useRef<number | null>(null);
+  const release = (e: ReactPointerEvent<HTMLElement>) => { if (holder.current !== e.pointerId) return; holder.current = null; onHold(false); };
   const holdHandlers = {
-    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); onHold(true); },
-    onPointerUp: () => onHold(false), onPointerCancel: () => onHold(false), onContextMenu: (e: ReactMouseEvent) => e.preventDefault(),
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { e.preventDefault(); if (holder.current !== null) return; holder.current = e.pointerId; e.currentTarget.setPointerCapture(e.pointerId); onHold(true); },
+    onPointerUp: release, onPointerCancel: release, onContextMenu: (e: ReactMouseEvent) => e.preventDefault(),
   };
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";

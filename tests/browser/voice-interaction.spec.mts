@@ -453,6 +453,11 @@ test('with push-to-talk on, the orb can be held to talk, as on a phone', async (
   // Held while speaking: sent when let go.
   await page.mouse.down();
   await expect(page.getByRole('status')).toContainText('Hearing you');
+  // A second finger lifting is not the first letting go.
+  await orb.dispatchEvent('pointerup', { pointerId: 7 });
+  await orb.dispatchEvent('pointercancel', { pointerId: 7 });
+  await page.waitForTimeout(400);
+  await expect(page.getByRole('status')).toContainText('Hearing you');
   // Not a real click: the mouse is down on the orb.
   await page.getByRole('button', { name: 'Inject speech' }).dispatchEvent('click');
   await page.waitForTimeout(2800);
