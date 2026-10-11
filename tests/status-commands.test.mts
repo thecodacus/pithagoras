@@ -75,3 +75,22 @@ test("a message for people is shown without the codes a terminal would act on", 
   ]);
   assert.deepEqual(items.map(line), ["notice:All green"]);
 });
+
+test("a background task's end is shown as the sentence it carries, not as the block written for the model", () => {
+  const block = (status: string, extra = "") =>
+    [
+      "<background-task-notification>",
+      "  <task-id>b55b2d6a4</task-id>",
+      "  <task-name>Watch PR 103 CI</task-name>",
+      `  <status>${status}</status>`,
+      extra,
+      "  <output-file>.pi/tasks/x/b55b2d6a4.output</output-file>",
+      `  <summary>Background task "Watch PR 103 CI" ${status}</summary>`,
+      "  <guidance>Do not call bg_status to reconfirm.</guidance>",
+      "</background-task-notification>",
+    ].filter(Boolean).join("\n");
+  const end = (seq: number, content: string) => ({ seq, type: "message_end", at: 0, payload: { message: { role: "custom", customType: "background-task-notification", content, display: true } } });
+  const items = buildTranscript([end(1, block("completed", "  <exit-code>0</exit-code>")), end(2, block("failed", "  <exit-code>2</exit-code>\n  <error>a &lt; b</error>"))]);
+  assert.deepEqual(items.map(line), ['notice:Background task "Watch PR 103 CI" completed', 'notice:Background task "Watch PR 103 CI" failed (exit code 2: a < b)']);
+  assert.deepEqual(items.map((i: any) => i.tone), ["info", "warn"]);
+});

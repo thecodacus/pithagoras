@@ -206,6 +206,28 @@ function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
 /** Text without the colour and cursor codes a terminal would act on. */
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 
+/**
+ * What pi-background-tasks puts in the chat when a task ends: an XML block
+ * written for the model (ids, an output file, guidance not to poll). People get
+ * the sentence it carries, with the exit code or error if there was one.
+ */
+function backgroundTaskNotice(text: string): { text: string; tone: "info" | "warn" } | null {
+  const block = /^\s*<background-task-notification>([\s\S]*)<\/background-task-notification>\s*$/.exec(text)?.[1];
+  if (block === undefined) return null;
+  const field = (tag: string) => {
+    const raw = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(block)?.[1];
+    // The extension escapes these three and nothing else.
+    return raw?.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim();
+  };
+  const summary = field("summary");
+  if (!summary) return null;
+  const status = field("status");
+  const exit = field("exit-code");
+  const error = field("error");
+  const extra = [exit !== undefined && exit !== "0" ? `exit code ${exit}` : "", error ?? ""].filter(Boolean).join(": ");
+  return { text: extra ? `${summary} (${extra})` : summary, tone: status === undefined || status === "completed" ? "info" : "warn" };
+}
+
 /** The text of a tool result, however pi shaped it. */
 export function toolOutputText(result: any): string | undefined {
   if (typeof result === "string") return result;
@@ -459,7 +481,9 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           const text = typeof message.content === "string"
             ? message.content
             : Array.isArray(message.content) ? message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("\n") : "";
-          if (text.trim()) items.push({ kind: "notice", id: `m${ev.seq}`, text: stripAnsi(text).trim(), tone: "info" });
+          const shown = stripAnsi(text).trim();
+          const task = backgroundTaskNotice(shown);
+          if (shown) items.push({ kind: "notice", id: `m${ev.seq}`, text: task?.text ?? shown, tone: task?.tone ?? "info" });
           break;
         }
         if (ev.type === "message_end") closeCurrent();
