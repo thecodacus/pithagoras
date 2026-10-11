@@ -38,6 +38,8 @@ export interface LaunchOptions {
   subagentModel?: () => string | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
   heartbeatAgent?: string;
+  /** Told the chat's model when a spoken turn is about to run on another. */
+  rememberChatModel?: (provider: string, modelId: string) => void;
 }
 
 export interface Executor {
@@ -87,6 +89,7 @@ export class HostExecutor implements Executor {
       toolsOff: opts.toolsOff,
       subagentModel: opts.subagentModel,
       heartbeatAgent: opts.heartbeatAgent,
+      rememberChatModel: opts.rememberChatModel,
       provider: opts.provider,
       modelId: opts.model,
       thinkingLevel: opts.thinkingLevel,

@@ -1431,6 +1431,16 @@ export function chatModel(
   return { provider: session.provider || settings.provider, model: session.model || settings.model };
 }
 
+/**
+ * Writes a chat's model to its row when nothing names one for it, not even the
+ * defaults. pi reopens such a chat on the model of its last answer, and after a
+ * spoken turn on the voice model that would be the voice model.
+ */
+export function keepChatModel(sessionId: string, provider: string, model: string): void {
+  const row = getSession(sessionId);
+  if (row && !chatModel(row).model) updateSession(sessionId, { provider, model });
+}
+
 export { SETTING_DEFAULTS as getSettingDefaults };
 
 /**

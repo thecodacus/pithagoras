@@ -510,6 +510,8 @@ chat is back on its own once the run is over; the chat's model picker is not
 changed, and a model you pick in the chat during the run stays. A spoken
 message sent into a run that is already going is answered by the model that run
 is on. **Same as the chat** (the default) uses the chat's model for everything.
+In rare cases, a spoken message sent just as the run before it is winding down
+(an extension is still finishing its work) may be answered by the chat's model.
 This applies to chats the portal runs itself, not to the container executor.
 
 **Settings → Add-ons → Voice → Reply without thinking first on** names the

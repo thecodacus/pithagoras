@@ -55,6 +55,7 @@ import {
   unsettledMessages,
   unansweredCommands,
   chatModel,
+  keepChatModel,
   getSettings,
   markOrphanedSessionsInterrupted,
   openDetachedSubagents,
@@ -1042,6 +1043,9 @@ class SessionManager extends EventEmitter {
       role: session.role,
       toolsOff: this.piOff(sessionId),
       subagentModel: () => sessionSubagentModel(sessionId) ?? undefined,
+      // A chat that names no model is reopened on the model of its last answer,
+      // and after a spoken turn on the voice model that would be the voice's.
+      rememberChatModel: (provider, model) => keepChatModel(sessionId, provider, model),
       // A heartbeat is the agent looking around on its own: its own context,
       // but held to reading by a role of its own. See heartbeat.ts.
       ...(session.kind === "heartbeat"

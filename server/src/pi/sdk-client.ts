@@ -379,6 +379,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     subagentModel?: () => string | undefined;
     /** The agent whose heartbeat this is: gives it the note tool. See heartbeat.ts. */
     heartbeatAgent?: string;
+    /** Told the chat's model when a spoken turn is about to run on another: see useVoiceModel. */
+    rememberChatModel?: (provider: string, modelId: string) => void;
   }): Promise<SdkPiClient> {
     // Imported lazily so the server still boots (and the container executor
     // still works) if the SDK cannot initialise in this environment.
@@ -552,6 +554,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const client = new SdkPiClient(session, modelRuntime, () => {});
     switchedOff = () => client.switchedOff;
     client.portalSessionId = opts.sessionId;
+    client.rememberChatModel = opts.rememberChatModel;
     client.canvases = canvases;
     if (eventBus && resourceLoader) {
       client.bus = eventBus;
@@ -571,10 +574,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       client.sayAudioRuleEachTurn();
     }
     const unsub = session.subscribe((event: any) => {
-      // Before anything is measured against the window: pi swaps the model for the
-      // registry's whenever an extension registers a provider, and that undoes it.
-      if (event?.type === "agent_start") client.applyLimitQuietly();
-      if (event?.type === "agent_settled") client.restoreChatModel();
+      client.noteRun(event);
       canvases?.observe(event);
       // As pi emits it, not as forward() passes it on: a queue_update held
       // behind a settle would be too late for the prompt() that caused it.
@@ -787,6 +787,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       this.voiceFirst?.arm(this.isIdle());
     } else {
       this.voiceFirst?.reset();
+      // Typed into the moment between idle and settled: the voice model is not
+      // for this one, and the settle that would put the chat back is a run late.
+      this.restoreChatModel();
     }
     const ruleFromThis = this.sayAudioRule(options?.voice === true);
     const promptOptions = {
@@ -844,8 +847,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return { outcome: "handled" };
   }
 
+  /** What the model in use depends on at the start and the end of a run, from pi's events as they come. */
+  noteRun(event: any): void {
+    // Before anything is measured against the window: pi swaps the model for the
+    // registry's whenever an extension registers a provider, and that undoes it.
+    if (event?.type === "agent_start") this.applyLimitQuietly();
+    // See restoreChatModel for the settle that comes in a run late.
+    if (event?.type === "agent_settled") this.restoreChatModel();
+  }
+
   /** The chat's model and the voice model's name, while a spoken turn runs on the voice model instead: see useVoiceModel. */
   private displaced?: { chat: any; provider: string; id: string };
+
+  /** Set by create(): where the chat's model is kept for a chat that names none. */
+  rememberChatModel?: (provider: string, modelId: string) => void;
 
   /**
    * Puts a spoken turn on the model the voice settings name, where one is named.
@@ -856,6 +871,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * which would write a model change into the conversation and make the voice
    * model pi's default for every other chat. The chat's model stays what the
    * chat has chosen, and is back once the run has settled: restoreChatModel.
+   *
+   * pi marks itself idle a moment before it emits agent_settled, while the
+   * extensions' handlers are awaited. A spoken message in that moment finds the
+   * previous run's voice model still in place and keeps it, and the late settle
+   * is ignored while a run is going (restoreChatModel). Known limit: pi awaits
+   * the extensions' input handlers before it marks the next run as running, and
+   * a settle that falls into that wait still counts as idle, so that one spoken
+   * message may be answered by the chat's model. Closing it would mean tying
+   * each borrow to the run it was made for, which pi's events do not name.
    */
   private useVoiceModel(): void {
     if (this.displaced || !this.isIdle()) return;
@@ -869,17 +893,22 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       return;
     }
     this.displaced = { chat: current, provider: wanted.provider, id: wanted.modelId };
+    // A chat that names no model anywhere is reopened by pi on the model of the
+    // last answer, which would be this one: the portal keeps the chat's own.
+    if (current) this.rememberChatModel?.(current.provider, current.id);
     this.session.agent.state.model = model;
     this.applyLimitQuietly();
   }
 
   /**
-   * The chat's own model again after a spoken turn. Left alone where the
-   * person picked another model meanwhile: that choice is theirs.
+   * The chat's own model again after a spoken turn. Not while a run is going:
+   * pi is idle a moment before it settles, and a settle that arrives after the
+   * next run has begun is the previous run's. Left alone where the person
+   * picked another model meanwhile: that choice is theirs (see setModel).
    */
   restoreChatModel(): void {
     const displaced = this.displaced;
-    if (!displaced) return;
+    if (!displaced || !this.isIdle()) return;
     this.displaced = undefined;
     const current = this.session.model;
     if (current?.provider !== displaced.provider || current?.id !== displaced.id) return;
@@ -1363,6 +1392,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   async setModel(provider: string, modelId: string): Promise<void> {
     const model = this.modelRuntime.getModel(provider, modelId);
     if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
+    // A pick ends the borrow, even of the voice model itself: it is the chat's now.
+    this.displaced = undefined;
     await this.session.setModel(viaProgressProxy(model, this.portalSessionId) ?? model);
     this.applyLimitQuietly();
   }
