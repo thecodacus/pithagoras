@@ -103,7 +103,9 @@ export function agentsRouter(): Router {
   /** `{ on }`: whether the New button starts a chat with it. Off hands that back to the first agent. */
   router.put("/agents/:id/new-chats", (req, res) => {
     try {
-      const off = req.body?.on === false;
+      const on = req.body?.on;
+      if (typeof on !== "boolean") return res.status(400).json({ error: "on must be a boolean" });
+      const off = !on;
       // Off only matters for the agent that has it: another's pick stays.
       if (!off || newChatAgent().id === req.params.id) setNewChatAgent(off ? DEFAULT_AGENT : req.params.id);
       else if (!getAgent(req.params.id)) throw new AgentError("No such agent", 404);

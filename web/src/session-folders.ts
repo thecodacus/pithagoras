@@ -1,6 +1,6 @@
 /**
  * The chats gathered by the folder they work in: each agent's home, the
- * first of them where "New" starts one, and each project. A chat started in a project's subfolder belongs to
+ * one where "New" starts a chat (the agent picked for new chats), and each project. A chat started in a project's subfolder belongs to
  * the project all the same, as it does on the Projects page. One that is in
  * neither — the workspace root itself, say — goes under "Elsewhere", which is
  * only there while it has any.

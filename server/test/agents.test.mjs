@@ -363,6 +363,12 @@ test("the New button's chat goes to the agent picked for new chats, the first ag
   assert.equal((await flags())[picked.id], true, "off for an agent that does not have them leaves the pick alone");
   assert.equal((await call("PUT", "/api/agents/nobody/new-chats", { on: true })).status, 404);
   assert.equal((await call("PUT", "/api/agents/nobody/new-chats", { on: false })).status, 404);
+  for (const body of [undefined, {}, { on: "false" }, { on: 0 }, { on: null }]) {
+    const bad = await call("PUT", `/api/agents/${other.id}/new-chats`, body);
+    assert.equal(bad.status, 400, JSON.stringify(body));
+    assert.equal(bad.body.error, "on must be a boolean");
+  }
+  assert.equal((await flags())[picked.id], true, "a malformed body does not move the pick");
 
   await call("PUT", `/api/agents/${picked.id}/new-chats`, { on: false });
   assert.equal((await call("POST", "/api/sessions", {})).body.workspace, homePath, "off hands them back to the first agent");
