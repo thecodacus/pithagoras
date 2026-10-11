@@ -169,6 +169,8 @@ window.fetch = (async (input: any, init?: any) => {
     return reply({ pulls });
   }
   if (path === '/pulls/current' && params.get('currentfail') && !currentFailed++) return reply({ error: 'gh timed out' }, 502);
+  // The clone's branch has no pull request.
+  if (path === '/pulls/current' && q.get('repo') === 'tools/lib') return reply({ pull: null });
   if (path === '/pulls/current') return reply({ pull: repo.branch === 'feature/login' ? { ...pulls[0], body: '' } : created?.headRefName === repo.branch ? created : null });
   if (path === '/pulls' && method === 'POST') {
     created = { ...pulls[0], number: 42, title: body.title, headRefName: repo.branch, body: body.body };

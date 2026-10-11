@@ -171,10 +171,10 @@ export const GitPanel = memo(function GitPanel({
   // a clone in it can still be made a repository.
   useEffect(() => {
     if (!found) return;
-    const has = (p: string) => p === "" || found.repos.some((r) => r.path === p);
+    const listed = (p: string) => found.repos.some((r) => r.path === p);
     if (choice === null) {
-      if (!has("") && found.repos.length) setChoice(found.repos[0].path);
-    } else if (!has(choice) && !found.truncated) {
+      if (!listed("") && found.repos.length) setChoice(found.repos[0].path);
+    } else if (choice !== "" && !listed(choice) && !found.truncated) {
       setChoice(null);
       local.remove(choiceKey(sessionId));
     }
