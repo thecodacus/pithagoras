@@ -517,3 +517,31 @@ test('with one repository, nothing is offered to pick', async ({ page }) => {
   await expect(page.getByText('session.ts')).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Repository' })).toHaveCount(0);
 });
+
+test('GitHub\'s late answer for the repository left is not taken for the one picked', async ({ page }) => {
+  // The folder's own repository is asked first and answers after four seconds; the clone picked meanwhile answers at once.
+  await page.goto('/tests/git.html?nested=1&ghslow=1&tab=pulls');
+  const picker = page.getByRole('combobox', { name: 'Repository' });
+  await picker.click();
+  await page.getByRole('option', { name: 'tools/lib' }).click();
+  await expect(page.getByText(/On trunk — switch to a branch of your own/)).toBeVisible();
+  // Past the slow answer: it must not have replaced the clone's (whose default branch is trunk, not main).
+  await page.waitForTimeout(4500);
+  await expect(page.getByText(/On trunk — switch to a branch of your own/)).toBeVisible();
+});
+
+test('a folder in no repository that holds a clone can still be made a repository', async ({ page }) => {
+  await page.goto('/tests/git.html?repo=none&nested=1');
+  await expect(page.getByText('lib.ts')).toBeVisible();
+  const picker = page.getByRole('combobox', { name: 'Repository' });
+  await picker.click();
+  await page.getByRole('option', { name: '.', exact: true }).click();
+  await expect(page.getByText('This chat\'s folder is not in a git repository.')).toBeVisible();
+  await expect(picker).toBeVisible();
+  await page.getByRole('button', { name: 'Make it one (git init)' }).click();
+  expect(await calls(page)).toEqual([{ url: '/init', body: {} }]);
+  // And back to the clone, which is still there to pick.
+  await picker.click();
+  await page.getByRole('option', { name: 'tools/lib' }).click();
+  await expect(page.getByText('lib.ts')).toBeVisible();
+});

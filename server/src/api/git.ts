@@ -30,7 +30,7 @@ export function gitRouter(): Router {
   const router = express.Router();
 
   /** The chat's folder, or the clone in it that `?repo=` names; answered for when there is none. */
-  const folderOf = (req: Request, res: Response): string | undefined => {
+  const folderOf = async (req: Request, res: Response): Promise<string | undefined> => {
     const session = getSession(String(req.params.id));
     if (!session) {
       res.status(404).json({ error: "Not found" });
@@ -42,6 +42,9 @@ export function gitRouter(): Router {
       if (!rel) return base;
       const dir = resolveInside(base, rel);
       if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new FileError("missing", "There is no such repository in this chat's folder");
+      // A folder git works around (an empty .git, a plain folder in the repository around it) is not a repository
+      // of its own: acting on it would act on the one around.
+      if (!(await g.isRepoRoot(dir))) throw new FileError("missing", "There is no such repository in this chat's folder");
       return dir;
     } catch (e) {
       fail(res, e);
@@ -51,7 +54,7 @@ export function gitRouter(): Router {
 
   /** The repository the chat's folder is in; answered for when it is in none. */
   const repoOf = async (req: Request, res: Response): Promise<g.Repo | undefined> => {
-    const folder = folderOf(req, res);
+    const folder = await folderOf(req, res);
     if (!folder) return undefined;
     const repo = await g.findRepo(folder);
     if (!repo) {
@@ -94,7 +97,7 @@ export function gitRouter(): Router {
    */
   router.get("/sessions/:id/git", async (req, res) => {
     try {
-      const folder = folderOf(req, res);
+      const folder = await folderOf(req, res);
       if (!folder) return;
       const repo = await g.findRepo(folder);
       if (!repo) return res.json({ repo: false, folder });
@@ -109,7 +112,7 @@ export function gitRouter(): Router {
 
   router.post("/sessions/:id/git/init", async (req, res) => {
     try {
-      const folder = folderOf(req, res);
+      const folder = await folderOf(req, res);
       if (!folder) return;
       if (await g.findRepo(folder)) return res.status(409).json({ error: "This folder is already in a repository" });
       await g.initRepo(folder);

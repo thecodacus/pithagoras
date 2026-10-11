@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { insideReal, isUnderText, realPath } from "./within.js";
 
@@ -333,7 +333,8 @@ export async function findRepos(folder: string): Promise<{ repos: RepoEntry[]; t
         continue;
       }
       // The folder itself having a .git is the repository around it, listed above.
-      if (rel && names.some((d) => d.name === ".git")) {
+      const dotGit = rel ? names.find((d) => d.name === ".git") : undefined;
+      if (dotGit && (await looksLikeRepo(path.join(folder, rel, ".git"), dotGit.isDirectory()))) {
         if (repos.length >= SCAN_REPOS) truncated = true;
         else repos.push({ path: rel, name: path.posix.basename(rel) });
         continue;
@@ -346,6 +347,28 @@ export async function findRepos(folder: string): Promise<{ repos: RepoEntry[]; t
     level = next;
   }
   return { repos: sorted(repos), truncated };
+}
+
+/**
+ * Whether a `.git` is one git takes for a repository: a file is a worktree's or a submodule's, a folder needs a
+ * HEAD. An empty one, as an interrupted clone leaves, is skipped by git, which then works in the repository
+ * around it — so listing it would offer one repository and act on another.
+ */
+async function looksLikeRepo(dotGit: string, isDir: boolean): Promise<boolean> {
+  if (!isDir) return true;
+  try {
+    return (await stat(path.join(dotGit, "HEAD"))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `dir` is the top of the repository git works in there, not a folder in a bigger one. */
+export async function isRepoRoot(dir: string): Promise<boolean> {
+  const repo = await findRepo(dir);
+  if (!repo) return false;
+  const root = realPath(repo.root);
+  return root !== null && root === realPath(dir);
 }
 
 /** The one around first, then the clones by path. */

@@ -92,10 +92,19 @@ export const GitPanel = memo(function GitPanel({
 
   // Whether pull requests can be had: asked apart, since it asks GitHub, and
   // what is on this disk is not held back while it answers. Again on Refresh.
+  // A reply for a repository that is not the one shown any more is dropped: the pick changes the target
+  // in place, and the last repository's answer may still be on its way (GitHub asked uncached is slow).
+  const current = useRef(target);
+  current.current = target;
   const askGh = useCallback(
     (fresh = false) =>
-      gitApi.gh(target, fresh).then(setGh, (e) =>
-        setGh({ installed: true, authed: false, repo: null, url: null, defaultBranch: null, note: (e as Error).message }),
+      gitApi.gh(target, fresh).then(
+        (next) => {
+          if (current.current === target) setGh(next);
+        },
+        (e) => {
+          if (current.current === target) setGh({ installed: true, authed: false, repo: null, url: null, defaultBranch: null, note: (e as Error).message });
+        },
       ),
     [target],
   );
@@ -158,10 +167,11 @@ export const GitPanel = memo(function GitPanel({
   }, [reload]);
 
   // Picked for the person: the first clone when the folder is in no repository itself, and no pick is kept
-  // for one that is not there any more.
+  // for one that is not there any more. The folder itself is always there to pick, so that a folder with
+  // a clone in it can still be made a repository.
   useEffect(() => {
     if (!found) return;
-    const has = (p: string) => found.repos.some((r) => r.path === p);
+    const has = (p: string) => p === "" || found.repos.some((r) => r.path === p);
     if (choice === null) {
       if (!has("") && found.repos.length) setChoice(found.repos[0].path);
     } else if (!has(choice) && !found.truncated) {
@@ -259,8 +269,9 @@ export const GitPanel = memo(function GitPanel({
     };
   }, [state, gh, target, repoPath, act, busy, onOpenFile]);
 
-  // With more than one to pick from, or one that is not the folder's own, which is not the whole story.
-  const picker = found && (found.repos.length > 1 || repoPath) ? <RepoPicker repos={found.repos} value={repoPath} onPick={pick} disabled={!!busy} /> : null;
+  // With more than one to pick from, or one that is not the folder's own (a clone in a folder that is in no repository is
+  // what to pick the folder itself from again), which is not the whole story.
+  const picker = found && (found.repos.length > 1 || repoPath || found.repos.some((r) => r.path !== "")) ? <RepoPicker repos={found.repos} value={repoPath} onPick={pick} disabled={!!busy} /> : null;
 
   if (!state) {
     return (
@@ -341,9 +352,15 @@ export const GitPanel = memo(function GitPanel({
 
 /** Which of the chat's folder's repositories this is: the one the folder is in, or a clone below it. */
 function RepoPicker({ repos, value, onPick, disabled }: { repos: RepoChoice[]; value: string; onPick: (path: string) => void; disabled?: boolean }) {
-  // A pick that the scan has not listed (yet, or any more) is still shown as it is.
-  const listed = repos.some((r) => r.path === value);
-  const options = [...(listed ? [] : [{ value, label: value || "." }]), ...repos.map((r) => ({ value: r.path, label: r.path || r.name }))];
+  // The folder itself is always there to pick: when it is in no repository it is not listed, and is
+  // still what to pick to make it one. A pick that the scan has not listed (yet, or any more) is shown as it is.
+  const around = repos.some((r) => r.path === "");
+  const listed = !value || repos.some((r) => r.path === value);
+  const options = [
+    ...(around ? [] : [{ value: "", label: "." }]),
+    ...(listed ? [] : [{ value, label: value }]),
+    ...repos.map((r) => ({ value: r.path, label: r.path || r.name })),
+  ];
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1.5 text-xs text-fg-subtle">
       <span className="shrink-0">{t("Repository")}</span>

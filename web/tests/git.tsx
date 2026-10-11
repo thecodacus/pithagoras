@@ -104,8 +104,10 @@ window.fetch = (async (input: any, init?: any) => {
   if (path === '' && (window as any).stateFails) return reply({ error: 'The portal could not be reached' }, 500);
   if (path === '') return reply({ repo: true, root: '/work/app', prefix: params.get('prefix') ?? '', ...repo, truncated: false, remotes: [{ name: 'origin', address: 'github.com:me/app', web: 'https://github.com/me/app' }] });
   if (path === '/gh') {
-    if (params.get('ghslow')) await new Promise((r) => setTimeout(r, 4000));
-    return reply(gh);
+    // The clone is a repository of its own on GitHub, with another default branch; ?ghslow=1 is slow for the folder's own only.
+    const clone = q.get('repo') === 'tools/lib';
+    if (params.get('ghslow') && !clone) await new Promise((r) => setTimeout(r, 4000));
+    return reply(clone && gh.repo ? { ...gh, repo: 'me/lib', url: 'https://github.com/me/lib', defaultBranch: 'trunk' } : gh);
   }
   if (path === '/diff') return reply({ diff: q.get('path') === 'a.txt' ? conflictDiff : diffOf(q.get('path') ?? 'x'), truncated: false });
   if (path === '/stage') {

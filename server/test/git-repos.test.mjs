@@ -80,10 +80,52 @@ test("a tree too deep or with too many clones is cut, and says so", async () => 
   // Deeper than a scan goes: not found, and not a reason to say it was cut short.
   repo(path.join(work, "a", "b", "c", "d", "e", "deep"), "deep");
   assert.deepEqual((await g.findRepos(work)).repos, []);
-  for (let i = 0; i < 52; i++) mkdirSync(path.join(work, `r${String(i).padStart(2, "0")}`, ".git"), { recursive: true });
+  // Folders with a HEAD, which is all the scan reads of a clone: it does not start git for each.
+  for (let i = 0; i < 52; i++) {
+    const dotGit = path.join(work, `r${String(i).padStart(2, "0")}`, ".git");
+    mkdirSync(dotGit, { recursive: true });
+    writeFileSync(path.join(dotGit, "HEAD"), "ref: refs/heads/main\n");
+  }
   const many = await g.findRepos(work);
   assert.equal(many.repos.length, 50);
   assert.equal(many.truncated, true);
+});
+
+test("the depth and the folder limits are where the docs say: four levels, 4000 folders", async () => {
+  const { work } = chat();
+  // Four levels below the folder is found, five is not, and nothing was cut that a scan would have reached.
+  repo(path.join(work, "a", "b", "c", "d"), "four");
+  repo(path.join(work, "a", "b", "c", "d", "e"), "five-inside");
+  repo(path.join(work, "p", "q", "r", "s", "t"), "five");
+  const bounded = await g.findRepos(work);
+  assert.deepEqual(bounded.repos.map((r) => r.path), ["a/b/c/d"]);
+  assert.equal(bounded.truncated, false);
+
+  // More folders than a scan reads: it stops and says so, rather than walking on.
+  const { work: wide } = chat();
+  for (let i = 0; i < 4100; i++) mkdirSync(path.join(wide, `f${String(i).padStart(4, "0")}`));
+  const cut = await g.findRepos(wide);
+  assert.equal(cut.truncated, true);
+});
+
+test("an empty or broken .git is not a repository: it is not listed, and ?repo= refuses it", async () => {
+  const { id, work } = chat();
+  repo(work, "outer");
+  mkdirSync(path.join(work, "empty", ".git"), { recursive: true });
+  repo(path.join(work, "real"), "real");
+  mkdirSync(path.join(work, "plain"));
+  await withApi(async (base) => {
+    const url = `${base}/${id}/git`;
+    assert.deepEqual((await get(`${url}/repos`)).repos.map((r) => r.path), ["", "real"]);
+    // Git works in the repository around such a folder, so a route given it would act on that one.
+    for (const repoName of ["empty", "plain"]) {
+      const r = await get(`${url}?repo=${repoName}`);
+      assert.equal(r.status, 404);
+      assert.equal(r.branch, undefined);
+      assert.equal((await get(`${url}/log?repo=${repoName}`)).status, 404);
+    }
+    assert.equal((await get(`${url}?repo=real`)).branch, "real");
+  });
 });
 
 test("the routes work in the clone ?repo= names, and refuse a path out of the folder", async () => {
