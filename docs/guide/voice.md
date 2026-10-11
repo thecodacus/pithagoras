@@ -503,6 +503,15 @@ preferences are unchanged. This skips initial
 reasoning latency, but prompt processing and sentence synthesis still take time.
 Other providers and the container executor retain their normal thinking behavior.
 
+**Settings → Add-ons → Voice → Voice model** names the model that answers
+spoken messages, for when the chat is on a slow model and voice mode needs a
+fast one. A spoken message that starts a run is answered by that model, and the
+chat is back on its own once the run is over; the chat's model picker is not
+changed, and a model you pick in the chat during the run stays. A spoken
+message sent into a run that is already going is answered by the model that run
+is on. **Same as the chat** (the default) uses the chat's model for everything.
+This applies to chats the portal runs itself, not to the container executor.
+
 **Settings → Add-ons → Voice → Reply without thinking first on** names the
 providers instead, as the model menu shows them, separated by commas. Switching
 thinking off goes through the llama.cpp chat template, so only llama.cpp servers

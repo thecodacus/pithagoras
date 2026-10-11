@@ -30,7 +30,7 @@ import { heartbeatTool } from "./heartbeat-tool.js";
 import { askPrimaryTool } from "./ask-primary.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
-import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, portalBrowserOn, voiceSpeaks } from "../db.js";
+import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, portalBrowserOn, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE, understoryOn } from "../features.js";
@@ -574,6 +574,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Before anything is measured against the window: pi swaps the model for the
       // registry's whenever an extension registers a provider, and that undoes it.
       if (event?.type === "agent_start") client.applyLimitQuietly();
+      if (event?.type === "agent_settled") client.restoreChatModel();
       canvases?.observe(event);
       // As pi emits it, not as forward() passes it on: a queue_update held
       // behind a settle would be too late for the prompt() that caused it.
@@ -782,6 +783,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     options?: { voice?: boolean; images?: ImageContent[]; steer?: boolean },
   ): Promise<PromptTaken> {
     if (options?.voice) {
+      this.useVoiceModel();
       this.voiceFirst?.arm(this.isIdle());
     } else {
       this.voiceFirst?.reset();
@@ -820,6 +822,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         error => {
           if (options?.voice) this.voiceFirst?.reset();
           if (ruleFromThis) this.unsayAudioRule();
+          this.restoreChatModel();
           const reason = error instanceof Error ? error.message : String(error);
           this.emit("event", { type: "portal_failed", error: `${options?.voice ? "Voice turn" : "The run"} failed: ${reason}` });
         },
@@ -827,6 +830,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     } catch (error) {
       if (options?.voice) this.voiceFirst?.reset();
       if (ruleFromThis) this.unsayAudioRule();
+      this.restoreChatModel();
       throw error;
     }
     finally {
@@ -836,7 +840,51 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     if (idleWhenTaken && !this.session.isIdle) return { outcome: "started" };
     // Taken by an extension, and not into the conversation.
     if (ruleFromThis) this.unsayAudioRule();
+    this.restoreChatModel();
     return { outcome: "handled" };
+  }
+
+  /** The chat's model and the voice model's name, while a spoken turn runs on the voice model instead: see useVoiceModel. */
+  private displaced?: { chat: any; provider: string; id: string };
+
+  /**
+   * Puts a spoken turn on the model the voice settings name, where one is named.
+   *
+   * Only for a turn that starts a run: a spoken message into a run that is
+   * going is answered by the model that run is on. The model is put on the
+   * agent's state, as applyContextLimit does, rather than through setModel,
+   * which would write a model change into the conversation and make the voice
+   * model pi's default for every other chat. The chat's model stays what the
+   * chat has chosen, and is back once the run has settled: restoreChatModel.
+   */
+  private useVoiceModel(): void {
+    if (this.displaced || !this.isIdle()) return;
+    const wanted = getVoiceModel();
+    if (!wanted) return;
+    const current = this.session.model;
+    if (current?.provider === wanted.provider && current?.id === wanted.modelId) return;
+    const model = viaProgressProxy(this.modelRuntime.getModel(wanted.provider, wanted.modelId), this.portalSessionId);
+    if (!model) {
+      console.error(`[portal] voice model ${wanted.provider}/${wanted.modelId} not found; the chat's model answers`);
+      return;
+    }
+    this.displaced = { chat: current, provider: wanted.provider, id: wanted.modelId };
+    this.session.agent.state.model = model;
+    this.applyLimitQuietly();
+  }
+
+  /**
+   * The chat's own model again after a spoken turn. Left alone where the
+   * person picked another model meanwhile: that choice is theirs.
+   */
+  restoreChatModel(): void {
+    const displaced = this.displaced;
+    if (!displaced) return;
+    this.displaced = undefined;
+    const current = this.session.model;
+    if (current?.provider !== displaced.provider || current?.id !== displaced.id) return;
+    this.session.agent.state.model = displaced.chat;
+    this.applyLimitQuietly();
   }
 
   /**

@@ -10,7 +10,7 @@ const dir = inProcessHome('pithagoras-voice-');
 process.env.DOCKER_SOCKET = join(dir, 'no-docker.sock');
 const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
 const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
-const { getDb, getSkipThinkingProviders, getVoiceInstructions } = await import('../server/src/db.js');
+const { getDb, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel } = await import('../server/src/db.js');
 const { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS } = await import('../server/src/pi/voice-first.js');
 const upstream = express();
 let calls = 0;
@@ -503,6 +503,24 @@ test('the providers that skip thinking on the first spoken call: the default lis
   assert.equal(getSkipThinkingProviders(), undefined);
   // What is not a list of provider names.
   for (const bad of ['llama-swap', [42], ['two words'], ['a/b'], Array(51).fill('x')]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad).slice(0, 40));
+  await put(undefined);
+});
+test('the voice model: none by default, a provider/model is saved and read back, and anything else is refused', async () => {
+  const put = (voiceModel: unknown) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, voiceModel }) });
+  await put(undefined);
+  assert.equal(getVoiceModel(), undefined);
+  assert.equal((await put(' fast/small-model:q4 ')).status, 200);
+  assert.deepEqual(getVoiceModel(), { provider: 'fast', modelId: 'small-model:q4' });
+  assert.equal(((await (await fetch(`${base}/voice`)).json()) as any).voiceModel, 'fast/small-model:q4');
+  // Kept when the managed voice saves the settings again.
+  assert.equal(connectManagedVoice().voiceModel, 'fast/small-model:q4');
+  // A model id may hold slashes of its own: only the first one ends the provider.
+  await put('router/vendor/model');
+  assert.deepEqual(getVoiceModel(), { provider: 'router', modelId: 'vendor/model' });
+  // Empty is the way back to the chat's own.
+  await put('');
+  assert.equal(getVoiceModel(), undefined);
+  for (const bad of [42, 'no-slash', '/model', 'provider/', 'two words/model', 'x'.repeat(301)]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad).slice(0, 40));
   await put(undefined);
 });
 test('VOICE_RESPONSE_INSTRUCTIONS=false is shown to the page, and leaves a saved text alone', async () => {

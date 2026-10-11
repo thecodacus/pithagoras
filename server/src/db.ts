@@ -1361,6 +1361,17 @@ export function getSkipThinkingProviders(): string[] | undefined {
   }
 }
 
+/** The model spoken turns run on, as saved in the voice settings; undefined where they use the chat's own. */
+export function getVoiceModel(): { provider: string; modelId: string } | undefined {
+  try {
+    const saved = JSON.parse(getSetting("voice") ?? "{}").voiceModel;
+    const at = typeof saved === "string" ? saved.indexOf("/") : -1;
+    return at > 0 && at < saved.length - 1 ? { provider: saved.slice(0, at), modelId: saved.slice(at + 1) } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Whether voice mode can speak: the add-on is on, with a speech engine (not recognition alone). */
 export function voiceSpeaks(): boolean {
   try {

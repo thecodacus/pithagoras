@@ -376,6 +376,8 @@ export interface VoiceConfig {
   // The providers whose first call of a spoken turn goes without thinking, and the built-in list to go back to.
   skipThinkingProviders?: string[];
   defaultSkipThinkingProviders?: string[];
+  // The model spoken turns run on, "provider/model"; empty means the chat's own.
+  voiceModel?: string;
   pipelineMode?: "parallel" | "sequential";
   // False with no speech synthesis (runtime "none"): the page can listen, but replies are not spoken.
   speech?: boolean;

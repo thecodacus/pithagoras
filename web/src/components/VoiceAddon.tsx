@@ -2,7 +2,7 @@ import { VoiceLibrary, kokoroVoiceOptions } from './VoiceLibrary';
 import { VoiceEngines } from './VoiceEngines';
 import { Select } from "./Select";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
+import { DEFAULT_VAD, api, type AvailableModel, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
@@ -105,6 +105,9 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const [readFailed, setReadFailed] = useState<string | null>(null);
   const readConfig = () => api.voice().then(value => { setReadFailed(null); setConfig(value); }, e => setReadFailed((e as Error).message));
   useEffect(() => { void readConfig(); }, []);
+  // Every model there is, to name one for spoken turns rather than the chat's.
+  const [models, setModels] = useState<AvailableModel[]>([]);
+  useEffect(() => { api.allModels().then(r => setModels(r.models)).catch(() => {}); }, []);
   if (!config) return readFailed ? <div className="mt-4"><LoadFailed error={readFailed} onRetry={readConfig} /></div> : null;
   const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); setEdited(true); };
   const instructions = config.responseInstructions ?? "";
@@ -145,6 +148,14 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
       : <div className="block text-xs text-fg-muted">{t("Speech generation")}<Select<number> aria-label={t("Speech generation")} size="sm" className="mt-1.5 w-full" value={config.cfgScale ?? 4} onChange={cfgScale => update({ cfgScale })} options={[{ value: 1, label: t("Fast"), hint: t("Lighter voice guidance") }, { value: 4, label: t("Expressive"), hint: t("Stronger voice guidance") }]} /></div>)}
     {chatterbox && <p className="text-xs text-fg-faint">{t("Chatterbox speaks your input language and clones the selected reference voice; it has no designed voice.")} {NUMBER_PACK_LANGUAGES.includes(config.language ?? "") ? t("Numbers are written out before synthesis so they are spoken correctly.") : t("Numbers stay as digits in this language, which Chatterbox reads unreliably.")}</p>}
     {chatterbox && (config.voice || "design") === "design" && <p role="alert" className="text-xs text-danger">{t("Choose a voice with a recording above: Chatterbox cannot speak with a designed voice.")}</p>}
+    {!listening && <div className="block text-xs text-fg-muted">{t("Voice model")}
+      <Select aria-label={t("Voice model")} size="sm" className="mt-1.5 w-full" value={config.voiceModel ?? ""} onChange={voiceModel => update({ voiceModel })} options={[
+        { value: "", label: t("Same as the chat"), hint: t("The model the chat is on") },
+        ...(!config.voiceModel || models.some(m => `${m.provider}/${m.id}` === config.voiceModel) ? [] : [{ value: config.voiceModel, label: config.voiceModel }]),
+        ...models.map(m => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
+      ]} />
+      <p className="mt-1.5 text-xs text-fg-faint">{t("The model that answers spoken messages, so a slow chat model does not slow down a conversation. A spoken message that starts a run is answered by it and the chat goes back to its own model afterwards; the model picker of the chat is not changed.")}</p>
+    </div>}
     {!listening && <div className="space-y-2">
       <label className="block text-xs text-fg-muted">{t("Reply without thinking first on")}
         <input aria-label={t("Reply without thinking first on")} className={`mt-1.5 ${inputCls}`} value={providersText ?? (config.skipThinkingProviders ?? []).join(", ")}

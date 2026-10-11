@@ -40,6 +40,8 @@ export interface VoiceConfig {
   responseInstructions?: string;
   // The providers whose first call of a spoken turn goes without thinking. Absent means DEFAULT_SKIP_THINKING_PROVIDERS.
   skipThinkingProviders?: string[];
+  // The model spoken turns run on, "provider/model". Empty or absent means the chat's own.
+  voiceModel?: string;
 }
 /** Long enough for the built-in text several times over; every voice turn carries it. */
 export const MAX_RESPONSE_INSTRUCTIONS = 8000;
@@ -91,6 +93,9 @@ export function validateConfig(value: any): VoiceConfig {
   if (typeof responseInstructions !== "string" || responseInstructions.length > MAX_RESPONSE_INSTRUCTIONS)
     throw new Error(`Speaking instructions may be at most ${MAX_RESPONSE_INSTRUCTIONS} characters`);
   const skipThinkingProviders = skipThinking(value.skipThinkingProviders);
+  const voiceModel = typeof value.voiceModel === "string" ? value.voiceModel.trim() : value.voiceModel ?? "";
+  if (typeof voiceModel !== "string" || voiceModel.length > 300 || (voiceModel && !/^[^/\s]+\/\S+$/.test(voiceModel)))
+    throw new Error("Name the voice model as provider/model, or leave it empty to use the chat's own");
   if (runtime === "chatterbox") {
     // Chatterbox is told a language or it refuses; it has no detection mode,
     // and the language also decides how numbers are written out for synthesis.
@@ -105,7 +110,7 @@ export function validateConfig(value: any): VoiceConfig {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
 }
 /**
  * The providers as saved: names as the model menu shows them, each once. The
