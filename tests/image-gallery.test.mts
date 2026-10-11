@@ -1213,7 +1213,9 @@ test("a copy is made once, kept, and sent from then on", async () => {
 
   // Put back in time: a copy that is made again would have the time of now.
   const [name] = kept();
-  const long = new Date(Date.now() - 3_600_000);
+  // A whole second: utimes turns a time with milliseconds into a fraction of seconds that Node 22 (on CI) hands
+  // to the file system a millisecond short about half the time, and the time written is not the one asserted below.
+  const long = new Date(Math.floor(Date.now() / 1000) * 1000 - 3_600_000);
   utimesSync(path.join(thumbs, name), long, long);
   const again = await call("GET", `/images/${picture.id}/thumb`);
   assert.deepEqual(again.bytes, first.bytes);
