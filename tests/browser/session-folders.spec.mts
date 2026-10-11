@@ -163,8 +163,8 @@ test('a chat is started in a folder from its line', async ({ page }) => {
   await page.goto('/sessions');
   await folder(side, 'Home').hover();
   await side.getByRole('button', { name: 'New chat in Home' }).click();
-  // Home is where a chat starts without one.
-  await expect.poll(() => sent.find((s) => s.method === 'POST' && s.path === '/api/sessions')?.body ?? null).toEqual({});
+  // Home's own folder is named, not left out: a chat started without one goes to the agent picked for new chats.
+  await expect.poll(() => sent.find((s) => s.method === 'POST' && s.path === '/api/sessions')?.body ?? null).toEqual({ workspace: HOME });
 });
 
 test('the chats can be listed together again, as they were', async ({ page }) => {

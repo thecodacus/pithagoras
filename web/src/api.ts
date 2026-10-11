@@ -128,6 +128,8 @@ export interface Agent {
   sandboxUser: string;
   /** The Home there always was: the one chats go to when none is named, which cannot be deleted. */
   first: boolean;
+  /** Whether the New button starts a chat with it. */
+  newChats: boolean;
   initialised: boolean;
   chats: number;
   /** The channels that talk as it. */
@@ -872,6 +874,9 @@ export const api = {
       `/api/agents/${encodeURIComponent(id)}?folder=${folder}`,
       { method: "DELETE" }
     ),
+  /** On makes it the agent the New button starts with; off hands that back to the first agent. */
+  setNewChats: (agent: string, on: boolean) =>
+    json<Agent>(`/api/agents/${encodeURIComponent(agent)}/new-chats`, { method: "PUT", body: JSON.stringify({ on }) }),
   setAgentVoice: (agent: string, voice: string) =>
     json<Agent>(`/api/agents/${encodeURIComponent(agent)}/voice`, { method: "PUT", body: JSON.stringify({ voice }) }),
   agentSkills: (agent: string) => json<{ folder: string; skills: AgentSkill[] }>(`/api/agents/${encodeURIComponent(agent)}/skills`),

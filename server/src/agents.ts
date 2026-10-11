@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { writeFileAtomic } from "./atomic-write.js";
-import { getDb } from "./db.js";
+import { getDb, getSetting, putSetting } from "./db.js";
 import { removeFolderLater } from "./folder-removal.js";
 import { agentHomePath } from "./agent-home.js";
 import { AGENT_NAME_FILE as NAME_FILE } from "./pi/context-files.js";
@@ -60,6 +60,26 @@ export function getAgent(id: string): Agent | undefined {
 /** The first agent: the one a chat, channel or routine goes to when none is named. */
 export function defaultAgent(): Agent {
   return getAgent(DEFAULT_AGENT) ?? listAgents()[0];
+}
+
+const NEW_CHAT_AGENT = "new_chat_agent";
+
+/**
+ * The agent a new chat started without a project or an agent goes to: the one
+ * picked for it, else the first agent. An agent that has been deleted since is
+ * not one, so the first agent takes over.
+ */
+export function newChatAgent(): Agent {
+  const id = getSetting(NEW_CHAT_AGENT);
+  return (id ? getAgent(id) : undefined) ?? defaultAgent();
+}
+
+/** Picks the agent new chats go to; the first agent is the one that needs no pick, so it clears it. */
+export function setNewChatAgent(id: string): Agent {
+  const agent = getAgent(id);
+  if (!agent) throw new AgentError("No such agent", 404);
+  putSetting(NEW_CHAT_AGENT, id === DEFAULT_AGENT ? "" : id);
+  return agent;
 }
 
 /** The agent whose home this is, if any. */
@@ -246,6 +266,8 @@ export function deletable(id: string): Agent {
 export function deleteAgent(id: string, { deleteFolder }: { deleteFolder: boolean }): Agent {
   const agent = deletable(id);
   getDb().prepare("DELETE FROM agents WHERE id = ?").run(id);
+  // An agent made later under the same name gets the same id, and must not inherit the pick.
+  if (getSetting(NEW_CHAT_AGENT) === id) putSetting(NEW_CHAT_AGENT, "");
   // Only a folder this module made, under agentsRoot(): nothing else is ever removed.
   if (deleteFolder && isWithinText(agentsRoot(), agent.home) && agent.home !== agentsRoot() && existsSync(agent.home)) {
     removeFolderLater(agent.home);
