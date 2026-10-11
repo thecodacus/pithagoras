@@ -57,7 +57,7 @@ import { insideReal, isWithinText } from "./within.js";
 import { agentHome, agentHomePath } from "./agent-home.js";
 import { dataFolder } from "./data-dir.js";
 import { resolveChannelSession } from "./agent.js";
-import { AgentError, agentOf, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, orbOf } from "./agents.js";
+import { AgentError, agentOf, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, newChatAgent, orbOf } from "./agents.js";
 import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
 import { heartbeat } from "./heartbeat.js";
@@ -93,6 +93,7 @@ import { startLlamaProxy } from "./llama-progress.js";
 import { applyOnStart } from "./sandbox/apply.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
+import { logsRouter } from "./api/logs.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -320,7 +321,8 @@ function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[]
 app.get("/api/projects", (req, res) => {
   const home = agentHomePath();
   // Each agent's home is a folder of chats of its own, named after the agent.
-  const agents = listAgents().map((a) => ({ id: a.id, name: a.name, home: a.home }));
+  const fresh = newChatAgent().id;
+  const agents = listAgents().map((a) => ({ id: a.id, name: a.name, home: a.home, newChats: a.id === fresh }));
   try {
     if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, home, agents, projects: [] });
     if (req.query.bare === "1") {
@@ -735,9 +737,11 @@ app.get("/api/sessions", (_req, res) => {
 });
 
 /**
- * Conversations reached through a channel. Each is a real session — same
- * transcript, same replay, same model handling — so the Agent tab opens them
- * with the ordinary chat view rather than a parallel implementation.
+ * One agent's conversations: every chat in its home — those the New and + buttons
+ * start, and those started on the Agent page — and those that arrived through a
+ * channel. Each is a real session — same transcript, same replay, same model
+ * handling — so the Agent tab opens them with the ordinary chat view rather than
+ * a parallel implementation.
  */
 app.get("/api/agent/sessions", (req, res) => {
   // One agent's, given `?agent=`; the first agent's otherwise.
@@ -750,19 +754,21 @@ app.get("/api/agent/sessions", (req, res) => {
 
   res.json({
     agentHome: agent.home,
-    sessions: chatsOf(agent, listAgentSessions()).map((s) => ({
-      ...toApi(s),
-      // Matched on the slug, so a channel deleted and recreated under the same
-      // one still owns its conversations.
-      channel: s.channel_slug
-        ? {
-            slug: s.channel_slug,
-            name: bySlug.get(s.channel_slug)?.name ?? s.channel_slug,
-            kind: bySlug.get(s.channel_slug)?.kind ?? null,
-            present: bySlug.has(s.channel_slug),
-          }
-        : null,
-    })),
+    sessions: chatsOf(agent, [...listSessions(), ...listAgentSessions()])
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .map((s) => ({
+        ...toApi(s),
+        // Matched on the slug, so a channel deleted and recreated under the same
+        // one still owns its conversations.
+        channel: s.channel_slug
+          ? {
+              slug: s.channel_slug,
+              name: bySlug.get(s.channel_slug)?.name ?? s.channel_slug,
+              kind: bySlug.get(s.channel_slug)?.kind ?? null,
+              present: bySlug.has(s.channel_slug),
+            }
+          : null,
+      })),
   });
 });
 
@@ -812,10 +818,11 @@ app.post("/api/sessions", (req, res) => {
   // `agent` starts it in that agent's home.
   const agent = agentId === undefined ? undefined : typeof agentId === "string" ? getAgent(agentId) : undefined;
   if (agentId !== undefined && !agent) return res.status(404).json({ error: "No such agent" });
-  // Without either, a chat starts in Home: the first agent's own directory,
-  // where its SOUL.md, PrimaryUser.md and MEMORY.md are. Agents' homes are the
-  // only places outside the workspace root a chat may start.
-  const where = agent ? { path: agentHome(agent.home) } : workspace === undefined ? { path: agentHome() } : checkWorkspace(workspace);
+  // Without either, a chat starts in the home of the agent picked for new chats,
+  // the first agent's by default: the directory where its SOUL.md, PrimaryUser.md
+  // and MEMORY.md are. Agents' homes are the only places outside the workspace
+  // root a chat may start.
+  const where = agent ? { path: agentHome(agent.home) } : workspace === undefined ? { path: agentHome(newChatAgent().home) } : checkWorkspace(workspace);
   if ("error" in where) return res.status(400).json({ error: where.error });
   const resolved = where.path;
 
@@ -1444,6 +1451,7 @@ app.use("/api", providersRouter());
 app.use("/api", peopleRouter());
 app.use("/api", browserRouter());
 app.use("/api", sandboxRouter(sessions));
+app.use("/api", logsRouter());
 app.use("/api", voiceRouter());
 app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());

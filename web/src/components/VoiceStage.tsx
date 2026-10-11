@@ -48,7 +48,7 @@ const watchWide = (changed: () => void) => {
 const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
 
 export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue,
-  waitingForTap, items, running, onStop, attachments, onAddPictures, onRemovePicture, canRepeat, onRepeat, rate, onRate, steer, onSteer, ptt, onPtt, holding, onHold }: {
+  waitingForTap, items, errorsAfter, running, onStop, attachments, onAddPictures, onRemovePicture, canRepeat, onRepeat, rate, onRate, steer, onSteer, ptt, onPtt, holding, onHold }: {
   sessionId: string; folder: string;
   workPhase?: Activity | null;
   canvasOpen: boolean; onCanvasMinimize: () => void; onCanvasToggle: () => void;
@@ -57,7 +57,9 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   browserAvailable: boolean; browserActivity: number; terminalActivity: number; toolEvents: PortalEvent[]; sounds: boolean; onSounds: () => void; onCue: (kind: VoiceCue) => void;
   /** Back after a reload, and waiting for a tap before audio may start. */
   waitingForTap?: boolean;
-  items: Item[]; running: boolean; onStop: () => void;
+  items: Item[];
+  /** Where voice mode's controller began (null until it has): only errors after it open the conversation, as only those are said. */
+  errorsAfter: number | null; running: boolean; onStop: () => void;
   /** Pictures waiting to go with the next thing said. */
   attachments: Attachment[]; onAddPictures: (files: File[]) => void; onRemovePicture: (id: string) => void;
   canRepeat: boolean; onRepeat: () => void;
@@ -85,6 +87,19 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);
   const [conversation, setConversation] = useState(false), [settings, setSettings] = useState(false);
+  // A failure is said in one short line and written in the conversation, which
+  // opens on it: only an error that came after voice mode began, by the same
+  // mark the speaking side uses. Before that mark is known (the chat may still
+  // be replaying its history) nothing counts, so old errors never open it.
+  const errorsSeen = useRef(0);
+  useEffect(() => {
+    if (errorsAfter === null) return;
+    let newest = Math.max(errorsSeen.current, errorsAfter);
+    const before = newest;
+    for (const item of items) if (item.kind === "notice" && item.tone === "error") newest = Math.max(newest, Number(item.id.slice(1)) || 0);
+    errorsSeen.current = newest;
+    if (newest > before) setConversation(true);
+  }, [items, errorsAfter]);
   const settingsToggle = useRef<HTMLButtonElement>(null);
   const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);

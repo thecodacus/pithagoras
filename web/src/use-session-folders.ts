@@ -98,7 +98,7 @@ export function useOpenFolders(key: string, byDefault: (folder: string) => boole
 const agentsFrom = (raw: unknown) =>
   (Array.isArray(raw) ? raw : []).filter(
     (a): a is PlaceAgent => typeof a?.id === "string" && typeof a?.name === "string" && typeof a?.home === "string" && a.home !== "",
-  ).map((a) => ({ id: a.id, name: a.name, home: a.home }));
+  ).map((a) => ({ id: a.id, name: a.name, home: a.home, ...(typeof a.newChats === "boolean" ? { newChats: a.newChats } : {}) }));
 
 /** Places as they were last known, so that the chats are gathered from the start rather than once they are asked for. */
 function knownPlaces(): Places | undefined {

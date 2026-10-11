@@ -577,12 +577,26 @@ never spoken. The lines below are given in English.
   says so ("Let me do a quick context compaction so I can keep going."), and another
   when it is over ("Context compaction is done. I'm ready to continue.") or when it
   stopped before it finished.
+- **Errors.** When the model fails and the portal gives up on it, a single line
+  says "An error occurred." (once, however many errors came together), and the
+  Conversation window opens with the error written in it. This line is spoken
+  whatever the settings below say, since otherwise a failure would pass unnoticed
+  with the chat put away. It is not made when the error happens, when the speech
+  model may be the very thing that is down: the portal makes it as voice mode
+  starts, in the language of the interface and with the voice of the agent, and keeps it
+  as a file in the `voice` folder of its data directory. A new voice, speech engine
+  or interface language makes a new one at the next start. If the line is missing
+  (the speech model was not ready when voice mode started), the error is shown in
+  writing only, and voice mode says so. A start that finds the speech model not
+  ready tries three times, about a second and then three seconds apart, and writes
+  one line per failed try to the portal's log. If it still fails, the next time voice
+  mode starts tries again, however long that is, without waiting for an error.
 - **Talking during compaction.** What you say while it compacts is dropped, not
   sent: the agent cannot take it in until the compaction is over. The portal says
   "I'm still compacting our conversation. Please wait a moment; I'll let you know
   when I'm ready.", at most every eight seconds, so say it again afterwards.
 
-All the spoken lines are off in the [sequential baseline](/guide/voice-comparison),
+All the other spoken lines are off in the [sequential baseline](/guide/voice-comparison),
 and `VOICE_STATUS_SPEECH=false` on the portal turns them off everywhere. Only the
 lines go: what you say during compaction is still dropped, with nothing said about
 it.
@@ -603,6 +617,18 @@ Recognition is Whisper by default. **Speech recognition model** takes another
 model id (letters, digits, `.`, `:`, `-`, `_`), such as `qwen3-asr` behind
 llama-swap. **Lazy load** and the speech-detection thresholds are saved with the
 rest by **Save voice settings**.
+
+**Dictation model** and **Dictation endpoint** name the model and the address
+the microphone button of the message box transcribes with, where they should
+differ from voice mode's: a conversation wants the quick model, while a message
+you dictate can wait for a more accurate one, perhaps on another service. Set
+only the model and both use the same **Speech recognition URL**, so that service
+has to serve both models (llama-swap loads the one that is asked for). Left
+empty, dictation uses **Speech recognition model** and **Speech recognition
+URL**, like voice mode. Installing the managed voice service over a recognition
+address of your own empties both, and uninstalling it brings back what was there
+before. What you set up afterwards stays, also when you press **Start voice**;
+an address of the managed service itself is cleared with the uninstall.
 
 ## Speech speed
 
