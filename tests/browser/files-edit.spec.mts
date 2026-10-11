@@ -189,6 +189,24 @@ test('an empty markdown file opens as the source, not as a blank page, and the s
   await expect(page.getByRole('region', { name: 'Rendered notes.md' }).getByRole('heading', { name: 'Typed' })).toBeVisible();
 });
 
+test('a kept edit of an empty markdown file comes back as the source, and the saved choice stays', async ({ page }) => {
+  await files(page, () => null, 'page', '');
+  await box(page).fill('# Typed\n');
+  await second(page);
+  await first(page);
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(box(page)).toHaveValue('# Typed\n');
+  await expect(page.getByRole('region', { name: 'Rendered notes.md' })).toHaveCount(0);
+  // Coming back is not a choice either: nothing is saved, so the next file with text is still a page.
+  expect(await page.evaluate(() => localStorage.getItem('filesMarkdownRendered'))).toBeNull();
+  // The same after a reload of the page.
+  page.on('dialog', (d) => void d.accept());
+  await page.reload();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(box(page)).toHaveValue('# Typed\n');
+  expect(await page.evaluate(() => localStorage.getItem('filesMarkdownRendered'))).toBeNull();
+});
+
 test('a new markdown file is made to be written in: it opens as the source whatever was chosen, and typing works', async ({ page }) => {
   const { disk } = await files(page, () => null, 'page');
   await expect(page.getByRole('region', { name: 'Rendered notes.md' })).toBeVisible();

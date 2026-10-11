@@ -135,7 +135,8 @@ export const FilesPanel = memo(function FilesPanel({
   const [showHidden, setShowHidden] = useState(savedShowHidden);
   const [rendered, setRendered] = useState(savedRendered);
   // A file made to be written in, or empty, opens as the source whatever the saved choice is: a blank page cannot be typed into. The choice itself is left alone.
-  const [writing, setWriting] = useState(false);
+  // An edit brought back for a file that was empty on disk is the same case: it comes back as the source.
+  const [writing, setWriting] = useState(() => !!left && !left.saved);
   const asPage = rendered && !writing;
   // The chat's full path is not drawn in the sidebar or the chat's header any more: it is here, on request.
   const [showPath, setShowPath] = useState(false);
