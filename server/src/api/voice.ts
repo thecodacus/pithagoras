@@ -32,6 +32,8 @@ export interface VoiceConfig {
   // The model the chat's dictation is transcribed with, where it is not the one voice mode uses (a bigger, slower one is fine
   // for a message typed by voice, while a conversation wants the quick one). Empty means the same as `sttModel`.
   dictationModel?: string;
+  /** Where dictation sends its recordings; empty means whisperUrl. */
+  dictationUrl?: string;
   // Chatterbox emotion exaggeration; its own scale, unrelated to Breeze's CFG.
   exaggeration?: number;
   // Kokoro speaks with one of its own voices, kept apart from `voice` so that
@@ -62,14 +64,21 @@ export function validateConfig(value: any): VoiceConfig {
   if (typeof value?.enabled !== "boolean") throw new Error("enabled must be a boolean");
   const runtime = value.runtime ?? "breeze";
   if (!["breeze", "audio-cpp", "chatterbox", "kokoro", "none"].includes(runtime)) throw new Error("Choose a supported speech runtime");
+  const checkUrl = (key: string, given: string) => {
+    const url = new URL(given);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash)
+      throw new Error(`${key} must be an HTTP URL without credentials or a fragment`);
+  };
   for (const key of ["whisperUrl", "breezeUrl"]) {
     if (typeof value[key] !== "string") throw new Error(`${key} is required`);
     // With no speech synthesis there is no address to speak to.
     if (key === "breezeUrl" && runtime === "none" && !value[key].trim()) continue;
-    const url = new URL(value[key]);
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash)
-      throw new Error(`${key} must be an HTTP URL without credentials or a fragment`);
+    checkUrl(key, value[key]);
   }
+  // Dictation may recognise at an address of its own; empty means the one of voice mode.
+  const dictationUrl = value.dictationUrl ?? "";
+  if (typeof dictationUrl !== "string") throw new Error("dictationUrl must be a string");
+  if (dictationUrl.trim()) checkUrl("dictationUrl", dictationUrl);
   if (typeof value.instruction !== "string" || !value.instruction.trim() || value.instruction.length > 1000)
     throw new Error("Provide a voice description of 1–1000 characters");
   const voice = value.voice ?? "design";
@@ -113,7 +122,7 @@ export function validateConfig(value: any): VoiceConfig {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, dictationModel, exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
 }
 /**
  * The providers as saved: names as the model menu shows them, each once. The
@@ -216,7 +225,7 @@ setImmediate(maintain);
  * no speech address, which is how recognition alone leaves the speech side, and which is then the managed service's and not the user's.
  */
 interface Remembered {
-  listening?: { whisperUrl: string; sttModel: string; dictationModel: string; enabled: boolean };
+  listening?: { whisperUrl: string; sttModel: string; dictationModel: string; dictationUrl: string; enabled: boolean };
   speaking?: { breezeUrl: string; runtime: NonNullable<VoiceConfig["runtime"]>; enabled: boolean };
   noSpeech?: boolean;
 }
@@ -229,7 +238,7 @@ function remembered(): Remembered {
     const value = JSON.parse(getSetting(REMEMBERED_KEY) ?? "{}");
     const { listening, speaking } = value;
     return {
-      ...(typeof listening?.whisperUrl === "string" ? { listening: { whisperUrl: listening.whisperUrl, sttModel: typeof listening.sttModel === "string" ? listening.sttModel : "", dictationModel: typeof listening.dictationModel === "string" ? listening.dictationModel : "", enabled: listening.enabled === true } } : {}),
+      ...(typeof listening?.whisperUrl === "string" ? { listening: { whisperUrl: listening.whisperUrl, sttModel: typeof listening.sttModel === "string" ? listening.sttModel : "", dictationModel: typeof listening.dictationModel === "string" ? listening.dictationModel : "", dictationUrl: typeof listening.dictationUrl === "string" ? listening.dictationUrl : "", enabled: listening.enabled === true } } : {}),
       ...(typeof speaking?.breezeUrl === "string" && typeof speaking.runtime === "string" ? { speaking: { breezeUrl: speaking.breezeUrl, runtime: speaking.runtime, enabled: speaking.enabled === true } } : {}),
       ...(typeof value.noSpeech === "boolean" ? { noSpeech: value.noSpeech } : {}),
     };
@@ -253,15 +262,15 @@ export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   const kept = remembered();
   const { listening, speaking } = managedSides(current, kept.noSpeech);
   const next: Remembered = { ...kept, noSpeech: runtime === "none" };
-  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "", dictationModel: current.dictationModel ?? "", enabled: current.enabled };
+  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "", dictationModel: current.dictationModel ?? "", dictationUrl: current.dictationUrl ?? "", enabled: current.enabled };
   if (!speaking) next.speaking = { breezeUrl: current.breezeUrl, runtime: current.runtime ?? "breeze", enabled: current.enabled };
   putSetting(REMEMBERED_KEY, JSON.stringify(next));
   // Chatterbox is told a language and has no detection mode; keep one it speaks rather than save a setting it refuses.
   const language = runtime === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(current.language) ? 'en' : current.language;
   // Whisper.cpp serves one model and is sent no model field: an id left over
   // from another runtime would reach it in the multipart body.
-  // The same goes for the dictation model, which the service's model replaces.
-  const saved = { ...current, language, enabled: true, runtime, ...urls, dictationModel: "" };
+  // The same goes for the dictation model and address, which the service's replace.
+  const saved = { ...current, language, enabled: true, runtime, ...urls, dictationModel: "", dictationUrl: "" };
   saveVoice(saved);
   return {...saved, managed:true};
 }
@@ -278,7 +287,7 @@ export function disconnectManagedVoice() {
   const { listening, speaking } = managedSides(current, kept.noSpeech);
   if (!listening && !speaking) return current;
   const back = {
-    ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "", dictationModel: kept.listening?.dictationModel ?? "" } : {}),
+    ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "", dictationModel: kept.listening?.dictationModel ?? "", dictationUrl: kept.listening?.dictationUrl ?? "" } : {}),
     ...(speaking ? { breezeUrl: kept.speaking?.breezeUrl ?? DEFAULT_BREEZE_URL, runtime: kept.speaking?.runtime ?? "breeze" } : {}),
   };
   // Voice was switched on by the connect, and is left on only where everything put back is what the user had, it was on when each
@@ -390,14 +399,15 @@ export function voiceRouter(): Router {
     form.set("language", settings.language);
     // OpenAI-compatible recognition services (audio.cpp, Qwen3-ASR) name the
     // loaded model here; Whisper.cpp has one model and ignores the field.
-    // The chat's dictation may name a model of its own; voice mode and "auto" use the general one.
-    const model = req.query.purpose === "dictation" && settings.dictationModel ? settings.dictationModel : settings.sttModel;
+    // The chat's dictation may name a model and an address of its own; voice mode and "auto" use the general one.
+    const dictation = req.query.purpose === "dictation";
+    const model = dictation && settings.dictationModel ? settings.dictationModel : settings.sttModel;
     if (model) form.set("model", model);
     const controller = new AbortController();
     res.on("close", () => controller.abort());
     try {
       const sttStarted=performance.now();
-      const upstream = await fetch(settings.whisperUrl, { method: "POST", body: form, redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
+      const upstream = await fetch(dictation && settings.dictationUrl ? settings.dictationUrl : settings.whisperUrl, { method: "POST", body: form, redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
       if (!upstream.ok) throw new Error(`Whisper returned HTTP ${upstream.status}`);
       const result = await upstream.json() as { text?: unknown };
       if (typeof result.text !== "string") throw new Error("Whisper returned no transcript");

@@ -37,7 +37,7 @@ function UninstallQuestion({ removeData }: { removeData: { current: boolean } })
 }
 
 /** What the install and the uninstall write into the settings, apart from what is edited on this page. */
-const managed = (c: VoiceConfig) => ({ enabled: c.enabled, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel, dictationModel: c.dictationModel });
+const managed = (c: VoiceConfig) => ({ enabled: c.enabled, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel, dictationModel: c.dictationModel, dictationUrl: c.dictationUrl });
 
 export function VoiceAddon({ onError }: { onError: (message: string) => void }) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
@@ -210,6 +210,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     {([['whisperUrl', msg('Speech recognition URL')], ...(listening ? [] : [['breezeUrl', msg('Speech synthesis URL')] as const])] as const).map(([key, label]) => <label key={key} className="block text-xs text-fg-muted">{t(label)}<input className={`mt-1.5 ${inputCls}`} value={config[key]} onChange={e => update({ [key]: e.target.value })} /></label>)}
     <label className="block text-xs text-fg-muted">{t("Speech recognition model")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr")} value={config.sttModel ?? ""} onChange={e => update({ sttModel: e.target.value })} /></label>
     <label className="block text-xs text-fg-muted">{t("Dictation model")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Empty uses the speech recognition model above")} value={config.dictationModel ?? ""} onChange={e => update({ dictationModel: e.target.value })} /><span className="mt-1 block text-xs text-fg-faint">{t("The model the microphone button of the message box transcribes with. Voice mode keeps using the one above, so a conversation can have the quick model and dictation the accurate one.")}</span></label>
+    <label className="block text-xs text-fg-muted">{t("Dictation endpoint")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Empty uses the speech recognition URL above")} value={config.dictationUrl ?? ""} onChange={e => update({ dictationUrl: e.target.value })} /><span className="mt-1 block text-xs text-fg-faint">{t("The address the microphone button of the message box sends its recordings to. Voice mode keeps using the one above, so dictation can run on another service.")}</span></label>
       </div>
     </details>
     <div className="sticky -bottom-4 z-10 -mx-5 !-mb-4 flex justify-end border-t border-line bg-raised px-5 pt-3 pb-7">

@@ -1766,6 +1766,9 @@ const de: Locale = {
     "Dictation model": "Modell für das Diktieren",
     "Empty uses the speech recognition model above": "Leer nutzt das Modell der Spracherkennung oben",
     "The model the microphone button of the message box transcribes with. Voice mode keeps using the one above, so a conversation can have the quick model and dictation the accurate one.": "Das Modell, mit dem die Mikrofontaste des Nachrichtenfelds transkribiert. Der Sprachmodus nutzt weiter das Modell oben, so kann ein Gespräch das schnelle Modell haben und das Diktieren das genauere.",
+    "Dictation endpoint": "Adresse für das Diktieren",
+    "Empty uses the speech recognition URL above": "Leer nutzt die URL der Spracherkennung oben",
+    "The address the microphone button of the message box sends its recordings to. Voice mode keeps using the one above, so dictation can run on another service.": "Die Adresse, an die die Mikrofontaste des Nachrichtenfelds ihre Aufnahmen schickt. Der Sprachmodus nutzt weiter die Adresse oben, so kann das Diktieren auf einem anderen Dienst laufen.",
     "Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr": "Whisper.cpp braucht keines; audio.cpp nennt sein Modell, z. B. qwen3-asr",
     "Save voice settings": "Spracheinstellungen speichern",
     // components/VoiceControl.tsx
