@@ -305,7 +305,9 @@ export const FilesPanel = memo(function FilesPanel({
     setFile(null);
   };
 
-  const follow = () => {
+  // Clicked again while following, it lets go: what is open stays where it is.
+  const toggleFollow = () => {
+    if (following) return setFollowing(false);
     setFollowing(true);
     if (activity && !dirtyRef.current) {
       handled.current = activity.seq;
@@ -480,10 +482,9 @@ export const FilesPanel = memo(function FilesPanel({
           ))}
         </nav>
         <button
-          onClick={follow}
-          disabled={following}
+          onClick={toggleFollow}
           aria-pressed={following}
-          title={following ? t("Showing what the agent reads and changes") : t("Show what the agent reads and changes")}
+          title={following ? t("Stop showing what the agent reads and changes") : t("Show what the agent reads and changes")}
           className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 transition ${
             following ? "text-accent" : "text-fg-faint hover:bg-fg/5 hover:text-fg"
           }`}

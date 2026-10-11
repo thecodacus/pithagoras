@@ -174,6 +174,11 @@ test('the Files window of voice mode leaves the edit of the chat\'s own Files pa
   await expect(window.getByRole('button', { name: /^app\.ts/ })).toBeVisible();
   await expect(window.getByLabel('Contents of app.ts')).toHaveCount(0);
   await expect(window.getByRole('button', { name: 'Following' })).toBeVisible();
+  // Clicking Following again lets go, and Follow takes it up again.
+  await window.getByRole('button', { name: 'Following' }).click();
+  await expect(window.getByRole('button', { name: 'Follow', exact: true })).toBeVisible();
+  await window.getByRole('button', { name: 'Follow', exact: true }).click();
+  await expect(window.getByRole('button', { name: 'Following' })).toBeVisible();
   // And it did not take the chat's edit with it when it came: that is still kept, for a reload.
   expect(await kept()).toContain('edited by hand');
   await page.getByRole('button', { name: 'End voice mode' }).click();
