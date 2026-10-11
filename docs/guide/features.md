@@ -203,7 +203,7 @@ On the same page, under the generation settings:
 | **Editing address** | Where edits go, with the same rules as the API address. The portal adds `/images/edits` unless the address already ends with it, and an address that ends with `/images/generations` is taken as the base, so the address saved for generation also does for editing. **Empty uses the API address above:** one server that does both needs no second address. |
 | **Editing key** | Sent as `Authorization: Bearer …` to the editing address, and nowhere else. **Empty:** the key above goes along when edits go to the same server as generation (an empty address, or the same scheme, name and port), and no key goes to another server: a key belongs to the server it was given for. A saved key is never shown again, and a new address of another server without a key drops it, as for the key above. |
 | **Editing model** | Sent as `model`. Empty sends none. It is never the model above, which may be one that only makes pictures. |
-| **Maximum picture size** | The most pixels a picture sent to be edited may have, as `WIDTHxHEIGHT` such as `2048x2048`: the box it must fit, whichever way up it is (a `1024x2048` picture fits a `2048x1024` limit). Empty is no limit, as an empty size sends none. It applies to the picture, to each of [several pictures](#several-pictures) and to a mask, and is what an endpoint with a limit on its input needs; an edit comes out about as large as the picture it is made from. A picture beyond it is not sent: see below. Read at each call, so a change needs no restart. A setup saved before there was one has none. |
+| **Maximum picture size** | The most pixels a picture sent to be edited may have, as `WIDTHxHEIGHT` such as `2048x2048`: the box it must fit, whichever way up it is (a `1024x2048` picture fits a `2048x1024` limit). Empty is no limit, as an empty size sends none. It applies to the picture, to each of [several pictures](#several-pictures) and to a mask, and is what an endpoint with a limit on its input needs; an edit comes out about as large as the picture it is made from. A picture beyond it is scaled down to fit: see below. Read at each call, so a change needs no restart. A setup saved before there was one has none. |
 | **Image editing** | The switch of the feature, as **Image generation** is for making pictures: on the Images page, and for the `edit_image` tool being there at all (which chats get it is set in the tool lists). It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
 | **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one, and the [Images page](/guide/images#changing-a-picture) takes up to eight (see [several pictures](#several-pictures)). **While it is off, an edit uses exactly one picture** — if the agent or the Images page seems to use only one of several, this switch is the first thing to check — and both say so (below). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
 
@@ -252,10 +252,10 @@ What was decided for it:
   portal made can always be edited. A picture outside the chat's folder, or
   reached through a link that leads out of it, is refused, as for `show_image`.
   All of this is checked before anything is sent, so nothing that is not a
-  picture ever leaves the portal. **A larger picture is refused, never scaled or
-  cut:** the endpoint gets the picture that is in the folder or nothing, and
-  where its own limit is lower it says so in its answer, which is passed on
-  without the key.
+  picture ever leaves the portal. **A picture over the limits is scaled down
+  to fit, not refused** (see below): the endpoint gets the picture that is in the
+  folder if it fits, a scaled copy if it does not, and where its own limit is
+  lower it says so in its answer, which is passed on without the key.
 - **A picture attached to a message is not in the folder.** Pictures pasted,
   dropped or picked in the message box go to the model with the message and are
   kept beside the chat, not in its folder, so `edit_image` has no path for them.
@@ -264,15 +264,23 @@ What was decided for it:
   [Images page](/guide/images#changing-a-picture), rather than guess a path or
   edit another picture. Taking attached pictures straight into an edit is not
   built.
-- **A picture beyond the maximum size is refused, naming the limit.** With a
+- **A picture beyond the maximum size is scaled down to fit.** With a
   **Maximum picture size** set, a picture (or mask) with more pixels than it is
-  not sent: the portal reads its size from its header, makes no request, and
-  `edit_image` fails with a plain message such as "The image is 4000x500 pixels,
-  which is over the maximum of 2048x2048 for an edit. Nothing was sent." The agent
-  can then use a smaller picture or tell you; with several pictures the message says
-  which one it is. A picture whose size cannot be read is refused too, since it
-  cannot be shown to be within the limit. The check is in the shared editing
-  function, so every caller of it, not only the agent's tool, has the same limit and the same message.
+  scaled down by the portal before anything is sent: the largest size within the
+  box, either way up, with its ratio kept and nothing cut, never up, and as it is
+  seen (a photo held on its side is turned by its EXIF mark first). The kind stays
+  what it was, PNG, JPEG, WebP or GIF, and so does transparency. A picture
+  within the box is sent byte for byte. A mask is scaled with the first picture to
+  the same size by taking the nearest pixel, so that it stays a mask; a mask of
+  another size is left as it was, for the endpoint to say. `edit_image` says in its
+  answer what it did ("The image was scaled down from 4000x500 pixels (3 MB) to
+  2048x256 pixels (180 KB) to fit what an edit takes."), so the agent can tell you the
+  result is smaller; the result is not scaled back up. A picture whose size
+  cannot be read is still refused, since it cannot be shown to be within the
+  limit, and so is one that cannot be read as a picture at all: the message says
+  "cannot be made to fit an edit" and "Nothing was sent", and with several pictures
+  which one it is. The scaling is in the shared editing function, so every caller of
+  it, not only the agent's tool, has the same behaviour and the same words.
 - **No mask in the agent's tool.** A mask is a second picture of the same size
   with the area to change cleared, which an agent has no good way to make
   and which endpoints treat differently. The endpoint support in the portal
@@ -336,12 +344,15 @@ What was decided for it:
   and written as for one picture.
 - **On the Images page, too.** The page's form sends the same request for the same pictures: up
   to eight, in the order of the row, `image[]` once for each, with the same count, weight and
-  [maximum size](#editing-a-picture) checks per picture, and the same refusal for an endpoint that
+  [maximum size](#editing-a-picture) scaling per picture, and the same refusal for an endpoint that
   takes one. It adds ways to put the pictures in: several files at once, a drop, a paste, and
   ticking pictures of the gallery (see [Changing a picture](/guide/images#changing-a-picture)).
-- **A count and a weight.** At most **8 pictures**, and **50 MB together**: all of
-  them are held in memory and go up within the time limit of the request. More
-  is refused with the numbers, never scaled, cut or dropped to fit. The endpoint's
+- **A count and a weight.** At most **8 pictures**, and **50 MB together** (25 MB each):
+  all of them are held in memory and go up within the time limit of the request. More
+  pictures are refused with the numbers. Pictures that weigh more are made lighter, never
+  cut or dropped: at lower quality first, then smaller, the heaviest first and a light one
+  left alone; a PNG with transparency becomes a WebP and one without a JPEG when it has to
+  be lighter. A file of more than 25 MB is not read at all. The endpoint's
   own limit, if lower, is its to say, in its answer, which is passed on without the
   key. The count is also what the tool's list accepts, so the model is held to it
   before the tool runs.
