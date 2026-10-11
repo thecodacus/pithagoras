@@ -8,7 +8,7 @@ import { inProcessHome } from "./helpers.mts";
 const dir = inProcessHome('pithagoras-voice-');
 // No Docker here, whatever this machine has: the managed service is tested on its own.
 process.env.DOCKER_SOCKET = join(dir, 'no-docker.sock');
-const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
+const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice, errorLineRetry } = await import('../server/src/api/voice.js');
 const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
 const { getDb, getSkipThinkingProviders, getVoiceInstructions } = await import('../server/src/db.js');
 const { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS } = await import('../server/src/pi/voice-first.js');
@@ -16,6 +16,8 @@ const upstream = express();
 let calls = 0;
 let busyAttempts = 0;
 let speechCalls = 0;
+// The next this many speech requests fail, as a model that is still coming up does.
+let failSpeech = 0;
 let nativeRequest: any;
 let speechBody = "";
 let transcriptionBody = "";
@@ -28,6 +30,7 @@ upstream.post('/inference', express.raw({ type: () => true }), (req, res) => {
 });
 upstream.post('/v1/audio/speech', express.raw({ type: () => true }), (req, res) => {
   speechCalls++;
+  if (failSpeech > 0) { failSpeech--; return res.status(503).json({ detail: 'loading' }); }
   if (req.get('content-type') === 'application/json') {
     nativeRequest = JSON.parse(req.body.toString());
     // Chatterbox and Kokoro have no streaming mode: they answer with one complete WAV.
@@ -293,6 +296,7 @@ test('the spoken error line is made once when voice mode starts, kept, and read 
   const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, ...patch }) });
   const make = (text = 'An error occurred.', session = 'test') => fetch(`${base}/sessions/${session}/voice/error-line`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
   const read = (text = 'An error occurred.', session = 'test') => fetch(`${base}/sessions/${session}/voice/error-line?text=${encodeURIComponent(text)}`);
+  errorLineRetry.waitsMs = [0, 0];
   const files = () => existsSync(join(dir, 'voice')) ? readdirSync(join(dir, 'voice')).filter(name => name.endsWith('.wav')) : [];
   assert.equal((await put({ runtime: 'kokoro' })).status, 200);
   // Before voice mode has started there is no file, and that is said, not synthesized on the spot.
@@ -345,6 +349,66 @@ test('the spoken error line is made once when voice mode starts, kept, and read 
   assert.equal((await make()).status, 409);
   assert.equal(files().length, count);
   assert.equal((await put({})).status, 200);
+});
+
+test('a failed spoken error line is tried again at the start, and again at every later start until it exists', async () => {
+  const { readdirSync, writeFileSync: write } = await import('node:fs');
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, ...patch }) });
+  const make = () => fetch(`${base}/sessions/test/voice/error-line`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'A line for retries.' }) });
+  const read = () => fetch(`${base}/sessions/test/voice/error-line?text=${encodeURIComponent('A line for retries.')}`);
+  errorLineRetry.waitsMs = [0, 0];
+  const warned: string[] = [];
+  const warn = console.warn; console.warn = (...args: unknown[]) => { warned.push(args.join(' ')); };
+  try {
+    assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'bm_fable' })).status, 200);
+    // The model is up on the third try: one start, three calls, one file, a warning per failed try.
+    let before = speechCalls; failSpeech = 2;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: true });
+    assert.equal(speechCalls - before, 3);
+    assert.equal(warned.length, 2);
+    assert.match(warned[0], /try 1 of 3.*HTTP 503/);
+    assert.match(warned[1], /try 2 of 3/);
+    assert.equal((await read()).status, 200);
+    // Found at the next start: the engine is not asked, and a success stops the retrying.
+    before = speechCalls;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: false });
+    assert.equal(speechCalls, before);
+    // Another voice: the model fails on all three tries. The start reports it, nothing is stored, one warning per try.
+    assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'bm_george' })).status, 200);
+    warned.length = 0; before = speechCalls; failSpeech = 99;
+    const failed = await make();
+    assert.equal(failed.status, 502);
+    assert.equal(speechCalls - before, 3);
+    assert.equal(warned.length, 3);
+    assert.match(warned[2], /try 3 of 3.*tried again when voice mode next starts/);
+    assert.equal((await read()).status, 404);
+    // The error time reads the file only, and does not ask the model while the line is missing.
+    before = speechCalls;
+    assert.equal((await read()).status, 404);
+    assert.equal(speechCalls, before);
+    // The next start tries again, on its own, without an error having happened, and makes it now that the model is up.
+    failSpeech = 0; before = speechCalls;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: true });
+    assert.equal(speechCalls - before, 1);
+    assert.equal((await read()).status, 200);
+    // A damaged file is no line: it is made again, not served.
+    const folder = join(dir, 'voice');
+    for (const file of readdirSync(folder).filter(n => n.endsWith('.wav'))) write(join(folder, file), Buffer.from('broken'));
+    assert.equal((await read()).status, 404);
+    before = speechCalls;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: true });
+    assert.equal(speechCalls - before, 1);
+    assert.equal((await read()).status, 200);
+    // The waits between the tries are the ones set.
+    errorLineRetry.waitsMs = [30, 60];
+    assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'bm_lewis' })).status, 200);
+    failSpeech = 2; const started = Date.now();
+    assert.equal((await make()).status, 200);
+    assert.ok(Date.now() - started >= 85, 'the tries wait as long as set');
+  } finally {
+    console.warn = warn; failSpeech = 0; errorLineRetry.waitsMs = [1000, 3000];
+    await put({});
+  }
 });
 
 test('VAD settings preserve defaults, accept tuning and reject invalid thresholds', () => {

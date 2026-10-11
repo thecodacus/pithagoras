@@ -576,7 +576,10 @@ never spoken. The lines below are given in English.
   as a file in the `voice` folder of its data directory. A new voice, speech engine
   or interface language makes a new one at the next start. If the line is missing
   (the speech model was not ready when voice mode started), the error is shown in
-  writing only, and voice mode says so.
+  writing only, and voice mode says so. A start that finds the speech model not
+  ready tries three times, about a second and then three seconds apart, and writes
+  one line per failed try to the portal's log. If it still fails, the next time voice
+  mode starts tries again, however long that is, without waiting for an error.
 - **Talking during compaction.** What you say while it compacts is dropped, not
   sent: the agent cannot take it in until the compaction is over. The portal says
   "I'm still compacting our conversation. Please wait a moment; I'll let you know

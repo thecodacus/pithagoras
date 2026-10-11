@@ -368,6 +368,31 @@ function lineText(value: unknown): string {
   return value;
 }
 const makingLines = new Map<string, Promise<boolean>>();
+/**
+ * The waits between the tries at making the error line within one start: the speech model is often just coming up when voice
+ * mode begins. A line still missing after the last try is made again at the next start (nothing is stored for it), not at error time.
+ */
+export const errorLineRetry = { waitsMs: [1000, 3000] };
+/** The stored line, where there is one that a player can read: a half-written or damaged file counts as none. */
+function storedErrorLine(key: string): Buffer | undefined {
+  const wav = readErrorLine(key);
+  if (!wav) return undefined;
+  try { wavPcm(wav, "The stored error line"); return wav; } catch { return undefined; }
+}
+async function makeErrorLine(settings: VoiceConfig, request: SpeechRequest, key: string): Promise<void> {
+  const tries = errorLineRetry.waitsMs.length + 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      saveErrorLine(key, await speechWav(settings, request, AbortSignal.timeout(120000)));
+      return;
+    } catch (e) {
+      const last = attempt >= tries;
+      console.warn(`[voice] the spoken error line could not be made (try ${attempt} of ${tries}): ${(e as Error).message}${last ? "; it is tried again when voice mode next starts" : ""}`);
+      if (last) throw e;
+      await delay(errorLineRetry.waitsMs[attempt - 1]);
+    }
+  }
+}
 export function voiceRouter(): Router {
   const router = express.Router();
   // The stored GPU choice, in place before anything asks the service to start.
@@ -554,11 +579,11 @@ export function voiceRouter(): Router {
       const settings = speechSettings(req.params.id);
       const request = await speechRequest(settings, text);
       const key = errorLineKey(request.identity);
-      if (readErrorLine(key)) return res.json({ ready: true, generated: false });
+      if (storedErrorLine(key)) return res.json({ ready: true, generated: false });
       // Two pages starting together ask the engine once.
       let making = makingLines.get(key);
       if (!making) {
-        making = speechWav(settings, request, AbortSignal.timeout(120000)).then(wav => { saveErrorLine(key, wav); return true; }).finally(() => makingLines.delete(key));
+        making = makeErrorLine(settings, request, key).then(() => true).finally(() => makingLines.delete(key));
         makingLines.set(key, making);
       }
       await making;
@@ -569,7 +594,7 @@ export function voiceRouter(): Router {
   router.get("/sessions/:id/voice/error-line", async (req, res) => {
     try {
       const text = lineText(req.query.text);
-      const wav = readErrorLine(errorLineKey((await speechRequest(speechSettings(req.params.id), text)).identity));
+      const wav = storedErrorLine(errorLineKey((await speechRequest(speechSettings(req.params.id), text)).identity));
       if (!wav) return res.status(404).json({ error: "The spoken error line has not been made for this voice yet" });
       res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
