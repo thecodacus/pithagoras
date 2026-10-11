@@ -480,11 +480,6 @@ function SessionItem({
           <SessionActions session={s} small onPin={onPin} onStartRename={() => setRenaming(true)} onDelete={onDelete} onError={onError} />
         </div>
       </div>
-      {/* Cut at the start, not the end: what tells chats apart is the last part of
-          the path. rtl moves the ellipsis; bdi keeps the path itself left to right. */}
-      <div className="truncate pl-4 text-left font-mono text-[10px] text-fg-subtle [direction:rtl]" title={s.workspace}>
-        <bdi>{s.workspace}</bdi>
-      </div>
     </div>
   );
 }

@@ -13,6 +13,9 @@ that started there. Nothing outside it can be reached.
 - **Browse.** Click a folder to go in, the path at the top to go back.
   Folders come first; `.git` is not listed. A link that leads out of the folder
   is shown greyed out and cannot be opened. A file's size is on its row, in B, KB, MB or GB.
+- **See the full path.** The pin button at the top shows the folder's full path
+  (and the folder you are in) on a line of its own; click it again to hide it.
+  The sidebar and the chat's header do not carry the path.
 - **Hide or show dotfiles.** Names that start with a dot (`.env`, `.cache`, …) are
   hidden to begin with, and a line under the list says how many. The eye icon at
   the top turns them on and off, and the choice is remembered in the browser.

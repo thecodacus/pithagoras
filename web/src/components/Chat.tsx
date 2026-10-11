@@ -1706,7 +1706,6 @@ export function Chat({
               </button>
             </h2>
           )}
-          <p className="truncate font-mono text-[11px] text-fg-faint">{session.workspace}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {session.status === "interrupted" && (
