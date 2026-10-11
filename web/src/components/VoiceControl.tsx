@@ -375,14 +375,18 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     })().catch(() => {}).finally(() => { if (replay.current === controller) replay.current = null; });
     return true;
   };
-  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
+  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'|'error'='reply') => {
     const trace=profiling.current?profiler.current!.current:undefined;
     const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
     mark('tts_request');
-    // The previous cancelled request may still be releasing Breeze's GPU lock.
     let response: Response;
+    // The previous cancelled request may still be releasing Breeze's GPU lock.
     const deadline = Date.now() + 15000;
-    do {
+    if (kind === 'error') {
+      // Said from the file made when voice mode began: the speech model is not asked at the moment something has gone wrong.
+      response = await fetch(`/api/sessions/${sessionId}/voice/error-line?text=${encodeURIComponent(text)}`, { signal });
+      if (!response.ok) throw new Error(t("The spoken error line is not available, so the error is shown in writing only. The speech model was not ready when voice mode started."));
+    } else do {
       signal.throwIfAborted();
       response = await fetch(`/api/sessions/${sessionId}/voice/speech`, {
         method: "POST", headers: { "Content-Type": "application/json", "Accept": "audio/pcm" },
@@ -500,6 +504,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         if(!current())return;
         heartbeat.current=setInterval(()=>{void connectVoice(lease,true).catch(e=>{if(current()){setError(e.message);stop();}});},25000);
       }
+      // The spoken error line is made now, while the speech model is at hand, and kept: at error time it is only played. Not waited
+      // for, and no failure here is shown: if it is missing then, that is said with the error.
+      void json(`/api/sessions/${sessionId}/voice/error-line`, { method: 'POST', body: JSON.stringify({ text: t("An error occurred.") }) }).catch(() => {});
       const detectorModule = await import("@ricky0123/vad-web");
       if (!current()) return;
       const live = new LiveTranscription(async (samples, signal) => {

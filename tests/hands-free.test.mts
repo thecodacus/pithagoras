@@ -448,3 +448,10 @@ test('the error of a turn the agent refused is said, although replies are off af
   voice.observe([reply('a10'), { kind: 'notice' as const, id: 'n12', text: 'example has no API key.', tone: 'error' as const }]); await tick();
   assert.deepEqual(spoken, ['An error occurred.']); voice.stop();
 });
+
+test('the error line is asked for as its own kind, which the page plays from a file instead of asking the speech model', async () => {
+  const kinds: (string | undefined)[] = [];
+  const { voice } = setup({ synthesize: async (_text, _signal, kind) => { kinds.push(kind); return async () => {}; } });
+  voice.observe([reply('a10'), { kind: 'notice' as const, id: 'n11', text: 'Model error: overloaded', tone: 'error' as const }]); await tick();
+  assert.deepEqual(kinds, ['error']); voice.stop();
+});

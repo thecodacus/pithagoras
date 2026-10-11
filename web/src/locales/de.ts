@@ -1789,6 +1789,7 @@ const de: Locale = {
     // components/VoiceConversation.tsx
     "Nothing has been said yet.": "Noch wurde nichts gesagt.",
     "An error occurred.": "Es ist ein Fehler aufgetreten.",
+    "The spoken error line is not available, so the error is shown in writing only. The speech model was not ready when voice mode started.": "Die gesprochene Fehlermeldung ist nicht verfügbar, deshalb wird der Fehler nur geschrieben angezeigt. Das Sprachmodell war nicht bereit, als der Sprachmodus gestartet wurde.",
     // components/VoiceLibrary.tsx
     "Choose an audio file smaller than 20 MB": "Wähle eine Audiodatei unter 20 MB",
     "Choose a recording between 1 and 30 seconds": "Wähle eine Aufnahme zwischen 1 und 30 Sekunden",

@@ -570,7 +570,13 @@ never spoken. The lines below are given in English.
   says "An error occurred." (once, however many errors came together), and the
   Conversation window opens with the error written in it. This line is spoken
   whatever the settings below say, since otherwise a failure would pass unnoticed
-  with the chat put away.
+  with the chat put away. It is not made when the error happens, when the speech
+  model may be the very thing that is down: the portal makes it as voice mode
+  starts, in the language of the interface and with the voice of the agent, and keeps it
+  as a file in the `voice` folder of its data directory. A new voice, speech engine
+  or interface language makes a new one at the next start. If the line is missing
+  (the speech model was not ready when voice mode started), the error is shown in
+  writing only, and voice mode says so.
 - **Talking during compaction.** What you say while it compacts is dropped, not
   sent: the agent cannot take it in until the compaction is over. The portal says
   "I'm still compacting our conversation. Please wait a moment; I'll let you know

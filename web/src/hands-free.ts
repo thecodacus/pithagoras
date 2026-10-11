@@ -33,7 +33,7 @@ export interface VoiceIO {
   /** True when speaking mid-run should add to the run rather than stop it. */
   steering?: () => boolean;
   agentRunning: () => boolean;
-  synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
+  synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status'|'error') => Promise<PreparedSpeech>;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
   error: (message: string) => void;
@@ -152,7 +152,7 @@ export class HandsFreeVoice {
     }
     if (!fresh || (!this.acceptingReplies && !this.refused)) return;
     this.thinkingPipeline.cancel();
-    this.pipeline.enqueue([t("An error occurred.")], 'status');
+    this.pipeline.enqueue([t("An error occurred.")], 'error');
   }
   /** Where voice mode began: error notices after this seq are new, and the stage opens the conversation on them. */
   get startedAfter() { return this.afterSeq; }
