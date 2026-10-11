@@ -76,7 +76,7 @@ test("a message for people is shown without the codes a terminal would act on", 
   assert.deepEqual(items.map(line), ["notice:All green"]);
 });
 
-test("a background task's end is shown as the sentence it carries, not as the block written for the model", () => {
+test("a message of markup written for the model is shown as the sentence it carries: a background task's end is one", () => {
   const block = (status: string, extra = "") =>
     [
       "<background-task-notification>",
@@ -93,4 +93,14 @@ test("a background task's end is shown as the sentence it carries, not as the bl
   const items = buildTranscript([end(1, block("completed", "  <exit-code>0</exit-code>")), end(2, block("failed", "  <exit-code>2</exit-code>\n  <error>a &lt; b</error>"))]);
   assert.deepEqual(items.map(line), ['notice:Background task "Watch PR 103 CI" completed', 'notice:Background task "Watch PR 103 CI" failed (exit code 2: a < b)']);
   assert.deepEqual(items.map((i: any) => i.tone), ["info", "warn"]);
+});
+
+test("any extension's markup message is shown readably, and words that are not markup stay as they are", () => {
+  const shown = (content: string) => buildTranscript([{ seq: 1, type: "message_end", at: 0, payload: { message: { role: "custom", customType: "x", content, display: true } } }]);
+  const titled = shown("<sync-result>\n  <id>7</id>\n  <title>Synced 3 files</title>\n  <path>/a/b</path>\n</sync-result>");
+  assert.deepEqual(titled.map(line), ["notice:Synced 3 files"]);
+  const bare = shown("<job-report>\n  <job>nightly</job>\n  <status>failed</status>\n</job-report>");
+  assert.deepEqual(bare.map(line), ["notice:job: nightly\nstatus: failed"]);
+  assert.equal((bare[0] as any).tone, "warn");
+  for (const plain of ["All green", "a <b>bold</b> word", "Use <tag> like this", "<b>bold</b>"]) assert.deepEqual(shown(plain).map(line), [`notice:${plain}`]);
 });

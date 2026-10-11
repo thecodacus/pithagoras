@@ -207,25 +207,27 @@ function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 
 /**
- * What pi-background-tasks puts in the chat when a task ends: an XML block
- * written for the model (ids, an output file, guidance not to poll). People get
- * the sentence it carries, with the exit code or error if there was one.
+ * Some extensions put a block of markup in the chat that is written for the
+ * model: one element with ids, file paths and guidance inside (pi-background-tasks
+ * does so when a task ends). People get its summary, or its title, or its message;
+ * a block with none of them is listed as its fields. A status that is not a
+ * success, an error, or an exit code other than 0 is added, and warns. Text that
+ * is not one such element is the extension's own words and stays as it is.
  */
-function backgroundTaskNotice(text: string): { text: string; tone: "info" | "warn" } | null {
-  const block = /^\s*<background-task-notification>([\s\S]*)<\/background-task-notification>\s*$/.exec(text)?.[1];
-  if (block === undefined) return null;
-  const field = (tag: string) => {
-    const raw = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(block)?.[1];
-    // The extension escapes these three and nothing else.
-    return raw?.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim();
-  };
-  const summary = field("summary");
-  if (!summary) return null;
+function markupNotice(text: string): { text: string; tone: "info" | "warn" } | null {
+  const block = /^<([a-z][\w-]*)(?:\s[^>]*)?>([\s\S]*)<\/\1>$/.exec(text);
+  if (!block || !/<[a-z][\w-]*(?:\s[^>]*)?>[\s\S]*<\/[a-z]/.test(block[2])) return null;
+  const unescape = (raw: string) => raw.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+  const fields = [...block[2].matchAll(/<([a-z][\w-]*)(?:\s[^>]*)?>([^<]*)<\/\1>/g)].map((m) => [m[1], unescape(m[2])] as const).filter(([, v]) => v);
+  const field = (tag: string) => fields.find(([k]) => k === tag)?.[1];
+  const main = field("summary") ?? field("title") ?? field("message");
   const status = field("status");
   const exit = field("exit-code");
   const error = field("error");
+  const warn = (status !== undefined && !/^(completed|succeeded|success|ok|done)$/i.test(status)) || !!error || (exit !== undefined && exit !== "0");
+  if (main === undefined) return fields.length ? { text: fields.map(([k, v]) => `${k}: ${v}`).join("\n"), tone: warn ? "warn" : "info" } : null;
   const extra = [exit !== undefined && exit !== "0" ? `exit code ${exit}` : "", error ?? ""].filter(Boolean).join(": ");
-  return { text: extra ? `${summary} (${extra})` : summary, tone: status === undefined || status === "completed" ? "info" : "warn" };
+  return { text: extra ? `${main} (${extra})` : main, tone: warn ? "warn" : "info" };
 }
 
 /** The text of a tool result, however pi shaped it. */
@@ -482,7 +484,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             ? message.content
             : Array.isArray(message.content) ? message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("\n") : "";
           const shown = stripAnsi(text).trim();
-          const task = backgroundTaskNotice(shown);
+          const task = markupNotice(shown);
           if (shown) items.push({ kind: "notice", id: `m${ev.seq}`, text: task?.text ?? shown, tone: task?.tone ?? "info" });
           break;
         }
