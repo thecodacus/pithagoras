@@ -437,12 +437,15 @@ test('an error that comes while the line is still being made waits for it, and a
     assert.equal(early.headers.get('content-type'), 'audio/wav');
     assert.equal((await making).status, 200);
     // A line that is being made and fails is still a 404 for the error, which then shows the text only.
-    failSpeech = 99; slowSpeechMs = 100;
+    // The wait between the tries keeps the make in flight (the engine answers a failure at once), so the read has to wait for it.
+    failSpeech = 99; errorLineRetry.waitsMs = [300, 0];
     const failing = make('Waiting in vain.');
     await new Promise(r => setTimeout(r, 30));
+    const askedAt = Date.now();
     assert.equal((await read('Waiting in vain.')).status, 404);
+    assert.ok(Date.now() - askedAt >= 200, 'the read waited for the make that failed');
     assert.equal((await failing).status, 502);
-    failSpeech = 0; slowSpeechMs = 0;
+    failSpeech = 0; errorLineRetry.waitsMs = [0, 0];
     // Used lines are the ones kept: a line used after eight newer ones were made survives, the least recently used goes.
     for (const name of wavs()) rmSync(join(folder, name));
     const named = async (text: string) => { const before = new Set(wavs()); assert.equal((await make(text)).status, 200); return wavs().find(n => !before.has(n))!; };
