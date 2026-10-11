@@ -221,6 +221,19 @@ test('with a second agent and no projects the sidebar gathers the chats by agent
   await expect(side.locator('[data-folder]')).toHaveCount(2);
 });
 
+test('the house marks the agent that New starts chats with, not the first agent', async ({ page }) => {
+  await portal(page, [chat('h1', 'Home chat', HOME, 30), chat('a1', 'Scout chat', '/data/agents/scout', 5)]);
+  await page.route('**/api/projects*', (route) => route.fulfill({ json: {
+    root: '/w', home: HOME, projects: [],
+    agents: [{ id: 'home', name: 'Nova', home: HOME, newChats: false }, { id: 'scout', name: 'Scout', home: '/data/agents/scout', newChats: true }],
+  } }));
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(folder(side, 'Scout')).toBeVisible();
+  await expect(side.locator('[data-folder="agent:scout"] [data-icon="house"]')).toHaveCount(1);
+  await expect(side.locator('[data-folder="home"] [data-icon="house"]')).toHaveCount(0);
+});
+
 test('a folder shut while searching is shut only for the search', async ({ page }) => {
   const many = Array.from({ length: 12 }, (_, i) => chat(`h${i}`, `Home chat ${i}`, HOME, i + 1));
   await portal(page, [...many, chat('s1', 'Home and site', '/w/site', 40)]);

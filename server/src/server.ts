@@ -320,7 +320,8 @@ function workingIn<T extends { workspace: string }>(dir: string, rows: T[]): T[]
 app.get("/api/projects", (req, res) => {
   const home = agentHomePath();
   // Each agent's home is a folder of chats of its own, named after the agent.
-  const agents = listAgents().map((a) => ({ id: a.id, name: a.name, home: a.home }));
+  const fresh = newChatAgent().id;
+  const agents = listAgents().map((a) => ({ id: a.id, name: a.name, home: a.home, newChats: a.id === fresh }));
   try {
     if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, home, agents, projects: [] });
     if (req.query.bare === "1") {

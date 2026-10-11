@@ -21,6 +21,8 @@ export type Folder<S> = {
   name: string;
   /** The agent whose home it is, for a home. */
   agent?: string;
+  /** Whether it is the home of the agent "New" starts chats with, for a home; left out where the server did not say. */
+  newChats?: boolean;
   /** Where a chat started in it works; null for Elsewhere, which is no one place. */
   path: string | null;
   /** Its chats, in the order they were given. */
@@ -42,7 +44,8 @@ export const ELSEWHERE = "elsewhere";
 export const projectKey = (name: string) => `project:${name}`;
 const agentKey = (id: string) => (id === "home" ? HOME : `agent:${id}`);
 
-export type PlaceAgent = { id: string; name: string; home: string };
+/** `newChats`: the agent that "New" starts chats with; a server that does not say leaves it out. */
+export type PlaceAgent = { id: string; name: string; home: string; newChats?: boolean };
 
 /** What the chats are gathered into: where Home is, the agents' homes, and the projects. */
 export type Places = { home: string; agents?: readonly PlaceAgent[]; projects: readonly { name: string; path: string }[] };
@@ -85,6 +88,7 @@ export function groupByFolder<S extends { workspace: string; updated_at: string 
     kind: "home",
     // Home where the server has not said what the agent is called.
     ...(a.name ? { name: a.name, agent: a.id } : { name: msg("Home") }),
+    ...(a.newChats === undefined ? {} : { newChats: a.newChats }),
     path: a.home,
     sessions: [],
     lastActive: "",

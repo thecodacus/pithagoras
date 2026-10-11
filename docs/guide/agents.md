@@ -121,7 +121,7 @@ all the layers.
 ## In the sidebar
 
 Each agent's home is a folder in the sidebar and on the Sessions page, named
-after the agent. The first agent's has the house icon, the others a robot. The
+after the agent. The house icon marks the agent that **New** starts chats with (the first one unless you picked another), the others have a robot. The
 **+** on a folder's line starts a chat with that agent. A chat and a conversation
 are the same thing: a chat started with **+** or **New** in its home is listed on the
 Agents page and counted there, and **New conversation** there starts the same kind of

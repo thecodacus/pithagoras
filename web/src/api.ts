@@ -466,7 +466,7 @@ export const api = {
     }),
   projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
   /** Only where Home is and which projects there are, without their counts: see /api/projects. */
-  places: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string }[]; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
+  places: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string; newChats?: boolean }[]; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
   /** `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them. */
   createProject: (name: string, instructions?: string, toolsOff?: string[]) =>
     json<Project & { toolsError?: string }>("/api/projects", {
