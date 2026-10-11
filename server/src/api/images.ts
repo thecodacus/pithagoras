@@ -6,11 +6,9 @@ import {
   addPagePicture,
   deletePicture,
   listPictures,
-  THUMB_MAX_BYTES,
   openListed,
-  openThumb,
+  openListedThumb,
   picturesById,
-  saveThumb,
   type PictureKind,
   type PictureOrigin,
 } from "../image-gallery.js";
@@ -230,32 +228,17 @@ export function imagesRouter(): Router {
 
   /**
    * The small copy of a picture, which the tiles of the gallery show instead of the file. It is
-   * made by the page, in the browser (the portal has no image library), from the file it has
-   * loaded once, and kept for every view after that, of any person and any device.
+   * made here, the first time it is asked for and again when the file has changed, and kept for
+   * every view after that, of any person and any device. A picture that gets none is sent whole.
    */
-  router.get("/images/:id/thumb", (req, res) => {
-    let opened: ReturnType<typeof openThumb>;
+  router.get("/images/:id/thumb", async (req, res) => {
+    let opened: Awaited<ReturnType<typeof openListedThumb>>;
     try {
-      opened = openThumb(req.params.id);
+      opened = await openListedThumb(req.params.id);
     } catch (e) {
       return fail(res, e);
     }
     sendPicture(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache");
-  });
-
-  /** Keeps the small copy of a picture the page made: a picture as the body, in the size a small copy has. */
-  router.put("/images/:id/thumb", express.raw({ type: () => true, limit: THUMB_MAX_BYTES }), (req, res) => {
-    const bytes: unknown = req.body;
-    if (!Buffer.isBuffer(bytes) || !bytes.length) return res.status(400).json({ error: "There is no picture in the request" });
-    // The ETag of the file the copy was drawn from (the page reads it from the response it drew): without it a copy of an older file could be taken for the new one's.
-    const version = req.get("x-picture-version");
-    if (!version) return res.status(400).json({ error: "Say which version of the picture the small copy was drawn from" });
-    try {
-      saveThumb(req.params.id, bytes, version);
-      res.json({ ok: true });
-    } catch (e) {
-      fail(res, e);
-    }
   });
 
   /**

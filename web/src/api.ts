@@ -756,14 +756,8 @@ export const api = {
   uploadPicture: async (file: File): Promise<GalleryPicture> => (await uploadBytes(`/api/images/upload?name=${encodeURIComponent(file.name)}`, file, file.name)).picture,
   /** The picture as the file it is. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
   galleryFileUrl: (id: string) => `/api/images/${id}/file`,
-  /** The small copy of a picture, when the gallery says there is one (`GalleryPicture.thumb`). */
+  /** The small copy of a picture, which the portal makes when it is asked for; for the pictures the gallery says have one (`GalleryPicture.thumb`). */
   galleryThumbUrl: (id: string) => `/api/images/${id}/thumb`,
-  /** Keeps the small copy of a picture that this page made of it, from the file with this ETag; the portal refuses it when the file is another by now. */
-  putGalleryThumb: async (id: string, copy: Blob, version: string): Promise<void> => {
-    const res = await send(`/api/images/${id}/thumb`, { method: "PUT", headers: { "Content-Type": copy.type || "application/octet-stream", "X-Picture-Version": version }, body: copy });
-    // Not shown to anyone: the tile keeps the file it has.
-    if (!res.ok) throw new Error(`The portal refused the small copy (${res.status})`);
-  },
   /** Each as asked, files and all: what could not be deleted is said for each. */
   deletePictures: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/images/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
@@ -1450,7 +1444,7 @@ export interface GalleryPicture {
   createdAt: number;
   bytes: number;
   fileName: string;
-  /** A small copy of it is kept: the tiles load that, and not the file. */
+  /** The tiles load a small copy of it (see `galleryThumbUrl`), and not the file. */
   thumb: boolean;
 }
 

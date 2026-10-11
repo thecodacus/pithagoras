@@ -13,10 +13,6 @@ interface ImagePreviewProps {
   edit?: boolean;
   /** The picture, once there. */
   src?: string;
-  /** A small copy of it, shown instead while there is one; the picture itself is loaded when it is not there. */
-  thumbSrc?: string;
-  /** The picture itself has loaded (not its small copy): a small copy is made of it. */
-  onFullLoad?: () => void;
   /** An edit's original: shown under the wait, and the picture arrives over it. */
   before?: string;
   /** Width over height of the picture to come, as far as it is known; a square until the picture itself says. */
@@ -58,15 +54,12 @@ interface ImagePreviewProps {
  * It knows nothing of chats or tools, so that the Images page can use it as
  * well; what goes in `actions` and around it is the caller's.
  */
-export function ImagePreview({ state, edit = false, src: full, thumbSrc, onFullLoad, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {
+export function ImagePreview({ state, edit = false, src, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {
   // Taken once: whether it was being made when it first appeared here.
   const arriving = useRef(state === "making").current;
   // What has loaded, and what has not, by the address: another picture in the same place starts over.
   const [loaded, setLoaded] = useState<{ src: string; shape?: number }>();
   const [gone, setGone] = useState<string>();
-  // The small copy that could not be loaded: the picture's own address is used from then on.
-  const [noThumb, setNoThumb] = useState<string>();
-  const src = thumbSrc && noThumb !== thumbSrc ? thumbSrc : full;
   const [original, setOriginal] = useState<{ shape?: number; gone?: boolean }>({});
   const [settled, setSettled] = useState(false);
   const img = useRef<HTMLImageElement>(null);
@@ -81,11 +74,7 @@ export function ImagePreview({ state, edit = false, src: full, thumbSrc, onFullL
   const withOriginal = !!before && !compact && waiting && !original.gone;
   const shape = (ready ? loaded?.shape : undefined) ?? (withOriginal ? original.shape : undefined) ?? ratio ?? 1;
 
-  const loadedNow = (el: HTMLImageElement) => {
-    if (!src) return;
-    setLoaded({ src, shape: shapeOf(el.naturalWidth, el.naturalHeight) });
-    if (src === full) onFullLoad?.();
-  };
+  const loadedNow = (el: HTMLImageElement) => src && setLoaded({ src, shape: shapeOf(el.naturalWidth, el.naturalHeight) });
   // A picture that was there already may have loaded before this saw it.
   useEffect(() => {
     const el = img.current;
@@ -109,7 +98,7 @@ export function ImagePreview({ state, edit = false, src: full, thumbSrc, onFullL
       loading={arriving ? "eager" : "lazy"}
       decoding="async"
       onLoad={(e) => loadedNow(e.currentTarget)}
-      onError={() => (src === thumbSrc && full ? setNoThumb(thumbSrc) : setGone(src))}
+      onError={() => setGone(src)}
     />
   );
   // One that was just made is not gone from the folder: what failed was getting it here.

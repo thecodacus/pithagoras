@@ -75,7 +75,7 @@ const feature = (over: Record<string, unknown> = {}) => {
 
 async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
   const pics = [...pictures];
-  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], thumbPuts: [] as { id: string; type: string | undefined; size: number; version: string | undefined }[], thumbGone: false, limit: 4 };
+  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], limit: 4 };
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
@@ -140,24 +140,16 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
       return { deleted: ids, failed: [] };
     }
     if (/^\/api\/images\/[0-9a-f]{12}\/thumb$/.test(p)) {
+      // The portal makes the small copy when it is asked for: here it is a smaller drawing.
       const id = p.split('/')[3];
-      const found = pics.find((x) => x.id === id);
-      if (method === 'PUT') {
-        state.thumbPuts.push({ id, type: route.request().headers()['content-type'], size: route.request().postDataBuffer()?.length ?? 0, version: route.request().headers()['x-picture-version'] });
-        if (found) found.thumb = true;
-        return { ok: true };
-      }
       state.thumbFiles.push(id);
-      // A small copy that has gone missing, as the portal answers for one that is of an older picture.
-      if (!found?.thumb || state.thumbGone) return reply(404, { error: 'There is no small copy' });
       await route.fulfill({ body: svg(id, 200, 150), contentType: 'image/svg+xml' });
       return DONE;
     }
     if (/^\/api\/images\/[0-9a-f]{12}\/file$/.test(p)) {
       const id = p.split('/')[3];
       state.files.push(id);
-      // The version the portal names the file by, which the copy says it was drawn from.
-      await route.fulfill({ body: svg(id), contentType: 'image/svg+xml', headers: { etag: `W/"${id}-1"` } });
+      await route.fulfill({ body: svg(id), contentType: 'image/svg+xml' });
       return DONE;
     }
   }, { settings: true });
@@ -2347,80 +2339,18 @@ test('the gallery reads in the dark theme as in the light', async ({ page }) => 
   }
 });
 
-test('a tile loads the picture\'s file once, and sends the small copy it drew of it; the next view loads the small one', async ({ page }) => {
-  const a = pic({ prompt: 'A heavy picture', age: 5 });
-  const p = await portal(page, { pictures: [a] });
-  await page.goto('/images');
-  await loaded(tile(page, 'A heavy picture').getByRole('img'));
-  // The file was loaded because there was no copy; the page made one of it and sent it, as WebP where the browser makes that.
-  await expect.poll(() => p.state.thumbPuts.length).toBe(1);
-  expect(p.state.thumbPuts[0].id).toBe(a.id);
-  expect(p.state.thumbPuts[0].type).toMatch(/^image\/(webp|png)$/);
-  expect(p.state.thumbPuts[0].size).toBeGreaterThan(0);
-  expect(p.state.thumbPuts[0].version, 'the copy says which version of the file it was drawn from').toBe(`W/"${a.id}-1"`);
-  expect(p.state.files).toContain(a.id);
-  expect(p.state.thumbFiles).toEqual([]);
-
-  // Seen again, the portal says there is a copy: that is loaded, and the file is not.
-  p.state.files.length = 0;
-  await page.goto('/images');
-  await loaded(tile(page, 'A heavy picture').getByRole('img'));
-  await expect(tile(page, 'A heavy picture').getByRole('img')).toHaveAttribute('src', `/api/images/${a.id}/thumb`);
-  expect(p.state.thumbFiles).toContain(a.id);
-  expect(p.state.files).toEqual([]);
-  expect(p.state.thumbPuts.length).toBe(1);
-});
-
-// A browser that cannot encode WebP (Safari) answers toBlob with a PNG: the page stubs that.
-const noWebp = (page: Page, png: number) =>
-  page.addInitScript((pngBytes) => {
-    const original = HTMLCanvasElement.prototype.toBlob;
-    HTMLCanvasElement.prototype.toBlob = function (cb, type, quality) {
-      if (type === 'image/webp') return cb(new Blob([new Uint8Array(pngBytes)], { type: 'image/png' }));
-      return original.call(this, cb, type, quality);
-    };
-  }, png);
-
-test('where the browser cannot make WebP the small copy is a JPEG, not the PNG it answers with', async ({ page }) => {
-  const a = pic({ prompt: 'On an iPhone', age: 5, bytes: 300_000 });
-  await noWebp(page, 400_000);
-  const p = await portal(page, { pictures: [a] });
-  await page.goto('/images');
-  await loaded(tile(page, 'On an iPhone').getByRole('img'));
-  await expect.poll(() => p.state.thumbPuts.length).toBe(1);
-  expect(p.state.thumbPuts[0].type).toBe('image/jpeg');
-  expect(p.state.thumbPuts[0].size).toBeLessThan(150_000);
-});
-
-test('a small copy that is not well below the file is not sent', async ({ page }) => {
-  const a = pic({ prompt: 'Already light', age: 5, bytes: 60_000 });
-  // The encoder gives back more than half of what the file weighs.
-  await page.addInitScript(() => {
-    HTMLCanvasElement.prototype.toBlob = function (cb) {
-      cb(new Blob([new Uint8Array(40_000)], { type: 'image/webp' }));
-    };
-  });
-  const p = await portal(page, { pictures: [a] });
-  await page.goto('/images');
-  await loaded(tile(page, 'Already light').getByRole('img'));
-  await page.waitForTimeout(500);
-  expect(p.state.thumbPuts).toEqual([]);
-});
-
-test('a small copy that is gone shows the file, and a new copy is sent; small files and animated ones get none', async ({ page }) => {
-  const stale = pic({ prompt: 'Written over', age: 5, thumb: true });
+test('a tile of a big picture loads its small copy, and one of a small file or a GIF loads the file', async ({ page }) => {
+  const big = pic({ prompt: 'A heavy picture', age: 5, thumb: true });
   const small = pic({ prompt: 'A small file', age: 4, bytes: 2_000 });
   const animated = pic({ prompt: 'A moving one', age: 3, fileName: 'move.gif' });
-  const p = await portal(page, { pictures: [stale, small, animated] });
-  p.state.thumbGone = true;
+  const p = await portal(page, { pictures: [big, small, animated] });
   await page.goto('/images');
-  for (const name of ['Written over', 'A small file', 'A moving one']) await loaded(tile(page, name).getByRole('img'));
-  // The copy was asked for and not there: the file is shown and a copy made of it.
-  expect(p.state.thumbFiles).toEqual([stale.id]);
-  await expect(tile(page, 'Written over').getByRole('img')).toHaveAttribute('src', `/api/images/${stale.id}/file`);
-  await expect.poll(() => p.state.thumbPuts.map((x) => x.id)).toEqual([stale.id]);
-  await page.waitForTimeout(300);
-  expect(p.state.thumbPuts.map((x) => x.id), 'a small file and a GIF are shown as they are').toEqual([stale.id]);
+  for (const name of ['A heavy picture', 'A small file', 'A moving one']) await loaded(tile(page, name).getByRole('img'));
+  await expect(tile(page, 'A heavy picture').getByRole('img')).toHaveAttribute('src', `/api/images/${big.id}/thumb`);
+  await expect(tile(page, 'A small file').getByRole('img')).toHaveAttribute('src', `/api/images/${small.id}/file`);
+  await expect(tile(page, 'A moving one').getByRole('img')).toHaveAttribute('src', `/api/images/${animated.id}/file`);
+  expect(p.state.thumbFiles).toEqual([big.id]);
+  expect(p.state.files, 'the big picture\'s file is not loaded for its tile').not.toContain(big.id);
 });
 
 test('the pictures of an edit show their small copies in the form', async ({ page }) => {

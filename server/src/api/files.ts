@@ -14,7 +14,6 @@ import {
   uploadTarget,
   openDownload,
   openPicture,
-  pictureTag,
   readText,
   removeEntry,
   unsavedAt,
@@ -58,7 +57,7 @@ export function sendPicture(req: Request, res: Response, opened: ReturnType<type
   res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
   res.setHeader("Cache-Control", cache);
   const modified = fstatSync(fd).mtime;
-  res.setHeader("ETag", pictureTag(size, modified));
+  res.setHeader("ETag", `W/"${size.toString(16)}-${modified.getTime().toString(16)}"`);
   res.setHeader("Last-Modified", modified.toUTCString());
   if (req.fresh) {
     closeSync(fd);

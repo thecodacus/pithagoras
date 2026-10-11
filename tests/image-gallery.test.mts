@@ -1,7 +1,7 @@
 import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, get } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./helpers.mts";
 
@@ -1095,153 +1095,230 @@ test("the sidebar is told whether the page is there: on while an address is set 
   gone();
 });
 
-// A PNG whose header says how large it is: all the check of a small copy reads.
-const sizedPng = (width: number, height: number, tag = "") => {
-  const head = Buffer.alloc(24);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(head);
-  head.writeUInt32BE(width, 16);
-  head.writeUInt32BE(height, 20);
-  return Buffer.concat([head, Buffer.from(tag)]);
-};
+
+// Pictures with real pixels: the portal decodes them to make the small copy. Random pixels do not compress, so these are well over the 48 KB below which no copy is made.
+const { default: sharp } = await import("sharp");
+const { randomBytes } = await import("node:crypto");
+const { thumbJobsPeak } = await import("../server/src/image-thumbs.ts");
+const noise = (width: number, height: number, channels: 3 | 4 = 3) => sharp(randomBytes(width * height * channels), { raw: { width, height, channels } });
+const bigPng = (width: number, height: number) => noise(width, height).png().toBuffer();
+const meta = (bytes: Buffer) => sharp(bytes).metadata();
 const thumbs = path.join(temp, "image-thumbs");
-/** What the page sends with a small copy: the ETag of the file as it loaded it. */
-const versionOf = async (id: string) => ({ "x-picture-version": (await call("GET", `/images/${id}/file`)).headers.get("etag")! });
-const putThumb = async (id: string, raw: Buffer, headers?: Record<string, string>) =>
-  call("PUT", `/images/${id}/thumb`, undefined, { raw, headers: headers ?? (await versionOf(id)) });
+const kept = () => (existsSync(thumbs) ? readdirSync(thumbs) : []);
+const upload = async (raw: Buffer, name = "p.png") => (await call("POST", `/images/upload?name=${name}`, undefined, { raw })).body.picture;
+/** A picture in a chat's folder, which the agent may write over. */
+async function inChat(id: string, name: string, bytes: Buffer) {
+  const folder = chat(id);
+  const file = path.join(folder, GENERATED_DIR, name);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, bytes);
+  gallery.recordChatPicture({ sessionId: id, path: `${GENERATED_DIR}/${name}`, kind: "generated", prompt: id, params: {}, bytes: bytes.length });
+  const picture = (await listed("?origin=chat")).pictures.find((p: any) => p.chat?.id === id);
+  return { folder, file, picture };
+}
+const writeOver = (file: string, bytes: Buffer, minutesLater = 1) => {
+  writeFileSync(file, bytes);
+  const later = new Date(Date.now() + minutesLater * 60_000);
+  utimesSync(file, later, later);
+};
 
-test("the page keeps a small copy of a picture, which is sent in its place, and it goes when the picture does", async () => {
-  const { picture } = (await call("POST", "/images/upload?name=big.png", undefined, { raw: png("thumb-source") })).body;
-  assert.equal(picture.thumb, false);
-  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404, "there is none yet: the page shows the file and makes one");
-
-  const small = sizedPng(480, 320, "first");
-  const put = await putThumb(picture.id, small);
-  assert.equal(put.status, 200);
-  assert.equal((await listed(`?ids=${picture.id}`)).pictures[0].thumb, true);
+test("the portal makes the small copy of a big picture itself: WebP, at most 480 pixels on the long side, the picture's proportions", async () => {
+  const wide = await bigPng(1200, 800);
+  const picture = await upload(wide);
+  assert.equal(picture.thumb, true, "the gallery says the tile shows a small copy");
+  assert.deepEqual(kept(), [], "none is made before it is asked for");
   const got = await call("GET", `/images/${picture.id}/thumb`);
   assert.equal(got.status, 200);
-  assert.deepEqual(got.bytes, small);
-  assert.equal(got.headers.get("content-type"), "image/png");
+  assert.equal(got.headers.get("content-type"), "image/webp");
   assert.equal(got.headers.get("cache-control"), "private, max-age=86400");
   assert.equal(got.headers.get("x-content-type-options"), "nosniff");
-  assert.deepEqual((await call("GET", `/images/${picture.id}/file`)).bytes, png("thumb-source"), "the file itself is as it was");
-  assert.equal((await listed()).pictures.find((p: any) => p.id === picture.id).thumb, true);
+  const info = await meta(got.bytes);
+  assert.equal(info.format, "webp");
+  assert.deepEqual([info.width, info.height], [480, 320]);
+  assert.ok(got.bytes.length < wide.length / 5, `${got.bytes.length} bytes is far below the file's ${wide.length}`);
+  assert.deepEqual((await call("GET", `/images/${picture.id}/file`)).bytes, wide, "the file itself is as it was");
+  assert.equal(kept().length, 1);
 
-  // Put in place of the old one when the page makes another.
-  const newer = sizedPng(480, 320, "second");
-  assert.equal((await putThumb(picture.id, newer)).status, 200);
-  assert.deepEqual((await call("GET", `/images/${picture.id}/thumb`)).bytes, newer);
-
-  assert.equal((await call("DELETE", `/images/${picture.id}`)).status, 200);
-  assert.deepEqual(readdirSync(thumbs), [], "the small copy goes with the picture");
-  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404);
+  const tall = await upload(await bigPng(600, 1500));
+  const info2 = await meta((await call("GET", `/images/${tall.id}/thumb`)).bytes);
+  assert.deepEqual([info2.width, info2.height], [192, 480], "the long side is the height");
+  const small = await upload(await bigPng(300, 200));
+  assert.ok(small.bytes > 48 * 1024, "heavy for its size, so it gets a copy");
+  const info3 = await meta((await call("GET", `/images/${small.id}/thumb`)).bytes);
+  assert.deepEqual([info3.width, info3.height], [300, 200], "a picture below 480 is not made larger");
+  await call("POST", "/images/delete", { ids: [picture.id, tall.id, small.id] });
+  assert.deepEqual(kept(), []);
 });
 
-test("only a small picture is kept as a small copy, and only for a picture that is in the gallery", async () => {
-  const { picture } = (await call("POST", "/images/upload?name=x.png", undefined, { raw: png("thumb-checks") })).body;
-  const put = (id: string, raw: Buffer) => putThumb(id, raw, { "x-picture-version": 'W/"0-0"' });
-  assert.equal((await put(picture.id, SVG)).status, 400, "what it is called does not make it a picture");
-  assert.equal((await put(picture.id, Buffer.alloc(0))).status, 400);
-  assert.equal((await put(picture.id, png("no-size"))).status, 400, "a header that says no size is none");
-  assert.equal((await put(picture.id, sizedPng(641, 100))).status, 400, "not wider than a small copy is");
-  assert.equal((await put(picture.id, sizedPng(100, 4000))).status, 400, "nor taller");
-  assert.equal((await put(picture.id, Buffer.concat([sizedPng(100, 100), Buffer.alloc(513 * 1024)]))).status, 413, "nor heavier");
-  assert.equal((await put(picture.id, Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(30)]))).status, 400, "a small copy of a GIF would stand still");
-  assert.equal((await put("ffffffffffff", sizedPng(10, 10))).status, 404, "a picture that is not in the gallery has none");
-  assert.equal((await put("../../x", sizedPng(10, 10))).status, 404);
-  assert.equal(existsSync(thumbs) ? readdirSync(thumbs).length : 0, 0, "nothing was kept by any of them");
-  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404);
-  assert.equal((await call("GET", "/images/ffffffffffff/thumb")).status, 404);
+test("the small copy keeps transparency, and turns a picture the way its camera said", async () => {
+  const pixels = randomBytes(800 * 600 * 4);
+  // The left half is see-through, the right one is not.
+  for (let y = 0; y < 600; y++) for (let x = 0; x < 800; x++) pixels[(y * 800 + x) * 4 + 3] = x < 400 ? 0 : 255;
+  const see = await upload(await sharp(pixels, { raw: { width: 800, height: 600, channels: 4 } }).png().toBuffer());
+  const got = await call("GET", `/images/${see.id}/thumb`);
+  assert.equal(got.headers.get("content-type"), "image/webp");
+  const raw = await sharp(got.bytes).raw().toBuffer({ resolveWithObject: true });
+  assert.equal(raw.info.channels, 4, "it has an alpha channel");
+  const alpha = (x: number, y: number) => raw.data[(y * raw.info.width + x) * 4 + 3];
+  assert.equal(alpha(20, 100), 0, "the left side is still see-through");
+  assert.equal(alpha(raw.info.width - 20, 100), 255, "and the right side is not");
 
-  // A GIF is shown as the file it is, whatever is put in its place.
-  const gif = (await call("POST", "/images/upload?name=a.gif", undefined, { raw: Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(30)]) })).body.picture;
-  assert.equal((await put(gif.id, sizedPng(10, 10))).status, 400);
-  await call("POST", "/images/delete", { ids: [picture.id, gif.id] });
+  // A photo taken with the phone on its side says so in its metadata, which the copy does not keep.
+  const turned = await upload(await noise(1000, 600).jpeg({ quality: 95 }).withMetadata({ orientation: 6 }).toBuffer(), "turned.jpg");
+  const info = await meta((await call("GET", `/images/${turned.id}/thumb`)).bytes);
+  assert.deepEqual([info.width, info.height], [288, 480], "it stands up, as the viewer shows it");
+  await call("POST", "/images/delete", { ids: [see.id, turned.id] });
 });
 
-test("a small copy is only kept for the version of the file it was drawn from", async () => {
-  const folder = chat("chat-thumb-version");
-  const file = path.join(folder, GENERATED_DIR, "fox.png");
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, png("fox-one"));
-  gallery.recordChatPicture({ sessionId: "chat-thumb-version", path: `${GENERATED_DIR}/fox.png`, kind: "generated", prompt: "a fox", params: {}, bytes: png("fox-one").length });
-  const fox = (await listed("?origin=chat")).pictures.find((p: any) => p.chat?.id === "chat-thumb-version");
-  // The page loads the file, and draws the copy of it.
-  const drawn = await versionOf(fox.id);
-  const copy = sizedPng(200, 200, "fox-one");
-  assert.equal((await call("PUT", `/images/${fox.id}/thumb`, undefined, { raw: copy })).status, 400, "a copy that does not say what it is of is not kept");
+test("a small file, a GIF, an animated picture and one that cannot be read are sent whole, and get no copy", async () => {
+  const tiny = await sharp({ create: { width: 20, height: 20, channels: 3, background: "#c33" } }).png().toBuffer();
+  assert.ok(tiny.length < 48 * 1024);
+  const little = await upload(tiny);
+  assert.equal(little.thumb, false, "the gallery says the tile shows the file");
+  const gotLittle = await call("GET", `/images/${little.id}/thumb`);
+  assert.equal(gotLittle.status, 200);
+  assert.deepEqual(gotLittle.bytes, tiny);
 
-  // The agent writes the file over while the copy waits its turn to be sent.
-  writeFileSync(file, png("fox-two-is-longer"));
-  const later = new Date(Date.now() + 60_000);
+  const gifBytes = await noise(400, 300).gif().toBuffer();
+  assert.ok(gifBytes.length > 48 * 1024);
+  const gif = await upload(gifBytes, "move.gif");
+  assert.equal(gif.thumb, false);
+  const gotGif = await call("GET", `/images/${gif.id}/thumb`);
+  assert.equal(gotGif.headers.get("content-type"), "image/gif");
+  assert.deepEqual(gotGif.bytes, gifBytes, "a copy would stand still");
+
+  // An animated WebP, which the gallery cannot tell by its name.
+  const frames = Buffer.concat([randomBytes(400 * 300 * 3), randomBytes(400 * 300 * 3)]);
+  const moving = await sharp(frames, { raw: { width: 400, height: 600, channels: 3, pageHeight: 300 } }).webp({ quality: 90 }).toBuffer();
+  assert.equal((await meta(moving)).pages, 2);
+  const animated = await upload(moving, "move.webp");
+  assert.deepEqual((await call("GET", `/images/${animated.id}/thumb`)).bytes, moving);
+
+  // A header that is a PNG's and nothing after it.
+  const broken = Buffer.concat([PNG.subarray(0, 8), randomBytes(100 * 1024)]);
+  const bad = await upload(broken);
+  const gotBad = await call("GET", `/images/${bad.id}/thumb`);
+  assert.equal(gotBad.status, 200);
+  assert.deepEqual(gotBad.bytes, broken, "what cannot be drawn small is shown as it is");
+  assert.deepEqual(kept(), [], "none of them has a copy");
+  await call("POST", "/images/delete", { ids: [little.id, gif.id, animated.id, bad.id] });
+});
+
+test("a copy is made once, kept, and sent from then on", async () => {
+  const picture = await upload(await bigPng(900, 900));
+  const [first, second, third] = await Promise.all([1, 2, 3].map(() => call("GET", `/images/${picture.id}/thumb`)));
+  assert.deepEqual(second.bytes, first.bytes);
+  assert.deepEqual(third.bytes, first.bytes);
+  assert.equal(kept().length, 1, "asked for three times at once, made once");
+
+  // Put back in time: a copy that is made again would have the time of now.
+  const [name] = kept();
+  const long = new Date(Date.now() - 3_600_000);
+  utimesSync(path.join(thumbs, name), long, long);
+  const again = await call("GET", `/images/${picture.id}/thumb`);
+  assert.deepEqual(again.bytes, first.bytes);
+  assert.equal(statSync(path.join(thumbs, name)).mtimeMs, long.getTime(), "the copy that was kept is the one that was sent");
+  // The browser that has it is told so.
+  const tag = again.headers.get("etag")!;
+  assert.ok(tag);
+  // (not through fetch, which adds a no-cache of its own to a request that asks with a tag)
+  const status = await new Promise<number>((resolve) => get(`${at}/images/${picture.id}/thumb`, { headers: { "if-none-match": tag } }, (res) => { res.resume(); resolve(res.statusCode!); }));
+  assert.equal(status, 304);
+  await call("DELETE", `/images/${picture.id}`);
+});
+
+test("a file that is written over gets a new copy, and the old one goes", async () => {
+  const one = await bigPng(1000, 500);
+  const { file, picture } = await inChat("chat-thumb-over", "owl.png", one);
+  const before = await call("GET", `/images/${picture.id}/thumb`);
+  assert.equal(before.headers.get("cache-control"), "private, no-cache", "the folder's, not the page's: the browser asks");
+  assert.deepEqual([(await meta(before.bytes)).width, (await meta(before.bytes)).height], [480, 240]);
+  const [oldName] = kept();
+
+  // The agent made another picture under the same name.
+  writeOver(file, await bigPng(500, 1000));
+  const after = await call("GET", `/images/${picture.id}/thumb`);
+  assert.equal(after.status, 200);
+  assert.deepEqual([(await meta(after.bytes)).width, (await meta(after.bytes)).height], [240, 480], "it is of the new picture");
+  assert.notEqual(after.headers.get("etag"), before.headers.get("etag"));
+  assert.equal(kept().length, 1, "and the copy of the old one is not kept");
+  assert.notEqual(kept()[0], oldName);
+
+  // The same bytes with another time are another file: its copy is made again.
+  const [middleName] = kept();
+  const later = new Date(Date.now() + 120_000);
   utimesSync(file, later, later);
-  const refused = await call("PUT", `/images/${fox.id}/thumb`, undefined, { raw: copy, headers: drawn });
-  assert.equal(refused.status, 409, "it is of the file before");
-  assert.equal(existsSync(thumbs) ? readdirSync(thumbs).length : 0, 0, "and so is not stamped with the new file's time");
-  assert.equal((await call("GET", `/images/${fox.id}/thumb`)).status, 404);
-  assert.equal((await listed(`?ids=${fox.id}`)).pictures[0].thumb, false);
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, 1);
+  assert.notEqual(kept()[0], middleName, "the time alone makes it a new copy");
 
-  // A copy of the file as it is now is kept.
-  const now = await versionOf(fox.id);
-  assert.notEqual(now["x-picture-version"], drawn["x-picture-version"]);
-  assert.equal((await call("PUT", `/images/${fox.id}/thumb`, undefined, { raw: sizedPng(200, 200, "fox-two"), headers: now })).status, 200);
-  assert.deepEqual((await call("GET", `/images/${fox.id}/thumb`)).bytes, sizedPng(200, 200, "fox-two"));
-  await call("DELETE", `/images/${fox.id}`);
+  // The same time with another size, as a file system that keeps only seconds would give.
+  const stamp = statSync(file).mtime;
+  writeFileSync(file, await bigPng(700, 700));
+  utimesSync(file, stamp, stamp);
+  const sized = await call("GET", `/images/${picture.id}/thumb`);
+  assert.deepEqual([(await meta(sized.bytes)).width, (await meta(sized.bytes)).height], [480, 480]);
+  await call("DELETE", `/images/${picture.id}`);
 });
 
-test("a small copy is only sent for a picture whose file can be read", async () => {
-  const folder = chat("chat-thumb-away");
-  const file = path.join(folder, GENERATED_DIR, "bat.png");
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, png("bat"));
-  gallery.recordChatPicture({ sessionId: "chat-thumb-away", path: `${GENERATED_DIR}/bat.png`, kind: "generated", prompt: "a bat", params: {}, bytes: png("bat").length });
-  const bat = (await listed("?origin=chat")).pictures.find((p: any) => p.chat?.id === "chat-thumb-away");
-  const version = await versionOf(bat.id);
-  assert.equal((await call("PUT", `/images/${bat.id}/thumb`, undefined, { raw: sizedPng(100, 100), headers: version })).status, 200);
+test("a copy is only sent for a picture whose file can be read in full", async () => {
+  const { folder, file, picture } = await inChat("chat-thumb-away", "bat.png", await bigPng(800, 800));
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, 1);
   const moved = `${folder}-moved`;
   renameSync(folder, moved);
-  assert.equal((await call("GET", `/images/${bat.id}/thumb`)).status, 404, "a folder that cannot be reached shows nothing of its pictures");
-  assert.equal((await call("PUT", `/images/${bat.id}/thumb`, undefined, { raw: sizedPng(100, 100, "b"), headers: version })).status, 404);
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404, "the copy is not a way round: a folder that cannot be reached shows nothing of its pictures");
   renameSync(moved, folder);
-  assert.equal((await call("GET", `/images/${bat.id}/thumb`)).status, 200);
-  await call("DELETE", `/images/${bat.id}`);
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+
+  // The file has become a link out of the folder: not a picture of this gallery any more, and not made small either.
+  const outside = path.join(temp, "outside.png");
+  writeFileSync(outside, await bigPng(900, 900));
+  rmSync(file);
+  symlinkSync(outside, file);
+  const linked = await call("GET", `/images/${picture.id}/thumb`);
+  assert.notEqual(linked.status, 200);
+  assert.equal((await call("GET", `/images/${picture.id}/file`)).status, linked.status, "the same answer as for the file");
+  assert.equal((await call("GET", "/images/ffffffffffff/thumb")).status, 404);
+  assert.equal((await call("GET", "/images/..%2F..%2Fx/thumb")).status, 404);
+
+  // The file is something that is no picture.
+  const second = await inChat("chat-thumb-svg", "x.png", await bigPng(800, 800));
+  writeOver(second.file, Buffer.concat([SVG, Buffer.alloc(60 * 1024)]));
+  const before = kept().length;
+  assert.notEqual((await call("GET", `/images/${second.picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, before, "nothing was made of it");
+  await call("POST", "/images/delete", { ids: [picture.id, second.picture.id] });
 });
 
-test("the small copies of the pictures of a deleted chat are deleted too, when its folder cannot be reached", async () => {
+test("the small copies go with their pictures, however the pictures go", async () => {
   getDb().prepare("DELETE FROM images").run();
-  const folder = chat("chat-thumb-gone", "Going");
-  mkdirSync(path.join(folder, GENERATED_DIR), { recursive: true });
-  writeFileSync(path.join(folder, GENERATED_DIR, "a.png"), png("a"));
-  gallery.recordChatPicture({ sessionId: "chat-thumb-gone", path: `${GENERATED_DIR}/a.png`, kind: "generated", prompt: "original", params: {}, bytes: 70 });
-  const picture = (await listed("?origin=chat")).pictures[0];
-  assert.equal((await putThumb(picture.id, sizedPng(100, 100))).status, 200);
-  assert.equal(readdirSync(thumbs).length, 1);
+  const page = await upload(await bigPng(700, 700));
+  assert.equal((await call("GET", `/images/${page.id}/thumb`)).status, 200);
+  assert.equal((await call("DELETE", `/images/${page.id}`)).status, 200);
+  assert.deepEqual(kept(), [], "deleted in the gallery");
+
+  const { folder, picture } = await inChat("chat-thumb-gone", "a.png", await bigPng(700, 700));
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, 1);
   renameSync(folder, `${folder}-away`);
   deleteSession("chat-thumb-gone");
   assert.equal((await listed("?origin=chat")).total, 0);
-  assert.deepEqual(readdirSync(thumbs), [], "nothing lists the copy any more, so it has to go with the row");
+  assert.deepEqual(kept(), [], "the chat is deleted and its folder cannot be reached: nothing lists the copy any more, so it has to go with the row");
+
+  const gonePicture = await inChat("chat-thumb-file-gone", "b.png", await bigPng(700, 700));
+  assert.equal((await call("GET", `/images/${gonePicture.picture.id}/thumb`)).status, 200);
+  rmSync(gonePicture.file);
+  assert.equal((await call("GET", `/images/${gonePicture.picture.id}/thumb`)).status, 404, "its file is gone");
+  assert.deepEqual(kept(), [], "and so the copy is, as the row is forgotten");
 });
 
-test("the small copy of a picture in a chat's folder is dropped when the file is written over, and the page makes a new one", async () => {
-  const folder = chat("chat-thumb");
-  const file = path.join(folder, GENERATED_DIR, "owl.png");
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, png("owl-one"));
-  gallery.scanFolders();
-  gallery.recordChatPicture({ sessionId: "chat-thumb", path: `${GENERATED_DIR}/owl.png`, kind: "generated", prompt: "an owl", params: {}, bytes: png("owl-one").length });
-  const owl = (await listed("?origin=chat")).pictures.find((p: any) => p.chat?.id === "chat-thumb");
-  assert.ok(owl);
-  assert.equal((await putThumb(owl.id, sizedPng(200, 200, "owl-one"))).status, 200);
-  const got = await call("GET", `/images/${owl.id}/thumb`);
-  assert.equal(got.status, 200);
-  assert.equal(got.headers.get("cache-control"), "private, no-cache", "the folder's, not the page's: the browser asks");
-
-  // The agent made another picture under the same name.
-  writeFileSync(file, png("owl-two"));
-  const later = new Date(Date.now() + 60_000);
-  utimesSync(file, later, later);
-  assert.equal((await call("GET", `/images/${owl.id}/thumb`)).status, 404, "it is of the picture before");
-  assert.equal(existsSync(thumbs) ? readdirSync(thumbs).length : 0, 0);
-  assert.equal((await putThumb(owl.id, sizedPng(200, 200, "owl-two"))).status, 200);
-  assert.deepEqual((await call("GET", `/images/${owl.id}/thumb`)).bytes, sizedPng(200, 200, "owl-two"));
+test("only a few small copies are made at the same time", async () => {
+  const ids: string[] = [];
+  for (let i = 0; i < 8; i++) ids.push((await upload(await bigPng(1600, 1200))).id);
+  const all = await Promise.all(ids.map((id) => call("GET", `/images/${id}/thumb`)));
+  assert.ok(all.every((r) => r.status === 200 && r.headers.get("content-type") === "image/webp"));
+  assert.equal(kept().length, 8);
+  assert.ok(thumbJobsPeak() >= 1 && thumbJobsPeak() <= 2, `at most 2 at once, saw ${thumbJobsPeak()}`);
+  await call("POST", "/images/delete", { ids });
 });
