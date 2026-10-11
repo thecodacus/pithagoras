@@ -66,7 +66,8 @@ and saving yours anyway.
 
 Files follows the agent. When it reads a file, or writes or edits one, that file
 is shown — the editor, live, as it changes. Opening a file or a folder yourself
-takes over from that, and **Follow** hands it back. Editing is never interrupted:
+takes over from that, and **Follow** hands it back; clicking **Following** again
+stops following. Editing is never interrupted:
 while you have unsaved changes, the agent's next file does not replace them.
 
 In [voice mode](/guide/voice) it opens on its own the first time the agent touches

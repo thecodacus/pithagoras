@@ -901,7 +901,7 @@ const de: Locale = {
     "This removes the folder and everything in it. It cannot be undone.": "Das entfernt den Ordner und alles darin. Das lässt sich nicht rückgängig machen.",
     "This removes the file. It cannot be undone.": "Das entfernt die Datei. Das lässt sich nicht rückgängig machen.",
     "Folder": "Ordner",
-    "Showing what the agent reads and changes": "Zeigt, was der Agent liest und ändert",
+    "Stop showing what the agent reads and changes": "Nicht mehr zeigen, was der Agent liest und ändert",
     "Show what the agent reads and changes": "Zeigen, was der Agent liest und ändert",
     "Following": "Folgt",
     "Follow": "Folgen",

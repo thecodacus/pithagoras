@@ -206,6 +206,42 @@ function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
 /** Text without the colour and cursor codes a terminal would act on. */
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 
+/**
+ * Some extensions put a block of markup in the chat that is written for the
+ * model: one element with ids, file paths and guidance inside (pi-background-tasks
+ * does so when a task ends). People get its summary, or its title, or its message;
+ * a block with none of them is listed as its fields. The status is added unless
+ * the words already say it, an error or an exit code other than 0 after it; a
+ * failure status, an error or such an exit code warns. Text that is not one such element, or that has words of its own between
+ * the elements inside it, is the extension's own words and stays as it is.
+ */
+function markupNotice(text: string): { text: string; tone: "info" | "warn" } | null {
+  const block = /^<([a-z][\w-]*)(?:\s[^>]*)?>([\s\S]*)<\/\1>$/.exec(text);
+  if (!block || !/<[a-z][\w-]*(?:\s[^>]*)?>[\s\S]*<\/[a-z]/.test(block[2])) return null;
+  const unescape = (raw: string) => raw.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+  const leaf = /<([a-z][\w-]*)(?:\s[^>]*)?>([^<]*)<\/\1>/g;
+  // Words outside the child elements ("<p>Run <code>x</code> first</p>") would be lost in a field list.
+  if (block[2].replace(leaf, "").trim()) return null;
+  const fields = [...block[2].matchAll(leaf)].map((m) => [m[1], unescape(m[2])] as const).filter(([, v]) => v);
+  const field = (tag: string) => fields.find(([k]) => k === tag)?.[1];
+  const main = field("summary") ?? field("title") ?? field("message");
+  const status = field("status");
+  // "null" is how a process that ended without a code (killed, timed out) is written.
+  const code = field("exit-code");
+  const exit = code !== undefined && /^-?\d+$/.test(code) ? code : undefined;
+  const error = field("error");
+  const warn = (status !== undefined && /^(failed|failure|error|errored|killed|cancelled|canceled|time(?:d)?[-_ ]?out|aborted)$/i.test(status)) || !!error || (exit !== undefined && exit !== "0");
+  if (main === undefined) return fields.length ? { text: fields.map(([k, v]) => `${k}: ${v}`).join("\n"), tone: warn ? "warn" : "info" } : null;
+  // An error usually says the code itself ("Exited with code 2"), so the code is added only where nothing else says it.
+  const extra = error ?? (exit !== undefined && exit !== "0" ? `exit code ${exit}` : "");
+  // The summary of pi-background-tasks ends with the status already; a title or message of another extension does not.
+  // "timed-out", "timed_out" and "timed out" are one word, and so are "canceled" and "cancelled".
+  const words = (v: string) => v.toLowerCase().replace(/[-_\s]+/g, " ").replace(/\bcanceled\b/g, "cancelled").trim();
+  const saysStatus = status !== undefined && new RegExp(`(^|[^\\w])${words(status).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w])`).test(words(main));
+  const notes = [status !== undefined && !saysStatus ? status : "", extra].filter(Boolean).join(", ");
+  return { text: notes ? `${main} (${notes})` : main, tone: warn ? "warn" : "info" };
+}
+
 /** The text of a tool result, however pi shaped it. */
 export function toolOutputText(result: any): string | undefined {
   if (typeof result === "string") return result;
@@ -459,7 +495,9 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           const text = typeof message.content === "string"
             ? message.content
             : Array.isArray(message.content) ? message.content.filter((c: any) => c?.type === "text").map((c: any) => c.text ?? "").join("\n") : "";
-          if (text.trim()) items.push({ kind: "notice", id: `m${ev.seq}`, text: stripAnsi(text).trim(), tone: "info" });
+          const shown = stripAnsi(text).trim();
+          const task = markupNotice(shown);
+          if (shown) items.push({ kind: "notice", id: `m${ev.seq}`, text: task?.text ?? shown, tone: task?.tone ?? "info" });
           break;
         }
         if (ev.type === "message_end") closeCurrent();
