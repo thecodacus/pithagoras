@@ -458,7 +458,7 @@ export const api = {
   logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
-  /** Without a workspace the chat starts in Home. */
+  /** Without a workspace the chat starts in the home of the agent New is set to. */
   createSession: (workspace?: string, title?: string) =>
     json<Session>("/api/sessions", {
       method: "POST",

@@ -402,13 +402,14 @@ Each agent has a home folder of its own, with its own `SOUL.md`,
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/agents` | `{ agents }`, each `{ id, name, home, first, initialised, chats, channels, orb, voice, heartbeat, unread }` |
+| `GET /api/agents` | `{ agents }`, each `{ id, name, home, first, newChats, initialised, chats, channels, orb, voice, heartbeat, unread }` |
 | `POST /api/agents` | `{ name, setup? }` — a new agent and its folder; `setup` takes the wizard's answers. A folder kept from a deleted agent of the same name is taken up again, and the files in it are not rewritten: `kept` in the answer names the agent's own files (`SOUL.md`, `PrimaryUser.md`, `MEMORY.md`) that the folder already had, with `setup` or without it, and the wizard's answers did not replace them. |
 | `PATCH /api/agents/:id` | `{ name }` — its folder stays where it is, and records the new name in `.agent-name`, which is what makes an agent of that name take the folder up again once this one is deleted with it kept |
 | `DELETE /api/agents/:id` | Deletes it and its chats, and its folder with `?folder=delete`. Refused for the first agent, for one a channel talks as, and while one of its chats or routines is working. The jobs running in its folder are stopped (`jobsStopped`), whichever way the folder goes. Its routines are switched off (`routinesSwitchedOff`), or with `?folder=delete` deleted (`routinesDeleted`); their runs are kept either way. |
 | `GET /api/agents/:id/setup` | Setup status and its editable files, each `{ name, exists, content, mtime }` |
 | `POST /api/agents/:id/setup` | Writes the identity files that are not there from the wizard's answers; the others are left, and `kept` names them |
 | `PUT /api/agents/:id/files/:name` | `{ content, mtime? }` — saves one of its files whole. With `mtime` (0 for a file that was not there), a file that has changed since is not overwritten: 409. A link is refused. |
+| `PUT /api/agents/:id/new-chats` | `{ on }` (boolean, else 400) — whether the **New** button starts chats with it. Turning it off hands New back to the first agent; off for an agent that is not the pick changes nothing. Answers the agent |
 | `PUT /api/agents/:id/orb` | Saves its avatar; answers the style as stored |
 | `PUT /api/agents/:id/heartbeat` | `{ minutes, quietStart, quietEnd }` — how often it looks around on its own (0 never, else 15 minutes to a week) and the hours it keeps quiet (`"HH:MM"`, both or neither) |
 | `POST /api/agents/:id/heartbeat/run` | A look now. Answers at once; `heartbeat.running` and `heartbeat.status` follow it |

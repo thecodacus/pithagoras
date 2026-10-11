@@ -42,7 +42,7 @@ export const SessionsPage = memo(function SessionsPage({
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
   places?: Places | null;
   onSelect: (id: string) => void;
-  /** A chat in `workspace`, or in Home without one, opened. */
+  /** A chat in `workspace`, or where New starts without one, opened. */
   onNewChat?: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
