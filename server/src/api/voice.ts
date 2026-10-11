@@ -264,7 +264,9 @@ export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   const kept = remembered();
   const { listening, speaking } = managedSides(current, kept.noSpeech);
   const next: Remembered = { ...kept, noSpeech: runtime === "none" };
-  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "", dictationModel: current.dictationModel ?? "", dictationUrl: current.dictationUrl ?? "", enabled: current.enabled };
+  // A dictation address that is the service's own was never the user's, so it is not kept with its model: the uninstall would put it back.
+  const dictationKept = isManagedUrl(current.dictationUrl) ? { dictationModel: "", dictationUrl: "" } : { dictationModel: current.dictationModel ?? "", dictationUrl: current.dictationUrl ?? "" };
+  if (!listening) next.listening = { whisperUrl: current.whisperUrl, sttModel: current.sttModel ?? "", ...dictationKept, enabled: current.enabled };
   if (!speaking) next.speaking = { breezeUrl: current.breezeUrl, runtime: current.runtime ?? "breeze", enabled: current.enabled };
   putSetting(REMEMBERED_KEY, JSON.stringify(next));
   // Chatterbox is told a language and has no detection mode; keep one it speaks rather than save a setting it refuses.

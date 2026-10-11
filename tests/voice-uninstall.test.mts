@@ -426,3 +426,41 @@ test('a dictation endpoint that points at the service is cleared by the uninstal
   assert.deepEqual([back.whisperUrl, back.dictationUrl, back.dictationModel], [OWN.whisperUrl, '', '']);
   assert.equal((await get('/voice/install')).connected, false);
 });
+
+test('a managed dictation address is not remembered as theirs when Start voice takes the recognition over, so the uninstall does not put it back', async () => {
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  await install();
+  // The split setup: voice mode on their own server, dictation on the service's. Start voice connects again over their server.
+  const split = { ...await get('/voice'), whisperUrl: OWN.whisperUrl, dictationUrl: MANAGED.whisper, dictationModel: 'asr-x' };
+  assert.equal((await put(split)).status, 200);
+  assert.equal((await post('/voice/stop')).status, 200);
+  assert.equal((await post('/voice/start')).status, 200);
+  assert.equal((await settle()).state, 'running');
+  const kept = JSON.parse(stored('voice_before_managed')!).listening;
+  assert.deepEqual([kept.whisperUrl, kept.dictationUrl, kept.dictationModel], [OWN.whisperUrl, '', '']);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  const back = await get('/voice');
+  assert.deepEqual([back.whisperUrl, back.dictationUrl, back.dictationModel], [OWN.whisperUrl, '', '']);
+});
+
+test('a managed dictation address alone makes the settings point at the service, and the uninstall clears it when both sides are their own', async () => {
+  reset(); seedContainer();
+  assert.equal((await put({ ...OWN, dictationUrl: MANAGED.whisper, dictationModel: 'asr-x' })).status, 200);
+  assert.equal((await get('/voice/install')).connected, true);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { ...fields(OWN), dictationUrl: '', dictationModel: '' });
+  assert.equal((await get('/voice/install')).connected, false);
+});
+
+test('Start voice over a recognition that is the service\'s clears a dictation address that is the service\'s as well', async () => {
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  await install();
+  assert.equal((await put({ ...await get('/voice'), dictationUrl: MANAGED.whisper, dictationModel: 'asr-x' })).status, 200);
+  assert.equal((await post('/voice/stop')).status, 200);
+  assert.equal((await post('/voice/start')).status, 200);
+  assert.equal((await settle()).state, 'running');
+  const now = await get('/voice');
+  assert.deepEqual([now.whisperUrl, now.dictationUrl, now.dictationModel], [MANAGED.whisper, '', '']);
+});
