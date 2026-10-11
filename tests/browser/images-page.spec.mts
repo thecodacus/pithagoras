@@ -18,6 +18,7 @@ interface Pic {
   createdAt: number;
   bytes: number;
   fileName: string;
+  thumb?: boolean;
 }
 interface Job {
   id: string;
@@ -52,6 +53,7 @@ const pic = (over: Partial<Pic> & { age?: number } = {}): Pic => {
     createdAt: Date.now() - age * 60_000,
     bytes: 120_000,
     fileName: `image-${n}.png`,
+    thumb: false,
     ...rest,
   };
 };
@@ -73,7 +75,7 @@ const feature = (over: Record<string, unknown> = {}) => {
 
 async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
   const pics = [...pictures];
-  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], limit: 4 };
+  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], thumbPuts: [] as { id: string; type: string | undefined; size: number }[], thumbGone: false, limit: 4 };
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
@@ -136,6 +138,20 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
       state.deleted.push(ids);
       for (const id of ids) pics.splice(pics.findIndex((x) => x.id === id), 1);
       return { deleted: ids, failed: [] };
+    }
+    if (/^\/api\/images\/[0-9a-f]{12}\/thumb$/.test(p)) {
+      const id = p.split('/')[3];
+      const found = pics.find((x) => x.id === id);
+      if (method === 'PUT') {
+        state.thumbPuts.push({ id, type: route.request().headers()['content-type'], size: route.request().postDataBuffer()?.length ?? 0 });
+        if (found) found.thumb = true;
+        return { ok: true };
+      }
+      state.thumbFiles.push(id);
+      // A small copy that has gone missing, as the portal answers for one that is of an older picture.
+      if (!found?.thumb || state.thumbGone) return reply(404, { error: 'There is no small copy' });
+      await route.fulfill({ body: svg(id, 200, 150), contentType: 'image/svg+xml' });
+      return DONE;
     }
     if (/^\/api\/images\/[0-9a-f]{12}\/file$/.test(p)) {
       const id = p.split('/')[3];
@@ -2328,4 +2344,56 @@ test('the gallery reads in the dark theme as in the light', async ({ page }) => 
     });
     expect(colours.ink).not.toBe(colours.ground);
   }
+});
+
+test('a tile loads the picture\'s file once, and sends the small copy it drew of it; the next view loads the small one', async ({ page }) => {
+  const a = pic({ prompt: 'A heavy picture', age: 5 });
+  const p = await portal(page, { pictures: [a] });
+  await page.goto('/images');
+  await loaded(tile(page, 'A heavy picture').getByRole('img'));
+  // The file was loaded because there was no copy; the page made one of it and sent it, as WebP where the browser makes that.
+  await expect.poll(() => p.state.thumbPuts.length).toBe(1);
+  expect(p.state.thumbPuts[0].id).toBe(a.id);
+  expect(p.state.thumbPuts[0].type).toMatch(/^image\/(webp|png)$/);
+  expect(p.state.thumbPuts[0].size).toBeGreaterThan(0);
+  expect(p.state.files).toContain(a.id);
+  expect(p.state.thumbFiles).toEqual([]);
+
+  // Seen again, the portal says there is a copy: that is loaded, and the file is not.
+  p.state.files.length = 0;
+  await page.goto('/images');
+  await loaded(tile(page, 'A heavy picture').getByRole('img'));
+  await expect(tile(page, 'A heavy picture').getByRole('img')).toHaveAttribute('src', `/api/images/${a.id}/thumb`);
+  expect(p.state.thumbFiles).toContain(a.id);
+  expect(p.state.files).toEqual([]);
+  expect(p.state.thumbPuts.length).toBe(1);
+});
+
+test('a small copy that is gone shows the file, and a new copy is sent; small files and animated ones get none', async ({ page }) => {
+  const stale = pic({ prompt: 'Written over', age: 5, thumb: true });
+  const small = pic({ prompt: 'A small file', age: 4, bytes: 2_000 });
+  const animated = pic({ prompt: 'A moving one', age: 3, fileName: 'move.gif' });
+  const p = await portal(page, { pictures: [stale, small, animated] });
+  p.state.thumbGone = true;
+  await page.goto('/images');
+  for (const name of ['Written over', 'A small file', 'A moving one']) await loaded(tile(page, name).getByRole('img'));
+  // The copy was asked for and not there: the file is shown and a copy made of it.
+  expect(p.state.thumbFiles).toEqual([stale.id]);
+  await expect(tile(page, 'Written over').getByRole('img')).toHaveAttribute('src', `/api/images/${stale.id}/file`);
+  await expect.poll(() => p.state.thumbPuts.map((x) => x.id)).toEqual([stale.id]);
+  await page.waitForTimeout(300);
+  expect(p.state.thumbPuts.map((x) => x.id), 'a small file and a GIF are shown as they are').toEqual([stale.id]);
+});
+
+test('the pictures of an edit show their small copies in the form', async ({ page }) => {
+  const a = pic({ prompt: 'With a copy', age: 5, thumb: true });
+  const b = pic({ prompt: 'Without one', age: 4 });
+  const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await pick(page, 'With a copy', 'Without one');
+  await expect(thumbs(page)).toHaveCount(2);
+  await loaded(thumbs(page).first());
+  await loaded(thumbs(page).last());
+  expect(await thumbs(page).evaluateAll((els) => els.map((e) => e.getAttribute('src')))).toEqual([`/api/images/${a.id}/thumb`, `/api/images/${b.id}/file`]);
+  expect(p.state.thumbFiles).toContain(a.id);
 });

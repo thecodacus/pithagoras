@@ -1,7 +1,7 @@
 import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, get } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./helpers.mts";
 
@@ -205,7 +205,7 @@ test("a picture is made without any chat: a job, a picture in the gallery that i
     assert.deepEqual({ ...picture, createdAt: 0, bytes: 0, fileName: "" }, {
       id: job.pictureId, origin: "page", chat: null, folder: null, kind: "generated", prompt: "a lighthouse at dusk",
       params: { model: "other-model", size: "512x512", outputFormat: "webp", outputCompression: 60, negativePrompt: "blurry", seed: 7, sampleSteps: 25 },
-      from: null, createdAt: 0, bytes: 0, fileName: "",
+      from: null, createdAt: 0, bytes: 0, fileName: "", thumb: false,
     });
     assert.match(picture.fileName, /^image-\d{8}-\d{6}-[0-9a-f]{4}\.png$/);
     assert.equal(picture.bytes, PNG.length);
@@ -1093,4 +1093,88 @@ test("the sidebar is told whether the page is there: on while an address is set 
   gen.saveImageGeneration({ editEnabled: false });
   assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: false }, "an address for changes that is switched off is not a page");
   gone();
+});
+
+// A PNG whose header says how large it is: all the check of a small copy reads.
+const sizedPng = (width: number, height: number, tag = "") => {
+  const head = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(head);
+  head.writeUInt32BE(width, 16);
+  head.writeUInt32BE(height, 20);
+  return Buffer.concat([head, Buffer.from(tag)]);
+};
+const thumbs = path.join(temp, "image-thumbs");
+
+test("the page keeps a small copy of a picture, which is sent in its place, and it goes when the picture does", async () => {
+  const { picture } = (await call("POST", "/images/upload?name=big.png", undefined, { raw: png("thumb-source") })).body;
+  assert.equal(picture.thumb, false);
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404, "there is none yet: the page shows the file and makes one");
+
+  const small = sizedPng(480, 320, "first");
+  const put = await call("PUT", `/images/${picture.id}/thumb`, undefined, { raw: small, type: "image/png" });
+  assert.equal(put.status, 200);
+  assert.equal((await listed(`?ids=${picture.id}`)).pictures[0].thumb, true);
+  const got = await call("GET", `/images/${picture.id}/thumb`);
+  assert.equal(got.status, 200);
+  assert.deepEqual(got.bytes, small);
+  assert.equal(got.headers.get("content-type"), "image/png");
+  assert.equal(got.headers.get("cache-control"), "private, max-age=86400");
+  assert.equal(got.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual((await call("GET", `/images/${picture.id}/file`)).bytes, png("thumb-source"), "the file itself is as it was");
+  assert.equal((await listed()).pictures.find((p: any) => p.id === picture.id).thumb, true);
+
+  // Put in place of the old one when the page makes another.
+  const newer = sizedPng(480, 320, "second");
+  assert.equal((await call("PUT", `/images/${picture.id}/thumb`, undefined, { raw: newer })).status, 200);
+  assert.deepEqual((await call("GET", `/images/${picture.id}/thumb`)).bytes, newer);
+
+  assert.equal((await call("DELETE", `/images/${picture.id}`)).status, 200);
+  assert.deepEqual(readdirSync(thumbs), [], "the small copy goes with the picture");
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404);
+});
+
+test("only a small picture is kept as a small copy, and only for a picture that is in the gallery", async () => {
+  const { picture } = (await call("POST", "/images/upload?name=x.png", undefined, { raw: png("thumb-checks") })).body;
+  const put = (id: string, raw: Buffer) => call("PUT", `/images/${id}/thumb`, undefined, { raw });
+  assert.equal((await put(picture.id, SVG)).status, 400, "what it is called does not make it a picture");
+  assert.equal((await put(picture.id, Buffer.alloc(0))).status, 400);
+  assert.equal((await put(picture.id, png("no-size"))).status, 400, "a header that says no size is none");
+  assert.equal((await put(picture.id, sizedPng(641, 100))).status, 400, "not wider than a small copy is");
+  assert.equal((await put(picture.id, sizedPng(100, 4000))).status, 400, "nor taller");
+  assert.equal((await put(picture.id, Buffer.concat([sizedPng(100, 100), Buffer.alloc(513 * 1024)]))).status, 413, "nor heavier");
+  assert.equal((await put(picture.id, Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(30)]))).status, 400, "a small copy of a GIF would stand still");
+  assert.equal((await put("ffffffffffff", sizedPng(10, 10))).status, 404, "a picture that is not in the gallery has none");
+  assert.equal((await put("../../x", sizedPng(10, 10))).status, 404);
+  assert.equal(existsSync(thumbs) ? readdirSync(thumbs).length : 0, 0, "nothing was kept by any of them");
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404);
+  assert.equal((await call("GET", "/images/ffffffffffff/thumb")).status, 404);
+
+  // A GIF is shown as the file it is, whatever is put in its place.
+  const gif = (await call("POST", "/images/upload?name=a.gif", undefined, { raw: Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(30)]) })).body.picture;
+  assert.equal((await put(gif.id, sizedPng(10, 10))).status, 400);
+  await call("POST", "/images/delete", { ids: [picture.id, gif.id] });
+});
+
+test("the small copy of a picture in a chat's folder is dropped when the file is written over, and the page makes a new one", async () => {
+  const folder = chat("chat-thumb");
+  const file = path.join(folder, GENERATED_DIR, "owl.png");
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, png("owl-one"));
+  gallery.scanFolders();
+  gallery.recordChatPicture({ sessionId: "chat-thumb", path: `${GENERATED_DIR}/owl.png`, kind: "generated", prompt: "an owl", params: {}, bytes: png("owl-one").length });
+  const owl = (await listed("?origin=chat")).pictures.find((p: any) => p.chat?.id === "chat-thumb");
+  assert.ok(owl);
+  assert.equal((await call("PUT", `/images/${owl.id}/thumb`, undefined, { raw: sizedPng(200, 200, "owl-one") })).status, 200);
+  const got = await call("GET", `/images/${owl.id}/thumb`);
+  assert.equal(got.status, 200);
+  assert.equal(got.headers.get("cache-control"), "private, no-cache", "the folder's, not the page's: the browser asks");
+
+  // The agent made another picture under the same name.
+  writeFileSync(file, png("owl-two"));
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(file, later, later);
+  assert.equal((await call("GET", `/images/${owl.id}/thumb`)).status, 404, "it is of the picture before");
+  assert.equal(existsSync(thumbs) ? readdirSync(thumbs).length : 0, 0);
+  assert.equal((await call("PUT", `/images/${owl.id}/thumb`, undefined, { raw: sizedPng(200, 200, "owl-two") })).status, 200);
+  assert.deepEqual((await call("GET", `/images/${owl.id}/thumb`)).bytes, sizedPng(200, 200, "owl-two"));
 });

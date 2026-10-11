@@ -9,6 +9,7 @@ import { bytesLabel } from "../projects";
 import { isEscape } from "../shortcuts";
 import { sinceThen } from "../time";
 import { formatDateTime, msg, t, tp } from "../i18n";
+import { keepThumb } from "../gallery-thumb";
 import { useNow } from "../use-now";
 import { confirmDialog } from "./ConfirmDialog";
 import { ImageMaker, type Mode } from "./ImageMaker";
@@ -804,6 +805,9 @@ const GalleryTile = memo(function GalleryTile({
         state={state}
         edit={job?.kind === "edit" || picture?.kind === "edited"}
         src={here ? api.galleryFileUrl(id) : undefined}
+        thumbSrc={here && picture?.thumb ? api.galleryThumbUrl(id) : undefined}
+        // The file has been loaded for want of a small copy: one is made of it now.
+        onFullLoad={here ? (img) => keepThumb(id, img, picture) : undefined}
         before={job?.from && making ? api.galleryFileUrl(job.from) : undefined}
         ratio={1}
         title={picture?.prompt || job?.prompt || picture?.fileName}

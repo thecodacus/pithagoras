@@ -553,7 +553,11 @@ export function ImageMaker({
                     {/* A button, so that it can be looked at larger and a keyboard reaches it. */}
                     <button type="button" data-source-id={p.id} onClick={() => setLooking(p.id)} aria-label={t("Look at {name}", { name: sourceName(p) })} title={t("Look at {name}", { name: sourceName(p) })} className="block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
                       <img
-                        src={api.galleryFileUrl(p.id)}
+                        src={p.thumb ? api.galleryThumbUrl(p.id) : api.galleryFileUrl(p.id)}
+                        // A small copy that is gone (the picture was written over) is not a reason to show nothing.
+                        onError={(e) => {
+                          if (p.thumb && !e.currentTarget.src.endsWith("/file")) e.currentTarget.src = api.galleryFileUrl(p.id);
+                        }}
                         alt={sourceName(p)}
                         loading="lazy"
                         draggable={false}

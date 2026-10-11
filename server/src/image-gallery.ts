@@ -1,11 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, fstatSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import path from "node:path";
 import { agentsRoot, listAgents } from "./agents.js";
+import { writeFileAtomic } from "./atomic-write.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
 import { OUTPUT_FORMATS, type OutputFormat } from "./image-settings.js";
+import { pictureSize } from "./picture-size.js";
+import { pictureExt } from "./prompt-images.js";
 import { listProjects } from "./projects.js";
 import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
 import { workspaceRoot } from "./workspaces.js";
@@ -83,6 +86,8 @@ export interface GalleryPicture {
   bytes: number;
   /** What a download is called. */
   fileName: string;
+  /** A small copy of it is kept, which the tiles show instead of the file (see saveThumb). */
+  thumb: boolean;
 }
 
 interface Row {
@@ -103,6 +108,10 @@ type ListedRow = Row & { chat_title: string | null };
 
 /** Where the page's own pictures are kept. */
 export const imagesDir = (): string => path.join(path.resolve(DATA_DIR), "images");
+
+/** Where the small copies are kept, one for each picture, under its id. */
+export const thumbsDir = (): string => path.join(path.resolve(DATA_DIR), "image-thumbs");
+const thumbFile = (id: string): string => path.join(thumbsDir(), `${id}.thumb`);
 
 /** The params a row holds, kept to the fields that are known: what is in the database is the portal's own, but only as far as it is read back. */
 function readParams(text: string): PictureParams {
@@ -159,6 +168,7 @@ function shown(row: ListedRow): GalleryPicture {
     createdAt: row.created_at,
     bytes: row.bytes,
     fileName: downloadName(row),
+    thumb: existsSync(thumbFile(row.id)),
   };
 }
 
@@ -583,6 +593,8 @@ function forget(ids: string[]): void {
       unlink.run(id);
     }
   })();
+  // The small copy has no use without the picture.
+  for (const id of ids) rmSync(thumbFile(id), { force: true });
 }
 
 /**
@@ -704,6 +716,61 @@ export function openListed(id: string): { fd: number; size: number; name: string
     if (e instanceof FileError && e.code === "missing") forget([id]);
     throw e;
   }
+}
+
+/** The longest side of a small copy the portal keeps, and the most bytes it takes for one: the page makes them about 480 pixels across, this leaves room for another size. */
+export const THUMB_MAX_SIDE = 640;
+export const THUMB_MAX_BYTES = 512 * 1024;
+
+/**
+ * Keeps the small copy of a picture that the page made in the browser, in place of an
+ * older one. It is no more than a picture by its bytes, small in both its sides and in size,
+ * and is only kept for a picture that is in the list. An animated picture (GIF) is shown as the
+ * file it is: a copy would stand still.
+ *
+ * The copy takes the time of the file it was made from, which is how a picture in a chat's folder
+ * that was written over is told from the copy of the one before (see openThumb).
+ */
+export function saveThumb(id: string, bytes: Buffer): void {
+  const ext = pictureExt(bytes.subarray(0, 12));
+  if (!ext || ext === "gif") throw new FileError("invalid", "A small copy is a PNG, JPEG or WebP picture");
+  if (bytes.length > THUMB_MAX_BYTES) throw new FileError("too_large", `A small copy is at most ${THUMB_MAX_BYTES / 1024} KB`);
+  const size = pictureSize(bytes);
+  if (!size || size.width > THUMB_MAX_SIDE || size.height > THUMB_MAX_SIDE) throw new FileError("invalid", `A small copy is at most ${THUMB_MAX_SIDE} pixels on a side`);
+  const opened = openListed(id);
+  let modified: Date;
+  try {
+    if (opened.mimeType === "image/gif") throw new FileError("invalid", "A GIF is shown as the file it is");
+    modified = fstatSync(opened.fd).mtime;
+  } finally {
+    closeSync(opened.fd);
+  }
+  mkdirSync(thumbsDir(), { recursive: true });
+  writeFileAtomic(thumbFile(id), bytes, 0o644);
+  utimesSync(thumbFile(id), modified, modified);
+}
+
+/**
+ * The small copy of a picture, opened to be sent the way the picture is. Missing when there is
+ * none, or when the picture is in a chat's folder and was written over since the copy was made: it
+ * is dropped, and the page makes a new one from the file.
+ */
+export function openThumb(id: string): ReturnType<typeof openListed> {
+  const whole = openListed(id);
+  let modified: number;
+  try {
+    modified = fstatSync(whole.fd).mtimeMs;
+  } finally {
+    closeSync(whole.fd);
+  }
+  const opened = { ...openPicture(baseDir(thumbsDir()), `${id}.thumb`), origin: whole.origin };
+  // The copy has the file's time to the millisecond, give or take what a file system keeps.
+  if (whole.origin !== "page" && Math.abs(fstatSync(opened.fd).mtimeMs - modified) > 2) {
+    closeSync(opened.fd);
+    rmSync(thumbFile(id), { force: true });
+    throw new FileError("missing", "The small copy is of an older picture");
+  }
+  return opened;
 }
 
 /** The bytes of a picture, for an edit that starts from it; same checks as serving one. */
