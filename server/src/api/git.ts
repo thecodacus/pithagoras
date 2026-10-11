@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type Router } from "express";
 import { getSession } from "../db.js";
-import { baseDir, FileError } from "../workspace-files.js";
+import { statSync } from "node:fs";
+import { baseDir, FileError, resolveInside } from "../workspace-files.js";
 import * as g from "../git.js";
 
 /**
@@ -10,6 +11,10 @@ import * as g from "../git.js";
  * this chat works in" is what is the same for a chat in a project, in the
  * workspace root, or in Home. What git does is in git.ts; this turns a chat
  * into its repository and a refusal into a status.
+ *
+ * A folder can hold repositories of its own (a project with a clone in it), so
+ * every route takes `?repo=<path from the chat's folder>` to work in one of
+ * those; without it, it is the repository the folder itself is in.
  */
 
 function fail(res: Response, e: unknown) {
@@ -24,7 +29,7 @@ const flag = (v: unknown) => v === true || v === "1" || v === "true";
 export function gitRouter(): Router {
   const router = express.Router();
 
-  /** The chat's folder, answered for when there is none. */
+  /** The chat's folder, or the clone in it that `?repo=` names; answered for when there is none. */
   const folderOf = (req: Request, res: Response): string | undefined => {
     const session = getSession(String(req.params.id));
     if (!session) {
@@ -32,7 +37,12 @@ export function gitRouter(): Router {
       return undefined;
     }
     try {
-      return baseDir(session.workspace);
+      const base = baseDir(session.workspace);
+      const rel = typeof req.query.repo === "string" ? req.query.repo : "";
+      if (!rel) return base;
+      const dir = resolveInside(base, rel);
+      if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new FileError("missing", "There is no such repository in this chat's folder");
+      return dir;
     } catch (e) {
       fail(res, e);
       return undefined;
@@ -62,6 +72,17 @@ export function gitRouter(): Router {
       fail(res, e);
     }
   };
+
+  /** The repositories in the chat's folder: the one around it and the clones below it. */
+  router.get("/sessions/:id/git/repos", async (req, res) => {
+    try {
+      const session = getSession(String(req.params.id));
+      if (!session) return res.status(404).json({ error: "Not found" });
+      res.json(await g.findRepos(baseDir(session.workspace)));
+    } catch (e) {
+      fail(res, e);
+    }
+  });
 
   /**
    * Where things stand: whether there is a repository at all, and if so its

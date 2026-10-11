@@ -293,6 +293,64 @@ export async function findRepo(folder: string): Promise<Repo | null> {
   }
 }
 
+/** A repository the panel can show: where it is, as a path from the chat's folder ("" for the one around it). */
+export interface RepoEntry {
+  path: string;
+  name: string;
+}
+
+/** How far below the chat's folder a clone is looked for, and how much of the tree is looked at for it. */
+const SCAN_DEPTH = 4;
+const SCAN_FOLDERS = 4000;
+const SCAN_REPOS = 50;
+/** Folders no clone the agent works in is kept in, and that are the most of what a scan would walk. */
+const SCAN_SKIP = new Set(["node_modules", "__pycache__", "dist", "build", "target", "vendor"]);
+
+/**
+ * The repositories the chat's folder has: the one it is in, if any ("" in
+ * `path`), and the clones below it — a project that holds a repository of its
+ * own, or several. A repository is a folder with a `.git` (a file there is a
+ * worktree or a submodule); one is not looked into any further, and neither is
+ * a link, which may lead out of the folder. Bounded in depth, folders and
+ * repositories, since it runs on the machine that serves every other request.
+ */
+export async function findRepos(folder: string): Promise<{ repos: RepoEntry[]; truncated: boolean }> {
+  const repos: RepoEntry[] = [];
+  const around = await findRepo(folder);
+  if (around) repos.push({ path: "", name: path.basename(around.root) });
+  let truncated = false;
+  let seen = 0;
+  let level: string[] = [""];
+  for (let depth = 0; level.length && depth <= SCAN_DEPTH; depth++) {
+    const next: string[] = [];
+    for (const rel of level) {
+      if (++seen > SCAN_FOLDERS) return { repos: sorted(repos), truncated: true };
+      let names;
+      try {
+        names = await readdir(path.join(folder, rel), { withFileTypes: true });
+      } catch {
+        // Gone since it was listed, or not ours to read.
+        continue;
+      }
+      // The folder itself having a .git is the repository around it, listed above.
+      if (rel && names.some((d) => d.name === ".git")) {
+        if (repos.length >= SCAN_REPOS) truncated = true;
+        else repos.push({ path: rel, name: path.posix.basename(rel) });
+        continue;
+      }
+      for (const d of names) {
+        if (!d.isDirectory() || d.name.startsWith(".") || SCAN_SKIP.has(d.name)) continue;
+        next.push(rel ? `${rel}/${d.name}` : d.name);
+      }
+    }
+    level = next;
+  }
+  return { repos: sorted(repos), truncated };
+}
+
+/** The one around first, then the clones by path. */
+const sorted = (repos: RepoEntry[]) => repos.sort((a, b) => (a.path === "" ? -1 : b.path === "" ? 1 : a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
 /** Make the chat's folder a repository. */
 export async function initRepo(folder: string): Promise<void> {
   await git(folder, ["init"], { writes: true });

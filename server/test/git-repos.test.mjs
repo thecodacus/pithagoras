@@ -1,0 +1,128 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { inProcessHome } from "./server-harness.mjs";
+
+// A home of its own: who commits, and no config of the person running the tests.
+const home = inProcessHome("pithagoras-git-repos-");
+process.env.HOME = home;
+process.env.GIT_CONFIG_GLOBAL = path.join(home, ".gitconfig");
+process.env.GIT_CONFIG_NOSYSTEM = "1";
+// Nor the repository that the temp folder may lie in.
+process.env.GIT_CEILING_DIRECTORIES = path.dirname(home);
+writeFileSync(process.env.GIT_CONFIG_GLOBAL, "[user]\n\tname = Tester\n\temail = t@example.com\n[init]\n\tdefaultBranch = main\n");
+
+const { default: express } = await import("express");
+const { gitRouter } = await import("../dist/api/git.js");
+const { createSession } = await import("../dist/db.js");
+const g = await import("../dist/git.js");
+
+const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+let n = 0;
+/** A repository with one commit, a file `tag.txt` saying which it is. */
+function repo(dir, branch) {
+  mkdirSync(dir, { recursive: true });
+  sh(dir, "init", "-q", "-b", branch);
+  writeFileSync(path.join(dir, "tag.txt"), `${branch}\n`);
+  sh(dir, "add", "-A");
+  sh(dir, "commit", "-qm", "first");
+  return dir;
+}
+/** A chat in a folder of its own. */
+function chat() {
+  const work = path.join(home, `work${++n}`);
+  mkdirSync(work);
+  createSession({ id: `s${n}`, title: "s", workspace: work, executor: "host" });
+  return { id: `s${n}`, work };
+}
+
+async function withApi(fn) {
+  const app = express();
+  app.use(express.json());
+  app.use("/api", gitRouter());
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${server.address().port}/api/sessions`;
+  try {
+    await fn(base);
+  } finally {
+    server.close();
+  }
+}
+const get = (url) => fetch(url).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+
+test("clones below the folder are found, the repository around it first, and none looked into further", async () => {
+  const { work } = chat();
+  repo(work, "outer");
+  repo(path.join(work, "tools", "lib"), "lib");
+  repo(path.join(work, "app"), "app");
+  // Inside a clone: not listed, a clone's own business.
+  repo(path.join(work, "app", "vendored", "inner"), "inner");
+  // Not looked into: what is only built, and what is hidden.
+  repo(path.join(work, "node_modules", "dep"), "dep");
+  repo(path.join(work, ".cache", "x"), "x");
+  const found = await g.findRepos(work);
+  assert.deepEqual(found.repos.map((r) => r.path), ["", "app", "tools/lib"]);
+  assert.equal(found.truncated, false);
+});
+
+test("a folder in no repository lists only the clones in it, and a link is not followed", async () => {
+  const { work } = chat();
+  const elsewhere = repo(path.join(home, `elsewhere${n}`), "else");
+  repo(path.join(work, "a"), "a");
+  symlinkSync(elsewhere, path.join(work, "link"));
+  assert.deepEqual((await g.findRepos(work)).repos, [{ path: "a", name: "a" }]);
+});
+
+test("a tree too deep or with too many clones is cut, and says so", async () => {
+  const { work } = chat();
+  // Deeper than a scan goes: not found, and not a reason to say it was cut short.
+  repo(path.join(work, "a", "b", "c", "d", "e", "deep"), "deep");
+  assert.deepEqual((await g.findRepos(work)).repos, []);
+  for (let i = 0; i < 52; i++) mkdirSync(path.join(work, `r${String(i).padStart(2, "0")}`, ".git"), { recursive: true });
+  const many = await g.findRepos(work);
+  assert.equal(many.repos.length, 50);
+  assert.equal(many.truncated, true);
+});
+
+test("the routes work in the clone ?repo= names, and refuse a path out of the folder", async () => {
+  const { id, work } = chat();
+  repo(work, "outer");
+  repo(path.join(work, "tools", "lib"), "lib");
+  writeFileSync(path.join(work, "tools", "lib", "tag.txt"), "changed\n");
+  await withApi(async (base) => {
+    const url = `${base}/${id}/git`;
+    assert.deepEqual((await get(`${url}/repos`)).repos.map((r) => r.path), ["", "tools/lib"]);
+
+    // Without it, the repository the folder is in, which holds the clone as it does any folder.
+    const outer = await get(url);
+    assert.equal(outer.branch, "outer");
+    assert.equal(outer.root, work);
+    // With it, the clone: its branch and its change.
+    const lib = await get(`${url}?repo=${encodeURIComponent("tools/lib")}`);
+    assert.equal(lib.branch, "lib");
+    assert.equal(lib.root, path.join(work, "tools", "lib"));
+    assert.deepEqual(lib.files.map((f) => f.path), ["tag.txt"]);
+    // And a route that needs a repository gets that one.
+    const log = await get(`${url}/log?repo=tools%2Flib`);
+    assert.equal(log.commits.length, 1);
+    const branches = await get(`${url}/branches?repo=tools%2Flib`);
+    assert.deepEqual(branches.branches.map((b) => b.name), ["lib"]);
+
+    assert.equal((await get(`${url}?repo=..`)).status, 404);
+    assert.equal((await get(`${url}?repo=${encodeURIComponent("/etc")}`)).status, 404);
+    assert.equal((await get(`${url}?repo=nothing%2Fhere`)).status, 404);
+  });
+});
+
+test("a clone is found in a folder that is in no repository, and the folder itself answers that it is in none", async () => {
+  const { id, work } = chat();
+  repo(path.join(work, "only"), "only");
+  await withApi(async (base) => {
+    const url = `${base}/${id}/git`;
+    assert.equal((await get(url)).repo, false);
+    assert.deepEqual((await get(`${url}/repos`)).repos, [{ path: "only", name: "only" }]);
+    assert.equal((await get(`${url}?repo=only`)).branch, "only");
+  });
+});

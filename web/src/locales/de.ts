@@ -2168,6 +2168,7 @@ const de: Locale = {
     "Branches": "Branches",
     "Pull requests": "Pull Requests",
     "This chat's folder is not in a git repository.": "Der Ordner dieses Chats ist in keinem Git-Repository.",
+    "Repository": "Repository",
     "Making a repository": "Repository wird angelegt",
     "Make it one (git init)": "Eines daraus machen (git init)",
     "Refreshing": "Wird aktualisiert",
