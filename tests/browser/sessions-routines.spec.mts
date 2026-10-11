@@ -141,7 +141,7 @@ test('a click on another row overtakes a click on a name that was waiting for a 
   await portal(page);
   await page.goto('/sessions');
   await page.getByRole('main').getByText('Old name', { exact: true }).click();
-  await page.getByRole('main').getByText('/w/notes', { exact: true }).click();
+  await page.getByRole('main').locator('[data-flip="s2"] span.text-fg-faint').first().click();
   await expect(page).toHaveURL(/\/s\/s2$/);
   await page.waitForTimeout(500);
   await expect(page).toHaveURL(/\/s\/s2$/);
@@ -152,7 +152,7 @@ test('ending a rename with a click elsewhere in its row does not open the chat',
   await page.goto('/sessions');
   await page.getByRole('button', { name: 'Rename Old name' }).click();
   await page.getByLabel('Session name').fill('Kept here');
-  await page.getByRole('main').getByText('/w/site', { exact: true }).click();
+  await page.getByRole('main').locator('[data-flip="s1"] span.text-fg-faint').first().click();
   await expect.poll(() => sent.find((s) => s.method === 'PATCH')?.body).toEqual({ title: 'Kept here' });
   await page.waitForTimeout(500);
   expect(page.url()).toMatch(/\/sessions$/);

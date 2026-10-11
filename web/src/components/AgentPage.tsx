@@ -27,7 +27,7 @@ import { AgentSetup } from "./AgentSetup";
 import { ToolSwitches } from "./ToolSwitches";
 import { confirmDeleteSession } from "./SessionActions";
 import { Modal } from "./Modal";
-import { ErrorBanner, LoadFailed, primarySmCls } from "./SettingsUi";
+import { ErrorBanner, LoadFailed, Switch, primarySmCls } from "./SettingsUi";
 import { StatusDot } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { pollWhileVisible } from "../poll";
@@ -41,7 +41,16 @@ import { when } from "../time";
  * another. A card opens that agent (`?agent=`), with its own home, files and
  * conversations.
  */
-export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
+export function AgentPage({
+  onSelect,
+  onNewChat,
+  reloadPlaces,
+}: {
+  onSelect: (id: string) => void;
+  onNewChat: (workspace: string) => Promise<void>;
+  /** The sidebar's places load again: it shows which agent New starts chats with, and groups by agent once there is more than one. */
+  reloadPlaces: () => void;
+}) {
   const [params, setParams] = useSearchParams();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -80,6 +89,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
           onSubmit={async (input) => {
             const made = await api.createAgent(input);
             await loadAgents();
+            reloadPlaces();
             setMadeKept({ id: made.id, files: answersLeft(made.kept) });
             setCreating(false);
             setParams({ agent: made.id });
@@ -116,11 +126,17 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
         </button>
       }
       onChanged={loadAgents}
+      onPickChanged={async () => {
+        await loadAgents();
+        reloadPlaces();
+      }}
       onDeleted={async () => {
         await loadAgents();
+        reloadPlaces();
         setParams({});
       }}
       onSelect={onSelect}
+      onNewChat={onNewChat}
     />
   );
 }
@@ -181,11 +197,12 @@ function AgentCards({ agents, onOpen, onNew }: { agents: Agent[]; onOpen: (id: s
   );
 }
 
-/** Conversations started here rather than arriving through a channel. */
+/** Conversations started in the portal rather than arriving through a channel. */
 const BROWSER = "browser";
 
 /**
- * The agent's conversations, one per chat rather than one overall.
+ * The agent's conversations, one per chat rather than one overall: the chats in
+ * its home, however they were started, and those that arrived through a channel.
  *
  * A channel package supplies a key for each conversation it sees — a Telegram
  * chat id, a Slack channel — and the portal turns each into its own session.
@@ -198,8 +215,10 @@ function AgentView({
   onKept,
   back,
   onChanged,
+  onPickChanged,
   onDeleted,
   onSelect,
+  onNewChat,
 }: {
   agent: Agent;
   /** The files its folder already had, which the answers did not replace (see `answersLeft`), until they are dismissed. Held by the page, so that it is said once and not again each time the agent is opened. */
@@ -207,8 +226,12 @@ function AgentView({
   onKept: (files: string[]) => void;
   back: ReactNode;
   onChanged: () => Promise<void>;
+  /** The "New chats start here" switch was used: the sidebar's house follows it. */
+  onPickChanged: () => Promise<void>;
   onDeleted: () => Promise<void>;
   onSelect: (id: string) => void;
+  /** A chat started in the agent's home, as the + in the sidebar starts one: listed in the sidebar and opened. */
+  onNewChat: (workspace: string) => Promise<void>;
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -320,7 +343,8 @@ function AgentView({
       { name: string; kind: string | null; present: boolean; items: AgentSession[] }
     >();
     for (const s of sessions) {
-      const key = s.channel?.slug ?? "none";
+      // A chat the New or + button started has no channel: it is one of the portal's own.
+      const key = s.channel?.slug ?? BROWSER;
       if (!out.has(key)) {
         out.set(key, {
           name: s.channel?.name ?? "",
@@ -401,7 +425,7 @@ function AgentView({
                   setStarting(true);
                   setError("");
                   try {
-                    onSelect((await api.startAgentChat(agent.id)).id);
+                    await onNewChat(agent.home);
                   } catch (e) {
                     setError((e as Error).message);
                   } finally {
@@ -430,6 +454,24 @@ function AgentView({
               <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-raised/60 px-2.5 py-1" title={t("The user it runs as when the sandbox is on")}>
                 <LuUser className="h-3 w-3 shrink-0 text-fg-faint" />
                 <span className="truncate font-mono text-[11px] text-fg-subtle">{agent.sandboxUser}</span>
+              </div>
+              <div className="flex min-w-0 items-center gap-2 rounded-lg bg-raised/60 px-2.5 py-1" title={t("The New button starts its chats with this agent")}>
+                <span className="truncate text-[11px] text-fg-subtle">{t("New chats start here")}</span>
+                <Switch
+                  on={agent.newChats}
+                  // The first agent takes new chats back when no other has them: it is turned on from another's page, not off.
+                  disabled={agent.newChats && agent.first}
+                  label={t("New chats start here")}
+                  onChange={async (on) => {
+                    setError("");
+                    try {
+                      await api.setNewChats(agent.id, on);
+                      await onPickChanged();
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                />
               </div>
             </div>
           </PageHeader>

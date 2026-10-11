@@ -1,7 +1,8 @@
 # Projects
 
 Every chat works in a folder. Most chats do not need one of their own, so there
-is a single **Home**, and **New** starts a chat there. Home is the agent's own
+is a single **Home**, and **New** starts a chat there, unless you picked another
+agent for new chats (see [Agents](/guide/agents)). Home is the first agent's own
 directory: its SOUL.md, PrimaryUser.md and MEMORY.md are there, so in Home the agent
 knows who it is and who it works for, and keeps its memory. A **project** is an extra
 folder you make on purpose, with instructions for the agent in an AGENTS.md — and
@@ -9,7 +10,8 @@ only that — for work that should stay together.
 
 ## Home and New
 
-**New** in the sidebar starts a chat in Home straight away: no dialog, no name.
+**New** in the sidebar starts a chat straight away, with the agent picked for new
+chats (Home's agent by default, see [Agents](/guide/agents)): no dialog, no name.
 The chat is called *New chat* until you send its first message, and is then named
 after it (the first line, shortened). Rename it any time from the sidebar.
 
@@ -60,8 +62,10 @@ has and when one last moved.
 ## Chats inside a project
 
 In any chat, `/new` or `/clear` starts a fresh chat in the same project. The
-sidebar shows each chat's full path under its title — Home is the agent's own
-directory, a project is a folder under the workspace root.
+sidebar groups the chats by folder — Home is the agent's own directory, a
+project is a folder under the workspace root. A chat's full path is not drawn
+under its title, in the sidebar, on the Sessions or Projects page or beside a
+terminal; the pin button in the Files panel's header shows it.
 
 Deleting a chat never deletes a folder — only pi's conversation file for it, which is not part of any project. Folders are only made by **New project**
 and only removed by deleting a project.

@@ -14,6 +14,7 @@ import {
   LuFolderPlus,
   LuLink,
   LuLocateFixed,
+  LuMapPin,
   LuPencil,
   LuRefreshCw,
   LuSave,
@@ -133,6 +134,8 @@ export const FilesPanel = memo(function FilesPanel({
   const [following, setFollowing] = useState(!left);
   const [showHidden, setShowHidden] = useState(savedShowHidden);
   const [rendered, setRendered] = useState(savedRendered);
+  // The chat's full path is not drawn in the sidebar or the chat's header any more: it is here, on request.
+  const [showPath, setShowPath] = useState(false);
   // The entry being given a name, and the name so far.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -542,6 +545,15 @@ export const FilesPanel = memo(function FilesPanel({
           </>
         )}
         <button
+          onClick={() => setShowPath((v) => !v)}
+          aria-pressed={showPath}
+          title={showPath ? t("Hide the full path") : t("Show the full path of this folder")}
+          aria-label={showPath ? t("Hide the full path") : t("Show the full path")}
+          className={`shrink-0 rounded p-1 transition hover:bg-fg/5 hover:text-fg ${showPath ? "text-accent" : "text-fg-faint"}`}
+        >
+          <LuMapPin aria-hidden className="h-3.5 w-3.5" />
+        </button>
+        <button
           onClick={toggleHidden}
           aria-pressed={showHidden}
           title={showHidden ? t("Hide names that start with a dot") : t("Show names that start with a dot")}
@@ -567,6 +579,12 @@ export const FilesPanel = memo(function FilesPanel({
           <LuDownload aria-hidden className="h-3.5 w-3.5" />
         </a>
       </div>
+      {showPath && (
+        // Cut at the start, not the end: what tells folders apart is the last part. rtl moves the ellipsis; bdi keeps the path itself left to right.
+        <div className="shrink-0 truncate border-b border-line px-3 py-1 text-left font-mono text-[11px] text-fg-subtle [direction:rtl]" title={dir ? `${folder}/${dir}` : folder}>
+          <bdi data-testid="files-full-path">{dir ? `${folder}/${dir}` : folder}</bdi>
+        </div>
+      )}
 
       {file ? (
         <div className="flex min-h-0 flex-1 flex-col">

@@ -5,7 +5,8 @@ folder it works in. It is the normal unit of work in the portal.
 
 ## Where a session works
 
-**New** starts a chat in **Home**, the first agent's own directory; a chat in a
+**New** starts a chat with the agent picked for new chats, in **Home** (the first
+agent's own directory) by default; a chat in a
 project works in that project's folder, and a chat with another agent in that
 agent's home. See [Projects](/guide/projects) and [Agents](/guide/agents). The session is named after its
 first message, and you can rename it.
@@ -256,21 +257,22 @@ The sidebar opens with New, then the places — Sessions, Projects, Agents,
 Routines and [Audit](#audit), with Browser, Memory and Images added while the
 [browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
 holds the agent's memory and an [image endpoint](/guide/images) is set up — then **Pinned**, then **Recents**. The button at its
-top edge folds it to a rail of icons; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
-the Sessions page, which lists everything with search over names and workspace
-paths.
+top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
+the Sessions page, which lists everything with a search of its own.
 
 Pinning is stored server-side and drives the ordering (`pinned DESC,
 updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
 With more chats than the sidebar lists, it has a search field above them. It looks
-through every chat by name and folder, not only the ones shown, and Escape clears
-it. The Sessions page has the same search with more room.
+through every chat by its name, and by its folder's name where the chats are gathered by
+folder (below), not only the ones shown, and Escape clears it. A pinned chat is found by
+its name only, as its row shows no folder. It never goes by a chat's path. The Sessions page has the same search with more room; in its
+list of all chats, each row names the folder it works in.
 
 ### By folder
 
-Once there is a project, the chats below **Pinned** are gathered by the folder
-they work in: each agent's home, named after the agent, and each project, a
+Once there is a project or more than one agent, the chats below **Pinned** are
+gathered by the folder they work in: each agent's home, named after the agent, and each project, a
 chat in a project's subfolder counting as the project's. Each folder opens to show its chats — the sidebar up to eight,
 then *N more in …*, which opens the Sessions page at that folder — and remembers
 whether it was left open. The folder of the chat you open is opened for you. A

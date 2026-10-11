@@ -147,8 +147,9 @@ export function FolderTree<S extends { status: SessionStatus }>({
         const before = drag && !carried && drag.to === other;
         if (!carried) other++;
         const running = !open && f.sessions.some((s) => s.status === "running");
-        // Home is the first agent's; every other agent's home is its own.
-        const Icon = f.kind === "home" ? (f.key === HOME ? LuHouse : LuBot) : f.kind === "elsewhere" ? LuFolderSearch : open ? LuFolderOpen : LuFolder;
+        // The house marks the agent that New starts chats with; every other agent's home is a bot. A server that does not say
+        // which that is (no `newChats`) keeps the house on the first agent's.
+        const Icon = f.kind === "home" ? ((f.newChats ?? f.key === HOME) ? LuHouse : LuBot) : f.kind === "elsewhere" ? LuFolderSearch : open ? LuFolderOpen : LuFolder;
         return (
           <div key={f.key} data-folder={f.key} className={carried ? "opacity-50" : undefined}>
             {before && mark}
@@ -183,7 +184,7 @@ export function FolderTree<S extends { status: SessionStatus }>({
                 className={`flex min-w-0 flex-1 items-center gap-1.5 text-left ${md ? "text-sm" : "text-[13px]"} text-fg-muted hover:text-fg`}
               >
                 <LuChevronRight aria-hidden className={`h-3 w-3 shrink-0 text-fg-faint transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`} />
-                <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+                <Icon aria-hidden data-icon={Icon === LuHouse ? "house" : undefined} className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
                 <span className="truncate font-medium">{folderName(f)}</span>
               </button>
               {running && <StatusDot status="running" bare />}

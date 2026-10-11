@@ -5,6 +5,7 @@ import {
   LuBrain,
   LuCheck,
   LuDownload,
+  LuScrollText,
   LuExternalLink,
   LuEye,
   LuFileJson,
@@ -33,6 +34,7 @@ import { api, SIGNED_OUT, type AvailableModel, type ExtensionInfo, type GlobalSe
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
+import { LogsPanel } from "./LogsPanel";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { formatTokens } from "../transcript";
@@ -110,6 +112,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
       { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
       { id: "add-ons", label: msg("Add-ons"), icon: <LuPuzzle />, hint: msg("Optional parts of the portal itself") },
       { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
+      { id: "logs", label: msg("Logs"), icon: <LuScrollText />, hint: msg("What the server prints, and a file to take away") },
       { id: "about", label: msg("About"), icon: <LuInfo />, hint: msg("Where this portal keeps things") },
       { id: "advanced", label: msg("Advanced"), icon: <LuFileJson />, hint: msg("pi's raw settings file") },
     ],
@@ -279,6 +282,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
+      {nav.kind === "tab" && nav.id === "logs" && <LogsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
