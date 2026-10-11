@@ -400,6 +400,8 @@ test('the conversation window renders a reply as markdown, also while it is writ
 });
 
 test('a model error in voice mode opens the conversation on it and says one short line', async ({ page }) => {
+  const asked: string[] = [];
+  await page.route('**/voice/speech', route => { asked.push(route.request().postData() ?? ''); return route.fulfill({ body: sample, contentType: 'audio/wav' }); });
   await start(page);
   const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
   await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
@@ -407,6 +409,20 @@ test('a model error in voice mode opens the conversation on it and says one shor
   // Opened by itself, with the error written in it.
   await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
   await expect(conversation.getByRole('alert')).toHaveText('Model error: the provider is down');
+  // And said: the line, not the error's own words.
+  await expect.poll(() => asked.some(body => body.includes('An error occurred.'))).toBe(true);
+  expect(asked.some(body => body.includes('the provider is down'))).toBe(false);
+});
+
+test('an error from before voice mode, coming in late, does not open the conversation', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Replay an old error' }).click();
+  await expect(page.getByTestId('workspace')).toContainText('Model error: from yesterday');
+  await settled(page);
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
+  // A new one still does.
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
 });
 
 test('Escape in the confirmation of a link in a reply closes it and neither stops the agent nor ends voice mode', async ({ page }) => {

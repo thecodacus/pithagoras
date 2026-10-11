@@ -58,6 +58,12 @@ export class HandsFreeVoice {
   /** Error notices at or before this seq were there before voice mode began. */
   private afterSeq: number;
   private announcedErrors = new Set<string>();
+  /**
+   * The last turn was refused before it began (no model, no key): replies are
+   * off until the next utterance, but the error notice that follows is still
+   * the answer to what was said, and is spoken.
+   */
+  private refused = false;
   private recordings: Float32Array[] = [];
   private text: string[] = [];
   private processing = false;
@@ -144,10 +150,12 @@ export class HandsFreeVoice {
       this.announcedErrors.add(item.id);
       fresh = true;
     }
-    if (!fresh || !this.acceptingReplies) return;
+    if (!fresh || (!this.acceptingReplies && !this.refused)) return;
     this.thinkingPipeline.cancel();
     this.pipeline.enqueue([t("An error occurred.")], 'status');
   }
+  /** Where voice mode began: error notices after this seq are new, and the stage opens the conversation on them. */
+  get startedAfter() { return this.afterSeq; }
   /** Called after a sustained speech detection, not a single noise frame. */
   speechStart() {
     if (!this.alive || this.muted) return;
@@ -162,6 +170,7 @@ export class HandsFreeVoice {
     this.clearThinkingTimer();
     this.hearing = true;
     this.acceptingReplies = false;
+    this.refused = false;
     this.held = [...(this.held ?? []), ...this.pipeline.cancel(), ...this.output];
     this.output = [];
     this.thinkingPipeline.cancel();
@@ -253,6 +262,7 @@ export class HandsFreeVoice {
         this.held = null;
         this.ignoreCurrent();
         this.acceptingReplies = true;
+        this.refused = false;
         this.sending = true;
         this.thinkingAnnounced = false;
         this.state();
@@ -261,6 +271,7 @@ export class HandsFreeVoice {
           if (valid()) { this.text = []; this.stopped = false; }
         } catch (error) {
           this.acceptingReplies = false;
+          this.refused = true;
           throw new Error(t("Could not send “{text}”: {error}", { text, error: error instanceof Error ? error.message : String(error) }));
         } finally { this.sending = false; }
       });

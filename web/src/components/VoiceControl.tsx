@@ -108,6 +108,8 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const [starting, setStarting] = useState(false);
   const [phase, setPhase] = useState<VoicePhase>("Listening");
   const [error, setError] = useState("");
+  // Where the controller began, once it has: the stage opens the conversation on errors after it, and the controller says the same ones.
+  const [errorsAfter, setErrorsAfter] = useState<number | null>(null);
   const [muted, setMuted] = useState(false);
   const [transcript, setTranscript] = useState("");
   const transcription = useRef<LiveTranscription | null>(null);
@@ -191,7 +193,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     clearTimeout(maxTurn.current);
     clearTimeout(holdLimit.current); clearTimeout(held.current?.timer); held.current = null;
     replay.current?.abort(); replay.current = null;
-    voice.current?.stop(); voice.current = null;
+    voice.current?.stop(); voice.current = null; setErrorsAfter(null);
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
     void detector?.destroy().catch(() => {});
@@ -550,6 +552,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         error: message => { if (current()) {setError(message);profiler.current?.close('error');} },
       }, latest.current.items);
       voice.current = controller;
+      setErrorsAfter(controller.startedAfter);
       controller.setCompacting(latest.current.compacting);
       const detector = await detectorModule.MicVAD.new({
         model: "v5", audioContext: audio, startOnLoad: false,
@@ -642,7 +645,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       <VoiceStage sessionId={sessionId} folder={folder} workPhase={work} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? t("Sentence pipeline · buffered audio") : t("Sentence chunks · buffered audio")) : t("Sequential baseline")}` : comparison ? `${title} · ${t("Streaming pipeline")}` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
         browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
         levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} waitingForTap={waitingForTap}
-        items={items} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
+        items={items} errorsAfter={errorsAfter} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
         attachments={attachments} onAddPictures={files => { void addPictures(files); }} onRemovePicture={id => pending.set(sessionId, pending.get(sessionId).filter(a => a.id !== id))}
         canRepeat={canRepeat} onRepeat={() => { repeatReply(); }}
         rate={rate} onRate={value => { local.set('voiceRate', String(value)); setRate(value); }}
