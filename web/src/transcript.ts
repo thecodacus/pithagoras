@@ -210,9 +210,9 @@ export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/
  * Some extensions put a block of markup in the chat that is written for the
  * model: one element with ids, file paths and guidance inside (pi-background-tasks
  * does so when a task ends). People get its summary, or its title, or its message;
- * a block with none of them is listed as its fields. A failure status, an error,
- * or an exit code other than 0 is added, and warns; any other status is shown as
- * it is. Text that is not one such element, or that has words of its own between
+ * a block with none of them is listed as its fields. The status is added unless
+ * the words already say it, an error or an exit code other than 0 after it; a
+ * failure status, an error or such an exit code warns. Text that is not one such element, or that has words of its own between
  * the elements inside it, is the extension's own words and stays as it is.
  */
 function markupNotice(text: string): { text: string; tone: "info" | "warn" } | null {
@@ -234,7 +234,10 @@ function markupNotice(text: string): { text: string; tone: "info" | "warn" } | n
   if (main === undefined) return fields.length ? { text: fields.map(([k, v]) => `${k}: ${v}`).join("\n"), tone: warn ? "warn" : "info" } : null;
   // An error usually says the code itself ("Exited with code 2"), so the code is added only where nothing else says it.
   const extra = error ?? (exit !== undefined && exit !== "0" ? `exit code ${exit}` : "");
-  return { text: extra ? `${main} (${extra})` : main, tone: warn ? "warn" : "info" };
+  // The summary of pi-background-tasks ends with the status already; a title or message of another extension does not.
+  const saysStatus = status !== undefined && new RegExp(`(^|[^\\w-])${status.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w-])`, "i").test(main);
+  const notes = [status !== undefined && !saysStatus ? status : "", extra].filter(Boolean).join(", ");
+  return { text: notes ? `${main} (${notes})` : main, tone: warn ? "warn" : "info" };
 }
 
 /** The text of a tool result, however pi shaped it. */

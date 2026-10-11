@@ -118,6 +118,16 @@ test("any extension's markup message is shown readably, and words that are not m
   for (const plain of ["All green", "a <b>bold</b> word", "Use <tag> like this", "<b>bold</b>", "<note><b>Heads up:</b> the build server is down until 5pm</note>", "<p>Run <code>npm test</code> before you push.</p>"]) assert.deepEqual(shown(plain).map(line), [`notice:${plain}`]);
   // Only a failure word warns: a green CI result or a job that has just started is not a warning.
   const status = (word: string) => shown(`<ci-result>\n  <title>CI for PR 7</title>\n  <status>${word}</status>\n</ci-result>`)[0] as any;
-  for (const word of ["passed", "running", "started", "queued", "complete", "finished", "completed"]) assert.equal(status(word).tone, "info", word);
-  for (const word of ["failed", "Timed-out", "cancelled", "aborted"]) assert.equal(status(word).tone, "warn", word);
+  for (const word of ["passed", "running", "started", "queued", "complete", "finished", "completed"]) {
+    assert.equal(status(word).tone, "info", word);
+    assert.equal(status(word).text, `CI for PR 7 (${word})`, word);
+  }
+  for (const word of ["failed", "Timed-out", "cancelled", "aborted"]) {
+    assert.equal(status(word).tone, "warn", word);
+    assert.equal(status(word).text, `CI for PR 7 (${word})`, word);
+  }
+  // The status is not said twice, and an exit code comes after it.
+  assert.deepEqual(shown("<deploy>\n  <message>Deploy of web</message>\n  <status>timeout</status>\n</deploy>").map(line), ["notice:Deploy of web (timeout)"]);
+  assert.deepEqual(shown("<deploy>\n  <message>Deploy of web failed</message>\n  <status>failed</status>\n  <exit-code>3</exit-code>\n</deploy>").map(line), ["notice:Deploy of web failed (exit code 3)"]);
+  assert.deepEqual(shown("<deploy>\n  <message>Deploy of web</message>\n  <status>failed</status>\n  <exit-code>3</exit-code>\n</deploy>").map(line), ["notice:Deploy of web (failed, exit code 3)"]);
 });
