@@ -25,8 +25,8 @@ Under the tabs, one line shows where the repository is:
   picked, and a file opened in Files is found under the clone's path. The pick is
   kept per chat in this browser. A folder in no repository of its own that holds
   exactly one shows that one at once, and the folder itself stays in the picker (as `.`) so it can be made a
-  repository too. A folder with an empty or broken `.git` is not listed. The folder is scanned four levels deep, for up
-  to 50 repositories; hidden folders, `node_modules`, build output and links are
+  repository too. A folder with an empty or broken `.git` (a half-made folder, or a file naming a
+  repository that is gone) is not listed. The folder is scanned four levels deep, for up to 50 repositories; hidden folders, `node_modules`, build output and links are
   skipped, and a repository inside another one is not listed. Refresh scans again.
 - **The branch.** Click it to open Branches. On a detached HEAD it reads
   *detached at* and the short hash.

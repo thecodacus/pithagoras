@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { lstat, readdir, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { insideReal, isUnderText, realPath } from "./within.js";
 
@@ -350,17 +350,33 @@ export async function findRepos(folder: string): Promise<{ repos: RepoEntry[]; t
 }
 
 /**
- * Whether a `.git` is one git takes for a repository: a file is a worktree's or a submodule's, a folder needs a
- * HEAD. An empty one, as an interrupted clone leaves, is skipped by git, which then works in the repository
- * around it — so listing it would offer one repository and act on another.
+ * Whether a `.git` is one git takes for a repository: a folder that is a git dir, or a file naming one, as a
+ * worktree's or a submodule's does. An empty or half-made one, as an interrupted clone or a deleted main
+ * clone leaves, is skipped by git, which then works in the repository around it — so listing it would offer one
+ * repository and act on another.
  */
 async function looksLikeRepo(dotGit: string, isDir: boolean): Promise<boolean> {
-  if (!isDir) return true;
+  if (isDir) return isGitDir(dotGit);
   try {
-    return (await stat(path.join(dotGit, "HEAD"))).isFile();
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, "utf8"));
+    return m ? await isGitDir(path.resolve(path.dirname(dotGit), m[1])) : false;
   } catch {
     return false;
   }
+}
+
+/** Whether `dir` has what git needs of a git dir: a HEAD, and the refs and objects, or the `commondir` of a worktree's. */
+async function isGitDir(dir: string): Promise<boolean> {
+  const is = async (name: string, dirOk: boolean) => {
+    try {
+      const st = await stat(path.join(dir, name));
+      return dirOk ? st.isDirectory() : st.isFile();
+    } catch {
+      return false;
+    }
+  };
+  if (!(await is("HEAD", false))) return false;
+  return (await is("commondir", false)) || ((await is("objects", true)) && (await is("refs", true)));
 }
 
 /** Whether `dir` is the top of the repository git works in there, not a folder in a bigger one. */

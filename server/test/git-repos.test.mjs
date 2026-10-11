@@ -80,10 +80,11 @@ test("a tree too deep or with too many clones is cut, and says so", async () => 
   // Deeper than a scan goes: not found, and not a reason to say it was cut short.
   repo(path.join(work, "a", "b", "c", "d", "e", "deep"), "deep");
   assert.deepEqual((await g.findRepos(work)).repos, []);
-  // Folders with a HEAD, which is all the scan reads of a clone: it does not start git for each.
+  // Folders with a HEAD, objects and refs, which is all the scan reads of a clone: it does not start git for each.
   for (let i = 0; i < 52; i++) {
     const dotGit = path.join(work, `r${String(i).padStart(2, "0")}`, ".git");
-    mkdirSync(dotGit, { recursive: true });
+    mkdirSync(path.join(dotGit, "objects"), { recursive: true });
+    mkdirSync(path.join(dotGit, "refs"));
     writeFileSync(path.join(dotGit, "HEAD"), "ref: refs/heads/main\n");
   }
   const many = await g.findRepos(work);
@@ -126,6 +127,49 @@ test("an empty or broken .git is not a repository: it is not listed, and ?repo= 
     }
     assert.equal((await get(`${url}?repo=real`)).branch, "real");
   });
+});
+
+/** The clone `real` and one folder made by `make`: only the clone is listed, through the function and the route. */
+async function onlyRealListed(make) {
+  const { id, work } = chat();
+  repo(path.join(work, "real"), "real");
+  make(path.join(work, "odd"));
+  assert.deepEqual((await g.findRepos(work)).repos.map((r) => r.path), ["real"]);
+  await withApi(async (base) => {
+    assert.deepEqual((await get(`${base}/${id}/git/repos`)).repos.map((r) => r.path), ["real"]);
+  });
+}
+
+test("a .git file naming a git dir that is gone is not listed, as a worktree left by a deleted clone is", async () => {
+  await onlyRealListed((dir) => {
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, ".git"), `gitdir: ${path.join(home, "no-such-clone", ".git", "worktrees", "odd")}\n`);
+  });
+});
+
+test("a .git file that is not a gitfile is not listed", async () => {
+  await onlyRealListed((dir) => {
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, ".git"), "nonsense\n");
+  });
+});
+
+test("a .git folder with only a HEAD is not listed", async () => {
+  await onlyRealListed((dir) => {
+    mkdirSync(path.join(dir, ".git"), { recursive: true });
+    writeFileSync(path.join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+  });
+});
+
+test("a worktree and a submodule are listed: their .git file names a git dir that exists", async () => {
+  const { work } = chat();
+  const main = repo(path.join(work, "main"), "main");
+  sh(main, "worktree", "add", "-q", path.join(work, "wt"), "-b", "side");
+  const dep = repo(path.join(work, "dep-src"), "dep");
+  sh(main, "-c", "protocol.file.allow=always", "submodule", "add", "-q", dep, "sub");
+  assert.deepEqual((await g.findRepos(work)).repos.map((r) => r.path), ["dep-src", "main", "wt"]);
+  // The submodule sits inside main, which is listed itself and not looked into.
+  assert.equal(await g.isRepoRoot(path.join(main, "sub")), true);
 });
 
 test("the routes work in the clone ?repo= names, and refuse a path out of the folder", async () => {
