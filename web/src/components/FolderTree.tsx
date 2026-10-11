@@ -187,6 +187,15 @@ export function FolderTree<S extends { status: SessionStatus }>({
                 <Icon aria-hidden data-icon={Icon === LuHouse ? "house" : undefined} className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
                 <span className="truncate font-medium">{folderName(f)}</span>
               </button>
+              {/* Beside the toggle, not in it: its name is the folder's, which a chat list and a test look it up by. */}
+              {f.with && (
+                <span
+                  className="min-w-0 max-w-[40%] shrink-0 truncate text-[11px] text-fg-faint"
+                  title={t("Chats here start with the SOUL.md, PrimaryUser.md and memory of {agent}", { agent: f.with })}
+                >
+                  {t("with {agent}", { agent: f.with })}
+                </span>
+              )}
               {running && <StatusDot status="running" bare />}
               <span className="shrink-0 px-1 text-[11px] tabular-nums text-fg-faint">
                 <span aria-hidden>{f.sessions.length}</span>

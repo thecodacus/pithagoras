@@ -10,7 +10,7 @@ import { sandboxTools } from "../sandbox/tools.js";
 import { sandboxOn } from "../sandbox/policy.js";
 import { projectSkillPaths, withoutFolderMcp } from "../sandbox/project-trust.js";
 import { agentSkillsDir, skillsLine } from "../agent-skills.js";
-import { agentOf, defaultAgent } from "../agents.js";
+import { agentFor, agentLinkedAt, understoryAt } from "../project-agent.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-mcp-rules.js";
 import { browserTools } from "../browser/tools.js";
@@ -33,7 +33,7 @@ import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../
 import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, portalBrowserOn, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
-import { UNDERSTORY_RULE, understoryOn } from "../features.js";
+import { UNDERSTORY_RULE } from "../features.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -53,10 +53,20 @@ function asArray(v: any): any[] {
 /**
  * While Understory holds the agent's memory, MEMORY.md is not read: two
  * memories would drift apart, and the file would be the stale one. It stays
- * where it is, and is read again once Understory is switched off.
+ * where it is, and is read again once Understory is switched off. Asked for
+ * the place the chat works in, since a project can do without Understory.
  */
-const filesFor = (role?: string) =>
-  !role || role === "primary" ? (understoryOn() ? CONTEXT_FILES.filter((f) => f !== "MEMORY.md") : CONTEXT_FILES) : SHARED_FILES;
+const filesFor = (cwd: string, role?: string) =>
+  !role || role === "primary" ? (understoryAt(cwd) ? CONTEXT_FILES.filter((f) => f !== "MEMORY.md") : CONTEXT_FILES) : SHARED_FILES;
+
+/**
+ * Where the agent's own files are read from for a chat working in `cwd`: the
+ * folder itself, which is the agent's home for a chat there. A chat in a
+ * project that is linked to an agent reads the agent's home instead, and the
+ * project's folder, which the agent can write to, is not a place to take its
+ * soul from.
+ */
+const filesIn = (cwd: string) => agentLinkedAt(cwd)?.home ?? cwd;
 
 /**
  * pi's own theme, for extensions that style text with it even when nothing
@@ -101,8 +111,9 @@ const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
  */
 export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
-  for (const name of filesFor(role)) {
-    const file = path.join(cwd, name);
+  const from = filesIn(cwd);
+  for (const name of filesFor(cwd, role)) {
+    const file = path.join(from, name);
     try {
       if (existsSync(file)) out.push({ path: file, content: readFileSync(file, "utf8") });
     } catch {
@@ -121,15 +132,18 @@ export function extraContextFiles(cwd: string, role?: string): { path: string; c
  * One line at system level is enough to change what they are.
  */
 function ownFiles(cwd: string, role?: string): string[] {
-  const present = filesFor(role).filter((name) => {
+  const from = filesIn(cwd);
+  const present = filesFor(cwd, role).filter((name) => {
     try {
-      return existsSync(path.join(cwd, name));
+      return existsSync(path.join(from, name));
     } catch {
       return false;
     }
   });
+  // In a project the files are not in the working directory: they are the agent's the project works with.
+  const where = from === cwd ? "in your working directory" : "of the agent this project works with";
   return present.length
-    ? [`${present.join(", ")} in your working directory are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`]
+    ? [`${present.join(", ")} ${where} are yours, not reference material about someone else. Each opens with a block saying what it is for; follow it.`]
     : [];
 }
 
@@ -414,8 +428,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Both are required: the constructor resolves each and throws on
       // undefined, which previously left every session with no extensions.
       const builtinSkills = builtinSkillsDir();
-      // The skills the agent wrote for itself, in its own home: a chat in a project is the first agent's.
-      const skillsOf = agentOf(opts.cwd) ?? defaultAgent();
+      // The skills the agent wrote for itself, in its own home: a chat in a project is the one the project is linked to, else the first agent's.
+      const skillsOf = agentFor(opts.cwd);
       // Every session, unconditionally: the point is to limit what a turn can do
       // after it reads something untrusted, and any session can read something.
       const factories: { name: string; factory: (pi: any) => void }[] = [
@@ -502,7 +516,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         ...ownFiles(opts.cwd, opts.role),
         // Where its own skills go: only for the person it works for; a look or a colleague does not write them.
         ...(skillsOf && (!opts.role || opts.role === "primary") && !opts.heartbeatAgent ? [skillsLine(skillsOf)] : []),
-        ...((!opts.role || opts.role === "primary") && understoryOn() ? [UNDERSTORY_RULE] : []),
+        ...((!opts.role || opts.role === "primary") && understoryAt(opts.cwd) ? [UNDERSTORY_RULE] : []),
       ]);
       await resourceLoader.reload();
     } catch (e) {

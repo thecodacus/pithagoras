@@ -23,6 +23,8 @@ export type Folder<S> = {
   agent?: string;
   /** Whether it is the home of the agent "New" starts chats with, for a home; left out where the server did not say. */
   newChats?: boolean;
+  /** The name of the agent a project works with: its chats carry that agent's soul and memory. Left out for a blank slate. */
+  with?: string;
   /** Where a chat started in it works; null for Elsewhere, which is no one place. */
   path: string | null;
   /** Its chats, in the order they were given. */
@@ -48,7 +50,7 @@ const agentKey = (id: string) => (id === "home" ? HOME : `agent:${id}`);
 export type PlaceAgent = { id: string; name: string; home: string; newChats?: boolean };
 
 /** What the chats are gathered into: where Home is, the agents' homes, and the projects. */
-export type Places = { home: string; agents?: readonly PlaceAgent[]; projects: readonly { name: string; path: string }[] };
+export type Places = { home: string; agents?: readonly PlaceAgent[]; projects: readonly { name: string; path: string; agent?: string }[] };
 
 /** The agents: the first one's home is Home, from a server that names none. */
 const agentsOf = (places: Places): PlaceAgent[] =>
@@ -94,10 +96,13 @@ export function groupByFolder<S extends { workspace: string; updated_at: string 
     lastActive: "",
   }));
   const elsewhere: Folder<S> = { key: ELSEWHERE, kind: "elsewhere", name: msg("Elsewhere"), path: null, sessions: [], lastActive: "" };
+  const named = new Map(agentsOf(places).map((a) => [a.id, a.name]));
   const projects = projectsOf(places).map<Folder<S>>((p) => ({
     key: projectKey(p.name),
     kind: "project",
     name: p.name,
+    // An agent the server did not give a name is not one to say.
+    ...(p.agent && named.get(p.agent) ? { with: named.get(p.agent) } : {}),
     path: p.path,
     sessions: [],
     lastActive: "",

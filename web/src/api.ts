@@ -200,9 +200,20 @@ export interface Project {
   hasInstructions: boolean;
   /** Whether the project switches tools differently from the portal-wide default. */
   hasTools?: boolean;
+  /** The agent whose soul, user and memory its chats carry: its id. Left out for a blank slate, which has only the instructions. */
+  agent?: string;
+  /** Set where the project does without Understory as its memory. */
+  understoryOff?: boolean;
   /** How many chats work in it, and when one last moved. */
   sessions: number;
   lastActive: string | null;
+}
+
+/** Who a project's chats are with: see /api/projects/:name/agent. */
+export interface ProjectAgent {
+  agent: string | null;
+  understory: boolean;
+  understoryAvailable: boolean;
 }
 
 /** What a delete would lose that only the folder holds: nothing else has a copy of these. */
@@ -464,15 +475,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ workspace, title }),
     }),
-  projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
+  projects: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string; newChats?: boolean }[]; projects: Project[] }>("/api/projects"),
   /** Only where Home is and which projects there are, without their counts: see /api/projects. */
-  places: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string; newChats?: boolean }[]; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
-  /** `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them. */
-  createProject: (name: string, instructions?: string, toolsOff?: string[]) =>
+  places: () =>
+    json<{ root: string; home: string; agents?: { id: string; name: string; home: string; newChats?: boolean }[]; projects: { name: string; path: string; agent?: string }[] }>(
+      "/api/projects?bare=1"
+    ),
+  /**
+   * `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them.
+   * `link`: the agent it works with (none is a blank slate) and whether Understory is its memory (the default where the portal has it).
+   */
+  createProject: (name: string, instructions?: string, toolsOff?: string[], link?: { agent?: string; understory?: boolean }) =>
     json<Project & { toolsError?: string }>("/api/projects", {
       method: "POST",
-      body: JSON.stringify({ name, instructions, toolsOff }),
+      body: JSON.stringify({ name, instructions, toolsOff, ...link }),
     }),
+  /** The agent a project works with (null: none), whether Understory is its memory, and whether the portal has Understory at all. */
+  projectAgent: (name: string) => json<ProjectAgent>(`/api/projects/${encodeURIComponent(name)}/agent`),
+  /** Either may be left out and then stays; `agent: null` makes the project a blank slate. */
+  setProjectAgent: (name: string, change: { agent?: string | null; understory?: boolean }) =>
+    json<ProjectAgent>(`/api/projects/${encodeURIComponent(name)}/agent`, { method: "PUT", body: JSON.stringify(change) }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
   projectInstructions: (name: string) =>
     json<{ text: string; mtime: number }>(`/api/projects/${encodeURIComponent(name)}/instructions`),

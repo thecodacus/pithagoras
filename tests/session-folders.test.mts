@@ -156,6 +156,32 @@ test("the folder of the agent that New starts chats with carries the flag, the o
   ]);
 });
 
+test("a project says which agent it works with, by name; a blank slate or an agent the server did not name says nothing", () => {
+  const agents = [
+    { id: "home", name: "Nova", home: "/data/agent" },
+    { id: "scout", name: "Scout", home: "/data/agents/scout" },
+  ];
+  const linked = {
+    home: "/data/agent",
+    agents,
+    projects: [
+      { name: "site", path: "/w/site", agent: "scout" },
+      { name: "notes", path: "/w/notes" },
+      { name: "gone", path: "/w/gone", agent: "deleted" },
+    ],
+  };
+  const folders = groupByFolder([], linked);
+  assert.deepEqual(folders.filter((f) => f.kind === "project").map((f) => [f.name, f.with]), [
+    ["site", "Scout"],
+    ["notes", undefined],
+    ["gone", undefined],
+  ]);
+  // The agents' homes are not projects, and say nothing of a link.
+  assert.ok(folders.filter((f) => f.kind === "home").every((f) => f.with === undefined));
+  // A server that names no agent has nothing to say a project is with.
+  assert.equal(groupByFolder([], { home: "/data/agent", projects: [{ name: "site", path: "/w/site", agent: "home" }] })[1].with, undefined);
+});
+
 test("chats are gathered by folder when there is a project or a second agent, not for one agent alone", () => {
   const agent = (id: string) => ({ id, name: id, home: `/data/agents/${id}` });
   const bare = { home: "/data/agent", projects: [] };

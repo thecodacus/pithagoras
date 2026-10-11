@@ -33,7 +33,8 @@ started, and the number above it counts them all),
 **Heartbeat**, **Tools** (see [below](#tools)), **Skills** and **Files** to edit. The tab is kept in the link (`&tab=files`). Its avatar is at
 the top beside its name; the palette on it opens the avatar customizer. Each
 agent's avatar is its own, and voice mode shows the avatar of the agent the
-chat is with (the first agent's for a chat in a project). Its
+chat is with (the agent a project works with for a chat in it, the first agent's if it
+works with none, see [Projects](/guide/projects#an-agent-for-a-project)). Its
 name, with the pencil beside it, renames it; the folder keeps its name, and
 `.agent-name` in it takes the new one.
 **Agents** at the top goes back to the cards.
@@ -58,7 +59,8 @@ speaks with in voice mode, saved with **Save avatar**. **As in the voice setting
 voice chosen in Settings; a designed voice or one from the voice library is the
 agent's own. **Add voice** at the end of the menu adds a voice to the library,
 a clone from a recording or one designed from a description, and gives it to
-the agent. A chat in a project shows the first agent's avatar and speaks with its voice.
+the agent. A chat in a project shows the avatar of the agent the project works with and
+speaks with its voice, the first agent's where the project works with none.
 A library voice that is deleted is no longer any agent's, and those
 that had it speak as the voice settings say again.
 
@@ -115,7 +117,8 @@ touching any other agent.
 
 A project and a routine come after the agent and can switch a tool again for their
 own; a chat's own switch has the last word. Chats in a project are not in any agent's
-home, and follow the project. See [Routines](/guide/routines#tools) for the order of
+home, and follow the project, also where it works with an agent: that agent's soul, user
+and memory are used, but not its tool switches. See [Routines](/guide/routines#tools) for the order of
 all the layers.
 
 ## In the sidebar

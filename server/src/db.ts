@@ -364,6 +364,18 @@ function schema(db: Database.Database): void {
       tools_on TEXT NOT NULL DEFAULT ''
     );
 
+    -- Which agent a project works with, and whether Understory is its memory.
+    -- No row, or an empty agent, is a blank slate: the chats get the project's
+    -- AGENTS.md and nothing else. Kept here and not as a file in the folder for
+    -- the reason project_tools is: the agent works in the folder and can write
+    -- to it, and whose soul and memory it gets is not for it to change. A project
+    -- is only a folder, so it is known by its name; a row goes with the project.
+    CREATE TABLE IF NOT EXISTS project_agent (
+      project TEXT PRIMARY KEY,
+      agent TEXT NOT NULL DEFAULT '',
+      understory_off INTEGER NOT NULL DEFAULT 0
+    );
+
     -- An agent's exceptions to the portal-wide tool default, for every chat in
     -- its home and every run it does on its own: the first layer above the
     -- default. Here for the same reason as a project's: the agent can write to
@@ -2017,6 +2029,59 @@ export function projectsWithTools(): Set<string> {
   return new Set(
     (getDb().prepare("SELECT project FROM project_tools").all() as { project: string }[]).map((r) => r.project)
   );
+}
+
+/** What a project says about the agent it works with: see the table. A project that never said anything is a blank slate. */
+export interface ProjectAgent {
+  /** The agent's id; "" for none. */
+  agent: string;
+  /** Whether Understory is not this project's memory, though it is the portal's. */
+  understoryOff: boolean;
+}
+
+export function projectAgent(project: string): ProjectAgent {
+  const row = getDb().prepare("SELECT agent, understory_off FROM project_agent WHERE project = ?").get(project) as
+    | { agent: string; understory_off: number }
+    | undefined;
+  return { agent: row?.agent ?? "", understoryOff: !!row?.understory_off };
+}
+
+export function setProjectAgent(project: string, say: ProjectAgent): ProjectAgent {
+  if (!say.agent && !say.understoryOff) clearProjectAgent(project);
+  else
+    getDb()
+      .prepare(
+        `INSERT INTO project_agent (project, agent, understory_off) VALUES (?, ?, ?)
+         ON CONFLICT(project) DO UPDATE SET agent = excluded.agent, understory_off = excluded.understory_off`
+      )
+      .run(project, say.agent, say.understoryOff ? 1 : 0);
+  return { agent: say.agent, understoryOff: say.understoryOff };
+}
+
+/** Forgets what a project said about its agent, as when it is deleted or made again. */
+export function clearProjectAgent(project: string): void {
+  getDb().prepare("DELETE FROM project_agent WHERE project = ?").run(project);
+}
+
+/**
+ * Lets go of an agent that is deleted: the projects that worked with it are
+ * blank slates again, and keep what they said about Understory.
+ */
+export function releaseProjectsOf(agent: string): void {
+  getDb().transaction(() => {
+    getDb().prepare("UPDATE project_agent SET agent = '' WHERE agent = ?").run(agent);
+    getDb().prepare("DELETE FROM project_agent WHERE agent = '' AND understory_off = 0").run();
+  })();
+}
+
+/** What every project that says something about its agent says, by name. */
+export function projectAgents(): Map<string, ProjectAgent> {
+  const rows = getDb().prepare("SELECT project, agent, understory_off FROM project_agent").all() as {
+    project: string;
+    agent: string;
+    understory_off: number;
+  }[];
+  return new Map(rows.map((r) => [r.project, { agent: r.agent, understoryOff: !!r.understory_off }]));
 }
 
 /**

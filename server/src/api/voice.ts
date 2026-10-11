@@ -11,7 +11,7 @@ import { once } from "node:events";
 import { createHash } from "node:crypto";
 import express, { type Router } from "express";
 import { getSession, getSetting, putSetting } from "../db.js";
-import { agentOf, defaultAgent } from "../agents.js";
+import { agentFor } from "../project-agent.js";
 import { errorLineKey, readErrorLine, saveErrorLine, touchErrorLine } from "../voice-error-line.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
@@ -312,12 +312,12 @@ export function disconnectManagedVoice() {
   return saved;
 }
 /**
- * The settings a chat speaks with: the voice of the agent the chat is with, where it has one of its own (the first agent's for a
- * chat in a project, as its avatar is). An agent's voice is one of Kokoro's or one from the library, and is used by the runtime
- * it belongs to.
+ * The settings a chat speaks with: the voice of the agent the chat is with, where it has one of its own (the agent a project is
+ * linked to for a chat in it, else the first agent's, as its avatar is). An agent's voice is one of Kokoro's or one from the
+ * library, and is used by the runtime it belongs to.
  */
 function speechSettings(sessionId: string): VoiceConfig {
-  const own = (agentOf(getSession(sessionId)?.workspace) ?? defaultAgent()).voice;
+  const own = agentFor(getSession(sessionId)?.workspace).voice;
   const saved = config();
   return { ...saved, ...(own && saved.runtime === "kokoro" && isKokoroVoice(own) ? { kokoroVoice: own } : own && !isKokoroVoice(own) ? { voice: own } : {}) };
 }

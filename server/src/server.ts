@@ -14,6 +14,7 @@ import cookieParser from "cookie-parser";
 import { nanoid } from "nanoid";
 import {
   BROWSER_CHANNEL,
+  clearProjectAgent,
   clearProjectTools,
   chatModel,
   contextLimitProblem,
@@ -31,7 +32,11 @@ import {
   listRoutineSessions,
   listSessions,
   projectTools,
+  projectAgent,
+  projectAgents,
   projectsWithTools,
+  releaseProjectsOf,
+  setProjectAgent,
   agentTools,
   setAgentTools,
   clearAgentTools,
@@ -57,9 +62,11 @@ import { insideReal, isWithinText } from "./within.js";
 import { agentHome, agentHomePath } from "./agent-home.js";
 import { dataFolder } from "./data-dir.js";
 import { resolveChannelSession } from "./agent.js";
-import { AgentError, agentOf, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, newChatAgent, orbOf } from "./agents.js";
+import { AgentError, agentsRoot, chatsOf, defaultAgent, deletable, deleteAgent, getAgent, listAgents, newChatAgent, orbOf } from "./agents.js";
 import { sweepRemoved } from "./folder-removal.js";
 import { agentsRouter } from "./api/agents.js";
+import { agentFor, linkedAgent } from "./project-agent.js";
+import { understoryOn } from "./features.js";
 import { heartbeat } from "./heartbeat.js";
 import { deleteNotesOf } from "./activity.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
@@ -325,8 +332,14 @@ app.get("/api/projects", (req, res) => {
   const agents = listAgents().map((a) => ({ id: a.id, name: a.name, home: a.home, newChats: a.id === fresh }));
   try {
     if (!existsSync(WORKSPACE_ROOT)) return res.json({ root: WORKSPACE_ROOT, home, agents, projects: [] });
+    // The agent each project works with, where it still exists; a blank slate says nothing.
+    const links = projectAgents();
+    const linkOf = (name: string) => {
+      const id = links.get(name)?.agent;
+      return id && agents.some((a) => a.id === id) ? { agent: id } : {};
+    };
     if (req.query.bare === "1") {
-      return res.json({ root: WORKSPACE_ROOT, home, agents, projects: listProjects(WORKSPACE_ROOT).map((p) => ({ name: p.name, path: p.path })) });
+      return res.json({ root: WORKSPACE_ROOT, home, agents, projects: listProjects(WORKSPACE_ROOT).map((p) => ({ name: p.name, path: p.path, ...linkOf(p.name) })) });
     }
     // Read once, not once per project.
     const all = listSessions();
@@ -335,6 +348,8 @@ app.get("/api/projects", (req, res) => {
       const chats = chatsIn(p.path, all);
       return {
         ...p,
+        ...linkOf(p.name),
+        ...(links.get(p.name)?.understoryOff ? { understoryOff: true } : {}),
         hasTools: withTools.has(p.name),
         sessions: chats.length,
         lastActive: chats.reduce((latest, s) => (s.updated_at > latest ? s.updated_at : latest), "") || null,
@@ -370,6 +385,9 @@ app.post("/api/projects", (req, res) => {
   if (instructions !== undefined && typeof instructions !== "string") {
     return res.status(400).json({ error: "instructions must be text" });
   }
+  // Also checked before the folder is made, so that a refusal leaves no project behind.
+  const wanted = agentLinkOf(req.body);
+  if ("error" in wanted) return res.status(wanted.status).json({ error: wanted.error });
   if (toolsOff !== undefined) {
     if (!isToolList(toolsOff)) return res.status(400).json({ error: "toolsOff must be a list of tool names" });
     if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
@@ -387,7 +405,74 @@ app.post("/api/projects", (req, res) => {
     } catch (e) {
       return res.json({ ...project, toolsError: (e as Error).message });
     }
+    // The same for the agent: a folder of this name left behind by an earlier project does not give its link to this one.
+    clearProjectAgent(project.name);
+    if (wanted.agent !== undefined || wanted.understory !== undefined) {
+      setProjectAgent(project.name, { agent: wanted.agent ?? "", understoryOff: wanted.understory === false });
+    }
     res.json(project);
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/**
+ * What a request says about the agent a project works with: `agent`, an
+ * agent's id or null (or "") for none, and `understory`, whether Understory is
+ * the project's memory. Either may be left out. An agent that does not exist
+ * is refused rather than stored: the project would be a blank slate and the
+ * page would not know why.
+ */
+function agentLinkOf(body: unknown): { agent?: string; understory?: boolean } | { error: string; status: number } {
+  const { agent, understory } = (body ?? {}) as { agent?: unknown; understory?: unknown };
+  if (agent !== undefined && agent !== null && typeof agent !== "string") return { error: "agent must be an agent's id, or null", status: 400 };
+  if (understory !== undefined && typeof understory !== "boolean") return { error: "understory must be true or false", status: 400 };
+  if (agent && !getAgent(agent)) return { error: "No such agent", status: 404 };
+  return { ...(agent !== undefined ? { agent: agent ?? "" } : {}), ...(understory !== undefined ? { understory } : {}) };
+}
+
+/** The agent a project works with and whether Understory is its memory, as its page shows them. */
+function agentOfProject(name: string) {
+  const link = projectAgent(name);
+  return {
+    agent: linkedAgent(name)?.id ?? null,
+    understory: !link.understoryOff,
+    // Whether the portal has Understory at all: without it there is nothing for the project to do without.
+    understoryAvailable: understoryOn(),
+  };
+}
+
+/**
+ * Which agent a project works with: its chats carry that agent's soul, its
+ * primary user and its memory as well as the project's AGENTS.md, and use its
+ * skills, voice and avatar. `agent: null` is a blank slate, which is what a
+ * project is until it says otherwise.
+ */
+app.get("/api/projects/:name/agent", (req, res) => {
+  try {
+    res.json(agentOfProject(getProject(WORKSPACE_ROOT, req.params.name).name));
+  } catch (e) {
+    projectFailure(res, e);
+  }
+});
+
+/**
+ * Change the agent a project works with, or whether Understory is its memory;
+ * what is left out stays. Chats already open pick it up after /reload, like
+ * the project's instructions.
+ */
+app.put("/api/projects/:name/agent", (req, res) => {
+  const wanted = agentLinkOf(req.body);
+  if ("error" in wanted) return res.status(wanted.status).json({ error: wanted.error });
+  if (wanted.agent === undefined && wanted.understory === undefined) return res.status(400).json({ error: "agent or understory required" });
+  try {
+    const project = getProject(WORKSPACE_ROOT, req.params.name);
+    const held = projectAgent(project.name);
+    setProjectAgent(project.name, {
+      agent: wanted.agent ?? held.agent,
+      understoryOff: wanted.understory === undefined ? held.understoryOff : !wanted.understory,
+    });
+    res.json(agentOfProject(project.name));
   } catch (e) {
     projectFailure(res, e);
   }
@@ -634,6 +719,7 @@ app.delete("/api/projects/:name", async (req, res) => {
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       forgetPicturesIn(project.path);
       clearProjectTools(project.name);
+      clearProjectAgent(project.name);
       const switchedOff = switchOffRoutines([...routines, ...late]);
       getDb().transaction(() => {
         for (const chat of chats) deleteSession(chat.id);
@@ -687,6 +773,8 @@ app.delete("/api/agents/:id", async (req, res) => {
       deleteAgent(agent.id, { deleteFolder: req.query.folder === "delete" });
       // What it said about tools: an agent made later under the same name starts from the default.
       clearAgentTools(agent.id);
+      // The projects that worked with it are blank slates again.
+      releaseProjectsOf(agent.id);
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       if (req.query.folder === "delete") forgetPicturesIn(agent.home);
       deleteNotesOf(agent.id);
@@ -801,12 +889,12 @@ app.post("/api/agent/sessions", (req, res) => {
 // --- the agent's home directory ---
 
 /**
- * The avatar voice mode shows for a chat (`?session=`): its agent's, and the
- * first agent's for a chat in a project, or without one.
+ * The avatar voice mode shows for a chat (`?session=`): its agent's, the one a
+ * chat in a project is linked to, and else the first agent's.
  */
 app.get("/api/agent/orb", (req, res) => {
   const session = typeof req.query.session === "string" ? getSession(req.query.session) : undefined;
-  res.json(orbOf(agentOf(session?.workspace) ?? defaultAgent()));
+  res.json(orbOf(agentFor(session?.workspace)));
 });
 
 app.post("/api/sessions", (req, res) => {
