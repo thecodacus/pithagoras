@@ -173,20 +173,36 @@ test('New conversation starts the same chat as the + in the sidebar, and a chat 
   const posts: unknown[] = [];
   const at = new Date().toISOString();
   const chat = { id: 'c1', title: 'Started with plus', status: 'idle', workspace: '/a/ada', kind: 'task', pinned: false, updated_at: at, channel_key: '', channel: null };
+  const fresh = { ...chat, id: 'c2', title: 'Fresh conversation' };
+  // The sidebar's list: it learns of the new chat only when it is asked again, as the poll does every five seconds.
+  const listed = [chat];
   await mockPortal(page, async ({ path: p, method, json }) => {
     if (p === '/api/agents') return { agents: [agent('home', 'Nova'), agent('ada', 'Ada', { chats: 1 })] };
     if (p === '/api/agent/sessions') return { sessions: [chat], agentHome: '/a/ada' };
     if (p === '/api/agents/ada/setup') return { initialised: true, home: '/a/ada', files: [] };
+    if (p === '/api/sessions' && method === 'GET') return { sessions: listed, executor: 'host' };
     if (p === '/api/sessions' && method === 'POST') {
       posts.push(json());
-      return { ...chat, id: 'c2', title: 'New chat' };
+      listed.push(fresh);
+      return fresh;
     }
+    // A project besides the agents' homes, so that the sidebar gathers the chats by folder.
+    if (p === '/api/projects') return {
+      root: '/w', home: '/a/home', agents: [{ id: 'ada', name: 'Ada', home: '/a/ada' }],
+      projects: [{ name: 'site', path: '/w/site', isGit: false, hasInstructions: false, sessions: 0, lastActive: null }],
+    };
   }, { settings: true });
   await page.goto('/agents?agent=ada');
   const main = page.getByRole('main');
   await expect(main.getByText('Started with plus')).toBeVisible();
   await expect(main.locator('div', { has: page.getByText('conversation', { exact: true }) }).filter({ hasText: /^1conversation$/ })).toHaveCount(1);
+  // A chat of the portal's own is under "Here, in the portal", and nothing says that a channel is missing.
+  await expect(main.getByRole('heading', { name: 'Here, in the portal' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'No channel' })).toHaveCount(0);
+  await expect(main.getByText('no channel', { exact: true })).toHaveCount(0);
   await main.getByRole('button', { name: 'New conversation' }).click();
   await expect(page).toHaveURL(/\/s\/c2$/);
   expect(posts).toEqual([{ workspace: '/a/ada' }]);
+  // In the sidebar under the agent's folder at once, not with the next poll.
+  await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByRole('group', { name: 'Ada' }).getByText('Fresh conversation')).toBeVisible({ timeout: 2000 });
 });

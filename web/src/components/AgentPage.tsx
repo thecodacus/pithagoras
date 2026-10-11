@@ -41,7 +41,7 @@ import { when } from "../time";
  * another. A card opens that agent (`?agent=`), with its own home, files and
  * conversations.
  */
-export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
+export function AgentPage({ onSelect, onNewChat }: { onSelect: (id: string) => void; onNewChat: (workspace: string) => Promise<void> }) {
   const [params, setParams] = useSearchParams();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -121,6 +121,7 @@ export function AgentPage({ onSelect }: { onSelect: (id: string) => void }) {
         setParams({});
       }}
       onSelect={onSelect}
+      onNewChat={onNewChat}
     />
   );
 }
@@ -201,6 +202,7 @@ function AgentView({
   onChanged,
   onDeleted,
   onSelect,
+  onNewChat,
 }: {
   agent: Agent;
   /** The files its folder already had, which the answers did not replace (see `answersLeft`), until they are dismissed. Held by the page, so that it is said once and not again each time the agent is opened. */
@@ -210,6 +212,8 @@ function AgentView({
   onChanged: () => Promise<void>;
   onDeleted: () => Promise<void>;
   onSelect: (id: string) => void;
+  /** A chat started in the agent's home, as the + in the sidebar starts one: listed in the sidebar and opened. */
+  onNewChat: (workspace: string) => Promise<void>;
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([]);
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -403,8 +407,7 @@ function AgentView({
                   setStarting(true);
                   setError("");
                   try {
-                    // The same chat the + in the sidebar starts, in the agent's home.
-                    onSelect((await api.createSession(agent.home)).id);
+                    await onNewChat(agent.home);
                   } catch (e) {
                     setError((e as Error).message);
                   } finally {
