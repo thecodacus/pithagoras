@@ -356,6 +356,10 @@ test("the New button's chat goes to the agent picked for new chats, the first ag
   assert.equal(on.body.newChats, true);
   const now = await flags();
   assert.deepEqual(Object.keys(now).filter((id) => now[id]), [picked.id], "one agent has them");
+  // The sidebar's house comes from this route, not from /api/agents.
+  const shown = (await call("GET", "/api/projects?bare=1")).body.agents;
+  assert.deepEqual(shown.filter((x) => x.newChats).map((x) => x.id), [picked.id], "the sidebar's list marks the picked agent and no other");
+  assert.ok(shown.length >= 3 && shown.every((x) => x.newChats === (x.id === picked.id)), "every other agent is marked off");
   assert.equal((await call("POST", "/api/sessions", {})).body.workspace, picked.home);
   assert.equal((await call("POST", "/api/sessions", { agent: other.id })).body.workspace, other.home, "an agent named is the one used");
   assert.equal((await call("POST", "/api/sessions", { workspace: homePath })).body.workspace, homePath, "so is a folder named, Home included");

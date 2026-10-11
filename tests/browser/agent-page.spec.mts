@@ -79,6 +79,26 @@ test('an agent can be made the one the New button starts with, and gives it back
   await expect(first).toBeDisabled();
 });
 
+test('the sidebar moves its house to the agent picked, without waiting for its next poll', async ({ page }) => {
+  const asked: unknown[] = [];
+  await portal(page, { newChats: asked });
+  // Asked after the portal's, so heard first. The sidebar's list follows the pick as the server keeps it.
+  await page.route('**/api/projects*', (route) => {
+    const picked = asked.length && asked[asked.length - 1] ? 'ada' : 'home';
+    route.fulfill({ json: {
+      root: '/w', home: '/a/home', projects: [],
+      agents: [{ id: 'home', name: 'Nova', home: '/a/home', newChats: picked === 'home' }, { id: 'ada', name: 'Ada', home: '/a/ada', newChats: picked === 'ada' }],
+    } });
+  });
+  await page.goto('/agents?agent=ada');
+  const side = page.getByRole('complementary', { name: 'Sidebar' });
+  await expect(side.locator('[data-folder="home"] [data-icon="house"]')).toHaveCount(1);
+  await expect(side.locator('[data-folder="agent:ada"] [data-icon="house"]')).toHaveCount(0);
+  await page.getByRole('switch', { name: 'New chats start here' }).click();
+  await expect(side.locator('[data-folder="agent:ada"] [data-icon="house"]')).toHaveCount(1);
+  await expect(side.locator('[data-folder="home"] [data-icon="house"]')).toHaveCount(0);
+});
+
 /** The wizard's two steps, answered: a character and a name. */
 async function answerWizard(main: Locator) {
   await main.getByLabel('Name').fill('Ada');

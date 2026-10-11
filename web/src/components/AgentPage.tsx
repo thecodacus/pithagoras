@@ -41,7 +41,16 @@ import { when } from "../time";
  * another. A card opens that agent (`?agent=`), with its own home, files and
  * conversations.
  */
-export function AgentPage({ onSelect, onNewChat }: { onSelect: (id: string) => void; onNewChat: (workspace: string) => Promise<void> }) {
+export function AgentPage({
+  onSelect,
+  onNewChat,
+  reloadPlaces,
+}: {
+  onSelect: (id: string) => void;
+  onNewChat: (workspace: string) => Promise<void>;
+  /** The sidebar's places load again: it shows which agent New starts chats with, and groups by agent once there is more than one. */
+  reloadPlaces: () => void;
+}) {
   const [params, setParams] = useSearchParams();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -80,6 +89,7 @@ export function AgentPage({ onSelect, onNewChat }: { onSelect: (id: string) => v
           onSubmit={async (input) => {
             const made = await api.createAgent(input);
             await loadAgents();
+            reloadPlaces();
             setMadeKept({ id: made.id, files: answersLeft(made.kept) });
             setCreating(false);
             setParams({ agent: made.id });
@@ -116,8 +126,13 @@ export function AgentPage({ onSelect, onNewChat }: { onSelect: (id: string) => v
         </button>
       }
       onChanged={loadAgents}
+      onPickChanged={async () => {
+        await loadAgents();
+        reloadPlaces();
+      }}
       onDeleted={async () => {
         await loadAgents();
+        reloadPlaces();
         setParams({});
       }}
       onSelect={onSelect}
@@ -200,6 +215,7 @@ function AgentView({
   onKept,
   back,
   onChanged,
+  onPickChanged,
   onDeleted,
   onSelect,
   onNewChat,
@@ -210,6 +226,8 @@ function AgentView({
   onKept: (files: string[]) => void;
   back: ReactNode;
   onChanged: () => Promise<void>;
+  /** The "New chats start here" switch was used: the sidebar's house follows it. */
+  onPickChanged: () => Promise<void>;
   onDeleted: () => Promise<void>;
   onSelect: (id: string) => void;
   /** A chat started in the agent's home, as the + in the sidebar starts one: listed in the sidebar and opened. */
@@ -448,7 +466,7 @@ function AgentView({
                     setError("");
                     try {
                       await api.setNewChats(agent.id, on);
-                      await onChanged();
+                      await onPickChanged();
                     } catch (e) {
                       setError((e as Error).message);
                     }

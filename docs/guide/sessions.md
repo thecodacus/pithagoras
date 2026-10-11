@@ -270,8 +270,8 @@ it. The Sessions page has the same search with more room.
 
 ### By folder
 
-Once there is a project, the chats below **Pinned** are gathered by the folder
-they work in: each agent's home, named after the agent, and each project, a
+Once there is a project or more than one agent, the chats below **Pinned** are
+gathered by the folder they work in: each agent's home, named after the agent, and each project, a
 chat in a project's subfolder counting as the project's. Each folder opens to show its chats — the sidebar up to eight,
 then *N more in …*, which opens the Sessions page at that folder — and remembers
 whether it was left open. The folder of the chat you open is opened for you. A

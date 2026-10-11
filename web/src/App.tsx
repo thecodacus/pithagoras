@@ -745,7 +745,7 @@ function Shell({
             }}
           />
         ) : view === "agents" ? (
-          <AgentPage onSelect={(id) => navigate(`/s/${id}`)} onNewChat={startChat} />
+          <AgentPage onSelect={(id) => navigate(`/s/${id}`)} onNewChat={startChat} reloadPlaces={reloadPlaces} />
         ) : view === "routines" ? (
           <RoutinesPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "browser" ? (
