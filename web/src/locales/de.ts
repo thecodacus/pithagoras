@@ -1421,7 +1421,7 @@ const de: Locale = {
     "Every task you have handed to pi. Each one runs on the server, so you can close the tab and pick it back up here once it is done.": "Jede Aufgabe, die du pi gegeben hast. Jede läuft auf dem Server, du kannst also den Tab schließen und sie hier wieder aufnehmen, wenn sie fertig ist.",
     "total": "insgesamt",
     "pinned": "angeheftet",
-    "Search by name or workspace…": "Nach Name oder Arbeitsbereich suchen…",
+    "Search by name or folder…": "Nach Name oder Ordner suchen…",
     "{n} of {all}": "{n} von {all}",
     "Dismiss": "Schließen",
     "Only {name}": "Nur {name}",

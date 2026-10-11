@@ -7,7 +7,7 @@ test("a chat's full path is not drawn under its title, and the Files panel shows
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.goto('/tests/chat.html?phase=switch');
   await expect(page.locator('header .chat-title')).toBeVisible();
-  // Neither the chat's header nor a row in the sidebar carries the path.
+  // The chat's header does not carry the path. (The sidebar is mounted only by the full app: hidden-paths.spec and mobile.spec check it.)
   await expect(page.getByText('/workspaces/pithagoras', { exact: true })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Files', exact: true }).click();

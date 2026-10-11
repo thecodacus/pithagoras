@@ -62,7 +62,8 @@ has and when one last moved.
 In any chat, `/new` or `/clear` starts a fresh chat in the same project. The
 sidebar groups the chats by folder — Home is the agent's own directory, a
 project is a folder under the workspace root. A chat's full path is not drawn
-under its title; the pin button in the Files panel's header shows it.
+under its title, in the sidebar, on the Sessions or Projects page or beside a
+terminal; the pin button in the Files panel's header shows it.
 
 Deleting a chat never deletes a folder — only pi's conversation file for it, which is not part of any project. Folders are only made by **New project**
 and only removed by deleting a project.

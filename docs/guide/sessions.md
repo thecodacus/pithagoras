@@ -256,16 +256,17 @@ The sidebar opens with New, then the places — Sessions, Projects, Agents,
 Routines and [Audit](#audit), with Browser, Memory and Images added while the
 [browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
 holds the agent's memory and an [image endpoint](/guide/images) is set up — then **Pinned**, then **Recents**. The button at its
-top edge folds it to a rail of icons; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
-the Sessions page, which lists everything with search over names and workspace
-paths.
+top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
+the Sessions page, which lists everything with a search of its own.
 
 Pinning is stored server-side and drives the ordering (`pinned DESC,
 updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
 With more chats than the sidebar lists, it has a search field above them. It looks
-through every chat by name and folder, not only the ones shown, and Escape clears
-it. The Sessions page has the same search with more room.
+through every chat by its name, and by its folder's name where the chats are gathered by
+folder (below), not only the ones shown, and Escape clears it. It never goes by a
+chat's path. The Sessions page has the same search with more room; in its
+list of all chats, each row names the folder it works in.
 
 ### By folder
 

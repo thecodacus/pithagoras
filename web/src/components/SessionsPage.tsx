@@ -11,7 +11,7 @@ import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
-import { HOME, folderFrom, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { HOME, folderFrom, folderKeys, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { useFlip } from "../motion";
 import { useNow } from "../use-now";
@@ -82,7 +82,9 @@ export const SessionsPage = memo(function SessionsPage({
   const running = sessions.filter((s) => s.status === "running").length;
   const pinnedCount = sessions.filter((s) => s.pinned).length;
 
-  const matches = useMemo(() => filterSessions(sessions, query), [sessions, query]);
+  // Each row names its folder (not the path it works in), and the search goes by that name.
+  const folderOf = useMemo(() => folderNameOf(sessions, places), [sessions, places]);
+  const matches = useMemo(() => filterSessions(sessions, query, folderOf), [sessions, query, folderOf]);
 
   const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
   const hasProjects = !!places && places.projects.length > 0;
@@ -111,7 +113,7 @@ export const SessionsPage = memo(function SessionsPage({
   const allKeys = useMemo(() => (places ? folderKeys(places) : undefined), [places]);
   const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, allKeys);
   // A folder asked for shows only its chats — none while it cannot be told which they are.
-  const shown = useMemo(() => (only ? filterSessions(only.sessions, query) : asked !== null ? [] : matches), [only, asked, query, matches]);
+  const shown = useMemo(() => (only ? filterSessions(only.sessions, query, folderOf) : asked !== null ? [] : matches), [only, asked, query, matches, folderOf]);
   // Rows slide to their new places (see motion.ts); a new one comes in with the list's own stagger.
   const rowsOrder = [byFolder ? "folders" : "list", ...(byFolder ? folders.flatMap((f) => f.sessions) : shown).map((s) => s.id)].join();
   const list = useFlip<HTMLDivElement>(rowsOrder, searching, false);
@@ -189,7 +191,8 @@ export const SessionsPage = memo(function SessionsPage({
               <LuPin className="h-3 w-3 shrink-0 text-accent/70" title={t("Pinned")} />
             )}
           </div>
-          <p className="truncate font-mono text-[11px] text-fg-faint">{s.workspace}</p>
+          {/* Under a folder's heading, or on the one folder shown, its name is already there. */}
+          {!byFolder && !only && <p className="truncate text-[11px] text-fg-faint">{folderOf(s)}</p>}
         </div>
         <span className="shrink-0 text-[11px] text-fg-faint">{when(s.updated_at)}</span>
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
@@ -223,8 +226,8 @@ export const SessionsPage = memo(function SessionsPage({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("Search by name or workspace…")}
-              aria-label={t("Search by name or workspace…")}
+              placeholder={t("Search by name or folder…")}
+              aria-label={t("Search by name or folder…")}
               className="w-full rounded-lg border border-line bg-raised/60 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-fg-faint focus:border-accent/60"
             />
             {query && (

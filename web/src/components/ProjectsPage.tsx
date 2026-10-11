@@ -207,9 +207,6 @@ export function ProjectsPage({
                         </span>
                       )}
                     </div>
-                    <p className="truncate font-mono text-[11px] text-fg-faint" title={p.path}>
-                      {p.path}
-                    </p>
                     <p className="truncate text-[11px] text-fg-faint">
                       {tp(p.sessions, "{n} chat", "{n} chats")}
                       {lastActive(p) ? ` · ${t("last {when}", { when: when(lastActive(p)!) })}` : ""}

@@ -229,10 +229,10 @@ test('a folder shut while searching is shut only for the search', async ({ page 
 
   // The same on the Sessions page.
   const main = page.getByRole('main');
-  await main.getByPlaceholder('Search by name or workspace…').fill('site');
+  await main.getByPlaceholder('Search by name or folder…').fill('site');
   await folder(main, 'site').click();
   await expect(folder(main, 'site')).toHaveAttribute('aria-expanded', 'false');
-  await main.getByPlaceholder('Search by name or workspace…').fill('');
+  await main.getByPlaceholder('Search by name or folder…').fill('');
   await expect(folder(main, 'site')).toHaveAttribute('aria-expanded', 'true');
   expect(await page.evaluate(() => localStorage.getItem('sessionsFoldersOpen'))).toBeNull();
 });

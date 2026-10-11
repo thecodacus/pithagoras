@@ -1500,7 +1500,6 @@ export function Chat({
         ) : (
           <span className="text-[11px] text-fg-subtle">{t(PANEL[kind].label)}</span>
         )}
-        {kind === "terminal" && terminalTab === "shell" && <span className="max-md:hidden truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
         <div className="ml-auto flex items-center gap-0.5">
           {kind === "browser" && (
             <button

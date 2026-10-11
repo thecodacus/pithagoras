@@ -107,6 +107,20 @@ export function groupByFolder<S extends { workspace: string; updated_at: string 
   return [...first, ...projects, ...(always || elsewhere.sessions.length ? [elsewhere] : [])];
 }
 
+/**
+ * The name of the folder a chat is listed in, as the folders show it, for the places
+ * that name it per chat (the Sessions page's rows, the search) instead of its path.
+ * "" until the places are known.
+ */
+export function folderNameOf<S extends { id: string; workspace: string; updated_at: string }>(
+  sessions: readonly S[],
+  places: Places | null | undefined,
+): (s: S) => string {
+  const names = new Map<string, string>();
+  if (places) for (const f of groupByFolder(sessions, places)) for (const s of f.sessions) names.set(s.id, folderName(f));
+  return (s) => names.get(s.id) ?? "";
+}
+
 /** How the folders are ordered: by their latest chat, by name, or as they were put. */
 export type FolderSort = "recent" | "name" | "manual";
 
