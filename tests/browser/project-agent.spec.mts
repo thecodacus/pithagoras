@@ -134,7 +134,7 @@ test('a project row names the agent it works with, and a blank slate says nothin
 
 test('a project that works with no agent has no mark of one on its row', async ({ page }) => {
   await portal(page);
-  await expect(page.getByText('demo', { exact: true })).toBeVisible();
+  await expect(rows(page).getByText('demo', { exact: true })).toBeVisible();
   await expect(rows(page).getByText(/^with /)).toHaveCount(0);
 });
 
