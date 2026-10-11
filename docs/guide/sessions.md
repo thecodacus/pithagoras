@@ -265,8 +265,8 @@ updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
 With more chats than the sidebar lists, it has a search field above them. It looks
 through every chat by its name, and by its folder's name where the chats are gathered by
-folder (below), not only the ones shown, and Escape clears it. It never goes by a
-chat's path. The Sessions page has the same search with more room; in its
+folder (below), not only the ones shown, and Escape clears it. A pinned chat is found by
+its name only, as its row shows no folder. It never goes by a chat's path. The Sessions page has the same search with more room; in its
 list of all chats, each row names the folder it works in.
 
 ### By folder

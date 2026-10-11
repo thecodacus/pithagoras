@@ -115,10 +115,11 @@ export const Sidebar = memo(function Sidebar({
   // Until the places are known, the chats are listed as they were: not held back for them.
   const byFolder = grouping === "folders" && hasPlaces;
   // The search goes by what the list shows: the name, and the folder's name where the chats are gathered under it.
-  const found = useMemo(
-    () => filterSessions(sessions, searching ? query : "", searching && byFolder ? folderNameOf(sessions, places) : undefined),
-    [sessions, searching, query, byFolder, places],
-  );
+  // A pinned chat is listed at the top with no folder next to it, so it is found by its title only.
+  const found = useMemo(() => {
+    const nameOf = searching && byFolder ? folderNameOf(sessions, places) : undefined;
+    return filterSessions(sessions, searching ? query : "", nameOf && ((s) => (s.pinned ? "" : nameOf(s))));
+  }, [sessions, searching, query, byFolder, places]);
   const pinned = found.filter((s) => s.pinned);
   const recents = found.filter((s) => !s.pinned);
   // A search looks through all of them, not only the dozen that are listed.

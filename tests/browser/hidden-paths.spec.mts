@@ -78,6 +78,21 @@ test('the sidebar search matches the shown names only: a chat\'s path never find
   await expect(side.getByText('Quarterly numbers')).toBeVisible();
 });
 
+test('a pinned chat is not found by its folder\'s name, which the sidebar does not show next to it', async ({ page }) => {
+  const many = Array.from({ length: 12 }, (_, i) => chat(`h${i}`, `Home chat ${i}`, HOME, i + 20));
+  await portal(page, [...many, { ...chat('s1', 'Quarterly numbers', '/w/site', 1), pinned: true }, chat('s2', 'Fix login', '/w/site', 2)]);
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  const search = side.getByLabel('Search chats');
+  await search.fill('site');
+  // The unpinned chat sits under its folder heading, so the name finds it; the pinned one is in Pinned, with no folder.
+  await expect(side.getByRole('group', { name: 'site' }).getByText('Fix login')).toBeVisible();
+  await expect(side.getByText('Quarterly numbers')).toHaveCount(0);
+  // Its title still does.
+  await search.fill('quarterly');
+  await expect(side.getByText('Quarterly numbers')).toBeVisible();
+});
+
 test('the shell tab of the terminal panel does not draw the chat\'s path', async ({ page }) => {
   await portal(page, [chat('s1', 'Fix login', '/w/site', 5)]);
   await page.goto('/s/s1');
