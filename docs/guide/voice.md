@@ -600,8 +600,10 @@ you dictate can wait for a more accurate one, perhaps on another service. Set
 only the model and both use the same **Speech recognition URL**, so that service
 has to serve both models (llama-swap loads the one that is asked for). Left
 empty, dictation uses **Speech recognition model** and **Speech recognition
-URL**, like voice mode. Installing or connecting the managed voice service
-empties both.
+URL**, like voice mode. Installing the managed voice service over a recognition
+address of your own empties both, and uninstalling it brings back what was there
+before. What you set up afterwards stays, also when you press **Start voice**;
+an address of the managed service itself is cleared with the uninstall.
 
 ## Speech speed
 

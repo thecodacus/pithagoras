@@ -244,23 +244,24 @@ test('voice that was off before the install is off after it, however the sides w
 });
 
 test('a service installed before settings were remembered: only what points at it is reset, and every other address stays', async () => {
+  // The dictation endpoint of OWN stays throughout this test: the service never wrote one, so it is the user's.
   // Speech and recognition both the managed service's: both go back to a portal with nothing set up, and voice is off.
   reset(); seedContainer();
   assert.equal((await put({ ...OWN, runtime: 'audio-cpp', whisperUrl: MANAGED.qwen, breezeUrl: MANAGED.speech, sttModel: 'qwen3-asr' })).status, 200);
   assert.equal((await post('/voice/uninstall')).status, 200);
   const both = await get('/voice');
-  assert.deepEqual(fields(both), { enabled: false, runtime: 'breeze', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: DEFAULTS.breezeUrl, sttModel: '', dictationModel: '', dictationUrl: '' });
+  assert.deepEqual(fields(both), { enabled: false, runtime: 'breeze', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: DEFAULTS.breezeUrl, sttModel: '', dictationModel: 'my-dictation', dictationUrl: OWN.dictationUrl });
   assert.deepEqual([both.voice, both.language, both.instruction], ['design', 'de', 'A calm voice.']);
   // Recognition alone, with no speech address, is the managed service's as well.
   reset(); seedContainer();
   assert.equal((await put({ ...OWN, runtime: 'none', whisperUrl: MANAGED.whisper, breezeUrl: '', sttModel: '' })).status, 200);
   assert.equal((await post('/voice/uninstall')).status, 200);
-  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'breeze', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: DEFAULTS.breezeUrl, sttModel: '', dictationModel: '', dictationUrl: '' });
+  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'breeze', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: DEFAULTS.breezeUrl, sttModel: '', dictationModel: 'my-dictation', dictationUrl: OWN.dictationUrl });
   // Their own speech server beside the managed recognition: it stays, with the runtime it is spoken to in.
   reset(); seedContainer();
   assert.equal((await put({ ...OWN, runtime: 'audio-cpp', whisperUrl: MANAGED.qwen, sttModel: 'qwen3-asr' })).status, 200);
   assert.equal((await post('/voice/uninstall')).status, 200);
-  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'audio-cpp', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: '', dictationModel: '', dictationUrl: '' });
+  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'audio-cpp', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: '', dictationModel: 'my-dictation', dictationUrl: OWN.dictationUrl });
   // And the other way round: their own recognition server stays beside the managed speech, which goes.
   reset(); seedContainer();
   assert.equal((await put({ ...OWN, runtime: 'audio-cpp', breezeUrl: MANAGED.speech })).status, 200);
@@ -308,7 +309,7 @@ test('uninstalling what is not installed is harmless, and the choice to delete t
   reset();
   assert.equal((await put({ ...OWN, runtime: 'audio-cpp', whisperUrl: MANAGED.qwen, breezeUrl: MANAGED.speech, sttModel: 'qwen3-asr' })).status, 200);
   assert.equal((await post('/voice/uninstall')).status, 200);
-  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'breeze', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: DEFAULTS.breezeUrl, sttModel: '', dictationModel: '', dictationUrl: '' });
+  assert.deepEqual(fields(await get('/voice')), { enabled: false, runtime: 'breeze', whisperUrl: DEFAULTS.whisperUrl, breezeUrl: DEFAULTS.breezeUrl, sttModel: '', dictationModel: 'my-dictation', dictationUrl: OWN.dictationUrl });
 });
 
 test('a container that the portal did not make is left alone, with the settings as they are', async () => {
@@ -381,5 +382,47 @@ test('the status says whether the saved settings point at the service, also afte
   assert.equal((await put({ ...OWN, runtime: 'none', whisperUrl: MANAGED.whisper, breezeUrl: '', sttModel: '' })).status, 200);
   assert.equal((await get('/voice/install')).connected, true);
   assert.equal((await put({ ...OWN, runtime: 'none', breezeUrl: '', sttModel: '' })).status, 200);
+  assert.equal((await get('/voice/install')).connected, false);
+});
+
+test('a dictation endpoint and model set up after the install survive Start voice, and the uninstall puts back what there was before', async () => {
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  await install();
+  // The install took the recognition over from their own server, so the dictation pair of that server is gone for now.
+  const set = await get('/voice');
+  assert.deepEqual([set.dictationModel, set.dictationUrl], ['', '']);
+  const mine = { dictationUrl: 'http://big.example.test:9100/v1/audio/transcriptions', dictationModel: 'big-asr' };
+  assert.equal((await put({ ...set, ...mine })).status, 200);
+  // Stop and Start connect again, over a recognition that is the service's already.
+  assert.equal((await post('/voice/stop')).status, 200);
+  assert.equal((await post('/voice/start')).status, 200);
+  assert.equal((await settle()).state, 'running');
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'none', whisperUrl: MANAGED.whisper, breezeUrl: '', sttModel: '', ...mine });
+  // The uninstall puts the recognition back and leaves the endpoint they set up since, with its model.
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: 'my-model', ...mine });
+  // Without one of theirs set up since, what was there before the install comes back.
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  await install();
+  assert.equal((await post('/voice/stop')).status, 200);
+  assert.equal((await post('/voice/start')).status, 200);
+  assert.equal((await settle()).state, 'running');
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  assert.deepEqual(fields(await get('/voice')), { enabled: true, runtime: 'breeze', whisperUrl: OWN.whisperUrl, breezeUrl: OWN.breezeUrl, sttModel: 'my-model', dictationModel: 'my-dictation', dictationUrl: OWN.dictationUrl });
+});
+
+test('a dictation endpoint that points at the service is cleared by the uninstall, also when voice mode listens to their own server', async () => {
+  reset();
+  assert.equal((await put(OWN)).status, 200);
+  await install();
+  // Dictation keeps the service's recognition while voice mode listens to their own server.
+  const split = { ...await get('/voice'), whisperUrl: OWN.whisperUrl, dictationUrl: MANAGED.whisper, dictationModel: 'asr-x' };
+  assert.equal((await put(split)).status, 200);
+  assert.equal((await get('/voice/install')).connected, true);
+  assert.equal((await post('/voice/uninstall')).status, 200);
+  const back = await get('/voice');
+  assert.deepEqual([back.whisperUrl, back.dictationUrl, back.dictationModel], [OWN.whisperUrl, '', '']);
   assert.equal((await get('/voice/install')).connected, false);
 });

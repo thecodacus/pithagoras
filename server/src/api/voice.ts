@@ -252,7 +252,9 @@ function managedSides(c: VoiceConfig, noSpeech: boolean | undefined) {
   return { listening, speaking };
 }
 /** Do the saved settings still point at the managed service, in either side? */
-export const pointsAtManagedVoice = () => { const { listening, speaking } = managedSides(config(), remembered().noSpeech); return listening || speaking; };
+export const pointsAtManagedVoice = () => { const c = config(); const { listening, speaking } = managedSides(c, remembered().noSpeech); return listening || speaking || isManagedUrl(c.dictationUrl); };
+/** A dictation address the user set up themselves, which belongs with the dictation model beside it and not to the service. */
+const ownDictation = (c: VoiceConfig) => !!c.dictationUrl?.trim() && !isManagedUrl(c.dictationUrl);
 /** Point the saved config at the managed services, for the engines they were built with. */
 export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   const { runtime, ...urls } = endpoints(choice);
@@ -269,8 +271,11 @@ export function connectManagedVoice(choice: VoiceChoice = DEFAULT_CHOICE) {
   const language = runtime === 'chatterbox' && !CHATTERBOX_LANGUAGES.includes(current.language) ? 'en' : current.language;
   // Whisper.cpp serves one model and is sent no model field: an id left over
   // from another runtime would reach it in the multipart body.
-  // The same goes for the dictation model and address, which the service's replace.
-  const saved = { ...current, language, enabled: true, runtime, ...urls, dictationModel: "", dictationUrl: "" };
+  // The same goes for the dictation model and address, which the service's replace: but only where the connect takes the
+  // recognition over from the user (what they had is remembered above), or where the dictation address is the service's own.
+  // On a service that is connected already (Start voice, a rebuild), what they set up since is theirs.
+  const dictation = !listening || isManagedUrl(current.dictationUrl) ? { dictationModel: "", dictationUrl: "" } : {};
+  const saved = { ...current, language, enabled: true, runtime, ...urls, ...dictation };
   saveVoice(saved);
   return {...saved, managed:true};
 }
@@ -285,9 +290,14 @@ export function disconnectManagedVoice() {
   const kept = remembered();
   putSetting(REMEMBERED_KEY, "");
   const { listening, speaking } = managedSides(current, kept.noSpeech);
-  if (!listening && !speaking) return current;
+  // A dictation address that is the service's is gone with it, whatever voice mode listens to.
+  const dictationManaged = isManagedUrl(current.dictationUrl);
+  if (!listening && !speaking && !dictationManaged) return current;
   const back = {
-    ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "", dictationModel: kept.listening?.dictationModel ?? "", dictationUrl: kept.listening?.dictationUrl ?? "" } : {}),
+    ...(listening ? { whisperUrl: kept.listening?.whisperUrl ?? DEFAULT_WHISPER_URL, sttModel: kept.listening?.sttModel ?? "" } : {}),
+    // The dictation pair that was there before goes back, unless they set up an address of their own since: that one stays with its model.
+    ...(listening && !ownDictation(current) ? { dictationModel: kept.listening?.dictationModel ?? "", dictationUrl: kept.listening?.dictationUrl ?? "" } : {}),
+    ...(!listening && dictationManaged ? { dictationModel: "", dictationUrl: "" } : {}),
     ...(speaking ? { breezeUrl: kept.speaking?.breezeUrl ?? DEFAULT_BREEZE_URL, runtime: kept.speaking?.runtime ?? "breeze" } : {}),
   };
   // Voice was switched on by the connect, and is left on only where everything put back is what the user had, it was on when each
