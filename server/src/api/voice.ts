@@ -8,9 +8,11 @@ import { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS, voiceInstr
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
+import { createHash } from "node:crypto";
 import express, { type Router } from "express";
 import { getSession, getSetting, putSetting } from "../db.js";
 import { agentOf, defaultAgent } from "../agents.js";
+import { errorLineKey, readErrorLine, saveErrorLine, touchErrorLine } from "../voice-error-line.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
 export interface VoiceConfig {
@@ -279,6 +281,131 @@ export function disconnectManagedVoice() {
   saveVoice(saved);
   return saved;
 }
+/**
+ * The settings a chat speaks with: the voice of the agent the chat is with, where it has one of its own (the first agent's for a
+ * chat in a project, as its avatar is). An agent's voice is one of Kokoro's or one from the library, and is used by the runtime
+ * it belongs to.
+ */
+function speechSettings(sessionId: string): VoiceConfig {
+  const own = (agentOf(getSession(sessionId)?.workspace) ?? defaultAgent()).voice;
+  const saved = config();
+  return { ...saved, ...(own && saved.runtime === "kokoro" && isKokoroVoice(own) ? { kokoroVoice: own } : own && !isKokoroVoice(own) ? { voice: own } : {}) };
+}
+/** What the speech engine is asked, and `identity`: everything in it that decides how the phrase sounds. */
+interface SpeechRequest { json?: Record<string, unknown>; form?: FormData; identity: unknown }
+async function speechRequest(settings: VoiceConfig, text: string): Promise<SpeechRequest> {
+  // Resolve the voice once: a reference clip is up to a megabyte, and only
+  // the runtime that is about to be called should pay to carry it.
+  let instruction = settings.instruction;
+  let reference: { audio: Buffer; transcript: string; filename: string } | undefined;
+  // Kokoro speaks with a voice of its own and reads no library voice.
+  if (settings.runtime !== "kokoro" && settings.voice !== "design") {
+    const preset = readVoice(settings.voice);
+    instruction = preset.instruction;
+    if (preset.audio) reference = { audio: preset.audio, transcript: preset.transcript, filename: "reference.wav" };
+  }
+  // Chatterbox clones a speaker; it has no designed or built-in voice.
+  // validateConfig refuses this combination on save; a config written before
+  // that check, or by the managed connect, still reaches here.
+  if (settings.runtime === "chatterbox" && !reference)
+    throw new Error("Chatterbox speaks with a reference clone: choose a voice with a recording");
+  let json: Record<string, unknown> | undefined;
+  if (settings.runtime === "kokoro") {
+    // Kokoro has no streaming mode in audio.cpp either, and is fast enough that a phrase is ready
+    // soon after it is asked for. The voice names the language, so none is sent.
+    json = { model: "kokoro", input: text, voice: settings.kokoroVoice ?? DEFAULT_KOKORO_VOICE, speed: settings.speed ?? 1, response_format: "wav", options: { seed: "42" } };
+  } else if (settings.runtime === "chatterbox") {
+    // Chatterbox has no streaming mode in audio.cpp: one phrase, one WAV.
+    // The browser buffers each phrase before playing it either way.
+    json = { model: "chatterbox", input: spokenNumbers(text, settings.language), language: settings.language,
+      response_format: "wav", options: { exaggeration: String(settings.exaggeration ?? 0.5), seed: "42" },
+      voice_ref: { type: "base64", data: reference!.audio.toString("base64") } };
+  } else if (settings.runtime === "audio-cpp") {
+    json = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
+    if (reference) { json.voice_ref = { type: "base64", data: reference.audio.toString("base64") }; json.reference_text = reference.transcript; }
+  }
+  if (json) return { json, identity: { url: settings.breezeUrl, runtime: settings.runtime, json } };
+  const form = new FormData();
+  form.set("text", text); form.set("instruction", instruction); form.set("cfg_scale", String(settings.cfgScale));
+  if (reference) {
+    form.set("ref_audio", new Blob([new Uint8Array(reference.audio)], { type: "audio/wav" }), reference.filename);
+    form.set("ref_text", reference.transcript);
+  }
+  return { form, identity: { url: settings.breezeUrl, runtime: settings.runtime, text, instruction, cfgScale: settings.cfgScale, reference: reference && { transcript: reference.transcript, audio: createHash("sha256").update(reference.audio).digest("hex") } } };
+}
+/** Asks the engine, and keeps one request pending where it is busy, with the time that took. */
+async function postSpeech(settings: VoiceConfig, request: SpeechRequest, signal: AbortSignal): Promise<{ upstream: Response; busyMs: number }> {
+  let busyMs = 0;
+  let upstream: Response;
+  // Cancellation may leave Breeze finishing its current GPU operation.
+  // Keep one browser request pending instead of exposing normal contention.
+  do {
+    const attemptStarted = performance.now();
+    upstream = await fetch(settings.breezeUrl, { method: "POST", body: request.json ? JSON.stringify(request.json) : request.form!, headers: request.json ? { "Content-Type": "application/json" } : undefined, redirect: "error", signal });
+    if (upstream.status !== 409) break;
+    await upstream.body?.cancel();
+    await delay(750, undefined, { signal });
+    busyMs += performance.now() - attemptStarted;
+  } while (true);
+  return { upstream, busyMs };
+}
+/** Refuses what Breeze answered with when it is not 24 kHz PCM, before any of it is passed on or kept. */
+function checkBreezePcm(upstream: Response, settings: VoiceConfig) {
+  const type = upstream.headers.get("content-type");
+  if (!type?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && type?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
+  const rate = upstream.headers.get("x-sample-rate");
+  if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
+}
+/** One whole phrase as a WAV, for what is kept rather than streamed. */
+async function speechWav(settings: VoiceConfig, request: SpeechRequest, signal: AbortSignal): Promise<Buffer> {
+  const { upstream } = await postSpeech(settings, request, signal);
+  const runtimeName = settings.runtime === "chatterbox" ? "Chatterbox" : settings.runtime === "kokoro" ? "Kokoro" : "Breeze";
+  if (!upstream.ok) throw new Error(`${runtimeName} returned HTTP ${upstream.status}`);
+  if (settings.runtime === "chatterbox" || settings.runtime === "kokoro") {
+    if (!/^audio\/(wav|x-wav|wave|vnd\.wave)\b/.test(upstream.headers.get("content-type") ?? "")) throw new Error(`Expected WAV audio from the ${runtimeName} API`);
+    const wav = Buffer.from(await upstream.arrayBuffer());
+    wavPcm(wav, runtimeName);
+    return wav;
+  }
+  checkBreezePcm(upstream, settings);
+  return pcmWav(Buffer.from(await upstream.arrayBuffer()));
+}
+/** The line of a stored phrase: a short one, as the engine is asked for it at every start. */
+function lineText(value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 200) throw new Error("The line must contain 1–200 characters");
+  return value;
+}
+const makingLines = new Map<string, Promise<boolean>>();
+/**
+ * The waits between the tries at making the error line within one start: the speech model is often just coming up when voice
+ * mode begins. A line still missing after the last try is made again at the next start (nothing is stored for it), not at error time.
+ */
+export const errorLineRetry = { waitsMs: [1000, 3000] };
+/** How long an error waits for a line that is still being made. */
+export const errorLineWaitMs = 8000;
+/** The stored line, where there is one that a player can read: a half-written or damaged file counts as none. */
+function storedErrorLine(key: string): Buffer | undefined {
+  const wav = readErrorLine(key);
+  if (!wav) return undefined;
+  try { wavPcm(wav, "The stored error line"); } catch { return undefined; }
+  // Used, so it is among the last to be cleared away.
+  touchErrorLine(key);
+  return wav;
+}
+async function makeErrorLine(settings: VoiceConfig, request: SpeechRequest, key: string): Promise<void> {
+  const tries = errorLineRetry.waitsMs.length + 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      saveErrorLine(key, await speechWav(settings, request, AbortSignal.timeout(120000)));
+      return;
+    } catch (e) {
+      const last = attempt >= tries;
+      console.warn(`[voice] the spoken error line could not be made (try ${attempt} of ${tries}): ${(e as Error).message}${last ? "; it is tried again when voice mode next starts" : ""}`);
+      if (last) throw e;
+      await delay(errorLineRetry.waitsMs[attempt - 1]);
+    }
+  }
+}
 export function voiceRouter(): Router {
   const router = express.Router();
   // The stored GPU choice, in place before anything asks the service to start.
@@ -402,65 +529,14 @@ export function voiceRouter(): Router {
     const text = req.body?.text;
     if (typeof text !== "string" || !text.trim() || text.length > 600)
       return res.status(400).json({ error: "Speech text must contain 1–600 characters" });
-    // The voice of the agent the chat is with, where it has one of its own: the
-    // first agent's for a chat in a project, as its avatar is.
-    // An agent's voice is one of Kokoro's or one from the library, and is used by the runtime it belongs to.
-    const own = (agentOf(getSession(req.params.id)?.workspace) ?? defaultAgent()).voice;
-    const saved = config();
-    const settings = { ...saved, ...(own && saved.runtime === "kokoro" && isKokoroVoice(own) ? { kokoroVoice: own } : own && !isKokoroVoice(own) ? { voice: own } : {}) };
+    const settings = speechSettings(req.params.id);
     const controller = new AbortController();
     res.on("close", () => controller.abort());
     try {
-      // Resolve the voice once: a reference clip is up to a megabyte, and only
-      // the runtime that is about to be called should pay to carry it.
-      let instruction = settings.instruction;
-      let reference: { audio: Buffer; transcript: string; filename: string } | undefined;
-      // Kokoro speaks with a voice of its own and reads no library voice.
-      if (settings.runtime !== "kokoro" && settings.voice !== "design") {
-        const preset = readVoice(settings.voice);
-        instruction = preset.instruction;
-        if (preset.audio) reference = { audio: preset.audio, transcript: preset.transcript, filename: "reference.wav" };
-      }
-      // Chatterbox clones a speaker; it has no designed or built-in voice.
-      // validateConfig refuses this combination on save; a config written before
-      // that check, or by the managed connect, still reaches here.
-      if (settings.runtime === "chatterbox" && !reference)
-        throw new Error("Chatterbox speaks with a reference clone: choose a voice with a recording");
-      let form: FormData | undefined;
-      let json: Record<string, unknown> | undefined;
-      if (settings.runtime === "kokoro") {
-        // Kokoro has no streaming mode in audio.cpp either, and is fast enough that a phrase is ready
-        // soon after it is asked for. The voice names the language, so none is sent.
-        json = { model: "kokoro", input: text, voice: settings.kokoroVoice ?? DEFAULT_KOKORO_VOICE, speed: settings.speed ?? 1, response_format: "wav", options: { seed: "42" } };
-      } else if (settings.runtime === "chatterbox") {
-        // Chatterbox has no streaming mode in audio.cpp: one phrase, one WAV.
-        // The browser buffers each phrase before playing it either way.
-        json = { model: "chatterbox", input: spokenNumbers(text, settings.language), language: settings.language,
-          response_format: "wav", options: { exaggeration: String(settings.exaggeration ?? 0.5), seed: "42" },
-          voice_ref: { type: "base64", data: reference!.audio.toString("base64") } };
-      } else if (settings.runtime === "audio-cpp") {
-        json = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
-        if (reference) { json.voice_ref = { type: "base64", data: reference.audio.toString("base64") }; json.reference_text = reference.transcript; }
-      } else {
-        form = new FormData();
-        form.set("text", text); form.set("instruction", instruction); form.set("cfg_scale", String(settings.cfgScale));
-        if (reference) {
-          form.set("ref_audio", new Blob([new Uint8Array(reference.audio)], { type: "audio/wav" }), reference.filename);
-          form.set("ref_text", reference.transcript);
-        }
-      }
+      const request = await speechRequest(settings, text);
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]);
-      let upstream: Response;
-      // Cancellation may leave Breeze finishing its current GPU operation.
-      // Keep one browser request pending instead of exposing normal contention.
-      do {
-        const attemptStarted=performance.now();
-        upstream = await fetch(settings.breezeUrl, { method: "POST", body: json ? JSON.stringify(json) : form!, headers: json ? { "Content-Type": "application/json" } : undefined, redirect: "error", signal });
-        if (upstream.status !== 409) break;
-        await upstream.body?.cancel();
-        await delay(750, undefined, { signal });
-        busyMs+=performance.now()-attemptStarted;
-      } while (true);
+      const { upstream, busyMs: busy } = await postSpeech(settings, request, signal);
+      busyMs = busy;
       const runtimeName = settings.runtime === "chatterbox" ? "Chatterbox" : settings.runtime === "kokoro" ? "Kokoro" : "Breeze";
       if (!upstream.ok) throw new Error(`${runtimeName} returned HTTP ${upstream.status}`);
       if (settings.runtime === "chatterbox" || settings.runtime === "kokoro") {
@@ -472,9 +548,7 @@ export function voiceRouter(): Router {
         if (req.get("accept") !== "audio/pcm") return res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
         return res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store" }).send(pcm);
       }
-      if (!upstream.headers.get("content-type")?.startsWith("audio/pcm") && !(settings.runtime === "audio-cpp" && upstream.headers.get("content-type")?.startsWith("application/octet-stream"))) throw new Error("Expected PCM audio from the Breeze API");
-      const rate = upstream.headers.get("x-sample-rate");
-      if (rate && rate !== "24000") throw new Error(`Unsupported Breeze sample rate: ${rate}`);
+      checkBreezePcm(upstream, settings);
       if (req.get("accept") === "audio/pcm") {
         if (!upstream.body) throw new Error("Breeze returned no audio stream");
         res.set({ "Content-Type": "audio/pcm", "X-Sample-Rate": "24000", "X-Sample-Format": "s16le", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
@@ -503,6 +577,43 @@ export function voiceRouter(): Router {
         else res.status(502).json({ error: (e as Error).message });
       }
     }
+  });
+  /**
+   * Makes the spoken error line of voice mode, once: when it is there for this voice and engine nothing is asked of the engine.
+   * The page calls it as voice mode starts; at error time only the stored file is read.
+   */
+  router.post("/sessions/:id/voice/error-line", async (req, res) => {
+    if (config().runtime === "none") return res.status(409).json({ error: "Speech synthesis is not installed: replies are not spoken" });
+    let text: string;
+    try { text = lineText(req.body?.text); } catch (e) { return res.status(400).json({ error: (e as Error).message }); }
+    try {
+      const settings = speechSettings(req.params.id);
+      const request = await speechRequest(settings, text);
+      const key = errorLineKey(request.identity);
+      if (storedErrorLine(key)) return res.json({ ready: true, generated: false });
+      // Two pages starting together ask the engine once.
+      let making = makingLines.get(key);
+      if (!making) {
+        making = makeErrorLine(settings, request, key).then(() => true).finally(() => makingLines.delete(key));
+        makingLines.set(key, making);
+      }
+      await making;
+      res.json({ ready: true, generated: true });
+    } catch (e) { res.status(502).json({ error: (e as Error).message }); }
+  });
+  /** The stored line for the voice the chat speaks with now: 404 where there is none, which is then said in writing only. */
+  router.get("/sessions/:id/voice/error-line", async (req, res) => {
+    try {
+      const text = lineText(req.query.text);
+      const key = errorLineKey((await speechRequest(speechSettings(req.params.id), text)).identity);
+      // The line may still be on its way from the start of voice mode (the engine warming up, or on a later try): wait for it,
+      // for about as long as the tries take, rather than say it was never made.
+      const making = makingLines.get(key);
+      if (making) await Promise.race([making.catch(() => {}), delay(errorLineWaitMs)]);
+      const wav = storedErrorLine(key);
+      if (!wav) return res.status(404).json({ error: "The spoken error line has not been made for this voice yet" });
+      res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(wav);
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
   return router;
 }

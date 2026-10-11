@@ -20,7 +20,7 @@ import { t, tp, tx } from "../i18n";
  * Projects are folders made on purpose, each with instructions of its own that
  * end up as the folder's AGENTS.md, and tools of its own: which of them its
  * chats start with. Opening one opens its latest chat, or starts one. Home,
- * where "New" starts a chat, is not a project and is not listed.
+ * where "New" starts a chat unless another agent is picked for it, is not a project and is not listed.
  */
 export function ProjectsPage({
   sessions,
@@ -156,7 +156,7 @@ export function ProjectsPage({
             title={t("Projects")}
             description={
               <>
-                {t("New chats start in Home. A project is a folder of its own with instructions for the agent — saved as its AGENTS.md — for work that should stay together.")}
+                {t("New starts chats in Home, or with the agent you picked for it. A project is a folder of its own with instructions for the agent — saved as its AGENTS.md — for work that should stay together.")}
               </>
             }
             action={
@@ -183,7 +183,7 @@ export function ProjectsPage({
             <ul className="stagger-in mt-4 space-y-1">
               {projects.length === 0 && (
                 <li className="py-12 text-center text-sm text-fg-subtle">
-                  {t("No projects yet. New chats start in Home; make a project for work that should stay together.")}
+                  {t("No projects yet. New starts chats in Home, or with the agent you picked for it; make a project for work that should stay together.")}
                 </li>
               )}
               {projects.map((p) => (

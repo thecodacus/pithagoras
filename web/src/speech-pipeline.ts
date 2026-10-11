@@ -1,12 +1,12 @@
 export type PreparedSpeech = ((signal: AbortSignal) => Promise<void>) & { completed?: Promise<void> };
-type Phrase = {text:string;kind:'reply'|'status'};
+type Phrase = {text:string;kind:'reply'|'status'|'error'};
 type Run = { controller: AbortController; text: Phrase[]; audio: {phrase:Phrase;play:PreparedSpeech}[]; generating?: Phrase; playing?: Phrase };
 
 /** One TTS producer and one audio consumer, running independently in sentence order. */
 export class SpeechPipeline {
   private run = this.fresh();
   constructor(
-    private synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>,
+    private synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status'|'error') => Promise<PreparedSpeech>,
     private changed: () => void,
     private error: (error: unknown) => void,
     private sequential = false,
@@ -15,7 +15,7 @@ export class SpeechPipeline {
   ) {}
   private fresh(): Run { return { controller: new AbortController(), text: [], audio: [] }; }
   get busy() { const r = this.run; return !!(r.generating || r.playing || r.text.length || r.audio.length); }
-  enqueue(text: string[],kind:'reply'|'status'='reply') { this.run.text.push(...text.map(text=>({text,kind})));  this.pump(this.run); }
+  enqueue(text: string[],kind:'reply'|'status'|'error'='reply') { this.run.text.push(...text.map(text=>({text,kind})));  this.pump(this.run); }
   /** Stops at once, and returns the replies not yet heard to the end — the one cut off included. */
   cancel(): string[] {
     const previous = this.run;

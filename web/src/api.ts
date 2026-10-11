@@ -128,6 +128,8 @@ export interface Agent {
   sandboxUser: string;
   /** The Home there always was: the one chats go to when none is named, which cannot be deleted. */
   first: boolean;
+  /** Whether the New button starts a chat with it. */
+  newChats: boolean;
   initialised: boolean;
   chats: number;
   /** The channels that talk as it. */
@@ -456,7 +458,7 @@ export const api = {
   logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
-  /** Without a workspace the chat starts in Home. */
+  /** Without a workspace the chat starts in the home of the agent New is set to. */
   createSession: (workspace?: string, title?: string) =>
     json<Session>("/api/sessions", {
       method: "POST",
@@ -464,7 +466,7 @@ export const api = {
     }),
   projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
   /** Only where Home is and which projects there are, without their counts: see /api/projects. */
-  places: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string }[]; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
+  places: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string; newChats?: boolean }[]; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
   /** `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them. */
   createProject: (name: string, instructions?: string, toolsOff?: string[]) =>
     json<Project & { toolsError?: string }>("/api/projects", {
@@ -791,6 +793,14 @@ export const api = {
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
   /** Up to and including `through`, the newest entry the caller has seen. */
   clearAudit: (through: number) => json<{ removed: number }>(`/api/audit?through=${through}`, { method: "DELETE" }),
+  /** What the server printed; with `since`, only what came after that line. */
+  logs: (opts: { since?: number; level?: LogLevel; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.since !== undefined) q.set("since", String(opts.since));
+    if (opts.level) q.set("level", opts.level);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    return json<LogsResponse>(`/api/logs?${q}`);
+  },
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
@@ -872,6 +882,9 @@ export const api = {
       `/api/agents/${encodeURIComponent(id)}?folder=${folder}`,
       { method: "DELETE" }
     ),
+  /** On makes it the agent the New button starts with; off hands that back to the first agent. */
+  setNewChats: (agent: string, on: boolean) =>
+    json<Agent>(`/api/agents/${encodeURIComponent(agent)}/new-chats`, { method: "PUT", body: JSON.stringify({ on }) }),
   setAgentVoice: (agent: string, voice: string) =>
     json<Agent>(`/api/agents/${encodeURIComponent(agent)}/voice`, { method: "PUT", body: JSON.stringify({ voice }) }),
   agentSkills: (agent: string) => json<{ folder: string; skills: AgentSkill[] }>(`/api/agents/${encodeURIComponent(agent)}/skills`),
@@ -898,8 +911,6 @@ export const api = {
       `/api/sessions/${id}/events/before?before=${before}&limit=${limit}`
     ),
   session: (id: string) => json<Session>(`/api/sessions/${id}`),
-  startAgentChat: (agent: string, title?: string) =>
-    json<Session>("/api/agent/sessions", { method: "POST", body: JSON.stringify({ agent, title }) }),
 
   setHeartbeat: (agent: string, heartbeat: { minutes: number; quietStart: string; quietEnd: string }) =>
     json<Agent>(`/api/agents/${encodeURIComponent(agent)}/heartbeat`, { method: "PUT", body: JSON.stringify(heartbeat) }),
@@ -1310,6 +1321,25 @@ export interface ToolRule {
   person_key: string | null;
   note: string;
   created_at: string;
+}
+
+export type LogLevel = "info" | "warn" | "error";
+
+/** One line the server printed, for Settings → Logs. */
+export interface LogLine {
+  id: number;
+  at: string;
+  level: LogLevel;
+  text: string;
+}
+
+/** `boot` changes when the server starts again, and the ids with it. */
+export interface LogsResponse {
+  boot: string;
+  last: number;
+  /** Lines after `since` were let go before they were read, so `lines` does not join what the page holds. */
+  gap?: boolean;
+  lines: LogLine[];
 }
 
 /** One decision the guard made, for the audit view. */

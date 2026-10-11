@@ -404,6 +404,80 @@ test('the conversation window renders a reply as markdown, also while it is writ
   }
 });
 
+test('a model error in voice mode opens the conversation on it and plays the line kept at the start, without asking the speech model', async ({ page }) => {
+  const asked: string[] = [], made: string[] = [], played: string[] = [];
+  await page.route('**/voice/speech', route => { asked.push(route.request().postData() ?? ''); return route.fulfill({ body: sample, contentType: 'audio/wav' }); });
+  await page.route('**/voice/error-line**', route => {
+    if (route.request().method() === 'POST') { made.push(route.request().postData() ?? ''); return route.fulfill({ json: { ready: true, generated: true } }); }
+    played.push(decodeURIComponent(new URL(route.request().url()).searchParams.get('text') ?? ''));
+    return route.fulfill({ body: sample, contentType: 'audio/wav' });
+  });
+  await start(page);
+  // Made as voice mode started, in the words it will say.
+  await expect.poll(() => made).toEqual([JSON.stringify({ text: 'An error occurred.' })]);
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  // Opened by itself, with the error written in it.
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
+  await expect(conversation.getByRole('alert')).toHaveText('Model error: the provider is down');
+  // And said: the kept line, not the error's own words, and not made again.
+  await expect.poll(() => played).toEqual(['An error occurred.']);
+  await settled(page);
+  expect(asked).toEqual([]);
+});
+
+test('without the kept line the error is shown in writing only, and said so', async ({ page }) => {
+  const asked: string[] = [];
+  await page.route('**/voice/speech', route => { asked.push(route.request().postData() ?? ''); return route.fulfill({ body: sample, contentType: 'audio/wav' }); });
+  // The speech model was not there when voice mode started: nothing was made, and nothing is found.
+  await page.route('**/voice/error-line**', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 503' } })
+    : route.fulfill({ status: 404, json: { error: 'The spoken error line has not been made for this voice yet' } }));
+  await start(page);
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('alert')).toHaveText('Model error: the provider is down');
+  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible();
+  // The speech model is not asked as a way round it.
+  expect(asked).toEqual([]);
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
+});
+
+async function missingErrorLine(page: import('@playwright/test').Page) {
+  await page.route('**/voice/error-line**', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 503' } })
+    : route.fulfill({ status: 404, json: { error: 'The spoken error line has not been made for this voice yet' } }));
+  await start(page);
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible();
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  return page.getByRole('alert').filter({ hasText: 'The spoken error line is not available' });
+}
+
+test('the notice about the missing error line is still there after voice mode ends, then fades by itself', async ({ page }) => {
+  const notice = await missingErrorLine(page);
+  await expect(notice).toBeVisible();
+  await expect(notice).toBeHidden({ timeout: 9000 });
+});
+
+test('the notice about the missing error line goes at once when clicked', async ({ page }) => {
+  const notice = await missingErrorLine(page);
+  await expect(notice).toBeVisible();
+  await notice.click();
+  await expect(notice).toBeHidden({ timeout: 1000 });
+});
+
+test('an error from before voice mode, coming in late, does not open the conversation', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Replay an old error' }).click();
+  await expect(page.getByTestId('workspace')).toContainText('Model error: from yesterday');
+  await settled(page);
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
+  // A new one still does.
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
+});
+
 test('Escape in the confirmation of a link in a reply closes it and neither stops the agent nor ends voice mode', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Show the conversation' }).click();

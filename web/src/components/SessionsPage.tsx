@@ -11,7 +11,7 @@ import { StatusDot, workingText } from "./StatusDot";
 import { TitleInput } from "./TitleInput";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import { RowsSkeleton } from "./Skeleton";
-import { HOME, folderFrom, folderKeys, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { folderFrom, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { useFlip } from "../motion";
 import { useNow } from "../use-now";
@@ -42,7 +42,7 @@ export const SessionsPage = memo(function SessionsPage({
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
   places?: Places | null;
   onSelect: (id: string) => void;
-  /** A chat in `workspace`, or in Home without one, opened. */
+  /** A chat in `workspace`, or where New starts without one, opened. */
   onNewChat?: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onPin: (id: string, pinned: boolean) => Promise<void>;
@@ -87,7 +87,7 @@ export const SessionsPage = memo(function SessionsPage({
   const matches = useMemo(() => filterSessions(sessions, query, folderOf), [sessions, query, folderOf]);
 
   const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
-  const hasProjects = !!places && places.projects.length > 0;
+  const hasPlaces = !!places && hasMoreThanHome(places);
   const folders = useMemo(() => (places ? sortFolders(groupByFolder(matches, places), sort, order) : []), [matches, places, sort, order]);
   const [params, setParams] = useSearchParams();
   /** The one folder shown, with all its chats, when a link or its filter asked for it. */
@@ -108,7 +108,7 @@ export const SessionsPage = memo(function SessionsPage({
       return next;
     });
   const searching = query.trim() !== "";
-  const byFolder = asked === null && grouping === "folders" && hasProjects;
+  const byFolder = asked === null && grouping === "folders" && hasPlaces;
   // Every folder, not only those a search shows: what is kept for one hidden by it must not be let go.
   const allKeys = useMemo(() => (places ? folderKeys(places) : undefined), [places]);
   const openFolders = useOpenFolders("sessionsFoldersOpen", () => true, searching, allKeys);
@@ -253,7 +253,7 @@ export const SessionsPage = memo(function SessionsPage({
               </span>
             </div>
           ) : (
-            hasProjects && (
+            hasPlaces && (
               <div className="mt-3">
                 <ChatsHeading size="md" label={byFolder ? t("Folders") : t("All chats")} grouping={grouping} sort={sort} onGrouping={setGrouping} onSort={setSort} />
               </div>
@@ -277,7 +277,7 @@ export const SessionsPage = memo(function SessionsPage({
                 isOpen={openFolders.isOpen}
                 onToggle={openFolders.toggle}
                 onMove={searching || !allKeys ? undefined : (keys, key, to) => move(keys, key, to, allKeys)}
-                onNewChat={onNewChat ? (f) => start(f.key === HOME ? undefined : f.path!) : undefined}
+                onNewChat={onNewChat ? (f) => start(f.path || undefined) : undefined}
                 extra={(f) => (
                   <button
                     type="button"
