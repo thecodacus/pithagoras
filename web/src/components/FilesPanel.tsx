@@ -135,8 +135,8 @@ export const FilesPanel = memo(function FilesPanel({
   const [showHidden, setShowHidden] = useState(savedShowHidden);
   const [rendered, setRendered] = useState(savedRendered);
   // A file made to be written in, or empty, opens as the source whatever the saved choice is: a blank page cannot be typed into. The choice itself is left alone.
-  // An edit brought back for a file that was empty on disk is the same case: it comes back as the source.
-  const [writing, setWriting] = useState(() => !!left && !left.saved);
+  // An edit brought back for a file that was empty on disk is the same case: it comes back as the source, also after it was saved with text and edited again.
+  const [writing, setWriting] = useState(() => left?.writing ?? (!!left && !left.saved));
   const asPage = rendered && !writing;
   // The chat's full path is not drawn in the sidebar or the chat's header any more: it is here, on request.
   const [showPath, setShowPath] = useState(false);
@@ -184,8 +184,8 @@ export const FilesPanel = memo(function FilesPanel({
   // Kept while there are changes, for a panel that is unmounted with them: switching chat or leaving the page.
   useEffect(() => {
     if (!keepDraft) return;
-    keepFileDraft(sessionId, dirty && file ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size } : null);
-  }, [keepDraft, sessionId, dirty, file, draft]);
+    keepFileDraft(sessionId, dirty && file ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size, writing } : null);
+  }, [keepDraft, sessionId, dirty, file, draft, writing]);
   // Written before it goes: unmounting must not lose what was typed a moment ago. Closing the panel on purpose forgets it first.
   useEffect(() => (keepDraft ? () => flushFileDraft(sessionId) : undefined), [keepDraft, sessionId]);
   // An edit brought back may be of a file that changed meanwhile: told the way a save would, instead of at the save.

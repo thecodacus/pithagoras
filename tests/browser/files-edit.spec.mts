@@ -205,6 +205,22 @@ test('a kept edit of an empty markdown file comes back as the source, and the sa
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await expect(box(page)).toHaveValue('# Typed\n');
   expect(await page.evaluate(() => localStorage.getItem('filesMarkdownRendered'))).toBeNull();
+  // Saved with text, then edited again: still the file that was written in, so it comes back as the source too.
+  await box(page).fill('# a\n');
+  await save(page).click();
+  await expect(save(page)).toBeDisabled();
+  await box(page).fill('# a\nsecond\n');
+  await expect(page.getByTitle('Not saved')).toBeVisible();
+  await second(page);
+  await first(page);
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(box(page)).toHaveValue('# a\nsecond\n');
+  await expect(page.getByRole('region', { name: 'Rendered notes.md' })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('filesMarkdownRendered'))).toBeNull();
+  await page.reload();
+  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(box(page)).toHaveValue('# a\nsecond\n');
+  expect(await page.evaluate(() => localStorage.getItem('filesMarkdownRendered'))).toBeNull();
 });
 
 test('a new markdown file is made to be written in: it opens as the source whatever was chosen, and typing works', async ({ page }) => {
