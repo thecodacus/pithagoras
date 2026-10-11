@@ -238,7 +238,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       if (!ptt || !matches(bindings["voice.hold"], e)) return;
       e.preventDefault(); e.stopPropagation(); onHold(false);
     };
-    const away = () => { if (keys.current.ptt) keys.current.onHold(false); };
+    const away = () => { holder.current = null; if (keys.current.ptt) keys.current.onHold(false); };
     window.addEventListener("keydown", down, true); window.addEventListener("keyup", up, true); window.addEventListener("blur", away);
     return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", away); };
   }, []);
@@ -292,6 +292,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   };
   // A press on the microphone button or the orb holds the key down; the pointer is captured so that sliding off, or a touch the phone turns into a scroll or a long-press menu, still ends it where it began. Only the finger that started the hold ends it: a second one lifting is not the first letting go.
   const holder = useRef<number | null>(null);
+  // Turning push-to-talk off mid-hold takes the handlers away, so the lift never arrives; the next hold must not find the old one still there.
+  useEffect(() => { holder.current = null; }, [ptt]);
   const release = (e: ReactPointerEvent<HTMLElement>) => { if (holder.current !== e.pointerId) return; holder.current = null; onHold(false); };
   const holdHandlers = {
     onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { e.preventDefault(); if (holder.current !== null) return; holder.current = e.pointerId; e.currentTarget.setPointerCapture(e.pointerId); onHold(true); },
