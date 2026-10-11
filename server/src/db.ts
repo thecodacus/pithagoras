@@ -11,6 +11,7 @@ import path from "node:path";
 import { isWithinText } from "./within.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
+import { removeThumbs } from "./image-thumbs.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
@@ -847,7 +848,9 @@ function removeSession(id: string): void {
   if (real) d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
   // What is left is what could not be kept, and what was made of it no longer names it.
   d.prepare("UPDATE images SET source_id = NULL WHERE source_id IN (SELECT id FROM images WHERE session_id = ?)").run(id);
+  const left = (d.prepare("SELECT id FROM images WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
   d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
+  removeThumbs(left);
 }
 
 /**

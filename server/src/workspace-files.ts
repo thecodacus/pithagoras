@@ -287,6 +287,9 @@ export function openPicture(base: string, rel: unknown): { fd: number; size: num
   }
 }
 
+/** The ETag a picture is sent with, and so the version of it a small copy says it was drawn from. */
+export const pictureTag = (size: number, modified: Date): string => `W/"${size.toString(16)}-${modified.getTime().toString(16)}"`;
+
 /**
  * A picture in the folder, read whole, for one that is sent on as it is, to an
  * image endpoint to be changed. Opened as a picture shown is: checked by its

@@ -758,9 +758,9 @@ export const api = {
   galleryFileUrl: (id: string) => `/api/images/${id}/file`,
   /** The small copy of a picture, when the gallery says there is one (`GalleryPicture.thumb`). */
   galleryThumbUrl: (id: string) => `/api/images/${id}/thumb`,
-  /** Keeps the small copy of a picture that this page made of it. */
-  putGalleryThumb: async (id: string, copy: Blob): Promise<void> => {
-    const res = await send(`/api/images/${id}/thumb`, { method: "PUT", headers: { "Content-Type": copy.type || "application/octet-stream" }, body: copy });
+  /** Keeps the small copy of a picture that this page made of it, from the file with this ETag; the portal refuses it when the file is another by now. */
+  putGalleryThumb: async (id: string, copy: Blob, version: string): Promise<void> => {
+    const res = await send(`/api/images/${id}/thumb`, { method: "PUT", headers: { "Content-Type": copy.type || "application/octet-stream", "X-Picture-Version": version }, body: copy });
     // Not shown to anyone: the tile keeps the file it has.
     if (!res.ok) throw new Error(`The portal refused the small copy (${res.status})`);
   },

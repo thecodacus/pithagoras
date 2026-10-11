@@ -221,8 +221,10 @@ one that was found, how it was made for the others) and how long ago.
   and sends it to the portal. From then on the tiles, and the pictures in the form of an
   edit, load that copy, which is a few tens of kilobytes instead of megabytes; the viewer
   still opens the whole file. Files of 48 KB or less and GIFs (which would stop moving) get
-  no copy. The copies are kept beside the gallery and go with the picture; a copy of a
-  picture in a chat's or another folder is dropped when its file is written over. Nothing
+  no copy, nor does a picture whose copy would not be much smaller than the file. The copies
+  are kept beside the gallery and go with the picture; a copy of a picture in a chat's or
+  another folder is dropped when its file is written over, and a copy drawn from a file that
+  was written over meanwhile is refused. Nothing
   needs setting up. Pictures in the chat itself are shown as they were.
 - **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*:
   all, made, changed, from this computer, not known. They are in the address

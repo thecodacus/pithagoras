@@ -6,13 +6,14 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
+import { removeThumbs, thumbFile, thumbsDir } from "./image-thumbs.js";
 import { OUTPUT_FORMATS, type OutputFormat } from "./image-settings.js";
 import { pictureSize } from "./picture-size.js";
 import { pictureExt } from "./prompt-images.js";
 import { listProjects } from "./projects.js";
 import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
 import { workspaceRoot } from "./workspaces.js";
-import { FileError, baseDir, openPicture, readPicture, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
+import { FileError, baseDir, openPicture, pictureTag, readPicture, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
 
 /**
  * The pictures of the Images page, in one list: the ones the page made itself
@@ -109,9 +110,7 @@ type ListedRow = Row & { chat_title: string | null };
 /** Where the page's own pictures are kept. */
 export const imagesDir = (): string => path.join(path.resolve(DATA_DIR), "images");
 
-/** Where the small copies are kept, one for each picture, under its id. */
-export const thumbsDir = (): string => path.join(path.resolve(DATA_DIR), "image-thumbs");
-const thumbFile = (id: string): string => path.join(thumbsDir(), `${id}.thumb`);
+export { thumbsDir };
 
 /** The params a row holds, kept to the fields that are known: what is in the database is the portal's own, but only as far as it is read back. */
 function readParams(text: string): PictureParams {
@@ -593,8 +592,7 @@ function forget(ids: string[]): void {
       unlink.run(id);
     }
   })();
-  // The small copy has no use without the picture.
-  for (const id of ids) rmSync(thumbFile(id), { force: true });
+  removeThumbs(ids);
 }
 
 /**
@@ -729,9 +727,11 @@ export const THUMB_MAX_BYTES = 512 * 1024;
  * file it is: a copy would stand still.
  *
  * The copy takes the time of the file it was made from, which is how a picture in a chat's folder
- * that was written over is told from the copy of the one before (see openThumb).
+ * that was written over is told from the copy of the one before (see openThumb). `version` is the
+ * ETag of the file the page drew the copy from: the file may have been written over between the
+ * page loading it and the copy arriving, and then the copy is of a picture that is not the file's.
  */
-export function saveThumb(id: string, bytes: Buffer): void {
+export function saveThumb(id: string, bytes: Buffer, version: string): void {
   const ext = pictureExt(bytes.subarray(0, 12));
   if (!ext || ext === "gif") throw new FileError("invalid", "A small copy is a PNG, JPEG or WebP picture");
   if (bytes.length > THUMB_MAX_BYTES) throw new FileError("too_large", `A small copy is at most ${THUMB_MAX_BYTES / 1024} KB`);
@@ -742,6 +742,7 @@ export function saveThumb(id: string, bytes: Buffer): void {
   try {
     if (opened.mimeType === "image/gif") throw new FileError("invalid", "A GIF is shown as the file it is");
     modified = fstatSync(opened.fd).mtime;
+    if (pictureTag(opened.size, modified) !== version) throw new FileError("conflict", "The picture was written over since the small copy was drawn");
   } finally {
     closeSync(opened.fd);
   }

@@ -247,8 +247,11 @@ export function imagesRouter(): Router {
   router.put("/images/:id/thumb", express.raw({ type: () => true, limit: THUMB_MAX_BYTES }), (req, res) => {
     const bytes: unknown = req.body;
     if (!Buffer.isBuffer(bytes) || !bytes.length) return res.status(400).json({ error: "There is no picture in the request" });
+    // The ETag of the file the copy was drawn from (the page reads it from the response it drew): without it a copy of an older file could be taken for the new one's.
+    const version = req.get("x-picture-version");
+    if (!version) return res.status(400).json({ error: "Say which version of the picture the small copy was drawn from" });
     try {
-      saveThumb(req.params.id, bytes);
+      saveThumb(req.params.id, bytes, version);
       res.json({ ok: true });
     } catch (e) {
       fail(res, e);

@@ -75,7 +75,7 @@ const feature = (over: Record<string, unknown> = {}) => {
 
 async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
   const pics = [...pictures];
-  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], thumbPuts: [] as { id: string; type: string | undefined; size: number }[], thumbGone: false, limit: 4 };
+  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], thumbPuts: [] as { id: string; type: string | undefined; size: number; version: string | undefined }[], thumbGone: false, limit: 4 };
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
@@ -143,7 +143,7 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
       const id = p.split('/')[3];
       const found = pics.find((x) => x.id === id);
       if (method === 'PUT') {
-        state.thumbPuts.push({ id, type: route.request().headers()['content-type'], size: route.request().postDataBuffer()?.length ?? 0 });
+        state.thumbPuts.push({ id, type: route.request().headers()['content-type'], size: route.request().postDataBuffer()?.length ?? 0, version: route.request().headers()['x-picture-version'] });
         if (found) found.thumb = true;
         return { ok: true };
       }
@@ -156,7 +156,8 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
     if (/^\/api\/images\/[0-9a-f]{12}\/file$/.test(p)) {
       const id = p.split('/')[3];
       state.files.push(id);
-      await route.fulfill({ body: svg(id), contentType: 'image/svg+xml' });
+      // The version the portal names the file by, which the copy says it was drawn from.
+      await route.fulfill({ body: svg(id), contentType: 'image/svg+xml', headers: { etag: `W/"${id}-1"` } });
       return DONE;
     }
   }, { settings: true });
@@ -2356,6 +2357,7 @@ test('a tile loads the picture\'s file once, and sends the small copy it drew of
   expect(p.state.thumbPuts[0].id).toBe(a.id);
   expect(p.state.thumbPuts[0].type).toMatch(/^image\/(webp|png)$/);
   expect(p.state.thumbPuts[0].size).toBeGreaterThan(0);
+  expect(p.state.thumbPuts[0].version, 'the copy says which version of the file it was drawn from').toBe(`W/"${a.id}-1"`);
   expect(p.state.files).toContain(a.id);
   expect(p.state.thumbFiles).toEqual([]);
 
@@ -2367,6 +2369,42 @@ test('a tile loads the picture\'s file once, and sends the small copy it drew of
   expect(p.state.thumbFiles).toContain(a.id);
   expect(p.state.files).toEqual([]);
   expect(p.state.thumbPuts.length).toBe(1);
+});
+
+// A browser that cannot encode WebP (Safari) answers toBlob with a PNG: the page stubs that.
+const noWebp = (page: Page, png: number) =>
+  page.addInitScript((pngBytes) => {
+    const original = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb, type, quality) {
+      if (type === 'image/webp') return cb(new Blob([new Uint8Array(pngBytes)], { type: 'image/png' }));
+      return original.call(this, cb, type, quality);
+    };
+  }, png);
+
+test('where the browser cannot make WebP the small copy is a JPEG, not the PNG it answers with', async ({ page }) => {
+  const a = pic({ prompt: 'On an iPhone', age: 5, bytes: 300_000 });
+  await noWebp(page, 400_000);
+  const p = await portal(page, { pictures: [a] });
+  await page.goto('/images');
+  await loaded(tile(page, 'On an iPhone').getByRole('img'));
+  await expect.poll(() => p.state.thumbPuts.length).toBe(1);
+  expect(p.state.thumbPuts[0].type).toBe('image/jpeg');
+  expect(p.state.thumbPuts[0].size).toBeLessThan(150_000);
+});
+
+test('a small copy that is not well below the file is not sent', async ({ page }) => {
+  const a = pic({ prompt: 'Already light', age: 5, bytes: 60_000 });
+  // The encoder gives back more than half of what the file weighs.
+  await page.addInitScript(() => {
+    HTMLCanvasElement.prototype.toBlob = function (cb) {
+      cb(new Blob([new Uint8Array(40_000)], { type: 'image/webp' }));
+    };
+  });
+  const p = await portal(page, { pictures: [a] });
+  await page.goto('/images');
+  await loaded(tile(page, 'Already light').getByRole('img'));
+  await page.waitForTimeout(500);
+  expect(p.state.thumbPuts).toEqual([]);
 });
 
 test('a small copy that is gone shows the file, and a new copy is sent; small files and animated ones get none', async ({ page }) => {

@@ -15,8 +15,8 @@ interface ImagePreviewProps {
   src?: string;
   /** A small copy of it, shown instead while there is one; the picture itself is loaded when it is not there. */
   thumbSrc?: string;
-  /** The picture itself has loaded (not its small copy): what a small copy is made from. */
-  onFullLoad?: (img: HTMLImageElement) => void;
+  /** The picture itself has loaded (not its small copy): a small copy is made of it. */
+  onFullLoad?: () => void;
   /** An edit's original: shown under the wait, and the picture arrives over it. */
   before?: string;
   /** Width over height of the picture to come, as far as it is known; a square until the picture itself says. */
@@ -84,7 +84,7 @@ export function ImagePreview({ state, edit = false, src: full, thumbSrc, onFullL
   const loadedNow = (el: HTMLImageElement) => {
     if (!src) return;
     setLoaded({ src, shape: shapeOf(el.naturalWidth, el.naturalHeight) });
-    if (src === full) onFullLoad?.(el);
+    if (src === full) onFullLoad?.();
   };
   // A picture that was there already may have loaded before this saw it.
   useEffect(() => {
