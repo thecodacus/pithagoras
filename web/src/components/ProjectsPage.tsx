@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LuBlocks, LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
+import { LuBlocks, LuBot, LuFileText, LuFolderGit2, LuFolderKanban, LuPlus, LuTrash2 } from "react-icons/lu";
 import { PageHeader } from "./PageHeader";
 import { RowsSkeleton } from "./Skeleton";
-import { api, ApiError, type Project, type ProjectContents, type Session } from "../api";
+import { api, ApiError, type Project, type ProjectAgent, type ProjectContents, type Session } from "../api";
+import { useCached } from "../settings-cache";
 import { deleteAsking, unsavedNotes } from "../unsaved";
 import { bytesLabel, slugify } from "../projects";
 import { within } from "../paths";
 import { when } from "../time";
 import { confirmDialog } from "./ConfirmDialog";
 import { Modal } from "./Modal";
-import { LoadFailed, inputCls, primarySmCls } from "./SettingsUi";
+import { Select } from "./Select";
+import { Field, LoadFailed, SwitchRow, inputCls, primarySmCls } from "./SettingsUi";
 import { ToolSwitches } from "./ToolSwitches";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
@@ -19,8 +21,10 @@ import { t, tp, tx } from "../i18n";
  *
  * Projects are folders made on purpose, each with instructions of its own that
  * end up as the folder's AGENTS.md, and tools of its own: which of them its
- * chats start with. Opening one opens its latest chat, or starts one. Home,
- * where "New" starts a chat, is not a project and is not listed.
+ * chats start with, and optionally an agent of its own: one with an agent carries
+ * its soul, user and memory into the project's chats, one without is a blank
+ * slate with only the instructions. Opening one opens its latest chat, or starts one. Home,
+ * where "New" starts a chat unless another agent is picked for it, is not a project and is not listed.
  */
 export function ProjectsPage({
   sessions,
@@ -41,6 +45,9 @@ export function ProjectsPage({
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
   const [toolsOf, setToolsOf] = useState<Project | null>(null);
+  const [agentOf, setAgentOf] = useState<Project | null>(null);
+  /** The agents a project can work with, from the same read as the list. */
+  const [agents, setAgents] = useState<AgentOption[]>([]);
 
   /** Why the first read failed: until there is a list, that is said where the list would be. */
   const [failed, setFailed] = useState<string | null>(null);
@@ -54,6 +61,7 @@ export function ProjectsPage({
           had.current = true;
           setFailed(null);
           setProjects(r.projects);
+          setAgents((r.agents ?? []).map((a) => ({ id: a.id, name: a.name })));
           setRoot(r.root);
         })
         .catch((e) => (had.current ? setError((e as Error).message) : setFailed((e as Error).message))),
@@ -156,7 +164,7 @@ export function ProjectsPage({
             title={t("Projects")}
             description={
               <>
-                {t("New chats start in Home. A project is a folder of its own with instructions for the agent — saved as its AGENTS.md — for work that should stay together.")}
+                {t("New starts chats in Home, or with the agent you picked for it. A project is a folder of its own with instructions for the agent — saved as its AGENTS.md — for work that should stay together.")}
               </>
             }
             action={
@@ -183,7 +191,7 @@ export function ProjectsPage({
             <ul className="stagger-in mt-4 space-y-1">
               {projects.length === 0 && (
                 <li className="py-12 text-center text-sm text-fg-subtle">
-                  {t("No projects yet. New chats start in Home; make a project for work that should stay together.")}
+                  {t("No projects yet. New starts chats in Home, or with the agent you picked for it; make a project for work that should stay together.")}
                 </li>
               )}
               {projects.map((p) => (
@@ -201,15 +209,17 @@ export function ProjectsPage({
                       {p.hasInstructions && (
                         <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">{t("instructions")}</span>
                       )}
+                      {p.agent && agents.some((a) => a.id === p.agent) && (
+                        <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent" title={t("Chats here start with the SOUL.md, PrimaryUser.md and memory of {agent}", { agent: agents.find((a) => a.id === p.agent)!.name })}>
+                          {t("with {agent}", { agent: agents.find((a) => a.id === p.agent)!.name })}
+                        </span>
+                      )}
                       {p.hasTools && (
                         <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent" title={t("Switches tools differently from the portal-wide default")}>
                           {t("tools")}
                         </span>
                       )}
                     </div>
-                    <p className="truncate font-mono text-[11px] text-fg-faint" title={p.path}>
-                      {p.path}
-                    </p>
                     <p className="truncate text-[11px] text-fg-faint">
                       {tp(p.sessions, "{n} chat", "{n} chats")}
                       {lastActive(p) ? ` · ${t("last {when}", { when: when(lastActive(p)!) })}` : ""}
@@ -237,6 +247,17 @@ export function ProjectsPage({
                       aria-label={t("Instructions for {name}", { name: p.name })}
                     >
                       <LuFileText className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAgentOf(p);
+                      }}
+                      className="rounded p-1.5 text-fg-subtle hover:text-accent"
+                      title={t("Agent and memory for this project's chats")}
+                      aria-label={t("Agent for {name}", { name: p.name })}
+                    >
+                      <LuBot className="h-3.5 w-3.5" />
                     </button>
                     <button
                       onClick={(e) => {
@@ -271,9 +292,10 @@ export function ProjectsPage({
       {creating && (
         <NewProject
           root={root}
+          agents={agents}
           onClose={() => setCreating(false)}
-          onCreate={async (name, instructions, toolsOff) => {
-            const project = await api.createProject(name, instructions, toolsOff);
+          onCreate={async (name, instructions, toolsOff, link) => {
+            const project = await api.createProject(name, instructions, toolsOff, link);
             setCreating(false);
             load();
             // The chats' folders have one more, even if its chat does not open.
@@ -305,6 +327,18 @@ export function ProjectsPage({
           }}
         />
       )}
+      {agentOf && (
+        <ProjectAgentChoice
+          project={agentOf}
+          agents={agents}
+          onClose={() => {
+            setAgentOf(null);
+            // The "with" mark on the row, and the sidebar's, are what was chosen here.
+            load();
+            onChanged();
+          }}
+        />
+      )}
       {toolsOf && (
         <ProjectTools
           project={toolsOf}
@@ -321,16 +355,22 @@ export function ProjectsPage({
 
 function NewProject({
   root,
+  agents,
   onClose,
   onCreate,
 }: {
   /** Where the folder will be made, so the preview is the whole path. */
   root: string;
+  agents: AgentOption[];
   onClose: () => void;
-  onCreate: (name: string, instructions: string, toolsOff?: string[]) => Promise<void>;
+  onCreate: (name: string, instructions: string, toolsOff?: string[], link?: { agent?: string; understory?: boolean }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
+  /** The agent it works with: "" for a blank slate, which is what a project was before there was a choice. */
+  const [agent, setAgent] = useState("");
+  const [understory, setUnderstory] = useState(true);
+  const features = useCached("feature-flags", api.featureFlags, { freshMs: 30_000 });
   /** The tools wanted off, once somebody has switched any; untouched, the project says nothing about tools. */
   const [toolsOff, setToolsOff] = useState<string[] | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -342,7 +382,8 @@ function NewProject({
     setBusy(true);
     setError(null);
     try {
-      await onCreate(name.trim(), instructions, toolsOff);
+      // Only what was chosen: a project made with the defaults says nothing of an agent or of Understory.
+      await onCreate(name.trim(), instructions, toolsOff, { ...(agent ? { agent } : {}), ...(understory ? {} : { understory: false }) });
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -354,7 +395,7 @@ function NewProject({
       title={t("New project")}
       subtitle={t("A folder of its own, with instructions the agent follows in it")}
       onClose={onClose}
-      unsaved={!busy && (!!name.trim() || !!instructions.trim() || toolsOff !== undefined)}
+      unsaved={!busy && (!!name.trim() || !!instructions.trim() || toolsOff !== undefined || !!agent || !understory)}
       footer={
         <div className="flex items-center justify-end gap-2">
           {error && <p role="alert" className="mr-auto text-xs text-danger">{error}</p>}
@@ -397,6 +438,16 @@ function NewProject({
           className={`${inputCls} mt-1 resize-y font-mono text-xs`}
         />
       </label>
+      <div className="mt-4">
+        <AgentChoice
+          agents={agents}
+          agent={agent}
+          onAgent={setAgent}
+          understory={understory}
+          onUnderstory={setUnderstory}
+          understoryAvailable={!!features.value?.understory.enabled}
+        />
+      </div>
       {/* Shut, like the sections of the voice settings: most projects start with
           the default, and sixty checkboxes would push the dialog off the screen.
           Mounted all the same, so what was loaded and switched is kept. */}
@@ -410,6 +461,65 @@ function NewProject({
         </div>
       </details>
     </Modal>
+  );
+}
+
+/** An agent a project can work with. */
+type AgentOption = { id: string; name: string };
+
+/**
+ * Who a project's chats are with: an agent, whose soul, user and memory go into
+ * them beside the project's own instructions, or nobody, a blank slate with
+ * only the instructions. And, where the portal has Understory, whether it is the
+ * project's memory: without it the agent's MEMORY.md is read instead.
+ */
+function AgentChoice({
+  agents,
+  agent,
+  onAgent,
+  understory,
+  onUnderstory,
+  understoryAvailable,
+  disabled,
+}: {
+  agents: AgentOption[];
+  /** The agent's id, "" for none. */
+  agent: string;
+  onAgent: (id: string) => void;
+  understory: boolean;
+  onUnderstory: (on: boolean) => void;
+  understoryAvailable: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="space-y-3">
+      <Field
+        label={t("Agent")}
+        hint={
+          agent
+            ? t("Its SOUL.md, PrimaryUser.md and memory go into this project's chats, next to the instructions. Its skills, voice and avatar are used too.")
+            : t("A blank slate: the chats have only the instructions, none of an agent's SOUL.md, PrimaryUser.md or memory.")
+        }
+      >
+        <Select
+          aria-label={t("Agent")}
+          value={agent}
+          onChange={onAgent}
+          disabled={disabled}
+          options={[{ value: "", label: t("None — a blank slate") }, ...agents.map((a) => ({ value: a.id, label: a.name, text: a.name }))]}
+        />
+      </Field>
+      {/* A blank slate has no agent whose memory it would be: it never has Understory, so there is nothing to switch. */}
+      {understoryAvailable && agent && (
+        <SwitchRow
+          title={t("Understory as memory")}
+          detail={t("Off: the chats do not get Understory's memory instructions, and the agent's MEMORY.md is read instead.")}
+          on={understory}
+          onChange={onUnderstory}
+          disabled={disabled}
+        />
+      )}
+    </div>
   );
 }
 
@@ -509,6 +619,63 @@ function Instructions({
           />
           <p className="mt-2 text-[11px] text-fg-subtle">
             {tx("Chats started after saving pick this up. One already open does after {command}. Leave it empty to remove the file.", { command: <code>/reload</code> })}
+          </p>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * Who the chats of a project are with. Saved as each choice is made, as the
+ * tools are, so there is nothing to confirm and no button to save. A chat that
+ * is open picks the change up after /reload.
+ */
+function ProjectAgentChoice({ project, agents, onClose }: { project: Project; agents: AgentOption[]; onClose: () => void }) {
+  const [now, setNow] = useState<ProjectAgent | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.projectAgent(project.name).then(
+      (r) => live && setNow(r),
+      (e) => live && setError((e as Error).message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [project.name]);
+
+  const change = async (what: { agent?: string | null; understory?: boolean }) => {
+    setError(null);
+    try {
+      setNow(await api.setProjectAgent(project.name, what));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <Modal
+      title={t("Agent · {name}", { name: project.name })}
+      subtitle={t("Whose SOUL.md, PrimaryUser.md and memory the chats in this project start with")}
+      onClose={onClose}
+    >
+      {error && <p role="alert" className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
+      {now === null ? (
+        <p className="py-8 text-center text-sm text-fg-subtle">{error ? "" : t("Loading…")}</p>
+      ) : (
+        <>
+          <AgentChoice
+            agents={agents}
+            agent={now.agent ?? ""}
+            onAgent={(id) => void change({ agent: id || null })}
+            understory={now.understory}
+            onUnderstory={(on) => void change({ understory: on })}
+            understoryAvailable={now.understoryAvailable}
+          />
+          <p className="mt-3 text-[11px] text-fg-subtle">
+            {tx("Chats started after this pick it up. One already open does after {command}.", { command: <code>/reload</code> })}
           </p>
         </>
       )}

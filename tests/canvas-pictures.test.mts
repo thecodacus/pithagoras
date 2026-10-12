@@ -22,3 +22,18 @@ test('text around the pictures, and links that are not pictures, stay as they we
   const text = 'Before [link](a.png) and\n\n![one](a.png)\n\nafter ![two](b/c.gif).';
   assert.equal(canvasPictures(text, folder, url), 'Before [link](a.png) and\n\n![one](</api/sessions/s/picture?path=a.png>)\n\nafter ![two](</api/sessions/s/picture?path=b%2Fc.gif>).');
 });
+
+test('in a file of a subfolder a relative path is read from that subfolder, and may not leave the folder', () => {
+  assert.equal(canvasPictures('![a](img/a.png)', folder, url, 'docs'), '![a](</api/sessions/s/picture?path=docs%2Fimg%2Fa.png>)');
+  assert.equal(canvasPictures('![a](../a.png)', folder, url, 'docs'), '![a](</api/sessions/s/picture?path=a.png>)');
+  assert.equal(canvasPictures('![a](/workspaces/proj/a.png)', folder, url, 'docs'), '![a](</api/sessions/s/picture?path=a.png>)');
+  assert.equal(canvasPictures('![a](../../a.png)', folder, url, 'docs'), '![a](../../a.png)');
+});
+
+test('the Files panel passes the chat folder: an absolute path inside it is the file, one outside stays as written', () => {
+  // The call as the panel makes it, for a file in the top of the folder.
+  assert.equal(canvasPictures('![a](/workspaces/proj/a.png)', folder, url, ''), '![a](</api/sessions/s/picture?path=a.png>)');
+  assert.equal(canvasPictures('![a](/etc/a.png)', folder, url, ''), '![a](/etc/a.png)');
+  // An empty folder, as the panel once passed it, would have sent both under the folder.
+  assert.notEqual(canvasPictures('![a](/etc/a.png)', '', url, ''), '![a](/etc/a.png)');
+});

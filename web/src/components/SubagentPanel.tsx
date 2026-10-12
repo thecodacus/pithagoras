@@ -120,6 +120,9 @@ const ChildItem = memo(function ChildItem({ item, running }: { item: Item; runni
       return <div className="tool-row"><ToolCall item={item} /></div>;
     case "compaction":
       return <CompactionMarker item={item} />;
+    // A subagent has nobody to ask: only the chat's own agent asks the person.
+    case "question":
+      return null;
     default:
       return <div className="sub-notice">{item.kind === "notice" && item.portal ? t(item.text) : item.text}</div>;
   }

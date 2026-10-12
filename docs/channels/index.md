@@ -5,7 +5,7 @@ Sessions are per-task: one workspace, one job, its own conversation. An
 you talk to continuously. The portal starts with one, and [more](/guide/agents)
 can be added, each with a home of its own.
 
-Chats you start with **New** in the portal work in the first agent's home, so its
+Chats you start with **New** in the portal work in the home of the agent New is set to (the first agent unless you picked another, see [Agents](/guide/agents)), so its
 SOUL.md, PrimaryUser.md and MEMORY.md are there in those as well; a chat started
 on another agent's page works in that agent's home. Chats in a
 [project](/guide/projects) are ordinary per-task sessions and have none of them.
@@ -191,40 +191,14 @@ Telegram probably wants less than a war-room Slack channel does.
 ### Questions from extensions
 
 An extension command can stop and ask something — a model picker from a
-provider package, say — and opens a menu. In the portal that draws a modal. In a chat there is nowhere to
-draw one, so the question is sent as a message and the next reply answers it:
-
-```
-Models:
-1. model-a
-2. model-b
-
-Reply with a number. Anything else cancels.
-```
-
-Numbers work, so does typing the option. `confirm` takes yes or no; `input` and
-`editor` take whatever you send.
-
-**Anything that is not a valid answer cancels the question.** Asking again would
-trap the conversation: the run stays blocked, and every attempt to talk about
-something else gets the same prompt back.
-
-The answer jumps the queue — the run is stopped waiting for it, so it cannot be
-made to wait its turn behind itself.
-
-Only the person whose message raised the question, or the primary user, can
-answer it. In a group the next message is anybody's, and a question that asks the
-owner to confirm something is not for a guest to say yes to: theirs is answered
-with a note saying whom it waits for, and is not taken as the answer. Telegram's
-buttons check the person who pressed them in the same way.
-
-Slash commands are the primary user's alone. What anybody else writes reaches
-the agent after the portal's note about who they are, so `/bg ...` in a colleague's
-message is words, not a command.
-
-Questions are relayed whatever the progress toggles say. They are not chatter:
-the command hangs until somebody answers, and staying quiet would just leave it
-to time out.
+provider package, say — and opens a menu. In the portal that draws a modal. A
+chat reached through a channel has nobody at a screen to answer it, so the
+question is not asked there: the dialog is answered at once with no answer
+(`confirm` says no, `select`, `input` and `editor` are cancelled), nothing waits,
+and nothing is sent to the channel or to any page. The same goes for a routine's
+run and a heartbeat's look. The agent's own `ask_question` tool is not offered in
+these chats either; when the agent needs something from the person on a
+channel, it asks in plain text and the person's next message is the answer.
 
 A message that is only `stop`, `wait`, `cancel`, `abort`, `halt`, `hold on` or
 `nevermind` aborts the current run instead. It is checked before the queue, so

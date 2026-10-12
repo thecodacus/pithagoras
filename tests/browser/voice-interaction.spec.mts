@@ -404,6 +404,80 @@ test('the conversation window renders a reply as markdown, also while it is writ
   }
 });
 
+test('a model error in voice mode opens the conversation on it and plays the line kept at the start, without asking the speech model', async ({ page }) => {
+  const asked: string[] = [], made: string[] = [], played: string[] = [];
+  await page.route('**/voice/speech', route => { asked.push(route.request().postData() ?? ''); return route.fulfill({ body: sample, contentType: 'audio/wav' }); });
+  await page.route('**/voice/error-line**', route => {
+    if (route.request().method() === 'POST') { made.push(route.request().postData() ?? ''); return route.fulfill({ json: { ready: true, generated: true } }); }
+    played.push(decodeURIComponent(new URL(route.request().url()).searchParams.get('text') ?? ''));
+    return route.fulfill({ body: sample, contentType: 'audio/wav' });
+  });
+  await start(page);
+  // Made as voice mode started, in the words it will say.
+  await expect.poll(() => made).toEqual([JSON.stringify({ text: 'An error occurred.' })]);
+  const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  // Opened by itself, with the error written in it.
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
+  await expect(conversation.getByRole('alert')).toHaveText('Model error: the provider is down');
+  // And said: the kept line, not the error's own words, and not made again.
+  await expect.poll(() => played).toEqual(['An error occurred.']);
+  await settled(page);
+  expect(asked).toEqual([]);
+});
+
+test('without the kept line the error is shown in writing only, and said so', async ({ page }) => {
+  const asked: string[] = [];
+  await page.route('**/voice/speech', route => { asked.push(route.request().postData() ?? ''); return route.fulfill({ body: sample, contentType: 'audio/wav' }); });
+  // The speech model was not there when voice mode started: nothing was made, and nothing is found.
+  await page.route('**/voice/error-line**', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 503' } })
+    : route.fulfill({ status: 404, json: { error: 'The spoken error line has not been made for this voice yet' } }));
+  await start(page);
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('alert')).toHaveText('Model error: the provider is down');
+  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible();
+  // The speech model is not asked as a way round it.
+  expect(asked).toEqual([]);
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
+});
+
+async function missingErrorLine(page: import('@playwright/test').Page) {
+  await page.route('**/voice/error-line**', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 502, json: { error: 'Breeze returned HTTP 503' } })
+    : route.fulfill({ status: 404, json: { error: 'The spoken error line has not been made for this voice yet' } }));
+  await start(page);
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByText('The spoken error line is not available, so the error is shown in writing only.')).toBeVisible();
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  return page.getByRole('alert').filter({ hasText: 'The spoken error line is not available' });
+}
+
+test('the notice about the missing error line is still there after voice mode ends, then fades by itself', async ({ page }) => {
+  const notice = await missingErrorLine(page);
+  await expect(notice).toBeVisible();
+  await expect(notice).toBeHidden({ timeout: 9000 });
+});
+
+test('the notice about the missing error line goes at once when clicked', async ({ page }) => {
+  const notice = await missingErrorLine(page);
+  await expect(notice).toBeVisible();
+  await notice.click();
+  await expect(notice).toBeHidden({ timeout: 1000 });
+});
+
+test('an error from before voice mode, coming in late, does not open the conversation', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Replay an old error' }).click();
+  await expect(page.getByTestId('workspace')).toContainText('Model error: from yesterday');
+  await settled(page);
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toBeVisible();
+  // A new one still does.
+  await page.getByRole('button', { name: 'Fail the model' }).click();
+  await expect(page.getByRole('button', { name: 'Show the conversation' })).toHaveCount(0);
+});
+
 test('Escape in the confirmation of a link in a reply closes it and neither stops the agent nor ends voice mode', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Show the conversation' }).click();
@@ -430,4 +504,80 @@ test('the voice settings card stays inside a short screen and scrolls', async ({
   // The first row can be reached.
   await card.getByRole('group', { name: 'Speaking speed' }).scrollIntoViewIfNeeded();
   await expect(card.getByRole('group', { name: 'Speaking speed' })).toBeInViewport();
+});
+
+test('with push-to-talk on, the orb can be held to talk, as on a phone', async ({ page }) => {
+  test.setTimeout(60000);
+  await page.addInitScript(() => localStorage.setItem('voicePtt', 'on'));
+  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'Hello from the orb.' } }));
+  // The detector starts a moment after the stage is up, and a press before that is not heard.
+  const ready = page.waitForEvent('console', m => m.text().includes('started micVAD'));
+  await start(page);
+  await ready;
+  const orb = page.locator('.voice-avatar');
+  await expect(orb).toHaveClass(/is-holdable/);
+  const box = (await orb.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // A tap is not a turn.
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  await expect(page.getByTestId('sent')).toHaveText('0');
+  // Held while speaking: sent when let go.
+  await page.mouse.down();
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  // A second finger lifting is not the first letting go.
+  await orb.dispatchEvent('pointerup', { pointerId: 7 });
+  await orb.dispatchEvent('pointercancel', { pointerId: 7 });
+  await page.waitForTimeout(400);
+  await expect(page.getByRole('status')).toContainText('Hearing you');
+  // Not a real click: the mouse is down on the orb.
+  await page.getByRole('button', { name: 'Inject speech' }).dispatchEvent('click');
+  await page.waitForTimeout(2800);
+  await page.mouse.up();
+  await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 12000 });
+  await expect(page.getByTestId('last-send')).toHaveText(JSON.stringify({ message: 'Hello from the orb.', images: 0, steer: false }));
+});
+
+test('turning push-to-talk off during a hold does not leave the orb dead for the next hold', async ({ page }) => {
+  test.setTimeout(60000);
+  await page.addInitScript(() => localStorage.setItem('voicePtt', 'on'));
+  const ready = page.waitForEvent('console', m => m.text().includes('started micVAD'));
+  await start(page);
+  await ready;
+  const orb = page.locator('.voice-avatar');
+  const status = page.getByRole('status');
+  const box = (await orb.boundingBox())!;
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  // The mouse has one pointer id for good: the first press after the switch has to count.
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await expect(status).toContainText('Hearing you');
+  await page.keyboard.press('h');
+  await expect(orb).not.toHaveClass(/is-holdable/);
+  await page.mouse.up();
+  await page.keyboard.press('h');
+  await expect(orb).toHaveClass(/is-holdable/);
+  await page.mouse.down();
+  await expect(status).toContainText('Hearing you');
+  await page.mouse.up();
+  await expect(status).not.toContainText('Hearing you');
+  // Every finger is a new pointer id, so a stale one would block all of them.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+  const touch = async (type: 'touchStart' | 'touchEnd') => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+  await touch('touchStart');
+  await expect(status).toContainText('Hearing you');
+  await page.keyboard.press('h');
+  await expect(orb).not.toHaveClass(/is-holdable/);
+  await touch('touchEnd');
+  await page.keyboard.press('h');
+  await expect(orb).toHaveClass(/is-holdable/);
+  for (let i = 0; i < 2; i++) {
+    await touch('touchStart');
+    await expect(status).toContainText('Hearing you');
+    await touch('touchEnd');
+    await expect(status).not.toContainText('Hearing you');
+  }
 });

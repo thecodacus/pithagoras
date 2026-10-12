@@ -33,7 +33,7 @@ export interface VoiceIO {
   /** True when speaking mid-run should add to the run rather than stop it. */
   steering?: () => boolean;
   agentRunning: () => boolean;
-  synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
+  synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status'|'error') => Promise<PreparedSpeech>;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
   error: (message: string) => void;
@@ -55,6 +55,15 @@ export class HandsFreeVoice {
   private held: string[] | null = null;
   private items: Item[] = [];
   private speech: StreamingSpeech;
+  /** Error notices at or before this seq were there before voice mode began. */
+  private afterSeq: number;
+  private announcedErrors = new Set<string>();
+  /**
+   * The last turn was refused before it began (no model, no key): replies are
+   * off until the next utterance, but the error notice that follows is still
+   * the answer to what was said, and is spoken.
+   */
+  private refused = false;
   private recordings: Float32Array[] = [];
   private text: string[] = [];
   private processing = false;
@@ -77,7 +86,7 @@ export class HandsFreeVoice {
 
 
   constructor(private io: VoiceIO, initial: Item[]) {
-    const afterSeq = initial.reduce((n, item) => Math.max(n, Number(item.id.slice(1)) || 0), 0);
+    const afterSeq = this.afterSeq = initial.reduce((n, item) => Math.max(n, Number(item.id.slice(1)) || 0), 0);
     this.pipeline = new SpeechPipeline(io.synthesize, () => this.state(), error => this.report(error), io.sequential, io.sentenceChunks, io.ttsPrefetch);
     this.thinkingPipeline = new SpeechPipeline(io.synthesize, () => this.state(), error => this.report(error));
     this.speech = new StreamingSpeech(afterSeq);
@@ -122,11 +131,31 @@ export class HandsFreeVoice {
   observe(items: Item[]) {
     this.items = items;
     if (!this.alive) return;
+    this.announceErrors(items);
     if (!this.acceptingReplies) { if (this.held) this.held.push(...this.speech.observe(items)); else this.ignoreCurrent(); }
     else if (!this.io.sequential || this.io.sentenceChunks || !this.io.agentRunning()) this.output.push(...this.speech.observe(items));
     this.state();
     void this.play();
   }
+  /**
+   * A failure is written into the chat as an error notice and nothing else, so
+   * with the chat put away voice mode would stay silent. One short line says
+   * it happened, however many errors came; the notice itself is in the
+   * conversation window, which the stage opens.
+   */
+  private announceErrors(items: Item[]) {
+    let fresh = false;
+    for (const item of items) {
+      if (item.kind !== "notice" || item.tone !== "error" || Number(item.id.slice(1)) <= this.afterSeq || this.announcedErrors.has(item.id)) continue;
+      this.announcedErrors.add(item.id);
+      fresh = true;
+    }
+    if (!fresh || (!this.acceptingReplies && !this.refused)) return;
+    this.thinkingPipeline.cancel();
+    this.pipeline.enqueue([t("An error occurred.")], 'error');
+  }
+  /** Where voice mode began: error notices after this seq are new, and the stage opens the conversation on them. */
+  get startedAfter() { return this.afterSeq; }
   /** Called after a sustained speech detection, not a single noise frame. */
   speechStart() {
     if (!this.alive || this.muted) return;
@@ -141,6 +170,7 @@ export class HandsFreeVoice {
     this.clearThinkingTimer();
     this.hearing = true;
     this.acceptingReplies = false;
+    this.refused = false;
     this.held = [...(this.held ?? []), ...this.pipeline.cancel(), ...this.output];
     this.output = [];
     this.thinkingPipeline.cancel();
@@ -232,6 +262,7 @@ export class HandsFreeVoice {
         this.held = null;
         this.ignoreCurrent();
         this.acceptingReplies = true;
+        this.refused = false;
         this.sending = true;
         this.thinkingAnnounced = false;
         this.state();
@@ -240,6 +271,7 @@ export class HandsFreeVoice {
           if (valid()) { this.text = []; this.stopped = false; }
         } catch (error) {
           this.acceptingReplies = false;
+          this.refused = true;
           throw new Error(t("Could not send “{text}”: {error}", { text, error: error instanceof Error ? error.message : String(error) }));
         } finally { this.sending = false; }
       });

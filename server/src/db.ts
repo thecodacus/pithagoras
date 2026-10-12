@@ -11,6 +11,7 @@ import path from "node:path";
 import { isWithinText } from "./within.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
+import { removeThumbs } from "./image-thumbs.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
@@ -362,6 +363,18 @@ function schema(db: Database.Database): void {
       project TEXT PRIMARY KEY,
       tools_off TEXT NOT NULL DEFAULT '',
       tools_on TEXT NOT NULL DEFAULT ''
+    );
+
+    -- Which agent a project works with, and whether Understory is its memory.
+    -- No row, or an empty agent, is a blank slate: the chats get the project's
+    -- AGENTS.md and nothing else. Kept here and not as a file in the folder for
+    -- the reason project_tools is: the agent works in the folder and can write
+    -- to it, and whose soul and memory it gets is not for it to change. A project
+    -- is only a folder, so it is known by its name; a row goes with the project.
+    CREATE TABLE IF NOT EXISTS project_agent (
+      project TEXT PRIMARY KEY,
+      agent TEXT NOT NULL DEFAULT '',
+      understory_off INTEGER NOT NULL DEFAULT 0
     );
 
     -- An agent's exceptions to the portal-wide tool default, for every chat in
@@ -847,7 +860,9 @@ function removeSession(id: string): void {
   if (real) d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
   // What is left is what could not be kept, and what was made of it no longer names it.
   d.prepare("UPDATE images SET source_id = NULL WHERE source_id IN (SELECT id FROM images WHERE session_id = ?)").run(id);
+  const left = (d.prepare("SELECT id FROM images WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
   d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
+  removeThumbs(left);
 }
 
 /**
@@ -1361,6 +1376,17 @@ export function getSkipThinkingProviders(): string[] | undefined {
   }
 }
 
+/** The model spoken turns run on, as saved in the voice settings; undefined where they use the chat's own. */
+export function getVoiceModel(): { provider: string; modelId: string } | undefined {
+  try {
+    const saved = JSON.parse(getSetting("voice") ?? "{}").voiceModel;
+    const at = typeof saved === "string" ? saved.indexOf("/") : -1;
+    return at > 0 && at < saved.length - 1 ? { provider: saved.slice(0, at), modelId: saved.slice(at + 1) } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Whether voice mode can speak: the add-on is on, with a speech engine (not recognition alone). */
 export function voiceSpeaks(): boolean {
   try {
@@ -1418,6 +1444,16 @@ export function chatModel(
   settings: GlobalSettings = getSettings(),
 ): { provider: string; model: string } {
   return { provider: session.provider || settings.provider, model: session.model || settings.model };
+}
+
+/**
+ * Writes a chat's model to its row when nothing names one for it, not even the
+ * defaults. pi reopens such a chat on the model of its last answer, and after a
+ * spoken turn on the voice model that would be the voice model.
+ */
+export function keepChatModel(sessionId: string, provider: string, model: string): void {
+  const row = getSession(sessionId);
+  if (row && !chatModel(row).model) updateSession(sessionId, { provider, model });
 }
 
 export { SETTING_DEFAULTS as getSettingDefaults };
@@ -2019,6 +2055,59 @@ export function projectsWithTools(): Set<string> {
   );
 }
 
+/** What a project says about the agent it works with: see the table. A project that never said anything is a blank slate. */
+export interface ProjectAgent {
+  /** The agent's id; "" for none. */
+  agent: string;
+  /** Whether Understory is not this project's memory, though it is the portal's. */
+  understoryOff: boolean;
+}
+
+export function projectAgent(project: string): ProjectAgent {
+  const row = getDb().prepare("SELECT agent, understory_off FROM project_agent WHERE project = ?").get(project) as
+    | { agent: string; understory_off: number }
+    | undefined;
+  return { agent: row?.agent ?? "", understoryOff: !!row?.understory_off };
+}
+
+export function setProjectAgent(project: string, say: ProjectAgent): ProjectAgent {
+  if (!say.agent && !say.understoryOff) clearProjectAgent(project);
+  else
+    getDb()
+      .prepare(
+        `INSERT INTO project_agent (project, agent, understory_off) VALUES (?, ?, ?)
+         ON CONFLICT(project) DO UPDATE SET agent = excluded.agent, understory_off = excluded.understory_off`
+      )
+      .run(project, say.agent, say.understoryOff ? 1 : 0);
+  return { agent: say.agent, understoryOff: say.understoryOff };
+}
+
+/** Forgets what a project said about its agent, as when it is deleted or made again. */
+export function clearProjectAgent(project: string): void {
+  getDb().prepare("DELETE FROM project_agent WHERE project = ?").run(project);
+}
+
+/**
+ * Lets go of an agent that is deleted: the projects that worked with it are
+ * blank slates again, and keep what they said about Understory.
+ */
+export function releaseProjectsOf(agent: string): void {
+  getDb().transaction(() => {
+    getDb().prepare("UPDATE project_agent SET agent = '' WHERE agent = ?").run(agent);
+    getDb().prepare("DELETE FROM project_agent WHERE agent = '' AND understory_off = 0").run();
+  })();
+}
+
+/** What every project that says something about its agent says, by name. */
+export function projectAgents(): Map<string, ProjectAgent> {
+  const rows = getDb().prepare("SELECT project, agent, understory_off FROM project_agent").all() as {
+    project: string;
+    agent: string;
+    understory_off: number;
+  }[];
+  return new Map(rows.map((r) => [r.project, { agent: r.agent, understoryOff: !!r.understory_off }]));
+}
+
 /**
  * What an agent says about tools, as exceptions to the portal-wide default:
  * for every chat in its home and every run it does on its own — its heartbeat,
@@ -2225,6 +2314,26 @@ export function extensionStash(): Record<string, unknown> {
 
 export function setExtensionStash(stash: Record<string, unknown>): void {
   putSetting("extension_stash", Object.keys(stash).length ? JSON.stringify(stash) : "");
+}
+
+/** The minutes ask_question waits for an answer; 0, the default, is until it is answered. */
+export const QUESTION_WAIT_MINUTES = [0, 5, 15, 30, 60] as const;
+
+export function questionWaitMinutes(): number {
+  const saved = Number(getSetting("ask_question_wait_minutes"));
+  return (QUESTION_WAIT_MINUTES as readonly number[]).includes(saved) ? saved : 0;
+}
+
+/** Stores one of QUESTION_WAIT_MINUTES; returns undefined for anything else. */
+export function setQuestionWaitMinutes(minutes: unknown): number | undefined {
+  if (typeof minutes !== "number" || !(QUESTION_WAIT_MINUTES as readonly number[]).includes(minutes)) return undefined;
+  putSetting("ask_question_wait_minutes", String(minutes));
+  return minutes;
+}
+
+/** The wait for a question in milliseconds, read when it is asked. */
+export function questionWaitMs(): number {
+  return questionWaitMinutes() * 60_000;
 }
 
 /** Tools that are off unless a conversation says otherwise. */

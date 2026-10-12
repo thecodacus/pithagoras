@@ -4,6 +4,7 @@ import { argsSummary } from "./tool-args";
 import { calledToolOf, toolArgsOf, toolNameOf } from "./tool-payload";
 import { msg, t } from "./i18n";
 import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
+import type { AgentQuestion } from "./components/QuestionCard";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -156,7 +157,16 @@ export type Item =
    * its own, `quiet` when it ran and showed nothing, `started`/`queued` when it
    * became a run, `failed` with why.
    */
-  | { kind: "command"; id: string; seq: number; text: string; state: CommandState; error?: string };
+  | { kind: "command"; id: string; seq: number; text: string; state: CommandState; error?: string }
+  /**
+   * The agent's questions (ask_question), by the id the page answers them under. Drawn above the message box
+   * while `open`, and as their record where they were asked once they have ended: `answers` when answered.
+   */
+  | { kind: "question"; id: string; questionId: string; title?: string; questions: AgentQuestion[]; state: QuestionState; answers?: Record<string, string | string[]> };
+
+/** How the agent's questions stand: see QuestionOutcome on the server. */
+export type QuestionState = "open" | "answered" | "cancelled" | "expired" | "stopped";
+const QUESTION_ENDS: readonly QuestionState[] = ["answered", "cancelled", "expired", "stopped"];
 
 export type CommandState = "running" | "done" | "quiet" | "started" | "queued" | "failed";
 
@@ -598,6 +608,31 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           const notice = failures.get(it.seq);
           if (notice) items.splice(items.indexOf(notice), 1);
         } else it.state = p.quiet ? "quiet" : p.outcome === "started" ? "started" : p.outcome === "queued" ? "queued" : "done";
+        break;
+      }
+
+      // The agent asking. Each once: a page is sent the open ones again with the stream (see liveSnapshot),
+      // for a long chat whose loaded end does not reach back to where they were asked.
+      case "portal_question": {
+        const questionId = typeof p.id === "string" ? p.id : "";
+        if (!questionId || !Array.isArray(p.questions) || items.some((x) => x.kind === "question" && x.questionId === questionId)) break;
+        items.push({
+          kind: "question",
+          id: `q${questionId}`,
+          questionId,
+          ...(typeof p.title === "string" && p.title ? { title: p.title } : {}),
+          questions: p.questions,
+          state: "open",
+        });
+        break;
+      }
+
+      case "portal_question_end": {
+        const it = items.find((x): x is Extract<Item, { kind: "question" }> => x.kind === "question" && x.questionId === p.of);
+        // Its start is on a page not loaded yet.
+        if (!it || !QUESTION_ENDS.includes(p.outcome)) break;
+        it.state = p.outcome;
+        if (p.outcome === "answered" && p.answers && typeof p.answers === "object") it.answers = p.answers;
         break;
       }
 

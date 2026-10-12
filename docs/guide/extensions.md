@@ -125,8 +125,18 @@ all render as a modal in the browser, standing in for the menu the TUI would
 draw. `notify`, `setStatus` and `setWidget` are one-way and do not open
 anything.
 
-An unanswered dialog times out after five minutes rather than wedging the
-session forever.
+A dialog waits until someone answers it, cancels it, or stops the agent: it has
+no time limit of its own, and it stays open on every page that shows the chat. A
+page that opens the chat later, after a reload or from another chat, is shown
+the dialog again. An extension that passes its own `timeout` to the call gets a
+dialog that closes when that time is up. The agent's own questions are a dialog
+of this kind: see [Questions from the agent](/guide/sessions#questions-from-the-agent).
+
+Only where a person can answer in the portal's pages: in your chats and in the
+conversations you start on the Agent page. A routine's run, a heartbeat's look and a
+chat reached through a channel have nobody at a screen, so a dialog there is
+answered at once with no answer (`confirm` says no, the others are cancelled),
+waits for nothing and is shown nowhere.
 
 A status line or a widget an extension keeps refreshing does not count as use of
 the chat, and does not cut what the agent is writing into pieces: only a dialog

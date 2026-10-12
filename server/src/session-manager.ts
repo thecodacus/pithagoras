@@ -17,8 +17,11 @@ import { projectOf } from "./workspaces.js";
 import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
 import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
-import { isDialog } from "./pi/ui-requests.js";
+import { isDialog, showsDialogs } from "./pi/ui-requests.js";
+import { ASK_QUESTION_TOOL, asksQuestions, describeAnswers, readAnswers, type Answers, type Question } from "./pi/ask-question.js";
+import { CHAT_QUESTION, CHAT_QUESTION_END, holdAnswers, openChatQuestion, openChatQuestions, takeHeldAnswers, type ChatQuestion, type QuestionOutcome } from "./questions.js";
 import { forgetTaint } from "./pi/guard.js";
+import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
@@ -55,6 +58,7 @@ import {
   unsettledMessages,
   unansweredCommands,
   chatModel,
+  keepChatModel,
   getSettings,
   markOrphanedSessionsInterrupted,
   openDetachedSubagents,
@@ -80,6 +84,7 @@ import {
   routineGuards,
   updateSession,
   type EventRow,
+  type SessionRow,
   sessionSubagentModel,
   anySessionRunning,
   onChannel,
@@ -244,6 +249,9 @@ function plain(text: unknown): string {
   return String(text ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim();
 }
 
+/** Whether the conversation gets the ask_question tool: see asksQuestions. */
+const canAsk = (session: SessionRow) => asksQuestions(session, onChannel(session));
+
 /**
  * A command sent to pi and not yet answered. `inRun`: sent into a run, whose
  * next start is not the command's doing.
@@ -319,7 +327,43 @@ class SessionManager extends EventEmitter {
   /** Model failures pi has not recovered from: see model-errors.ts. */
   private modelErrors = new ModelErrors();
 
-  liveSnapshot(sessionId: string) { return this.stream.snapshot(sessionId); }
+  /**
+   * What a page that attaches is shown beyond the stored events: the message being written, the dialogs
+   * (confirm, select, input, editor) an extension is waiting on, and the agent's questions still open.
+   * Dialogs are live events and never stored, so without this a reload or a visit to another chat lost the
+   * dialog. A question is stored, and sent again here for a page that loads only the end of a long chat,
+   * which may not reach back to where it was asked: the page draws each question once.
+   */
+  liveSnapshot(sessionId: string) {
+    const dialogs = (this.live.get(sessionId)?.client.openDialogRequests?.() ?? [])
+      .filter((req) => req.method !== "questions")
+      .map((req) => this.stream.ephemeral(sessionId, "extension_ui_request", req));
+    const questions = this.openQuestions(sessionId).map((q) => this.stream.ephemeral(sessionId, CHAT_QUESTION, q));
+    return [...this.stream.snapshot(sessionId), ...dialogs, ...questions];
+  }
+
+  /**
+   * The agent's questions in a chat that are still open. One nobody waits on any more, whose wait is up, ends
+   * here: its timer went with the portal that asked it.
+   */
+  openQuestions(sessionId: string): ChatQuestion[] {
+    const now = Date.now();
+    return openChatQuestions(sessionId).filter((q) => {
+      if (q.until === undefined || q.until > now || this.waitedOn(sessionId, q.id)) return true;
+      this.endQuestion(sessionId, q.id, "expired");
+      return false;
+    });
+  }
+
+  /** Whether the run that asked a question is still waiting for its answer. */
+  private waitedOn(sessionId: string, id: string): boolean {
+    return (this.live.get(sessionId)?.client.openDialogRequests?.() ?? []).some((req) => req.id === id);
+  }
+
+  /** A question's record: how it ended, and the answers when it was answered. See questions.ts. */
+  private endQuestion(sessionId: string, id: string, outcome: QuestionOutcome, answers?: Answers): void {
+    this.record(sessionId, CHAT_QUESTION_END, { of: id, outcome, ...(answers ? { answers } : {}) });
+  }
   /** In-flight ask() per session, so messages in one chat are answered in turn. */
   private asking = new Map<string, Promise<string>>();
   /**
@@ -378,6 +422,8 @@ class SessionManager extends EventEmitter {
     for (const c of unansweredCommands()) {
       this.record(c.sessionId, "portal_command_end", { of: c.seq, error: c.error ?? "The portal restarted before it answered" });
     }
+    // Answers the last server took while it was stopping: they go to the agent now, as one given after a restart does.
+    for (const held of takeHeldAnswers()) this.passOnAnswers(held.sessionId, held.questions, held.answers);
     return [...new Set([...orphaned, ...unsent])].filter((id) => {
       const row = getSession(id);
       return Boolean(row?.channel_slug && row.channel_key);
@@ -652,6 +698,51 @@ class SessionManager extends EventEmitter {
       seqs: dropped.map((m) => m.seq),
       prompts: Object.fromEntries(dropped.map((m) => [m.seq, m.prompt])),
     });
+  }
+
+  /**
+   * Takes back messages sent mid-run that pi has not read yet: `seq` is
+   * dropped for good, or — with `direct` — sent first, after the run is
+   * stopped. Whatever else waits keeps its order and goes in behind.
+   *
+   * pi can only empty its queue as a whole, so that is what is done, and the
+   * messages that stay are sent again, as they were: the same words, pictures
+   * and lane, under new numbers, in the order they were sent. Sent now, the
+   * others go in as follow-ups, since the run they steered is gone.
+   */
+  async takeBackWaiting(sessionId: string, seq: number, direct: boolean): Promise<void> {
+    const live = this.live.get(sessionId);
+    if (!live?.client.clearQueue) throw new SessionEditError("unsupported", "This agent's queue cannot be changed.");
+    // Into pi's queue first, where the clearing below reaches them.
+    await this.whenHanded(sessionId);
+    // Nothing awaited from here to the clearing: what pi takes in meanwhile is
+    // seen by takeIn, and is not on the list any more.
+    const pulled = (this.waiting.get(sessionId) ?? []).filter((m) => m.inPi);
+    const chosen = pulled.find((m) => m.seq === seq);
+    if (!chosen) throw new SessionEditError("busy", "The agent has taken that message in already.");
+    live.client.clearQueue();
+    const rest = pulled.filter((m) => m !== chosen);
+    const again = direct ? [chosen, ...rest] : rest;
+    for (const m of pulled) {
+      this.unwait(sessionId, m);
+      deleteEvent(m.seq);
+      this.tellRemoved(sessionId, { from: m.seq, to: m.seq + 1 });
+    }
+    // The pictures of the messages sent again stay on disk; a dropped one's go.
+    if (!direct) dropImages(IMAGE_ROOT, sessionId, storedIn(chosen.prompt));
+    if (direct && live.client.running) await this.abort(sessionId);
+    for (const m of again) {
+      const images = loadImages(IMAGE_ROOT, sessionId, storedIn(m.prompt));
+      // Sent now, the others wait for the run the chosen one starts: as
+      // steers, pi would read them in its first model request, together with
+      // it. Behind it, as follow-ups, they are answered after it.
+      const steer = !direct && m.prompt.steer === true;
+      await this.prompt(sessionId, m.message, {
+        ...(m.prompt.voice === true ? { voice: true } : {}),
+        ...(images.length ? { images } : {}),
+        ...(steer ? { steer: true } : {}),
+      });
+    }
   }
 
   /** Takes one message off the waiting list; false if it was no longer on it. */
@@ -1028,6 +1119,8 @@ class SessionManager extends EventEmitter {
       // has no business rescheduling anything; a routine run is excluded too,
       // since a routine that can create routines can build a chain unwatched.
       routineTools: session.kind === "agent",
+      questions: canAsk(session),
+      dialogs: showsDialogs(session, onChannel(session)),
       // A routine run gets the report tool instead: it is the one kind of
       // session with nobody on the other end to read what it found.
       routineSlug: session.kind === "routine" ? session.routine_slug : undefined,
@@ -1044,6 +1137,9 @@ class SessionManager extends EventEmitter {
       role: session.role,
       ...this.toolsFor(sessionId),
       subagentModel: () => sessionSubagentModel(sessionId) ?? undefined,
+      // A chat that names no model is reopened on the model of its last answer,
+      // and after a spoken turn on the voice model that would be the voice's.
+      rememberChatModel: (provider, model) => keepChatModel(sessionId, provider, model),
       // A heartbeat is the agent looking around on its own: its own context,
       // but held to reading by a role of its own. See heartbeat.ts.
       ...(session.kind === "heartbeat"
@@ -1120,7 +1216,20 @@ class SessionManager extends EventEmitter {
       const modelFailure = this.modelErrors.take(sessionId, msg);
       if (modelFailure) this.record(sessionId, "portal_notice", { text: modelFailure, error: true });
       if (msg.type === "extension_ui_request") this.noteExtensionUi(sessionId, msg);
-      this.record(sessionId, msg.type, forTranscript(msg));
+      // The agent's questions are kept with the chat until they end, rather than live as the dialogs are.
+      if (msg.type === "extension_ui_request" && msg.method === "questions") {
+        this.record(sessionId, CHAT_QUESTION, {
+          id: msg.id,
+          ...(msg.title ? { title: msg.title } : {}),
+          questions: msg.questions,
+          ...(typeof msg.until === "number" ? { until: msg.until } : {}),
+        });
+      } else if (msg.type === "extension_ui_cancel" && typeof msg.id === "string" && openChatQuestion(sessionId, msg.id)) {
+        // A restart stops the run that waits, so that its tool returns, but the question stays open: the portal
+        // that starts next draws it again, and its answers go to the agent as a message (see respondUi).
+        const outcome = msg.reason === "expired" ? "expired" : "stopped";
+        if (!(this.closing && outcome === "stopped")) this.endQuestion(sessionId, msg.id, outcome);
+      } else this.record(sessionId, msg.type, forTranscript(msg));
       // Anything a command in hand shows for itself: see endCommand. Only what
       // a person sees in the chat — a line, a dialog, a run, a message — and
       // not a status or widget, which any extension updates on its own clock.
@@ -2415,9 +2524,39 @@ class SessionManager extends EventEmitter {
     else this.drafts.delete(sessionId);
   }
 
-  /** Answer an extension dialog for a live session. */
+  /**
+   * Answer an extension dialog for a live session, or one of the agent's questions. A question's answer, or
+   * that it was cancelled, is written down as its record. When nothing waits for it any more (the portal
+   * restarted, or the chat's pi was let go, while it was open) the answers go to the agent as a message.
+   */
   respondUi(sessionId: string, id: string, response: { cancelled?: boolean; value?: unknown }): boolean {
-    return this.live.get(sessionId)?.client.respondUi(id, response) ?? false;
+    const asked = openChatQuestion(sessionId, id);
+    const waiting = this.live.get(sessionId)?.client.respondUi(id, response) ?? false;
+    if (!asked) return waiting;
+    if (!waiting && asked.until !== undefined && asked.until <= Date.now()) {
+      this.endQuestion(sessionId, id, "expired");
+      return false;
+    }
+    const answers = response.cancelled ? undefined : readAnswers(asked.questions, response.value);
+    // While the portal stops, a message would start a pi that it no longer lets go, cut off as it exits. The
+    // answers are written down, and held for the portal that starts next to pass on (see recoverOrphans).
+    this.endQuestion(sessionId, id, answers ? "answered" : "cancelled", answers);
+    if (!waiting && answers && this.closing) holdAnswers(sessionId, id);
+    else if (!waiting && answers) this.passOnAnswers(sessionId, asked.questions, answers);
+    return true;
+  }
+
+  /** Answers to questions nothing waits for any more, sent to the agent as a message. */
+  private passOnAnswers(sessionId: string, questions: Question[], answers: Answers): void {
+    const message = [
+      "<answer-from-primary>",
+      "These are the answers to the questions you asked with ask_question. Your run ended before they came (the portal restarted while you waited, for one), so they come as this message: go on from there.",
+      "",
+      // What was typed in is the person's, as a channel's sender's words are: it cannot close the frame or open one.
+      neutralise(describeAnswers(questions, answers)),
+      "</answer-from-primary>",
+    ].join("\n");
+    this.prompt(sessionId, message).catch((e) => console.error(`[portal] could not pass on the answers in ${sessionId}: ${(e as Error).message}`));
   }
 
   /**
@@ -2511,7 +2650,11 @@ class SessionManager extends EventEmitter {
     const exceptions = sessionTools(sessionId);
     const lazy = lazyToolNames();
     const servers = view.servers;
-    const shown: { name: string; source: string; description?: string; inline?: true; cached?: true }[] = listed.length ? listed : shownTools(workspace, view);
+    // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
+    const asks = session ? canAsk(session) : true;
+    const shown: { name: string; source: string; description?: string; inline?: true; cached?: true }[] = listed.length
+      ? listed
+      : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
     return {
       tools: shown.map(({ name, source, description, inline, cached }) => ({
         name,

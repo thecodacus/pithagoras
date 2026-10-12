@@ -587,3 +587,59 @@ test("taking the lazy mark away does not bring back what its extension hid", asy
     client.dispose();
   }
 });
+
+test("ask_question, lazy, is asked through the tools tool: the dialog opens for the person, waits, and the answer comes back to the model", async () => {
+  const asked = { questions: [{ id: "db", question: "Which database?", options: ["SQLite", "Postgres"] }] };
+  script = [via("call", { name: "ask_question", args: asked })];
+  model.requests.length = 0;
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `gateway-${n++}`,
+    questions: true, toolsLazy: ["ask_question"], lazySets: ["ask-question"],
+  });
+  const events = [];
+  client.on("event", (e) => events.push(e));
+  const until = async (check) => { for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 25)); assert.ok(check(), "it came"); };
+  try {
+    await client.prompt("Ask me");
+    await until(() => events.some((e) => e.type === "extension_ui_request"));
+    const request = events.find((e) => e.type === "extension_ui_request");
+    // The question is the person's to answer as for a direct call: the same request, kept for a page that opens later.
+    assert.equal(request.method, "questions");
+    assert.deepEqual(request.questions[0].options, [{ label: "SQLite" }, { label: "Postgres" }]);
+    assert.deepEqual(client.openDialogRequests(), [request]);
+    assert.ok(!events.some((e) => e.type === "tool_execution_end"), "the call waits for the answer");
+
+    assert.equal(client.respondUi(request.id, { value: { db: "Postgres" } }), true);
+    await until(() => events.some((e) => e.type === "agent_settled"));
+    const end = events.find((e) => e.type === "tool_execution_end");
+    assert.equal(end.isError, false);
+    assert.equal(end.portalCalledTool, "ask_question", "the pages know which tool it was");
+    assert.match(textOf(end), /Which database\?\\n\s+Chosen: Postgres/);
+    // Not offered one by one, but reached through the tools tool.
+    const offered = names(model.requests[0]);
+    assert.ok(offered.includes("tools") && !offered.includes("ask_question"));
+    assert.match(JSON.stringify(model.requests[0]), /You have ask-question tools; search for them with the tools tool\./);
+    assert.match(JSON.stringify(model.requests.at(-1).messages), /Chosen: Postgres/, "the model is given the answer");
+  } finally {
+    client.dispose();
+  }
+
+  // A stop while the question waits ends the wait as for a direct call, with no answer of the model's own making.
+  script = [via("call", { name: "ask_question", args: asked })];
+  const stopped = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `gateway-${n++}`,
+    questions: true, toolsLazy: ["ask_question"], lazySets: ["ask-question"],
+  });
+  const seen = [];
+  stopped.on("event", (e) => seen.push(e));
+  try {
+    await stopped.prompt("Ask me");
+    await until(() => seen.some((e) => e.type === "extension_ui_request"));
+    await stopped.abort();
+    await until(() => seen.some((e) => e.type === "agent_settled"));
+    assert.ok(seen.some((e) => e.type === "extension_ui_cancel" && e.reason === "stopped"), "the dialog is closed on the page");
+    assert.deepEqual(stopped.openDialogRequests(), []);
+  } finally {
+    stopped.dispose();
+  }
+});

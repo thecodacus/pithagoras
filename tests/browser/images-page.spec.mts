@@ -18,6 +18,7 @@ interface Pic {
   createdAt: number;
   bytes: number;
   fileName: string;
+  thumb?: boolean;
 }
 interface Job {
   id: string;
@@ -29,6 +30,7 @@ interface Job {
   startedAt: number;
   finishedAt?: number;
   pictureId?: string;
+  notes?: string[];
   error?: string;
 }
 
@@ -52,6 +54,7 @@ const pic = (over: Partial<Pic> & { age?: number } = {}): Pic => {
     createdAt: Date.now() - age * 60_000,
     bytes: 120_000,
     fileName: `image-${n}.png`,
+    thumb: false,
     ...rest,
   };
 };
@@ -73,7 +76,7 @@ const feature = (over: Record<string, unknown> = {}) => {
 
 async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
   const pics = [...pictures];
-  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], limit: 4 };
+  const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], limit: 4 };
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
@@ -137,6 +140,13 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
       for (const id of ids) pics.splice(pics.findIndex((x) => x.id === id), 1);
       return { deleted: ids, failed: [] };
     }
+    if (/^\/api\/images\/[0-9a-f]{12}\/thumb$/.test(p)) {
+      // The portal makes the small copy when it is asked for: here it is a smaller drawing.
+      const id = p.split('/')[3];
+      state.thumbFiles.push(id);
+      await route.fulfill({ body: svg(id, 200, 150), contentType: 'image/svg+xml' });
+      return DONE;
+    }
     if (/^\/api\/images\/[0-9a-f]{12}\/file$/.test(p)) {
       const id = p.split('/')[3];
       state.files.push(id);
@@ -148,11 +158,11 @@ async function portal(page: Page, { pictures = [] as Pic[], images = feature(), 
     state,
     pics,
     /** A running job is done: its picture is in the gallery, as the portal puts it. */
-    finish(id: string, over: Partial<Pic> = {}) {
+    finish(id: string, over: Partial<Pic> = {}, notes?: string[]) {
       const j = state.jobs.find((x) => x.id === id)!;
       const made = pic({ prompt: j.prompt, kind: j.kind === 'edit' ? 'edited' : 'generated', from: j.from ?? null, ...over });
       pics.push(made);
-      Object.assign(j, { state: 'done', pictureId: made.id, finishedAt: Date.now() });
+      Object.assign(j, { state: 'done', pictureId: made.id, finishedAt: Date.now(), ...(notes ? { notes } : {}) });
       return made;
     },
     fail(id: string, error: string) {
@@ -1062,6 +1072,34 @@ test('Edit it puts the picture in the form, and the change is sent with it', asy
   await expect(page.getByPlaceholder('Describe the picture')).toBeVisible();
   await toEdit(page);
   await expect(maker(page).getByRole('img', { name: 'A fox' })).toBeVisible();
+});
+
+test('an edit that scaled or compressed its picture says so in a warning, until it is put away or the next thing is asked', async ({ page }) => {
+  const made = pic({ prompt: 'A fox' });
+  const p = await portal(page, { pictures: [made] });
+  await page.goto('/images');
+  await tile(page, 'A fox').click();
+  await viewer(page).getByRole('button', { name: 'Edit it' }).click();
+  await page.keyboard.type('Make the fur white');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  const note = 'The image was scaled down from 4000x500 pixels (1.2 MB) to 2048x256 pixels (0.3 MB) to fit what an edit takes. The result is not scaled back up.';
+  p.finish(p.state.jobs[0].id, {}, [note]);
+  const warning = page.getByRole('status').filter({ hasText: 'A picture was changed to fit what an edit takes.' });
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText(note);
+  await warning.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(warning).toHaveCount(0);
+  // Again, and then a change that needed nothing: the old warning is gone with the next thing asked, and no new one comes.
+  await describe(page).fill('Make it blue');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  p.finish(p.state.jobs[0].id, {}, [note]);
+  await expect(warning).toBeVisible();
+  await describe(page).fill('Make it red');
+  await page.getByRole('button', { name: 'Change the picture' }).click();
+  await expect(warning).toHaveCount(0);
+  p.finish(p.state.jobs[0].id);
+  await expect(tile(page, 'Make it red')).toBeVisible();
+  await expect(warning).toHaveCount(0);
 });
 
 test('in Edit a tick in the box of a picture takes it into the edit, after the ones there, and again takes it out; a click on the picture itself never does, it opens it', async ({ page }) => {
@@ -2328,4 +2366,31 @@ test('the gallery reads in the dark theme as in the light', async ({ page }) => 
     });
     expect(colours.ink).not.toBe(colours.ground);
   }
+});
+
+test('a tile of a big picture loads its small copy, and one of a small file or a GIF loads the file', async ({ page }) => {
+  const big = pic({ prompt: 'A heavy picture', age: 5, thumb: true });
+  const small = pic({ prompt: 'A small file', age: 4, bytes: 2_000 });
+  const animated = pic({ prompt: 'A moving one', age: 3, fileName: 'move.gif' });
+  const p = await portal(page, { pictures: [big, small, animated] });
+  await page.goto('/images');
+  for (const name of ['A heavy picture', 'A small file', 'A moving one']) await loaded(tile(page, name).getByRole('img'));
+  await expect(tile(page, 'A heavy picture').getByRole('img')).toHaveAttribute('src', `/api/images/${big.id}/thumb`);
+  await expect(tile(page, 'A small file').getByRole('img')).toHaveAttribute('src', `/api/images/${small.id}/file`);
+  await expect(tile(page, 'A moving one').getByRole('img')).toHaveAttribute('src', `/api/images/${animated.id}/file`);
+  expect(p.state.thumbFiles).toEqual([big.id]);
+  expect(p.state.files, 'the big picture\'s file is not loaded for its tile').not.toContain(big.id);
+});
+
+test('the pictures of an edit show their small copies in the form', async ({ page }) => {
+  const a = pic({ prompt: 'With a copy', age: 5, thumb: true });
+  const b = pic({ prompt: 'Without one', age: 4 });
+  const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
+  await page.goto('/images');
+  await pick(page, 'With a copy', 'Without one');
+  await expect(thumbs(page)).toHaveCount(2);
+  await loaded(thumbs(page).first());
+  await loaded(thumbs(page).last());
+  expect(await thumbs(page).evaluateAll((els) => els.map((e) => e.getAttribute('src')))).toEqual([`/api/images/${a.id}/thumb`, `/api/images/${b.id}/file`]);
+  expect(p.state.thumbFiles).toContain(a.id);
 });

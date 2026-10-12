@@ -200,7 +200,7 @@ export function useDictation({
       if (r.closed) return teardown(r);
 
       const live = new LiveTranscription(
-        async (samples, signal) => (await api.transcribe(r.sessionId, samples, signal)).text,
+        async (samples, signal) => (await api.transcribe(r.sessionId, samples, signal, "dictation")).text,
         (text) => {
           if (!r.closed) setPartial(text);
         },
