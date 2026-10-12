@@ -330,6 +330,41 @@ test('a picture started while only videos are shown does the same, and one of th
   await expect(page).toHaveURL(/\/media\?show=videos$/);
 });
 
+test('a kind or an origin that would hide what was just started is let go of with the rest, and one that fits stays', async ({ page }) => {
+  const mine = pic({ prompt: 'Mine', origin: 'page', age: 5 });
+  const edited = pic({ prompt: 'A changed one', kind: 'edited', age: 6 });
+  const theirs = pic({ prompt: 'From a chat', origin: 'chat', chat: { id: 'c1', title: 'A chat' }, age: 7 });
+  await portal(page, { pictures: [mine, edited, theirs] });
+  const makeVideo = async (words: string) => {
+    await page.getByRole('radiogroup', { name: 'Make' }).getByRole('radio', { name: 'A video' }).click();
+    await page.getByPlaceholder('Describe the video: the subject, what moves, the camera').fill(words);
+    await page.getByRole('button', { name: 'Make the video' }).click();
+  };
+
+  // Changed pictures only: a video is none of them, so the kind goes and the video has its tile.
+  await page.goto('/media?show=images&kind=edited');
+  await expect(gallery(page).getByRole('listitem')).toHaveCount(1);
+  await makeVideo('A fox in the snow');
+  await expect(page).toHaveURL(/\/media$/);
+  await expect(gallery(page).getByRole('listitem')).toHaveCount(4);
+  await expect(page.getByText('Making a video', { exact: true })).toBeVisible();
+
+  // The agent's pictures only: what is made here is not from a chat, so the origin goes.
+  await page.goto('/media?show=images&origin=chat');
+  await expect(gallery(page).getByRole('listitem')).toHaveCount(1);
+  await makeVideo('A river');
+  await expect(page).toHaveURL(/\/media$/);
+  await expect(gallery(page).getByRole('listitem').filter({ hasText: 'A river' })).toHaveCount(1);
+
+  // What is made here fits "made here": that filter stays, with the video in it.
+  await page.goto('/media?show=images&origin=page');
+  await expect(gallery(page).getByRole('listitem')).toHaveCount(2);
+  await makeVideo('A lighthouse');
+  await expect(page).toHaveURL(/\/media\?origin=page$/);
+  await expect(show(page, 'All')).toBeChecked();
+  await expect(gallery(page).getByRole('listitem').filter({ hasText: 'A lighthouse' })).toHaveCount(1);
+});
+
 test('the form follows the filter: videos shown, the form of videos is open', async ({ page }) => {
   await portal(page);
   await page.goto('/media?show=videos');

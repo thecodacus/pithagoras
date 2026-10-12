@@ -15,7 +15,8 @@ The gallery under it holds both kinds together, with a filter for **All**, **Pic
 Both are set up in one place, **Settings → Agent → Media**: the **Image model** (with **Image generation** and
 **Image editing**, each with an address) and the **Video model** (**Video generation**, with an address). Those
 switches decide whether the feature exists: whether the page can make or change pictures and make videos, and
-whether the agent can have the `generate_image`, `edit_image`, `generate_video` and `show_*` tools at all. Whether a
+whether the agent can have the `generate_image`, `edit_image`, `generate_video` and `show_video` tools at all
+(`show_image` is always there). Whether a
 chat's agent actually gets a tool is set where every tool is, in the tool lists (Settings → Agent → Tools, a
 project's Tools, the tools control of a chat), where the picture and video tools are one **Media** group. The page
 does not depend on those lists: a tool switched off there leaves the page as it is.
@@ -316,8 +317,8 @@ shows its first frame, with a mark that it plays.
 
 - **Both, or one.** Where both kinds are made, *Show* is **All**, **Pictures** or **Videos**; where only one is,
   that is all the page shows, and there is no choice. Choosing one kind also opens its form, until you choose
-  the other. A picture or a video started while the gallery shows only the other kind brings the gallery back to
-  both, so that the one being made has its tile.
+  the other. A picture or a video started while the filters would leave it out — the other kind is shown, or a
+  kind or an origin it does not have — lets go of them, so that the one being made has its tile.
 - **Together.** The portal keeps a list of pictures and a list of videos, and the page asks for a page of each
   and shows them as one, in the order of the time each was made. Where a list has more than has been loaded,
   nothing older than its last item is shown yet, so that nothing is left out between: **Show more**, and nearing

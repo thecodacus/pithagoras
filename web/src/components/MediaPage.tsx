@@ -234,9 +234,17 @@ export function MediaPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [selecting]);
 
-  /** A picture or a video was started while the gallery shows only the other kind: its tile has no place there, so the gallery shows both. */
-  const reveal = (kind: "images" | "videos") => {
-    if (picturesOn && videosOn && wanted.show !== "all" && wanted.show !== kind) setFilter({ ...wanted, show: "all" });
+  /**
+   * A picture or a video was started while the filters would leave its tile out: the other kind is shown, or a kind or an
+   * origin it does not have. Those filters are let go of, so that the one being made has its place; what fits it stays.
+   */
+  const reveal = (list: "pictures" | "videos", made: { kind: string }[]) => {
+    const ofKind = list === "videos" ? (made[0]?.kind === "animate" ? "animated" : "generated") : made[0]?.kind === "edit" ? "edited" : "generated";
+    const shown = list === "pictures" ? show !== "videos" : show !== "images";
+    const origin = wanted.origin === "page" ? "page" : undefined;
+    const kind = wanted.kind === ofKind ? ofKind : undefined;
+    if (shown && origin === wanted.origin && kind === wanted.kind) return;
+    setFilter({ show: shown ? wanted.show : "all", origin, kind });
   };
 
   const openPicture = useCallback((id: string) => setOpened({ kind: "picture", id }), []);
@@ -582,7 +590,7 @@ export function MediaPage() {
             onFind={find}
             onStarted={(made) => {
               pictures.started(made);
-              reveal("images");
+              reveal("pictures", made);
             }}
             onUploaded={() => pictures.refreshTop()}
           />
@@ -599,7 +607,7 @@ export function MediaPage() {
             onFirstFrame={setFirstFrame}
             onStarted={(made) => {
               videos.started(made);
-              reveal("videos");
+              reveal("videos", made);
             }}
           />
         )}
