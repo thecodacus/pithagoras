@@ -131,7 +131,7 @@ export function attachBrowserUpgrade(server: http.Server): void {
     if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized");
     if (req.headers.origin && !fromHere(req.headers.origin, req.headers)) return refuse(socket, 403, "Forbidden");
     // The stream is checked only as it opens: it ends when the password it was opened under goes.
-    socket.once("close", watchStream(req, () => socket.destroy()));
+    socket.once("close", watchStream(() => socket.destroy()));
     const proxied = https.request({
       host: UPSTREAM_HOST,
       port: upstreamPort(),

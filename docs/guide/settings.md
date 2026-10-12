@@ -159,8 +159,10 @@ asks for one on its first start, in the browser; see
 **Change password** takes the current password once and the new one twice, which
 has to be at least 8 characters and not `change-me`, the example the older
 guides gave. Every other browser is signed out by the change and asks for the new
-password, and what it had open is closed with it: a chat's live view, a terminal,
-the agent's browser. The one you changed it in stays signed in. Wrong current
+password. What is open under the old password is closed in every browser, the one
+you changed it in too, since a copied cookie must not keep its streams: a chat's
+live view, a terminal, the agent's browser. The page you changed it in stays signed
+in and opens them again by itself, with its new login. Wrong current
 passwords are counted on their own, apart from the sign-in's: after ten from one
 source in fifteen minutes the page is told to wait, and not even the right one is
 taken until the time is up.

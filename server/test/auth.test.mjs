@@ -462,7 +462,7 @@ const staysOpen = async (stream, what) => {
   assert.equal(stream.ended, false, what);
 };
 
-test("changing the password ends the event and terminal streams other browsers have open, and the one it was changed in keeps its own", async () => {
+test("changing the password ends every event and terminal stream that was open under the old one, also those that share the cookie it was changed with", async () => {
   const p = await portalOf({ PORTAL_PASSWORD: PASSWORD });
   try {
     const mine = cookieOf(await login(PASSWORD, p.base));
@@ -470,28 +470,29 @@ test("changing the password ends the event and terminal streams other browsers h
     const chat = (await (await post(p.base, "/api/sessions", {}, mine)).json()).id;
     const shell = (await (await post(p.base, "/api/terminal", {}, other)).json()).id;
     const streams = {
+      // Two streams on one cookie: the browser's own, and one whoever copied the cookie opened. A cookie is a string, so
+      // there is nothing to tell them apart by, and neither may outlive the password it was opened under.
       myEvents: await openStream(p.base, mine, `/api/sessions/${chat}/events`),
+      copiedEvents: await openStream(p.base, mine, `/api/sessions/${chat}/events`),
       theirEvents: await openStream(p.base, other, `/api/sessions/${chat}/events`),
       theirTerminal: await openStream(p.base, other, `/api/terminal/${shell}/stream`),
     };
     const changed = await post(p.base, "/api/auth/password", { current: PASSWORD, password: "the brand new one" }, mine);
     assert.equal(changed.status, 200);
-    await ends(streams.theirEvents, "the other browser's event stream");
-    await ends(streams.theirTerminal, "the other browser's terminal");
-    // Not by its next check either: that is on a timer, and it must find the browser that changed it still signed in.
-    await staysOpen(streams.myEvents, "the event stream of the browser that changed it");
-    // A stream opened from now on is under the new password, and the cookie of the change opens it.
+    for (const [name, stream] of Object.entries(streams)) await ends(stream, name);
+    // The page opens them again with the cookie of the change, and what it opens from now on is under the new password.
     const again = await openStream(p.base, cookieOf(changed), `/api/sessions/${chat}/events`);
     await staysOpen(again, "a stream opened after the change");
-    assert.equal((await fetch(`${p.base}/api/sessions/${chat}/events`, { headers: { Cookie: other } })).status, 401);
+    assert.equal((await fetch(`${p.base}/api/sessions/${chat}/events`, { headers: { Cookie: mine } })).status, 401);
     await fetch(`${p.base}/api/terminal/${shell}`, { method: "DELETE", headers: { Cookie: cookieOf(changed) } });
   } finally {
     await p.stop();
   }
 });
 
-test("changing the password ends the agent's browser stream another login has open, and a reset ends every stream", async () => {
+test("changing the password ends the agent's browser streams, the changer's too, and a reset ends every stream", async () => {
   const p = await portalOf({ PORTAL_PASSWORD: PASSWORD, BROWSER_HTTPS_PORT: String(upstreamPort), BROWSER_USER: "agent", BROWSER_PASSWORD });
+  const closes = (stream, what) => Promise.race([stream.closed, new Promise((_, no) => setTimeout(() => no(new Error(`${what} is still open`)), 5000))]);
   try {
     browser.mode = "accept";
     const mine = cookieOf(await login(PASSWORD, p.base));
@@ -503,20 +504,20 @@ test("changing the password ends the agent's browser stream another login has op
     };
     const theirs = await open(other);
     const own = await open(mine);
+    const copied = await open(mine);
     const changed = await post(p.base, "/api/auth/password", { current: PASSWORD, password: "the brand new one" }, mine);
     assert.equal(changed.status, 200);
-    await Promise.race([theirs.closed, new Promise((_, no) => setTimeout(() => no(new Error("the other login's stream is still open")), 5000))]);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
-    assert.equal(own.socket.destroyed, false, "the stream of the login that changed it");
+    await closes(theirs, "the other login's stream");
+    await closes(own, "the stream of the login that changed it");
+    await closes(copied, "the stream another holder of that cookie opened");
 
-    // Removed by the command, which is another process: every stream goes, the one that was kept too.
+    // Removed by the command, which is another process: every stream goes, one opened under the new password too.
     const chat = (await (await post(p.base, "/api/sessions", {}, cookieOf(changed))).json()).id;
     const events = await openStream(p.base, cookieOf(changed), `/api/sessions/${chat}/events`);
+    const later = await open(cookieOf(changed));
     assert.equal((await resetPassword(p.home, "reset\n")).code, 0);
     await ends(events, "the event stream, after the reset");
-    await Promise.race([own.closed, new Promise((_, no) => setTimeout(() => no(new Error("the browser stream is still open after the reset")), 5000))]);
-    own.socket.destroy();
-    theirs.socket.destroy();
+    await closes(later, "the browser stream, after the reset");
   } finally {
     await p.stop();
   }

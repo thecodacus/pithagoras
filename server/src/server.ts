@@ -197,7 +197,7 @@ app.post("/api/auth/setup", async (req, res) => {
 // Throttled like the login, since it too takes a guess at the password. Every other login ends with the change,
 // and this browser is signed in again under the new one.
 app.post("/api/auth/password", requireAuth, loginThrottle(), async (req, res) => {
-  const refused = await changePassword(req.body?.current, req.body?.password, req);
+  const refused = await changePassword(req.body?.current, req.body?.password);
   if (refused) return res.status(refused.status).json({ error: refused.error });
   issueCookie(res);
   res.json({ ok: true });

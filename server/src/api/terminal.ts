@@ -322,7 +322,7 @@ export function terminalRouter(): Router {
     // Without traffic a proxy takes an idle shell for a dead connection.
     const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
     // The shell goes on and its page is shown to the next login: the stream is for the password it was opened under.
-    const unwatch = watchStream(req, drop);
+    const unwatch = watchStream(drop);
     req.on("close", () => {
       unwatch();
       clearInterval(heartbeat);

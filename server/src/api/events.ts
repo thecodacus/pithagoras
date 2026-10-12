@@ -151,7 +151,7 @@ export function eventsRouter(): Router {
     sessions.on(`session:${session.id}`, onEvent);
 
     // Ended when the password changes: this login is not the portal's any more, and the stream was checked only as it opened.
-    const unwatch = watchStream(req, () => res.destroy());
+    const unwatch = watchStream(() => res.destroy());
     res.on("close", () => {
       unwatch();
       gone = true;

@@ -11,13 +11,6 @@
 export interface Login {
   /** The hash of the password now, or undefined where there is none. */
   hash(): string | undefined;
-  /** The login cookie a request carries. */
-  cookie(req: StreamRequest): string | undefined;
-}
-
-export interface StreamRequest {
-  cookies?: Record<string, string>;
-  headers: { cookie?: string };
 }
 
 let login: Login | undefined;
@@ -25,7 +18,7 @@ export const bindLogin = (bound: Login): void => {
   login = bound;
 };
 
-const streams = new Set<{ hash: string; cookie: string | undefined; end: () => void }>();
+const streams = new Set<{ hash: string; end: () => void }>();
 let sweeper: ReturnType<typeof setInterval> | undefined;
 
 /** Ends every stream that was opened under a password that is not the one now. */
@@ -43,24 +36,17 @@ export function sweep(): void {
 }
 
 /**
- * Ties a stream to the login it was opened with: `end` is called when the password changes, in another
- * browser or with the command that removes it, and the returned function lets go of the stream when it
- * closes by itself. The command runs in another process, so what it did is noticed on a timer.
+ * Ties a stream to the password it was opened under: `end` is called when the password changes, in any
+ * browser (the one that changed it too: a cookie is a copyable string, so no stream is "its own", and the
+ * page opens its streams again with the cookie the change signed it in with) or with the command that
+ * removes it, and the returned function lets go of the stream when it closes by itself. The command runs
+ * in another process, so what it did is noticed on a timer.
  */
-export function watchStream(req: StreamRequest, end: () => void): () => void {
+export function watchStream(end: () => void): () => void {
   const hash = login?.hash();
-  if (!login || !hash) return () => {};
-  const stream = { hash, cookie: login.cookie(req), end };
+  if (!hash) return () => {};
+  const stream = { hash, end };
   streams.add(stream);
   sweeper ??= setInterval(sweep, 2000).unref();
   return () => void streams.delete(stream);
-}
-
-/**
- * After a change of the password to `hash`: the streams of the login that made it are the person's own and
- * go on under the new one, and every other is ended.
- */
-export function keepStreams(cookie: string | undefined, hash: string): void {
-  if (cookie !== undefined) for (const stream of streams) if (stream.cookie === cookie) stream.hash = hash;
-  sweep();
 }

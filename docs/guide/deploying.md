@@ -77,8 +77,9 @@ log says it is waiting. This works the same in Docker and on a headless machine:
 open the address from any browser that can reach it.
 
 **Changing it.** **Settings → Password** takes the current password and the new
-one twice; it signs out every other browser and closes what they had open. See
-[Settings](/guide/settings#password).
+one twice; it signs out every other browser, and closes every chat view, terminal and
+browser stream that was open, in the one you changed it in as well (that page opens
+them again with its new login). See [Settings](/guide/settings#password).
 
 **An install from before.** A portal that took its password from `PORTAL_PASSWORD`
 moves it into the database on its first start after the upgrade and says so in the

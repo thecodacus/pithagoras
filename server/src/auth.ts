@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { getDb, getSetting, isSignedOut, putSetting, recordSignOut } from "./db.js";
 import { allowNoPassword, tlsFiles } from "./http-security.js";
-import { bindLogin, keepStreams, sweep } from "./login-streams.js";
+import { bindLogin, sweep } from "./login-streams.js";
 import {
   EXAMPLE_PASSWORD,
   MIN_PASSWORD_LENGTH,
@@ -240,17 +240,16 @@ export async function setUpPassword(password: unknown): Promise<Refusal | null> 
 /**
  * Changes the password to `next`, given the one it is now. The caller signs this browser in again (issueCookie):
  * every other login is ended by the change, because the cookies are signed with the password's hash, and so is
- * every stream they had open. The login the change was made with is the person's own, and its streams stay.
+ * every stream that was open under the old one, the changer's too: a cookie can be copied, and so can what is open with it.
  */
-export async function changePassword(current: unknown, next: unknown, req: { cookies?: Record<string, string> }): Promise<Refusal | null> {
+export async function changePassword(current: unknown, next: unknown): Promise<Refusal | null> {
   if (authMode() !== "password") return { status: 409, error: "No password is set." };
   const problem = passwordProblem(next);
   if (problem) return { status: 400, error: problem };
   if (!(await checkPassword(current))) return { status: 403, error: "The current password is wrong." };
-  const hash = await hashPassword(next as string);
-  keepPassword(hash);
-  // What the browser that changed it has open stays open (it is signed in again by the caller); every other stream ends.
-  keepStreams(req.cookies?.[COOKIE], hash);
+  keepPassword(await hashPassword(next as string));
+  // Every stream ends, the changer's too: the page opens them again with the cookie it is signed in with by the caller.
+  sweep();
   return null;
 }
 
@@ -278,7 +277,7 @@ function upgradeCookie(req: { headers: { cookie?: string } }): string | undefine
   return undefined;
 }
 
-bindLogin({ hash: storedHash, cookie: (req) => req.cookies?.[COOKIE] ?? upgradeCookie(req) });
+bindLogin({ hash: storedHash });
 
 export function isAuthedUpgrade(req: { headers: { cookie?: string } }): boolean {
   return authMode() === "open" || verify(upgradeCookie(req));
