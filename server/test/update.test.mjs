@@ -274,6 +274,27 @@ test("after a failed build, the next update builds again without merging, and re
   assert.equal((await u.status()).rebuild, false);
 });
 
+test("a build that failed does not keep the next update from merging what is new on main meanwhile", async () => {
+  const w = world();
+  w.fails.add("npm run");
+  const { u, calls } = updater(w);
+  await u.start();
+  assert.equal((await settled(u)).failed.step, "build");
+
+  // The fix is on main: the checkout is behind again, and the build is still pending.
+  w.fails.clear();
+  w.ran.length = 0;
+  w.target = commit("fff", "The fix");
+  w.behind = 1;
+  await u.start(commit("fff").sha);
+  const run = await settled(u);
+  assert.equal(run.state, "restarting");
+  assert.deepEqual(run.steps.map((s) => s.state), ["done", "done", "done", "done", "running"]);
+  assert.ok(w.ran.includes("git merge --ff-only refs/remotes/origin/main"));
+  assert.equal((await u.status()).current.sha, commit("fff").sha);
+  assert.equal(calls.restart, 1);
+});
+
 test("a merge git refuses fails the update before anything is built", async () => {
   const w = world();
   w.fails.add("git merge");

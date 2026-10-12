@@ -32,9 +32,11 @@ async function portal(page: Page, w: World) {
     if (path === '/api/update' && method === 'POST') {
       w.posted.start.push(json());
       if (w.refuse) return reply(w.refuse.status, w.refuse.body);
+      // As the server has it once the merge is in: the build is pending, which is not a failed one.
       w.status = {
         ...w.status,
         notice: null,
+        rebuild: true,
         run: {
           state: 'running', from: NOW, to: NEXT, startedAt: '2026-10-12T09:00:00Z',
           steps: [{ id: 'fetch', state: 'done' }, { id: 'merge', state: 'done' }, { id: 'install', state: 'running' }, { id: 'build', state: 'pending' }, { id: 'restart', state: 'pending' }],
@@ -78,6 +80,7 @@ test('Update asks what is new, shows both commits and confirms before anything i
   await expect(steps.nth(2)).toHaveAttribute('data-state', 'running');
   await expect(steps.nth(0)).toHaveAttribute('data-state', 'done');
   await expect(section.getByRole('button', { name: 'Update', exact: true })).toBeDisabled();
+  await expect(section).not.toContainText('building it failed');
 });
 
 test('one running chat is said in the singular, and none is not mentioned', async ({ page }) => {

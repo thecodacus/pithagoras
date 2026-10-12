@@ -374,7 +374,8 @@ export class Updater {
       startedAt: this.now().toISOString(),
     };
     this.run = run;
-    void this.execute(run);
+    // Behind: there is something to merge, a failed build before it or not. Not behind: the build is what is left.
+    void this.execute(run, seen.behind > 0);
     return run;
   }
 
@@ -403,12 +404,12 @@ export class Updater {
     return true;
   }
 
-  private async execute(run: RunView): Promise<void> {
+  private async execute(run: RunView, merge: boolean): Promise<void> {
     let at: Step = "fetch";
     try {
       console.log(`[update] ${run.from.sha.slice(0, 7)} -> ${run.to.sha.slice(0, 7)}`);
       this.mark(run, "fetch", "done");
-      if (this.rebuild) this.mark(run, "merge", "skipped");
+      if (!merge) this.mark(run, "merge", "skipped");
       else {
         at = "merge";
         // Only moves forward: where it cannot, git stops without changing a file.

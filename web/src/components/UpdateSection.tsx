@@ -70,13 +70,16 @@ export function UpdateSection() {
         </div>
       </dl>
 
-      <p className="mt-3 text-sm text-fg-muted">
-        {status.notice
-          ? tp(status.notice.count, "{n} new commit on main, update available", "{n} new commits on main, update available")
-          : status.rebuild
-            ? t("The new version is checked out, but building it failed. Update builds it again.")
-            : t("Nothing new on main when it was last looked at.")}
-      </p>
+      {/* While an update runs, the steps below say where it is: its merge has the build pending, which is no failure. */}
+      {!active && (
+        <p className="mt-3 text-sm text-fg-muted">
+          {status.notice
+            ? tp(status.notice.count, "{n} new commit on main, update available", "{n} new commits on main, update available")
+            : status.rebuild
+              ? t("The new version is checked out, but building it failed. Update builds it again.")
+              : t("Nothing new on main when it was last looked at.")}
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
           type="button"
