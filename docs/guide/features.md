@@ -417,7 +417,7 @@ server is started with the video model you choose.
 
 | Field | Meaning |
 | --- | --- |
-| **API address** | The server's own address, such as `http://localhost:1234`. The portal adds `/sdcpp/v1/…` to it; the address of the same server's image endpoint, ending in `/v1`, works as well. No login, query or `#` in it: the key has its own field. |
+| **API address** | The server's own address, such as `http://localhost:1234`, or `http://host:port/upstream/<model>` through llama-swap. The portal adds `/sdcpp/v1/…` to it; the address of the same server's image endpoint, ending in `/v1`, works as well. Only a stable-diffusion.cpp server works: an OpenAI-style `/v1` endpoint of another kind, or another video server, does not. No login, query or `#` in it: the key has its own field. |
 | **API key** | Sent as `Authorization: Bearer …` to this address, and nowhere else, for a server behind a gateway that needs one. Left empty for a server that needs none. A saved key is never shown again — the page is only told that one is set — so leave the field empty to keep it, or choose **Remove the saved key**. Giving the address of another server without a key drops the saved one: a key belongs to the server it was given for. |
 | **Model** | Sent as `model`. stable-diffusion.cpp's server runs the one model it was started with and ignores it; a gateway in front of it may choose a model by it. Empty sends none. |
 | **Video size** | Sent as `width` and `height`, such as `832x480`, each side a whole number from 64 to 4096. Empty sends none (the server's own). The agent can ask for another size in a call. |

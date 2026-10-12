@@ -179,7 +179,9 @@ for (const [label, width] of [['wide', 1280], ['phone', 390]] as const) {
       await expect(opener).toHaveAttribute('aria-expanded', 'false');
       await heading.scrollIntoViewIfNeeded();
       // Closed: where the switches are.
-      const closed = await Promise.all(switches.map(async (switchName) => (await box(region.getByRole('switch', { name: switchName, exact: true }))).y - (await box(heading)).y));
+      // Where the switches are in the section, which is not the same as where the heading is: the heading may move for what is in its row.
+      const top = (await box(region)).y;
+      const closed = await Promise.all(switches.map(async (switchName) => (await box(region.getByRole('switch', { name: switchName, exact: true }))).y - top));
 
       await opener.click();
       await expect(body).toBeVisible();
@@ -195,7 +197,7 @@ for (const [label, width] of [['wide', 1280], ['phone', 390]] as const) {
         expect(beside || above, `${switchName}: in the heading's row or above it`).toBe(true);
         expect(at.y + at.height, `${switchName}: not between the heading and the body`).toBeLessThanOrEqual(under.y);
         // And it has not moved for the opening of the section.
-        expect(at.y - head.y, `${switchName}: stays where it was`).toBeCloseTo(closed[i], 0);
+        expect(at.y - (await box(region)).y, `${switchName}: stays where it was`).toBeCloseTo(closed[i], 0);
       }
       await opener.click();
       await expect(body).toBeHidden();

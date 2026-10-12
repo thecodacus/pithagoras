@@ -197,3 +197,52 @@ test('the search of Settings finds the video endpoint and lights it up', async (
   await expect(dialog.getByRole('switch', { name: 'Video generation', exact: true })).toBeVisible();
   await expect(dialog.locator('[data-setting="Video model"]')).toHaveClass(/setting-flash/);
 });
+
+test('a note says that only a stable-diffusion.cpp server works and what the address is through llama-swap, under the address field while the section is open, and in its heading row while it is closed', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/media');
+  const panel = videoPanel(page);
+  const note = panel.getByRole('note');
+  const heading = panel.getByRole('heading', { level: 3 });
+  const box = async (locator: ReturnType<Page['locator']>) => (await locator.boundingBox())!;
+
+  // Open (a model that is not set up starts open): right under the address and above the next field.
+  await expect(note).toHaveCount(1);
+  await expect(note).toBeVisible();
+  await expect(note).toContainText('Only a stable-diffusion.cpp server works, through its native API (/sdcpp/v1) with a video model started on it.');
+  await expect(note).toContainText('An OpenAI-style /v1 endpoint or another video server does not.');
+  await expect(note).toContainText('Through llama-swap the address is http://host:port/upstream/<model>.');
+  const address = await box(panel.getByLabel('API address'));
+  const key = await box(panel.getByLabel('API key'));
+  const open = await box(note);
+  expect(open.y).toBeGreaterThanOrEqual(address.y + address.height);
+  expect(open.y + open.height).toBeLessThanOrEqual(key.y);
+
+  // Closed: still there, once, in the row of the heading and the switch.
+  await panel.getByRole('button', { name: /^Video model/ }).click();
+  await expect(panel.getByLabel('API address')).toBeHidden();
+  await expect(note).toHaveCount(1);
+  await expect(note).toBeVisible();
+  const row = await box(heading);
+  const closed = await box(note);
+  expect(closed.y).toBeGreaterThanOrEqual(row.y);
+  expect(closed.y + closed.height).toBeLessThanOrEqual(row.y + row.height + 1);
+
+  // And under the address again when it is opened again.
+  await panel.getByRole('button', { name: /^Video model/ }).click();
+  await expect(note).toHaveCount(1);
+  await expect(panel.getByLabel('API address')).toBeVisible();
+  const again = await box(note);
+  expect(again.y).toBeGreaterThanOrEqual((await box(panel.getByLabel('API address'))).y);
+});
+
+test.describe('in a browser set to German', () => {
+  test.use({ locale: 'de-DE' });
+
+  test('the note on what the video address has to be is in German', async ({ page }) => {
+    await portal(page);
+    await page.goto('/settings/media');
+    await expect(page.getByRole('note')).toContainText('Nur ein stable-diffusion.cpp-Server funktioniert');
+    await expect(page.getByRole('note')).toContainText('Über llama-swap lautet die Adresse http://host:port/upstream/<model>.');
+  });
+});

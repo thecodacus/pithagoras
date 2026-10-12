@@ -933,6 +933,8 @@ const de: Locale = {
     "Off: an edit takes one picture.": "Aus: Eine Bearbeitung nimmt ein Bild.",
     "Switch it on only if the editing endpoint takes more than one picture in a request.": "Schalte es nur ein, wenn der Bearbeitungs-Endpunkt mehr als ein Bild pro Anfrage annimmt.",
     // components/MediaPanel.tsx
+    "Only a stable-diffusion.cpp server works, through its native API ({route}) with a video model started on it. An OpenAI-style /v1 endpoint or another video server does not.": "Nur ein stable-diffusion.cpp-Server funktioniert, über seine native API ({route}) mit einem darauf gestarteten Videomodell. Ein OpenAI-artiger /v1-Endpunkt oder ein anderer Videoserver funktioniert nicht.",
+    "Through llama-swap the address is {upstream}.": "Über llama-swap lautet die Adresse {upstream}.",
     "Unsaved changes": "Ungespeicherte Änderungen",
     "Not set up": "Nicht eingerichtet",
     "Uses the image endpoint": "Nutzt den Bild-Endpunkt",

@@ -230,11 +230,17 @@ byte for byte.
 
 ## Videos
 
-The one kind of endpoint the portal speaks to for now is a
-[stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) server started with a
-video model. How a video is asked for is a backend's business and nothing else in the portal
-knows it, so another can be added later; there is none yet (see [What it takes from the
-endpoint](#what-it-takes-from-the-endpoint)).
+::: warning Only a stable-diffusion.cpp server works
+Video generation works only with a [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
+server, through its native API (`/sdcpp/v1`), with a video model started on it. **An OpenAI-style `/v1` endpoint, or
+another video server, does not work.** The same note is under the address in **Settings → Agent → Media**.
+
+Through llama-swap the address is `http://host:port/upstream/<model>`, where `<model>` is the llama-swap name of
+the model that runs the stable-diffusion.cpp server: the portal adds `/sdcpp/v1/…` to it.
+:::
+
+How a video is asked for is a backend's business and nothing else in the portal knows it, so another can be added
+later; there is none yet (see [What it takes from the endpoint](#what-it-takes-from-the-endpoint)).
 
 ### Making a video
 
@@ -573,8 +579,9 @@ video takes far longer than a request should be held open:
    long for a portal that fetches it at once.
 5. `POST /sdcpp/v1/jobs/{id}/cancel`, when the wait is stopped or runs out.
 
-The address is the server's own, such as `http://localhost:1234`; the address of the image endpoint of
-the same server, with its `/v1`, works too. The server must have been **started with a video model** and **built
+The address is the server's own, such as `http://localhost:1234`, or `http://host:port/upstream/<model>` through
+llama-swap; the address of the image endpoint of the same stable-diffusion.cpp server, with its `/v1`, works too (the
+`/v1` is taken off). A `/v1` endpoint of another kind of server does not work. The server must have been **started with a video model** and **built
 with WebM support**: an AVI or an animated WebP, which it can make too, is not something a browser plays.
 Other request and answer shapes are not translated; there is no other backend yet. Not supported: a last
 frame, control frames, LoRA and the other fields of the native API; they are not in the form.

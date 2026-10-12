@@ -1159,6 +1159,19 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
     return (next === saved ? {} : { [name]: next }) as Partial<Record<K, number | null>>;
   };
 
+  // What a video address has to be, said where it is typed while the section is open and in its heading's row while it is closed, so that it is seen either way.
+  const works = (
+    <div role="note" className="flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-fg-muted">
+      <LuTriangleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
+      <div className="space-y-1">
+        <p>
+          {tx("Only a stable-diffusion.cpp server works, through its native API ({route}) with a video model started on it. An OpenAI-style /v1 endpoint or another video server does not.", { route: <code>/sdcpp/v1</code> })}
+        </p>
+        <p>{tx("Through llama-swap the address is {upstream}.", { upstream: <code>{"http://host:port/upstream/<model>"}</code> })}</p>
+      </div>
+    </div>
+  );
+
   return (
     <CollapsibleSection
       title={t("Video model")}
@@ -1183,6 +1196,7 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
             </p>
           )}
           {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+          {!open && works}
         </>
       }
     >
@@ -1200,6 +1214,7 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
               className={`${inputCls} mt-1 font-mono text-xs`}
             />
           </label>
+          {open && <div className="sm:col-span-2">{works}</div>}
           <label className="text-xs text-fg-muted">
             {t("API key")}
             <input
