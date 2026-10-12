@@ -220,7 +220,8 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
     // The state cookie is kept for the host it is set on, and the provider sends the browser back to the redirect
     // URL's: a portal opened by another name (an IP, a Tailscale name) starts again there first. The target is the
     // configured address, never the request's; `moved` stops a proxy that rewrites Host from sending it round again.
-    if (req.hostname.toLowerCase() !== config.redirectUrl.hostname.toLowerCase() && req.query.moved === undefined) {
+    // A request without a Host header (HTTP/1.0 allows it) has no name, which is another name too.
+    if ((req.hostname ?? "").toLowerCase() !== config.redirectUrl.hostname.toLowerCase() && req.query.moved === undefined) {
       const there = new URL("/api/auth/oidc/start", config.redirectUrl.origin);
       there.searchParams.set("returnTo", safeReturnTo(req.query.returnTo));
       there.searchParams.set("moved", "1");

@@ -226,7 +226,9 @@ export function safeReturnTo(value: unknown): string {
     return "/";
   }
   // Checked again on what is returned: dot segments collapse, so `/.//host` comes out as `//host`.
-  if (url.origin !== base || url.pathname.startsWith("//") || url.pathname === "/api" || url.pathname.startsWith("/api/")) return "/";
+  // Express matches routes whatever their case, so `/API/` is an API route too.
+  const lower = url.pathname.toLowerCase();
+  if (url.origin !== base || url.pathname.startsWith("//") || lower === "/api" || lower.startsWith("/api/")) return "/";
   return url.pathname + url.search;
 }
 

@@ -132,8 +132,8 @@ A login lasts 30 days, as with the password. When the provider's own session or
 token runs out, the portal's login does not end, and blocking an account at the
 provider does not end a login the account already has. Changing the issuer, the
 client ID or an allow-list ends every login made before, as changing the password
-does. So do changing `PORTAL_SECRET`, and switching `OIDC_ONLY` on, which ends the
-logins the password gave.
+does. So do changing `PORTAL_SECRET` and switching `OIDC_ONLY` on or off: that ends
+every login, the provider's too, so everyone signs in again.
 
 ### Authentik
 

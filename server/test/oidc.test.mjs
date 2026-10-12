@@ -2,6 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
+import net from "node:net";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { ENTRY, freePort, runToEnd, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
@@ -171,7 +172,7 @@ test("the settings are read as the deployment gives them, and one that cannot be
 test("where a login goes on to is a page of the portal's own, never another origin or an API route", () => {
   assert.equal(safeReturnTo("/sessions/abc?tab=files"), "/sessions/abc?tab=files");
   // Dot segments collapse into `//` once the path is read, so the result is checked as well as what was asked.
-  for (const elsewhere of ["//evil.example/x", "/.//evil.example", "/a/..//evil.example/x", "/%2e//evil.example", "/./api/settings", "/\\evil.example", "https://evil.example/", "evil.example", "/\t/evil.example", "/api/settings", "/api", "", undefined, ["/x"], `/${"a".repeat(3000)}`]) {
+  for (const elsewhere of ["//evil.example/x", "/.//evil.example", "/a/..//evil.example/x", "/%2e//evil.example", "/./api/settings", "/API/settings", "/Api", "/\\evil.example", "https://evil.example/", "evil.example", "/\t/evil.example", "/api/settings", "/api", "", undefined, ["/x"], `/${"a".repeat(3000)}`]) {
     assert.equal(safeReturnTo(elsewhere), "/", JSON.stringify(elsewhere));
   }
 });
@@ -385,6 +386,16 @@ test("a sign-in started at another name of the portal starts again at the redire
   const moved = await atAnotherName("/api/auth/oidc/start?returnTo=%2F&moved=1");
   assert.equal(new URL(moved.headers.location).origin, issuer);
   assert.ok(stateCookie(moved));
+  // One without a Host header at all, as HTTP/1.0 may send, is sent there too, rather than failing.
+  const bare = await new Promise((resolve, reject) => {
+    const socket = net.connect(Number(port), "127.0.0.1", () => socket.end("GET /api/auth/oidc/start?returnTo=%2Fsessions HTTP/1.0\r\n\r\n"));
+    let answer = "";
+    socket.on("data", (d) => { answer += d; });
+    socket.on("end", () => resolve(answer));
+    socket.on("error", reject);
+  });
+  assert.match(bare, /^HTTP\/1\.1 303 /, bare.split("\r\n")[0]);
+  assert.match(bare, /\r\nLocation: http:\/\/127\.0\.0\.1:\d+\/api\/auth\/oidc\/start\?returnTo=%2Fsessions&moved=1\r\n/i);
   // A callback without the cookie says where to open the portal.
   const flow = await begin();
   await refused(await finish(flow, await sign(claimsFor(flow)), { cookie: null }), 400, /Open the portal at http:\/\/127\.0\.0\.1:\d+ and start it again/);

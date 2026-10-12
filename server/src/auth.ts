@@ -147,7 +147,8 @@ if (!authEnabled) {
 /**
  * What the cookies are signed with: the secret and the password, so a new password refuses every old cookie,
  * and the single sign-on provider and its allow-list, so that a change to who may sign in does the same.
- * The password only while it is a way in: switching OIDC_ONLY on ends the logins it gave.
+ * The password only while it is a way in, so switching OIDC_ONLY on ends the logins it gave. The key is the
+ * same for every login, so the provider's end with them, and switching it off again ends those made meanwhile.
  */
 const KEY = crypto.createHash("sha256").update(`${SECRET}\0${passwordLogin ? PASSWORD : ""}${oidcConfig ? `\0${fingerprint(oidcConfig)}` : ""}`).digest();
 
