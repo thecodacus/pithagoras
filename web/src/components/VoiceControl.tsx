@@ -108,6 +108,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const [starting, setStarting] = useState(false);
   const [phase, setPhase] = useState<VoicePhase>("Listening");
   const [error, setError] = useState("");
+  // A notice that did not end voice mode (the spoken error line missing, say): once voice mode is over it fades by itself. Failures that ended it stay until dismissed or the next start.
+  const [fadingError, setFadingError] = useState("");
+  // Where the controller began, once it has: the stage opens the conversation on errors after it, and the controller says the same ones.
+  const [errorsAfter, setErrorsAfter] = useState<number | null>(null);
   const [muted, setMuted] = useState(false);
   const [transcript, setTranscript] = useState("");
   const transcription = useRef<LiveTranscription | null>(null);
@@ -175,6 +179,12 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   };
   const maxTurn = useRef<ReturnType<typeof setTimeout>>();
 
+  useEffect(() => {
+    if (!error || error !== fadingError || enabled || starting) return;
+    const timer = setTimeout(() => setError(""), 5000);
+    return () => clearTimeout(timer);
+  }, [error, fadingError, enabled, starting]);
+
   const stop = () => {
     profiler.current?.close('stopped');
     // Ended, or left for another chat: a reload after this does not bring it back.
@@ -191,7 +201,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     clearTimeout(maxTurn.current);
     clearTimeout(holdLimit.current); clearTimeout(held.current?.timer); held.current = null;
     replay.current?.abort(); replay.current = null;
-    voice.current?.stop(); voice.current = null;
+    voice.current?.stop(); voice.current = null; setErrorsAfter(null);
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
     void detector?.destroy().catch(() => {});
@@ -373,14 +383,18 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     })().catch(() => {}).finally(() => { if (replay.current === controller) replay.current = null; });
     return true;
   };
-  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
+  const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'|'error'='reply') => {
     const trace=profiling.current?profiler.current!.current:undefined;
     const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
     mark('tts_request');
-    // The previous cancelled request may still be releasing Breeze's GPU lock.
     let response: Response;
+    // The previous cancelled request may still be releasing Breeze's GPU lock.
     const deadline = Date.now() + 15000;
-    do {
+    if (kind === 'error') {
+      // Said from the file made when voice mode began: the speech model is not asked at the moment something has gone wrong.
+      response = await fetch(`/api/sessions/${sessionId}/voice/error-line?text=${encodeURIComponent(text)}`, { signal });
+      if (!response.ok) throw new Error(t("The spoken error line is not available, so the error is shown in writing only. The speech model was not ready when voice mode started."));
+    } else do {
       signal.throwIfAborted();
       response = await fetch(`/api/sessions/${sessionId}/voice/speech`, {
         method: "POST", headers: { "Content-Type": "application/json", "Accept": "audio/pcm" },
@@ -498,6 +512,9 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         if(!current())return;
         heartbeat.current=setInterval(()=>{void connectVoice(lease,true).catch(e=>{if(current()){setError(e.message);stop();}});},25000);
       }
+      // The spoken error line is made now, while the speech model is at hand, and kept: at error time it is only played. Not waited
+      // for, and no failure here is shown: if it is missing then, that is said with the error.
+      void json(`/api/sessions/${sessionId}/voice/error-line`, { method: 'POST', body: JSON.stringify({ text: t("An error occurred.") }) }).catch(() => {});
       const detectorModule = await import("@ricky0123/vad-web");
       if (!current()) return;
       const live = new LiveTranscription(async (samples, signal) => {
@@ -547,9 +564,10 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         synthesize: (text, signal,kind) => synthesize(text, signal, audio,kind),
         trace: profileMark,
         phase: value => { if (current()) setPhase(value); },
-        error: message => { if (current()) {setError(message);profiler.current?.close('error');} },
+        error: message => { if (current()) {setError(message);setFadingError(message);profiler.current?.close('error');} },
       }, latest.current.items);
       voice.current = controller;
+      setErrorsAfter(controller.startedAfter);
       controller.setCompacting(latest.current.compacting);
       const detector = await detectorModule.MicVAD.new({
         model: "v5", audioContext: audio, startOnLoad: false,
@@ -642,7 +660,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       <VoiceStage sessionId={sessionId} folder={folder} workPhase={work} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? t("Sentence pipeline · buffered audio") : t("Sentence chunks · buffered audio")) : t("Sequential baseline")}` : comparison ? `${title} · ${t("Streaming pipeline")}` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
         browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
         levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} waitingForTap={waitingForTap}
-        items={items} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
+        items={items} errorsAfter={errorsAfter} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
         attachments={attachments} onAddPictures={files => { void addPictures(files); }} onRemovePicture={id => pending.set(sessionId, pending.get(sessionId).filter(a => a.id !== id))}
         canRepeat={canRepeat} onRepeat={() => { repeatReply(); }}
         rate={rate} onRate={value => { local.set('voiceRate', String(value)); setRate(value); }}
@@ -651,7 +669,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     )}
     <div className="relative flex items-center gap-1">
       <button type="button" className="prompt-action" aria-label={t("Profile voice latency")} title={t("Profile voice latency")} aria-pressed={profileOpen} onClick={()=>{setProfileOpen(v=>!v);if(profileOpen)profiler.current!.close('disabled');}}><LuGauge/></button>
-      {error && !enabled && !starting && <p role="alert" className="absolute bottom-full right-0 mb-3 w-64 rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
+      {error && !enabled && !starting && <p role="alert" onClick={() => setError("")} className="absolute bottom-full right-0 mb-3 w-64 cursor-pointer rounded-xl border border-line bg-surface p-3 text-xs text-danger shadow-pop">{error}</p>}
       <button ref={startButton} type="button" onClick={() => { void start(); }} aria-label={t("Turn on hands-free voice")} title={bindings["voice.toggle"] ? t("Start voice conversation ({keys})", { keys: describe(bindings["voice.toggle"], layout) }) : t("Start voice conversation")} className="prompt-action">
         {starting ? <LuLoaderCircle aria-hidden className="animate-spin" /> : <LuAudioLines aria-hidden />}
       </button>

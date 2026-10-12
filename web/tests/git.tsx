@@ -8,7 +8,8 @@
 // file, ?fork=1 for a pull request from a fork's `main` while `main` is checked out, ?pullsfail=1 and ?currentfail=1
 // for GitHub failing the first time it is asked for the list and for this branch's pull request, ?prdifffail=1 for
 // a pull request whose diff cannot be had, ?prfiles=1 for one that also renamed a file and deleted another, ?unmerged=1 for a branch that is not merged and has to be deleted
-// anyway, ?branch=<name> for another branch checked out. window.stateFails = true makes reading the repository
+// anyway, ?nested=1 for a folder that also holds a clone of its own (tools/lib, with a repository of its own to pick; with
+// ?repo=none it is the only one), ?branch=<name> for another branch checked out. window.stateFails = true makes reading the repository
 // fail, as a portal that cannot be reached would. window.moveHead() moves HEAD, as a commit in the shell would.
 // What the panel asked for is in window.gitCalls; window.agentWrote() changes a file the way the agent would.
 import { useState } from 'react';
@@ -91,12 +92,22 @@ window.fetch = (async (input: any, init?: any) => {
   const reply = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
   const path = url.replace('/api/sessions/s/git', '').split('?')[0];
   const q = new URLSearchParams(url.split('?')[1] ?? '');
+  // The clone in the folder: a repository of its own, on its own branch, with a change of its own.
+  if (path === '' && q.get('repo') === 'tools/lib') {
+    return reply({ repo: true, root: '/work/app/tools/lib', prefix: '', branch: 'trunk', head: '9'.repeat(40), upstream: null, ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'src/lib.ts', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }] });
+  }
+  if (path === '/repos') {
+    const around = params.get('repo') === 'none' ? [] : [{ path: '', name: 'app' }];
+    return reply({ repos: [...around, ...(params.get('nested') ? [{ path: 'tools/lib', name: 'lib' }] : [])], truncated: false });
+  }
   if (params.get('repo') === 'none' && path === '') return reply({ repo: false, folder: '/work/notes' });
   if (path === '' && (window as any).stateFails) return reply({ error: 'The portal could not be reached' }, 500);
   if (path === '') return reply({ repo: true, root: '/work/app', prefix: params.get('prefix') ?? '', ...repo, truncated: false, remotes: [{ name: 'origin', address: 'github.com:me/app', web: 'https://github.com/me/app' }] });
   if (path === '/gh') {
-    if (params.get('ghslow')) await new Promise((r) => setTimeout(r, 4000));
-    return reply(gh);
+    // The clone is a repository of its own on GitHub, with another default branch; ?ghslow=1 is slow for the folder's own only.
+    const clone = q.get('repo') === 'tools/lib';
+    if (params.get('ghslow') && !clone) await new Promise((r) => setTimeout(r, 4000));
+    return reply(clone && gh.repo ? { ...gh, repo: 'me/lib', url: 'https://github.com/me/lib', defaultBranch: 'trunk' } : gh);
   }
   if (path === '/diff') return reply({ diff: q.get('path') === 'a.txt' ? conflictDiff : diffOf(q.get('path') ?? 'x'), truncated: false });
   if (path === '/stage') {
@@ -158,6 +169,8 @@ window.fetch = (async (input: any, init?: any) => {
     return reply({ pulls });
   }
   if (path === '/pulls/current' && params.get('currentfail') && !currentFailed++) return reply({ error: 'gh timed out' }, 502);
+  // The clone's branch has no pull request.
+  if (path === '/pulls/current' && q.get('repo') === 'tools/lib') return reply({ pull: null });
   if (path === '/pulls/current') return reply({ pull: repo.branch === 'feature/login' ? { ...pulls[0], body: '' } : created?.headRefName === repo.branch ? created : null });
   if (path === '/pulls' && method === 'POST') {
     created = { ...pulls[0], number: 42, title: body.title, headRefName: repo.branch, body: body.body };

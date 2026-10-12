@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal, reply } from './portal-mock';
+import { test, expect, mockPortal, reply, DONE, HANG } from './portal-mock';
 
 const tree = {
   name: '/', path: '/', kind: 'directory', children: [
@@ -29,15 +29,25 @@ const concepts: Record<string, unknown> = {
 const healthy = { healthy: true, orphans: [], brokenLinks: [], issues: [] };
 const broken1 = { healthy: false, orphans: [], brokenLinks: [{ path: '/deployment/branches.md', target: '/people/owner.md' }], issues: [] };
 
-async function portal(page: Page, { enabled = true, broken = false, conformant = true, writable = true, afterDelete = broken1 as any, notes = 0 } = {}) {
+async function portal(page: Page, { enabled = true, broken = false, conformant = true, writable = true, afterDelete = broken1 as any, notes = 0, librarian = [] as (string | typeof HANG)[] } = {}) {
   const asked: string[] = [];
+  // What the librarian is asked, and what it answers (a stream, per question, in order).
+  const chats: any[][] = [];
   const changes: { method: string; path: string; body?: any }[] = [];
   let logCleared = false;
   let wiped = false;
-  await mockPortal(page, async ({ path: p, method, url, json }) => {
+  await mockPortal(page, async (ask) => {
+    const { path: p, method, url, json } = ask;
     if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled } };
     if (p === '/api/features') return { subagent: {}, understory: { enabled, url: 'http://127.0.0.1:3800/mcp', managed: { available: true, container: 'running', config: { llm: { source: 'auto' }, dreamInterval: '' }, providers: [], pulling: { active: false }, lastDream: { at: '2026-09-28T14:00:00Z', ok: true, ran: true, said: '1 file changed — mended the link' } } } };
     if (p === '/api/memory/health') return writable ? { writable: true, health: healthy } : { writable: false };
+    if (p === '/api/memory/chat' && method === 'POST') {
+      chats.push(json().messages);
+      const answer = librarian[chats.length - 1];
+      if (answer === HANG) return HANG;
+      await ask.route.fulfill({ status: 200, contentType: 'text/event-stream', body: answer ?? '' });
+      return DONE;
+    }
     if (p === '/api/memory/concept' && method === 'PUT') {
       const sent = json();
       changes.push({ method: 'PUT', path: sent.path, body: sent });
@@ -101,7 +111,7 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
       }
     }
   }, { settings: true });
-  return { asked, changes };
+  return { asked, changes, chats };
 }
 
 const notes = (page: Page) => page.getByRole('navigation', { name: 'Notes' });
@@ -686,4 +696,82 @@ test('one run elsewhere cannot be cleared from here', async ({ page }) => {
   await page.goto('/memory');
   await expect(page.getByRole('navigation', { name: 'Notes' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Clear the memory' })).toHaveCount(0);
+});
+
+const events = (...chunks: unknown[]) => chunks.map((c) => `data: ${typeof c === 'string' ? c : JSON.stringify(c)}\n\n`).join('');
+const answering = (text: string, withTool = false) => events(
+  { type: 'start' }, { type: 'start-step' },
+  ...(withTool ? [
+    { type: 'tool-input-available', toolCallId: 'c1', toolName: 'search_knowledge', input: { query: 'deploy' } },
+    { type: 'tool-output-available', toolCallId: 'c1', output: [] },
+    { type: 'finish-step' }, { type: 'start-step' },
+  ] : []),
+  { type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: text }, { type: 'text-end', id: 't' }, { type: 'finish' }, '[DONE]',
+);
+const composer = (page: Page) => page.getByRole('textbox', { name: 'Ask the librarian' });
+
+test('the librarian answers in a chat of its own, with its tool calls and links to notes; the conversation goes up whole, and Clear chat starts over', async ({ page }) => {
+  const { chats, asked } = await portal(page, {
+    librarian: [answering('Branches go out with [the script](/deployment/branches.md).', true), answering('Only the owner.'), answering('Fresh start.')],
+  });
+  await page.goto('/memory');
+  await page.getByRole('button', { name: 'Librarian' }).click();
+  await expect(page).toHaveURL(/view=chat/);
+  const log = page.getByRole('log', { name: 'Conversation with the librarian' });
+  await expect(page.getByRole('button', { name: 'Clear chat' })).toBeDisabled();
+
+  await composer(page).fill('How are branches deployed?');
+  await composer(page).press('Enter');
+  await expect(log.getByText('How are branches deployed?')).toBeVisible();
+  await expect(log.getByText('search_knowledge')).toBeVisible();
+  await expect(log.getByText(/Branches go out with/)).toBeVisible();
+  expect(chats[0].map((m) => [m.role, m.parts[0].text])).toEqual([['user', 'How are branches deployed?']]);
+  // It wrote or read with a tool: the notes beside it are read again.
+  await expect.poll(() => asked.filter((a) => a === '/api/memory/tree').length).toBeGreaterThan(1);
+
+  // The conversation stays while a note from its answer is open, and the next question carries it.
+  await log.getByRole('link', { name: 'the script' }).click();
+  await expect(page.getByRole('article', { name: 'Branch Deployment on Test Host' })).toBeVisible();
+  await page.getByRole('button', { name: 'Librarian' }).click();
+  await expect(log.getByText('How are branches deployed?')).toBeVisible();
+  await composer(page).fill('Who asked for it?');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(log.getByText('Only the owner.')).toBeVisible();
+  expect(chats[1].map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+  expect(chats[1][1].parts.map((p: any) => p.type)).toEqual(['step-start', 'tool-search_knowledge', 'step-start', 'text']);
+  expect(chats[1][1].parts[1]).toMatchObject({ state: 'output-available', input: { query: 'deploy' } });
+
+  await page.getByRole('button', { name: 'Clear chat' }).click();
+  await expect(log.getByText('Who asked for it?')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Clear chat' })).toBeDisabled();
+  await composer(page).fill('Anything left?');
+  await composer(page).press('Enter');
+  await expect(log.getByText('Fresh start.')).toBeVisible();
+  expect(chats[2].map((m) => m.role)).toEqual(['user']);
+});
+
+test('an answer under way can be stopped, and a failure of the librarian is said', async ({ page }) => {
+  const { chats } = await portal(page, { librarian: [HANG, events({ type: 'start' }, { type: 'error', errorText: 'The model did not answer' }, '[DONE]')] });
+  await page.goto('/memory?view=chat');
+  await composer(page).fill('Hello?');
+  await composer(page).press('Enter');
+  await expect(page.getByText('The librarian is thinking…')).toBeVisible();
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await composer(page).fill('Again?');
+  await composer(page).press('Enter');
+  await expect(page.getByRole('alert')).toContainText('The librarian could not answer: The model did not answer');
+  // The stopped question had no answer: the model is not given an empty turn to follow it.
+  expect(chats[1].map((m) => m.role)).toEqual(['user', 'user']);
+});
+
+test('one run elsewhere has no librarian', async ({ page }) => {
+  await portal(page, { writable: false });
+  await page.goto('/memory');
+  await expect(page.getByRole('navigation', { name: 'Notes' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Librarian' })).toHaveCount(0);
+  await page.goto('/memory?view=chat');
+  await expect(page.getByText('Choose a note, or open the log or the graph.')).toBeVisible();
 });

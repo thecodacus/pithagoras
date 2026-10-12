@@ -154,7 +154,7 @@ test("the memory is read through the portal: only Understory's read API, with it
     assert.equal((await get("/log")).status, 502, "what is not JSON is Understory failing");
     assert.equal((await get("/graph")).status, 200);
     assert.equal(asked.at(-1)!.url, "/api/graph");
-    assert.equal((await fetch(`${at}/chat`)).status, 404, "nothing past the reads: its chat writes");
+    assert.equal((await fetch(`${at}/chat`)).status, 404, "the librarian is asked with a POST, in the Understory the portal runs only (memory-chat.test.mts)");
     // A note is changed only in the Understory the portal runs; this one it does not.
     const put = await fetch(`${at}/concept`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/a.md", frontmatter: { type: "T", title: "A" }, body: "" }) });
     assert.equal(put.status, 409);

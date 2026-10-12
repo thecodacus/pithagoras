@@ -15,7 +15,7 @@ import { ImageMaker, type Mode } from "./ImageMaker";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
 import { ImageViewer, iconButton } from "./ImageViewer";
 import { PageHeader, Stat } from "./PageHeader";
-import { Empty, ErrorBanner, Segments, btnCls, ghostCls } from "./SettingsUi";
+import { Empty, ErrorBanner, Segments, WarnBanner, btnCls, ghostCls } from "./SettingsUi";
 import type { ViewerPicture } from "../image-viewer";
 
 /** How many pictures a page of the gallery has: enough to fill a screen and some, and few enough to be quick. */
@@ -93,6 +93,8 @@ export function ImagesPage() {
   const [error, setError] = useState<string | null>(null);
   // The gallery's own, apart: a page of it that loads ends a page that could not, and nothing else that went wrong.
   const [galleryError, setGalleryError] = useState<string | null>(null);
+  // What an edit that is done was made to fit (scaled down, compressed): it went ahead, so it is a warning and not an error.
+  const [fitted, setFitted] = useState<string[]>([]);
   useEffect(() => {
     api.imagesFeature().then((r) => setFeatures(r.images), (e: Error) => setError(e.message));
   }, []);
@@ -211,7 +213,10 @@ export function ImagesPage() {
         ignored.current ??= new Set(r.jobs.filter((j) => j.state === "done").map((j) => j.id));
         const shown = r.jobs.filter((j) => !ignored.current!.has(j.id));
         // A picture that was being made and is done now is in the gallery, and the list asks for it.
-        if (shown.some((j) => j.state === "done" && running.current.has(j.id))) refreshTop();
+        const finished = shown.filter((j) => j.state === "done" && running.current.has(j.id));
+        if (finished.length) refreshTop();
+        const said = finished.flatMap((j) => j.notes ?? []);
+        if (said.length) setFitted(said);
         running.current = new Set(shown.filter((j) => j.state === "running").map((j) => j.id));
         setLimit(r.limit);
         // A job that runs says the same each time it is asked about: only a change is drawn.
@@ -229,6 +234,7 @@ export function ImagesPage() {
 
   const started = (made: PictureJob[]) => {
     for (const job of made) running.current.add(job.id);
+    setFitted([]);
     setJobs((cur) => [...made, ...cur.filter((j) => !made.some((m) => m.id === j.id))]);
   };
   const dismiss = useCallback((id: string) => {
@@ -492,6 +498,14 @@ export function ImagesPage() {
 
         {error && <ErrorBanner onClose={() => setError(null)}>{error}</ErrorBanner>}
         {galleryError && <ErrorBanner onClose={() => setGalleryError(null)}>{galleryError}</ErrorBanner>}
+        {fitted.length > 0 && (
+          <WarnBanner onClose={() => setFitted([])}>
+            <p>{t("A picture was changed to fit what an edit takes.")}</p>
+            {[...new Set(fitted)].map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </WarnBanner>
+        )}
 
         {features && (
           <ImageMaker
@@ -803,7 +817,7 @@ const GalleryTile = memo(function GalleryTile({
       <ImagePreview
         state={state}
         edit={job?.kind === "edit" || picture?.kind === "edited"}
-        src={here ? api.galleryFileUrl(id) : undefined}
+        src={here ? (picture?.thumb ? api.galleryThumbUrl(id) : api.galleryFileUrl(id)) : undefined}
         before={job?.from && making ? api.galleryFileUrl(job.from) : undefined}
         ratio={1}
         title={picture?.prompt || job?.prompt || picture?.fileName}

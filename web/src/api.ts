@@ -3,6 +3,7 @@ import { samplesWav } from "./voice";
 import type { Host, VoiceChoice } from "../../server/src/voice-engines";
 import type { OrbStyle } from "../../server/src/orb-style";
 import type { OutputFormat } from "../../server/src/image-settings";
+import type { ChatMessage } from "./memory-chat";
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
@@ -128,6 +129,8 @@ export interface Agent {
   sandboxUser: string;
   /** The Home there always was: the one chats go to when none is named, which cannot be deleted. */
   first: boolean;
+  /** Whether the New button starts a chat with it. */
+  newChats: boolean;
   initialised: boolean;
   chats: number;
   /** The channels that talk as it. */
@@ -198,9 +201,20 @@ export interface Project {
   hasInstructions: boolean;
   /** Whether the project switches tools differently from the portal-wide default. */
   hasTools?: boolean;
+  /** The agent whose soul, user and memory its chats carry: its id. Left out for a blank slate, which has only the instructions. */
+  agent?: string;
+  /** Set where the project does without Understory as its memory. */
+  understoryOff?: boolean;
   /** How many chats work in it, and when one last moved. */
   sessions: number;
   lastActive: string | null;
+}
+
+/** Who a project's chats are with: see /api/projects/:name/agent. */
+export interface ProjectAgent {
+  agent: string | null;
+  understory: boolean;
+  understoryAvailable: boolean;
 }
 
 /** What a delete would lose that only the folder holds: nothing else has a copy of these. */
@@ -376,11 +390,13 @@ export interface VoiceConfig {
   // The providers whose first call of a spoken turn goes without thinking, and the built-in list to go back to.
   skipThinkingProviders?: string[];
   defaultSkipThinkingProviders?: string[];
+  // The model spoken turns run on, "provider/model"; empty means the chat's own.
+  voiceModel?: string;
   pipelineMode?: "parallel" | "sequential";
   // False with no speech synthesis (runtime "none"): the page can listen, but replies are not spoken.
   speech?: boolean;
   vad?: typeof DEFAULT_VAD;
-  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
+  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; dictationModel?: string; dictationUrl?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
 }
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; /** The saved settings point at the managed service, whether or not its container is there. */ connected?: boolean; }
@@ -440,9 +456,9 @@ export const api = {
   /** Removes the voice container and puts the settings back; `removeData` deletes the downloaded engines and models too. */
   uninstallVoice: (removeData: boolean) => json<{ok:boolean}>('/api/voice/uninstall', {method:'POST', body: JSON.stringify({removeData})}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
-  /** What was said in `samples` (16 kHz mono), in words, and how long the speech server says it took. */
-  transcribe: async (sessionId: string, samples: Float32Array, signal?: AbortSignal): Promise<{ text: string; serverTiming: string }> => {
-    const res = await send(`/api/sessions/${sessionId}/voice/transcribe`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal });
+  /** What was said in `samples` (16 kHz mono), in words, and how long the speech server says it took. Dictation may be set to use another model than voice mode. */
+  transcribe: async (sessionId: string, samples: Float32Array, signal?: AbortSignal, purpose?: "dictation"): Promise<{ text: string; serverTiming: string }> => {
+    const res = await send(`/api/sessions/${sessionId}/voice/transcribe${purpose ? `?purpose=${purpose}` : ""}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: samplesWav(samples), signal });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new ApiError(body.error || t("Transcription failed"), res.status, body);
     return { text: String(body.text ?? ""), serverTiming: res.headers.get("server-timing") ?? "" };
@@ -456,21 +472,32 @@ export const api = {
   logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
-  /** Without a workspace the chat starts in Home. */
+  /** Without a workspace the chat starts in the home of the agent New is set to. */
   createSession: (workspace?: string, title?: string) =>
     json<Session>("/api/sessions", {
       method: "POST",
       body: JSON.stringify({ workspace, title }),
     }),
-  projects: () => json<{ root: string; home: string; projects: Project[] }>("/api/projects"),
+  projects: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string; newChats?: boolean }[]; projects: Project[] }>("/api/projects"),
   /** Only where Home is and which projects there are, without their counts: see /api/projects. */
-  places: () => json<{ root: string; home: string; agents?: { id: string; name: string; home: string }[]; projects: { name: string; path: string }[] }>("/api/projects?bare=1"),
-  /** `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them. */
-  createProject: (name: string, instructions?: string, toolsOff?: string[]) =>
+  places: () =>
+    json<{ root: string; home: string; agents?: { id: string; name: string; home: string; newChats?: boolean }[]; projects: { name: string; path: string; agent?: string }[] }>(
+      "/api/projects?bare=1"
+    ),
+  /**
+   * `toolsOff`: the tools its chats start with off, as for setProjectTools. `toolsError` says the project was made without them.
+   * `link`: the agent it works with (none is a blank slate) and whether Understory is its memory (the default where the portal has it).
+   */
+  createProject: (name: string, instructions?: string, toolsOff?: string[], link?: { agent?: string; understory?: boolean }) =>
     json<Project & { toolsError?: string }>("/api/projects", {
       method: "POST",
-      body: JSON.stringify({ name, instructions, toolsOff }),
+      body: JSON.stringify({ name, instructions, toolsOff, ...link }),
     }),
+  /** The agent a project works with (null: none), whether Understory is its memory, and whether the portal has Understory at all. */
+  projectAgent: (name: string) => json<ProjectAgent>(`/api/projects/${encodeURIComponent(name)}/agent`),
+  /** Either may be left out and then stays; `agent: null` makes the project a blank slate. */
+  setProjectAgent: (name: string, change: { agent?: string | null; understory?: boolean }) =>
+    json<ProjectAgent>(`/api/projects/${encodeURIComponent(name)}/agent`, { method: "PUT", body: JSON.stringify(change) }),
   projectContents: (name: string) => json<ProjectContents>(`/api/projects/${encodeURIComponent(name)}`),
   projectInstructions: (name: string) =>
     json<{ text: string; mtime: number }>(`/api/projects/${encodeURIComponent(name)}/instructions`),
@@ -546,6 +573,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+  /** Takes back a message sent mid-run that the agent has not read yet (409 once it has). */
+  takeBackQueued: (id: string, seq: number) =>
+    json<{ ok: true }>(`/api/sessions/${id}/queued/${seq}`, { method: "DELETE" }),
+  /** Stops the run and sends a queued message first, the others behind it in their order. */
+  sendQueuedNow: (id: string, seq: number) =>
+    json<{ ok: true }>(`/api/sessions/${id}/queued/${seq}/send`, { method: "POST" }),
   /** Shows another version of a message, and what followed it then. */
   switchVersion: (id: string, seq: number, to: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/version`, {
@@ -558,7 +591,12 @@ export const api = {
       tools: { name: string; source: string; defaultOn: boolean; inline?: true }[];
       off: string[];
       names: Record<string, string>;
+      /** How long ask_question waits for an answer; 0 is until it is answered. */
+      questionWaitMinutes?: number;
     }>("/api/tools"),
+  /** How long the agent's ask_question waits for an answer, in minutes; 0 is until it is answered. */
+  setQuestionWait: (waitMinutes: number) =>
+    json<{ waitMinutes: number }>("/api/ask-question", { method: "PUT", body: JSON.stringify({ waitMinutes }) }),
   /** Which tools are off unless a conversation says otherwise. */
   setToolDefaults: (off: string[]) =>
     json<{ off: string[]; applied: number }>("/api/tools", { method: "PUT", body: JSON.stringify({ off }) }),
@@ -721,6 +759,15 @@ export const api = {
   clearMemoryLog: () => json<{ health: MemoryHealth }>("/api/memory/clear-log", { method: "POST" }),
   /** Every note gone, the index and log empty: the memory from nothing. */
   wipeMemory: () => json<{ health: MemoryHealth }>("/api/memory/wipe", { method: "POST" }),
+  /** The librarian's answer to a conversation, as the stream it comes in: the caller reads the body. */
+  askLibrarian: async (messages: ChatMessage[], signal: AbortSignal): Promise<Response> => {
+    const res = await send("/api/memory/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages }), signal });
+    if (!res.ok || !res.body) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.error || `HTTP ${res.status}`, res.status, body);
+    }
+    return res;
+  },
   setSubagentFeature: (patch: { enabled?: boolean; mode?: SubagentMode; maxParallel?: number; model?: string }) =>
     json<{ subagent: SubagentFeature; reloaded: number; waiting: number }>("/api/features/subagent", {
       method: "PUT",
@@ -754,6 +801,8 @@ export const api = {
   uploadPicture: async (file: File): Promise<GalleryPicture> => (await uploadBytes(`/api/images/upload?name=${encodeURIComponent(file.name)}`, file, file.name)).picture,
   /** The picture as the file it is. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
   galleryFileUrl: (id: string) => `/api/images/${id}/file`,
+  /** The small copy of a picture, which the portal makes when it is asked for; for the pictures the gallery says have one (`GalleryPicture.thumb`). */
+  galleryThumbUrl: (id: string) => `/api/images/${id}/thumb`,
   /** Each as asked, files and all: what could not be deleted is said for each. */
   deletePictures: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/images/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   setUnderstoryConfig: (config: { llm: UnderstoryLlmChoice; dreamInterval: string; dreamAt: string }) =>
@@ -791,6 +840,14 @@ export const api = {
   audit: (limit = 200) => json<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
   /** Up to and including `through`, the newest entry the caller has seen. */
   clearAudit: (through: number) => json<{ removed: number }>(`/api/audit?through=${through}`, { method: "DELETE" }),
+  /** What the server printed; with `since`, only what came after that line. */
+  logs: (opts: { since?: number; level?: LogLevel; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.since !== undefined) q.set("since", String(opts.since));
+    if (opts.level) q.set("level", opts.level);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    return json<LogsResponse>(`/api/logs?${q}`);
+  },
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
@@ -872,6 +929,9 @@ export const api = {
       `/api/agents/${encodeURIComponent(id)}?folder=${folder}`,
       { method: "DELETE" }
     ),
+  /** On makes it the agent the New button starts with; off hands that back to the first agent. */
+  setNewChats: (agent: string, on: boolean) =>
+    json<Agent>(`/api/agents/${encodeURIComponent(agent)}/new-chats`, { method: "PUT", body: JSON.stringify({ on }) }),
   setAgentVoice: (agent: string, voice: string) =>
     json<Agent>(`/api/agents/${encodeURIComponent(agent)}/voice`, { method: "PUT", body: JSON.stringify({ voice }) }),
   agentSkills: (agent: string) => json<{ folder: string; skills: AgentSkill[] }>(`/api/agents/${encodeURIComponent(agent)}/skills`),
@@ -898,8 +958,6 @@ export const api = {
       `/api/sessions/${id}/events/before?before=${before}&limit=${limit}`
     ),
   session: (id: string) => json<Session>(`/api/sessions/${id}`),
-  startAgentChat: (agent: string, title?: string) =>
-    json<Session>("/api/agent/sessions", { method: "POST", body: JSON.stringify({ agent, title }) }),
 
   setHeartbeat: (agent: string, heartbeat: { minutes: number; quietStart: string; quietEnd: string }) =>
     json<Agent>(`/api/agents/${encodeURIComponent(agent)}/heartbeat`, { method: "PUT", body: JSON.stringify(heartbeat) }),
@@ -1312,6 +1370,25 @@ export interface ToolRule {
   created_at: string;
 }
 
+export type LogLevel = "info" | "warn" | "error";
+
+/** One line the server printed, for Settings → Logs. */
+export interface LogLine {
+  id: number;
+  at: string;
+  level: LogLevel;
+  text: string;
+}
+
+/** `boot` changes when the server starts again, and the ids with it. */
+export interface LogsResponse {
+  boot: string;
+  last: number;
+  /** Lines after `since` were let go before they were read, so `lines` does not join what the page holds. */
+  gap?: boolean;
+  lines: LogLine[];
+}
+
 /** One decision the guard made, for the audit view. */
 export interface AuditEntry {
   id: number;
@@ -1412,6 +1489,8 @@ export interface GalleryPicture {
   createdAt: number;
   bytes: number;
   fileName: string;
+  /** The tiles load a small copy of it (see `galleryThumbUrl`), and not the file. */
+  thumb: boolean;
 }
 
 export interface GalleryPage {
@@ -1435,6 +1514,8 @@ export interface PictureJob {
   startedAt: number;
   finishedAt?: number;
   pictureId?: string;
+  /** What was done to a picture to make it fit an edit (scaled down, compressed), when something was. */
+  notes?: string[];
   error?: string;
 }
 

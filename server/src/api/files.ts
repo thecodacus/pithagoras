@@ -49,10 +49,12 @@ export function fail(res: Response, e: unknown) {
  * Sends a picture that was opened by openPicture: its bytes as the type they
  * say, under a policy that would stop it running anything even if a browser
  * disagreed. The descriptor is read to the size that was announced and closed
- * with the response. `cache` is what the browser may keep it for.
+ * with the response, or at once if the response is already gone. `cache` is what the browser may keep it for.
  */
 export function sendPicture(req: Request, res: Response, opened: ReturnType<typeof openPicture>, cache: string): void {
   const { fd, size, mimeType } = opened;
+  // The person may have gone while the picture was being made ready: there is no close to come for the stream, so the file is let go here.
+  if (res.destroyed) return void closeSync(fd);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
   res.setHeader("Cache-Control", cache);

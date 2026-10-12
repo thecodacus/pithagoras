@@ -5,6 +5,7 @@ import { agentsRoot, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
 import { getDb, getSession } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
+import { openThumb, removeThumbs, wantsThumb } from "./image-thumbs.js";
 import { OUTPUT_FORMATS, type OutputFormat } from "./image-settings.js";
 import { listProjects } from "./projects.js";
 import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
@@ -83,6 +84,8 @@ export interface GalleryPicture {
   bytes: number;
   /** What a download is called. */
   fileName: string;
+  /** The tiles show a small copy of it, which the portal makes when it is first asked for (see image-thumbs.ts), instead of the file. */
+  thumb: boolean;
 }
 
 interface Row {
@@ -159,6 +162,7 @@ function shown(row: ListedRow): GalleryPicture {
     createdAt: row.created_at,
     bytes: row.bytes,
     fileName: downloadName(row),
+    thumb: wantsThumb(row.bytes, downloadName(row)),
   };
 }
 
@@ -583,6 +587,7 @@ function forget(ids: string[]): void {
       unlink.run(id);
     }
   })();
+  removeThumbs(ids);
 }
 
 /**
@@ -704,6 +709,16 @@ export function openListed(id: string): { fd: number; size: number; name: string
     if (e instanceof FileError && e.code === "missing") forget([id]);
     throw e;
   }
+}
+
+/**
+ * The small copy of a picture, opened to be sent the way the picture is: made now when there is
+ * none for the file as it is. A picture that gets no copy (a small file, a GIF) is sent whole.
+ * Whoever may open the picture may have its copy, and nobody else: it is opened as the picture is.
+ */
+export async function openListedThumb(id: string): Promise<ReturnType<typeof openListed>> {
+  const whole = openListed(id);
+  return { ...(await openThumb(whole, id, () => !!rowOf(id))), origin: whole.origin };
 }
 
 /** The bytes of a picture, for an edit that starts from it; same checks as serving one. */

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Markdown } from "./Markdown";
 import {
@@ -7,15 +7,18 @@ import {
   LuChevronLeft,
   LuChevronRight,
   LuCircleCheck,
+  LuEraser,
   LuFileText,
   LuFolder,
   LuHistory,
   LuLocateFixed,
+  LuMessageCircle,
   LuMinus,
   LuPencil,
   LuPlus,
   LuRefreshCw,
   LuSearch,
+  LuSquare,
   LuTrash2,
   LuTriangleAlert,
   LuWaypoints,
@@ -34,6 +37,7 @@ import {
   type MemoryValidation,
 } from "../api";
 import { bounds, colours, layoutKept } from "../memory-graph";
+import { applyChunk, eventReader, history, textOf, toolName, usedTools, type ChatMessage, type ToolPart, type Turn } from "../memory-chat";
 import { NOTE_LINK, linkNotes } from "../memory-links";
 import { forgetNoteDraft, forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
 import { confirmDialog } from "./ConfirmDialog";
@@ -43,8 +47,8 @@ import { formatDateTime, msg, t, tp, tx } from "../i18n";
 import { SkeletonGroup } from "./Skeleton";
 import { formatTokens } from "../transcript";
 
-/** What the page shows in place of a note: the log of changes, the graph of links, or what the health check found. */
-type View = "log" | "graph" | "issues";
+/** What the page shows in place of a note: the log of changes, the graph of links, the librarian chat, or what the health check found. */
+type View = "log" | "graph" | "chat" | "issues";
 
 /** The colour of each type of note, the same in the list, a note and the graph. */
 const Colours = createContext<(type: string | undefined) => string>(colours([]));
@@ -80,7 +84,7 @@ export function MemoryPage() {
   const [params, setParams] = useSearchParams();
   const note = params.get("note");
   const asView = params.get("view");
-  const view: View | null = asView === "log" || asView === "graph" || asView === "issues" ? asView : null;
+  const view: View | null = asView === "log" || asView === "graph" || asView === "chat" || asView === "issues" ? asView : null;
   // Whether the open note is being edited, with something changed in it: it is told by the note.
   const [editing, setEditing] = useState(false);
   /**
@@ -142,6 +146,8 @@ export function MemoryPage() {
     }, () => {});
     if (asked) api.memorySearch(asked).then(setHits, () => {});
   };
+  // The librarian chat lives here, not in its view: it goes on while a note is open, and is there again when the view is.
+  const librarian = useLibrarian((changed) => changed && refresh());
   const [wiping, setWiping] = useState(false);
   /** The memory from nothing, after asking. */
   const wipe = async () => {
@@ -314,8 +320,8 @@ export function MemoryPage() {
               </ul>
             )}
           </nav>
-          <div className="grid grid-cols-2 border-t border-line">
-            {(["log", "graph"] as const).map((v) => (
+          <div className={`grid border-t border-line ${writable ? "grid-cols-3" : "grid-cols-2"}`}>
+            {(writable ? (["chat", "log", "graph"] as const) : (["log", "graph"] as const)).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -325,8 +331,8 @@ export function MemoryPage() {
                   view === v ? "bg-accent/10 text-accent" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
                 }`}
               >
-                {v === "log" ? <LuHistory className="h-3.5 w-3.5" /> : <LuWaypoints className="h-3.5 w-3.5" />}
-                {v === "log" ? t("Log") : t("Graph")}
+                {v === "chat" ? <LuMessageCircle className="h-3.5 w-3.5" /> : v === "log" ? <LuHistory className="h-3.5 w-3.5" /> : <LuWaypoints className="h-3.5 w-3.5" />}
+                {v === "chat" ? t("Librarian") : v === "log" ? t("Log") : t("Graph")}
               </button>
             ))}
           </div>
@@ -339,6 +345,8 @@ export function MemoryPage() {
             <LogView key={round} writable={writable} onOpen={openNote} onBack={close} onCleared={refresh} />
           ) : view === "graph" ? (
             <GraphView key={round} onOpen={openNote} onBack={close} />
+          ) : view === "chat" && writable ? (
+            <LibrarianView chat={librarian} onOpen={openNote} onBack={close} />
           ) : view === "issues" ? (
             <Issues validation={validation} onOpen={openNote} onBack={close} />
           ) : (
@@ -1041,6 +1049,198 @@ function LogView({ writable, onOpen, onBack, onCleared }: { writable: boolean; o
           )}
         </div>
       </section>
+    </>
+  );
+}
+
+/** What a librarian chat is, for the page that holds it. */
+interface Librarian {
+  messages: ChatMessage[];
+  busy: boolean;
+  error: string | null;
+  send: (text: string) => void;
+  stop: () => void;
+  clear: () => void;
+}
+
+/**
+ * The conversation with Understory's librarian, and the turn it is in the
+ * middle of. `onTurnEnded` is told whether the turn called any tool, since
+ * the librarian writes to the memory with them.
+ */
+function useLibrarian(onTurnEnded: (usedTools: boolean) => void): Librarian {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const running = useRef<AbortController | null>(null);
+  const ended = useRef(onTurnEnded);
+  ended.current = onTurnEnded;
+  // A count, not a clock: ids must differ however fast the questions come.
+  const counter = useRef(0);
+  // A page that is left stops listening; Understory's librarian may still finish what it started.
+  useEffect(() => () => running.current?.abort(), []);
+
+  const send = async (text: string) => {
+    if (running.current || !text.trim()) return;
+    const question: ChatMessage = { id: `q${++counter.current}`, role: "user", parts: [{ type: "text", text }] };
+    const asked = [...messages, question];
+    let turn: Turn = { message: { id: `a${++counter.current}`, role: "assistant", parts: [] } };
+    const control = new AbortController();
+    running.current = control;
+    setMessages([...asked, turn.message]);
+    setBusy(true);
+    setError(null);
+    try {
+      const answer = await api.askLibrarian(history(asked), control.signal);
+      const reader = answer.body!.getReader();
+      const decoder = new TextDecoder();
+      const events = eventReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        for (const chunk of events.feed(decoder.decode(value, { stream: true }))) turn = applyChunk(turn, chunk);
+        if (control.signal.aborted) break;
+        setMessages([...asked, turn.message]);
+      }
+      if (turn.error && !control.signal.aborted) setError(turn.error);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") setError((e as Error).message);
+    } finally {
+      // Clearing the chat or leaving the page has taken its place already.
+      if (running.current === control) {
+        running.current = null;
+        setBusy(false);
+      }
+      ended.current(usedTools(turn.message));
+    }
+  };
+  /** Stops listening to the turn under way; what was said so far stays. Understory's librarian is not cut off by it. */
+  const stop = () => running.current?.abort();
+  /** The conversation from nothing — and a turn in the middle of it ended. */
+  const clear = () => {
+    const was = running.current;
+    running.current = null;
+    was?.abort();
+    setBusy(false);
+    setMessages([]);
+    setError(null);
+  };
+  return { messages, busy, error, send: (text) => void send(text), stop, clear };
+}
+
+/** A tool the librarian called, by its name, and whether it has answered. */
+function ToolCall({ part }: { part: ToolPart }) {
+  const state = part.state === "output-available" ? "done" : part.state === "output-error" ? "failed" : "running";
+  return (
+    <span
+      title={part.errorText || undefined}
+      className={`inline-flex items-center gap-1 rounded bg-fg/5 px-1.5 py-0.5 font-mono text-[11px] ${state === "failed" ? "text-warn" : "text-fg-subtle"}`}
+    >
+      {state === "running" ? <LuRefreshCw className="h-3 w-3 animate-spin" /> : state === "failed" ? <LuTriangleAlert className="h-3 w-3" /> : <LuCircleCheck className="h-3 w-3 text-ok" />}
+      {toolName(part)}
+    </span>
+  );
+}
+
+/** The librarian: Understory's own agent, asked about the memory or told what to keep, as in Understory's web UI. */
+function LibrarianView({ chat, onOpen, onBack }: { chat: Librarian; onOpen: (path: string) => void; onBack: () => void }) {
+  const { messages, busy, error, send, stop, clear } = chat;
+  const [draft, setDraft] = useState("");
+  const scroller = useRef<HTMLElement>(null);
+  // Followed to the newest words, unless the reader has scrolled up to read.
+  const following = useRef(true);
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && following.current) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+  const submit = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (busy || !draft.trim()) return;
+    following.current = true;
+    send(draft.trim());
+    setDraft("");
+  };
+  return (
+    <>
+      <Bar title={t("Librarian")} onBack={onBack}>
+        <button
+          type="button"
+          onClick={clear}
+          disabled={!messages.length}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-fg-subtle transition hover:bg-fg/5 hover:text-fg disabled:opacity-40"
+        >
+          <LuEraser className="h-3.5 w-3.5" /> {t("Clear chat")}
+        </button>
+      </Bar>
+      <section
+        ref={scroller}
+        role="log"
+        aria-label={t("Conversation with the librarian")}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6"
+      >
+        <div className="mx-auto max-w-3xl space-y-4 text-sm">
+          {!messages.length && (
+            <p className="py-8 text-center text-fg-subtle">{t("Ask the librarian about the memory, or tell it what to keep. It reads and writes the notes with the same tools the agent has.")}</p>
+          )}
+          {messages.map((m, i) =>
+            m.role === "user" ? (
+              <div key={m.id} className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-accent/10 px-3 py-2 text-fg">
+                {textOf(m)}
+              </div>
+            ) : (
+              <div key={m.id} className="space-y-2">
+                {m.parts.map((p, n) =>
+                  p.type === "text" ? (
+                    p.text && (
+                      <div key={n} className="md text-fg">
+                        <MemoryMarkdown text={p.text} from="/" onOpen={onOpen} />
+                      </div>
+                    )
+                  ) : p.type === "step-start" ? null : (
+                    <div key={n}>
+                      <ToolCall part={p} />
+                    </div>
+                  ),
+                )}
+                {busy && i === messages.length - 1 && !m.parts.length && <p className="text-xs text-fg-faint">{t("The librarian is thinking…")}</p>}
+              </div>
+            ),
+          )}
+          {error && (
+            <p role="alert" className="text-xs text-warn">
+              {t("The librarian could not answer: {why}", { why: error })}
+            </p>
+          )}
+        </div>
+      </section>
+      <form onSubmit={submit} className="border-t border-line px-4 py-3 md:px-6">
+        <div className="mx-auto flex max-w-3xl items-end gap-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
+            }}
+            rows={2}
+            placeholder={t("Ask the librarian…")}
+            aria-label={t("Ask the librarian")}
+            className={`${inputCls} min-w-0 flex-1 resize-none`}
+          />
+          {busy ? (
+            <button type="button" onClick={stop} className={`${primarySmCls} inline-flex items-center gap-1.5`}>
+              <LuSquare className="h-3.5 w-3.5" /> {t("Stop")}
+            </button>
+          ) : (
+            <button type="submit" disabled={!draft.trim()} className={`${primarySmCls} disabled:opacity-40`}>
+              {t("Send")}
+            </button>
+          )}
+        </div>
+      </form>
     </>
   );
 }

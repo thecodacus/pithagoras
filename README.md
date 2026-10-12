@@ -118,7 +118,7 @@ composer. Defaults you set apply to **newly started** sessions only.
 ## Sessions and workspaces
 
 A **session** is a conversation, and it works in a folder. **New** starts one in **Home**, the
-agent's own directory, where its SOUL.md, PrimaryUser.md and MEMORY.md are. A **project** is an
+own directory of the first agent (or of the one you picked for New), where its SOUL.md, PrimaryUser.md and MEMORY.md are. A **project** is an
 extra folder you make on purpose, on the Projects tab: `"Cool Project"` becomes `cool-project`,
 with instructions of its own saved as its `AGENTS.md`. Opening a project opens its chat, and
 `/new` or `/clear` starts a fresh one in it. Deleting a session never deletes a folder.

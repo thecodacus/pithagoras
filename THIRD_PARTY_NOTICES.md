@@ -77,3 +77,15 @@ Files: `ort-wasm-simd-threaded.mjs` and `ort-wasm-simd-threaded.wasm`, from the 
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
+
+## Image copies on the server (sharp and libvips)
+
+The server makes the small copies of the gallery's pictures with the npm package `sharp` 0.35.5 (https://github.com/lovell/sharp), which is licensed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0). It does not ship in the web app's `voice-assets/`; it is installed with the server, and so it is in the Docker image.
+
+sharp runs on libvips (https://github.com/libvips/libvips), which comes prebuilt in the npm packages `@img/sharp-libvips-<platform>` that `npm ci` installs next to it, as the shared library `libvips-cpp`. libvips is licensed under the GNU Lesser General Public License, version 3 or later (LGPL-3.0-or-later), and the library bundles other libraries, among them glib, libexif and libheif, under the LGPL 3 or compatible licences. The texts are not repeated here:
+
+- GNU Lesser General Public License, version 3: https://www.gnu.org/licenses/lgpl-3.0.txt (it builds on the GNU General Public License, version 3: https://www.gnu.org/licenses/gpl-3.0.txt)
+- the licences of the libraries inside the prebuilt libvips, and their versions: https://github.com/lovell/sharp-libvips/blob/main/THIRD-PARTY-NOTICES.md
+- the source code of libvips: https://github.com/libvips/libvips, and of the build: https://github.com/lovell/sharp-libvips
+
+libvips is used unchanged and is linked dynamically: it can be replaced by another build of the library, either by installing another `@img/sharp-libvips-<platform>` package of the same major version or by pointing sharp at a libvips of the system (see https://sharp.pixelplumbing.com/install#custom-libvips).
