@@ -39,7 +39,7 @@ export function UpdateNotice({ onDetails }: { onDetails: () => void }) {
           {lost
             ? t("The portal has not come back after three minutes. Look at its log on the host.")
             : run?.state === "failed"
-              ? t("The update stopped at “{step}”. The portal is still running its old build.", { step: t(STEP_LABELS[run.failed?.step ?? step?.id ?? "build"]) })
+              ? t("The update stopped at “{step}”. The portal is still running its old build, with its files as they were.", { step: t(STEP_LABELS[run.failed?.step ?? step?.id ?? "build"]) })
               : run?.state === "restarting"
                 ? t("The portal is restarting. This page loads again when it is back.")
                 : t("Updating the portal: {step}", { step: step ? t(STEP_LABELS[step.id]) : "" })}

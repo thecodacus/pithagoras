@@ -122,11 +122,12 @@ export function runToEnd(args, env, { cwd, ms = 60_000 } = {}) {
  * takes it, and that can be another test's server or a fake one before this server has opened its database: whatever
  * answers on the port is not the server that was started, so the line the server itself prints is what is waited for.
  * When it could not take the port, it is started again on another one. `port` is the one it listens on.
+ * `entry` is the server's entry, where a test runs a copy of it from another place.
  */
-export async function startServer(env, tries = 5) {
+export async function startServer(env, tries = 5, entry = ENTRY) {
   for (let attempt = 1; ; attempt++) {
     const run = attempt === 1 ? env : { ...env, PORT: String(await freePort()) };
-    const child = spawn(process.execPath, [ENTRY], { env: run, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [entry], { env: run, stdio: ["ignore", "pipe", "pipe"] });
     started.push(child);
     let log = "";
     const listening = new RegExp(`pithagoras listening on :${run.PORT}\\b`);

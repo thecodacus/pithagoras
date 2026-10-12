@@ -106,6 +106,7 @@ import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { logsRouter } from "./api/logs.js";
 import { startUpdateChecks, updateRouter } from "./api/update.js";
+import { requestedExit } from "./restart.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -1742,14 +1743,14 @@ function shutdown(signal: string): Promise<void> {
 async function stop(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
   // However long the rest takes, and no longer than docker waits before it kills.
-  setTimeout(() => process.exit(0), 10_000).unref();
+  setTimeout(() => process.exit(requestedExit()), 10_000).unref();
   routineSupervisor.stop();
   // Alongside the rest: their shells are given a moment to wind down.
   const shells = endAllTerminals();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
   await shells;
-  server.close(() => process.exit(0));
+  server.close(() => process.exit(requestedExit()));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds
   // of the timer above.

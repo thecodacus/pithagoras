@@ -1,8 +1,9 @@
 import express, { type Router } from "express";
 import { runningSessionCount } from "../db.js";
 import { LOG_BOOT } from "../logs.js";
-import { restartPortal } from "../restart.js";
+import { restartPortal, restartProblem } from "../restart.js";
 import { Updater, UpdateError, installRoot, realExec, type Notice } from "../update.js";
+import { fileArtifacts } from "../update-files.js";
 
 const root = installRoot();
 
@@ -11,7 +12,9 @@ export const portalUpdater = new Updater({
   root,
   exec: realExec(root),
   running: runningSessionCount,
+  artifacts: fileArtifacts(root),
   restart: () => restartPortal(),
+  restartProblem: () => restartProblem(),
   onRaise: (notice: Notice) => console.log(`[update] ${notice.count} new ${notice.count === 1 ? "commit" : "commits"} on main, update available (${notice.target.sha.slice(0, 7)})`),
 });
 
@@ -55,12 +58,10 @@ export function updateRouter(updater: Updater = portalUpdater): Router {
     }
   });
 
-  /** `{ expect }` is the commit the person was shown. */
+  /** `{ expect }` is the commit the person was shown, and is required: without it nothing is started. */
   router.post("/update", async (req, res) => {
     try {
-      const expect = req.body?.expect;
-      if (expect !== undefined && typeof expect !== "string") throw new UpdateError(400, "invalid", "expect must be a commit id.");
-      res.status(202).json({ run: await updater.start(expect) });
+      res.status(202).json({ run: await updater.start(req.body?.expect) });
     } catch (e) {
       failure(res, e);
     }

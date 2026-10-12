@@ -37,7 +37,21 @@ function world(over = {}) {
     /** Held back until the test lets it go: "npm ci". */
     gates: new Map(),
     ran: [],
+    /** The commit the build in place was made from, as its record on disk has it; nothing until one is written. */
+    built: undefined,
     ...over,
+  };
+  // What the update puts aside and writes down, said into `ran` among the commands, and kept in `built` as the files would.
+  w.artifacts = {
+    builtFrom: async () => w.built,
+    markBuilt: async (sha, onlyIfMissing = false) => {
+      w.ran.push(`files markBuilt ${sha.slice(0, 3)}${onlyIfMissing ? " if missing" : ""}`);
+      if (!onlyIfMissing || w.built === undefined) w.built = sha;
+    },
+    keepModules: async () => void w.ran.push("files keepModules"),
+    keepBuild: async () => void w.ran.push("files keepBuild"),
+    restore: async () => void w.ran.push("files restore"),
+    discard: async () => void w.ran.push("files discard"),
   };
   w.exec = async (command, args) => {
     w.ran.push(`${command} ${args.join(" ")}`);
@@ -68,9 +82,11 @@ function updater(w, over = {}) {
   const u = new Updater({
     root: repo,
     exec: w.exec,
+    artifacts: w.artifacts,
     running: () => w.running ?? 0,
     restart: async () => { calls.restart++; if (w.restartFails) throw new Error(w.restartFails); },
     inContainer: () => false,
+    fromSource: () => false,
     onRaise: (notice) => calls.raised.push(notice),
     ...over,
   });
@@ -108,7 +124,7 @@ test("the portal updates itself from a checkout of its own only: the folder must
   const { u } = updater(w, { inContainer: () => true });
   assert.deepEqual(await u.status(), { kind: "container" });
   await refusal(u.check(), "unavailable", 404);
-  await refusal(u.start(), "unavailable", 404);
+  await refusal(u.start(w.target.sha), "unavailable", 404);
   assert.deepEqual(w.ran, []);
 });
 
@@ -129,33 +145,33 @@ test("checking says where the checkout is and where origin/main is, and changes 
 test("a checkout with local changes is not updated, and nothing is changed", async () => {
   const w = world({ changed: ["server/src/server.ts", "README.md"] });
   const { u, calls } = updater(w);
-  const e = await refusal(u.start(), "dirty");
+  const e = await refusal(u.start(w.target.sha), "dirty");
   assert.match(e.message, /2 files/);
   assert.deepEqual(changesTheCheckout(w), []);
   assert.equal(calls.restart, 0);
   // The tree is clean again: the refusal did not leave the updater held.
   w.changed = [];
-  await u.start();
+  await u.start(w.target.sha);
 });
 
 test("what git does not track is no local change: only tracked files count", async () => {
   const w = world();
   const { u } = updater(w);
-  await u.start();
+  await u.start(w.target.sha);
   assert.ok(w.ran.includes("git status --porcelain --untracked-files=no"));
 });
 
 test("a checkout that is on no branch is not updated", async () => {
   const w = world({ branch: null });
   const { u } = updater(w);
-  await refusal(u.start(), "detached");
+  await refusal(u.start(w.target.sha), "detached");
   assert.deepEqual(changesTheCheckout(w), []);
 });
 
 test("a checkout that cannot move straight to origin/main is not updated: it has commits of its own", async () => {
   const w = world({ ahead: 1, behind: 2 });
   const { u } = updater(w);
-  const e = await refusal(u.start(), "diverged");
+  const e = await refusal(u.start(w.target.sha), "diverged");
   assert.match(e.message, /1 commit that origin\/main lacks/);
   assert.deepEqual(changesTheCheckout(w), []);
 });
@@ -164,7 +180,7 @@ test("a checkout that is not behind has nothing to update to, with commits of it
   for (const ahead of [0, 2]) {
     const w = world({ ahead, behind: 0, target: commit("aaa") });
     const { u } = updater(w);
-    await refusal(u.start(), "current");
+    await refusal(u.start(w.target.sha), "current");
     assert.deepEqual(changesTheCheckout(w), []);
   }
 });
@@ -175,7 +191,7 @@ test("a remote that cannot be reached is said, and nothing is changed", async ()
   const seen = await u.check();
   assert.equal(seen.problem.code, "fetch");
   assert.match(seen.problem.message, /unable to access/);
-  await refusal(u.start(), "fetch");
+  await refusal(u.start(w.target.sha), "fetch");
   assert.deepEqual(changesTheCheckout(w), []);
 });
 
@@ -195,12 +211,13 @@ test("a second press while an update runs is refused, and the first is not distu
   const w = world();
   w.gates.set("npm ci", new Promise((resolve) => (go = resolve)));
   const { u, calls } = updater(w);
-  const first = await u.start();
+  const first = await u.start(w.target.sha);
   assert.equal(first.state, "running");
-  await refusal(u.start(), "busy");
+  await refusal(u.start(w.target.sha), "busy");
   // Two at the same moment: the second never gets as far as asking git.
-  const { u: other } = updater(world(), {});
-  const results = await Promise.allSettled([other.start(), other.start()]);
+  const w2 = world();
+  const { u: other } = updater(w2);
+  const results = await Promise.allSettled([other.start(w2.target.sha), other.start(w2.target.sha)]);
   assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
   assert.equal(results.find((r) => r.status === "rejected").reason.code, "busy");
   go();
@@ -210,7 +227,7 @@ test("a second press while an update runs is refused, and the first is not distu
   assert.equal(w.ran.filter((c) => c.startsWith("git merge")).length, 1);
   assert.equal(w.ran.filter((c) => c.startsWith("npm ci")).length, 1);
   // Still held while the portal is on its way out.
-  await refusal(u.start(), "busy");
+  await refusal(u.start(w.target.sha), "busy");
 });
 
 test("an update fetches, merges fast-forward only, installs, builds and restarts, in that order", async () => {
@@ -242,7 +259,7 @@ test("a failed step stops the update where it failed, with what the program prin
   const w = world();
   w.fails.add("npm ci");
   const { u, calls } = updater(w);
-  await u.start();
+  await u.start(w.target.sha);
   const run = await settled(u);
   assert.equal(run.state, "failed");
   assert.equal(run.failed.step, "install");
@@ -259,13 +276,13 @@ test("after a failed build, the next update builds again without merging, and re
   const w = world();
   w.fails.add("npm run");
   const { u, calls } = updater(w);
-  await u.start();
+  await u.start(w.target.sha);
   assert.equal((await settled(u)).failed.step, "build");
   assert.equal(calls.restart, 0);
 
   w.fails.clear();
   w.ran.length = 0;
-  await u.start();
+  await u.start(w.target.sha);
   const run = await settled(u);
   assert.equal(run.state, "restarting");
   assert.deepEqual(run.steps.map((s) => s.state), ["done", "skipped", "done", "done", "running"]);
@@ -278,7 +295,7 @@ test("a build that failed does not keep the next update from merging what is new
   const w = world();
   w.fails.add("npm run");
   const { u, calls } = updater(w);
-  await u.start();
+  await u.start(w.target.sha);
   assert.equal((await settled(u)).failed.step, "build");
 
   // The fix is on main: the checkout is behind again, and the build is still pending.
@@ -299,7 +316,7 @@ test("a merge git refuses fails the update before anything is built", async () =
   const w = world();
   w.fails.add("git merge");
   const { u } = updater(w);
-  await u.start();
+  await u.start(w.target.sha);
   const run = await settled(u);
   assert.equal(run.failed.step, "merge");
   assert.match(run.failed.output, /Not possible to fast-forward/);
@@ -307,13 +324,13 @@ test("a merge git refuses fails the update before anything is built", async () =
   assert.equal((await u.status()).rebuild, false, "nothing was merged");
   // Free again: the next press is not told one is running.
   w.fails.clear();
-  await u.start();
+  await u.start(w.target.sha);
 });
 
 test("a restart that cannot be made is a failed step, and the built portal stays up", async () => {
   const w = world({ restartFails: "The portal was not started from a file" });
   const { u } = updater(w);
-  await u.start();
+  await u.start(w.target.sha);
   const run = await settled(u);
   assert.equal(run.state, "failed");
   assert.equal(run.failed.step, "restart");
@@ -379,7 +396,7 @@ test("a check that cannot reach the remote is logged and tried again, says nothi
     assert.ok(!("error" in shown) && !("problem" in shown), "nothing about the failure is on the page");
     // A git that fails altogether is the same: a line in the log, nothing thrown.
     w.exec = async () => { throw new Error("spawn git ENOENT"); };
-    const broken = new Updater({ root: repo, exec: w.exec, running: () => 0, restart: async () => {}, inContainer: () => false });
+    const broken = new Updater({ root: repo, exec: w.exec, artifacts: w.artifacts, running: () => 0, restart: async () => {}, inContainer: () => false, fromSource: () => false });
     await broken.refresh();
     assert.equal(warned.length, 2);
     // And the next time it works, it is raised as ever.
@@ -418,11 +435,162 @@ test("the schedule leaves the remote alone while an update changes the checkout"
   const w = world();
   w.gates.set("npm ci", new Promise((resolve) => (go = resolve)));
   const { u } = updater(w);
-  await u.start();
+  await u.start(w.target.sha);
   while (!w.ran.includes("npm ci --prefer-offline --no-audit --no-fund")) await new Promise((r) => setTimeout(r, 2));
   const before = w.ran.length;
   await u.refresh();
   assert.equal(w.ran.length, before, "not asked while the update runs");
   go();
   await settled(u);
+});
+
+const files = (w) => w.ran.filter((c) => c.startsWith("files ") || /^(git merge|npm )/.test(c));
+
+test("the old node_modules and build are put aside for their steps, put back where one fails, and thrown away only when the build has worked", async () => {
+  // It works: aside for the install, aside for the build, the build written down, and only then thrown away.
+  const ok = world();
+  const first = updater(ok);
+  await first.u.start(ok.target.sha);
+  await settled(first.u);
+  assert.deepEqual(files(ok), [
+    "files markBuilt aaa if missing",
+    "git merge --ff-only refs/remotes/origin/main",
+    "files keepModules",
+    "npm ci --prefer-offline --no-audit --no-fund",
+    "files keepBuild",
+    "npm run build",
+    "files markBuilt ccc",
+    "files discard",
+  ]);
+
+  // The install fails: node_modules is put back, and the build was never touched.
+  const install = world();
+  install.fails.add("npm ci");
+  const second = updater(install);
+  await second.u.start(install.target.sha);
+  assert.equal((await settled(second.u)).failed.step, "install");
+  assert.deepEqual(files(install).slice(-3), ["files keepModules", "npm ci --prefer-offline --no-audit --no-fund", "files restore"]);
+  assert.ok(!install.ran.includes("files keepBuild"));
+  assert.ok(!install.ran.includes("files discard"));
+
+  // The build fails: both are put back, node_modules with the build it belongs to.
+  const build = world();
+  build.fails.add("npm run");
+  const third = updater(build);
+  await third.u.start(build.target.sha);
+  assert.equal((await settled(third.u)).failed.step, "build");
+  assert.deepEqual(files(build).slice(-5), ["files keepModules", "npm ci --prefer-offline --no-audit --no-fund", "files keepBuild", "npm run build", "files restore"]);
+  assert.ok(!build.ran.includes("files discard"));
+  assert.ok(!build.ran.includes("files markBuilt ccc"), "a build that failed is not written down as made");
+});
+
+test("a failure is held against a second update until the old files are back", async () => {
+  let back;
+  const w = world();
+  w.fails.add("npm run");
+  w.artifacts.restore = () => new Promise((resolve) => (back = resolve));
+  const { u } = updater(w);
+  await u.start(w.target.sha);
+  const run = await settled(u);
+  assert.equal(run.state, "failed");
+  await refusal(u.start(w.target.sha), "busy");
+  back();
+  await new Promise((r) => setTimeout(r, 20));
+  w.fails.clear();
+  w.artifacts.restore = async () => {};
+  await u.start(w.target.sha);
+});
+
+test("old files that cannot be put back are said, with the failure", async () => {
+  const w = world();
+  w.fails.add("npm ci");
+  w.artifacts.restore = async () => { throw new Error("EACCES: permission denied, rename node_modules.update-old"); };
+  const { u } = updater(w);
+  await u.start(w.target.sha);
+  const run = await settled(u);
+  assert.equal(run.failed.step, "install");
+  assert.match(run.failed.message, /npm ci failed.*The old files could not be put back: EACCES/);
+});
+
+test("that the build is not of the checked out commit is read from what is written down, so that a restart keeps it", async () => {
+  const w = world();
+  w.fails.add("npm run");
+  const first = updater(w);
+  await first.u.start(w.target.sha);
+  assert.equal((await settled(first.u)).failed.step, "build");
+
+  // The portal is started again: no memory of the run, the same files. It does not say it is up to date.
+  const again = updater(w).u;
+  assert.equal((await again.status()).rebuild, true);
+  const seen = await again.check();
+  assert.equal(seen.behind, 0);
+  assert.equal(seen.rebuild, true);
+  w.fails.clear();
+  w.ran.length = 0;
+  await again.start(w.target.sha);
+  const run = await settled(again);
+  assert.equal(run.state, "restarting");
+  assert.deepEqual(run.steps.map((s) => s.state), ["done", "skipped", "done", "done", "running"]);
+  assert.equal((await updater(w).u.status()).rebuild, false, "written down once it has worked");
+
+  // A portal whose build has never been written down is not told it needs one.
+  const fresh = world();
+  fresh.head = fresh.target;
+  fresh.behind = 0;
+  const idle = updater(fresh).u;
+  assert.equal((await idle.status()).rebuild, false);
+  await refusal(idle.start(fresh.target.sha), "current");
+});
+
+test("a portal that runs from its source files under a watcher is not updated: the watcher would restart it halfway", async () => {
+  const w = world();
+  const { u } = updater(w, { fromSource: () => true });
+  assert.equal(await u.kind(), "dev");
+  assert.deepEqual(await u.status(), { kind: "dev" });
+  const e = await refusal(u.check(), "unavailable", 404);
+  assert.match(e.message, /file watcher/);
+  await refusal(u.start(w.target.sha), "unavailable", 404);
+  const stop = await u.begin(5, 1);
+  await new Promise((r) => setTimeout(r, 30));
+  stop();
+  assert.deepEqual(w.ran, [], "nothing is asked of git, merged or built");
+});
+
+test("running from source files, or under node's watch, is told from the file and the flags", async () => {
+  const { runsFromSource } = await import("../dist/update.js");
+  assert.equal(runsFromSource("file:///srv/pithagoras/server/src/update.ts", []), true, "tsx watch src/index.ts");
+  assert.equal(runsFromSource("file:///srv/pithagoras/server/dist/update.js", ["--watch"]), true);
+  assert.equal(runsFromSource("file:///srv/pithagoras/server/dist/update.js", ["--watch-path=server/dist"]), true);
+  assert.equal(runsFromSource("file:///srv/pithagoras/server/dist/update.js", ["--enable-source-maps", "--watch-kill-signal=SIGTERM"]), false, "the test runner passes its defaults on");
+  assert.equal(runsFromSource("file:///srv/pithagoras/server/dist/update.js", []), false, "the built portal");
+  assert.equal(runsFromSource(), false, "this test runs the built one");
+});
+
+test("a portal that would not come back after the restart is not updated, and the reason is said before anything changes", async () => {
+  const w = world();
+  const why = "The portal runs as the systemd service pithagoras.service, which is set to Restart=no, so it would not be started again.";
+  const { u, calls } = updater(w, { restartProblem: async () => why });
+  const seen = await u.check();
+  assert.deepEqual(seen.problem, { code: "restart", message: why });
+  const e = await refusal(u.start(w.target.sha), "restart");
+  assert.equal(e.message, why);
+  assert.deepEqual(changesTheCheckout(w), []);
+  assert.deepEqual(w.ran.filter((c) => c.startsWith("files")), []);
+  assert.equal(calls.restart, 0);
+
+  // Where it would, nothing is said.
+  const fine = updater(world(), { restartProblem: async () => null });
+  assert.equal((await fine.u.check()).problem, null);
+});
+
+test("the update needs the commit that was confirmed: without it nothing is started", async () => {
+  const w = world();
+  const { u } = updater(w);
+  for (const expect of [undefined, null, "", 7, {}, ["ccc"]]) {
+    const e = await refusal(u.start(expect), "invalid", 400);
+    assert.match(e.message, /expect/);
+  }
+  assert.deepEqual(w.ran.filter((c) => !c.startsWith("git rev-parse")), [], "no git, no merge, no build");
+  // And the next press is not told one is running.
+  await u.start(w.target.sha);
 });

@@ -17,7 +17,7 @@ interface World {
 function world(over: Partial<World> = {}): World {
   return {
     status: { kind: 'git', boot: 'boot-a', branch: 'main', current: NOW, notice: { count: 2, target: NEXT, since: '2026-10-12T08:00:00Z' }, rebuild: false, run: null },
-    check: { branch: 'main', current: NOW, target: NEXT, behind: 2, ahead: 0, changed: 0, problem: null, running: 0 },
+    check: { branch: 'main', current: NOW, target: NEXT, behind: 2, ahead: 0, changed: 0, rebuild: false, problem: null, running: 0 },
     posted: { check: 0, start: [] },
     ...over,
   };
@@ -80,7 +80,22 @@ test('Update asks what is new, shows both commits and confirms before anything i
   await expect(steps.nth(2)).toHaveAttribute('data-state', 'running');
   await expect(steps.nth(0)).toHaveAttribute('data-state', 'done');
   await expect(section.getByRole('button', { name: 'Update', exact: true })).toBeDisabled();
-  await expect(section).not.toContainText('building it failed');
+  await expect(section).not.toContainText('most likely because a build failed');
+});
+
+test('a build that is not of the checked out commit is built again after a confirmation, with nothing to merge', async ({ page }) => {
+  // As after a failed build and a restart: the checkout is at main, so there is nothing new, and the files are of an older commit.
+  const w = world({ check: { ...world().check, current: NEXT, target: NEXT, behind: 0, rebuild: true } });
+  w.status = { ...w.status, notice: null, current: NEXT, rebuild: true };
+  await portal(page, w);
+  await page.goto('/settings/about');
+  const section = page.locator('section[data-setting="Update"]');
+  await expect(section).toContainText('most likely because a build failed. Update builds it again.');
+  await section.getByRole('button', { name: 'Update', exact: true }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('This builds it again: bbb2222 Where main is.');
+  await dialog.getByRole('button', { name: 'Update and restart' }).click();
+  await expect.poll(() => w.posted.start).toEqual([{ expect: NEXT.sha }]);
 });
 
 test('one running chat is said in the singular, and none is not mentioned', async ({ page }) => {
@@ -121,6 +136,17 @@ test('what stands in the way is said, with no question asked', async ({ page }) 
   expect(w.posted.start).toEqual([]);
 });
 
+test('a portal that would not come back after the restart says so before it asks, and asks nothing', async ({ page }) => {
+  const w = world({ check: { ...world().check, problem: { code: 'restart', message: 'The portal runs as the systemd service p.service, which is set to Restart=no.' } } });
+  await portal(page, w);
+  await page.goto('/settings/about');
+  const section = page.locator('section[data-setting="Update"]');
+  await section.getByRole('button', { name: 'Update', exact: true }).click();
+  await expect(section.getByRole('status').filter({ hasText: 'Set Restart=on-failure (or Restart=always) in its unit, then update again.' })).toBeVisible();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  expect(w.posted.start).toEqual([]);
+});
+
 test('a start the portal refuses is said in words', async ({ page }) => {
   const w = world({ refuse: { status: 409, body: { error: 'origin/main has moved on since it was looked at. Check again.', code: 'moved' } } });
   await portal(page, w);
@@ -145,10 +171,10 @@ test('a failed step is shown with its name and what the program printed, and the
   await page.goto('/settings/about');
   const section = page.locator('section[data-setting="Update"]');
   const alert = section.getByRole('alert');
-  await expect(alert).toContainText('The update stopped at “Building”. The portal is still running its old build.');
+  await expect(alert).toContainText('The update stopped at “Building”. The portal is still running its old build, with its files as they were.');
   await expect(alert).toContainText('npm run build failed (exit 2)');
   await expect(alert).toContainText('error TS2322: nope');
-  await expect(section).toContainText('The new version is checked out, but building it failed. Update builds it again.');
+  await expect(section).toContainText('The build is not of the commit that is checked out, most likely because a build failed. Update builds it again.');
   await expect(section.getByRole('button', { name: 'Update', exact: true })).toBeEnabled();
 });
 
@@ -170,6 +196,23 @@ test('in a Docker container there is no button and no notice, and the page says 
   await page.goto('/settings/about');
   await expect(page.getByText('Where the agent runs')).toBeVisible();
   await expect(page.locator('section[data-setting="Update"]')).toHaveCount(0);
+});
+
+test('a portal that runs from its source files under a watcher has no button and says why', async ({ page }) => {
+  const w = world();
+  w.status = { kind: 'dev', boot: 'boot-a' };
+  await portal(page, w);
+  await page.goto('/settings/about');
+  const section = page.locator('section[data-setting="Update"]');
+  await expect(section).toContainText('under a file watcher (npm run dev:server)');
+  await expect(section).toContainText('npm run build && npm start');
+  await expect(section.getByRole('button')).toHaveCount(0);
+  await expect(page.getByText('update available')).toHaveCount(0);
+  // Nothing was asked of the remote.
+  expect(w.posted.check).toBe(0);
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Sessions' }).first()).toBeVisible();
+  await expect(page.getByText('update available')).toHaveCount(0);
 });
 
 test('the notice at the top says there are new commits, and Update on it asks the same question', async ({ page }) => {

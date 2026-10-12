@@ -1,7 +1,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
@@ -11,14 +11,28 @@ import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs
  * answers are, and that the steps run in the order the issue names. git and npm are stand-ins in front on the PATH
  * that answer from files and write down what they were asked, so that nothing is fetched, merged, installed or
  * built, and the portal only exits at the end (PORTAL_UPDATE_RESTART=exit) instead of starting itself again.
+ *
+ * The server runs from a copy of the install's layout in the test's home, not from the developer's checkout: an
+ * update puts its node_modules and build aside and the stand-in npm and build write new ones.
  */
 const home = testHome("pithagoras-update-routes-");
 const bin = path.join(home, "bin");
 const fake = path.join(home, "fake");
 mkdirSync(bin);
 mkdirSync(fake);
-const root = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
+const repo = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
+const install = path.join(home, "install");
+mkdirSync(path.join(install, "server"), { recursive: true });
+mkdirSync(path.join(install, "web", "dist"), { recursive: true });
+cpSync(path.join(repo, "server", "dist"), path.join(install, "server", "dist"), { recursive: true });
+cpSync(path.join(repo, "package.json"), path.join(install, "package.json"));
+cpSync(path.join(repo, "server", "package.json"), path.join(install, "server", "package.json"));
+writeFileSync(path.join(install, "web", "dist", "index.html"), "old web app");
+// What the portal loads from beside its server's folder, and its packages: the same ones, linked.
+for (const name of ["node_modules", "skills", "channels", "extensions", "deploy"]) if (existsSync(path.join(repo, name))) symlinkSync(path.join(repo, name), path.join(install, name));
+const root = realpathSync(install);
 const PASSWORD = "a password long enough";
+const CCC = "ccc".padEnd(40, "0");
 
 const script = (name, body) => {
   const file = path.join(bin, name);
@@ -39,14 +53,29 @@ case "$1" in
   merge) cp "$FAKE/target" "$FAKE/head"; printf '0\\t0\\n' > "$FAKE/counts" ;;
 esac
 exit 0`);
+// npm ci empties node_modules and installs; the build writes a server and a web app, and a file of a build that stops halfway.
 script("npm", `
 echo "npm $*" >> "$FAKE/ran"
-if [ -e "$FAKE/npm-fails" ] && [ "$1" = "$(cat "$FAKE/npm-fails")" ]; then echo "npm ERR! the build is broken" >&2; exit 1; fi
+fails=$(cat "$FAKE/npm-fails" 2>/dev/null)
+case "$1" in
+  ci)
+    rm -rf node_modules
+    if [ "$fails" = ci ]; then mkdir node_modules; echo half > node_modules/half.txt; echo "npm ERR! registry down" >&2; exit 1; fi
+    ln -s "$REAL_MODULES" node_modules ;;
+  run)
+    mkdir -p server/dist web/dist
+    echo "// the new build" > server/dist/index.js
+    echo "half a build" > server/dist/partial.js
+    echo "new web app" > web/dist/index.html
+    if [ "$fails" = run ]; then echo "npm ERR! the build is broken" >&2; exit 1; fi ;;
+esac
 exit 0`);
 
 const commit = (sha, subject) => `${sha.padEnd(40, "0")}\x1f${subject}\x1f2026-10-12T09:00:00+02:00\n`;
 const put = (name, text) => writeFileSync(path.join(fake, name), text);
 const ran = () => (existsSync(path.join(fake, "ran")) ? readFileSync(path.join(fake, "ran"), "utf8").trim().split("\n").filter(Boolean) : []);
+/** What changes the checkout or the build: not the fetch, which only looks at the remote. */
+const changes = () => ran().filter((c) => /^(git merge|npm)/.test(c));
 /** A clean checkout on main, two commits behind. */
 function reset() {
   for (const name of ["ran", "fetch-fails", "npm-fails"]) rmSync(path.join(fake, name), { force: true });
@@ -68,8 +97,9 @@ before(async () => {
     PATH: `${bin}${path.delimiter}${process.env.PATH}`,
     FAKE: fake,
     ROOT: root,
+    REAL_MODULES: path.join(repo, "node_modules"),
     PORTAL_UPDATE_RESTART: "exit",
-  })));
+  }), 5, path.join(install, "server", "dist", "index.js")));
 });
 
 const login = async () => (await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: PASSWORD }) })).headers.getSetCookie()[0].split(";")[0];
@@ -85,16 +115,18 @@ const settled = async (cookie) => {
   }
   assert.fail("the run did not settle");
 };
+const text = (rel) => readFileSync(path.join(install, rel), "utf8");
+const isLink = (rel) => lstatSync(path.join(install, rel)).isSymbolicLink();
 
 test("whoever is not signed in is turned away from all of it, and nothing is run", async () => {
   reset();
   for (const [url, method] of [["/api/update", "GET"], ["/api/update/check", "POST"], ["/api/update", "POST"]]) {
-    const res = await send(undefined, url, method, method === "POST" ? {} : undefined);
+    const res = await send(undefined, url, method, method === "POST" ? { expect: CCC } : undefined);
     assert.equal(res.status, 401, `${method} ${url}`);
   }
-  const bogus = await send("pi_portal_auth=1.forged", "/api/update", "POST", {});
+  const bogus = await send("pi_portal_auth=1.forged", "/api/update", "POST", { expect: CCC });
   assert.equal(bogus.status, 401);
-  assert.ok(!ran().some((c) => /^(git (fetch|merge)|npm)/.test(c)), "no update was started");
+  assert.deepEqual(changes(), [], "no update was started");
 });
 
 test("the status says where the checkout is, and a check says what an update would do", async () => {
@@ -105,6 +137,7 @@ test("the status says where the checkout is, and a check says what an update wou
   assert.equal(status.branch, "main");
   assert.equal(status.current.subject, "Where the checkout is");
   assert.equal(status.run, null);
+  assert.equal(status.rebuild, false);
   assert.match(status.boot, /^[0-9a-f]+$/);
 
   const check = await send(cookie, "/api/update/check", "POST");
@@ -113,71 +146,118 @@ test("the status says where the checkout is, and a check says what an update wou
   assert.equal(check.body.target.subject, "Where main is");
   assert.equal(check.body.problem, null);
   assert.equal(check.body.running, 0);
-  assert.ok(!ran().some((c) => /^(git merge|npm)/.test(c)), "looking builds nothing");
+  assert.equal(check.body.rebuild, false);
+  assert.deepEqual(changes(), [], "looking builds nothing");
   assert.equal((await send(cookie, "/api/update")).body.notice.count, 2, "what a check found is the notice");
+});
+
+test("a start without the commit that was confirmed is refused, however the request is made, and nothing is run", async () => {
+  const cookie = await login();
+  reset();
+  for (const body of [undefined, {}, { expect: "" }, { expect: 7 }, { expect: null }, { expect: [CCC] }]) {
+    const res = await send(cookie, "/api/update", "POST", body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.equal(res.body.code, "invalid");
+    assert.match(res.body.error, /expect/);
+  }
+  // No body at all, and a body that is not JSON: a form from another page cannot send what the portal asks for.
+  for (const [type, body] of [[undefined, undefined], ["text/plain", `{"expect":"${CCC}"}`], ["application/x-www-form-urlencoded", `expect=${CCC}`]]) {
+    const res = await fetch(`${base}/api/update`, { method: "POST", headers: { Cookie: cookie, ...(type ? { "Content-Type": type } : {}) }, body });
+    assert.equal(res.status, 400, `${type}`);
+    assert.equal((await res.json()).code, "invalid");
+  }
+  assert.deepEqual(changes(), [], "nothing was merged, installed or built");
+  assert.equal((await send(cookie, "/api/update")).body.run, null);
 });
 
 test("a checkout with local changes, or that cannot fast-forward, is refused with its reason, and nothing is run", async () => {
   const cookie = await login();
   reset();
   put("changed", " M server/src/server.ts\n");
-  let res = await send(cookie, "/api/update", "POST", {});
+  let res = await send(cookie, "/api/update", "POST", { expect: CCC });
   assert.equal(res.status, 409);
   assert.equal(res.body.code, "dirty");
   assert.match(res.body.error, /local changes \(1 file\)/);
 
   reset();
   put("counts", "1\t2\n");
-  res = await send(cookie, "/api/update", "POST", {});
+  res = await send(cookie, "/api/update", "POST", { expect: CCC });
   assert.equal(res.body.code, "diverged");
 
   reset();
   put("branch", "");
-  assert.equal((await send(cookie, "/api/update", "POST", {})).body.code, "detached");
+  assert.equal((await send(cookie, "/api/update", "POST", { expect: CCC })).body.code, "detached");
 
   reset();
   put("counts", "0\t0\n");
-  assert.equal((await send(cookie, "/api/update", "POST", {})).body.code, "current");
+  assert.equal((await send(cookie, "/api/update", "POST", { expect: CCC })).body.code, "current");
 
   reset();
   assert.equal((await send(cookie, "/api/update", "POST", { expect: "f".repeat(40) })).body.code, "moved");
-  assert.equal((await send(cookie, "/api/update", "POST", { expect: 7 })).status, 400);
-  assert.ok(!ran().some((c) => /^(git merge|npm)/.test(c)), "none of them ran anything");
+  assert.deepEqual(changes(), [], "none of them ran anything");
 });
 
-test("a build that fails is shown with the step and what it printed, and the portal goes on", async () => {
+test("an install that fails puts the old node_modules back, and the build was never touched", async () => {
+  const cookie = await login();
+  reset();
+  writeFileSync(path.join(fake, "npm-fails"), "ci");
+  const started = await send(cookie, "/api/update", "POST", { expect: CCC });
+  assert.equal(started.status, 202, JSON.stringify(started.body));
+  const run = await settled(cookie);
+  assert.equal(run.state, "failed");
+  assert.equal(run.failed.step, "install");
+  assert.match(run.failed.output, /registry down/);
+  assert.equal(isLink("node_modules"), true, "the link to the packages is back, not a half-made folder");
+  assert.equal(existsSync(path.join(install, "node_modules", "half.txt")), false);
+  assert.equal(text("web/dist/index.html"), "old web app");
+  assert.equal(text("server/dist/index.js"), readFileSync(path.join(repo, "server", "dist", "index.js"), "utf8"));
+  assert.ok(!ran().includes("npm run build"));
+  assert.deepEqual(readdirSync(install).filter((n) => n.endsWith(".update-old")), []);
+});
+
+test("a build that fails puts the old server, web app and node_modules back, and the build to do is written down in the files", async () => {
   const cookie = await login();
   reset();
   writeFileSync(path.join(fake, "npm-fails"), "run");
-  const started = await send(cookie, "/api/update", "POST", { expect: commit("ccc", "").slice(0, 40) });
+  const started = await send(cookie, "/api/update", "POST", { expect: CCC });
   assert.equal(started.status, 202, JSON.stringify(started.body));
   const run = await settled(cookie);
   assert.equal(run.state, "failed");
   assert.equal(run.failed.step, "build");
   assert.match(run.failed.output, /the build is broken/);
-  assert.equal((await send(cookie, "/api/update")).body.rebuild, true);
+  // As the server was, with what the failed build wrote gone.
+  assert.equal(text("server/dist/index.js"), readFileSync(path.join(repo, "server", "dist", "index.js"), "utf8"));
+  assert.equal(existsSync(path.join(install, "server", "dist", "partial.js")), false);
+  assert.equal(text("web/dist/index.html"), "old web app");
+  assert.equal(isLink("node_modules"), true);
+  for (const aside of ["node_modules", "server/dist", "web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
+  // What it was made from stays with it: the checkout is at ccc now, the build is of aaa.
+  assert.equal(text("server/dist/.built-from").trim(), "aaa".padEnd(40, "0"));
+  const status = (await send(cookie, "/api/update")).body;
+  assert.equal(status.rebuild, true);
+  assert.equal(status.current.sha, CCC);
   assert.equal(child.exitCode, null, "the portal was not restarted");
 });
 
-test("an update fetches, merges, installs and builds in that order, refuses a second press meanwhile, and then the portal stops to be restarted", async () => {
+test("an update fetches, merges, installs and builds in that order, refuses a second press meanwhile, and then the portal stops with the status that has it started again", async () => {
   const cookie = await login();
   reset();
   rmSync(path.join(fake, "npm-fails"), { force: true });
-  // The build from before is pending: this one starts from it, after the merge that was made.
+  // As the last one left it: the checkout is at main, and what is built is not.
   put("counts", "0\t0\n");
   put("head", commit("ccc", "Where main is"));
-  const first = await send(cookie, "/api/update", "POST", {});
+  const first = await send(cookie, "/api/update", "POST", { expect: CCC });
   assert.equal(first.status, 202, JSON.stringify(first.body));
-  assert.equal((await send(cookie, "/api/update", "POST", {})).body.code, "busy");
+  assert.equal((await send(cookie, "/api/update", "POST", { expect: CCC })).body.code, "busy");
   const run = await settled(cookie);
   assert.equal(run.state, "restarting");
   assert.deepEqual(run.steps.map((s) => s.state), ["done", "skipped", "done", "done", "running"]);
-  assert.deepEqual(ran().filter((c) => /^(git (fetch|merge)|npm)/.test(c)).slice(-3), [
-    "git fetch origin +refs/heads/main:refs/remotes/origin/main",
-    "npm ci --prefer-offline --no-audit --no-fund",
-    "npm run build",
-  ]);
-  // The restart: the portal stops, as it does on SIGTERM, and a manager would start it again.
+  assert.deepEqual(changes(), ["npm ci --prefer-offline --no-audit --no-fund", "npm run build"]);
+  // The new build is in place, the old one thrown away, and what it was made from written with it.
+  assert.equal(text("web/dist/index.html").trim(), "new web app");
+  assert.equal(text("server/dist/.built-from").trim(), CCC);
+  for (const aside of ["node_modules", "server/dist", "web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
+  // The restart: the portal stops, as it does on SIGTERM, with the status a manager starts it again from.
   const [code] = await once(child, "exit");
-  assert.equal(code, 0);
+  assert.equal(code, 75);
 });

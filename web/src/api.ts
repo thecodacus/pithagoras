@@ -1421,15 +1421,15 @@ export interface UpdateNotice {
   since: string;
 }
 
-/** `kind` is where an update can be made: from a git checkout; not from a container's image; not at all. */
+/** `kind` is where an update can be made: from a git checkout; not from a container's image, nor from source files under a watcher; not at all. */
 export interface UpdateStatus {
-  kind: "git" | "container" | "none";
+  kind: "git" | "container" | "dev" | "none";
   /** Changes with each start of the portal. */
   boot: string;
   branch?: string | null;
   current?: UpdateCommit;
   notice?: UpdateNotice | null;
-  /** The new commit is checked out but its build failed: Update builds it again. */
+  /** What is built is not of the commit that is checked out (a build failed): Update builds it again. */
   rebuild?: boolean;
   run?: UpdateRun | null;
 }
@@ -1441,7 +1441,9 @@ export interface UpdateCheck {
   behind: number;
   ahead: number;
   changed: number;
-  problem: { code: "fetch" | "detached" | "dirty" | "diverged"; message: string } | null;
+  /** What is built is not of the commit that is checked out: Update builds again, with a merge or without. */
+  rebuild: boolean;
+  problem: { code: "fetch" | "detached" | "dirty" | "diverged" | "restart"; message: string } | null;
   /** Chats and runs going now, which the restart stops. */
   running: number;
 }

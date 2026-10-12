@@ -51,6 +51,17 @@ export function UpdateSection() {
     );
   }
 
+  if (status.kind === "dev") {
+    return (
+      <Section title={t("Update")} hint={t("This portal runs from its source files under a file watcher (npm run dev:server). The watcher restarts it as soon as an update changes the files, halfway through the update, so there is no Update button here.")}>
+        <div className="rounded-xl border border-line bg-raised/40 px-3 py-2.5 text-sm text-fg-muted">
+          <p>{t("Pull on the host, or run the built portal to update it from here:")}</p>
+          <pre className="mt-1.5 overflow-x-auto rounded-lg bg-fg/5 px-2.5 py-1.5 font-mono text-xs text-fg"><code>npm run build &amp;&amp; npm start</code></pre>
+        </div>
+      </Section>
+    );
+  }
+
   const run = status.run;
   const active = run?.state === "running" || run?.state === "restarting";
   const current = status.current;
@@ -76,7 +87,7 @@ export function UpdateSection() {
           {status.notice
             ? tp(status.notice.count, "{n} new commit on main, update available", "{n} new commits on main, update available")
             : status.rebuild
-              ? t("The new version is checked out, but building it failed. Update builds it again.")
+              ? t("The build is not of the commit that is checked out, most likely because a build failed. Update builds it again.")
               : t("Nothing new on main when it was last looked at.")}
         </p>
       )}
@@ -121,7 +132,7 @@ export function UpdateSection() {
               <span className="block">
                 {run.failed.step === "restart"
                   ? t("The new version is built, but the portal could not restart itself. Restart it on the host.")
-                  : t("The update stopped at “{step}”. The portal is still running its old build.", { step: t(STEP_LABELS[run.failed.step]) })}
+                  : t("The update stopped at “{step}”. The portal is still running its old build, with its files as they were.", { step: t(STEP_LABELS[run.failed.step]) })}
               </span>
               <span className="mt-1 block text-xs opacity-80">{run.failed.message}</span>
               {run.failed.output && <pre className="mt-2 max-h-56 overflow-auto rounded-lg bg-fg/5 p-2 font-mono text-[11px] leading-snug text-fg-muted">{run.failed.output}</pre>}

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -11,6 +11,7 @@ import { inProcessHome } from "./server-harness.mjs";
  */
 const home = inProcessHome("pithagoras-update-git-");
 const { Updater, UpdateError, realExec } = await import("../dist/update.js");
+const { fileArtifacts } = await import("../dist/update-files.js");
 console.log = console.error = () => {};
 
 const git = (cwd, ...args) =>
@@ -25,26 +26,52 @@ writeFileSync(path.join(seed, "package.json"), JSON.stringify({ name: "pithagora
 mkdirSync(path.join(seed, "server"));
 writeFileSync(path.join(seed, "server", "package.json"), "{}");
 writeFileSync(path.join(seed, "notes.txt"), "first\n");
+// What the repository ignores of a build, as it does: the build is not a change to the checkout.
+writeFileSync(path.join(seed, ".gitignore"), "node_modules/\ndist/\n*.update-old\n");
 git(seed, "add", ".");
 git(seed, "commit", "-m", "First");
 git(seed, "push", "origin", "main");
 
 let n = 0;
-/** A new checkout of the origin, and an updater for it with a build that only writes down what it was asked. */
+/**
+ * A new checkout of the origin with a build in it, and an updater for it with an install and a build that only write
+ * down what they make: `npm.fails` is the step that fails, after it has written something half way.
+ */
 function portal(clone = []) {
   const dir = path.join(home, `portal-${++n}`);
   git(home, "clone", ...clone, origin, dir);
+  for (const [folder, file] of [["node_modules", "dep.txt"], ["server/dist", "index.js"], ["web/dist", "index.html"]]) {
+    mkdirSync(path.join(dir, folder), { recursive: true });
+    writeFileSync(path.join(dir, folder, file), "old");
+  }
   const built = [];
+  const npm = { fails: undefined };
   const real = realExec(dir);
   let restarts = 0;
-  const u = new Updater({
+  const make = (folder, file, text) => {
+    mkdirSync(path.join(dir, folder), { recursive: true });
+    writeFileSync(path.join(dir, folder, file), text);
+  };
+  const updater = () => new Updater({
     root: dir,
-    exec: (command, args, options) => (command === "npm" ? Promise.resolve({ code: 0, stdout: "", output: "" }).then((r) => (built.push(args.join(" ")), r)) : real(command, args, options)),
+    exec: async (command, args, options) => {
+      if (command === "git") return real(command, args, options);
+      built.push(args.join(" "));
+      const step = args[0] === "ci" ? "ci" : "build";
+      if (step === "ci") make("node_modules", "dep.txt", "new");
+      else {
+        make("server/dist", "index.js", "new");
+        make("web/dist", "partial.js", "half");
+      }
+      return npm.fails === step ? { code: 1, stdout: "", output: `${step} failed` } : { code: 0, stdout: "", output: "" };
+    },
+    artifacts: fileArtifacts(dir),
     running: () => 0,
     restart: async () => void restarts++,
     inContainer: () => false,
+    fromSource: () => false,
   });
-  return { dir, u, built, restarts: () => restarts };
+  return { dir, u: updater(), again: updater, built, npm, restarts: () => restarts };
 }
 /** A commit on origin's main, made from the seed. */
 function publish(file, text, message = `Change ${file}`) {
@@ -91,21 +118,70 @@ test("a clean checkout behind origin/main moves to it, builds, and restarts", as
   assert.equal(readFileSync(path.join(p.dir, "b.txt"), "utf8"), "b\n");
   assert.deepEqual(p.built, ["ci --prefer-offline --no-audit --no-fund", "run build"]);
   assert.equal(p.restarts(), 1);
-  assert.equal(git(p.dir, "status", "--porcelain"), "");
+  assert.equal(git(p.dir, "status", "--porcelain"), "", "the build is not a change to the checkout");
+  // What was built is the new files, of the new commit, and none of the old ones is left aside.
+  assert.equal(readFileSync(path.join(p.dir, "node_modules/dep.txt"), "utf8"), "new");
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "new");
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8").trim(), newest);
+  for (const aside of ["node_modules.update-old", "server/dist.update-old", "web/dist.update-old"]) assert.equal(existsSync(path.join(p.dir, aside)), false, aside);
+  assert.equal((await p.again().status()).rebuild, false);
+});
+
+test("a build that fails leaves the old node_modules and build in place, and a portal started again is still told to build", async () => {
+  const p = portal();
+  const before = git(p.dir, "rev-parse", "HEAD");
+  const newest = publish("f.txt", "f\n");
+  p.npm.fails = "build";
+  await p.u.start(newest);
+  const run = await settled(p.u);
+  assert.equal(run.failed.step, "build");
+  // The checkout is at the new commit; the files are the old ones, with what the failed step wrote gone.
+  assert.equal(git(p.dir, "rev-parse", "HEAD"), newest);
+  assert.equal(readFileSync(path.join(p.dir, "node_modules/dep.txt"), "utf8"), "old");
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "old");
+  assert.equal(readFileSync(path.join(p.dir, "web/dist/index.html"), "utf8"), "old");
+  assert.equal(existsSync(path.join(p.dir, "web/dist/partial.js")), false);
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8").trim(), before, "the old build is still of the old commit");
+  assert.equal(p.restarts(), 0);
+
+  // The portal is started again, as after a reboot: nothing in memory, the same files on disk.
+  const restarted = p.again();
+  assert.equal((await restarted.status()).rebuild, true);
+  const seen = await restarted.check();
+  assert.equal(seen.behind, 0);
+  assert.equal(seen.rebuild, true);
+  p.npm.fails = undefined;
+  await restarted.start(newest);
+  const second = await settled(restarted);
+  assert.equal(second.state, "restarting", JSON.stringify(second.failed));
+  assert.deepEqual(second.steps.map((s) => s.state), ["done", "skipped", "done", "done", "running"]);
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "new");
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8").trim(), newest);
+});
+
+test("an install that fails leaves the old node_modules in place", async () => {
+  const p = portal();
+  const newest = publish("g.txt", "g\n");
+  p.npm.fails = "ci";
+  await p.u.start(newest);
+  assert.equal((await settled(p.u)).failed.step, "install");
+  assert.equal(readFileSync(path.join(p.dir, "node_modules/dep.txt"), "utf8"), "old");
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "old");
+  assert.deepEqual(p.built, ["ci --prefer-offline --no-audit --no-fund"], "no build on top of it");
 });
 
 test("a checkout with a change to a tracked file is left as it is; a file git does not track is no change", async () => {
   const p = portal();
   const newest = publish("c.txt", "c\n");
   writeFileSync(path.join(p.dir, "notes.txt"), "edited here\n");
-  await refused(p.u.start(), "dirty");
+  await refused(p.u.start(newest), "dirty");
   assert.equal(readFileSync(path.join(p.dir, "notes.txt"), "utf8"), "edited here\n");
   assert.notEqual(git(p.dir, "rev-parse", "HEAD"), newest);
   assert.deepEqual(p.built, []);
 
   git(p.dir, "checkout", "notes.txt");
   writeFileSync(path.join(p.dir, "scratch.log"), "not tracked\n");
-  await p.u.start();
+  await p.u.start(newest);
   assert.equal((await settled(p.u)).state, "restarting");
   assert.equal(git(p.dir, "rev-parse", "HEAD"), newest);
   assert.equal(readFileSync(path.join(p.dir, "scratch.log"), "utf8"), "not tracked\n");
@@ -113,24 +189,24 @@ test("a checkout with a change to a tracked file is left as it is; a file git do
 
 test("a checkout on no branch, or with commits of its own, is left as it is", async () => {
   const p = portal();
-  publish("d.txt", "d\n");
+  const newest = publish("d.txt", "d\n");
   git(p.dir, "checkout", "--detach");
-  await refused(p.u.start(), "detached");
+  await refused(p.u.start(newest), "detached");
 
   git(p.dir, "checkout", "main");
   writeFileSync(path.join(p.dir, "mine.txt"), "mine\n");
   git(p.dir, "add", ".");
   git(p.dir, "commit", "-m", "Mine");
   const mine = git(p.dir, "rev-parse", "HEAD");
-  await refused(p.u.start(), "diverged");
+  await refused(p.u.start(newest), "diverged");
   assert.equal(git(p.dir, "rev-parse", "HEAD"), mine);
   assert.deepEqual(p.built, []);
 });
 
 test("a checkout that is up to date has nothing to update to", async () => {
   const p = portal();
-  await p.u.check();
-  await refused(p.u.start(), "current");
+  const seen = await p.u.check();
+  await refused(p.u.start(seen.target.sha), "current");
 });
 
 test("an origin that cannot be reached is a problem to tell, with the checkout as it was", async () => {
@@ -138,7 +214,7 @@ test("an origin that cannot be reached is a problem to tell, with the checkout a
   git(p.dir, "remote", "set-url", "origin", path.join(home, "no-such-origin.git"));
   const seen = await p.u.check();
   assert.equal(seen.problem.code, "fetch");
-  await refused(p.u.start(), "fetch");
+  await refused(p.u.start("a".repeat(40)), "fetch");
   assert.deepEqual(p.built, []);
 });
 

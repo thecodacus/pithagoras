@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GIT_CONFIG, environment } from "./git.js";
 import { oneAtATime } from "./one-at-a-time.js";
+import type { Artifacts } from "./update-files.js";
 
 /**
  * Updating the portal from its own checkout: Settings → About pulls the newest `main`, builds it and restarts.
@@ -13,8 +14,11 @@ import { oneAtATime } from "./one-at-a-time.js";
  * clean, or cannot move straight to `origin/main`, is left as it is and the reason is told.
  */
 
-/** Where an update can be done: from a git checkout; not from a container's image; and not at all from anything else. */
-export type Kind = "git" | "container" | "none";
+/**
+ * Where an update can be done: from a git checkout. Not from a container's image, nor from source files that a file
+ * watcher runs (`npm run dev:server`), which it would restart in the middle of the update; and not from anything else.
+ */
+export type Kind = "git" | "container" | "dev" | "none";
 
 export const STEPS = ["fetch", "merge", "install", "build", "restart"] as const;
 export type Step = (typeof STEPS)[number];
@@ -53,7 +57,7 @@ export class UpdateError extends Error {
   }
 }
 
-export type ProblemCode = "fetch" | "detached" | "dirty" | "diverged";
+export type ProblemCode = "fetch" | "detached" | "dirty" | "diverged" | "restart";
 
 export interface Inspection {
   branch: string | null;
@@ -66,6 +70,8 @@ export interface Inspection {
   ahead: number;
   /** Files with changes to tracked files; what git ignores and what it does not track are no reason to stop. */
   changed: number;
+  /** The build in place was made from another commit than the checked out one: Update builds again, merge or none. */
+  rebuild: boolean;
   /** Why an update cannot be made, if it cannot. */
   problem: { code: ProblemCode; message: string } | null;
   /** Chats and runs going right now, which the restart stops. */
@@ -98,7 +104,7 @@ export interface UpdateStatus {
   notice?: Notice | null;
   /** When origin/main was last asked, and whether that worked. */
   checkedAt?: string | null;
-  /** A build failed after the merge: the checkout is ahead of what is built, and Update builds again. */
+  /** The build in place was made from another commit than the checked out one (a build failed after the merge): Update builds again. */
   rebuild?: boolean;
   run?: RunView | null;
 }
@@ -109,10 +115,16 @@ export interface UpdateDeps {
   exec: Exec;
   /** Chats and runs going right now. */
   running: () => number;
+  /** The files a build is made of: put aside while a step works on them, and put back when it fails. */
+  artifacts: Artifacts;
   /** Stops this portal and starts the new one. Throws, with nothing stopped, when it cannot. */
   restart: () => Promise<void>;
+  /** Why the portal would not come back after it stops, if it would not. */
+  restartProblem?: () => Promise<string | null>;
   /** A portal in a container is rebuilt with its image. */
   inContainer?: () => boolean;
+  /** The portal runs from source files under a watcher, which would restart it halfway through the update. */
+  fromSource?: () => boolean;
   /** Told when a target commit is seen that the portal has not told about yet. */
   onRaise?: (notice: Notice) => void;
   now?: () => Date;
@@ -144,6 +156,13 @@ export function tail(output: string, lines = OUTPUT_LINES): string {
     .map((l) => (l.length > LINE_MAX ? `${l.slice(0, LINE_MAX)}…` : l))
     .join("\n");
 }
+
+/**
+ * Whether the portal runs from its source files (`tsx watch src/index.ts`, as `npm run dev:server` has it) or under a
+ * watcher of node's own: either one restarts the portal as soon as the update changes a file, with `npm ci` just begun.
+ */
+export const runsFromSource = (url: string = import.meta.url, execArgv: string[] = process.execArgv): boolean =>
+  url.endsWith(".ts") || execArgv.some((a) => a === "--watch" || a === "--watch-path" || a.startsWith("--watch-path="));
 
 /** The install's folder, found as the portal finds its own files: from the compiled (or source) file, two folders up. */
 export function installRoot(): string {
@@ -200,8 +219,6 @@ export class Updater {
   /** An update is being started or is running: a second press is refused. */
   private busy = false;
   private run: RunView | null = null;
-  /** The merge is in but the build is not: what is checked out is ahead of what is built. */
-  private rebuild = false;
   private head: { branch: string | null; current: Commit } | undefined;
   private notice: Notice | null = null;
   private checkedAt: string | null = null;
@@ -218,6 +235,7 @@ export class Updater {
 
   private async detect(): Promise<Kind> {
     if ((this.deps.inContainer ?? inContainer)()) return "container";
+    if ((this.deps.fromSource ?? runsFromSource)()) return "dev";
     const { root } = this.deps;
     try {
       const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as { name?: string };
@@ -236,7 +254,15 @@ export class Updater {
   }
 
   private async needGit(): Promise<void> {
-    if ((await this.kind()) !== "git") throw new UpdateError(404, "unavailable", "This portal does not run from a git checkout, so it cannot update itself.");
+    const kind = await this.kind();
+    if (kind === "dev") throw new UpdateError(404, "unavailable", "This portal runs from its source files under a file watcher, which would restart it halfway through the update. Run the built portal (npm start) to update it from here.");
+    if (kind !== "git") throw new UpdateError(404, "unavailable", "This portal does not run from a git checkout, so it cannot update itself.");
+  }
+
+  /** The build in place was made from another commit than the one checked out: written down with it, so that a restart keeps it. */
+  private async needsBuild(current: Commit): Promise<boolean> {
+    const built = await this.deps.artifacts.builtFrom();
+    return built !== undefined && built !== current.sha;
   }
 
   private async git(args: string[], options?: ExecOptions): Promise<Ran> {
@@ -287,9 +313,12 @@ export class Updater {
     else if (changed > 0) problem = { code: "dirty", message: `The checkout has local changes (${plural(changed, "file", "files")}). Commit or discard them on the host first.` };
     else if (ahead > 0 && behind > 0) {
       problem = { code: "diverged", message: `The checkout has ${plural(ahead, "commit", "commits")} that origin/main lacks and origin/main has ${plural(behind, "new commit", "new commits")}, so it cannot move straight to it. Rebase or merge on the host first.` };
+    } else {
+      const restart = await this.deps.restartProblem?.();
+      if (restart) problem = { code: "restart", message: restart };
     }
 
-    const seen: Inspection = { branch, current, target, behind, ahead, changed, problem, running: this.deps.running() };
+    const seen: Inspection = { branch, current, target, behind, ahead, changed, rebuild: await this.needsBuild(current), problem, running: this.deps.running() };
     if (!fetchError) {
       this.checkedAt = this.now().toISOString();
       this.noteTarget(seen);
@@ -316,7 +345,7 @@ export class Updater {
     const kind = await this.kind();
     if (kind !== "git") return { kind };
     const head = this.head ?? (await this.readHead());
-    return { kind, branch: head.branch, current: head.current, notice: this.notice, checkedAt: this.checkedAt, rebuild: this.rebuild, run: this.run };
+    return { kind, branch: head.branch, current: head.current, notice: this.notice, checkedAt: this.checkedAt, rebuild: await this.needsBuild(head.current), run: this.run };
   }
 
   /** Asks the remote what is new, for the page that is about to ask whether to update. */
@@ -347,11 +376,13 @@ export class Updater {
 
   /**
    * Begins an update, if it may: answers once the checks are made and the steps are on their way, and refuses with
-   * the reason when they are not. `expect` is the commit the person was shown; a remote that has moved on since is
-   * a new question, not a thing to do unasked.
+   * the reason when they are not. `expect` is the commit the person was shown, and is required: the confirmation is
+   * the server's to ask for, not only the page's. A remote that has moved on since is a new question, not a thing
+   * to do unasked.
    */
-  async start(expect?: string): Promise<RunView> {
+  async start(expect: string): Promise<RunView> {
     await this.needGit();
+    if (typeof expect !== "string" || !expect) throw new UpdateError(400, "invalid", "The commit that was confirmed is needed: send it as expect.");
     // Taken before the first wait, or two presses side by side would both pass.
     if (this.busy) throw new UpdateError(409, "busy", "An update is already running.");
     this.busy = true;
@@ -360,8 +391,8 @@ export class Updater {
       seen = await this.serial(() => this.look(true));
       if (seen.problem) throw new UpdateError(409, seen.problem.code, seen.problem.message);
       const target = seen.target!;
-      if (expect && expect !== target.sha) throw new UpdateError(409, "moved", "origin/main has moved on since it was looked at. Check again.");
-      if (seen.behind === 0 && !this.rebuild) throw new UpdateError(409, "current", "Already up to date.");
+      if (expect !== target.sha) throw new UpdateError(409, "moved", "origin/main has moved on since it was looked at. Check again.");
+      if (seen.behind === 0 && !seen.rebuild) throw new UpdateError(409, "current", "Already up to date.");
     } catch (e) {
       this.busy = false;
       throw e;
@@ -383,12 +414,19 @@ export class Updater {
     run.steps.find((s) => s.id === id)!.state = state;
   }
 
-  private fail(run: RunView, step: Step, message: string, output: string): void {
+  /** Says where it failed, puts the old files back, and only then lets another update begin. */
+  private async fail(run: RunView, step: Step, message: string, output: string): Promise<void> {
     this.mark(run, step, "failed");
     run.state = "failed";
     run.failed = { step, message, output: tail(output) };
-    this.busy = false;
     console.error(`[update] failed at ${step}: ${message}${run.failed.output ? `\n${run.failed.output}` : ""}`);
+    try {
+      await this.deps.artifacts.restore();
+    } catch (e) {
+      console.error(`[update] the old files could not be put back: ${(e as Error).message}`);
+      run.failed.message += `. The old files could not be put back: ${(e as Error).message}`;
+    }
+    this.busy = false;
   }
 
   /** One program as a step; false when it failed, and the run says where. */
@@ -397,7 +435,7 @@ export class Updater {
     console.log(`[update] ${label}`);
     const r = await this.deps.exec(command, args, { timeoutMs, writes: true });
     if (r.code !== 0) {
-      this.fail(run, id, `${label} failed${r.code === null ? "" : ` (exit ${r.code})`}`, r.output);
+      await this.fail(run, id, `${label} failed${r.code === null ? "" : ` (exit ${r.code})`}`, r.output);
       return false;
     }
     this.mark(run, id, "done");
@@ -405,32 +443,38 @@ export class Updater {
   }
 
   private async execute(run: RunView, merge: boolean): Promise<void> {
+    const files = this.deps.artifacts;
     let at: Step = "fetch";
     try {
       console.log(`[update] ${run.from.sha.slice(0, 7)} -> ${run.to.sha.slice(0, 7)}`);
       this.mark(run, "fetch", "done");
+      // The build in place is of the commit that is checked out now, unless something wrote down otherwise: what a
+      // failure after the merge leaves behind is told from this.
+      await files.markBuilt(run.from.sha, true);
       if (!merge) this.mark(run, "merge", "skipped");
       else {
         at = "merge";
         // Only moves forward: where it cannot, git stops without changing a file.
         if (!(await this.step(run, "merge", "git merge --ff-only origin/main", "git", ["merge", "--ff-only", REMOTE], MERGE_MS))) return;
-        this.rebuild = true;
         // What was new is in; the notice goes with it.
         this.notice = null;
         await this.readHead();
       }
       at = "install";
+      await files.keepModules();
       if (!(await this.step(run, "install", "npm ci", "npm", ["ci", "--prefer-offline", "--no-audit", "--no-fund"], INSTALL_MS))) return;
       at = "build";
+      await files.keepBuild();
       if (!(await this.step(run, "build", "npm run build", "npm", ["run", "build"], BUILD_MS))) return;
-      this.rebuild = false;
+      await files.markBuilt((await this.readHead()).current.sha);
+      await files.discard();
       at = "restart";
       this.mark(run, "restart", "running");
       run.state = "restarting";
       console.log("[update] restarting");
       await this.deps.restart();
     } catch (e) {
-      this.fail(run, at, (e as Error).message, "");
+      await this.fail(run, at, (e as Error).message, "");
     }
   }
 }

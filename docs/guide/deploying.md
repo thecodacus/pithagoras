@@ -290,7 +290,7 @@ Everything here is optional except the password and, with the Compose files,
 | `ALLOW_OPEN` | — | `1` makes a portal with no password listen on every interface instead of `127.0.0.1` only. Both Compose files pass it. |
 | `PORTAL_SECRET` | random | Signs the session cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Port to listen on. |
-| `PORTAL_UPDATE_RESTART` | — | From source: `exit` makes the **Update** button in Settings → About only stop the portal after it has built the new version, for a portal that a service manager starts again by itself (systemd with `Restart=always`, pm2). Unset, the portal starts its replacement itself. See [Settings](/guide/settings#update). |
+| `PORTAL_UPDATE_RESTART` | — | From source: how the **Update** button in Settings → About restarts the portal after it has built the new version. `exit` only stops it, with status 75, for a portal that something else starts again (pm2, a restart policy); `self` starts the new one itself. Unset, a portal that runs as a systemd service exits, and any other starts its own. A systemd unit needs `Restart=on-failure` or `Restart=always`. See [Settings](/guide/settings#update). |
 | `TZ` | UTC | The time zone of the portal's clock, such as `Europe/Berlin`. A container keeps UTC unless it is told one. The quiet hours of an [agent's heartbeat](/guide/agents#its-heartbeat) and the schedule of a repeating [routine](/guide/routines) are read on this clock. Both Compose files pass it from `.env` or the shell. |
 | `PORTAL_UPGRADE_BACKUP` | — | `skip` upgrades the database without the backup it is otherwise made first, for a volume with no room for the copy. Both Compose files pass it; see [Upgrading](/guide/upgrading#no-room-for-the-backup). |
 | `PORTAL_UPDATE_CHECK` | — | From source: `off` stops the portal from fetching `origin/main` by itself at the start and every six hours to see whether there is something new. The **Update** button in Settings → About still asks when it is pressed. See [Settings](/guide/settings#update). |
@@ -360,6 +360,22 @@ npm install
 PORTAL_PASSWORD='a password of 8 or more characters' npm run dev:server   # API on :4100
 npm run dev:web      # Vite dev server, proxying to it
 ```
+
+`npm run dev:server` restarts the server when a source file changes. That is for
+developing, and Settings → About has no **Update** button for it. To run the
+portal from a checkout and update it from the page, build it and start the build:
+`npm run build && npm start`, or as a service:
+
+```ini
+[Service]
+WorkingDirectory=/srv/pithagoras
+Environment=PORTAL_PASSWORD=…
+ExecStart=/usr/bin/node server/dist/index.js
+Restart=on-failure
+```
+
+The update ends the portal with status 75, which `Restart=on-failure` (or
+`Restart=always`) starts again; see [Settings → Update](/guide/settings#update).
 
 To try it without a login, set
 `PORTAL_ALLOW_NO_PASSWORD=1` instead of the password; the server then listens on

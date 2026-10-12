@@ -143,6 +143,8 @@ export function problemText(p: NonNullable<UpdateCheck["problem"]>, changed: num
       return t("The checkout is not on a branch. Check out a branch on the host first.");
     case "diverged":
       return t("The checkout has commits that origin/main does not have, and origin/main has new ones, so it cannot move straight to it. Rebase or merge on the host first.");
+    case "restart":
+      return t("The portal runs as a systemd service that is not set to start again after it ends, so it would not come back after the update. Set Restart=on-failure (or Restart=always) in its unit, then update again.");
     default:
       return `${t("origin/main could not be fetched.")} ${p.message.replace(/^Could not fetch origin\/main: /, "")}`.trim();
   }
@@ -157,6 +159,8 @@ const refusal = (e: ApiError): string => {
       return t("origin/main has moved on since it was looked at. Try again.");
     case "current":
       return t("The portal is up to date.");
+    case "invalid":
+      return e.message;
     case "unavailable":
       return t("This portal does not run from a git checkout, so it cannot update itself.");
     default:
@@ -182,12 +186,12 @@ export async function updatePortal(): Promise<UpdateOutcome> {
     return { kind: "stopped", text: e instanceof ApiError && e.body.code ? refusal(e) : (e as Error).message };
   }
   if (check.problem) return { kind: "stopped", text: problemText(check.problem, check.changed) };
-  const rebuild = Boolean(snap.status?.rebuild);
+  const rebuild = check.rebuild;
   if (!check.target || (check.behind === 0 && !rebuild)) return { kind: "stopped", text: t("The portal is up to date.") };
 
   const parts = [
     rebuild && check.behind === 0
-      ? t("The new version is checked out, but building it failed. This builds it again: {commit}.", { commit: commitLabel(check.current) })
+      ? t("The build is not of the commit that is checked out, most likely because a build failed. This builds it again: {commit}.", { commit: commitLabel(check.current) })
       : tp(check.behind, "{n} new commit on main:", "{n} new commits on main:") + `\n${commitLabel(check.current)}\n→ ${commitLabel(check.target)}`,
     t("The portal downloads and builds the new version and restarts. It is away for a minute or two, and this page loads again when it is back."),
   ];

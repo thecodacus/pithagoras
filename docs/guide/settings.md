@@ -179,10 +179,10 @@ workspace root where each chat's folder is made, and where pi keeps its files
 
 ### Update
 
-A portal that runs from a git checkout of the repository (`npm start`, or a
-service that runs `node server/dist/index.js` in it) can update itself, so that
-nobody has to log in to the host. The folder is the one the portal itself runs
-from. The section shows the branch and commit that are checked out, and how
+A portal that runs from a git checkout of the repository, built (`npm start`,
+or a service that runs `node server/dist/index.js` in it), can update itself, so
+that nobody has to log in to the host. The folder is the one the portal itself
+runs from. The section shows the branch and commit that are checked out, and how
 many new commits `origin/main` has. The portal looks for them when it starts,
 every six hours, and when this page opens: a `git fetch` of `origin/main`
 and a count of the commits the checkout lacks. A failed look is written to the
@@ -190,7 +190,10 @@ and a count of the commits the checkout lacks. A failed look is written to the
 `PORTAL_UPDATE_CHECK=off` leaves out the looks the portal makes by itself.
 
 **Update** asks `origin` once more, then shows the commit you are on and the one
-it would move to, and asks for a confirmation. It says how many chats and
+it would move to, and asks for a confirmation. The portal's own request names the
+commit that was shown, and is refused without it (`expect`, see the
+[API](/reference/api#updating-the-portal)): nothing starts from a request that
+did not ask. It says how many chats and
 routines are running: the restart stops them as stopping the portal does, and a
 chat carries on when you send it a message. Once you confirm, the portal runs
 these steps, one update at a time:
@@ -208,18 +211,61 @@ reason), is not on a branch, or has commits of its own that `origin/main` lacks,
 so that it cannot be moved straight to it. Fix that on the host and press
 Update again.
 
-A step that fails stops the update where it is, names the step and shows the
+**A step that fails.** The update stops where it is, names the step and shows the
 last lines the program printed, and the portal goes on running its old build.
-After a failure in `npm ci` or `npm run build` the new commit is already
-checked out; Update then says so and builds it again, without a merge.
+`npm ci` empties `node_modules` and a build writes `server/dist` and `web/dist`
+as it goes, even a server build with a type error, so the update puts the three
+aside (`node_modules.update-old`, `server/dist.update-old`, `web/dist.update-old`)
+before the step that works on them, puts them back if it fails, and throws them
+away only when the whole build has worked. What a failed step wrote is removed.
+The checkout itself stays at the new commit, which the update never takes back.
+What the build was made from is written in `server/dist/.built-from`, and goes
+aside and comes back with the build: so after a failed build, and after any
+restart of the portal, **Update** says that the build is not of the commit that
+is checked out and builds it again, with a merge of whatever is new on `main`
+meanwhile, or without one. A portal that never ran an update has no such record
+and is not told it needs a build. (Between `npm ci` and the end of the build the
+running portal has no `node_modules` and no build to read from disk, as with
+any rebuild in place; a power cut or a kill of the portal in that time leaves
+the `.update-old` folders, which can be moved back by hand.)
 
-**The restart.** The portal starts a copy of itself with the command line it
-was started with, and then stops as it does on SIGTERM; the copy waits until the
-old one is gone. A portal that something else keeps running (systemd with
-`Restart=always`, a container's restart policy, pm2) would be started twice, so
-set `PORTAL_UPDATE_RESTART=exit` there: the portal then only stops, and its
-manager starts the new build. With a manager that does not restart a program
-that has ended, neither way brings the portal back.
+**The restart.** What starts the portal again depends on how it is run.
+
+- Run by hand, with `npm start` or `node server/dist/index.js` in a terminal, tmux
+  or `nohup`: the portal starts a copy of itself with the command line it was
+  started with, detached and writing where the portal wrote, and then stops as it
+  does on SIGTERM; the copy waits until the old one is gone.
+- Run as a **systemd service**: the portal stops with status 75 and leaves the
+  start to systemd. It knows that it runs as a service from its control group. A copy that
+  the portal started itself would be in the service's control group and be ended
+  with it, so it does not start one. The unit has to start it again:
+
+  ```ini
+  [Service]
+  WorkingDirectory=/srv/pithagoras
+  ExecStart=/usr/bin/node server/dist/index.js
+  Restart=on-failure
+  ```
+
+  `Restart=on-failure` or `Restart=always` is needed. A unit with `Restart=no` (the
+  default), `on-success`, `on-abnormal` and so on would leave the portal down, so
+  the check refuses the update beforehand, says why, and changes nothing. systemd
+  logs the stop as a failure, status 75, and starts the portal after `RestartSec`.
+- Run by something else that restarts it (pm2, a container's restart policy,
+  `while true`): set `PORTAL_UPDATE_RESTART=exit`. The portal then only stops, with
+  status 75, and its manager starts the new build; started by itself too, it would
+  be started twice. `PORTAL_UPDATE_RESTART=self` makes the portal start its own
+  copy where it would otherwise exit.
+
+If the replacement cannot be started, the update fails at the last step, and the
+portal goes on running. If the new portal does not come up, the page says after
+three minutes that it has not come back, and the log on the host says why.
+
+**Not offered.** A portal that runs from the source files with a file watcher
+(`npm run dev:server`, which is `tsx watch`, or `node --watch`) has no Update
+button. The watcher restarts the portal as soon as the merge changes a file,
+with `npm ci` just started and its node_modules half deleted; the section says so
+and suggests `npm run build && npm start`.
 
 **The notice.** When a look finds new commits, a line at the top of every page says
 *N new commits on main, update available*, with **Update** (the same question,

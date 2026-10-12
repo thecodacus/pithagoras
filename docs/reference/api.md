@@ -294,13 +294,13 @@ The session routes answer 409 until Voice is enabled in Settings → Add-ons. Se
 
 ## Updating the portal
 
-Settings → About → Update. Whoever is signed in may use it. A portal that does not run from a git checkout answers 404 `unavailable` to the last two.
+Settings → About → Update. Whoever is signed in may use it. A portal that does not run from a git checkout, or that runs from its source files under a file watcher, answers 404 `unavailable` to the last two.
 
 | | |
 | --- | --- |
-| `GET /api/update` | `{ kind, boot, branch, current, notice, checkedAt, rebuild, run }` from the portal's memory, the remote is not asked. `kind` is `git`, `container` (a container cannot rebuild itself) or `none`; only `git` has the rest. `notice` is `{ count, target, since }` while `origin/main` has commits the checkout lacks. `boot` changes with each start of the portal. `run` is the update going on or the last one that failed: `{ state: "running" \| "restarting" \| "failed", steps, from, to, startedAt, failed? }` |
-| `POST /api/update/check` | Fetches `origin/main` and answers `{ branch, current, target, behind, ahead, changed, problem, running }`. `problem` is `{ code, message }` with `code` `fetch`, `detached`, `dirty` or `diverged`, or `null`. `running` is the number of chats and runs the restart would stop. Changes nothing |
-| `POST /api/update` | `{ expect? }` — `expect` is the commit that was shown. Starts the update: 202 `{ run }`. Refused with 409 and a `code`: `busy` (one is running), `moved` (`origin/main` is not `expect` any more), `current` (nothing to update to), or the `problem` of a check |
+| `GET /api/update` | `{ kind, boot, branch, current, notice, checkedAt, rebuild, run }` from the portal's memory, the remote is not asked. `kind` is `git`, `container` (a container cannot rebuild itself), `dev` (source files under a watcher) or `none`; only `git` has the rest. `notice` is `{ count, target, since }` while `origin/main` has commits the checkout lacks. `rebuild` is true when `server/dist/.built-from` names another commit than the one checked out. `boot` changes with each start of the portal. `run` is the update going on or the last one that failed: `{ state: "running" \| "restarting" \| "failed", steps, from, to, startedAt, failed? }` |
+| `POST /api/update/check` | Fetches `origin/main` and answers `{ branch, current, target, behind, ahead, changed, rebuild, problem, running }`. `problem` is `{ code, message }` with `code` `fetch`, `detached`, `dirty`, `diverged` or `restart` (a systemd service not set to start again), or `null`. `running` is the number of chats and runs the restart would stop. Changes nothing |
+| `POST /api/update` | `{ expect }` — required: the commit that was shown. Without it, or with anything but a commit id, 400 `invalid`, and nothing starts. Starts the update: 202 `{ run }`. Refused with 409 and a `code`: `busy` (one is running), `moved` (`origin/main` is not `expect` any more), `current` (nothing to update to, and the build is of the commit checked out), or the `problem` of a check |
 
 ## Portal settings
 
