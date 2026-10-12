@@ -908,6 +908,32 @@ test("a poster that could not be made for a reason that is not the clip's is tri
   }
 });
 
+test("a poster run that is ended by a signal (the time, a kill) is tried again by the next request, and is not taken for a clip ffmpeg cannot read", async () => {
+  const dir = path.join(temp, "killed-ffmpeg");
+  mkdirSync(dir, { recursive: true });
+  const frame = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#996633" } }).png().toBuffer();
+  writeFileSync(path.join(dir, "frame.png"), frame);
+  const runs = path.join(dir, "runs.log");
+  const script = path.join(dir, "ffmpeg");
+  // Its first run kills itself, as the portal's kill after the time limit would end it; the second makes the frame.
+  writeFileSync(script, `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\necho run >> ${JSON.stringify(runs)}\nif [ "$(wc -l < ${JSON.stringify(runs)})" -eq 1 ]; then kill -KILL $$; fi\ncat > /dev/null\ncat ${JSON.stringify(path.join(dir, "frame.png"))}\n`);
+  chmodSync(script, 0o755);
+  process.env.FFMPEG_PATH = script;
+  posters.forgetPosterProbe();
+  try {
+    const video = gallery.addPageVideo({ bytes: clip("killed"), ext: "webm", kind: "generated", prompt: "killed", params: {} });
+    assert.equal((await call("GET", `/videos/${video.id}/poster`)).status, 404, "ended by a signal: no poster this time");
+    assert.equal(readFileSync(runs, "utf8").trim().split("\n").length, 1);
+    const again = await call("GET", `/videos/${video.id}/poster`);
+    assert.equal(again.status, 200, "run again, not given up for good");
+    assert.equal(readFileSync(runs, "utf8").trim().split("\n").length, 2);
+    assert.equal((await sharp(again.bytes).metadata()).format, "webp");
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+  }
+});
+
 test("a poster is made from a real clip by the ffmpeg that is installed", { skip: HAVE_FFMPEG ? false : "ffmpeg is not installed here" }, async () => {
   delete process.env.FFMPEG_PATH;
   posters.forgetPosterProbe();
