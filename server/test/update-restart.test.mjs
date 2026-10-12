@@ -10,7 +10,7 @@ import { scratch } from "./server-harness.mjs";
  * Starting the portal again after an update: what is run and when the old one is stopped, with a spawn and a stop of
  * the test's own; and the wait itself, with a real shell and a stand-in for the old portal.
  */
-const { RESTART_EXIT, requestedExit, restartMode, restartPortal, restartProblem, serviceOf } = await import("../dist/restart.js");
+const { RESTART_EXIT, ownService, requestedExit, restartPlan, restartPortal, restartProblem, serviceOf } = await import("../dist/restart.js");
 
 const launch = { execPath: "/usr/bin/node", execArgv: ["--import", "tsx"], script: "/srv/pithagoras/server/dist/index.js", args: ["--flag"], cwd: "/srv/pithagoras" };
 
@@ -73,14 +73,44 @@ test("a portal run by systemd is told from one run in a terminal, by its control
   assert.equal(serviceOf(undefined), undefined);
 });
 
-test("the portal exits for its manager under systemd, starts itself elsewhere, and PORTAL_UPDATE_RESTART decides either way", () => {
-  assert.equal(restartMode({}, SYSTEM), "exit");
-  assert.equal(restartMode({}, USER), "exit");
-  assert.equal(restartMode({}, TERMINAL), "self");
-  assert.equal(restartMode({}, ""), "self");
-  assert.equal(restartMode({ PORTAL_UPDATE_RESTART: "self" }, SYSTEM), "self");
-  assert.equal(restartMode({ PORTAL_UPDATE_RESTART: "exit" }, TERMINAL), "exit");
-  assert.equal(restartMode({ PORTAL_UPDATE_RESTART: "whatever" }, SYSTEM), "exit");
+/** What `systemctl show` says of the unit: the main process and the restart policy. */
+const unit = (main, restart = "on-failure", asked = []) => async (args) => (asked.push(args), `MainPID=${main}\nRestart=${restart}\n`);
+const PORTAL = 4242;
+/** This process, and its parent: `npm start` is a unit's main process and runs the portal as its child. */
+const PIDS = [PORTAL, 4000];
+
+test("a portal is a systemd service's own only when it is the unit's main process or that process's child", async () => {
+  const system = { unit: "pithagoras.service", user: false, restart: "on-failure" };
+  assert.deepEqual(await ownService(SYSTEM, unit(PORTAL), PIDS), system, "node server/dist/index.js as ExecStart");
+  assert.deepEqual(await ownService(SYSTEM, unit(4000), PIDS), system, "npm start as ExecStart: the portal is its child");
+  assert.deepEqual(await ownService(USER, unit(PORTAL), PIDS), { ...system, user: true });
+  // A cron job is in cron.service's control group, and the cron daemon is that unit's main process.
+  assert.equal(await ownService("0::/system.slice/cron.service\n", unit(811, "on-failure"), PIDS), undefined);
+  assert.equal(await ownService(SYSTEM, unit(0), PIDS), undefined, "a unit that has no main process");
+  assert.equal(await ownService(SYSTEM, async () => undefined, PIDS), undefined, "nothing is claimed where it cannot be read");
+  assert.equal(await ownService(SYSTEM, async () => "Restart=always\n", PIDS), undefined);
+  // Not in a service at all: systemctl is not asked.
+  const asked = [];
+  assert.equal(await ownService(TERMINAL, unit(PORTAL, "no", asked), PIDS), undefined);
+  assert.deepEqual(asked, []);
+});
+
+test("the portal exits for its manager when it is the service, starts itself elsewhere, and PORTAL_UPDATE_RESTART decides either way", async () => {
+  const mode = async (env, cgroup, show) => (await restartPlan(env, cgroup, show, PIDS)).mode;
+  assert.equal(await mode({}, SYSTEM, unit(PORTAL)), "exit");
+  assert.equal(await mode({}, USER, unit(4000)), "exit");
+  assert.equal(await mode({}, TERMINAL, unit(PORTAL)), "self");
+  assert.equal(await mode({}, "", unit(PORTAL)), "self");
+  // A job of another service, as cron's: it is in the service's control group and is not its main process. Nothing
+  // starts it again when it ends, so it starts its own copy, which the service's end does not take with it.
+  assert.equal(await mode({}, "0::/system.slice/cron.service\n", unit(811)), "self");
+  assert.equal(await mode({ PORTAL_UPDATE_RESTART: "self" }, SYSTEM, unit(PORTAL)), "self");
+  assert.equal(await mode({ PORTAL_UPDATE_RESTART: "exit" }, TERMINAL, unit(PORTAL)), "exit");
+  assert.equal(await mode({ PORTAL_UPDATE_RESTART: "exit" }, "0::/system.slice/cron.service\n", unit(811)), "exit");
+  assert.equal(await mode({ PORTAL_UPDATE_RESTART: "whatever" }, SYSTEM, unit(PORTAL)), "exit");
+  const asked = [];
+  await mode({ PORTAL_UPDATE_RESTART: "self" }, SYSTEM, unit(PORTAL, "on-failure", asked));
+  assert.deepEqual(asked, [], "said outright: not asked");
 });
 
 test("with PORTAL_UPDATE_RESTART=exit the portal only stops, with a status a manager starts it again from", async () => {
@@ -95,32 +125,44 @@ test("with PORTAL_UPDATE_RESTART=exit the portal only stops, with a status a man
 
 test("as a systemd service the portal starts nothing of its own, which the service's end would take with it: it exits", async () => {
   const { seen, deps } = fakes({}, false, SYSTEM);
-  await restartPortal(launch, deps);
+  await restartPortal(launch, { ...deps, show: unit(PORTAL), pids: PIDS });
   await pause(40);
   assert.equal(seen.spawned.length, 0);
   assert.equal(seen.stopped, 1);
   assert.equal(requestedExit(), RESTART_EXIT);
 });
 
-test("a systemd service that is not set to start again is found out before the update, not after", async () => {
+test("a job in another service's control group, cron's, keeps the restart that starts its own copy", async () => {
+  const { seen, deps } = fakes({}, false, "0::/system.slice/cron.service\n");
+  await restartPortal(launch, { ...deps, show: unit(811), pids: PIDS });
+  await pause(40);
+  assert.equal(seen.spawned.length, 1, "its own copy, as there is nothing else to start it");
+  assert.equal(seen.spawned[0].options.detached, true);
+  assert.equal(seen.stopped, 1);
+});
+
+test("a service that is not set to start again is found out before the update, only where the portal is that service", async () => {
   const asked = [];
-  const policy = (text) => async (args) => (asked.push(args), text === undefined ? undefined : `Restart=${text}\n`);
-  const system = { unit: "pithagoras.service", user: false };
-  for (const ok of ["always", "on-failure"]) assert.equal(await restartProblem("exit", system, policy(ok)), null, ok);
+  const run = (env, cgroup, show) => restartProblem(env, cgroup, show, PIDS);
+  for (const ok of ["always", "on-failure"]) assert.equal(await run({}, SYSTEM, unit(PORTAL, ok)), null, ok);
   for (const bad of ["no", "on-success", "on-abnormal", "on-abort", "on-watchdog"]) {
-    const why = await restartProblem("exit", system, policy(bad));
+    const why = await run({}, SYSTEM, unit(PORTAL, bad, asked));
     assert.match(why, new RegExp(`pithagoras\\.service, which is set to Restart=${bad}`), bad);
     assert.match(why, /Restart=on-failure \(or Restart=always\)/);
   }
-  assert.deepEqual(asked.at(-1), ["show", "--property=Restart", "pithagoras.service"]);
+  assert.deepEqual(asked.at(-1), ["show", "--property=MainPID,Restart", "pithagoras.service"]);
   // A user's service is asked of the user's manager.
-  await restartProblem("exit", { unit: "p.service", user: true }, policy("no"));
-  assert.deepEqual(asked.at(-1), ["--user", "show", "--property=Restart", "p.service"]);
+  await run({}, USER, unit(PORTAL, "no", asked));
+  assert.deepEqual(asked.at(-1), ["--user", "show", "--property=MainPID,Restart", "pithagoras.service"]);
+  // A cron job is not told to change cron's unit, whatever its policy is: it is not what restarts it.
+  const cron = "0::/system.slice/cron.service\n";
+  assert.equal(await run({}, cron, unit(811, "no")), null);
+  assert.equal(await run({ PORTAL_UPDATE_RESTART: "exit" }, cron, unit(811, "no")), null);
   // Nothing is claimed where it cannot be read, or where the portal starts itself.
-  assert.equal(await restartProblem("exit", system, policy(undefined)), null);
-  assert.equal(await restartProblem("exit", undefined, policy("no")), null);
+  assert.equal(await run({}, SYSTEM, async () => undefined), null);
+  assert.equal(await run({}, TERMINAL, unit(PORTAL, "no")), null);
   const before = asked.length;
-  assert.equal(await restartProblem("self", system, policy("no")), null);
+  assert.equal(await run({ PORTAL_UPDATE_RESTART: "self" }, SYSTEM, unit(PORTAL, "no", asked)), null);
   assert.equal(asked.length, before);
 });
 

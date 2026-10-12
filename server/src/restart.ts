@@ -59,14 +59,50 @@ const readCgroup = (): string | undefined => {
 
 export type RestartMode = "self" | "exit";
 
+/** This process and the one that started it: `npm start` is the unit's main process, and runs the portal as its child. */
+export const ownPids = (): number[] => [process.pid, process.ppid];
+
+/**
+ * The systemd service this portal is the main process of, with its restart policy, or nothing.
+ *
+ * Being in a service's control group is not that: a cron job is in `cron.service`, whose main process is the cron
+ * daemon, and nothing starts the job again when it exits. So the unit's `MainPID` has to be this process or its parent.
+ * Where that cannot be read (no systemctl), nothing is claimed.
+ */
+export async function ownService(
+  cgroup: string | undefined,
+  show: (args: string[]) => Promise<string | undefined> = systemctl,
+  pids: number[] = ownPids(),
+): Promise<{ unit: string; user: boolean; restart: string | undefined } | undefined> {
+  const service = serviceOf(cgroup);
+  if (!service) return undefined;
+  const out = await show([...(service.user ? ["--user"] : []), "show", "--property=MainPID,Restart", service.unit]);
+  const main = Number(/^MainPID=(\d+)$/m.exec(out ?? "")?.[1]);
+  if (!main || !pids.includes(main)) return undefined;
+  return { ...service, restart: /^Restart=(.*)$/m.exec(out ?? "")?.[1]?.trim() };
+}
+
+export interface RestartPlan {
+  mode: RestartMode;
+  /** The service the portal is the main process of, where it is. */
+  service?: { unit: string; user: boolean; restart: string | undefined };
+}
+
 /**
  * `exit`: the portal only stops, with a status that makes whatever runs it start it again. `self`: it starts its
- * replacement itself. `PORTAL_UPDATE_RESTART` says which; unset, a portal that runs as a systemd service exits, since
- * what it starts itself is in the service's control group and is ended with it, and anything else starts its own.
+ * replacement itself. `PORTAL_UPDATE_RESTART` says which; unset, a portal that is the main process of a systemd
+ * service exits, since what it starts itself is in the service's control group and is ended with it, and anything
+ * else starts its own.
  */
-export function restartMode(env: NodeJS.ProcessEnv = process.env, cgroup: string | undefined = readCgroup()): RestartMode {
-  if (env.PORTAL_UPDATE_RESTART === "exit" || env.PORTAL_UPDATE_RESTART === "self") return env.PORTAL_UPDATE_RESTART;
-  return serviceOf(cgroup) ? "exit" : "self";
+export async function restartPlan(
+  env: NodeJS.ProcessEnv = process.env,
+  cgroup: string | undefined = readCgroup(),
+  show?: (args: string[]) => Promise<string | undefined>,
+  pids?: number[],
+): Promise<RestartPlan> {
+  if (env.PORTAL_UPDATE_RESTART === "self") return { mode: "self" };
+  const service = await ownService(cgroup, show, pids);
+  return env.PORTAL_UPDATE_RESTART === "exit" || service ? { mode: "exit", service } : { mode: "self" };
 }
 
 /** Restart policies that start a program again that ended with a status other than 0. */
@@ -76,20 +112,19 @@ const systemctl = (args: string[]): Promise<string | undefined> =>
   new Promise((resolve) => execFile("systemctl", args, { timeout: 5000 }, (error, stdout) => resolve(error ? undefined : stdout)));
 
 /**
- * Why the portal would not come back after it stops, when it would not: a systemd service that is not set to start
- * again. Looked at before an update is begun, so that it is not found out afterwards. Nothing is claimed where it
- * cannot be read: no systemctl, another manager.
+ * Why the portal would not come back after it stops, when it would not: the systemd service it is the main process of
+ * is not set to start it again. Looked at before an update is begun, so that it is not found out afterwards. Nothing
+ * is claimed where it cannot be read, or for a portal that something else started.
  */
 export async function restartProblem(
-  mode: RestartMode = restartMode(),
-  service = serviceOf(readCgroup()),
-  show: (args: string[]) => Promise<string | undefined> = systemctl,
+  env: NodeJS.ProcessEnv = process.env,
+  cgroup: string | undefined = readCgroup(),
+  show?: (args: string[]) => Promise<string | undefined>,
+  pids?: number[],
 ): Promise<string | null> {
-  if (mode !== "exit" || !service) return null;
-  const out = await show([...(service.user ? ["--user"] : []), "show", "--property=Restart", service.unit]);
-  const policy = /^Restart=(.*)$/m.exec(out ?? "")?.[1]?.trim();
-  if (!policy || RESTARTS_ON_FAILURE.has(policy)) return null;
-  return `The portal runs as the systemd service ${service.unit}, which is set to Restart=${policy}, so it would not be started again after the update. Set Restart=on-failure (or Restart=always) in the unit, then update again.`;
+  const { mode, service } = await restartPlan(env, cgroup, show, pids);
+  if (mode !== "exit" || !service?.restart || RESTARTS_ON_FAILURE.has(service.restart)) return null;
+  return `The portal runs as the systemd service ${service.unit}, which is set to Restart=${service.restart}, so it would not be started again after the update. Set Restart=on-failure (or Restart=always) in the unit, then update again.`;
 }
 
 /** What a restart needs of the system, so that a test can look at what it would do. */
@@ -101,6 +136,9 @@ export interface RestartDeps {
   env: NodeJS.ProcessEnv;
   /** This process's control groups, as `/proc/self/cgroup` has them. */
   cgroup: string | undefined;
+  /** What systemctl says; and this process's own pid and its parent's. */
+  show?: (args: string[]) => Promise<string | undefined>;
+  pids?: number[];
   /** How long the stop waits, so that a page asking in the meantime is told the portal is restarting. */
   delayMs: number;
 }
@@ -116,13 +154,13 @@ const real = (): RestartDeps => ({
 
 /**
  * Restarts the portal: stops it as a SIGTERM does (running chats are wound down, channels closed), after starting
- * the replacement first, detached, so that it outlives this process; or, in `exit` mode (see `restartMode`), with
+ * the replacement first, detached, so that it outlives this process; or, in `exit` mode (see `restartPlan`), with
  * the status `RESTART_EXIT` and nothing started.
  *
  * Throws, before anything is stopped, when the replacement cannot be started: the old portal stays up.
  */
 export async function restartPortal(launch: Launch = LAUNCH, deps: RestartDeps = real()): Promise<void> {
-  if (restartMode(deps.env, deps.cgroup ?? "") === "exit") exitStatus = RESTART_EXIT;
+  if ((await restartPlan(deps.env, deps.cgroup ?? "", deps.show, deps.pids)).mode === "exit") exitStatus = RESTART_EXIT;
   else {
     if (!launch.script) throw new Error("The portal was not started from a file, so it cannot start itself again. Start it again by hand.");
     const child = deps.spawn("sh", ["-c", WAIT_THEN_START, "sh", String(deps.pid), launch.execPath, ...launch.execArgv, launch.script, ...launch.args], {

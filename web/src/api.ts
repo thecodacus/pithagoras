@@ -1411,7 +1411,13 @@ export interface UpdateRun {
   to: UpdateCommit;
   startedAt: string;
   /** English, from the server and from the program that failed. */
-  failed?: { step: UpdateStep; message: string; output: string };
+  failed?: {
+    step: UpdateStep;
+    message: string;
+    output: string;
+    /** The old node_modules and builds are in place: nothing was put aside, or what was has been put back. */
+    oldFilesBack: boolean;
+  };
 }
 
 /** New commits on origin/main, which the portal found on one of its looks. */

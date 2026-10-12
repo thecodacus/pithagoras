@@ -25,16 +25,17 @@ const manager = (() => {
 
 const home = scratch("pithagoras-update-systemd-");
 const script = path.join(home, "portal.mjs");
-// A stand-in for the portal: writes down how it was started, asks the restart to stop it as an update does, and
-// stops as the real one does, with the status the restart asked for. Its second life ends at once.
+// A stand-in for the portal: writes down how it was started and what the restart makes of it. Told `restart`, it asks
+// the restart to stop it as an update does, and stops as the real one does, with the status the restart asked for; its
+// second life ends at once. Told `plan`, it only writes down.
 writeFileSync(script, `
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-const [marker, dist] = process.argv.slice(2);
-const { restartMode, restartPortal, restartProblem, requestedExit, serviceOf } = await import(dist + "/restart.js");
+const [marker, dist, how] = process.argv.slice(2);
+const { restartPlan, restartPortal, restartProblem, requestedExit } = await import(dist + "/restart.js");
 const lives = existsSync(marker) ? readFileSync(marker, "utf8").trim().split("\\n").length : 0;
-const cgroup = readFileSync("/proc/self/cgroup", "utf8");
-appendFileSync(marker, JSON.stringify({ life: lives + 1, mode: restartMode(process.env, cgroup), unit: serviceOf(cgroup)?.unit ?? null, problem: await restartProblem() }) + "\\n");
-if (lives > 0) setTimeout(() => process.exit(0), 100);
+const plan = await restartPlan();
+appendFileSync(marker, JSON.stringify({ life: lives + 1, mode: plan.mode, unit: plan.service?.unit ?? null, problem: await restartProblem() }) + "\\n");
+if (how === "plan" || lives > 0) setTimeout(() => process.exit(0), 100);
 else {
   process.on("SIGTERM", () => process.exit(requestedExit()));
   await restartPortal();
@@ -47,11 +48,23 @@ const until = async (condition, ms) => {
   for (let i = 0; i < ms / 100 && !condition(); i++) await new Promise((r) => setTimeout(r, 100));
 };
 
-/** Runs the stand-in as a user service with the given restart policy; the unit is stopped and removed afterwards. */
-async function service(policy, settle) {
-  const unit = `pithagoras-update-test-${process.pid}-${policy}`;
-  const marker = path.join(home, `${policy}.lives`);
-  execFileSync("systemd-run", ["--user", "--quiet", "--collect", `--unit=${unit}`, `--property=Restart=${policy}`, "--property=RestartSec=100ms", "--property=StandardOutput=null", "--property=StandardError=null", "--", process.execPath, script, marker, dist]);
+/**
+ * Runs the stand-in as a user service with the given restart policy; the unit is stopped and removed afterwards.
+ * `how` is how the service starts it: the service's own main process, its child (as `npm start` has it) or its
+ * grandchild (as a job a daemon starts has it).
+ */
+async function service(policy, settle, { how = "restart", start = "main" } = {}) {
+  const unit = `pithagoras-update-test-${process.pid}-${policy}-${start}`;
+  const marker = path.join(home, `${policy}-${start}.lives`);
+  const portal = [script, marker, dist, how];
+  const command = {
+    main: [process.execPath, ...portal],
+    // The shell stays as the main process and the portal is its child.
+    child: ["sh", "-c", '"$0" "$@"; true', process.execPath, ...portal],
+    // A subshell between them: the portal's parent is not the main process, which only waits.
+    grandchild: ["sh", "-c", '( "$0" "$@"; true ) & wait', process.execPath, ...portal],
+  }[start];
+  execFileSync("systemd-run", ["--user", "--quiet", "--collect", `--unit=${unit}`, `--property=Restart=${policy}`, "--property=RestartSec=100ms", "--property=StandardOutput=null", "--property=StandardError=null", "--", ...command]);
   try {
     await settle(marker);
     return lives(marker);
@@ -67,7 +80,7 @@ async function service(policy, settle) {
 test("under systemd with Restart=on-failure the portal is started again after the update stops it", { skip: !manager && "no user manager of systemd" }, async () => {
   const seen = await service("on-failure", (marker) => until(() => lives(marker).length >= 2, 15_000));
   assert.equal(seen.length, 2, "started again");
-  assert.equal(seen[0].mode, "exit", "told to be a service by its control group, with nothing set");
+  assert.equal(seen[0].mode, "exit", "told to be the service by its control group and its main process, with nothing set");
   assert.match(seen[0].unit, /^pithagoras-update-test-.*\.service$/);
   assert.equal(seen[0].problem, null, "a policy that restarts it is no problem");
 });
@@ -82,4 +95,21 @@ test("under systemd with Restart=no the portal is not started again, and the che
   assert.equal(seen[0].mode, "exit");
   assert.match(seen[0].problem, /Restart=no/);
   assert.match(seen[0].problem, /Restart=on-failure \(or Restart=always\)/);
+});
+
+test("a portal that is the child of a service's main process, as under npm start, is taken for the service", { skip: !manager && "no user manager of systemd" }, async () => {
+  const seen = await service("no", (marker) => until(() => lives(marker).length >= 1, 15_000), { how: "plan", start: "child" });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].mode, "exit");
+  assert.match(seen[0].unit, /^pithagoras-update-test-.*\.service$/);
+  assert.match(seen[0].problem, /Restart=no/);
+});
+
+test("a portal that a service only runs a job for is not taken for it: it keeps starting its own copy, and is not told to change the unit", { skip: !manager && "no user manager of systemd" }, async () => {
+  // In the unit's control group, as a cron job is in cron.service, and not the unit's main process or its child.
+  const seen = await service("no", (marker) => until(() => lives(marker).length >= 1, 15_000), { how: "plan", start: "grandchild" });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].mode, "self");
+  assert.equal(seen[0].unit, null);
+  assert.equal(seen[0].problem, null);
 });

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { api, ApiError, type UpdateCheck, type UpdateStatus, type UpdateStep } from "./api";
+import { api, ApiError, type UpdateCheck, type UpdateRun, type UpdateStatus, type UpdateStep } from "./api";
 import { confirmDialog } from "./components/ConfirmDialog";
 import { local } from "./safe-storage";
 import { msg, t, tp } from "./i18n";
@@ -131,6 +131,17 @@ export const STEP_LABELS: Record<UpdateStep, string> = {
   build: msg("Building"),
   restart: msg("Restarting the portal"),
 };
+
+/**
+ * What a failed update says first. The old files are said to be as they were only where they are: not after the
+ * restart, which comes when the new build has replaced them, and not where putting them back failed.
+ */
+export function failureText(failed: NonNullable<UpdateRun["failed"]>): string {
+  if (failed.step === "restart") return t("The new version is built, but the portal could not restart itself. Restart it on the host.");
+  const step = t(STEP_LABELS[failed.step]);
+  if (!failed.oldFilesBack) return t("The update stopped at “{step}”, and the old files could not be put back. Look at the install on the host.", { step });
+  return t("The update stopped at “{step}”. The portal is still running its old build, with its files as they were.", { step });
+}
 
 export const commitLabel = (c: { sha: string; subject: string }): string => `${c.sha.slice(0, 7)} ${c.subject}`.trim();
 

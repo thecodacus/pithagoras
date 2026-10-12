@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LuCheck, LuCircleDashed, LuCircleX, LuGitBranch, LuLoaderCircle, LuMinus } from "react-icons/lu";
 import { api, type UpdateRun } from "../api";
-import { commitLabel, STEP_LABELS, updateNow, updatePortal, useUpdate } from "../update";
+import { commitLabel, failureText, STEP_LABELS, updateNow, updatePortal, useUpdate } from "../update";
 import { formatDateTime, msg, t, tp } from "../i18n";
 import { ErrorBanner, Section, WarnBanner, primaryCls } from "./SettingsUi";
 
@@ -129,11 +129,7 @@ export function UpdateSection() {
           {lost && <ErrorBanner className="mt-3">{t("The portal has not come back after three minutes. Look at its log on the host.")}</ErrorBanner>}
           {run.failed && (
             <ErrorBanner className="mt-3">
-              <span className="block">
-                {run.failed.step === "restart"
-                  ? t("The new version is built, but the portal could not restart itself. Restart it on the host.")
-                  : t("The update stopped at “{step}”. The portal is still running its old build, with its files as they were.", { step: t(STEP_LABELS[run.failed.step]) })}
-              </span>
+              <span className="block">{failureText(run.failed)}</span>
               <span className="mt-1 block text-xs opacity-80">{run.failed.message}</span>
               {run.failed.output && <pre className="mt-2 max-h-56 overflow-auto rounded-lg bg-fg/5 p-2 font-mono text-[11px] leading-snug text-fg-muted">{run.failed.output}</pre>}
             </ErrorBanner>

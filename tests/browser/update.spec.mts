@@ -164,7 +164,7 @@ test('a failed step is shown with its name and what the program printed, and the
     run: {
       state: 'failed', from: NOW, to: NEXT, startedAt: '2026-10-12T09:00:00Z',
       steps: [{ id: 'fetch', state: 'done' }, { id: 'merge', state: 'done' }, { id: 'install', state: 'done' }, { id: 'build', state: 'failed' }, { id: 'restart', state: 'pending' }],
-      failed: { step: 'build', message: 'npm run build failed (exit 2)', output: 'src/x.ts(4,1): error TS2322: nope' },
+      failed: { step: 'build', message: 'npm run build failed (exit 2)', output: 'src/x.ts(4,1): error TS2322: nope', oldFilesBack: true },
     },
   };
   await portal(page, w);
@@ -323,7 +323,7 @@ test('a failed update is said at the top of every page until it is put away', as
     run: {
       state: 'failed', from: NOW, to: NEXT, startedAt: '2026-10-12T09:00:00Z',
       steps: [{ id: 'fetch', state: 'done' }, { id: 'merge', state: 'done' }, { id: 'install', state: 'failed' }, { id: 'build', state: 'pending' }, { id: 'restart', state: 'pending' }],
-      failed: { step: 'install', message: 'npm ci failed (exit 1)', output: 'npm ERR! network' },
+      failed: { step: 'install', message: 'npm ci failed (exit 1)', output: 'npm ERR! network', oldFilesBack: true },
     },
   };
   await portal(page, w);
@@ -338,4 +338,54 @@ test('a failed update is said at the top of every page until it is put away', as
   await page.reload();
   await expect(page.getByRole('button', { name: 'Sessions' }).first()).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: 'The update stopped at' })).toHaveCount(0);
+});
+
+/** A failed run for the tests of what the failure says of the files. */
+function failedRun(step: string, oldFilesBack: boolean, message: string) {
+  const order = ['fetch', 'merge', 'install', 'build', 'restart'];
+  const at = order.indexOf(step);
+  return {
+    state: 'failed', from: NOW, to: NEXT, startedAt: '2026-10-12T09:00:00Z',
+    steps: order.map((id, i) => ({ id, state: i < at ? 'done' : i === at ? 'failed' : 'pending' })),
+    failed: { step, message, output: '', oldFilesBack },
+  };
+}
+
+test('a restart that failed does not say the old files are as they were: the new build has replaced them', async ({ page }) => {
+  const w = world();
+  w.status = { ...w.status, notice: null, run: failedRun('restart', false, 'The portal was not started from a file') };
+  await portal(page, w);
+  await page.goto('/');
+  const line = page.getByRole('status').filter({ hasText: 'could not restart itself' });
+  await expect(line).toContainText('The new version is built, but the portal could not restart itself. Restart it on the host.');
+  await expect(line).not.toContainText('as they were');
+  await page.goto('/settings/about');
+  const alert = page.locator('section[data-setting="Update"]').getByRole('alert');
+  await expect(alert).toContainText('could not restart itself');
+  await expect(alert).not.toContainText('as they were');
+});
+
+test('files that could not be put back are said, and not said to be as they were', async ({ page }) => {
+  const w = world();
+  w.status = { ...w.status, notice: null, run: failedRun('build', false, 'npm run build failed (exit 2). The old files could not be put back: EACCES') };
+  await portal(page, w);
+  await page.goto('/');
+  const line = page.getByRole('status').filter({ hasText: 'The update stopped at' });
+  await expect(line).toContainText('The update stopped at “Building”, and the old files could not be put back. Look at the install on the host.');
+  await expect(line).not.toContainText('as they were');
+  await page.goto('/settings/about');
+  const alert = page.locator('section[data-setting="Update"]').getByRole('alert');
+  await expect(alert).toContainText('and the old files could not be put back. Look at the install on the host.');
+  await expect(alert).toContainText('EACCES');
+  await expect(alert).not.toContainText('as they were');
+});
+
+test('a failure with the old files back says they are as they were, at the top and in Settings', async ({ page }) => {
+  const w = world();
+  w.status = { ...w.status, notice: null, run: failedRun('install', true, 'npm ci failed (exit 1)') };
+  await portal(page, w);
+  await page.goto('/');
+  await expect(page.getByRole('status').filter({ hasText: 'The update stopped at' })).toContainText('with its files as they were.');
+  await page.goto('/settings/about');
+  await expect(page.locator('section[data-setting="Update"]').getByRole('alert')).toContainText('with its files as they were.');
 });

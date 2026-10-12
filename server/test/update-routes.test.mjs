@@ -232,7 +232,7 @@ test("a build that fails puts the old server, web app and node_modules back, and
   assert.equal(isLink("node_modules"), true);
   for (const aside of ["node_modules", "server/dist", "web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
   // What it was made from stays with it: the checkout is at ccc now, the build is of aaa.
-  assert.equal(text("server/dist/.built-from").trim(), "aaa".padEnd(40, "0"));
+  assert.equal(JSON.parse(text("server/dist/.built-from")).sha, "aaa".padEnd(40, "0"));
   const status = (await send(cookie, "/api/update")).body;
   assert.equal(status.rebuild, true);
   assert.equal(status.current.sha, CCC);
@@ -255,7 +255,7 @@ test("an update fetches, merges, installs and builds in that order, refuses a se
   assert.deepEqual(changes(), ["npm ci --prefer-offline --no-audit --no-fund", "npm run build"]);
   // The new build is in place, the old one thrown away, and what it was made from written with it.
   assert.equal(text("web/dist/index.html").trim(), "new web app");
-  assert.equal(text("server/dist/.built-from").trim(), CCC);
+  assert.equal(JSON.parse(text("server/dist/.built-from")).sha, CCC);
   for (const aside of ["node_modules", "server/dist", "web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
   // The restart: the portal stops, as it does on SIGTERM, with the status a manager starts it again from.
   const [code] = await once(child, "exit");

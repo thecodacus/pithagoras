@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { scratch } from "./server-harness.mjs";
 
@@ -133,4 +133,57 @@ test("a portal with no build has nothing to write down", async () => {
   await files.markBuilt("aaa111");
   assert.equal(await files.builtFrom(), undefined);
   assert.deepEqual(readdirSync(root), []);
+});
+
+/** What a build on the host does to the build's own files: writes them again, a little later. */
+const buildByHand = (root, rel = "server/dist/index.js") => {
+  writeFileSync(path.join(root, rel), "built by hand");
+  const later = new Date(Date.now() + 5000);
+  utimesSync(path.join(root, rel), later, later);
+};
+
+test("a record is no longer true once the build has been made again outside the update", async () => {
+  const root = install();
+  const files = fileArtifacts(root);
+  await files.markBuilt("aaa111");
+  assert.equal(await files.builtFrom(), "aaa111");
+  // `git pull && npm ci && npm run build` on the host: tsc writes the server again and never removes the record.
+  buildByHand(root);
+  assert.equal(existsSync(path.join(root, "server/dist/.built-from")), true, "the record is still there");
+  assert.equal(await files.builtFrom(), undefined, "and is of a build that is not in place any more");
+
+  // The web app alone is built again: the same.
+  const web = install();
+  const webFiles = fileArtifacts(web);
+  await webFiles.markBuilt("aaa111");
+  buildByHand(web, "web/dist/index.html");
+  assert.equal(await webFiles.builtFrom(), undefined);
+});
+
+test("an update that finds a record that is not true any more writes its own, and keeps one that is", async () => {
+  const root = install();
+  const files = fileArtifacts(root);
+  await files.markBuilt("old000");
+  buildByHand(root);
+  await files.markBuilt("new111", true);
+  assert.equal(await files.builtFrom(), "new111", "what the build in place is of is the commit that is checked out");
+  await files.markBuilt("other22", true);
+  assert.equal(await files.builtFrom(), "new111", "a record that is true stays");
+});
+
+test("what put aside with a build comes back with its record true", async () => {
+  const root = install();
+  const files = fileArtifacts(root);
+  await files.markBuilt("aaa111");
+  await files.keepModules();
+  await files.keepBuild();
+  make(root, "server/dist", "index.js", "the new build");
+  await files.restore();
+  assert.equal(await files.builtFrom(), "aaa111", "the files are as they were, their times too");
+});
+
+test("a record of the first form, the commit alone, says nothing", async () => {
+  const root = install();
+  writeFileSync(path.join(root, "server/dist/.built-from"), "aaa111\n");
+  assert.equal(await fileArtifacts(root).builtFrom(), undefined);
 });

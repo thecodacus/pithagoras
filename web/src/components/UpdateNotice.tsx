@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuCircleArrowUp, LuX } from "react-icons/lu";
 import { notifyIfAway } from "../notify";
-import { dismissNotice, firstTimeTold, noticeDismissed, STEP_LABELS, updatePortal, useUpdate } from "../update";
+import { dismissNotice, failureText, firstTimeTold, noticeDismissed, STEP_LABELS, updatePortal, useUpdate } from "../update";
 import { t, tp } from "../i18n";
 import { ghostCls, primarySmCls } from "./SettingsUi";
 
@@ -38,8 +38,8 @@ export function UpdateNotice({ onDetails }: { onDetails: () => void }) {
         <span className="min-w-0 flex-1">
           {lost
             ? t("The portal has not come back after three minutes. Look at its log on the host.")
-            : run?.state === "failed"
-              ? t("The update stopped at “{step}”. The portal is still running its old build, with its files as they were.", { step: t(STEP_LABELS[run.failed?.step ?? step?.id ?? "build"]) })
+            : run?.state === "failed" && run.failed
+              ? failureText(run.failed)
               : run?.state === "restarting"
                 ? t("The portal is restarting. This page loads again when it is back.")
                 : t("Updating the portal: {step}", { step: step ? t(STEP_LABELS[step.id]) : "" })}

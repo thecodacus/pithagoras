@@ -94,7 +94,13 @@ export interface RunView {
   from: Commit;
   to: Commit;
   startedAt: string;
-  failed?: { step: Step; message: string; output: string };
+  failed?: {
+    step: Step;
+    message: string;
+    output: string;
+    /** The old node_modules and builds are in place: nothing was put aside, or what was has been put back. */
+    oldFilesBack: boolean;
+  };
 }
 
 export interface UpdateStatus {
@@ -418,11 +424,13 @@ export class Updater {
   private async fail(run: RunView, step: Step, message: string, output: string): Promise<void> {
     this.mark(run, step, "failed");
     run.state = "failed";
-    run.failed = { step, message, output: tail(output) };
+    // After the build has worked the old files are thrown away: a restart that fails leaves the new ones in place.
+    run.failed = { step, message, output: tail(output), oldFilesBack: step !== "restart" };
     console.error(`[update] failed at ${step}: ${message}${run.failed.output ? `\n${run.failed.output}` : ""}`);
     try {
       await this.deps.artifacts.restore();
     } catch (e) {
+      run.failed.oldFilesBack = false;
       console.error(`[update] the old files could not be put back: ${(e as Error).message}`);
       run.failed.message += `. The old files could not be put back: ${(e as Error).message}`;
     }
@@ -448,8 +456,8 @@ export class Updater {
     try {
       console.log(`[update] ${run.from.sha.slice(0, 7)} -> ${run.to.sha.slice(0, 7)}`);
       this.mark(run, "fetch", "done");
-      // The build in place is of the commit that is checked out now, unless something wrote down otherwise: what a
-      // failure after the merge leaves behind is told from this.
+      // The build in place is of the commit that is checked out now, unless a record that is still true says
+      // otherwise: what a failure after the merge leaves behind is told from this.
       await files.markBuilt(run.from.sha, true);
       if (!merge) this.mark(run, "merge", "skipped");
       else {
@@ -466,9 +474,10 @@ export class Updater {
       at = "build";
       await files.keepBuild();
       if (!(await this.step(run, "build", "npm run build", "npm", ["run", "build"], BUILD_MS))) return;
+      // From here on the new files are the ones in place, and a failure is the restart's.
+      at = "restart";
       await files.markBuilt((await this.readHead()).current.sha);
       await files.discard();
-      at = "restart";
       this.mark(run, "restart", "running");
       run.state = "restarting";
       console.log("[update] restarting");

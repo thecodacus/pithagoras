@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -122,7 +122,7 @@ test("a clean checkout behind origin/main moves to it, builds, and restarts", as
   // What was built is the new files, of the new commit, and none of the old ones is left aside.
   assert.equal(readFileSync(path.join(p.dir, "node_modules/dep.txt"), "utf8"), "new");
   assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "new");
-  assert.equal(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8").trim(), newest);
+  assert.equal(JSON.parse(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8")).sha, newest);
   for (const aside of ["node_modules.update-old", "server/dist.update-old", "web/dist.update-old"]) assert.equal(existsSync(path.join(p.dir, aside)), false, aside);
   assert.equal((await p.again().status()).rebuild, false);
 });
@@ -141,7 +141,7 @@ test("a build that fails leaves the old node_modules and build in place, and a p
   assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "old");
   assert.equal(readFileSync(path.join(p.dir, "web/dist/index.html"), "utf8"), "old");
   assert.equal(existsSync(path.join(p.dir, "web/dist/partial.js")), false);
-  assert.equal(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8").trim(), before, "the old build is still of the old commit");
+  assert.equal(JSON.parse(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8")).sha, before, "the old build is still of the old commit");
   assert.equal(p.restarts(), 0);
 
   // The portal is started again, as after a reboot: nothing in memory, the same files on disk.
@@ -156,7 +156,33 @@ test("a build that fails leaves the old node_modules and build in place, and a p
   assert.equal(second.state, "restarting", JSON.stringify(second.failed));
   assert.deepEqual(second.steps.map((s) => s.state), ["done", "skipped", "done", "done", "running"]);
   assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "new");
-  assert.equal(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8").trim(), newest);
+  assert.equal(JSON.parse(readFileSync(path.join(p.dir, "server/dist/.built-from"), "utf8")).sha, newest);
+});
+
+test("a build made on the host after an update is not told to be built again", async () => {
+  const p = portal();
+  const second = publish("h.txt", "h\n");
+  await p.u.start(second);
+  assert.equal((await settled(p.u)).state, "restarting");
+  assert.equal((await p.again().status()).rebuild, false);
+
+  // `git pull --ff-only && npm ci && npm run build` by hand, as when Update refused for a dirty checkout: the build
+  // is made again, and the record the update wrote is of the commit before.
+  const third = publish("i.txt", "i\n");
+  git(p.dir, "pull", "-q", "--ff-only", "origin", "main");
+  assert.equal(git(p.dir, "rev-parse", "HEAD"), third);
+  const file = path.join(p.dir, "server/dist/index.js");
+  writeFileSync(file, "built by hand");
+  const later = new Date(Date.now() + 5000);
+  utimesSync(file, later, later);
+
+  const restarted = p.again();
+  assert.equal((await restarted.status()).rebuild, false);
+  const seen = await restarted.check();
+  assert.equal(seen.behind, 0);
+  assert.equal(seen.rebuild, false);
+  await refused(restarted.start(third), "current");
+  assert.deepEqual(p.built, ["ci --prefer-offline --no-audit --no-fund", "run build"], "nothing was built again");
 });
 
 test("an install that fails leaves the old node_modules in place", async () => {

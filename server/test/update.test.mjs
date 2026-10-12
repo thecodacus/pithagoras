@@ -37,16 +37,16 @@ function world(over = {}) {
     /** Held back until the test lets it go: "npm ci". */
     gates: new Map(),
     ran: [],
-    /** The commit the build in place was made from, as its record on disk has it; nothing until one is written. */
+    /** The commit the build in place was made from, as its record on disk has it; nothing until one is written, or once somebody has built since. */
     built: undefined,
     ...over,
   };
   // What the update puts aside and writes down, said into `ran` among the commands, and kept in `built` as the files would.
   w.artifacts = {
     builtFrom: async () => w.built,
-    markBuilt: async (sha, onlyIfMissing = false) => {
-      w.ran.push(`files markBuilt ${sha.slice(0, 3)}${onlyIfMissing ? " if missing" : ""}`);
-      if (!onlyIfMissing || w.built === undefined) w.built = sha;
+    markBuilt: async (sha, onlyIfUnknown = false) => {
+      w.ran.push(`files markBuilt ${sha.slice(0, 3)}${onlyIfUnknown ? " if unknown" : ""}`);
+      if (!onlyIfUnknown || w.built === undefined) w.built = sha;
     },
     keepModules: async () => void w.ran.push("files keepModules"),
     keepBuild: async () => void w.ran.push("files keepBuild"),
@@ -453,7 +453,7 @@ test("the old node_modules and build are put aside for their steps, put back whe
   await first.u.start(ok.target.sha);
   await settled(first.u);
   assert.deepEqual(files(ok), [
-    "files markBuilt aaa if missing",
+    "files markBuilt aaa if unknown",
     "git merge --ff-only refs/remotes/origin/main",
     "files keepModules",
     "npm ci --prefer-offline --no-audit --no-fund",
@@ -593,4 +593,44 @@ test("the update needs the commit that was confirmed: without it nothing is star
   assert.deepEqual(w.ran.filter((c) => !c.startsWith("git rev-parse")), [], "no git, no merge, no build");
   // And the next press is not told one is running.
   await u.start(w.target.sha);
+});
+
+test("the failure says whether the old files are back: they are where nothing was put aside or what was has been put back, and not after the restart or a restore that failed", async () => {
+  const failure = async (setup) => {
+    const w = world();
+    setup(w);
+    const { u } = updater(w);
+    await u.start(w.target.sha);
+    return (await settled(u)).failed;
+  };
+  const merge = await failure((w) => w.fails.add("git merge"));
+  assert.deepEqual([merge.step, merge.oldFilesBack], ["merge", true], "nothing was put aside");
+  const install = await failure((w) => w.fails.add("npm ci"));
+  assert.deepEqual([install.step, install.oldFilesBack], ["install", true]);
+  const build = await failure((w) => w.fails.add("npm run"));
+  assert.deepEqual([build.step, build.oldFilesBack], ["build", true]);
+
+  // The restore itself fails: the files are not back, whatever the step was.
+  const lost = await failure((w) => {
+    w.fails.add("npm run");
+    w.artifacts.restore = async () => { throw new Error("EACCES"); };
+  });
+  assert.deepEqual([lost.step, lost.oldFilesBack], ["build", false]);
+  assert.match(lost.message, /could not be put back/);
+
+  // The restart: the new build has replaced the old files by then.
+  const restart = await failure((w) => (w.restartFails = "The portal was not started from a file"));
+  assert.deepEqual([restart.step, restart.oldFilesBack], ["restart", false]);
+  assert.ok(true);
+});
+
+test("a build that goes wrong in the step after the build is the restart's failure, with the old files thrown away", async () => {
+  const w = world();
+  w.artifacts.discard = async () => { throw new Error("EBUSY: rm node_modules.update-old"); };
+  const { u, calls } = updater(w);
+  await u.start(w.target.sha);
+  const run = await settled(u);
+  assert.equal(run.failed.step, "restart");
+  assert.equal(run.failed.oldFilesBack, false);
+  assert.equal(calls.restart, 0);
 });

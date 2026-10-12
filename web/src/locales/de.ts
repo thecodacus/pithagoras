@@ -1622,6 +1622,7 @@ const de: Locale = {
     "Update available": "Aktualisierung verfügbar",
     "{n} new commits on main, update available": { one: "{n} neuer Commit auf main, Aktualisierung verfügbar", other: "{n} neue Commits auf main, Aktualisierung verfügbar" },
     "The portal has not come back after three minutes. Look at its log on the host.": "Das Portal ist nach drei Minuten nicht zurückgekehrt. Sieh im Protokoll auf dem Host nach.",
+    "The update stopped at “{step}”, and the old files could not be put back. Look at the install on the host.": "Die Aktualisierung ist bei „{step}“ stehen geblieben, und die alten Dateien konnten nicht zurückgelegt werden. Sieh auf dem Host im Installationsordner nach.",
     "The update stopped at “{step}”. The portal is still running its old build, with its files as they were.": "Die Aktualisierung ist bei „{step}“ stehen geblieben. Das Portal läuft noch mit dem alten Build, und dessen Dateien sind wie zuvor.",
     "The portal is restarting. This page loads again when it is back.": "Das Portal startet neu. Diese Seite lädt sich neu, sobald es wieder da ist.",
     "Updating the portal: {step}": "Das Portal wird aktualisiert: {step}",

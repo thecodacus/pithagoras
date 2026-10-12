@@ -219,12 +219,15 @@ aside (`node_modules.update-old`, `server/dist.update-old`, `web/dist.update-old
 before the step that works on them, puts them back if it fails, and throws them
 away only when the whole build has worked. What a failed step wrote is removed.
 The checkout itself stays at the new commit, which the update never takes back.
-What the build was made from is written in `server/dist/.built-from`, and goes
-aside and comes back with the build: so after a failed build, and after any
-restart of the portal, **Update** says that the build is not of the commit that
-is checked out and builds it again, with a merge of whatever is new on `main`
-meanwhile, or without one. A portal that never ran an update has no such record
-and is not told it needs a build. (Between `npm ci` and the end of the build the
+What the build was made from is written in `server/dist/.built-from`, with the
+times at which the build's own files were written, and goes aside and comes back
+with the build: so after a failed build, and after any restart of the portal,
+**Update** says that the build is not of the commit that is checked out and
+builds it again, with a merge of whatever is new on `main` meanwhile, or without
+one. A build made on the host (`git pull && npm ci && npm run build`) writes
+those files again, so the record is then of a build that is not in place any more
+and says nothing: the portal is not told to build what is built. A portal that
+never ran an update has no record and is not told it needs a build. (Between `npm ci` and the end of the build the
 running portal has no `node_modules` and no build to read from disk, as with
 any rebuild in place; a power cut or a kill of the portal in that time leaves
 the `.update-old` folders, which can be moved back by hand.)
@@ -235,10 +238,12 @@ the `.update-old` folders, which can be moved back by hand.)
   or `nohup`: the portal starts a copy of itself with the command line it was
   started with, detached and writing where the portal wrote, and then stops as it
   does on SIGTERM; the copy waits until the old one is gone.
-- Run as a **systemd service**: the portal stops with status 75 and leaves the
-  start to systemd. It knows that it runs as a service from its control group. A copy that
-  the portal started itself would be in the service's control group and be ended
-  with it, so it does not start one. The unit has to start it again:
+- Run as a **systemd service**, as the unit's own process (`ExecStart=node server/dist/index.js`,
+  or `npm start`, whose child the portal is): the portal stops with status 75 and
+  leaves the start to systemd. It knows from its control group and from the
+  unit's `MainPID`, which is the portal or its parent. A copy that the portal
+  started itself would be in the service's control group and be ended with it,
+  so it does not start one. The unit has to start it again:
 
   ```ini
   [Service]
@@ -251,6 +256,11 @@ the `.update-old` folders, which can be moved back by hand.)
   default), `on-success`, `on-abnormal` and so on would leave the portal down, so
   the check refuses the update beforehand, says why, and changes nothing. systemd
   logs the stop as a failure, status 75, and starts the portal after `RestartSec`.
+- Started by a job of a service, not as its main process, such as `@reboot cd
+  /srv/pithagoras && npm start` in a crontab: it is in the service's control
+  group (`cron.service`) but nothing restarts it when it ends, so it starts its
+  own copy as in the first case, which the service does not end. Only a portal
+  that is the unit's own process (or its child) exits for the unit.
 - Run by something else that restarts it (pm2, a container's restart policy,
   `while true`): set `PORTAL_UPDATE_RESTART=exit`. The portal then only stops, with
   status 75, and its manager starts the new build; started by itself too, it would

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -11,10 +11,10 @@ import path from "node:path";
  * step, put back when it fails, and thrown away only when the whole build has worked.
  */
 export interface Artifacts {
-  /** The commit the build in place was made from, if it is known. */
+  /** The commit the build in place was made from, if it is known: not once somebody has built since. */
   builtFrom(): Promise<string | undefined>;
-  /** Writes down what the build in place was made from; with `onlyIfMissing`, only where nothing is written down yet. */
-  markBuilt(sha: string, onlyIfMissing?: boolean): Promise<void>;
+  /** Writes down what the build in place was made from; with `onlyIfUnknown`, only where it is not known already. */
+  markBuilt(sha: string, onlyIfUnknown?: boolean): Promise<void>;
   /** Puts `node_modules` aside, for the install. */
   keepModules(): Promise<void>;
   /** Puts the built server and web app aside, for the build. */
@@ -30,11 +30,21 @@ const MODULES = ["node_modules"];
 const BUILD = [path.join("server", "dist"), path.join("web", "dist")];
 /** In the server's build, so that the record goes with the build it describes: put aside with it, and put back with it. */
 const MARK = path.join("server", "dist", ".built-from");
+/**
+ * Files every build writes again, whose times are written down with the commit. A build that was not made by the
+ * update (`npm run build` on the host) leaves the record where it was, since tsc never removes what it did not write,
+ * but writes these: so a record whose times are not the files' times is of a build that is not in place any more.
+ */
+const WITNESSES = [path.join("server", "dist", "index.js"), path.join("web", "dist", "index.html")];
 
 export function fileArtifacts(root: string): Artifacts {
   /** What is aside now, in the order it was put there. */
   let aside: string[] = [];
   const at = (rel: string) => path.join(root, rel);
+
+  /** When each of the build's own files was written, to the nanosecond; null where there is none. */
+  const times = (): Promise<(string | null)[]> =>
+    Promise.all(WITNESSES.map((rel) => stat(at(rel), { bigint: true }).then((st) => String(st.mtimeNs), () => null)));
 
   async function keep(rels: string[]): Promise<void> {
     for (const rel of rels) {
@@ -49,15 +59,17 @@ export function fileArtifacts(root: string): Artifacts {
   return {
     async builtFrom() {
       try {
-        return (await readFile(at(MARK), "utf8")).trim() || undefined;
+        const kept = JSON.parse(await readFile(at(MARK), "utf8")) as { sha?: unknown; times?: unknown };
+        const now = await times();
+        return typeof kept.sha === "string" && JSON.stringify(kept.times) === JSON.stringify(now) ? kept.sha || undefined : undefined;
       } catch {
         return undefined;
       }
     },
-    async markBuilt(sha, onlyIfMissing = false) {
+    async markBuilt(sha, onlyIfUnknown = false) {
       // A portal with no build has nothing to describe.
-      if (!existsSync(at(BUILD[0])) || (onlyIfMissing && existsSync(at(MARK)))) return;
-      await writeFile(at(MARK), `${sha}\n`);
+      if (!existsSync(at(BUILD[0])) || (onlyIfUnknown && (await this.builtFrom()) !== undefined)) return;
+      await writeFile(at(MARK), JSON.stringify({ sha, times: await times() }) + "\n");
     },
     keepModules: () => keep(MODULES),
     keepBuild: () => keep(BUILD),
