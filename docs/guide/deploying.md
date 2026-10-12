@@ -175,6 +175,7 @@ Inside `/data`:
 | `/data/sessions/<id>` | Per-session working area, and pi's file of the chat's conversation: it is what the agent remembers. Do not clear it |
 | `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings, skills and packages |
 | `/data/channels` | Installed third-party channel packages |
+| `/data/channel-state` | What a channel keeps between its starts, such as where Signal's stream was |
 | `/data/agent-home` | The first agent's home: its `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` |
 | `/data/agents/<id>` | The home of every other [agent](/guide/agents) |
 | `/data/images` | The pictures the [Media page](/guide/media) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |

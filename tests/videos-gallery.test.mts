@@ -34,7 +34,7 @@ test("the form's limits are the portal's own, so that raising one raises both an
 test("the filters are read from the address, and what is not a filter is none", () => {
   assert.deepEqual(readFilter(new URLSearchParams("origin=chat&kind=animated")), { origin: "chat", kind: "animated" });
   assert.deepEqual(readFilter(new URLSearchParams("kind=unknown")), { kind: "unknown" });
-  // What the Images page has is not a filter of clips.
+  // What pictures have (edited) is not a filter of clips.
   assert.deepEqual(readFilter(new URLSearchParams("origin=elsewhere&kind=edited&other=1")), {});
   assert.deepEqual(readFilter(new URLSearchParams("")), {});
 });

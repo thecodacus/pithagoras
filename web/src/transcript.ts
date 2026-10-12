@@ -3,7 +3,7 @@ import { unwrapCall } from "./tool-activity";
 import { argsSummary } from "./tool-args";
 import { toolArgsOf, toolNameOf } from "./tool-payload";
 import { msg, t } from "./i18n";
-import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
+import { GENERATED_PICTURE_MARK, shownPicture, type ShownPicture } from "../../server/src/generated-picture";
 import { GENERATED_VIDEO_MARK } from "../../server/src/generated-video";
 import type { AgentQuestion } from "./components/QuestionCard";
 
@@ -19,28 +19,9 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
   return list.length ? list : undefined;
 };
 
-/** A picture the agent put in front of the person with show_image, or made or changed for them with generate_image or edit_image: its path in the chat's folder. */
-export interface ShownPicture {
-  path: string;
-  title?: string;
-}
-
-/**
- * The picture a show_image, generate_image or edit_image call ended with, when it succeeded.
- *
- * All answer with a path in the chat's folder and a title. generate_image and
- * edit_image are taken only with the mark the portal's own tool sets: an
- * extension may bring a tool of that name, whose path is not one in the
- * chat's folder.
- */
-export function shownPicture(payload: any): ShownPicture | undefined {
-  if (payload?.isError) return undefined;
-  const name = toolNameOf(payload);
-  const details = payload?.result?.details;
-  if (name === "generate_image" || name === "edit_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
-  if (typeof details?.path !== "string" || !details.path) return undefined;
-  return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
-}
+// The picture a show_image, generate_image or edit_image call ended with: read
+// on the server's side as well, where a channel sends it on.
+export { shownPicture, type ShownPicture } from "../../server/src/generated-picture";
 
 /** A clip the agent put in front of the person with show_video, or made for them with generate_video: its path in the chat's folder. */
 export interface ShownVideo {
@@ -168,6 +149,8 @@ export type Item =
       details?: unknown;
       /** How many updates it streamed while it ran: a tool that reports as it goes is doing something worth watching. */
       updates?: number;
+      /** The guard flagged what it returned as a suspected prompt injection: its envelope's id, the signs, and the message of the turn it is in. */
+      flagged?: { id: string; signals: string[]; turnSeq?: number };
       /** The run ended with this call still open: it never said how it came out. */
       interrupted?: boolean;
       since?: number;
@@ -241,6 +224,15 @@ function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
 
 /** Text without the colour and cursor codes a terminal would act on. */
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+
+/**
+ * A result the guard flagged as a suspected prompt injection: the first line of
+ * the envelope it put around it (server/src/pi/guard.ts, flaggedResult).
+ */
+export function flaggedOf(text: string): { id: string; signals: string[] } | undefined {
+  const match = /^<<<untrusted:([0-9a-f]{16})>>> \(suspected prompt injection: ([a-z, -]+)\)/.exec(text);
+  return match ? { id: match[1], signals: match[2].split(", ") } : undefined;
+}
 
 /**
  * Some extensions put a block of markup in the chat that is written for the
@@ -604,6 +596,12 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             if (ev.at !== undefined) it.until = ev.at;
             const text = toolOutputText(p.result);
             if (typeof text === "string" && text) setToolOutput(it, text);
+            const flag = typeof text === "string" ? flaggedOf(text) : undefined;
+            if (flag) {
+              let turn: UserItem | undefined;
+              for (let j = items.length - 1; j >= 0 && !turn; j--) { const item = items[j]; if (item.kind === "user") turn = item; }
+              it.flagged = { ...flag, ...(turn ? { turnSeq: turn.seq } : {}) };
+            }
             if (p.result?.details !== undefined) it.details = p.result.details;
             // Its updates were live only; how many there were is kept on its end.
             if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);

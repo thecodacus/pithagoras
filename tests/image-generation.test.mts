@@ -88,7 +88,7 @@ test("a request is checked: the address is a base with no secret in it, the size
     assert.equal(typeof parse({ baseUrl: bad }), "string", bad);
   }
   assert.equal(typeof parse({ size: "huge" }), "string");
-  // A default size is one the Images page takes as well: each side from 64 to 8192, or auto.
+  // A default size is one the Media page takes as well: each side from 64 to 8192, or auto.
   for (const bad of ["16x16", "99999x99999", "63x64", "1024x8193"]) assert.match(String(parse({ size: bad })), /each side from 64 to 8192/, bad);
   for (const good of ["auto", "64x64", "8192x8192", " 1024x768 "]) assert.equal((parse({ size: good }) as { size: string }).size, good.trim(), good);
   assert.equal((parse({ size: "  " }) as { size: string }).size, "", "emptied is the way back to none");

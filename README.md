@@ -64,7 +64,7 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
   and video generation through a stable-diffusion.cpp server, with one Media page to make pictures
   and short videos without a chat (from a description, or from a picture), a gallery of both, and a
   player for the videos.
-- **Channels and people** — reach the agent from Telegram, Slack, Discord or a webhook, with
+- **Channels and people** — reach the agent from Telegram, Slack, Discord, Signal or a webhook, with
   roles, approvals and an audit log.
 - **Routines** — scheduled runs that report to a channel.
 - **Portal** — installable app, light/dark theme, English and German.

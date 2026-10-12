@@ -1,0 +1,9 @@
+{
+  "name": "pithagoras-channel-signal",
+  "version": "0.1.0",
+  "description": "Reach the agent over Signal, through a signal-cli daemon",
+  "type": "module",
+  "main": "index.js",
+  "license": "Apache-2.0",
+  "pithagoras": { "channel": true }
+}

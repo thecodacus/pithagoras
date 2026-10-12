@@ -15,6 +15,7 @@ import {
 } from "react-icons/lu";
 import { api, type Agent, type BrokenChannelPackage, type Channel, type ChannelKind } from "../api";
 import { Select } from "./Select";
+import { QrCode } from "./QrCode";
 import { LoadFailed, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
@@ -549,6 +550,16 @@ function ChannelDetail({
           <LuCircleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <p className="min-w-0">{ch.error}</p>
         </div>
+      )}
+
+      {ch.pairing && (
+        <section className="mb-6">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Scan to connect")}</h3>
+          {/* The package's own words: it knows which app, and which menu in it. */}
+          {ch.pairing.hint && <p className="mt-0.5 text-xs text-fg-subtle">{ch.pairing.hint}</p>}
+          <QrCode text={ch.pairing.code} label={t("Code to scan")} className="mt-2 aspect-square w-56 max-w-full" />
+          <p className="mt-2 break-all font-mono text-[11px] text-fg-faint">{ch.pairing.code}</p>
+        </section>
       )}
 
       <section className="mb-6">
