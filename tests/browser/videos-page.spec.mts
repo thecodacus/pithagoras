@@ -192,6 +192,8 @@ test('Videos in the sidebar opens the page: the form first, the gallery under it
   await expect(page).toHaveURL(/\/videos$/);
   await expect(page.getByRole('heading', { name: 'Videos' })).toBeVisible();
   await expect(maker(page)).toBeVisible();
+  await expect(grid(page).getByRole('listitem')).toHaveCount(2);
+  await expect(grid(page).getByRole('button')).toHaveCount(2);
   const names = await grid(page).getByRole('button').evaluateAll((els) => els.map((e) => e.getAttribute('title')));
   expect(names).toEqual(['A red bicycle', 'A fox in the snow']);
   const first = grid(page).getByRole('listitem').first();

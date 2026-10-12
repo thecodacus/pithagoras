@@ -3,7 +3,7 @@ import { showImageTool } from "./show-image-tool.js";
 import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
 import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE } from "../image-generation.js";
-import { GenerateVideoTool } from "./generate-video-tool.js";
+import { GENERATE_VIDEO_VOICE_LINE, GenerateVideoTool } from "./generate-video-tool.js";
 import { showVideoTool } from "./show-video-tool.js";
 import { GENERATE_VIDEO_SOURCE, GENERATE_VIDEO_TOOL, SHOW_VIDEO_SOURCE } from "../video-generation.js";
 import { GENERATED_VIDEO_MARK } from "../generated-video.js";
@@ -438,6 +438,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       [
         imageTool?.registered() && !switchedOff().has(GENERATE_IMAGE_TOOL) ? GENERATE_IMAGE_VOICE_LINE : "",
         editTool?.registered() && !switchedOff().has(EDIT_IMAGE_TOOL) ? EDIT_IMAGE_VOICE_LINE : "",
+        videoTool?.registered() && !switchedOff().has(GENERATE_VIDEO_TOOL) ? GENERATE_VIDEO_VOICE_LINE : "",
       ].filter(Boolean).join(" "),
       voiceSpeaks,
     );

@@ -74,14 +74,14 @@ const feature = (over: Record<string, unknown> = {}) => {
   return { ready: f.enabled && f.baseUrl !== '', ...f };
 };
 
-async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
+async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false, videosOn = false } = {}) {
   const pics = [...pictures];
   const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], limit: 4 };
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
   await mockPortal(page, async ({ path: p, method, url, json, route }) => {
-    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: flagOn } };
+    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: flagOn }, videos: { enabled: videosOn } };
     if (p === '/api/features/images') return { images };
     if (p === '/api/images' && method === 'GET') {
       state.listed.push(url.search);
@@ -278,6 +278,26 @@ test('the portal is asked to look through its folders when the page opens and wi
   await page.getByRole('button', { name: 'Refresh' }).click();
   await expect.poll(() => lists().length).toBe(before + 1);
   expect(lists().at(-1)).toBe('?limit=48');
+});
+
+test('the viewer has Make a video from it only while video generation is on, and it leads to the Videos page with the picture as its first frame', async ({ page }) => {
+  const a = pic({ prompt: 'A lighthouse at dusk' });
+  await portal(page, { pictures: [a], videosOn: true });
+  await page.goto('/images');
+  await tile(page, 'A lighthouse at dusk').click();
+  const link = viewer(page).getByRole('link', { name: 'Make a video from it' });
+  await expect(link).toHaveAttribute('href', `/videos?from=${a.id}`);
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/videos\\?from=${a.id}$|/videos$`));
+  await expect(viewer(page)).toHaveCount(0);
+});
+
+test('without video generation the viewer has no way to a video', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A lighthouse at dusk' })], videosOn: false });
+  await page.goto('/images');
+  await tile(page, 'A lighthouse at dusk').click();
+  await expect(viewer(page)).toBeVisible();
+  await expect(viewer(page).getByRole('link', { name: 'Make a video from it' })).toHaveCount(0);
 });
 
 test('with nothing made yet the gallery says so, and a gallery that cannot be read says that', async ({ page }) => {

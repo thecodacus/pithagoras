@@ -1149,18 +1149,18 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
               className={`${inputCls} mt-1 font-mono text-xs`}
             />
           </label>
-          <label className="text-xs text-fg-muted">
-            {t("Video size")}
-            <input
-              value={form.size}
-              onChange={(e) => edit({ size: e.target.value })}
-              placeholder="832x480"
-              spellCheck={false}
-              autoComplete="off"
-              className={`${inputCls} mt-1 font-mono text-xs`}
-            />
-          </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid gap-2 sm:col-span-2 sm:grid-cols-3">
+            <label className="text-xs text-fg-muted">
+              {t("Video size")}
+              <input
+                value={form.size}
+                onChange={(e) => edit({ size: e.target.value })}
+                placeholder="832x480"
+                spellCheck={false}
+                autoComplete="off"
+                className={`${inputCls} mt-1 font-mono text-xs`}
+              />
+            </label>
             <label className="text-xs text-fg-muted">
               {t("Frames")}
               <input

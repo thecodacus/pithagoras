@@ -26,6 +26,13 @@ import { FileError, MAX_PICTURE_BYTES, baseDir, makeFolder, readPicture, saveNew
  * it, within the time limit of the settings, and the chat shows how long it has taken.
  */
 
+/**
+ * Said to the model in a spoken conversation, where a clip is not shown: voice mode has no window for one, and the
+ * wait is minutes. Said only while the model has the tool (see the SDK client).
+ */
+export const GENERATE_VIDEO_VOICE_LINE =
+  "A video made with generate_video is not shown in a spoken conversation, only in the chat, and takes minutes: make one only when the person asks for it, and say that it will be in the chat.";
+
 /** A name made here: the time, and something that tells two in one second apart. */
 const fileName = (ext: string): string =>
   `video-${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-")}-${randomBytes(3).toString("hex")}.${ext}`;

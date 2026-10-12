@@ -221,8 +221,9 @@ frame, control frames, LoRA and the other fields of the native API; they are not
 
 ## The agent
 
-With video generation on and an address set, a chat's agent can have two tools; the voice instructions
-say nothing of them, and voice mode's picture window does not show videos.
+With video generation on and an address set, a chat's agent can have two tools. Voice mode's picture window does not
+show videos: while the model has `generate_video`, the voice instructions tell it that a video is not shown in a spoken
+conversation, only in the chat, and that it takes minutes, so that it makes one only when asked and says it will be in the chat.
 
 - **`generate_video(prompt, title?, size?, seconds?, path?)`** makes one video and shows it. `size`
   is `WIDTHxHEIGHT`, within the limits of the form. `seconds` is how long it should play: the portal makes

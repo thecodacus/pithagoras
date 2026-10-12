@@ -450,7 +450,8 @@ description says so. The call waits for the video and stopping the chat stops th
 Its answer is the video's path and a title, with the mark only the portal's tool sets (`portalVideo`), and the chat plays the
 video only with that mark: another extension's `generate_video`, which pi may keep in the portal's place, stays a plain tool
 card. `show_video(path, title?)` plays a WebM or an MP4 of the chat's folder by what its bytes say, and nothing else. Voice mode
-shows no videos and its instructions say nothing of these tools.
+shows no videos: while the model has `generate_video`, the voice instructions say that a video is not shown in a spoken
+conversation, only in the chat, and tell it to make one only when asked.
 
 Only the primary user's conversations can have the agent make a video: like any tool that is not a plain read, it is refused in
 a conversation with a teammate unless a [tool rule](/people/rules) allows it. A video can cost money at a hosted endpoint, and

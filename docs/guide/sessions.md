@@ -293,8 +293,8 @@ either, but as the video from the moment it is asked for. A video takes minutes,
 - **A tool of the same name** that another extension brings is the plain tool line it always was; only the portal's own calls
   are drawn as videos.
 
-[Voice mode](/guide/voice) has no window for videos and the voice instructions say nothing of the video tools: a video is
-for the chat. Every video the agent makes this way is also in the [Videos](/guide/videos) page's gallery, from the moment it is saved.
+[Voice mode](/guide/voice) has no window for videos, and while the agent has `generate_video` its voice instructions say so: a video
+is for the chat, and is made only when asked. Every video the agent makes this way is also in the [Videos](/guide/videos) page's gallery, from the moment it is saved.
 
 ## Drafts and what is running
 
