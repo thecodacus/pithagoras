@@ -116,3 +116,25 @@ test("a code a channel package asks to have scanned is on its status until it ta
   assert.equal(channelSupervisor.status("c2").pairing, undefined, "the old start's code is not the new one's");
   await channelSupervisor.stopChannel("c2");
 });
+
+test("what a channel package keeps with ctx.state is there for its next start, not written by a stopped one, and goes with the channel", async () => {
+  const { removeChannelState } = await import("../dist/channels/state.js");
+  getDb().prepare("INSERT INTO channels (id, slug, kind, name, config, enabled) VALUES ('c3', 'kept', 'keeping', 'Keeping', '{}', 1)").run();
+  const row = getDb().prepare("SELECT * FROM channels WHERE id = 'c3'").get();
+  let first;
+  await channelSupervisor.startChannel(row, { start: async (ctx) => ((first = ctx), { stop() {} }) });
+  assert.equal(first.state.get(), undefined, "nothing kept yet");
+  first.state.set({ lastEventId: "7" });
+  assert.throws(() => first.state.set({ big: "x".repeat(70 * 1024) }), /at most 64 KB/);
+
+  await channelSupervisor.stopChannel("c3");
+  let second;
+  await channelSupervisor.startChannel(row, { start: async (ctx) => ((second = ctx), { stop() {} }) });
+  assert.deepEqual(second.state.get(), { lastEventId: "7" }, "the next start finds it, as a restart of the portal would");
+  first.state.set({ lastEventId: "1" });
+  assert.deepEqual(second.state.get(), { lastEventId: "7" }, "a stopped start does not write over the running one's");
+
+  removeChannelState("c3");
+  assert.equal(second.state.get(), undefined);
+  await channelSupervisor.stopChannel("c3");
+});

@@ -32,6 +32,7 @@ import {
 import { loadChannels, type LoadedChannel } from "./loader.js";
 import { neutralise, notesBlock } from "./framing.js";
 import { parseConfig, type ChannelRow } from "./row.js";
+import { readChannelState, writeChannelState } from "./state.js";
 
 /**
  * Runs the enabled channels.
@@ -244,6 +245,16 @@ class ChannelSupervisor {
           const code = typeof (pairing as Pairing | null)?.code === "string" ? (pairing as Pairing).code.trim() : "";
           const hint = typeof (pairing as Pairing | null)?.hint === "string" ? (pairing as Pairing).hint.trim() : "";
           live.pairing = code && code.length <= MAX_PAIRING ? { code, hint } : undefined;
+        },
+        // Kept across starts, for a package that has to know where it left off.
+        // Not by a start that has been stopped: it would write over what the
+        // one after it keeps.
+        state: {
+          get: () => readChannelState(row.id),
+          set: (value: unknown) => {
+            if (this.running.get(row.id) !== live) return;
+            writeChannelState(row.id, value);
+          },
         },
       });
       live.stop = handle?.stop;

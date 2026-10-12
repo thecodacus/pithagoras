@@ -7,6 +7,7 @@ import { DEFAULT_AGENT, getAgent } from "../agents.js";
 import { freeSlug, isValidSlug, slugify } from "../slug.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { parseConfig, type ChannelRow } from "../channels/row.js";
+import { removeChannelState } from "../channels/state.js";
 import {
   channelsDir,
   isPackageName,
@@ -250,7 +251,7 @@ export function channelsRouter(): Router {
     }
 
     getDb().prepare("DELETE FROM channels WHERE id = ?").run(row.id);
-    void channelSupervisor.sync();
+    void channelSupervisor.sync().then(() => removeChannelState(row.id), () => {});
     res.json({ ok: true, slug: row.slug, stranded: deleted ? 0 : count, deleted });
   });
 

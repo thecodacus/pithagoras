@@ -79,7 +79,9 @@ signal-cli --config /var/lib/signal-cli -a +15551234567 updateProfile --given-na
 `verify` takes the code that arrives by SMS. For a landline, add `--voice` to
 `register` and the code is read out in a call. The daemon can serve this one
 account (`-a +15551234567 daemon …`) or all accounts in its folder (no `-a`).
-The channel works with both.
+The channel works with both. A daemon for one account answers for that one
+whatever the channel asks for: if it is another number than the channel's, the
+activity says `ignored messages for …` with the daemon's number.
 
 ### Your own number
 
@@ -94,7 +96,7 @@ In **Settings → Channels**, add a **Signal** channel:
 | --- | --- |
 | **signal-cli daemon** | The daemon's address, such as `http://127.0.0.1:8080`. |
 | **Signal number** | The number the agent writes as, with its country code: `+15551234567`. |
-| **Allowed senders** | The numbers that may write to the agent directly, comma separated. A person who hides their number is given by their Signal account id (a UUID). |
+| **Allowed senders** | Who may write to the agent directly, comma separated: their number, or their Signal account id (a UUID). Either lets them through, whichever of the two signal-cli knows. A person who hides their number can only be given by their account id. |
 | **Allowed groups** | The ids of the groups where the agent reads and answers every message. |
 | **Device name** | What your phone lists the portal as once it is linked. `Pithagoras` if left empty. |
 
@@ -117,8 +119,8 @@ it is ready.
 A bot on a personal number must not answer strangers. So the channel ignores
 every message that is not from an allowed sender or in an allowed group. It
 sends no answer, no "I don't know you", nothing. The activity names each
-ignored sender and group once, with the number or the group id to copy into the
-fields above. Groups have no readable id in the Signal app, so writing in the
+ignored sender and group once, with the number and account id or the group id
+to copy into the fields above. Groups have no readable id in the Signal app, so writing in the
 group once and reading the activity is how to find it.
 
 On a linked number, what you write yourself reaches the agent only through
@@ -132,19 +134,24 @@ number is in. Use them only for a number of the agent's own. On your own number,
 `*` would let the agent answer, as you, anyone who writes to you.
 
 Messages that get through then go through the portal's [People](/people/) as on
-every channel. The sender is their number, or their account id when they hide
-their number. It is never their profile name, which anyone can change. Roles,
+every channel. The sender is their Signal account id: it is the same whether
+signal-cli knows their number or not, and when they change their number. It is
+never their profile name, which anyone can change. In **Settings → People** they
+are listed under their profile name, or their number. Roles,
 approvals and the audit log work as on the other channels. Once a primary user
 is named, a sender the roster does not know is turned away with a reply. Allow
 them in the channel first, then give them a role under **Settings → People**.
 
 ## What it does with messages
 
-- **Conversations.** Each direct chat is its own conversation (`chat:<number>`)
-  and so is each group (`group:<group id>`), whoever writes in it.
-- **Replies** go back to the chat they came from. A reply longer than 2000
-  characters is split into several messages, at a line or a space where
-  possible. While the agent works, Signal shows it typing.
+- **Conversations.** Each direct chat is its own conversation
+  (`chat:<account id>`, and `chat:<your number>` for Note to Self) and so is
+  each group (`group:<group id>`), whoever writes in it.
+- **Replies** go back to the chat they came from. A reply longer than Signal
+  carries in one message, 2000 bytes, is split into several messages, at a line
+  or a space where possible. That is 2000 letters of English, and fewer of
+  umlauts, Cyrillic, Chinese or emoji. A long message you send arrives whole.
+  While the agent works, Signal shows it typing.
 - **Pictures** you send (PNG, JPEG, GIF or WebP, up to 5 MB, up to eight with
   a message) reach the agent with your message. Pictures the agent shows with
   `show_image`, or makes with `generate_image` and `edit_image`, come back as
@@ -180,7 +187,15 @@ the agent like any other chat with it.
   behind a bot.
 - **Keep signal-cli up to date.** A release that is months old can stop
   receiving when Signal changes its servers.
-- **Missed messages.** signal-cli keeps the most recent messages for a
-  connection that drops, and the channel picks up after the last one it saw.
-  What arrives while the portal is down for longer is gone. Signal has
-  delivered it to signal-cli, and it is not sent again.
+- **Messages while the portal is away.** signal-cli goes on receiving while
+  the portal is down, restarting, or reconnecting, and keeps the last 1000
+  events (receipts and typing count too). The channel keeps the id of the last
+  message it took in, and on its next start or connection asks signal-cli for
+  what came after it. What is past those 1000, or arrived while signal-cli
+  itself was restarting before the portal connected to it again, is gone:
+  Signal has delivered it to signal-cli, and it is not sent again. Changing the
+  daemon's address or the number starts afresh.
+- **A connection that goes quiet.** signal-cli writes a keep-alive every
+  fifteen seconds. When nothing at all comes for a minute, the channel takes the
+  connection for dead and opens it again. Leave `--sse-keepalive-interval` at
+  its default, or under a minute.

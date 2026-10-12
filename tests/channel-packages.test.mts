@@ -204,7 +204,7 @@ test("stopping the webhook does not wait for the turn of a request that is still
  */
 function signalDaemon(answer: (method: string, params: any) => unknown = () => ({})) {
   const rpc: { method: string; params: any }[] = [];
-  const streams: { url: URL; headers: any; push: (event: unknown) => void }[] = [];
+  const streams: { url: URL; headers: any; push: (event: unknown) => void; beat: () => void }[] = [];
   const real = globalThis.fetch;
   let seq = 0;
   globalThis.fetch = (async (url: string, init: any = {}) => {
@@ -213,8 +213,13 @@ function signalDaemon(answer: (method: string, params: any) => unknown = () => (
       const body = JSON.parse(init.body);
       rpc.push({ method: body.method, params: body.params });
       try {
-        return json({ jsonrpc: "2.0", id: body.id, result: await answer(body.method, body.params) });
+        // As fetch does: a call that is aborted ends, whatever it was waiting for.
+        const aborted = new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))));
+        aborted.catch(() => {});
+        const result = await Promise.race([answer(body.method, body.params), aborted]);
+        return json({ jsonrpc: "2.0", id: body.id, result });
       } catch (e: any) {
+        if (e.name === "AbortError") throw e;
         return json({ jsonrpc: "2.0", id: body.id, error: { code: e.code ?? -1, message: e.message } });
       }
     }
@@ -228,7 +233,9 @@ function signalDaemon(answer: (method: string, params: any) => unknown = () => (
       });
       // As signal-cli writes them: an id, the event's name, the message as its data, and a keep-alive between.
       const push = (event: unknown) => stream.enqueue(new TextEncoder().encode(`:\nid:${++seq}\nevent:receive\ndata:${JSON.stringify(event)}\n\n`));
-      streams.push({ url: u, headers: init.headers, push });
+      // signal-cli's keep-alive, which it writes every fifteen seconds.
+      const beat = () => stream.enqueue(new TextEncoder().encode(":\n"));
+      streams.push({ url: u, headers: init.headers, push, beat });
       return new Response(body, { headers: { "content-type": "text/event-stream" } });
     }
     return new Response("", { status: 404 });
@@ -236,6 +243,7 @@ function signalDaemon(answer: (method: string, params: any) => unknown = () => (
   return {
     rpc,
     sent: () => rpc.filter((c) => c.method === "send").map((c) => c.params),
+    streams,
     connected: async () => {
       while (!streams.length) await sleep(5);
       return streams.at(-1)!;
@@ -253,7 +261,7 @@ const ME = "+15550000001";
 const KIM = "+15550000002";
 
 /** The Signal package started against a daemon that holds `accounts`, with what the test sets of its fields. */
-async function signal(config: Record<string, unknown>, ask: (text: string, meta: any) => Promise<string>, answer?: (method: string, params: any) => unknown) {
+async function signal(config: Record<string, unknown>, ask: (text: string, meta: any) => Promise<string>, answer?: (method: string, params: any) => unknown, kept: { value?: unknown } = {}) {
   const daemon = signalDaemon((method, params) => {
     const given = answer?.(method, params);
     if (given !== undefined) return given;
@@ -265,9 +273,12 @@ async function signal(config: Record<string, unknown>, ask: (text: string, meta:
   const { ctx, controller, asked } = context({ url: "http://signal-cli:8080", account: ME, ...config }, ask);
   const logged: string[] = [];
   const pairings: unknown[] = [];
-  const channel = await start({ ...ctx, log: (line: string) => logged.push(line), showPairing: (p: unknown) => pairings.push(p) });
+  // What the portal keeps for the channel between starts, here in memory.
+  const state = { get: () => kept.value, set: (value: unknown) => void (kept.value = value) };
+  const channel = await start({ ...ctx, log: (line: string) => logged.push(line), showPairing: (p: unknown) => pairings.push(p), state });
   return {
     daemon,
+    kept,
     asked,
     logged,
     pairings,
@@ -285,26 +296,27 @@ const dm = (from: string, message: string, extra: Record<string, unknown> = {}) 
   envelope: { source: from, sourceNumber: from, sourceUuid: `uuid-${from}`, sourceName: "Kim", sourceDevice: 1, timestamp: 1, dataMessage: { timestamp: 1, message, ...extra } },
 });
 
-test("a Signal message from somebody allowed is its own conversation, by their number, and a long answer comes back in pieces Signal takes", async () => {
-  const s = await signal({ allowedSenders: `${KIM.slice(0, 5)} ${KIM.slice(5)}` }, async () => `${"word ".repeat(900)}\n${"x".repeat(2500)}`);
+test("a Signal message from somebody allowed is its own conversation, by their account id, and a long answer comes back in pieces Signal takes", async () => {
+  const s = await signal({ allowedSenders: `${KIM.slice(0, 5)} ${KIM.slice(5)}` }, async () => `${"wörd ".repeat(900)}\n${"x".repeat(2500)}`);
   try {
     const stream = await s.daemon.connected();
     assert.equal(stream.url.searchParams.get("account"), ME, "the stream is this account's");
     stream.push(dm(KIM, "hello"));
-    await until(() => s.daemon.sent().length >= 4, "the reply went out");
+    await until(() => s.daemon.sent().length >= 5, "the reply went out");
 
     assert.equal(s.asked.length, 1);
     assert.equal(s.asked[0].text, "hello");
-    assert.equal(s.asked[0].meta.session, `chat:${KIM}`);
-    assert.deepEqual(s.asked[0].meta.from, { id: KIM, name: "Kim" }, "the number, not the profile name, is who it is");
+    assert.equal(s.asked[0].meta.session, `chat:uuid-${KIM}`);
+    assert.deepEqual(s.asked[0].meta.from, { id: `uuid-${KIM}`, name: "Kim" }, "the account id, not the profile name, is who it is");
     const sent = s.daemon.sent();
     for (const p of sent) {
       assert.equal(p.account, ME);
-      assert.deepEqual(p.recipient, [KIM]);
-      assert.ok(p.message.length <= 2000, `a piece of ${p.message.length} characters`);
+      assert.deepEqual(p.recipient, [`uuid-${KIM}`]);
+      // Signal's limit is in bytes: a piece of 2000 umlauted characters would be well over it.
+      assert.ok(Buffer.byteLength(p.message) <= 2000, `a piece of ${Buffer.byteLength(p.message)} bytes`);
     }
-    assert.equal(sent.map((p) => p.message).join("").replace(/\s/g, ""), `${"word".repeat(900)}${"x".repeat(2500)}`, "nothing lost between the pieces");
-    assert.ok(sent[0].message.endsWith("word"), "broken between words where it can be");
+    assert.equal(sent.map((p) => p.message).join("").replace(/\s/g, ""), `${"wörd".repeat(900)}${"x".repeat(2500)}`, "nothing lost between the pieces");
+    assert.ok(sent[0].message.endsWith("wörd"), "broken between words where it can be");
   } finally {
     await s.done();
   }
@@ -327,7 +339,9 @@ test("on Signal a stranger is not answered at all and is named once, nor is what
     assert.equal(s.asked[0].meta.session, `chat:${ME}`);
     assert.equal(s.asked[0].meta.from.id, ME);
     assert.deepEqual(s.daemon.sent(), [{ account: ME, noteToSelf: true, message: "noted" }], "the answer is a note to yourself, and nobody else heard a thing");
-    assert.equal(s.logged.filter((l) => l.includes("+15550000099")).length, 1, "the stranger is in the log once, for whoever wants to allow them");
+    const named = s.logged.filter((l) => l.includes("+15550000099"));
+    assert.equal(named.length, 1, "the stranger is in the log once, for whoever wants to allow them");
+    assert.match(named[0], /account id uuid-\+15550000099/, "with the id that the allow list and People know them by");
     assert.ok(s.logged.some((l) => l.includes("Z3JvdXA=") && l.includes("Family")), "so is the group, by its id");
   } finally {
     await s.done();
@@ -345,7 +359,7 @@ test("an allowed Signal group is one conversation, whoever writes in it, and the
     await until(() => s.daemon.sent().length >= 2, "both were answered");
 
     assert.deepEqual(s.asked.map((a) => a.meta.session), ["group:Z3JvdXA=", "group:Z3JvdXA="]);
-    assert.deepEqual(s.asked.map((a) => a.meta.from.id), [KIM, "u3"]);
+    assert.deepEqual(s.asked.map((a) => a.meta.from.id), ["u2", "u3"]);
     assert.equal(s.asked[0].meta.title, "Ops");
     for (const p of s.daemon.sent()) assert.equal(p.groupId, "Z3JvdXA=");
   } finally {
@@ -380,6 +394,8 @@ test("pictures go both ways on Signal, and what is not one is said to be left ou
         { id: "a1", contentType: "image/png", size: 11, filename: "photo.png" },
         { id: "a2", contentType: "audio/aac", size: 900, isVoiceNote: true },
         { id: "a3", contentType: "image/jpeg", size: 6 * 1024 * 1024, filename: "huge.jpg" },
+        // What a long text comes with: its words are the message already.
+        { id: "lt1", contentType: "text/x-signal-plain", size: 3000 },
       ],
     }));
     await until(() => s.daemon.sent().length >= 3, "everything went out");
@@ -387,7 +403,7 @@ test("pictures go both ways on Signal, and what is not one is said to be left ou
     assert.deepEqual(s.daemon.rpc.filter((c) => c.method === "getAttachment").map((c) => c.params.id), ["a1"], "only the picture it can take is fetched");
     assert.deepEqual(s.asked[0].meta.images, [{ data: png, mimeType: "image/png" }]);
     const [left, picture, words] = s.daemon.sent();
-    assert.match(left.message, /left out a voice note, huge\.jpg/);
+    assert.match(left.message, /left out a voice note, huge\.jpg\.$/);
     assert.deepEqual(picture.attachments, [`data:image/png;filename=sales_chart.png;base64,${png}`]);
     assert.equal(picture.message, "Sales");
     assert.equal(words.message, "Here it is.", "the words come after the picture they are about");
@@ -411,8 +427,8 @@ test("a number signal-cli does not have yet is linked with a code on the channel
     return undefined;
   });
   try {
-    await until(() => s.pairings.length === 2, "a second code after the first ran out");
-    assert.deepEqual(s.pairings.map((p: any) => p.code), ["sgnl://linkdevice?uuid=1&pub_key=k", "sgnl://linkdevice?uuid=2&pub_key=k"]);
+    await until(() => s.pairings.filter(Boolean).length === 2, "a second code after the first ran out");
+    assert.deepEqual(s.pairings.map((p: any) => p?.code ?? null), ["sgnl://linkdevice?uuid=1&pub_key=k", null, "sgnl://linkdevice?uuid=2&pub_key=k"], "the one that ran out is taken off first");
     assert.match((s.pairings[0] as any).hint, /Linked devices/);
     const finish = s.daemon.rpc.find((c) => c.method === "finishLink")!;
     assert.equal(finish.params.deviceName, "Pithagoras");
@@ -456,5 +472,128 @@ test("a signal-cli daemon that is not there fails the start, so that it is tried
     await assert.rejects(start(ctx), /Could not reach signal-cli at http:\/\/127\.0\.0\.1:1/);
   } finally {
     globalThis.fetch = real;
+  }
+});
+
+test("the same person on Signal stays one person and one conversation when signal-cli learns their number", async () => {
+  const s = await signal({ allowedSenders: "uuid-kim" }, async () => "ok");
+  try {
+    const stream = await s.daemon.connected();
+    const kim = (sourceNumber: string | undefined, message: string) => ({ account: ME, envelope: { sourceNumber, sourceUuid: "uuid-kim", sourceName: "Kim", dataMessage: { message } } });
+    stream.push(kim(undefined, "hidden number"));
+    stream.push(kim(KIM, "now it shows"));
+    await until(() => s.asked.length === 2, "both reached the agent");
+    assert.deepEqual(s.asked.map((a) => [a.meta.session, a.meta.from.id]), [["chat:uuid-kim", "uuid-kim"], ["chat:uuid-kim", "uuid-kim"]]);
+    // Allowed by number, the same person gets through whichever they show.
+  } finally {
+    await s.done();
+  }
+});
+
+test("a long Signal message is taken as the text it is, without a word about the file it came with", async () => {
+  const s = await signal({ allowedSenders: KIM }, async () => "read it");
+  try {
+    const stream = await s.daemon.connected();
+    stream.push(dm(KIM, "ü".repeat(1500), { attachments: [{ contentType: "text/x-signal-plain", id: "lt1", size: 3000 }] }));
+    await until(() => s.daemon.sent().length, "it was answered");
+    assert.equal(s.asked[0].text, "ü".repeat(1500));
+    assert.deepEqual(s.daemon.sent().map((p) => p.message), ["read it"]);
+    assert.equal(s.daemon.rpc.some((c) => c.method === "getAttachment"), false);
+  } finally {
+    await s.done();
+  }
+});
+
+test("Signal picks up after the last message it took in, across a restart, and only on the same daemon and number", async () => {
+  const kept: { value?: unknown } = {};
+  const first = await signal({ allowedSenders: KIM }, async () => "ok", undefined, kept);
+  try {
+    const stream = await first.daemon.connected();
+    assert.equal(stream.headers["last-event-id"], undefined, "nothing to pick up after the first time");
+    stream.push(dm(KIM, "one"));
+    await until(() => first.asked.length, "it was taken in");
+    assert.deepEqual(kept.value, { url: "http://signal-cli:8080", account: ME, lastEventId: "1" }, "kept before it is answered");
+  } finally {
+    await first.done();
+  }
+
+  const again = await signal({ allowedSenders: KIM }, async () => "ok", undefined, kept);
+  try {
+    assert.equal((await again.daemon.connected()).headers["last-event-id"], "1", "so that signal-cli replays what came while it was stopped");
+  } finally {
+    await again.done();
+  }
+
+  const other = await signal({ allowedSenders: KIM, url: "http://elsewhere:8080" }, async () => "ok", undefined, kept);
+  try {
+    assert.equal((await other.daemon.connected()).headers["last-event-id"], undefined, "another daemon's ids are not this one's");
+  } finally {
+    await other.done();
+  }
+});
+
+test("a daemon that runs for another number than the channel's says so, rather than taking in nothing without a word", async () => {
+  const s = await signal({ allowedSenders: "*" }, async () => "ok", (method) => {
+    if (method === "listAccounts") throw Object.assign(new Error("Method not implemented"), { code: -32601 });
+    return undefined;
+  });
+  try {
+    const stream = await s.daemon.connected();
+    stream.push({ ...dm(KIM, "hello"), account: "+15550000042" });
+    stream.push({ ...dm(KIM, "hello again"), account: "+15550000042" });
+    await until(() => s.logged.some((l) => l.includes("+15550000042")), "the daemon's number is named");
+    assert.equal(s.logged.filter((l) => l.includes("+15550000042")).length, 1);
+    assert.equal(s.asked.length, 0);
+  } finally {
+    await s.done();
+  }
+});
+
+test("an expired Signal link code does not stay on the page while there is no new one", async () => {
+  let starts = 0;
+  const s = await signal({}, async () => "", (method) => {
+    if (method === "listAccounts") return [];
+    if (method === "startLink") {
+      if (++starts > 1) throw new Error("signal-cli is restarting");
+      return { deviceLinkUri: "sgnl://linkdevice?uuid=1&pub_key=k" };
+    }
+    if (method === "finishLink") throw new Error("Link request timed out, please try again.");
+    return undefined;
+  });
+  try {
+    await until(() => s.logged.some((l) => l.includes("restarting")), "the next code could not be made");
+    assert.equal(s.pairings.at(-1), null, "the old code is gone");
+  } finally {
+    await s.done();
+  }
+});
+
+test("a Signal stream that goes quiet is opened again after a minute, rather than waited on for half an hour", async (t) => {
+  // Only setTimeout is the test's: what the fake daemon and the stream need runs on immediates.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const settle = async () => {
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const s = await signal({}, async () => "");
+  try {
+    await settle();
+    assert.equal(s.daemon.streams.length, 1);
+    // A keep-alive is something heard: the minute starts again.
+    t.mock.timers.tick(50_000);
+    s.daemon.streams[0].beat();
+    await settle();
+    t.mock.timers.tick(50_000);
+    await settle();
+    assert.equal(s.daemon.streams.length, 1, "a stream that keeps beating is left alone");
+    assert.equal(s.logged.some((l) => l.startsWith("lost connection")), false);
+
+    t.mock.timers.tick(11_000);
+    await settle();
+    assert.ok(s.logged.includes("lost connection: nothing came from signal-cli for a minute"), s.logged.join("\n"));
+    t.mock.timers.tick(5_000);
+    await settle();
+    assert.equal(s.daemon.streams.length, 2, "and it is opened again");
+  } finally {
+    await s.done();
   }
 });

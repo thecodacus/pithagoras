@@ -94,6 +94,7 @@ Called once when the channel is enabled. Return an object with `stop()`.
 | `log(message)` | Surfaced in the channel's status. |
 | `signal` | `AbortSignal`, aborted when the channel is disabled or the portal shuts down. |
 | `showPairing(pairing)` | Shows `{ code, hint }` on the channel's page as a QR code, until `showPairing(null)`. See [Something to scan](#something-to-scan). |
+| `state` | `get()` and `set(value)`: a little JSON kept across starts. See [Keeping your place](#keeping-your-place). |
 
 `ask` is the entire interface to the agent.
 
@@ -123,7 +124,7 @@ the builtins settled on:
 | Telegram | `chat:<chat id>` | A DM and a group have different chat ids, so they separate for free. |
 | Slack | `channel:<channel>` | Per channel, not per thread — a thread is a digression inside one conversation. |
 | Discord | `channel:<channel id>` | A DM is a channel too, so servers and DMs separate for free. |
-| Signal | `chat:<number>`, `group:<group id>` | A group has an id of its own; a direct chat is the other person's number, or their account id when they hide it. |
+| Signal | `chat:<account id>`, `group:<group id>` | A group has an id of its own; a direct chat is the other person's account id, which stays the same whether their number is known or not. |
 | Webhook | whatever the caller sends, else `default` | Only the caller knows what a conversation is. |
 
 Your key is prefixed with the channel's slug before it is stored, so two
@@ -327,6 +328,24 @@ code goes to the browser, so it must be something to scan, never a key.
 Do the waiting after `start()` has returned, not in it. `start()` holds up the
 other channels until it settles, and a code can wait minutes for somebody to
 pick up their phone.
+
+## Keeping your place
+
+A package is stopped and started again whenever the portal restarts or the
+channel's form is saved, and forgets everything in between. `ctx.state` is the
+exception: a value that is still there at the next start.
+
+```js
+const kept = ctx.state.get();          // what was set last, or undefined
+ctx.state.set({ cursor: lastEventId }); // replaces it; null forgets it
+```
+
+It is for a cursor, the Signal package's last event id say, so that a stream
+that can be resumed is resumed rather than missing what came while the channel
+was stopped. At most 64 KB of JSON, kept in a file per channel and removed with
+the channel. `set` from a start that has been stopped is ignored, so a package
+that is still shutting down does not write over the one that replaced it. Not
+for secrets: those are fields marked `secret`.
 
 ## Things to know
 

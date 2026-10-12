@@ -58,8 +58,15 @@ export const manifest = {
   ],
 };
 
-/** Signal's own apps cut a message body at 2000 characters and send the rest as a file: so a reply is split there instead. */
-const MAX_TEXT = 2000;
+/**
+ * Signal carries 2000 bytes of a message's text inline, in UTF-8, and the
+ * whole of a longer one as a file beside it: so a reply is split there
+ * instead. Bytes, not characters: a line of umlauts or emoji is two to four
+ * times as long.
+ */
+const MAX_TEXT_BYTES = 2000;
+/** The file a long text comes with, whose words signal-cli has already put in the message. */
+const LONG_TEXT = "text/x-signal-plain";
 /** What the portal takes as a picture with a message. */
 const PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_PICTURE_BYTES = 5 * 1024 * 1024;
@@ -67,6 +74,13 @@ const MAX_PICTURE_BYTES = 5 * 1024 * 1024;
 const DAEMON_METHODS = new Set(["listAccounts", "startLink", "finishLink", "version"]);
 /** A line of the event stream longer than this is no event signal-cli sends: attachments are fetched apart. */
 const MAX_EVENT = 4 * 1024 * 1024;
+/**
+ * signal-cli writes a keep-alive to the stream every fifteen seconds unless it
+ * is told otherwise. A minute with nothing at all is a connection that went
+ * away without saying so — a host that lost power, a NAT that forgot it — and
+ * is opened again rather than waited on for the half hour before fetch gives up.
+ */
+const STREAM_QUIET_MS = 60_000;
 /** Signal's typing indicator goes after fifteen seconds; a run takes minutes. */
 const TYPING_EVERY_MS = 10_000;
 
@@ -184,6 +198,24 @@ export async function start(ctx) {
 
   const isMe = (num, uuid) => num === account || (Boolean(aci) && sameId(uuid, aci));
 
+  /**
+   * The last event of the stream seen, to pick up after. Kept across starts
+   * for the last message taken in: signal-cli goes on receiving while nobody
+   * reads its stream, and replays what came after an id it is given — but only
+   * one it is given, so a restart that forgot it would never read what arrived
+   * meanwhile. Only for the same daemon and number: another one's ids are not
+   * this one's.
+   */
+  const kept = (() => {
+    try {
+      return ctx.state?.get();
+    } catch {
+      return undefined;
+    }
+  })();
+  let lastId = kept?.url === base && kept?.account === account && typeof kept?.lastEventId === "string" ? kept.lastEventId : undefined;
+  let keepFailed = false;
+
   const loop = (async () => {
     if (linking && !(await link())) return;
     await receive();
@@ -222,6 +254,8 @@ export async function start(ctx) {
         if (typeof uri !== "string" || !uri) throw new Error("signal-cli gave no code to link with");
       } catch (e) {
         if (ctx.signal.aborted) return false;
+        // The code on the page has run out: nobody should scan it while there is no other.
+        ctx.showPairing?.(null);
         ctx.log(`could not start linking: ${e.message}`);
         await pause(30_000, ctx.signal);
         continue;
@@ -236,8 +270,12 @@ export async function start(ctx) {
         await call("finishLink", { deviceLinkUri: uri, deviceName }, 1);
       } catch (e) {
         if (ctx.signal.aborted) return false;
-        // Nobody scanned it in time: the next code.
-        if (/timed out/i.test(e.message)) continue;
+        // Nobody scanned it in time: the next code. Taken off the page at once,
+        // as a phone that scans it now is refused.
+        if (/timed out/i.test(e.message)) {
+          ctx.showPairing?.(null);
+          continue;
+        }
         ctx.showPairing?.(null);
         ctx.log(`linking failed: ${e.message}`);
         await pause(30_000, ctx.signal);
@@ -264,42 +302,62 @@ export async function start(ctx) {
    * Follow the event stream for as long as the channel runs.
    *
    * One line when it drops and one when it is back, rather than one every
-   * few seconds while it is away. The daemon keeps the last events, and
-   * picking up after the last one seen means a message that came while the
-   * connection was down is not lost.
+   * few seconds while it is away. The daemon keeps its last thousand events,
+   * and picking up after the last one seen means a message that came while
+   * the connection was down is not lost.
    */
   async function receive() {
-    let lastId;
     let offline = false;
     while (!ctx.signal.aborted) {
+      const quiet = new AbortController();
+      let timer;
+      const awake = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => quiet.abort(), STREAM_QUIET_MS);
+      };
       try {
+        awake();
         const res = await fetch(`${base}/api/v1/events?account=${encodeURIComponent(account)}`, {
           headers: { accept: "text/event-stream", ...(lastId ? { "last-event-id": lastId } : {}) },
-          signal: ctx.signal,
+          signal: AbortSignal.any([ctx.signal, quiet.signal]),
         });
         if (!res.ok || !res.body) throw new Error(refusal(res.status, true));
         if (offline) {
           offline = false;
           ctx.log("connection back");
         }
-        for await (const event of events(res.body)) {
+        for await (const event of events(res.body, awake)) {
           if (event.id) lastId = event.id;
-          if (event.data) take(event.data);
+          if (event.data) take(event.data, event.id);
         }
         throw new Error("the daemon closed the event stream");
       } catch (e) {
         if (ctx.signal.aborted) return;
         if (!offline) {
           offline = true;
-          ctx.log(`lost connection: ${e.message}`);
+          ctx.log(`lost connection: ${quiet.signal.aborted ? "nothing came from signal-cli for a minute" : e.message}`);
         }
         await pause(5000, ctx.signal);
+      } finally {
+        clearTimeout(timer);
       }
     }
   }
 
+  /** Where to pick up after a restart: written before the message is handed on, so that a crash loses it rather than answering it twice. */
+  function keep(id) {
+    if (!id || !ctx.state) return;
+    try {
+      ctx.state.set({ url: base, account, lastEventId: id });
+    } catch (e) {
+      if (keepFailed) return;
+      keepFailed = true;
+      ctx.log(`could not keep where the stream was: ${e.message}`);
+    }
+  }
+
   /** One event from the stream: a message for the agent, or something it has no business with. */
-  function take(raw) {
+  function take(raw, id) {
     let event;
     try {
       event = JSON.parse(raw);
@@ -308,12 +366,18 @@ export async function start(ctx) {
     }
     // The stream carries what a JSON-RPC notification has as its params.
     const params = event?.params ?? event;
-    if (params?.account && params.account !== account) return;
+    if (params?.account && params.account !== account) {
+      // A daemon for one account sends that one's, whatever it is asked for.
+      noteIgnored(`account:${params.account}`, `ignored messages for ${params.account}: signal-cli runs for that number, not ${account}. Put the daemon's number in Signal number and save`);
+      return;
+    }
     const message = read(params?.envelope);
+    if (!message) return;
+    keep(id);
     // Deliberately not awaited: a `stop` is the next message, and it has to be
     // read while the run it stops is going. The portal keeps each chat's
     // messages in order.
-    if (message) void handle(message);
+    void handle(message);
   }
 
   /**
@@ -337,14 +401,19 @@ export async function start(ctx) {
     }
 
     const text = withMentions(typeof data.message === "string" ? data.message : "", data.mentions).trim();
-    const attachments = Array.isArray(data.attachments) ? data.attachments.filter((a) => a && typeof a.id === "string") : [];
+    const attachments = Array.isArray(data.attachments)
+      ? data.attachments.filter((a) => a && typeof a.id === "string" && a.contentType !== LONG_TEXT)
+      : [];
     if (!text && !attachments.length) return null;
 
-    // The sender is their number, or their account id where they hide it:
-    // never the profile name, which anybody can set to anything.
-    const sender = fromMe ? account : envelope.sourceNumber || envelope.sourceUuid;
+    // The sender is their Signal account id. Not their number: signal-cli
+    // knows that only once they show it or it is looked up, and the same
+    // person would then become somebody else, with a conversation of their
+    // own; nor does it survive a change of number. And never the profile
+    // name, which anybody can set to anything. You are this channel's number.
+    const sender = fromMe ? account : envelope.sourceUuid || envelope.sourceNumber;
     if (typeof sender !== "string" || !sender) return null;
-    const from = { id: sender, name: envelope.sourceName || sender };
+    const from = { id: sender, name: envelope.sourceName || envelope.sourceNumber || sender };
 
     const groupId = typeof data.groupInfo?.groupId === "string" ? data.groupInfo.groupId : "";
     if (groupId) {
@@ -358,7 +427,8 @@ export async function start(ctx) {
       return { key: `chat:${account}`, title: "Note to Self", target: { self: true }, from, text, attachments };
     }
     if (!allowed(senders, [envelope.sourceNumber, envelope.sourceUuid])) {
-      noteIgnored(`chat:${sender}`, `ignored a message from ${sender}: add it to Allowed senders to let it through`);
+      const who = envelope.sourceNumber && envelope.sourceNumber !== sender ? `${envelope.sourceNumber} (account id ${sender})` : sender;
+      noteIgnored(`chat:${sender}`, `ignored a message from ${who}: add it to Allowed senders to let it through`);
       return null;
     }
     return { key: `chat:${sender}`, title: envelope.sourceName || sender, target: { recipient: sender }, from, text, attachments };
@@ -452,7 +522,7 @@ export async function start(ctx) {
   }
 
   async function sendText(target, text) {
-    for (const chunk of split(String(text ?? ""), MAX_TEXT)) {
+    for (const chunk of split(String(text ?? ""), MAX_TEXT_BYTES)) {
       await call("send", { ...to(target), message: chunk });
     }
   }
@@ -506,13 +576,14 @@ function withMentions(text, mentions) {
   return out;
 }
 
-/** Server-sent events from a response body: each with its id and its data lines joined. */
-async function* events(body) {
+/** Server-sent events from a response body: each with its id and its data lines joined. `heard` is told of every chunk, keep-alives included. */
+async function* events(body, heard = () => {}) {
   const decoder = new TextDecoder();
   let buffer = "";
   let id;
   let data = [];
   for await (const chunk of body) {
+    heard();
     buffer += decoder.decode(chunk, { stream: true });
     let end;
     while ((end = buffer.indexOf("\n")) >= 0) {
@@ -536,15 +607,23 @@ async function* events(body) {
   }
 }
 
-/** Pieces of at most `size`, broken at a line or a space where there is one near the end. */
+/** Pieces of at most `size` bytes in UTF-8, broken at a line or a space where there is one near the end. */
 function split(text, size) {
   const out = [];
   let rest = text;
-  while (rest.length > size) {
-    let cut = rest.lastIndexOf("\n", size);
-    if (cut < size / 2) cut = rest.lastIndexOf(" ", size);
-    // Not between the two halves of a character outside the BMP, an emoji say.
-    if (cut < size / 2) cut = /[\uD800-\uDBFF]/.test(rest[size - 1]) ? size - 1 : size;
+  while (Buffer.byteLength(rest) > size) {
+    // The longest start that fits, by whole characters: an emoji is not cut in two.
+    let fit = 0;
+    let bytes = 0;
+    for (const ch of rest) {
+      const n = Buffer.byteLength(ch);
+      if (bytes + n > size) break;
+      bytes += n;
+      fit += ch.length;
+    }
+    let cut = rest.lastIndexOf("\n", fit);
+    if (cut < fit / 2) cut = rest.lastIndexOf(" ", fit);
+    if (cut < fit / 2) cut = fit;
     out.push(rest.slice(0, cut).trimEnd());
     rest = rest.slice(cut).replace(/^[ \n]+/, "");
   }
