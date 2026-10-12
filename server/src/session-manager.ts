@@ -18,8 +18,8 @@ import { findServerBuiltin, picturesRefused, runBuiltin } from "./pi/builtins.js
 import { dropMessage, SessionEditError, userTexts, type Scope } from "./pi/session-edit.js";
 import { AUDIO_MESSAGE_PREFIX } from "./pi/voice-first.js";
 import { isDialog, showsDialogs } from "./pi/ui-requests.js";
-import { ASK_QUESTION_TOOL, asksQuestions, describeAnswers, readAnswers, type Answers } from "./pi/ask-question.js";
-import { CHAT_QUESTION, CHAT_QUESTION_END, openChatQuestion, openChatQuestions, type ChatQuestion, type QuestionOutcome } from "./questions.js";
+import { ASK_QUESTION_TOOL, asksQuestions, describeAnswers, readAnswers, type Answers, type Question } from "./pi/ask-question.js";
+import { CHAT_QUESTION, CHAT_QUESTION_END, holdAnswers, openChatQuestion, openChatQuestions, takeHeldAnswers, type ChatQuestion, type QuestionOutcome } from "./questions.js";
 import { forgetTaint } from "./pi/guard.js";
 import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
@@ -420,6 +420,8 @@ class SessionManager extends EventEmitter {
     for (const c of unansweredCommands()) {
       this.record(c.sessionId, "portal_command_end", { of: c.seq, error: c.error ?? "The portal restarted before it answered" });
     }
+    // Answers the last server took while it was stopping: they go to the agent now, as one given after a restart does.
+    for (const held of takeHeldAnswers()) this.passOnAnswers(held.sessionId, held.questions, held.answers);
     return [...new Set([...orphaned, ...unsent])].filter((id) => {
       const row = getSession(id);
       return Boolean(row?.channel_slug && row.channel_key);
@@ -2486,19 +2488,25 @@ class SessionManager extends EventEmitter {
       return false;
     }
     const answers = response.cancelled ? undefined : readAnswers(asked.questions, response.value);
+    // While the portal stops, a message would start a pi that it no longer lets go, cut off as it exits. The
+    // answers are written down, and held for the portal that starts next to pass on (see recoverOrphans).
     this.endQuestion(sessionId, id, answers ? "answered" : "cancelled", answers);
-    if (!waiting && answers) {
-      const message = [
-        "<answer-from-primary>",
-        "These are the answers to the questions you asked with ask_question. Your run ended before they came (the portal restarted while you waited, for one), so they come as this message: go on from there.",
-        "",
-        // What was typed in is the person's, as a channel's sender's words are: it cannot close the frame or open one.
-        neutralise(describeAnswers(asked.questions, answers)),
-        "</answer-from-primary>",
-      ].join("\n");
-      this.prompt(sessionId, message).catch((e) => console.error(`[portal] could not pass on the answers in ${sessionId}: ${(e as Error).message}`));
-    }
+    if (!waiting && answers && this.closing) holdAnswers(sessionId, id);
+    else if (!waiting && answers) this.passOnAnswers(sessionId, asked.questions, answers);
     return true;
+  }
+
+  /** Answers to questions nothing waits for any more, sent to the agent as a message. */
+  private passOnAnswers(sessionId: string, questions: Question[], answers: Answers): void {
+    const message = [
+      "<answer-from-primary>",
+      "These are the answers to the questions you asked with ask_question. Your run ended before they came (the portal restarted while you waited, for one), so they come as this message: go on from there.",
+      "",
+      // What was typed in is the person's, as a channel's sender's words are: it cannot close the frame or open one.
+      neutralise(describeAnswers(questions, answers)),
+      "</answer-from-primary>",
+    ].join("\n");
+    this.prompt(sessionId, message).catch((e) => console.error(`[portal] could not pass on the answers in ${sessionId}: ${(e as Error).message}`));
   }
 
   /**

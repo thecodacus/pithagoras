@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeModel, resultsIn } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
@@ -21,7 +21,7 @@ const model = await fakeModel((request) =>
 );
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
-const { appendEvent, createSession, getDb, getSettings, setSettings } = await import("../dist/db.js");
+const { appendEvent, createSession, getDb, getSession, getSettings, setSettings } = await import("../dist/db.js");
 const { openChatQuestions } = await import("../dist/questions.js");
 const { sessions } = await import("../dist/session-manager.js");
 setSettings({ ...getSettings(), provider: "fake", model: "m" });
@@ -153,6 +153,40 @@ test("a restart of the portal stops the run that waits on a question, and leaves
     assert.equal(sent.length, 1);
     assert.match(sent[0].message, /1\. Which database\?\n\s+Chosen: SQLite/);
   } finally {
+    sent.length = 0;
+  }
+});
+
+test("an answer given while the portal stops is written down, and reaches the agent once the portal is back", async () => {
+  chat("stopping");
+  void prompt.call(sessions, "stopping", "Ask me which database").catch(() => {});
+  await until(() => stored("stopping").length > 0, "the question to be asked");
+  const [{ id }] = stored("stopping");
+  try {
+    // Answered while the portal is stopping: its run no longer waits, and the pi that would take a message is going.
+    const stopping = sessions.shutdown();
+    assert.equal(sessions.respondUi("stopping", id, { value: { db: "Postgres" } }), true);
+    await stopping;
+    sessions.closing = false;
+    assert.equal(sessions.isLoaded("stopping"), false, "no pi started for it by the portal that stops");
+    assert.deepEqual(sent, [], "not sent into the portal that stops");
+    assert.deepEqual(openChatQuestions("stopping"), [], "answered: not asked again");
+    assert.equal(ends("stopping")[0].outcome, "answered");
+    assert.deepEqual(ends("stopping")[0].answers, { db: "Postgres" });
+    // What the stopped run's tool told the agent, kept in pi's file: not that the person cancelled.
+    const file = readFileSync(getSession("stopping").pi_session_file, "utf8");
+    assert.match(file, /stopped before the person answered/);
+    assert.doesNotMatch(file, /cancelled the questions/);
+
+    // The portal that starts next passes the answers on, once.
+    sessions.recoverOrphans();
+    assert.equal(sent.filter((m) => m.sessionId === "stopping").length, 1);
+    assert.match(sent[0].message, /^<answer-from-primary>/);
+    assert.match(sent[0].message, /1\. Which database\?\n\s+Chosen: Postgres/);
+    sessions.recoverOrphans();
+    assert.equal(sent.filter((m) => m.sessionId === "stopping").length, 1, "not again on the start after");
+  } finally {
+    sessions.closing = false;
     sent.length = 0;
   }
 });

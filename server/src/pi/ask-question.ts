@@ -207,10 +207,21 @@ export function askQuestionTool(waitMs: () => number = () => 0) {
         if (typeof ctx?.ui?.questions !== "function") fail("There is no screen to ask on in this conversation. Ask in your reply instead.");
         const title = clip(p.title, 200);
         const value = await ctx.ui.questions({ ...(title ? { title } : {}), questions }, { signal, timeout: waitMs() });
-        if (value === undefined) {
-          return say("The person cancelled the questions without answering, or the time allowed for answering ran out. Carry on with your best judgement, or ask in your reply.");
+        // A stop closes the dialog with no value too. It is no answer: after a restart the questions stay open in
+        // the chat, and their answers come later as a message (see respondUi in session-manager.ts).
+        if (value === undefined && signal?.aborted) {
+          return {
+            ...say("The run was stopped before the person answered. If the questions are still open in the chat (the portal restarted, for one), their answers come later as a message: do not decide them yourself in the meantime."),
+            details: { outcome: "stopped" },
+          };
         }
-        return say(describeAnswers(questions, readAnswers(questions, value)));
+        if (value === undefined) {
+          return {
+            ...say("The person cancelled the questions without answering, or the time allowed for answering ran out. Carry on with your best judgement, or ask in your reply."),
+            details: { outcome: "cancelled" },
+          };
+        }
+        return { ...say(describeAnswers(questions, readAnswers(questions, value))), details: { outcome: "answered" } };
       },
     });
   };

@@ -157,6 +157,18 @@ test('the wait is read each time a question is asked', async () => {
 test('questions cancelled without answers are a result, not an error; a context with no screen is an error', async () => {
   const closed = await tool().execute('id', { questions: ask }, undefined, undefined, { ui: { questions: async () => undefined } });
   assert.match(closed.content[0].text, /cancelled the questions without answering/);
+  assert.equal(closed.details.outcome, 'cancelled');
   await assert.rejects(tool().execute('id', { questions: ask }, undefined, undefined, { ui: {} }), /no screen/);
   await assert.rejects(tool().execute('id', { questions: [] }, undefined, undefined, { ui: { questions: async () => ({}) } }), /at least one/);
+});
+
+test('a run stopped before the answers came is told so, and that the questions may still be answered, not that they were cancelled', async () => {
+  const run = new AbortController();
+  // As the portal's context does on a stop: the dialog closes, with no value.
+  const ctx = { ui: { questions: async () => (run.abort(), undefined) } };
+  const out = await tool().execute('id', { questions: ask }, run.signal, undefined, ctx);
+  assert.equal(out.details.outcome, 'stopped');
+  assert.match(out.content[0].text, /stopped before the person answered/);
+  assert.match(out.content[0].text, /still open in the chat/);
+  assert.doesNotMatch(out.content[0].text, /cancelled|best judgement/);
 });

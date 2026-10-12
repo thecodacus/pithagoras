@@ -104,8 +104,9 @@ box, which also takes the questions away in every window that has them. If you
 would rather the agent carries on by itself after a while, **Settings → Tools →
 Questions from the agent** sets a limit of 5, 15, 30 or 60 minutes. The portal
 keeps a question with its chat until it ends: after a reload, a visit to
-another chat or a restart of the portal it is there again. Answered after a
-restart, your answers reach the agent as a new message. Once it ends, the chat
+another chat or a restart of the portal it is there again. Answered while the
+portal restarts or after, your answers reach the agent as a new message once the
+portal is back. Once it ends, the chat
 keeps a short record of it where it was asked: each question and your answer,
 or that it was cancelled or not answered in time.
 

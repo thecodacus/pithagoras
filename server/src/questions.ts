@@ -1,5 +1,5 @@
-import { getDb } from "./db.js";
-import type { Question } from "./pi/ask-question.js";
+import { getDb, getSetting, putSetting } from "./db.js";
+import type { Answers, Question } from "./pi/ask-question.js";
 
 /**
  * Questions a colleague's conversation could not answer on its own.
@@ -184,3 +184,37 @@ export function openChatQuestions(sessionId: string): ChatQuestion[] {
 
 export const openChatQuestion = (sessionId: string, id: string): ChatQuestion | undefined =>
   openChatQuestions(sessionId).find((q) => q.id === id);
+
+/**
+ * Questions answered while the portal was stopping, whose answers the agent has not been sent yet (see respondUi in
+ * session-manager.ts). Noted beside the settings rather than looked for among the events, which only a scan of
+ * every chat would find: the portal that starts next passes them on.
+ */
+const HELD_ANSWERS = "held_answers";
+
+function held(): { sessionId: string; id: string }[] {
+  try {
+    const list = JSON.parse(getSetting(HELD_ANSWERS) ?? "[]");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+export function holdAnswers(sessionId: string, id: string): void {
+  putSetting(HELD_ANSWERS, JSON.stringify([...held(), { sessionId, id }]));
+}
+
+/** The answers held by the last portal, each with its questions. Taken, so that each goes out once. */
+export function takeHeldAnswers(): { sessionId: string; questions: Question[]; answers: Answers }[] {
+  const list = held();
+  if (!list.length) return [];
+  putSetting(HELD_ANSWERS, "");
+  const events = getDb().prepare(`SELECT type, payload FROM events WHERE session_id = ? AND type IN (?, ?) ORDER BY seq ASC`);
+  return list.flatMap(({ sessionId, id }) => {
+    const rows = (events.all(sessionId, CHAT_QUESTION, CHAT_QUESTION_END) as { type: string; payload: string }[]).map((r) => ({ type: r.type, ...JSON.parse(r.payload) }));
+    const asked = rows.find((r) => r.type === CHAT_QUESTION && r.id === id);
+    const end = rows.find((r) => r.type === CHAT_QUESTION_END && r.of === id);
+    return asked && end?.outcome === "answered" && end.answers ? [{ sessionId, questions: asked.questions as Question[], answers: end.answers as Answers }] : [];
+  });
+}
