@@ -81,6 +81,13 @@ const MAX_EVENT = 4 * 1024 * 1024;
  * is opened again rather than waited on for the half hour before fetch gives up.
  */
 const STREAM_QUIET_MS = 60_000;
+/**
+ * How old a message may be and still be answered. What signal-cli replays
+ * after a restart can be days old on a quiet number; an answer to that, or a
+ * request acted on long after the people who made it moved on, is worse than
+ * none. Telegram keeps a bot's backlog for a day, and so does this.
+ */
+const MAX_AGE_MS = 24 * 60 * 60_000;
 /** Signal's typing indicator goes after fifteen seconds; a run takes minutes. */
 const TYPING_EVERY_MS = 10_000;
 
@@ -215,6 +222,9 @@ export async function start(ctx) {
   })();
   let lastId = kept?.url === base && kept?.account === account && typeof kept?.lastEventId === "string" ? kept.lastEventId : undefined;
   let keepFailed = false;
+  /** Replayed messages too old to answer, waiting to be told of in one line. */
+  let stale = 0;
+  let staleTimer;
 
   const loop = (async () => {
     if (linking && !(await link())) return;
@@ -227,6 +237,7 @@ export async function start(ctx) {
     async stop() {
       for (const timer of typing) clearInterval(timer);
       typing.clear();
+      clearTimeout(staleTimer);
       await loop;
     },
 
@@ -374,6 +385,19 @@ export async function start(ctx) {
     const message = read(params?.envelope);
     if (!message) return;
     keep(id);
+    // Taken as read, so that it is not replayed again, but not answered.
+    const sent = Number(params.envelope.timestamp);
+    if (Number.isFinite(sent) && sent > 0 && Date.now() - sent > MAX_AGE_MS) {
+      stale++;
+      // Counted, and said once the replay is through, rather than a line for each.
+      clearTimeout(staleTimer);
+      staleTimer = setTimeout(() => {
+        ctx.log(`skipped ${stale} ${stale === 1 ? "message" : "messages"} older than a day, which came while this channel was not reading`);
+        stale = 0;
+      }, 1000);
+      if (typeof staleTimer.unref === "function") staleTimer.unref();
+      return;
+    }
     // Deliberately not awaited: a `stop` is the next message, and it has to be
     // read while the run it stops is going. The portal keeps each chat's
     // messages in order.

@@ -293,7 +293,7 @@ async function signal(config: Record<string, unknown>, ask: (text: string, meta:
 
 const dm = (from: string, message: string, extra: Record<string, unknown> = {}) => ({
   account: ME,
-  envelope: { source: from, sourceNumber: from, sourceUuid: `uuid-${from}`, sourceName: "Kim", sourceDevice: 1, timestamp: 1, dataMessage: { timestamp: 1, message, ...extra } },
+  envelope: { source: from, sourceNumber: from, sourceUuid: `uuid-${from}`, sourceName: "Kim", sourceDevice: 1, timestamp: Date.now(), dataMessage: { timestamp: Date.now(), message, ...extra } },
 });
 
 test("a Signal message from somebody allowed is its own conversation, by their account id, and a long answer comes back in pieces Signal takes", async () => {
@@ -593,6 +593,27 @@ test("a Signal stream that goes quiet is opened again after a minute, rather tha
     t.mock.timers.tick(5_000);
     await settle();
     assert.equal(s.daemon.streams.length, 2, "and it is opened again");
+  } finally {
+    await s.done();
+  }
+});
+
+test("what signal-cli replays from more than a day ago is taken as read but not answered, and said in one line", async () => {
+  const s = await signal({ allowedSenders: KIM }, async () => "ok");
+  try {
+    const stream = await s.daemon.connected();
+    const old = (message: string, daysAgo: number) => {
+      const event = dm(KIM, message);
+      event.envelope.timestamp = Date.now() - daysAgo * 24 * 60 * 60_000;
+      return event;
+    };
+    stream.push(old("please delete the old branch", 3));
+    stream.push(old("and the tag", 2));
+    stream.push(dm(KIM, "good morning"));
+    await until(() => s.logged.some((l) => l.startsWith("skipped")), "the skipped ones are named");
+    assert.deepEqual(s.asked.map((a) => a.text), ["good morning"], "only what is recent reaches the agent");
+    assert.ok(s.logged.includes("skipped 2 messages older than a day, which came while this channel was not reading"));
+    assert.equal((s.kept.value as any).lastEventId, "3", "nor are they replayed again");
   } finally {
     await s.done();
   }

@@ -342,8 +342,10 @@ ctx.state.set({ cursor: lastEventId }); // replaces it; null forgets it
 
 It is for a cursor, the Signal package's last event id say, so that a stream
 that can be resumed is resumed rather than missing what came while the channel
-was stopped. At most 64 KB of JSON, kept in a file per channel and removed with
-the channel. `set` from a start that has been stopped is ignored, so a package
+was stopped. At most 64 KB of JSON, kept in a file per channel. It is kept
+across a restart of the portal and a save of the form, and forgotten when the
+channel is switched off or removed: switched on again, a channel starts from
+then, not from where it was before somebody turned it off. `set` from a start that has been stopped is ignored, so a package
 that is still shutting down does not write over the one that replaced it. Not
 for secrets: those are fields marked `secret`.
 

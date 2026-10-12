@@ -195,6 +195,12 @@ the agent like any other chat with it.
   itself was restarting before the portal connected to it again, is gone:
   Signal has delivered it to signal-cli, and it is not sent again. Changing the
   daemon's address or the number starts afresh.
+
+  Of what is replayed, a message more than a day old is not answered: an answer
+  days late, or a request acted on long after it was made, is worse than none.
+  The activity says how many were skipped. A channel that is switched off
+  forgets where it was, so switched on again it starts from then: what was said
+  while it was off is not answered at all.
 - **A connection that goes quiet.** signal-cli writes a keep-alive every
   fifteen seconds. When nothing at all comes for a minute, the channel takes the
   connection for dead and opens it again. Leave `--sse-keepalive-interval` at

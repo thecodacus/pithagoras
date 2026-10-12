@@ -138,3 +138,14 @@ test("what a channel package keeps with ctx.state is there for its next start, n
   assert.equal(second.state.get(), undefined);
   await channelSupervisor.stopChannel("c3");
 });
+
+test("a channel switched off forgets what it kept, so that switched on again it does not pick up where it was", async () => {
+  const { readChannelState, writeChannelState } = await import("../dist/channels/state.js");
+  getDb().prepare("INSERT INTO channels (id, slug, kind, name, config, enabled) VALUES ('c4', 'off', 'keeping', 'Off', '{}', 1)").run();
+  writeChannelState("c4", { lastEventId: "9" });
+  await channelSupervisor.sync();
+  assert.deepEqual(readChannelState("c4"), { lastEventId: "9" }, "kept while it is on, across a restart or a save");
+  getDb().prepare("UPDATE channels SET enabled = 0 WHERE id = 'c4'").run();
+  await channelSupervisor.sync();
+  assert.equal(readChannelState("c4"), undefined);
+});

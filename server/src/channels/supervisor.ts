@@ -32,7 +32,7 @@ import {
 import { loadChannels, type LoadedChannel } from "./loader.js";
 import { neutralise, notesBlock } from "./framing.js";
 import { parseConfig, type ChannelRow } from "./row.js";
-import { readChannelState, writeChannelState } from "./state.js";
+import { readChannelState, removeChannelState, writeChannelState } from "./state.js";
 
 /**
  * Runs the enabled channels.
@@ -188,6 +188,9 @@ class ChannelSupervisor {
     for (const id of [...this.retries.keys()]) {
       if (!wanted.has(id)) this.clearRetry(id);
     }
+    // A channel switched off forgets where it was: switched on again, it starts
+    // from now rather than answering everything said while it was off.
+    for (const row of rows) if (!row.enabled) removeChannelState(row.id);
 
     for (const [id, row] of wanted) {
       if (this.running.has(id)) continue;
