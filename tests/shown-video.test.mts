@@ -68,17 +68,18 @@ test("the tool line says a clip is being made, and the clip is not a picture for
   assert.equal(describeCall(start("show_video", { path: "a.webm" }).payload, "/work").target, undefined, "voice mode has no window for clips");
 });
 
-test("the video tools are one group of their own, apart from the picture tools, and an extension's tool of the name is not in it", () => {
+test("the picture and video tools are one group, Media, and an extension's tool of the name is not in it", () => {
   const mine = (name: string, inline = true) => ({ name, source: inline ? "video-generation" : "my-videos", enabled: true, description: undefined, inline });
-  const groups = groupTools([mine("generate_video"), { ...mine("show_video"), source: "videos" }, { name: "generate_image", source: "image-generation", enabled: true, description: undefined, inline: true } as any, mine("generate_video", false) as any, { name: "bash", source: "built in", enabled: true, description: undefined } as any]);
+  const groups = groupTools([mine("generate_video"), { ...mine("show_video"), source: "videos" }, { name: "generate_image", source: "image-generation", enabled: true, description: undefined, inline: true } as any, { name: "edit_image", source: "image-editing", enabled: true, description: undefined, inline: true } as any, mine("generate_video", false) as any, { name: "bash", source: "built in", enabled: true, description: undefined } as any]);
   const by = Object.fromEntries(groups.map((g) => [g.source, g.tools.map((x) => x.name)]));
-  assert.deepEqual(by["<portal:videos>"], ["generate_video", "show_video"]);
-  assert.deepEqual(by["<portal:images>"], ["generate_image"]);
+  assert.deepEqual(by["<portal:media>"], ["edit_image", "generate_image", "generate_video", "show_video"]);
+  assert.equal(by["<portal:videos>"], undefined, "there is no group of videos apart");
+  assert.equal(by["<portal:images>"], undefined, "and none of pictures");
   // An extension's generate_video keeps the package it came from.
   assert.deepEqual(by["my-videos"], ["generate_video"]);
-  assert.equal(sourceName("<portal:videos>"), "Videos");
-  assert.equal(displayName("<portal:videos>"), "Videos");
+  assert.equal(sourceName("<portal:media>"), "Media");
+  assert.equal(displayName("<portal:media>"), "Media");
   // What the portal brings is after what is installed and before what is built in.
   assert.deepEqual(groups.map((g) => g.source).slice(-1), ["built in"]);
-  assert.ok(groups.findIndex((g) => g.source === "my-videos") < groups.findIndex((g) => g.source === "<portal:videos>"));
+  assert.ok(groups.findIndex((g) => g.source === "my-videos") < groups.findIndex((g) => g.source === "<portal:media>"));
 });
