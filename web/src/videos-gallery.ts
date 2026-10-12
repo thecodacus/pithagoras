@@ -3,10 +3,10 @@ import { appendNew, mergeHead, sameList } from "./gallery-list";
 import { VIDEO_LIMITS } from "../../server/src/video-settings";
 
 /**
- * What the Videos page (components/VideosPage.tsx) works out without a page:
- * which clips are drawn and in what order, how a page that was asked for again
+ * What the Media page (components/MediaPage.tsx) works out for its videos without a page:
+ * which videos are drawn and in what order, how a page that was asked for again
  * joins the ones already there, and the form's settings and what it remembers.
- * The same work the Images page does for pictures (images-gallery.ts), and the same
+ * The same work it does for pictures (images-gallery.ts), and the same
  * code where it is the same.
  */
 
@@ -27,6 +27,9 @@ export function readFilter(params: URLSearchParams): Filter {
     ...(kind && KINDS.includes(kind) ? { kind: kind as VideoKind } : {}),
   };
 }
+
+/** What a clip is called where it is named: its description, or the file's name for one that has none. */
+export const videoName = (video: GalleryVideo): string => (video.prompt || video.fileName).replace(/\s+/g, " ").trim();
 
 /** The clips there are, once the top of the list has been asked for again (see mergeHead). */
 export const mergeTop = (loaded: GalleryVideo[], fresh: { videos: GalleryVideo[]; next: string | null }): GalleryVideo[] => mergeHead(loaded, fresh.videos, fresh.next);

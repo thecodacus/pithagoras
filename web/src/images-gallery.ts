@@ -4,7 +4,7 @@ import type { ViewerPicture } from "./image-viewer";
 import { COMPRESSIBLE as COMPRESSIBLE_FORMATS, LIMITS, OUTPUT_FORMATS } from "../../server/src/image-settings";
 
 /**
- * What the Images page (components/ImagesPage.tsx) works out without a page:
+ * What the Media page (components/MediaPage.tsx) works out for its pictures without a page:
  * which pictures are drawn and in what order, how a page that was asked for
  * again joins the ones already there, what the viewer is given, and the form's
  * settings and what it remembers.

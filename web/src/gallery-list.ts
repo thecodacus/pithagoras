@@ -1,5 +1,5 @@
 /**
- * What a gallery page (the Images page, the Videos page) works out of the lists it holds, whatever is in them:
+ * What the gallery of the Media page works out of the lists it holds, pictures or videos:
  * how a page that was asked for again joins the ones already there. Each item has an `id` and a `createdAt`, and
  * the lists are newest first, by id among those made in the same moment, as the portal orders them.
  */
