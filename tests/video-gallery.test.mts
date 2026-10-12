@@ -873,6 +873,41 @@ test("a frame that ffmpeg cannot make is no poster, and only a few are made at t
   }
 });
 
+test("a poster that could not be made for a reason that is not the clip's is tried again: ffmpeg gone for a moment, a disk that cannot be written", async () => {
+  const frame = await sharp({ create: { width: 64, height: 48, channels: 3, background: "#336699" } }).png().toBuffer();
+  const tool = fakeFfmpeg(path.join(temp, "moving-ffmpeg"), frame);
+  const away = `${tool.script}.away`;
+  process.env.FFMPEG_PATH = tool.script;
+  posters.forgetPosterProbe();
+  try {
+    const gone = gallery.addPageVideo({ bytes: clip("ffmpeg gone"), ext: "webm", kind: "generated", prompt: "ffmpeg gone", params: {} });
+    const full = gallery.addPageVideo({ bytes: clip("disk full"), ext: "webm", kind: "generated", prompt: "disk full", params: {} });
+    // The probe has said it runs (and is not asked again for a minute) when ffmpeg is replaced: the run cannot start.
+    assert.equal(posters.posterAvailable(), true);
+    renameSync(tool.script, away);
+    assert.equal((await call("GET", `/videos/${gone.id}/poster`)).status, 404);
+    renameSync(away, tool.script);
+    assert.equal((await call("GET", `/videos/${gone.id}/poster`)).status, 200, "ffmpeg is back: the poster is made, and was not given up for good");
+
+    // A disk that cannot be written to: the folder of the posters is a file for a moment.
+    const dir = posters.postersDir();
+    const kept = `${dir}.kept`;
+    if (existsSync(dir)) renameSync(dir, kept);
+    writeFileSync(dir, "not a folder");
+    try {
+      assert.equal((await call("GET", `/videos/${full.id}/poster`)).status, 404);
+    } finally {
+      rmSync(dir, { force: true });
+      if (existsSync(kept)) renameSync(kept, dir);
+    }
+    assert.equal((await call("GET", `/videos/${full.id}/poster`)).status, 200, "the disk is fine again: the poster is made");
+  } finally {
+    if (existsSync(away)) renameSync(away, tool.script);
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+  }
+});
+
 test("a poster is made from a real clip by the ffmpeg that is installed", { skip: HAVE_FFMPEG ? false : "ffmpeg is not installed here" }, async () => {
   delete process.env.FFMPEG_PATH;
   posters.forgetPosterProbe();

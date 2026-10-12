@@ -108,7 +108,7 @@ and how long ago.
   a tile fetches the start of its video and the browser draws the first frame, only once the tile is
   near the screen. The same is the tile of a video ffmpeg cannot make a frame of (an MP4 whose index is at the end,
   for one, cannot be read from a pipe): the video is still there and plays, it is not tried again until the file changes
-  or the portal restarts, and its tile shows the first frame the browser draws. A poster is made again when the file has changed, and goes with the video. At most
+  or the portal restarts, and its tile shows the first frame the browser draws. A poster that fails for a reason that is not the video's — ffmpeg gone for a moment, a full disk, a frame that took too long — is tried again by the next request. A poster is made again when the file has changed, and goes with the video. At most
   two are made at a time. A video is handed to ffmpeg on its standard input, from the file that was
   checked, and ffmpeg may open nothing else.
 - **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*: from a

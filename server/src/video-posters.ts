@@ -92,10 +92,15 @@ async function turn<T>(job: () => Promise<T>): Promise<T> {
 /**
  * The posters that ffmpeg could not make, by their name (the clip's id, and the size and time of the file): a clip it
  * cannot read from a pipe — an MP4 with its index at the end — is not tried again for every tile that asks, which would stream
- * the whole file through ffmpeg each time. A file that is written over has another name and is tried once more. Kept to
- * no more than this, and started again beyond it; a restart tries them again.
+ * the whole file through ffmpeg each time. Only a failure that is the clip's is kept (see NoFrame): ffmpeg that is gone for a
+ * moment, a frame that took too long on a loaded machine, a disk that is full or a picture that could not be made are tried
+ * again by the next request. A file that is written over has another name and is tried once more. Kept to no more than this,
+ * and started again beyond it; a restart tries them again.
  */
 const failed = new Set<string>();
+
+/** ffmpeg ran to its end and made no frame of this clip: what is remembered of a failure, and nothing else is. */
+class NoFrame extends Error {}
 const MAX_FAILED = 10_000;
 
 /** Asked for twice at once (two tiles of one clip): made once. */
@@ -149,10 +154,12 @@ function firstFrame(fd: number, size: number): Promise<Buffer> {
       clearTimeout(timer);
       reject(e);
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
-      if (code === 0 && total > 0 && total <= MAX_FRAME_BYTES) resolve(Buffer.concat(out));
-      else reject(new Error(errors.trim().split("\n").pop() || `ffmpeg ended with ${code}`));
+      if (code === 0 && total > 0 && total <= MAX_FRAME_BYTES) return resolve(Buffer.concat(out));
+      const why = errors.trim().split("\n").pop() || `ffmpeg ended with ${code ?? signal}`;
+      // Ended by itself, with no frame: the clip's. Ended by a signal (the time, the size of a frame, a file that could not be read) it may be any other.
+      reject(code !== null ? new NoFrame(why) : new Error(why));
     });
   });
 }
@@ -176,8 +183,10 @@ function make(fd: number, size: number, modifiedMs: number, id: string, name: st
       return true;
     } catch (e) {
       console.error("[portal] videos: poster failed:", (e as Error).message);
-      if (failed.size >= MAX_FAILED) failed.clear();
-      failed.add(name);
+      if (e instanceof NoFrame) {
+        if (failed.size >= MAX_FAILED) failed.clear();
+        failed.add(name);
+      }
       return false;
     }
   }).finally(() => making.delete(name));
