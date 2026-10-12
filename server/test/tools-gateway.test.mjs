@@ -643,3 +643,92 @@ test("ask_question, lazy, is asked through the tools tool: the dialog opens for 
     stopped.dispose();
   }
 });
+
+test("a lazy canvas_write fills the canvas while the model writes it, and what came survives a stop", async () => {
+  const { createCanvas, markCanvasRead, readCanvas } = await import("../dist/canvases.js");
+  const { createSession } = await import("../dist/db.js");
+  /** One chat, with a canvas to write in, whose canvas_write is lazy; the model writes it in pieces and `between` looks at the canvas after each. */
+  async function writing(pieces, between, finish) {
+    const session = `gateway-canvas-${n++}`;
+    createSession({ id: session, title: session, workspace: process.env.WORKSPACE_ROOT, executor: "host", kind: "task" });
+    const row = createCanvas(session, "Lazy document");
+    markCanvasRead(session, row.id);
+    const text = pieces(row.id);
+    let client;
+    script = [{ name: "tools", pieces: text, between: (i) => between(i, session, row.id, client) }];
+    model.requests.length = 0;
+    client = await SdkPiClient.create({
+      cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: session,
+      toolsLazy: ["canvas_write"], lazySets: ["canvases"],
+    });
+    const events = [];
+    client.on("event", (e) => events.push(e));
+    try {
+      await client.prompt("Write it");
+      await finish(client, events, session, row.id);
+    } finally {
+      client.dispose();
+    }
+    return { session, id: row.id, events };
+  }
+  /** The canvas as it is after a short while: the table is written as the pieces come in. */
+  const contentOf = async (session, id, expected) => {
+    for (let i = 0; i < 100 && readCanvas(session, id).content !== expected; i++) await new Promise((r) => setTimeout(r, 20));
+    return readCanvas(session, id);
+  };
+  const head = (id) => `{"action":"call","name":"canvas_write","args":{"canvas_id":"${id}","revision":0,"operation":"replace","content":"First`;
+
+  // Called through the tools tool, whole: the text is there before the call has ended, and the call makes one revision.
+  const seen = [];
+  const whole = await writing(
+    (id) => [head(id), ` line\\nSecond`, ` and third"}}`],
+    async (i, session, id) => {
+      if (i === 0) seen.push((await contentOf(session, id, "First")).content);
+      if (i === 1) {
+        const row = await contentOf(session, id, "First line\nSecond");
+        seen.push(row.content, row.status);
+      }
+    },
+    async (_client, events) => {
+      for (let i = 0; i < 200 && !events.some((e) => e.type === "agent_settled"); i++) await new Promise((r) => setTimeout(r, 25));
+    },
+  );
+  assert.deepEqual(seen, ["First", "First line\nSecond", "writing"], "the canvas filled while the call was still coming in");
+  const done = readCanvas(whole.session, whole.id);
+  assert.equal(done.content, "First line\nSecond and third");
+  assert.equal(done.revision, 1, "one revision however many pieces it came in");
+  const end = whole.events.find((e) => e.type === "tool_execution_end");
+  assert.equal(end.isError, false);
+  assert.equal(end.portalCalledTool, "canvas_write");
+
+  // The text of the arguments, as a model may send them: the same.
+  const asText = await writing(
+    (id) => {
+      const raw = JSON.stringify({ action: "call", name: "canvas_write", args: JSON.stringify({ canvas_id: id, revision: 0, operation: "replace", content: "Alpha\nBeta \"quoted\" gamma" }) });
+      return raw.match(/.{1,17}/g);
+    },
+    async () => {},
+    async (_client, events) => {
+      for (let i = 0; i < 200 && !events.some((e) => e.type === "agent_settled"); i++) await new Promise((r) => setTimeout(r, 25));
+    },
+  );
+  assert.equal(readCanvas(asText.session, asText.id).content, "Alpha\nBeta \"quoted\" gamma");
+
+  // The turn is stopped in the middle of the call: what came is kept, and the call never ran.
+  const stopped = await writing(
+    (id) => [head(id), ` line\\nSecond`, ` and the rest that never comes"}}`],
+    async (i, session, id, client) => {
+      if (i === 1) {
+        await contentOf(session, id, "First line\nSecond");
+        await client.abort();
+      }
+    },
+    async (_client, events) => {
+      for (let i = 0; i < 200 && !events.some((e) => e.type === "agent_settled"); i++) await new Promise((r) => setTimeout(r, 25));
+    },
+  );
+  const cut = readCanvas(stopped.session, stopped.id);
+  assert.equal(cut.content, "First line\nSecond", "partial text survives the interruption");
+  assert.equal(cut.status, "interrupted");
+  assert.equal(cut.active_call, null);
+});

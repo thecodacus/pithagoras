@@ -88,6 +88,7 @@ import {
   sessionSubagentModel,
   anySessionRunning,
   onChannel,
+  lazyMarks,
   lazyToolNames,
   lazySetLabels,
 } from "./db.js";
@@ -2648,15 +2649,15 @@ class SessionManager extends EventEmitter {
     // What the chat's agent, project and routine start it with, which is what it is "default" against.
     const defaults = toolDefaultsForSession(session);
     const exceptions = sessionTools(sessionId);
-    const lazy = lazyToolNames();
+    const lazy = lazyMarks(view);
     const servers = view.servers;
     // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
     const asks = session ? canAsk(session) : true;
-    const shown: { name: string; source: string; description?: string; inline?: true; cached?: true }[] = listed.length
+    const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
       ? listed
       : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
     return {
-      tools: shown.map(({ name, source, description, inline, cached }) => ({
+      tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => ({
         name,
         ...(description !== undefined ? { description } : {}),
         source: toolSource(name, source, servers),
@@ -2665,8 +2666,8 @@ class SessionManager extends EventEmitter {
         ...(cached ? { cached: true as const } : {}),
         enabled: toolEnabled(name, defaults, exceptions),
         defaultOn: !defaults.includes(name),
-        // Not offered one by one but found through the `tools` tool: the page says so beside the switch.
-        ...(lazy.has(name) ? { lazy: true as const } : {}),
+        // Not offered one by one but found through the `tools` tool, or an MCP server's through `mcp`: the page says so beside the switch.
+        ...lazy({ name, source, package: pkg }),
       })),
       live: Boolean(listed.length),
     };

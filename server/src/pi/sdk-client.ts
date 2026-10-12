@@ -593,6 +593,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.dialogs = opts.dialogs !== false;
     client.rememberChatModel = opts.rememberChatModel;
     client.canvases = canvases;
+    if (canvases) canvases.viaGateway = () => client.reachableLazy().has("canvas_write");
     if (eventBus && resourceLoader) {
       client.bus = eventBus;
       client.unbridge = bridgeSubagents(

@@ -343,6 +343,31 @@ export function mcpRouter(): Router {
     }
   });
 
+  /**
+   * Register a server's tools one by one (`directTools`), or leave them to the adapter's `mcp` tool. The same
+   * setting the form has as "Register tools directly", for the Tools page, where leaving them to `mcp` is
+   * what the page calls lazy: only that setting is changed, the rest of the entry is as it was. A server
+   * that is not lazy gets `true`; one that is lazy loses the key, or has it `false` where the adapter-wide
+   * setting would register them. Read when a chat starts, as the rest of the file.
+   */
+  router.put("/mcp/servers/:name/direct", (req, res) => {
+    const name = req.params.name;
+    if (typeof req.body?.direct !== "boolean") return res.status(400).json({ error: "direct must be true or false" });
+    const { config, error } = readMcpFile();
+    if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
+    const entry = Object.prototype.hasOwnProperty.call(config.mcpServers, name) ? config.mcpServers[name] : undefined;
+    if (!entry || typeof entry !== "object") return res.status(404).json({ error: `No server called ${name}` });
+    if (req.body.direct) entry.directTools = true;
+    else if (config.settings?.directTools) entry.directTools = false;
+    else delete entry.directTools;
+    try {
+      writeMcpFile(config);
+      res.json({ ok: true, direct: req.body.direct });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
   router.delete("/mcp/servers/:name", (req, res) => {
     const { config, error } = readMcpFile();
     if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });

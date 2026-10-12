@@ -268,23 +268,31 @@ whether or not the conversation ever uses it. For a large set such as the [brows
 eleven tools that is a few thousand tokens in each chat. A tool that is **lazy** costs none of that until
 it is needed: it is not in the model's list, and the model finds it through a single tool, `tools`.
 
-**Nothing is lazy by default.** The portal marks no tool and no set on its own, so a portal behaves
-as it always did until you choose.
+**Nothing is lazy by default,** but for an MCP server's tools, which are lazy by the adapter's default (see
+below). The portal marks no other tool and no other set on its own, so a portal behaves as it always did until
+you choose.
 
 **Settings → Tools** has a **lazy** button on the header of each group (a package, the browser, the
-**Images** group) and one beside each tool. Marking a group makes every tool of it lazy, including tools
-that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers the tool one by
-one again.
+**Images** group, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
+including tools that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers
+the tool one by one again.
 
-Any tool can be made lazy except an MCP server's, pi's own built-in ones (`read`, `bash`, `edit`,
-`write`, `grep`, `find` and `ls`) and `canvas_write`. They have no lazy button, and the portal refuses a
-mark that names them, in whichever group they are listed: with the [sandbox](/guide/sandbox) on they are
-listed under **sandbox**, and an extension that brings a tool of one of these names does not make it lazy
-either. An MCP server has a way of its own to keep its tools out of the prompt, through the
-[MCP adapter](/guide/mcp), and the built-in tools are what every conversation works with.
-`canvas_write` fills the canvas with the text as the model writes it, and keeps what has come if the turn
-is cut off; a call through `tools` cannot be followed like that, so it is always offered one by one, also
-when the rest of the **canvases** are lazy.
+Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
+and `ls`), which every conversation works with and which are always offered. They have no lazy button, and
+the portal refuses a mark that names them, in whichever group they are listed: with the
+[sandbox](/guide/sandbox) on they are listed under **sandbox**, and an extension that brings a tool of one
+of these names does not make it lazy either. The canvas tools can be lazy, `canvas_write` too: a document
+written through `tools` fills the canvas while the model writes it, and what has come is kept if the turn
+is cut off, as for a direct call.
+
+**An MCP server's tools** are lazy by the server's own setting, which is the same thing as **Register tools
+directly** in [Settings → MCP](/guide/mcp), turned off: the adapter then leaves the tools to its `mcp` tool,
+which the model uses to search for them, describe them and call them. So there is one switch, and the
+lazy button of an MCP server in Settings → Tools is that setting (a tool of the server cannot differ from it;
+a list of tools in `directTools` is shown as it is). **MCP servers are lazy unless they register their
+tools directly**, as the adapter does by default; the add-ons the portal sets up itself, Understory for one,
+stay as they were, registered directly. A change reaches the chats that start after it. The portal's own
+`tools` tool has no part in this, and a mark that names an MCP server is refused.
 
 Lazy is not a switch. A lazy tool is **on** like any other, and behaves exactly like one: it is run by
 the same code, held to the same [guard](/guide/security) (the [browser](/guide/browser)'s allowlist, the

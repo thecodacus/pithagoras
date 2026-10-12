@@ -225,7 +225,7 @@ offered them one by one. The agent is told it has browser tools, and finds and c
 `tools` tool, so a chat that never opens a page carries none of their schemas. A lazy tool is still on
 like any other: a call is held to the allowlist and the other rules exactly as a direct one, and a
 switch that turns the browser off for a chat turns it off here too. This is for the portal's own browser tools;
-a browser attached as an MCP server cannot be lazy. See [Lazy tools](/guide/extensions#lazy-tools).
+a browser attached as an MCP server is lazy or not by that server's own "Register tools directly". See [Lazy tools](/guide/extensions#lazy-tools).
 :::
 
 Deliberately **not** gated on who is speaking. The agent has its own accounts and

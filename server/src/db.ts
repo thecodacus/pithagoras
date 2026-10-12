@@ -2,10 +2,10 @@ import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
-import { BUILT_IN_SET, DIRECT_TOOLS, PI_BUILT_IN_TOOLS, PICTURES_SET, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, PICTURES_SET, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
-import { mcpCatalogue, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
+import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
 import { mkdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
@@ -2364,11 +2364,13 @@ export function lazyToolSets(): string[] {
 }
 
 /**
- * Can this tool be lazy? Any tool can, but an MCP server's, one of pi's own, and the few that are followed as
- * the model types the call (DIRECT_TOOLS). The MCP adapter keeps a server's tools out of the prompt its own
- * way, through its `mcp` tool, and pi's built-in tools (read, bash, edit and the rest) are what a conversation
- * works with at all. Those are told by their names: the set they are filed in is the extension's that
- * registers them again, such as the sandbox's.
+ * Can this tool be marked lazy, and have the portal's `tools` tool reach it? Any tool can but pi's own
+ * (read, bash, edit and the rest are what a conversation works with at all), the MCP adapter's `mcp`
+ * tool, and an MCP server's. An MCP server's tool is lazy too, but not by a mark of the portal's: the
+ * adapter has a way of its own to keep a server's tools out of the prompt, through its `mcp` tool, and
+ * that is the server's setting "Register tools directly" (see lazyOfServer), the one switch for it. The
+ * built-in tools are told by their names: the set they are filed in is the extension's that registers
+ * them again, such as the sandbox's.
  */
 export function lazyAllowed(
   tool: Pick<KnownTool, "name" | "source"> & { package?: string | null; inline?: boolean; cached?: boolean },
@@ -2376,7 +2378,7 @@ export function lazyAllowed(
 ): boolean {
   if (tool.cached || adapterTool({ source: tool.source, package: tool.package })) return false;
   if (!noServerOf(tool.name) && mcpServerOf(tool.name, servers) !== undefined) return false;
-  if (PI_BUILT_IN_TOOLS.includes(tool.name) || DIRECT_TOOLS.includes(tool.name)) return false;
+  if (PI_BUILT_IN_TOOLS.includes(tool.name)) return false;
   return toolSetOf(tool, servers) !== BUILT_IN_SET;
 }
 
@@ -2397,6 +2399,22 @@ export function lazyToolNames(): Set<string> {
 }
 
 /**
+ * How a list of tools says which are lazy: not offered to the model one by one. Those the portal's `tools`
+ * tool reaches are the ones marked (lazyToolNames). An MCP server's tool is lazy when the adapter leaves it
+ * to its `mcp` tool, which is the server's setting "Register tools directly" turned off, and not by any
+ * mark: `mcp` names that server, for the page to say where the one switch for it is.
+ */
+export function lazyMarks(view: McpView = mcpView()): (tool: Pick<KnownTool, "name" | "source" | "package">) => { lazy?: true; mcp?: string } {
+  const portal = lazyToolNames();
+  return (tool) => {
+    const direct = view.direct(tool);
+    if (direct === undefined) return portal.has(tool.name) ? { lazy: true as const } : {};
+    const server = mcpServerOf(tool.name, view.servers);
+    return { ...(direct ? {} : { lazy: true as const }), ...(server !== undefined ? { mcp: server } : {}) };
+  };
+}
+
+/**
  * Of these marks, the ones that cannot be lazy: a set or a tool of an MCP server or of pi's own. Judged
  * by the tools the portal has seen of it; before it has seen one, by the name of the set. Any other mark is
  * let through, as it holds for the tools that turn up.
@@ -2407,7 +2425,7 @@ export function lazyRefused(marks: string[]): string[] {
   return clean(marks).filter((mark) => {
     const named = tools.filter((tool) => marksTool(mark, tool, servers));
     if (named.length) return named.every((tool) => !lazyAllowed(tool, servers));
-    return mark === BUILT_IN_SET || servers.includes(mark) || [...PI_BUILT_IN_TOOLS, ...DIRECT_TOOLS].some((name) => mark === lazyToolEntry(name));
+    return mark === BUILT_IN_SET || servers.includes(mark) || PI_BUILT_IN_TOOLS.some((name) => mark === lazyToolEntry(name));
   });
 }
 
@@ -2716,6 +2734,8 @@ function adapterTool(t: Pick<KnownTool, "source" | "package">): boolean {
  */
 export interface McpView {
   offers: (tool: Pick<KnownTool, "name" | "source" | "package">) => McpOffer | undefined;
+  /** Whether the adapter registers the tool one by one (`directTools`) and not through its `mcp` tool; undefined for a tool that is not a server's. */
+  direct: (tool: Pick<KnownTool, "name" | "source" | "package">) => boolean | undefined;
   /** Filed under the adapter by its label; `mcpCatalogueIn` files them under its package where a chat would load it. */
   catalogue: KnownTool[];
   serverTool: (name: string) => boolean;
@@ -2754,7 +2774,7 @@ function readMcpView(): McpView {
   let known: Map<string, KnownTool> | undefined;
   const knownNow = () => (known ??= new Map(knownTools().map((t) => [t.name, t])));
   if (!config) {
-    return { offers: () => undefined, catalogue: [], serverTool: () => false, servers: [], gone: [], known: knownNow };
+    return { offers: () => undefined, direct: () => undefined, catalogue: [], serverTool: () => false, servers: [], gone: [], known: knownNow };
   }
   const cache = readMcpCache();
   const offer = mcpOffer(config, cache);
@@ -2765,6 +2785,9 @@ function readMcpView(): McpView {
   }));
   const offers = (tool: Pick<KnownTool, "name" | "source" | "package">) =>
     adapterTool(tool) && !noServerOf(tool.name) ? offer(tool.name) : undefined;
+  const directly = mcpDirect(config, cache);
+  const direct = (tool: Pick<KnownTool, "name" | "source" | "package">) =>
+    adapterTool(tool) && !noServerOf(tool.name) ? directly(tool.name) : undefined;
   let reachable: Set<string> | undefined;
   const serverTool = (name: string) => {
     if (!reachable) {
@@ -2778,7 +2801,7 @@ function readMcpView(): McpView {
   };
   const servers = Object.keys(config.mcpServers ?? {});
   const gone = removedMcpServers().filter((name) => !servers.includes(name));
-  return { offers, catalogue, serverTool, servers, gone, known: knownNow };
+  return { offers, direct, catalogue, serverTool, servers, gone, known: knownNow };
 }
 
 /**

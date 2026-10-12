@@ -78,6 +78,13 @@ configured.
 costing roughly 150–300 tokens each. Worth it for a server with a handful of
 tools the agent uses constantly; expensive for a server with sixty.
 
+That is the same switch as **lazy** for an MCP server in [Settings → Tools](/guide/extensions#lazy-tools): off
+means lazy, and it is the default. The server's tools are then not in the system prompt, and the model finds
+and calls them through the `mcp` tool. The Tools page changes this one setting, for the whole server; a
+list of tool names under `directTools` in `mcp.json` is read as it stands, and the page shows each tool by it.
+Understory, which the portal sets up itself, keeps its tools registered directly. A change reaches the chats
+that start after it.
+
 `Only these tools` / `Except these tools` take names or globs and are the way to
 keep a large server from crowding the prompt.
 

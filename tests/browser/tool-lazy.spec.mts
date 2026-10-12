@@ -6,33 +6,53 @@ import { test, expect, mockPortal } from './portal-mock';
  * one, and the model reaches it through the `tools` tool. Opt-in, and no switch: the mark changes
  * nothing about whether a tool is on. The marking is the server's; the page shows the mark and sends it.
  */
-const tools: { name: string; source: string; noLazy?: true }[] = [
+const tools: { name: string; source: string; noLazy?: true; lazy?: true; mcp?: string }[] = [
   { name: 'heavy_open', source: 'pi-heavy' },
   { name: 'heavy_read', source: 'pi-heavy' },
   { name: 'web_search', source: 'pi-web-access' },
 ];
-/** What cannot be lazy: an MCP server's tool and one of pi's own, which the portal marks so. */
-const fixed: typeof tools = [
-  { name: 'notes_read', source: 'notes', noLazy: true },
-  { name: 'bash', source: 'built in', noLazy: true },
+/** What cannot be lazy: one of pi's own, which the portal marks so. */
+const fixed: typeof tools = [{ name: 'bash', source: 'built in', noLazy: true }];
+/** An MCP server's tools: lazy as the server's "Register tools directly" says, which the portal tells each tool by. */
+const servers: typeof tools = [
+  { name: 'notes_read', source: 'notes', mcp: 'notes', lazy: true },
+  { name: 'notes_write', source: 'notes', mcp: 'notes', lazy: true },
+  { name: 'memory_recall', source: 'memory', mcp: 'memory' },
 ];
 
 async function portal(page: Page, { lazy = [] as string[], off = [] as string[], more = [] as typeof tools } = {}) {
   const puts: string[][] = [];
+  /** The servers' "Register tools directly" as the page set it: [server, direct]. */
+  const directs: [string, boolean][] = [];
   await mockPortal(page, async ({ path: p, method, json }) => {
     if (p === '/api/tools' && method === 'GET') {
       const marked = (name: string, source: string) => lazy.includes(source) || lazy.includes(`<tool>${name}`);
-      return { tools: [...tools, ...more].map((tool) => ({ ...tool, defaultOn: !off.includes(tool.name), ...(marked(tool.name, tool.source) ? { lazy: true } : {}) })), off, names: {}, lazy };
+      return {
+        tools: [...tools, ...more].map((tool) => ({
+          ...tool,
+          defaultOn: !off.includes(tool.name),
+          // An MCP server's tool says for itself (`lazy` above); the others are lazy as marked.
+          ...(!tool.mcp && marked(tool.name, tool.source) ? { lazy: true } : {}),
+        })),
+        off,
+        names: {},
+        lazy,
+      };
     }
     if (p === '/api/tools/lazy' && method === 'PUT') {
       const { lazy: wanted } = json();
       puts.push(wanted);
       return { lazy: wanted, applied: 0 };
     }
+    const direct = /^\/api\/mcp\/servers\/([^/]+)\/direct$/.exec(p);
+    if (direct && method === 'PUT') {
+      directs.push([decodeURIComponent(direct[1]), json().direct]);
+      return { ok: true, direct: json().direct };
+    }
   }, { settings: true });
   await page.addInitScript(() => localStorage.removeItem('toolGroupsOpen'));
   await page.goto('/settings/tools');
-  return { puts };
+  return { puts, directs };
 }
 
 test('nothing is lazy until it is marked: no mark, every tool on', async ({ page }) => {
@@ -90,17 +110,48 @@ test('a lazy set is shown as lazy and can be made ordinary again', async ({ page
   await expect(page.getByRole('button', { name: /^pi-heavy/ })).toContainText('2 on');
 });
 
-test('an MCP server\'s tools and pi\'s own have no lazy mark to set', async ({ page }) => {
+test('pi\'s own tools have no lazy mark to set, and the groups that can be lazy have it', async ({ page }) => {
   await portal(page, { more: fixed });
-  // The headers of the groups that can be lazy have it, those of the groups that cannot do not.
   await expect(page.getByRole('button', { name: 'Lazy pi-heavy' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Lazy notes' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Lazy built in' })).toHaveCount(0);
-  await page.getByRole('button', { name: /^notes/ }).click();
   await page.getByRole('button', { name: /^built in/ }).click();
-  await expect(page.getByRole('checkbox', { name: /notes_read/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Lazy notes_read' })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: /bash/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Lazy bash' })).toHaveCount(0);
+});
+
+test('an MCP server\'s group has the lazy button, and it is the server\'s Register tools directly: lazy is off, and a tool cannot differ from its server', async ({ page }) => {
+  const { puts, directs } = await portal(page, { more: servers });
+  const notes = page.getByRole('button', { name: 'Lazy notes', exact: true });
+  const memory = page.getByRole('button', { name: 'Lazy memory', exact: true });
+  // Lazy is the adapter's default; a server that registers its tools directly (Understory, for one) is not.
+  await expect(notes).toHaveAttribute('aria-pressed', 'true');
+  await expect(memory).toHaveAttribute('aria-pressed', 'false');
+  await expect(notes).toHaveAttribute('title', /through the `mcp` tool/);
+  await expect(notes).toHaveAttribute('title', /Register tools directly/);
+  await page.getByRole('button', { name: /^notes/ }).click();
+  const read = page.getByRole('button', { name: 'Lazy notes_read' });
+  await expect(read).toHaveAttribute('aria-pressed', 'true');
+  await expect(read).toBeDisabled();
+  await expect(read).toHaveAttribute('title', /Set for the whole server/);
+
+  // Registering the tools directly: the setting of the server, and no mark of the portal's.
+  await notes.click();
+  await expect.poll(() => directs).toEqual([['notes', true]]);
+  await expect(notes).toHaveAttribute('aria-pressed', 'false');
+  await expect(read).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Lazy notes_write' })).toHaveAttribute('aria-pressed', 'false');
+  // The server's tools are on as they were.
+  await expect(page.getByRole('button', { name: /^notes/ })).toContainText('2 on');
+  // And lazy again.
+  await notes.click();
+  await expect.poll(() => directs).toEqual([['notes', true], ['notes', false]]);
+  await expect(notes).toHaveAttribute('aria-pressed', 'true');
+  await expect(read).toHaveAttribute('aria-pressed', 'true');
+  // A server that registers its tools directly can be lazy too, from its own button.
+  await memory.click();
+  await expect.poll(() => directs.at(-1)).toEqual(['memory', false]);
+  await expect(memory).toHaveAttribute('aria-pressed', 'true');
+  expect(puts).toEqual([]);
 });
 
 test('a lazy tool carries its label in a project\'s switches, and keeps it as the switch is flipped off and on', async ({ page }) => {

@@ -59,8 +59,8 @@ import {
   shownTools,
   toolDefaultsOff,
   lazyAllowed,
+  lazyMarks,
   lazyRefused,
-  lazyToolNames,
   lazyToolSets,
   setLazyToolSets,
   toolGroupNames,
@@ -573,7 +573,7 @@ app.put("/api/projects/:name/tools", async (req, res) => {
  */
 function layerTools(folder: string, below: string[], exceptions: { off: string[]; on: string[] }, unwatched = false) {
   const servers = mcpServerNames();
-  const lazy = lazyToolNames();
+  const lazy = lazyMarks();
   return {
     // A routine's runs have nobody to ask (see asksQuestions), so its page does not offer the tool.
     tools: shownTools(folder).filter((tool) => !(unwatched && tool.name === ASK_QUESTION_TOOL && tool.inline)).map((tool) => ({
@@ -581,7 +581,7 @@ function layerTools(folder: string, below: string[], exceptions: { off: string[]
       source: toolSource(tool.name, tool.source, servers),
       enabled: toolEnabled(tool.name, below, exceptions),
       defaultOn: !below.includes(tool.name),
-      ...(lazy.has(tool.name) ? { lazy: true as const } : {}),
+      ...lazy(tool),
     })),
     live: false,
     names: toolGroupNames(),
@@ -1177,17 +1177,20 @@ app.get("/api/tools", (_req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
-  const lazy = lazyToolNames();
+  const lazy = lazyMarks();
   res.json({
-    tools: shownTools().map((tool) => ({
-      ...tool,
-      source: toolSource(tool.name, tool.source, servers),
-      defaultOn: !off.has(tool.name),
-      // Not offered one by one, but found through the `tools` tool.
-      ...(lazy.has(tool.name) ? { lazy: true as const } : {}),
-      // An MCP server's tool, one of pi's own or canvas_write: the page offers no lazy mark for it.
-      ...(lazyAllowed(tool, servers) ? {} : { noLazy: true as const }),
-    })),
+    tools: shownTools().map((tool) => {
+      const marks = lazy(tool);
+      return {
+        ...tool,
+        source: toolSource(tool.name, tool.source, servers),
+        defaultOn: !off.has(tool.name),
+        // Not offered one by one: found through the `tools` tool, or for an MCP server's tool through `mcp`, where `mcp` is the server whose setting says so.
+        ...marks,
+        // Neither marked nor set on a server: pi's own tools and the adapter's `mcp` tool, which the page offers no lazy mark for.
+        ...(lazyAllowed(tool, servers) || marks.mcp !== undefined ? {} : { noLazy: true as const }),
+      };
+    }),
     off: [...off].sort(),
     names: toolGroupNames(),
     lazy: lazyToolSets(),
@@ -1232,8 +1235,9 @@ app.put("/api/tools", async (req, res) => {
 /**
  * Which tools are lazy: tool sets, named as the boxes of the tools list name them, and single tools
  * (`<tool>name`). A lazy tool is on like any other, but is not in the model's prompt: it finds it
- * through the `tools` tool. The marks reach the running conversations too. An MCP server's tools, pi's
- * own and canvas_write cannot be lazy, and a mark that names them is refused.
+ * through the `tools` tool. The marks reach the running conversations too. An MCP server's tools are
+ * lazy by the server's own setting (`PUT /api/mcp/servers/:name/direct`) and pi's own cannot be lazy,
+ * and a mark that names them is refused.
  */
 app.put("/api/tools/lazy", async (req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
@@ -1243,7 +1247,7 @@ app.put("/api/tools/lazy", async (req, res) => {
   const before = lazyToolSets();
   const refused = lazyRefused(lazy.filter((mark) => !before.includes(mark)));
   if (refused.length) {
-    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. An MCP server's tools, pi's built-in tools and canvas_write are always offered.`, code: "lazy-refused" });
+    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. An MCP server's tools are lazy by the server's own setting (Register tools directly), and pi's built-in tools are always offered.`, code: "lazy-refused" });
   }
   const stored = setLazyToolSets(lazy);
   const applied = await sessions.applyToolDefaults();
