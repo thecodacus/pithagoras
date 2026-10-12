@@ -4,6 +4,8 @@ import path from "node:path";
 import express, { type Request, type Response, type Router } from "express";
 import { getSession } from "../db.js";
 import { unsavedRefusal } from "../git.js";
+import { parseRange } from "../http-range.js";
+import { openVideo } from "../video-files.js";
 import {
   ARCHIVE_EXCLUDES,
   FileError,
@@ -70,6 +72,52 @@ export function sendPicture(req: Request, res: Response, opened: ReturnType<type
   const stream = createReadStream("", { fd, start: 0, end: Math.max(0, size - 1) });
   stream.on("error", (e) => {
     console.error("[portal] files: picture failed:", e.message);
+    res.destroy();
+  });
+  res.on("close", () => stream.destroy());
+  stream.pipe(res);
+}
+
+/**
+ * Sends a clip that was opened by openVideo, as sendPicture sends a picture and under the same policy, and with
+ * what a player needs: it asks for the part of the file it is about to show (`Range`), and is answered with just
+ * that, so that a clip of tens of megabytes starts at once and can be moved around in. The descriptor is
+ * closed with the response, or at once if the response is already gone.
+ */
+export function sendVideo(req: Request, res: Response, opened: ReturnType<typeof openVideo>, cache: string): void {
+  const { fd, size, mimeType } = opened;
+  if (res.destroyed) return void closeSync(fd);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+  res.setHeader("Cache-Control", cache);
+  res.setHeader("Accept-Ranges", "bytes");
+  const modified = fstatSync(fd).mtime;
+  const etag = `"${size.toString(16)}-${modified.getTime().toString(16)}"`;
+  res.setHeader("ETag", etag);
+  res.setHeader("Last-Modified", modified.toUTCString());
+  if (req.fresh) {
+    closeSync(fd);
+    return void res.status(304).end();
+  }
+  // A range goes with the version of the file the player has: for another it is the whole of this one (If-Range).
+  const ifRange = req.headers["if-range"] as string | undefined;
+  const sameFile = !ifRange || ifRange === etag || Date.parse(ifRange) === Math.floor(modified.getTime() / 1000) * 1000;
+  const range = sameFile ? parseRange(req.headers.range, size) : ({ kind: "all" } as const);
+  if (range.kind === "unsatisfiable") {
+    closeSync(fd);
+    res.setHeader("Content-Range", `bytes */${size}`);
+    return void res.status(416).end();
+  }
+  const [start, end] = range.kind === "range" ? [range.start, range.end] : [0, Math.max(0, size - 1)];
+  res.setHeader("Content-Type", mimeType);
+  if (range.kind === "range") {
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${size}`);
+  }
+  res.setHeader("Content-Length", range.kind === "range" ? end - start + 1 : size);
+  const stream = createReadStream("", { fd, start, end });
+  stream.on("error", (e) => {
+    console.error("[portal] files: video failed:", e.message);
     res.destroy();
   });
   res.on("close", () => stream.destroy());
@@ -162,6 +210,23 @@ export function filesRouter(): Router {
     // The agent rewrites files in place, so the browser asks every time — and
     // is told it already has it unless the file changed.
     sendPicture(req, res, opened, "private, no-cache");
+  });
+
+  /**
+   * A clip in the folder, played in the page rather than downloaded: for what the agent makes with
+   * generate_video and puts in front of the person with show_video. Only what its bytes say is a WebM or
+   * an MP4 is sent, with that type and under the same policy as a picture, and in parts where the player asks.
+   */
+  router.get("/sessions/:id/video", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    let opened: ReturnType<typeof openVideo>;
+    try {
+      opened = openVideo(base, req.query.path);
+    } catch (e) {
+      return fail(res, e);
+    }
+    sendVideo(req, res, opened, "private, no-cache");
   });
 
   router.put("/sessions/:id/file", (req, res) => {

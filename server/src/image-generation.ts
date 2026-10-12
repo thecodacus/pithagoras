@@ -184,7 +184,7 @@ export interface ImageGenerationPatch {
 }
 
 /** An API address as the settings keep it, or the reason it is not one. */
-function parseBase(value: unknown): { base: string } | { error: string } {
+export function parseBase(value: unknown): { base: string } | { error: string } {
   if (typeof value !== "string") return { error: "The address must be text" };
   const given = value.trim();
   if (!given) return { base: "" };
@@ -244,7 +244,7 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
   return patch;
 }
 
-const originOf = (address: string): string => {
+export const originOf = (address: string): string => {
   try {
     return new URL(address).origin;
   } catch {
@@ -307,7 +307,7 @@ export function endpointUrl(baseUrl: string): URL {
 }
 
 /** `message` without the key, in case the server repeated it. */
-const without = (message: string, key: string): string => (key ? message.split(key).join("[key]") : message);
+export const without = (message: string, key: string): string => (key ? message.split(key).join("[key]") : message);
 
 const seconds = (ms: number) => Math.round(ms / 1000);
 
@@ -428,27 +428,48 @@ async function post(endpoint: URL, apiKey: string, body: string | FormData, sign
   const sent = typeof body === "string" ? undefined : new Response(body);
   const bytes = sent ? Buffer.from(await sent.arrayBuffer()) : Buffer.from(body as string);
   const type = sent ? sent.headers.get("content-type") : "application/json";
+  return sendRequest(endpoint, apiKey, { method: "POST", signal, body: bytes, type: type ?? undefined, what: "image endpoint" });
+}
+
+/**
+ * One request to an endpoint, answered once the headers are in: the way every request to an image or video endpoint
+ * is made (see `post`). `body` is the bytes of a request that has one, and `type` its content type. The key goes with
+ * this request to this address and is not followed anywhere else: a redirect is refused, naming `what` the endpoint is,
+ * as the error `fail` makes of it.
+ */
+export function sendRequest(
+  endpoint: URL,
+  apiKey: string,
+  options: { method: "GET" | "POST"; signal: AbortSignal; body?: Buffer; type?: string; what: string; fail?: (message: string) => Error },
+): Promise<http.IncomingMessage> {
+  const { method, signal, body, type, what, fail = (message) => new ImageGenerationError(message) } = options;
   return new Promise((resolve, reject) => {
     const request = endpoint.protocol === "https:" ? https.request : http.request;
     const req = request(
       endpoint,
       {
-        method: "POST",
+        method,
         signal,
         // fetch sent one, and some endpoints sit behind a firewall that refuses a request with none.
-        headers: { "user-agent": "pithagoras", ...(type ? { "content-type": type } : {}), "content-length": bytes.length, accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+        headers: {
+          "user-agent": "pithagoras",
+          ...(type ? { "content-type": type } : {}),
+          ...(body ? { "content-length": body.length } : {}),
+          accept: "application/json",
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
       },
       (res) => {
         const status = res.statusCode ?? 0;
         if (status >= 300 && status < 400 && res.headers.location) {
           res.resume();
-          return reject(new ImageGenerationError("The image endpoint answered with a redirect, which is not followed: give the address it redirects to"));
+          return reject(fail(`The ${what} answered with a redirect, which is not followed: give the address it redirects to`));
         }
         resolve(res);
       },
     );
     req.on("error", reject);
-    req.end(bytes);
+    req.end(body);
   });
 }
 
@@ -469,14 +490,14 @@ function fromBase64(given: string, max: number): Buffer {
   return decoded.bytes;
 }
 
-/** A body read up to a limit, which is not read past. */
-async function readBody(stream: AsyncIterable<Uint8Array> | null, max: number, what: string): Promise<Buffer> {
+/** A body read up to a limit, which is not read past; `fail` makes the error of one that is over it. */
+export async function readBody(stream: AsyncIterable<Uint8Array> | null, max: number, what: string, fail: (message: string) => Error = (message) => new ImageGenerationError(message)): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   if (!stream) return Buffer.alloc(0);
   for await (const chunk of stream) {
     total += chunk.length;
-    if (total > max) throw new ImageGenerationError(`${what} is over ${Math.round(max / 1024 / 1024)} MB`);
+    if (total > max) throw fail(`${what} is over ${Math.round(max / 1024 / 1024)} MB`);
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);

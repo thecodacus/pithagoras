@@ -1,0 +1,891 @@
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { request } from "node:http";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import sharp from "sharp";
+import { inProcessHome } from "./helpers.mts";
+import { KEY, MP4, PNG, WEBM, completed, fakeSd } from "./video-fixtures.mts";
+
+// The clips of the Videos page: the gallery, its jobs, its API, the agent's tool and the posters.
+const temp = realpathSync(inProcessHome("pitha-vgallery-"));
+const root = process.env.WORKSPACE_ROOT!;
+mkdirSync(root, { recursive: true });
+
+const express = (await import("express")).default;
+const gen = await import("../server/src/video-generation.ts");
+const gallery = await import("../server/src/video-gallery.ts");
+const jobsModule = await import("../server/src/video-jobs.ts");
+const posters = await import("../server/src/video-posters.ts");
+const images = await import("../server/src/image-gallery.ts");
+const { videosRouter } = await import("../server/src/api/videos.ts");
+const { filesRouter } = await import("../server/src/api/files.ts");
+const { featuresRouter } = await import("../server/src/api/features.ts");
+const { GenerateVideoTool } = await import("../server/src/pi/generate-video-tool.ts");
+const { showVideoTool, videoIn } = await import("../server/src/pi/show-video-tool.ts");
+const { GENERATED_VIDEO_MARK } = await import("../server/src/generated-video.ts");
+const { MAX_RUNNING_VIDEOS } = await import("../server/src/video-settings.ts");
+const { MAX_VIDEO_BYTES } = await import("../server/src/video-files.ts");
+const { createSession, deleteSession, getDb } = await import("../server/src/db.ts");
+const { GENERATED_VIDEOS_DIR } = gallery;
+
+const app = express()
+  .use(express.json({ limit: "2mb" }))
+  .use("/api", featuresRouter(), videosRouter(), filesRouter());
+const portal = app.listen(0, "127.0.0.1");
+await new Promise((r) => portal.once("listening", r));
+after(() => portal.close());
+const at = `http://127.0.0.1:${(portal.address() as { port: number }).port}/api`;
+
+/** A call to the API, and what it answered; none ever has the key in it. */
+async function call(method: string, p: string, body?: unknown, headers: Record<string, string> = {}) {
+  const r = await fetch(`${at}${p}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const bytes = Buffer.from(await r.arrayBuffer());
+  assert.ok(!bytes.includes(KEY), `${method} ${p} gave the key back`);
+  const type = r.headers.get("content-type") ?? "";
+  return { status: r.status, headers: r.headers, bytes, body: type.includes("json") ? JSON.parse(bytes.toString("utf8")) : undefined };
+}
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Waits until none of the jobs is running, and returns them. */
+async function settled(): Promise<any[]> {
+  for (let i = 0; i < 400; i++) {
+    const { jobs } = (await call("GET", "/videos/jobs")).body;
+    if (jobs.every((j: any) => j.state !== "running")) return jobs;
+    await pause(25);
+  }
+  assert.fail("a job never ended");
+}
+/** No job of an earlier test is left to be told apart from this one's. */
+async function clearJobs() {
+  for (const job of (await call("GET", "/videos/jobs")).body.jobs) await call("DELETE", `/videos/jobs/${job.id}`);
+}
+const setup = (origin: string, more: Parameters<typeof gen.saveVideoGeneration>[0] = {}) =>
+  gen.saveVideoGeneration({ enabled: true, baseUrl: origin, apiKey: KEY, model: "", size: "", frames: null, fps: null, storageLimitMb: null, ...more });
+const off = () => gen.saveVideoGeneration({ enabled: false });
+const listed = async (query = "") => (await call("GET", `/videos${query}`)).body;
+/** A chat with a folder of its own. */
+function chat(id: string, title = "A chat") {
+  const folder = mkdtempSync(path.join(temp, "chat-"));
+  createSession({ id, title, workspace: folder, executor: "host" });
+  return folder;
+}
+/** A project: a folder under the workspace root, with a folder of generated clips if asked. */
+const project = (name: string, generated = true) => {
+  const folder = path.join(root, name);
+  mkdirSync(generated ? path.join(folder, GENERATED_VIDEOS_DIR) : folder, { recursive: true });
+  return folder;
+};
+const put = (folder: string, name: string, bytes: Buffer = WEBM) => {
+  mkdirSync(path.join(folder, GENERATED_VIDEOS_DIR), { recursive: true });
+  const file = path.join(folder, GENERATED_VIDEOS_DIR, name);
+  writeFileSync(file, bytes);
+  return file;
+};
+/** A clip of a different content, as a file: the bytes of the real one with a tail that tells two apart. */
+const clip = (tag: string) => Buffer.concat([WEBM, Buffer.from(tag)]);
+
+test("a clip is made without any chat: a job, a clip in the gallery that is sent, and the key stays on the server", async () => {
+  const sd = await fakeSd();
+  await clearJobs();
+  try {
+    setup(sd.origin, { model: "saved" });
+    const start = await call("POST", "/videos/generate", { prompt: "  a fox in the snow  ", size: "832x480", frames: 33, fps: 16, seed: 7, sampleSteps: 20, negativePrompt: "blurry", count: 2 });
+    assert.equal(start.status, 202, "answered at once, without waiting for the endpoint");
+    assert.equal(start.body.jobs.length, 2);
+    assert.deepEqual(start.body.jobs.map((j: any) => [j.kind, j.size, j.state]), [["generate", "832x480", "running"], ["generate", "832x480", "running"]]);
+    const done = await settled();
+    assert.deepEqual(done.map((j) => j.state), ["done", "done"]);
+
+    const bodies = sd.to("POST", "/sdcpp/v1/vid_gen").map((s) => s.body);
+    assert.deepEqual(bodies.map((b) => b.seed).sort(), [7, 8], "each clip takes the next seed");
+    assert.deepEqual(bodies[0], { prompt: "a fox in the snow", model: "saved", negative_prompt: "blurry", width: 832, height: 480, video_frames: 33, fps: 16, seed: bodies[0].seed, sample_params: { sample_steps: 20 }, output_format: "webm" });
+    assert.ok(sd.seen.every((s) => s.auth === `Bearer ${KEY}`));
+
+    const list = await listed();
+    assert.equal(list.total, 2);
+    assert.equal(list.videos.length, 2);
+    const first = list.videos[0];
+    assert.deepEqual(
+      { origin: first.origin, kind: first.kind, prompt: first.prompt, chat: first.chat, folder: first.folder, bytes: first.bytes },
+      { origin: "page", kind: "generated", prompt: "a fox in the snow", chat: null, folder: null, bytes: WEBM.length },
+    );
+    assert.deepEqual(
+      { model: first.params.model, size: first.params.size, frames: first.params.frames, fps: first.params.fps, madeFrames: first.params.madeFrames, madeFps: first.params.madeFps, negativePrompt: first.params.negativePrompt },
+      { model: "saved", size: "832x480", frames: 33, fps: 16, madeFrames: 33, madeFps: 16, negativePrompt: "blurry" },
+    );
+    assert.match(first.fileName, /^video-\d{8}-\d{6}-[0-9a-f]{4}\.webm$/);
+    assert.equal(list.pageBytes, WEBM.length * 2);
+    // Both jobs say which clip they made.
+    assert.deepEqual(new Set(done.map((j) => j.videoId)), new Set(list.videos.map((v: any) => v.id)));
+
+    const file = await call("GET", `/videos/${first.id}/file`);
+    assert.equal(file.status, 200);
+    assert.deepEqual(file.bytes, WEBM);
+    assert.equal(file.headers.get("content-type"), "video/webm");
+    assert.equal(file.headers.get("accept-ranges"), "bytes");
+    assert.equal(file.headers.get("x-content-type-options"), "nosniff");
+    assert.match(file.headers.get("content-security-policy") ?? "", /sandbox/);
+    assert.equal(file.headers.get("cache-control"), "private, max-age=86400");
+  } finally {
+    sd.server.close();
+    await clearJobs();
+  }
+});
+
+test("a player is sent the part of a clip it asks for, and the whole one when the range does not hold", async () => {
+  const sd = await fakeSd();
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    const { jobs } = (await call("POST", "/videos/generate", { prompt: "range" })).body;
+    await settled();
+    const { videoId } = (await call("GET", "/videos/jobs")).body.jobs.find((j: any) => j.id === jobs[0].id);
+    const file = `/videos/${videoId}/file`;
+    const size = WEBM.length;
+
+    const part = await call("GET", file, undefined, { range: "bytes=10-19" });
+    assert.equal(part.status, 206);
+    assert.equal(part.headers.get("content-range"), `bytes 10-19/${size}`);
+    assert.equal(part.headers.get("content-length"), "10");
+    assert.deepEqual(part.bytes, WEBM.subarray(10, 20));
+    assert.equal(part.headers.get("content-type"), "video/webm");
+
+    const open = await call("GET", file, undefined, { range: "bytes=100-" });
+    assert.equal(open.status, 206);
+    assert.deepEqual(open.bytes, WEBM.subarray(100));
+    const tail = await call("GET", file, undefined, { range: "bytes=-16" });
+    assert.equal(tail.headers.get("content-range"), `bytes ${size - 16}-${size - 1}/${size}`);
+    assert.deepEqual(tail.bytes, WEBM.subarray(size - 16));
+
+    const past = await call("GET", file, undefined, { range: `bytes=${size}-` });
+    assert.equal(past.status, 416);
+    assert.equal(past.headers.get("content-range"), `bytes */${size}`);
+    // Several ranges, or nonsense, are answered with the whole clip, as is a range of a version the player does not have.
+    assert.deepEqual((await call("GET", file, undefined, { range: "bytes=0-1,5-6" })).bytes, WEBM);
+    assert.equal((await call("GET", file, undefined, { range: "items=1-2" })).status, 200);
+    const etag = part.headers.get("etag")!;
+    assert.equal((await call("GET", file, undefined, { range: "bytes=0-3", "if-range": etag })).status, 206, "the version it has");
+    const other = await call("GET", file, undefined, { range: "bytes=0-3", "if-range": '"not-this-one"' });
+    assert.equal(other.status, 200, "another version: the whole of this one");
+    assert.deepEqual(other.bytes, WEBM);
+    // A player that has the clip is told so (not through fetch, which asks for a fresh one whenever it asks with a validator).
+    const asked = await new Promise<number>((resolve, reject) => {
+      const req = request(`${at}${file}`, { headers: { "if-none-match": etag } }, (res) => (res.resume(), resolve(res.statusCode ?? 0)));
+      req.on("error", reject).end();
+    });
+    assert.equal(asked, 304);
+  } finally {
+    sd.server.close();
+    await clearJobs();
+  }
+});
+
+test("while a clip is made the job says whether it waits its turn on the server or is being made, and a stop leaves the queue and makes no clip", async () => {
+  const sd = await fakeSd({ jobs: [{ status: "queued", queue_position: 3 }, { status: "generating" }] });
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    const before = (await listed()).total;
+    const { jobs } = (await call("POST", "/videos/generate", { prompt: "slow" })).body;
+    let seen: any;
+    for (let i = 0; i < 200 && seen?.stage !== "waiting"; i++) {
+      seen = (await call("GET", "/videos/jobs")).body.jobs.find((j: any) => j.id === jobs[0].id);
+      await pause(20);
+    }
+    assert.deepEqual([seen.state, seen.stage, seen.queuePosition], ["running", "waiting", 3]);
+    // The server moves it on (the next question is one second after the first).
+    for (let i = 0; i < 200 && seen?.stage !== "making"; i++) {
+      seen = (await call("GET", "/videos/jobs")).body.jobs.find((j: any) => j.id === jobs[0].id);
+      await pause(25);
+    }
+    assert.deepEqual([seen.state, seen.stage, seen.queuePosition], ["running", "making", undefined]);
+
+    assert.equal((await call("DELETE", `/videos/jobs/${jobs[0].id}`)).status, 200);
+    assert.equal((await call("GET", "/videos/jobs")).body.jobs.length, 0, "forgotten");
+    for (let i = 0; i < 100 && !sd.to("POST", `/sdcpp/v1/jobs/job_1/cancel`).length; i++) await pause(20);
+    assert.equal(sd.to("POST", "/sdcpp/v1/jobs/job_1/cancel").length, 1, "the server is told to drop it");
+    assert.equal((await listed()).total, before, "no clip comes of it");
+    assert.equal((await call("DELETE", `/videos/jobs/${jobs[0].id}`)).status, 404);
+  } finally {
+    sd.server.close();
+    await clearJobs();
+  }
+});
+
+test("a clip that is not made says why in the endpoint's words, and Dismiss clears it", async () => {
+  const sd = await fakeSd({ jobs: [{ status: "failed", error: { code: "generation_failed", message: "out of memory" } }] });
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    await call("POST", "/videos/generate", { prompt: "fails" });
+    const [job] = await settled();
+    assert.equal(job.state, "failed");
+    assert.match(job.error, /could not make the clip: out of memory/);
+    assert.equal(job.videoId, undefined);
+    assert.equal((await call("DELETE", `/videos/jobs/${job.id}`)).status, 200);
+    assert.deepEqual((await call("GET", "/videos/jobs")).body.jobs, []);
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("a request that is wrong is refused with the reason, and makes nothing", async () => {
+  const sd = await fakeSd();
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    const refuse = async (body: unknown, status: number, why: RegExp) => {
+      const r = await call("POST", "/videos/generate", body);
+      assert.equal(r.status, status, JSON.stringify(body));
+      assert.match(r.body.error, why, JSON.stringify(body));
+    };
+    await refuse({}, 400, /A prompt is required/);
+    await refuse({ prompt: "  " }, 400, /A prompt is required/);
+    await refuse({ prompt: "x".repeat(4001) }, 400, /over 4000 characters/);
+    await refuse({ prompt: "x", count: 0 }, 400, /from 1 to 4/);
+    await refuse({ prompt: "x", count: 5 }, 400, /from 1 to 4/);
+    await refuse({ prompt: "x", size: "63x480" }, 400, /size looks like/);
+    await refuse({ prompt: "x", frames: 0 }, 400, /frames/);
+    await refuse({ prompt: "x", fps: 500 }, 400, /frame rate/);
+    await refuse({ prompt: "x", seed: -5 }, 400, /seed/);
+    await refuse({ prompt: "x", firstFrame: "../etc/passwd" }, 400, /named by its id/);
+    await refuse({ prompt: "x", firstFrame: 5 }, 400, /named by its id/);
+    await refuse({ prompt: "x", firstFrame: "aaaaaaaaaaaa" }, 400, /The first frame: There is no such picture/);
+    assert.equal(sd.seen.length, 0, "nothing was asked of the endpoint");
+    assert.deepEqual((await call("GET", "/videos/jobs")).body.jobs, []);
+
+    off();
+    await refuse({ prompt: "x" }, 409, /switched off, or has no address.*Settings → Agent → Videos/);
+    gen.saveVideoGeneration({ baseUrl: "" });
+    await refuse({ prompt: "x" }, 409, /switched off/);
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("only a few clips are made at once, and the guard says how many", async () => {
+  const sd = await fakeSd({ jobs: [{ status: "generating" }] });
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    assert.equal(MAX_RUNNING_VIDEOS, 4);
+    assert.equal((await call("POST", "/videos/generate", { prompt: "a", count: 3 })).status, 202);
+    const more = await call("POST", "/videos/generate", { prompt: "b", count: 2 });
+    assert.equal(more.status, 429);
+    assert.match(more.body.error, /Only 1 more can be made now, as 4 are made at a time/);
+    assert.equal((await call("POST", "/videos/generate", { prompt: "c" })).status, 202);
+    const full = await call("POST", "/videos/generate", { prompt: "d" });
+    assert.equal(full.status, 429);
+    assert.match(full.body.error, /4 clips are being made already/);
+    assert.equal((await call("GET", "/videos/jobs")).body.limit, 4);
+  } finally {
+    await clearJobs();
+    sd.server.close();
+  }
+});
+
+test("the clips made on the page stop when they take the disk the person allowed", async () => {
+  const sd = await fakeSd();
+  await clearJobs();
+  try {
+    setup(sd.origin, { storageLimitMb: 1 });
+    // A clip of a little over a megabyte: its head is a clip's, the rest is padding.
+    const big = gallery.addPageVideo({ bytes: Buffer.concat([WEBM, Buffer.alloc(1024 * 1024)]), ext: "webm", kind: "generated", prompt: "big", params: {} });
+    const refused = await call("POST", "/videos/generate", { prompt: "one more" });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /take 1 MB, which is the limit set in Settings → Agent → Videos\. Delete some clips, or raise the limit/);
+    assert.equal(sd.seen.length, 0);
+    // Raised, or the clip deleted, it goes ahead.
+    setup(sd.origin, { storageLimitMb: 10 });
+    assert.equal((await call("POST", "/videos/generate", { prompt: "one more" })).status, 202);
+    await settled();
+    setup(sd.origin, { storageLimitMb: 1 });
+    assert.equal((await call("DELETE", `/videos/${big.id}`)).status, 200);
+    assert.equal((await call("POST", "/videos/generate", { prompt: "and another" })).status, 202);
+    await settled();
+    // Only the page's own clips are counted: the agent's are in the folders of its chats.
+    const folder = chat("limit-chat");
+    gallery.recordChatVideo({ sessionId: "limit-chat", path: `${GENERATED_VIDEOS_DIR}/x.webm`, kind: "generated", prompt: "chat", params: {}, bytes: 500 * 1024 * 1024 });
+    assert.ok(folder);
+    assert.equal((await call("POST", "/videos/generate", { prompt: "still room" })).status, 202);
+  } finally {
+    await settled();
+    sd.server.close();
+    setup("http://unused.example", { storageLimitMb: null });
+    off();
+  }
+});
+
+test("a clip can start from a picture of the Images page, which goes to the server as the first frame", async () => {
+  const sd = await fakeSd();
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    const picture = images.addPagePicture({ bytes: PNG, ext: "png", kind: "uploaded", prompt: "start.png", params: {} });
+    const start = await call("POST", "/videos/generate", { prompt: "it starts to rain", firstFrame: picture.id });
+    assert.equal(start.status, 202);
+    assert.deepEqual([start.body.jobs[0].kind, start.body.jobs[0].from], ["animate", picture.id]);
+    await settled();
+    assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen")[0].body.init_image, `data:image/png;base64,${PNG.toString("base64")}`);
+    const [video] = (await listed("?kind=animated")).videos;
+    assert.equal(video.kind, "animated");
+    assert.deepEqual(video.params.firstFrame, { picture: picture.id });
+    assert.equal((await listed("?kind=generated")).videos.filter((v: any) => v.id === video.id).length, 0, "filtered by how it was made");
+    // The picture it was made from can be gone: the clip does not depend on it.
+    await images.deletePicture(picture.id);
+    assert.equal((await call("GET", `/videos/${video.id}/file`)).status, 200);
+    assert.deepEqual((await listed(`?ids=${video.id}`)).videos.map((v: any) => v.params.firstFrame), [{ picture: picture.id }]);
+  } finally {
+    sd.server.close();
+    await clearJobs();
+  }
+});
+
+test("the gallery is filtered, paged and looked up by id, and what is asked wrong is said", async () => {
+  const sd = await fakeSd();
+  try {
+    setup(sd.origin);
+    for (let i = 0; i < 3; i++) gallery.addPageVideo({ bytes: clip(`p${i}`), ext: "webm", kind: "generated", prompt: `paged ${i}`, params: {} });
+    const all = await listed("?limit=100");
+    const mine = all.videos.filter((v: any) => v.prompt.startsWith("paged"));
+    assert.equal(mine.length, 3);
+    const first = await listed("?limit=2");
+    assert.equal(first.videos.length, 2);
+    assert.match(first.next, /^\d+:[0-9a-f]+$/);
+    const second = await listed(`?limit=2&before=${first.next}`);
+    assert.equal(first.videos.at(-1).id === second.videos[0].id, false, "the next page starts after the first");
+    assert.ok(first.videos.every((v: any, i: number) => i === 0 || v.createdAt <= first.videos[i - 1].createdAt), "newest first");
+    assert.deepEqual((await listed(`?ids=${mine[0].id},aaaaaaaaaaaa,${mine[1].id}`)).videos.map((v: any) => v.id), [mine[0].id, mine[1].id], "those that there are, in the order given");
+    assert.equal((await listed("?origin=chat")).videos.filter((v: any) => v.origin !== "chat").length, 0);
+    for (const bad of ["origin=elsewhere", "kind=edited", "before=oops", "limit=0", "limit=101", "limit=x", "ids=nope"]) {
+      assert.equal((await call("GET", `/videos?${bad}`)).status, 400, bad);
+    }
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("a clip is deleted with its file, singly or several at once, and what could not be is said", async () => {
+  const page = gallery.addPageVideo({ bytes: clip("a"), ext: "webm", kind: "generated", prompt: "mine", params: {} });
+  const second = gallery.addPageVideo({ bytes: clip("b"), ext: "webm", kind: "generated", prompt: "mine too", params: {} });
+  const third = gallery.addPageVideo({ bytes: clip("c"), ext: "webm", kind: "generated", prompt: "and this", params: {} });
+  const dir = path.join(temp, "videos");
+  assert.ok(readdirSync(dir).some((f) => f.startsWith(page.id)));
+  assert.equal((await call("DELETE", `/videos/${page.id}`)).status, 200);
+  assert.ok(!readdirSync(dir).some((f) => f.startsWith(page.id)), "the file went with the clip");
+  assert.equal((await call("GET", `/videos/${page.id}/file`)).status, 404);
+  assert.equal((await call("DELETE", `/videos/${page.id}`)).status, 404);
+  const bulk = await call("POST", "/videos/delete", { ids: [second.id, third.id, "aaaaaaaaaaaa", second.id] });
+  assert.deepEqual(bulk.body.deleted, [second.id, third.id]);
+  assert.deepEqual(bulk.body.failed, [{ id: "aaaaaaaaaaaa", error: "There is no such video" }]);
+  assert.equal((await call("POST", "/videos/delete", { ids: [] })).status, 400);
+  assert.equal((await call("POST", "/videos/delete", { ids: ["x"] })).status, 400);
+  assert.equal((await call("POST", "/videos/delete", { ids: Array.from({ length: 201 }, (_, i) => i.toString(16).padStart(12, "0")) })).status, 400);
+});
+
+test("a file that has stopped being a clip is not served, and a file that is gone leaves the list", async () => {
+  const kept = gallery.addPageVideo({ bytes: clip("k"), ext: "webm", kind: "generated", prompt: "keep", params: {} });
+  const swapped = gallery.addPageVideo({ bytes: clip("s"), ext: "webm", kind: "generated", prompt: "swapped", params: {} });
+  const lost = gallery.addPageVideo({ bytes: clip("l"), ext: "webm", kind: "generated", prompt: "lost", params: {} });
+  const dir = path.join(temp, "videos");
+  writeFileSync(path.join(dir, `${swapped.id}.webm`), '<html><script>alert(1)</script></html>');
+  rmSync(path.join(dir, `${lost.id}.webm`));
+  const refused = await call("GET", `/videos/${swapped.id}/file`);
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /not a WebM or MP4/);
+  assert.equal((await call("GET", `/videos/${lost.id}/file`)).status, 404);
+  assert.equal((await call("GET", `/videos/${kept.id}/file`)).status, 200);
+  const ids = (await listed("?limit=100")).videos.map((v: any) => v.id);
+  assert.ok(ids.includes(kept.id));
+  assert.ok(!ids.includes(lost.id), "a clip whose file is gone is dropped from the list");
+  // A file too large for a clip is not played either.
+  const huge = gallery.addPageVideo({ bytes: clip("h"), ext: "webm", kind: "generated", prompt: "huge", params: {} });
+  writeFileSync(path.join(dir, `${huge.id}.webm`), Buffer.concat([WEBM, Buffer.alloc(MAX_VIDEO_BYTES)]));
+  const big = await call("GET", `/videos/${huge.id}/file`);
+  assert.equal(big.status, 413);
+  rmSync(path.join(dir, `${huge.id}.webm`));
+});
+
+// --- the agent ---
+
+/** The tool as pi gets it, and a way to call it. */
+function load(folder: string, sessionId?: string) {
+  const tool = new GenerateVideoTool(folder, () => [], sessionId);
+  const registered: any[] = [];
+  tool.extension({ registerTool: (t: any) => registered.push(t) });
+  return { tool, registered, run: (p: any, signal?: AbortSignal) => registered[0].execute("id", p, signal) };
+}
+
+test("while video generation is off, or has no address, neither tool is there at all", () => {
+  off();
+  const folder = chat("tool-off");
+  assert.deepEqual(load(folder).registered, []);
+  assert.equal(load(folder).tool.registered(), false);
+  const shown: any[] = [];
+  showVideoTool(folder)({ registerTool: (t: any) => shown.push(t) });
+  assert.deepEqual(shown, []);
+
+  gen.saveVideoGeneration({ baseUrl: "https://video.example.com", enabled: true });
+  const on = load(folder);
+  assert.deepEqual(on.registered.map((t) => t.name), ["generate_video"]);
+  assert.equal(on.tool.registered(), true);
+  showVideoTool(folder)({ registerTool: (t: any) => shown.push(t) });
+  assert.deepEqual(shown.map((t) => t.name), ["show_video"]);
+  // Loaded again after a switch, as pi does on a reload: it follows.
+  off();
+  on.tool.extension({ registerTool: () => assert.fail("not while it is off") });
+  assert.equal(on.tool.registered(), false);
+  // An extension's tool of the same name is the one pi keeps.
+  gen.saveVideoGeneration({ enabled: true });
+  const taken = new GenerateVideoTool(folder, () => [{ path: "/some/ext.ts", tools: new Map([["generate_video", { definition: { name: "generate_video" } }]]) }]);
+  taken.extension({ registerTool: () => {} });
+  assert.equal(taken.registered(), false);
+});
+
+test("the tool makes a clip in the chat's folder, answers as show_image does, and lists it in the gallery", async () => {
+  const folder = chat("tool-chat", "The tool's chat");
+  const sd = await fakeSd({ capabilities: { supported_modes: ["vid_gen"], output_formats_by_mode: { vid_gen: ["webm"] }, defaults_by_mode: { vid_gen: { fps: 20 } } } });
+  try {
+    setup(sd.origin, { model: "video-model", size: "640x384" });
+    const { run, registered } = load(folder, "tool-chat");
+    assert.deepEqual(Object.keys(registered[0].parameters.properties).sort(), ["path", "prompt", "seconds", "size", "title"]);
+    assert.ok(!JSON.stringify(registered[0]).includes(KEY));
+
+    const result = await run({ prompt: "  a fox in the snow  ", title: "Fox", size: "832x480", seconds: 2 });
+    assert.match(result.details.path, new RegExp(`^${GENERATED_VIDEOS_DIR}/video-\\d{8}-\\d{6}-[0-9a-f]{6}\\.webm$`));
+    assert.deepEqual(result.details, { path: result.details.path, title: "Fox", [GENERATED_VIDEO_MARK]: true });
+    assert.ok(!path.isAbsolute(result.details.path), "a path in the chat's folder, which is what the page asks for");
+    assert.match(result.content[0].text, /shown to the user/i);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBM);
+    assert.deepEqual(readdirSync(folder), [GENERATED_VIDEOS_DIR], "nothing else was made in the folder");
+    assert.deepEqual(sd.to("POST", "/sdcpp/v1/vid_gen")[0].body, { prompt: "a fox in the snow", model: "video-model", width: 832, height: 480, video_frames: 40, fps: 20, output_format: "webm" });
+
+    // Listed with what it was asked for, as a clip of this chat.
+    const [video] = (await listed("?origin=chat&limit=100")).videos.filter((v: any) => v.chat?.id === "tool-chat");
+    assert.deepEqual([video.origin, video.kind, video.prompt, video.chat, video.fileName], ["chat", "generated", "a fox in the snow", { id: "tool-chat", title: "The tool's chat" }, path.basename(result.details.path)]);
+    assert.deepEqual([video.params.model, video.params.size, video.params.madeFrames, video.params.madeFps], ["video-model", "832x480", 33, 16]);
+    assert.equal((await call("GET", `/videos/${video.id}/file`)).status, 200);
+
+    // The page plays it from the chat's folder, by its path.
+    const played = await fetch(`${at}/sessions/tool-chat/video?path=${encodeURIComponent(result.details.path)}`, { headers: { range: "bytes=0-3" } });
+    assert.equal(played.status, 206);
+    assert.deepEqual(Buffer.from(await played.arrayBuffer()), WEBM.subarray(0, 4));
+    assert.equal(played.headers.get("content-type"), "video/webm");
+
+    // Without a title the prompt is the caption; a second one never takes the first's place.
+    const again = await run({ prompt: "a fox\nin   the snow" });
+    assert.equal(again.details.title, "a fox in the snow");
+    assert.notEqual(again.details.path, result.details.path);
+    assert.equal(readdirSync(path.join(folder, GENERATED_VIDEOS_DIR)).length, 2);
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("the tool starts from a picture of the chat's folder, and only from one", async () => {
+  const folder = chat("tool-frame");
+  const sd = await fakeSd();
+  try {
+    setup(sd.origin);
+    writeFileSync(path.join(folder, "start.png"), PNG);
+    mkdirSync(path.join(folder, "sub"));
+    writeFileSync(path.join(folder, "sub", "later.png"), PNG);
+    writeFileSync(path.join(folder, "notes.txt"), "not a picture");
+    const outside = path.join(temp, "outside.png");
+    writeFileSync(outside, PNG);
+    const { run } = load(folder, "tool-frame");
+
+    const made = await run({ prompt: "it moves", path: "sub/../start.png" });
+    assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen")[0].body.init_image, `data:image/png;base64,${PNG.toString("base64")}`);
+    const [video] = (await listed("?limit=100")).videos.filter((v: any) => v.chat?.id === "tool-frame");
+    assert.deepEqual([video.kind, video.params.firstFrame], ["animated", { path: "start.png" }]);
+    assert.equal(made.details.path, video.fileName ? `${GENERATED_VIDEOS_DIR}/${video.fileName}` : "");
+    await run({ prompt: "absolute", path: path.join(folder, "sub", "later.png") });
+    assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen").length, 2);
+
+    const before = sd.to("POST", "/sdcpp/v1/vid_gen").length;
+    await assert.rejects(run({ prompt: "x", path: outside }), /Only a picture in the chat's folder can be used as the first frame/);
+    await assert.rejects(run({ prompt: "x", path: "../outside.png" }), /Only a picture in the chat's folder/);
+    await assert.rejects(run({ prompt: "x", path: "notes.txt" }), /not a PNG, JPEG, GIF or WebP picture/);
+    await assert.rejects(run({ prompt: "x", path: "missing.png" }), /no such file/i);
+    assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen").length, before, "nothing was sent for any of them");
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("what the tool is given is checked before anything is sent, and a call that fails leaves no file and no folder behind", async () => {
+  const folder = chat("tool-bad");
+  const sd = await fakeSd({ jobs: [{ status: "failed", error: { message: "no memory" } }] });
+  try {
+    setup(sd.origin);
+    const { run } = load(folder, "tool-bad");
+    for (const [p, why] of [
+      [{ prompt: "" }, /A prompt is required/],
+      [{ prompt: "x".repeat(4001) }, /over 4000 characters/],
+      [{ prompt: "x", size: "auto" }, /size looks like/],
+      [{ prompt: "x", seconds: 0 }, /number of seconds/],
+      [{ prompt: "x", seconds: -2 }, /number of seconds/],
+      [{ prompt: "x", seconds: 601 }, /number of seconds/],
+      [{ prompt: "x", seconds: "long" }, /number of seconds/],
+    ] as const) await assert.rejects(run(p), why);
+    assert.equal(sd.seen.length, 0);
+    await assert.rejects(run({ prompt: "fails" }), /could not make the clip: no memory/);
+    assert.deepEqual(readdirSync(folder), [], "no folder was made for a clip that did not come");
+    off();
+    await assert.rejects(run({ prompt: "x" }), /switched off, or has no address now/);
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("the time limit of the settings is the one a call of the tool is held to, and stopping the chat stops the wait", async () => {
+  const folder = chat("tool-slow");
+  const sd = await fakeSd({ jobs: [{ status: "generating" }] });
+  try {
+    setup(sd.origin);
+    // 30 seconds is the least a limit may be: a call is stopped with the chat long before that.
+    const stop = new AbortController();
+    const { run } = load(folder, "tool-slow");
+    const running = run({ prompt: "slow" }, stop.signal);
+    for (let i = 0; i < 100 && sd.to("GET", "/sdcpp/v1/jobs/job_1").length < 1; i++) await pause(10);
+    stop.abort();
+    await assert.rejects(running, (e: Error) => !(e instanceof gen.VideoGenerationError));
+    assert.deepEqual(readdirSync(folder), []);
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("show_video shows a clip of the chat's folder by its bytes, and nothing else", async () => {
+  const folder = chat("tool-show");
+  gen.saveVideoGeneration({ baseUrl: "https://video.example.com", enabled: true });
+  mkdirSync(path.join(folder, "clips"));
+  writeFileSync(path.join(folder, "clips", "a.webm"), WEBM);
+  writeFileSync(path.join(folder, "b.mp4"), MP4);
+  writeFileSync(path.join(folder, "c.webm"), "<script>alert(1)</script>");
+  writeFileSync(path.join(folder, "d.png"), PNG);
+  writeFileSync(path.join(temp, "outside.webm"), WEBM);
+  symlinkSync(path.join(temp, "outside.webm"), path.join(folder, "link.webm"));
+  const tools: any[] = [];
+  showVideoTool(folder)({ registerTool: (t: any) => tools.push(t) });
+  const show = (p: any) => tools[0].execute("id", p);
+  assert.deepEqual((await show({ path: "clips/a.webm", title: " A clip " })).details, { path: "clips/a.webm", title: "A clip" });
+  assert.deepEqual((await show({ path: path.join(folder, "b.mp4") })).details, { path: "b.mp4" });
+  await assert.rejects(show({ path: "c.webm" }), /not a WebM or MP4/);
+  await assert.rejects(show({ path: "d.png" }), /not a WebM or MP4/);
+  await assert.rejects(show({ path: path.join(temp, "outside.webm") }), /Only a video in the chat's folder/);
+  await assert.rejects(show({ path: "link.webm" }), /./, "a link out of the folder is not followed");
+  assert.equal(videoIn(folder, "b.mp4"), "b.mp4");
+  off();
+});
+
+test("the chat's video route plays a clip from the chat's folder only, by its bytes", async () => {
+  const folder = chat("route-chat");
+  mkdirSync(path.join(folder, "sub"));
+  writeFileSync(path.join(folder, "sub", "a.webm"), WEBM);
+  writeFileSync(path.join(folder, "fake.webm"), "<html></html>");
+  writeFileSync(path.join(folder, "pic.png"), PNG);
+  writeFileSync(path.join(temp, "secret.webm"), WEBM);
+  symlinkSync(path.join(temp, "secret.webm"), path.join(folder, "out.webm"));
+  const ask = (p: string, headers: Record<string, string> = {}) => fetch(`${at}/sessions/route-chat/video?path=${encodeURIComponent(p)}`, { headers });
+  assert.equal((await ask("sub/a.webm")).status, 200);
+  assert.equal((await ask("sub/a.webm", { range: "bytes=0-9" })).status, 206);
+  assert.equal((await ask("sub/a.webm", { range: "bytes=999999-" })).status, 416);
+  assert.equal((await ask("fake.webm")).status, 400);
+  assert.equal((await ask("pic.png")).status, 400, "a picture is not a clip");
+  assert.equal((await ask("../secret.webm")).status, 400);
+  assert.equal((await ask("out.webm")).status >= 400, true, "no link is followed out of the folder");
+  assert.equal((await ask("nothing.webm")).status, 404);
+  assert.equal((await fetch(`${at}/sessions/no-such-chat/video?path=x`)).status, 404);
+});
+
+// --- the folders ---
+
+test("every clip in the folders the tool writes into is listed, recorded or not, and nothing else is", async () => {
+  const alpha = project("alpha");
+  const gamma = project("gamma", false);
+  const outside = path.join(temp, "outside-folder");
+  mkdirSync(path.join(outside, "videos"), { recursive: true });
+  writeFileSync(path.join(outside, "secret.webm"), clip("secret"));
+  writeFileSync(path.join(outside, "videos", "linked-dir.webm"), clip("linked-dir"));
+
+  put(alpha, "video-20260102-120000-abc123.webm", clip("g"));
+  put(alpha, "clip.mp4", MP4);
+  put(alpha, "no extension", clip("w"));
+  put(alpha, "disguised.txt", clip("d"));
+  // What is not: no clip by its bytes, an empty file, a hidden one, a picture, a QuickTime movie.
+  put(alpha, "notes.txt", Buffer.from("hello"));
+  put(alpha, "fake.webm", Buffer.from("<html><script>alert(1)</script></html>"));
+  put(alpha, "empty.webm", Buffer.alloc(0));
+  put(alpha, ".half-written.upload", clip("half"));
+  put(alpha, "pic.png", PNG);
+  put(alpha, "movie.mov", Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(40)]));
+  symlinkSync(path.join(outside, "secret.webm"), path.join(alpha, GENERATED_VIDEOS_DIR, "linked.webm"));
+  symlinkSync(path.join(alpha, GENERATED_VIDEOS_DIR, "clip.mp4"), path.join(alpha, GENERATED_VIDEOS_DIR, "alias.mp4"));
+  symlinkSync(path.join(outside, "videos"), path.join(gamma, GENERATED_VIDEOS_DIR));
+  // Not where the tool writes: beside the folder, below it, and in a folder of the workspace that no chat works in.
+  writeFileSync(path.join(alpha, "loose.webm"), clip("loose"));
+  mkdirSync(path.join(alpha, GENERATED_VIDEOS_DIR, "sub"));
+  writeFileSync(path.join(alpha, GENERATED_VIDEOS_DIR, "sub", "deep.webm"), clip("deep"));
+
+  const found = (await listed("?origin=folder&limit=100")).videos;
+  const names = found.map((v: any) => v.fileName).sort();
+  assert.deepEqual(names, ["clip.mp4", "disguised.txt", "no extension", "video-20260102-120000-abc123.webm"]);
+  assert.ok(found.every((v: any) => v.origin === "folder" && v.chat === null && v.folder.name === "alpha" && v.prompt === ""));
+  assert.deepEqual(found.map((v: any) => [v.fileName, v.kind]).sort(), [["clip.mp4", "unknown"], ["disguised.txt", "unknown"], ["no extension", "unknown"], ["video-20260102-120000-abc123.webm", "generated"]]);
+  // They play, whatever they are called.
+  const one = found.find((v: any) => v.fileName === "clip.mp4");
+  const played = await call("GET", `/videos/${one.id}/file`);
+  assert.deepEqual([played.status, played.headers.get("content-type")], [200, "video/mp4"]);
+  assert.deepEqual(played.bytes, MP4);
+  assert.equal(one.params && Object.keys(one.params).length, 0);
+
+  // Looked at again, nothing is listed twice; a clip that is added since is found when the page looks.
+  put(alpha, "added-later.webm", clip("later"));
+  const again = (await listed("?origin=folder&limit=100")).videos;
+  assert.equal(again.length, found.length + 1);
+  assert.equal(new Set(again.map((v: any) => v.id)).size, again.length);
+  // A page that asks again for a list it has does not look through the files within the minute.
+  put(alpha, "too-soon.webm", clip("soon"));
+  assert.equal((await listed("?origin=folder&limit=100&again=1")).videos.length, again.length);
+  assert.equal((await listed("?origin=folder&limit=100")).videos.length, again.length + 1);
+  for (const f of ["added-later.webm", "too-soon.webm"]) rmSync(path.join(alpha, GENERATED_VIDEOS_DIR, f));
+});
+
+test("a clip the agent made is the same file as the one a look through the folder finds: one entry, with what it was asked for", async () => {
+  const alpha = project("recorded");
+  const rel = `${GENERATED_VIDEOS_DIR}/video-20260103-100000-aaaaaa.webm`;
+  put(alpha, path.basename(rel), clip("rec"));
+  const found = (await listed("?origin=folder&limit=100")).videos.find((v: any) => v.fileName === path.basename(rel));
+  assert.ok(found, "found by the look");
+  const chatId = "recorded-chat";
+  createSession({ id: chatId, title: "Recorded", workspace: alpha, executor: "host" });
+  gallery.recordChatVideo({ sessionId: chatId, path: rel, kind: "generated", prompt: "what it was asked", params: { model: "m" }, bytes: 80 });
+  const all = (await listed("?limit=100")).videos.filter((v: any) => v.fileName === path.basename(rel));
+  assert.equal(all.length, 1, "one entry for one file");
+  assert.deepEqual([all[0].origin, all[0].prompt, all[0].chat], ["chat", "what it was asked", { id: chatId, title: "Recorded" }]);
+  // A name that comes back is a new clip: its file was taken away by something that did not tell the list.
+  rmSync(path.join(alpha, rel));
+  put(alpha, path.basename(rel), clip("rec again"));
+  gallery.recordChatVideo({ sessionId: chatId, path: rel, kind: "generated", prompt: "the second time", params: {}, bytes: 90 });
+  const renewed = (await listed("?limit=100")).videos.filter((v: any) => v.fileName === path.basename(rel));
+  assert.deepEqual(renewed.map((v: any) => v.prompt), ["the second time"]);
+});
+
+test("the clips of a chat that is deleted stay, as clips of its folder with what they were asked for", async () => {
+  // A folder the portal looks in: a project's, which a chat works in.
+  const folder = project("gone-project");
+  createSession({ id: "gone-chat", title: "Soon gone", workspace: folder, executor: "host" });
+  put(folder, "video-20260104-100000-bbbbbb.webm", clip("kept"));
+  gallery.recordChatVideo({ sessionId: "gone-chat", path: `${GENERATED_VIDEOS_DIR}/video-20260104-100000-bbbbbb.webm`, kind: "generated", prompt: "remember me", params: { size: "832x480" }, bytes: 80 });
+  deleteSession("gone-chat");
+  const kept = (await listed("?limit=100")).videos.filter((v: any) => v.fileName === "video-20260104-100000-bbbbbb.webm");
+  assert.equal(kept.length, 1);
+  assert.deepEqual([kept[0].origin, kept[0].chat, kept[0].prompt, kept[0].params.size], ["folder", null, "remember me", "832x480"]);
+  assert.equal((await call("GET", `/videos/${kept[0].id}/file`)).status, 200);
+  // Deleting the clip takes the file from the folder, the chat being gone or not.
+  assert.equal((await call("DELETE", `/videos/${kept[0].id}`)).status, 200);
+  assert.equal(existsSync(path.join(folder, GENERATED_VIDEOS_DIR, "video-20260104-100000-bbbbbb.webm")), false);
+});
+
+test("a clip of a folder that is out of reach for the moment stays in the list, and one whose file is gone does not", async () => {
+  const folder = chat("away-chat", "Away");
+  put(folder, "video-20260105-100000-cccccc.webm", clip("away"));
+  put(folder, "video-20260105-100001-dddddd.webm", clip("lost"));
+  for (const name of ["video-20260105-100000-cccccc.webm", "video-20260105-100001-dddddd.webm"]) {
+    gallery.recordChatVideo({ sessionId: "away-chat", path: `${GENERATED_VIDEOS_DIR}/${name}`, kind: "generated", prompt: name, params: {}, bytes: 80 });
+  }
+  rmSync(path.join(folder, GENERATED_VIDEOS_DIR, "video-20260105-100001-dddddd.webm"));
+  const there = async () => (await listed("?limit=100")).videos.filter((v: any) => v.chat?.id === "away-chat").map((v: any) => v.fileName);
+  assert.deepEqual(await there(), ["video-20260105-100000-cccccc.webm"], "the file that is gone is dropped");
+  // The folder is moved away, as a drive that is not mounted: its clips are not gone.
+  const moved = `${folder}-moved`;
+  renameSync(folder, moved);
+  assert.deepEqual(await there(), ["video-20260105-100000-cccccc.webm"]);
+  const id = (await listed("?limit=100")).videos.find((v: any) => v.chat?.id === "away-chat").id;
+  assert.equal((await call("DELETE", `/videos/${id}`)).status, 404, "a delete does not claim the file is gone");
+  assert.equal(((await listed("?limit=100")).videos.filter((v: any) => v.chat?.id === "away-chat")).length, 1);
+  renameSync(moved, folder);
+  assert.equal((await call("GET", `/videos/${id}/file`)).status, 200, "back, it plays again");
+});
+
+test("the clips of a folder the portal removes go with it, those of its chats included", async () => {
+  const doomed = project("doomed");
+  put(doomed, "video-20260106-100000-eeeeee.webm", clip("doomed"));
+  createSession({ id: "doomed-chat", title: "In the doomed project", workspace: doomed, executor: "host" });
+  gallery.recordChatVideo({ sessionId: "doomed-chat", path: `${GENERATED_VIDEOS_DIR}/video-20260106-100000-eeeeee.webm`, kind: "generated", prompt: "doomed", params: {}, bytes: 80 });
+  put(doomed, "found.webm", clip("found"));
+  const names = async () => (await listed("?limit=100")).videos.filter((v: any) => /doomed|found\.webm/.test(`${v.prompt}${v.fileName}`)).map((v: any) => v.fileName).sort();
+  assert.deepEqual(await names(), ["found.webm", "video-20260106-100000-eeeeee.webm"]);
+  rmSync(doomed, { recursive: true });
+  assert.equal(gallery.forgetVideosIn(doomed), 2);
+  assert.deepEqual(await names(), []);
+});
+
+// --- the settings, as the page reads and writes them ---
+
+test("the page reads the settings without the key, and writes them with every change checked", async () => {
+  gen.saveVideoGeneration({ enabled: false, baseUrl: "", apiKey: "" });
+  const sd = await fakeSd();
+  try {
+    const flags = async () => (await call("GET", "/features/flags")).body;
+    assert.deepEqual((await flags()).videos, { enabled: false });
+    assert.equal((await call("PUT", "/features/videos", { enabled: true })).status, 400, "no address to ask yet");
+    const saved = await call("PUT", "/features/videos", { baseUrl: sd.origin, apiKey: KEY, model: "m", enabled: true, timeoutSeconds: 600, frames: 33, fps: 16, storageLimitMb: 500 });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body.videos, {
+      enabled: true, backend: "sdcpp", baseUrl: sd.origin, model: "m", size: "", frames: 33, fps: 16, timeoutSeconds: 600, storageLimitMb: 500,
+      keySet: true, ready: true, backends: [{ id: "sdcpp", label: "stable-diffusion.cpp" }],
+    });
+    assert.equal(saved.body.changed, true, "the chats that are idle learn of the tools");
+    assert.deepEqual((await flags()).videos, { enabled: true });
+    const read = await call("GET", "/features/videos");
+    assert.equal(read.body.videos.keySet, true);
+    assert.equal((await call("PUT", "/features/videos", { model: "n" })).body.changed, false, "no reload for what is read at each call");
+    assert.equal((await call("PUT", "/features/videos", { fps: 500 })).status, 400);
+    assert.equal((await call("PUT", "/features/videos", { baseUrl: "ftp://x" })).status, 400);
+    assert.equal((await call("PUT", "/features/videos", { apiKey: "" })).body.videos.keySet, false, "an empty key takes the saved one away");
+  } finally {
+    sd.server.close();
+    off();
+  }
+});
+
+// --- the posters ---
+
+/** A stand-in for ffmpeg: it says it is there, records how it was run, and answers with a frame. */
+function fakeFfmpeg(dir: string, frame: Buffer) {
+  mkdirSync(dir, { recursive: true });
+  const log = path.join(dir, "args.log");
+  const png = path.join(dir, "frame.png");
+  writeFileSync(png, frame);
+  const script = path.join(dir, "ffmpeg");
+  writeFileSync(script, `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\necho "$@" >> ${JSON.stringify(log)}\ncat > /dev/null\ncat ${JSON.stringify(png)}\n`);
+  chmodSync(script, 0o755);
+  return { script, log };
+}
+const HAVE_FFMPEG = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
+
+test("without ffmpeg there are no posters, and the clips are listed and played as they were", async () => {
+  process.env.FFMPEG_PATH = path.join(temp, "no-such-ffmpeg");
+  posters.forgetPosterProbe();
+  try {
+    const video = gallery.addPageVideo({ bytes: clip("no poster"), ext: "webm", kind: "generated", prompt: "no ffmpeg", params: {} });
+    assert.equal(posters.posterAvailable(), false);
+    assert.equal((await listed(`?ids=${video.id}`)).videos[0].poster, false);
+    const poster = await call("GET", `/videos/${video.id}/poster`);
+    assert.equal(poster.status, 404);
+    assert.equal((await call("GET", `/videos/${video.id}/file`)).status, 200);
+    assert.equal((await call("GET", "/videos/aaaaaaaaaaaa/poster")).status, 404);
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+  }
+});
+
+test("a poster is made once from the first frame, small, and kept; it is made again when the file changes, and goes with the clip", async () => {
+  const frame = await sharp({ create: { width: 1600, height: 900, channels: 3, background: { r: 200, g: 30, b: 30 } } }).png().toBuffer();
+  const tool = fakeFfmpeg(path.join(temp, "fake-ffmpeg"), frame);
+  process.env.FFMPEG_PATH = tool.script;
+  posters.forgetPosterProbe();
+  try {
+    const video = gallery.addPageVideo({ bytes: clip("poster"), ext: "webm", kind: "generated", prompt: "with poster", params: {} });
+    assert.equal(posters.posterAvailable(), true);
+    assert.equal((await listed(`?ids=${video.id}`)).videos[0].poster, true);
+
+    const first = await call("GET", `/videos/${video.id}/poster`);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("content-type"), "image/webp");
+    const meta = await sharp(first.bytes).metadata();
+    assert.deepEqual([meta.format, meta.width, meta.height], ["webp", posters.POSTER_SIDE, 270], "a frame of 1600 by 900, small, with its shape");
+    assert.ok(first.bytes.length < 30 * 1024);
+    // ffmpeg took the clip on its standard input and may open nothing else.
+    const runs = readFileSync(tool.log, "utf8").trim().split("\n");
+    assert.equal(runs.length, 1);
+    assert.match(runs[0], /-protocol_whitelist pipe -i pipe:0 -frames:v 1 -f image2pipe -vcodec png pipe:1$/);
+    assert.ok(!runs[0].includes(video.id) && !runs[0].includes(temp), "no path of the clip is given to it");
+
+    // Kept: the second time ffmpeg is not run.
+    assert.equal((await call("GET", `/videos/${video.id}/poster`)).status, 200);
+    assert.equal(readFileSync(tool.log, "utf8").trim().split("\n").length, 1);
+    const dir = posters.postersDir();
+    assert.equal(readdirSync(dir).filter((n) => n.startsWith(video.id)).length, 1);
+
+    // The file written over gets a poster of its own, and the old one goes.
+    writeFileSync(path.join(temp, "videos", `${video.id}.webm`), clip("a different poster"));
+    assert.equal((await call("GET", `/videos/${video.id}/poster`)).status, 200);
+    assert.equal(readFileSync(tool.log, "utf8").trim().split("\n").length, 2);
+    assert.equal(readdirSync(dir).filter((n) => n.startsWith(video.id)).length, 1);
+
+    // Gone with its clip.
+    assert.equal((await call("DELETE", `/videos/${video.id}`)).status, 200);
+    assert.equal(readdirSync(dir).filter((n) => n.startsWith(video.id)).length, 0);
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+  }
+});
+
+test("a frame that ffmpeg cannot make is no poster, and only a few are made at the same time", async () => {
+  const dir = path.join(temp, "failing-ffmpeg");
+  mkdirSync(dir, { recursive: true });
+  const script = path.join(dir, "ffmpeg");
+  writeFileSync(script, `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\ncat > /dev/null\necho "Invalid data found when processing input" >&2\nexit 1\n`);
+  chmodSync(script, 0o755);
+  process.env.FFMPEG_PATH = script;
+  posters.forgetPosterProbe();
+  try {
+    const video = gallery.addPageVideo({ bytes: clip("broken"), ext: "webm", kind: "generated", prompt: "broken", params: {} });
+    const failed = await call("GET", `/videos/${video.id}/poster`);
+    assert.equal(failed.status, 404, "the page falls back to the clip's own first frame");
+    assert.equal(existsSync(posters.postersDir()) ? readdirSync(posters.postersDir()).filter((n) => n.startsWith(video.id)).length : 0, 0);
+
+    // Many asked at once: ffmpeg is run for at most two of them at a time.
+    const slow = path.join(dir, "slow");
+    mkdirSync(slow);
+    const frame = await sharp({ create: { width: 32, height: 32, channels: 3, background: "#123456" } }).png().toBuffer();
+    writeFileSync(path.join(slow, "frame.png"), frame);
+    writeFileSync(path.join(slow, "ffmpeg"), `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\ncat > /dev/null\nsleep 0.3\ncat ${JSON.stringify(path.join(slow, "frame.png"))}\n`);
+    chmodSync(path.join(slow, "ffmpeg"), 0o755);
+    process.env.FFMPEG_PATH = path.join(slow, "ffmpeg");
+    posters.forgetPosterProbe();
+    const many = Array.from({ length: 6 }, (_, i) => gallery.addPageVideo({ bytes: clip(`many ${i}`), ext: "webm", kind: "generated", prompt: `many ${i}`, params: {} }));
+    const answers = await Promise.all(many.map((v) => call("GET", `/videos/${v.id}/poster`)));
+    assert.ok(answers.every((a) => a.status === 200));
+    assert.ok(posters.posterJobsPeak() <= posters.POSTER_JOBS, `${posters.posterJobsPeak()} at once`);
+    assert.equal(posters.posterJobsPeak(), posters.POSTER_JOBS, "and they did run side by side");
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+  }
+});
+
+test("a poster is made from a real clip by the ffmpeg that is installed", { skip: HAVE_FFMPEG ? false : "ffmpeg is not installed here" }, async () => {
+  delete process.env.FFMPEG_PATH;
+  posters.forgetPosterProbe();
+  const webm = gallery.addPageVideo({ bytes: WEBM, ext: "webm", kind: "generated", prompt: "real webm", params: {} });
+  const mp4 = gallery.addPageVideo({ bytes: MP4, ext: "mp4", kind: "generated", prompt: "real mp4", params: {} });
+  for (const video of [webm, mp4]) {
+    const poster = await call("GET", `/videos/${video.id}/poster`);
+    assert.equal(poster.status, 200, video.prompt);
+    const meta = await sharp(poster.bytes).metadata();
+    assert.deepEqual([meta.format, meta.width, meta.height], ["webp", 64, 64], video.prompt);
+  }
+  // A clip that ffmpeg cannot read gets none, and the page its own first frame.
+  const damaged = gallery.addPageVideo({ bytes: Buffer.concat([WEBM.subarray(0, 64), Buffer.alloc(200, 7)]), ext: "webm", kind: "generated", prompt: "damaged", params: {} });
+  assert.equal((await call("GET", `/videos/${damaged.id}/poster`)).status, 404);
+});
+
+test("the schema keeps a clip's place once, in the folder of the chat or in the folder it was found in", () => {
+  const d = getDb();
+  const insert = (id: string, session: string | null, folder: string | null, p: string) =>
+    d.prepare("INSERT INTO videos (id, origin, session_id, folder, path, kind, created_at) VALUES (?, ?, ?, ?, ?, 'unknown', 1)").run(id, folder ? "folder" : "chat", session, folder, p);
+  insert("a1a1a1a1a1a1", "unique-chat", null, "generated-videos/x.webm");
+  assert.throws(() => insert("a2a2a2a2a2a2", "unique-chat", null, "generated-videos/x.webm"), /UNIQUE/);
+  insert("b1b1b1b1b1b1", null, "/some/folder", "generated-videos/x.webm");
+  assert.throws(() => insert("b2b2b2b2b2b2", null, "/some/folder", "generated-videos/x.webm"), /UNIQUE/);
+  d.prepare("DELETE FROM videos WHERE id IN ('a1a1a1a1a1a1', 'b1b1b1b1b1b1')").run();
+  assert.ok(jobsModule.listJobs);
+});

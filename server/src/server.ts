@@ -90,6 +90,8 @@ import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
 import { imagesRouter } from "./api/images.js";
 import { forgetPicturesIn } from "./image-gallery.js";
+import { videosRouter } from "./api/videos.js";
+import { forgetVideosIn } from "./video-gallery.js";
 import { memoryRouter } from "./api/memory.js";
 import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
@@ -725,6 +727,7 @@ app.delete("/api/projects/:name", async (req, res) => {
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       forgetPicturesIn(project.path);
+      forgetVideosIn(project.path);
       clearProjectTools(project.name);
       clearProjectAgent(project.name);
       const switchedOff = switchOffRoutines([...routines, ...late]);
@@ -783,7 +786,10 @@ app.delete("/api/agents/:id", async (req, res) => {
       // The projects that worked with it are blank slates again.
       releaseProjectsOf(agent.id);
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
-      if (req.query.folder === "delete") forgetPicturesIn(agent.home);
+      if (req.query.folder === "delete") {
+        forgetPicturesIn(agent.home);
+        forgetVideosIn(agent.home);
+      }
       deleteNotesOf(agent.id);
       // With its folder they have nowhere left to run, and an agent made under the
       // same name must not take them over. Kept with the folder, they stay, switched off.
@@ -1533,6 +1539,7 @@ app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
 app.use("/api", imagesRouter());
+app.use("/api", videosRouter());
 app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", agentsRouter());
