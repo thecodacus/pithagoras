@@ -81,11 +81,42 @@ tools the agent uses constantly; expensive for a server with sixty.
 `Only these tools` / `Except these tools` take names or globs and are the way to
 keep a large server from crowding the prompt.
 
+## What the tool lists show
+
+In the Tools lists (Settings → Tools, an agent's, a project's, a routine's, a
+chat's) an MCP server is a group like any other: switched on or off as a whole
+with the group's switch, or tool by tool. Every tool the server offers is listed,
+whether the model gets it registered directly or reaches it through the `mcp`
+tool, and a switch holds for both ways in: `mcp({ tool: "…" })` and
+`mcp({ describe: "…" })` of a tool that is off are refused. With the adapter's
+script mode on, `mcp_script` is refused while one of the servers' tools is switched
+off, since a script says which tools it calls only as it runs.
+
+The tools are read from the adapter's cache, so a server is listed once it has run
+at least once, and only where the adapter is installed and on — for every chat,
+or for a project that brings it in its own settings. Only the adapter's default
+tool names (`<server>_<tool>`) are listed this way.
+
+What the configuration says no to is not listed at all: a server switched off,
+a tool left out by `Only these tools` or `Except these tools`, or one the server
+no longer has. A chat that is running is told at once: one that had such a tool
+loaded from before has it off from then on, through the `mcp` tool too. Nothing
+is written down against it, so it comes back the way it was when the
+configuration allows it again. A file that cannot be read is taken as it last
+could be, so a typo neither hides a tool nor hands back one it had taken away.
+
+A tool marked **cached** is listed from the adapter's cache: its server starts
+only when one of its tools is first used (`lifecycle` lazy, the default), so the
+list is what the server had when it last ran.
+
 ## Disabling
 
 The toggle on each row sets `disabled: true` — the server stays configured and
 visible but is never connected. Better than deleting a server you are debugging.
-Deleting one, or renaming it, also takes its tools out of the Tools list.
+Deleting one, or renaming it, also takes its tools out of the Tools list, and a
+chat still running with it has them off from then on, as with one switched off —
+whatever took it out of the file, this panel or switching a feature such as
+Understory off.
 
 ::: tip The adapter has its own commands
 `/mcp` opens its status panel, `/mcp tools` lists what is available, and

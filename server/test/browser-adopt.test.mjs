@@ -37,6 +37,13 @@ db.createSession({ id: "silent", title: "untouched", workspace: home, executor: 
 db.setSessionTools("has-it", { off: [], on: OLD });
 db.setSessionTools("no-it", { off: ["browser_browser_click"], on: [] });
 db.setProjectTools("site", { off: [], on: OLD });
+// And an agent's and a routine's own switches.
+db.getDb().prepare("INSERT OR IGNORE INTO agents (id, name, home) VALUES ('scout', 'Scout', ?)").run(path.join(home, "scout"));
+db.setAgentTools("scout", { off: [], on: OLD });
+const { slug: routine } = (await import("../dist/routines/store.js")).insertRoutine({
+  name: "Check", timing: { schedule: "0 9 * * *", runAt: null }, instructions: "Look", freshSession: false, reportChannel: null, reportTarget: null, workspace: null,
+});
+db.setRoutineTools(routine, { off: OLD, on: [] });
 
 const has = (list) => PORTAL_BROWSER_TOOLS.every((name) => list.includes(name));
 const mcp = () => JSON.parse(readFileSync(mcpFile, "utf8")).mcpServers;
@@ -52,6 +59,8 @@ test("the first start moves over: the MCP entry goes, the portal's tools come on
   assert.ok(has(db.sessionTools("no-it").off), "a chat that had it off still has it off");
   assert.deepEqual(db.sessionTools("silent"), { off: [], on: [] }, "a chat that said nothing still says nothing");
   assert.ok(has(db.projectTools("site").on), "and a project's say too");
+  assert.ok(has(db.agentTools("scout").on), "an agent's");
+  assert.ok(has(db.routineTools(routine).off), "and a routine's");
 });
 
 test("what the old server left behind goes: its tools and its cache entry, and nothing of the others", () => {

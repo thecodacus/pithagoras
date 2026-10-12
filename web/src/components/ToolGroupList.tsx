@@ -83,6 +83,15 @@ export function ToolGroupList({
                       className="h-3 w-3 shrink-0 accent-accent"
                     />
                     <span className={`min-w-0 flex-1 truncate font-mono ${tool.enabled ? "text-fg" : "text-fg-faint line-through"}`}>{tool.name}</span>
+                    {/* What is listed is what the server had when it last ran, not what it has now. */}
+                    {tool.cached && (
+                      <span
+                        title={t("Listed from the MCP adapter's cache: the server starts when one of its tools is first used.")}
+                        className="shrink-0 rounded border border-line px-1 text-[10px] text-fg-faint"
+                      >
+                        {t("cached")}
+                      </span>
+                    )}
                     {/* Only where this chat disagrees with the default, so the
                         setting is findable from the place it is being overruled. */}
                     {tool.defaultOn !== undefined && tool.defaultOn !== tool.enabled && (

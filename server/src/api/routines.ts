@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { getDb, getDefaultReportTo, listRoutineSessions, setDefaultReportTo } from "../db.js";
+import { getDb, getDefaultReportTo, listRoutineSessions, setDefaultReportTo, setRoutineBrowser } from "../db.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { unscopeKey } from "../agent.js";
 import { isValidSlug, slugify } from "../slug.js";
@@ -145,7 +145,8 @@ function reportTargets() {
   return out;
 }
 
-export function routinesRouter(): Router {
+/** `toolsChanged` is told when a routine's tools changed here, so its runs that are going are told at once. */
+export function routinesRouter(toolsChanged: (slug: string) => void = () => {}): Router {
   const router = express.Router();
 
   /** Destinations a routine can report to, and the portal-wide default. */
@@ -238,10 +239,6 @@ export function routinesRouter(): Router {
       sets.push("guard = ?");
       values.push(req.body.guard ? 1 : 0);
     }
-    if (typeof req.body?.browser === "boolean") {
-      sets.push("browser = ?");
-      values.push(req.body.browser ? 1 : 0);
-    }
     if ("reportChannel" in (req.body ?? {})) {
       const report = readReport(req.body);
       sets.push("report_channel = ?", "report_target = ?");
@@ -266,6 +263,12 @@ export function routinesRouter(): Router {
       sets.push("updated_at = datetime('now')");
       getDb().prepare(`UPDATE routines SET ${sets.join(", ")} WHERE id = ?`).run(...values, row.id);
       routineSupervisor.refreshSchedules([row.id]);
+    }
+    // Its tools' lists as well, which are what a run goes by: the switch alone would answer 200 and change nothing.
+    if (typeof req.body?.browser === "boolean") {
+      const slug = rowById(row.id)!.slug;
+      setRoutineBrowser(slug, req.body.browser);
+      toolsChanged(slug);
     }
     res.json(toApi(rowById(row.id)!));
   });

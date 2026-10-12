@@ -141,6 +141,17 @@ export function effectiveOff(
 }
 
 /**
+ * What is wanted off, with what is held off and was not shown kept off. A page
+ * says what it wants of the tools it listed; one it did not list — an MCP tool
+ * the configuration leaves out for now, a package not loaded — it said nothing
+ * about, and its switch is to be there when it is listed again.
+ */
+export function heldOffUnshown(wantedOff: Iterable<string>, shown: Iterable<string>, held: ToolExceptions): string[] {
+  const listed = new Set(shown);
+  return [...new Set([...wantedOff, ...held.off.filter((name) => !listed.has(name))])];
+}
+
+/**
  * The exceptions to store, given what somebody wants off in this conversation.
  *
  * The page says what it wants the result to be; this works out what has to be

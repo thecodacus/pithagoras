@@ -67,6 +67,15 @@ test('the notices give the licence of the Smart Turn model the web build downloa
   assert.match(notices, /BSD 2-Clause License\s+Copyright \(c\) 2024–2025, Daily/);
 });
 
+test('the notices name sharp at the version that is installed, and libvips, which comes with it under the LGPL', () => {
+  const notices = read('THIRD_PARTY_NOTICES.md');
+  const { version, license } = installed('sharp');
+  assert.equal(license, 'Apache-2.0', 'sharp changed its licence: the notices have to be read again');
+  assert.ok(notices.includes(`\`sharp\` ${version}`), `sharp ${version} is the version the notices describe`);
+  assert.match(notices, /libvips[^\n]*LGPL-3\.0-or-later/);
+  assert.ok(notices.includes('https://www.gnu.org/licenses/lgpl-3.0.txt'), 'the LGPL text is linked');
+});
+
 test('the web build puts the notices next to the voice files', () => {
   const out = path.join(root, 'web/public/voice-assets/THIRD_PARTY_NOTICES.md');
   rmSync(out, { force: true });

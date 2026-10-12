@@ -42,6 +42,7 @@ export default defineConfig({
           { text: "Extensions", link: "/guide/extensions" },
           { text: "Skills", link: "/guide/skills" },
           { text: "Prompt injection", link: "/guide/security" },
+          { text: "Sandbox", link: "/guide/sandbox" },
           { text: "MCP servers", link: "/guide/mcp" },
           { text: "The agent's browser", link: "/guide/browser" },
           { text: "Docker add-ons", link: "/guide/add-ons" },

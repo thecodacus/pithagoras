@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { bareRef } from "../browser/ref.js";
-import { listToolRules, recordAudit, useGrant, type ToolRule } from "../db.js";
+import { listToolRules, mcpView, recordAudit, trustResult, trustedResults, useGrant, type McpView, type ToolRule } from "../db.js";
+import { injectionSignals } from "./injection.js";
 import { EDIT_IMAGE_TOOL } from "../image-generation.js";
-import { PORTAL_BROWSER_TOOLS } from "../tool-policy.js";
+import { PORTAL_BROWSER_TOOLS, mcpServerOf } from "../tool-policy.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
 import { agentsRoot, listAgents } from "../agents.js";
 import { workspaceRoot } from "../workspaces.js";
@@ -57,6 +58,57 @@ function untrustedResult(toolName: string, input: Record<string, unknown>): bool
   if (toolName === "bash") return UNTRUSTED_COMMAND.test(cmd(input));
   if (browserCall(toolName, input).isBrowser) return true;
   return /^mcp(_|$)/.test(toolName);
+}
+
+/**
+ * The switched-off tool a call reaches by another way, if it does.
+ *
+ * The MCP adapter offers every tool of every server it knows through its own
+ * `mcp` tool as well as, where a server registers them directly, under their
+ * own names: `mcp({ tool: "jira_create_issue" })` is the same call as
+ * `jira_create_issue`. Switching the tool off took it out of what the model is
+ * offered and left this way to it open, from the adapter's cache whether or
+ * not the server was running. So the proxy is held to the switches too: a call
+ * or a description of a tool that is off here is refused. The adapter finds a
+ * tool by its full name, hyphens or underscores; the bare name with a server is
+ * matched as well, whatever the adapter makes of it. Only against a server's
+ * tools: `bash` switched off is no reason to refuse a server's `shell_bash`,
+ * and the adapter sends a call for one of pi's own tools back to it anyway.
+ *
+ * A script (`mcp_script`, where the adapter's script mode is on) can call any
+ * tool and says which only as it runs, so it is refused while a tool the
+ * adapter reaches on a server is switched off here: it cannot be held to the
+ * switches one call at a time. Only such a tool: one the configuration leaves
+ * out is off for pi too, and the adapter would not reach it anyway; a tool of
+ * another extension whose name merely starts like a server's is no script's.
+ */
+export function switchedOffVia(
+  toolName: string,
+  input: Record<string, unknown>,
+  off: ReadonlySet<string>,
+  given?: Pick<McpView, "servers" | "serverTool">,
+): string | undefined {
+  if (!off.size || (toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) return undefined;
+  const mcp = given ?? mcpView();
+  // The adapter takes a name with hyphens for underscores (findToolByName); dots as well, which it
+  // writes as underscores, so a name it might take one day is not a way round.
+  const same = (name: string) => name.replace(/[-.]/g, "_");
+  if (toolName === "mcp") {
+    const server = typeof input.server === "string" && input.server ? same(input.server) : undefined;
+    for (const key of ["tool", "describe"]) {
+      const asked = input[key];
+      if (typeof asked !== "string" || !asked) continue;
+      const wanted = [same(asked), ...(server ? [`${server}_${same(asked)}`] : [])];
+      const hit = [...off].find((name) => wanted.includes(same(name)) && mcpServerOf(name, mcp.servers) !== undefined);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  // `mcpScript` too: the name the portal's own lists have for it, should an adapter register it so.
+  if (toolName === "mcp_script" || toolName === "mcpScript") {
+    return [...off].find((name) => mcp.serverTool(name));
+  }
+  return undefined;
 }
 
 interface Rule {
@@ -721,7 +773,7 @@ export function approvalCannotHelp(toolName: string, action: string, workspace: 
   // A conversation that has read something untrusted refuses a push, an upload, a subagent or a schedule after
   // an approval as it did before it, and an approval spent on one would be gone.
   const rule = portalSessionId ? taintRuleFor(portalSessionId, toolName, input) : undefined;
-  return rule ? `this conversation has read content from outside, and what it asks for is ${rule.why}` : undefined;
+  return rule ? `a result this conversation read looks like a prompt injection, and what it asks for is ${rule.why}` : undefined;
 }
 
 /** The text parts of a message's content, whichever way pi holds them. */
@@ -738,12 +790,27 @@ const textsOf = (content: unknown): string[] =>
  * report, is wrapped as data (see wrapUntrusted) but does not mark the
  * conversation.
  */
-function sawUntrusted(entries: unknown): boolean {
-  if (!Array.isArray(entries)) return false;
-  return entries.some((entry: any) => {
-    if (entry?.type !== "message") return false;
-    return entry.message?.role === "toolResult" && textsOf(entry.message.content).some((text) => /^<<<untrusted:[0-9a-f]{16}>>>/.test(text));
-  });
+function flaggedIn(entries: unknown): string[] {
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry: any) =>
+    entry?.type === "message" && entry.message?.role === "toolResult"
+      ? textsOf(entry.message.content).flatMap((text) => flaggedResult(text)?.id ?? [])
+      : [],
+  );
+}
+
+/**
+ * The first line of the envelope around a result that looked like a prompt
+ * injection: its id and the signs it carried. Only the guard writes it, at the
+ * very start of a result, and what a result carries that looks like a marker
+ * is defaced, so a result cannot flag or clear itself.
+ */
+const FLAGGED = /^<<<untrusted:([0-9a-f]{16})>>> \(suspected prompt injection: ([a-z, -]+)\)/;
+
+/** A flagged result's id and signs, from its text; undefined for any other. */
+export function flaggedResult(text: string): { id: string; signals: string[] } | undefined {
+  const match = FLAGGED.exec(text);
+  return match ? { id: match[1], signals: match[2].split(", ") } : undefined;
 }
 
 /**
@@ -762,7 +829,7 @@ export function wrapUntrusted(text: string): string {
  * the portal can mark one that read something outside a tool call (see
  * taintSession) and say whether the rules for a tainted one hold it now.
  */
-const taints = new Map<string, { mark: () => void; holds: () => boolean }>();
+const taints = new Map<string, { mark: () => void; holds: () => boolean; trusted: (id: string) => void }>();
 
 /**
  * Marks a conversation as having read untrusted content, as a tool result that
@@ -773,6 +840,15 @@ export function taintSession(portalSessionId: string): boolean {
   const taint = taints.get(portalSessionId);
   taint?.mark();
   return Boolean(taint);
+}
+
+/**
+ * The person looked at a result flagged in this conversation and trusts it: it
+ * no longer holds the conversation back, now and when it is opened again.
+ */
+export function trustFlagged(portalSessionId: string, id: string): void {
+  trustResult(portalSessionId, id);
+  taints.get(portalSessionId)?.trusted(id);
 }
 
 /**
@@ -821,14 +897,25 @@ export function guardExtension(
    */
   workspace?: string,
   /** Other places they may read as well: the skills the agent offers, which are instructions for anybody it serves. */
-  alsoReadable: string[] = []
+  alsoReadable: string[] = [],
+  /** What this conversation has switched off, read at each call: see switchedOffVia. */
+  offNow: () => ReadonlySet<string> = () => new Set(),
 ) {
   return (pi: any): void => {
     // Per session, not global: a taint belongs to the conversation that read the
-    // content, and this factory runs once per session.
-    let tainted = false;
+    // content, and this factory runs once per session. It is held by each result
+    // flagged as a suspected prompt injection that the person has not trusted,
+    // and by what the portal marks it with (taintSession).
+    const flagged = new Set<string>();
+    let marked = false;
+    let trusted = portalSessionId ? trustedResults(portalSessionId) : new Set<string>();
+    const isTainted = () => marked || [...flagged].some((id) => !trusted.has(id));
     if (portalSessionId) {
-      const taint = { mark: () => { tainted = true; }, holds: () => tainted && enforceTaint };
+      const taint = {
+        mark: () => { marked = true; },
+        holds: () => isTainted() && enforceTaint,
+        trusted: (id: string) => { trusted = new Set([...trusted, id]); },
+      };
       taints.set(portalSessionId, taint);
       // Only its own: a reload starts the next one before this one is gone.
       pi.on("session_shutdown", () => { if (taints.get(portalSessionId) === taint) taints.delete(portalSessionId); });
@@ -838,14 +925,16 @@ export function guardExtension(
     // relaunch: what was read stays in the conversation's history, so the taint
     // is taken from there rather than forgotten.
     pi.on("session_start", (event: any, ctx: any) => {
-      let found = false;
+      let found: string[] = [];
       try {
-        found = sawUntrusted(ctx?.sessionManager?.getEntries?.());
+        found = flaggedIn(ctx?.sessionManager?.getEntries?.());
       } catch {
         // A history that cannot be read is not evidence of anything.
       }
       // A new conversation has read nothing yet.
-      tainted = event?.reason === "new" ? found : tainted || found;
+      if (event?.reason === "new") { flagged.clear(); marked = false; }
+      for (const id of found) flagged.add(id);
+      if (portalSessionId) trusted = trustedResults(portalSessionId);
     });
 
     pi.on("tool_result", (event: any) => {
@@ -856,9 +945,25 @@ export function guardExtension(
       const untrusted = untrustedResult(String(event.toolName ?? ""), event.input ?? {});
       if (!untrusted) return compact ? { content: formatted } : undefined;
 
-      tainted = true;
+      // Wrapped as data whatever it says; it taints the conversation only when it looks like it tries to instruct the agent.
       const id = randomBytes(8).toString("hex");
-      const { open, close } = (PORTAL_BROWSER_TOOLS as readonly string[]).includes(event.toolName) ? pageEnvelope(id) : envelope(id);
+      const signals = injectionSignals(textsOf(formatted).join("\n"));
+      const wrap = (PORTAL_BROWSER_TOOLS as readonly string[]).includes(event.toolName) ? pageEnvelope(id) : envelope(id);
+      const open = signals.length
+        ? wrap.open.replace(`<<<untrusted:${id}>>>`, `<<<untrusted:${id}>>> (suspected prompt injection: ${signals.map((s) => s.name).join(", ")})`)
+        : wrap.open;
+      const close = wrap.close;
+      if (signals.length) {
+        flagged.add(id);
+        recordAudit({
+          kind: "flagged",
+          tool: event.toolName,
+          subject: callSubject(event.toolName, event.input ?? {}),
+          reason: `Suspected prompt injection: it ${signals.map((s) => s.label).join("; ")}`,
+          personKey: whoNow().key,
+          sessionId: portalSessionId,
+        });
+      }
       const content = (Array.isArray(formatted) ? formatted : []).map((part: any) =>
         part?.type === "text" && typeof part.text === "string"
           ? { ...part, text: deface(part.text) }
@@ -881,6 +986,22 @@ export function guardExtension(
           personKey: key,
           sessionId: portalSessionId,
         });
+
+      // Before anything that could allow it: a tool switched off is off for
+      // everybody, and no rule or approval switches it back on.
+      const offTool = switchedOffVia(event.toolName, event.input ?? {}, offNow());
+      if (offTool) {
+        note("refused", `Switched off in this conversation: ${offTool}`);
+        return {
+          block: true,
+          reason:
+            event.toolName !== "mcp"
+              ? `Refused: "${offTool}" is switched off in this conversation, and an MCP script could reach it. ` +
+                "Call the MCP tools you need one at a time instead."
+              : `Refused: "${offTool}" is switched off in this conversation, and the mcp tool does not reach it ` +
+                "either. Say that it is switched off rather than looking for another way to it.",
+        };
+      }
 
       // The browser is gated on the session, not on who is speaking: the agent
       // has its own accounts and uses them as itself, including when it is
@@ -926,7 +1047,7 @@ export function guardExtension(
       }
       // The rule that refuses this call because the conversation has read something untrusted, if any.
       // It refuses whatever allows the call, so a one-off approval is not spent on it first: see below.
-      const heldByTaint = tainted && enforceTaint ? RULES.find((r) => r.hit(event.toolName, event.input ?? {})) : undefined;
+      const heldByTaint = isTainted() && enforceTaint ? RULES.find((r) => r.hit(event.toolName, event.input ?? {})) : undefined;
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -997,7 +1118,7 @@ export function guardExtension(
         };
       }
 
-      if (!tainted) return undefined;
+      if (!isTainted()) return undefined;
       const rule = heldByTaint ?? RULES.find((r) => r.hit(event.toolName, event.input ?? {}));
       if (!rule) return undefined;
 
@@ -1013,9 +1134,9 @@ export function guardExtension(
       return {
         block: true,
         reason:
-          `Refused (${rule.name}): this session has read untrusted content, and this action is ` +
-          `${rule.why}. If a human asked for this, they can do it themselves or start a session ` +
-          `that has not read anything untrusted. Do not try to work around this — say it was refused.`,
+          `Refused (${rule.name}): a result this conversation read looks like a prompt injection, and this action is ` +
+          `${rule.why}. The person can look at the flagged result in the chat and trust it, or remove that turn, ` +
+          `and then ask again. Do not try to work around this — say it was refused, and which result was flagged.`,
       };
     });
   };

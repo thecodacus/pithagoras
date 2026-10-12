@@ -75,3 +75,63 @@ test("a message for people is shown without the codes a terminal would act on", 
   ]);
   assert.deepEqual(items.map(line), ["notice:All green"]);
 });
+
+test("a message of markup written for the model is shown as the sentence it carries: a background task's end is one", () => {
+  const block = (status: string, extra = "") =>
+    [
+      "<background-task-notification>",
+      "  <task-id>b55b2d6a4</task-id>",
+      "  <task-name>Watch PR 103 CI</task-name>",
+      `  <status>${status}</status>`,
+      extra,
+      "  <output-file>.pi/tasks/x/b55b2d6a4.output</output-file>",
+      `  <summary>Background task "Watch PR 103 CI" ${status}</summary>`,
+      "  <guidance>Do not call bg_status to reconfirm.</guidance>",
+      "</background-task-notification>",
+    ].filter(Boolean).join("\n");
+  const end = (seq: number, content: string) => ({ seq, type: "message_end", at: 0, payload: { message: { role: "custom", customType: "background-task-notification", content, display: true } } });
+  const items = buildTranscript([
+    end(1, block("completed", "  <exit-code>0</exit-code>")),
+    // As the extension writes them: a failing command says its code in its error, a killed or timed-out one has no code.
+    end(2, block("failed", "  <exit-code>2</exit-code>\n  <error>Exited with code 2</error>")),
+    end(3, block("killed", "  <exit-code>null</exit-code>")),
+    end(4, block("failed", "  <exit-code>null</exit-code>\n  <error>Timed out after 30s</error>")),
+    end(5, block("failed", "  <exit-code>3</exit-code>")),
+  ]);
+  assert.deepEqual(items.map(line), [
+    'notice:Background task "Watch PR 103 CI" completed',
+    'notice:Background task "Watch PR 103 CI" failed (Exited with code 2)',
+    'notice:Background task "Watch PR 103 CI" killed',
+    'notice:Background task "Watch PR 103 CI" failed (Timed out after 30s)',
+    'notice:Background task "Watch PR 103 CI" failed (exit code 3)',
+  ]);
+  assert.deepEqual(items.map((i: any) => i.tone), ["info", "warn", "warn", "warn", "warn"]);
+});
+
+test("any extension's markup message is shown readably, and words that are not markup stay as they are", () => {
+  const shown = (content: string) => buildTranscript([{ seq: 1, type: "message_end", at: 0, payload: { message: { role: "custom", customType: "x", content, display: true } } }]);
+  const titled = shown("<sync-result>\n  <id>7</id>\n  <title>Synced 3 files</title>\n  <path>/a/b</path>\n</sync-result>");
+  assert.deepEqual(titled.map(line), ["notice:Synced 3 files"]);
+  const bare = shown("<job-report>\n  <job>nightly</job>\n  <status>failed</status>\n</job-report>");
+  assert.deepEqual(bare.map(line), ["notice:job: nightly\nstatus: failed"]);
+  assert.equal((bare[0] as any).tone, "warn");
+  for (const plain of ["All green", "a <b>bold</b> word", "Use <tag> like this", "<b>bold</b>", "<note><b>Heads up:</b> the build server is down until 5pm</note>", "<p>Run <code>npm test</code> before you push.</p>"]) assert.deepEqual(shown(plain).map(line), [`notice:${plain}`]);
+  // Only a failure word warns: a green CI result or a job that has just started is not a warning.
+  const status = (word: string) => shown(`<ci-result>\n  <title>CI for PR 7</title>\n  <status>${word}</status>\n</ci-result>`)[0] as any;
+  for (const word of ["passed", "running", "started", "queued", "complete", "finished", "completed"]) {
+    assert.equal(status(word).tone, "info", word);
+    assert.equal(status(word).text, `CI for PR 7 (${word})`, word);
+  }
+  for (const word of ["failed", "Timed-out", "timed_out", "timed out", "cancelled", "aborted"]) {
+    assert.equal(status(word).tone, "warn", word);
+    assert.equal(status(word).text, `CI for PR 7 (${word})`, word);
+  }
+  // The status is not said twice, and an exit code comes after it.
+  // A status spelled differently from the same words in the summary is not added after them.
+  for (const [summary, word] of [["CI for PR 7 timed out", "timed-out"], ["CI for PR 7 timed out", "timed_out"], ["Deploy cancelled", "canceled"], ["Deploy canceled", "cancelled"]]) {
+    assert.deepEqual(shown(`<ci>\n  <summary>${summary}</summary>\n  <status>${word}</status>\n</ci>`).map(line), [`notice:${summary}`], word);
+  }
+  assert.deepEqual(shown("<deploy>\n  <message>Deploy of web</message>\n  <status>timeout</status>\n</deploy>").map(line), ["notice:Deploy of web (timeout)"]);
+  assert.deepEqual(shown("<deploy>\n  <message>Deploy of web failed</message>\n  <status>failed</status>\n  <exit-code>3</exit-code>\n</deploy>").map(line), ["notice:Deploy of web failed (exit code 3)"]);
+  assert.deepEqual(shown("<deploy>\n  <message>Deploy of web</message>\n  <status>failed</status>\n  <exit-code>3</exit-code>\n</deploy>").map(line), ["notice:Deploy of web (failed, exit code 3)"]);
+});

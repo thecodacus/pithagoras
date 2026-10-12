@@ -110,6 +110,7 @@ export function describeCall(payload: any, folder: string): ToolCall {
   if (name === "generate_image") return { label: t("Making a picture"), detail: flat(text(input.title) || text(input.prompt)) };
   if (name === "edit_image") return { label: t("Editing a picture"), detail: flat(text(input.title) || text(input.prompt)) };
   if (name === "show_image") return { label: t("Showing a picture"), detail: flat(text(input.title) || text(input.path)), target: "pictures" };
+  if (name === "ask_question") return { label: t("Asking you a question"), detail: flat(text(input.title) || text((input.questions as { question?: unknown }[] | undefined)?.[0]?.question)) };
   if (name.startsWith("canvas_")) {
     const verb: Record<string, string> = { canvas_create: t("Starting a document"), canvas_write: t("Writing in a document"), canvas_read: t("Reading a document"), canvas_list: t("Looking at the documents"), canvas_delete: t("Deleting a document") };
     return { label: verb[name] ?? t("Using a document"), detail: flat(text(input.title)), target: "canvas" };

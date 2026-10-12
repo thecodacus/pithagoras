@@ -37,6 +37,8 @@ export interface PiTool {
   package?: string;
   /** One of the portal's own, from an inline extension: no file or package of anyone's has a path like that, so it is not mistaken for an extension's of the same name. */
   inline?: true;
+  /** An MCP server's tool listed from the adapter's cache, its server not started until the tool is first used. */
+  cached?: true;
   /** False when this conversation has it switched off. */
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */
@@ -156,6 +158,8 @@ export interface PiClient extends EventEmitter {
 
   /** Answer an extension dialog. Returns false if the request is unknown/expired. */
   respondUi(id: string, response: { cancelled?: boolean; value?: unknown }): boolean;
+  /** The dialogs (confirm, select, input, editor, questions) still waiting, as sent, for a page that opens meanwhile. Only where the portal draws them. */
+  openDialogRequests?(): Record<string, unknown>[];
 }
 
 /** What is in a chat's box, and what is selected in it: where a paste goes. */

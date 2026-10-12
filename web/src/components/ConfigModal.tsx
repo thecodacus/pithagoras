@@ -5,11 +5,13 @@ import {
   LuBrain,
   LuCheck,
   LuDownload,
+  LuScrollText,
   LuExternalLink,
   LuEye,
   LuFileJson,
   LuFolder,
   LuHammer,
+  LuShieldCheck,
   LuImage,
   LuInfo,
   LuKeyboard,
@@ -32,6 +34,7 @@ import { api, SIGNED_OUT, type AvailableModel, type ExtensionInfo, type GlobalSe
 import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
+import { LogsPanel } from "./LogsPanel";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { formatTokens } from "../transcript";
@@ -46,6 +49,7 @@ import { PicturesPanel } from "./PicturesPanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal, useUnsavedDraft } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
+import { SandboxSettings } from "./SandboxSettings";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
@@ -88,6 +92,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     label: msg("Agent"),
     tabs: [
       { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
+      { id: "sandbox", label: msg("Sandbox"), icon: <LuShieldCheck />, hint: msg("What the agent may read, change and run") },
       { id: "images", label: msg("Images"), icon: <LuImage />, hint: msg("The image model behind making and changing pictures") },
       { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
       { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
@@ -107,6 +112,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
       { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
       { id: "add-ons", label: msg("Add-ons"), icon: <LuPuzzle />, hint: msg("Optional parts of the portal itself") },
       { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
+      { id: "logs", label: msg("Logs"), icon: <LuScrollText />, hint: msg("What the server prints, and a file to take away") },
       { id: "about", label: msg("About"), icon: <LuInfo />, hint: msg("Where this portal keeps things") },
       { id: "advanced", label: msg("Advanced"), icon: <LuFileJson />, hint: msg("pi's raw settings file") },
     ],
@@ -276,11 +282,13 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
+      {nav.kind === "tab" && nav.id === "logs" && <LogsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "people" && <PeoplePanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
       {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
+      {nav.kind === "tab" && nav.id === "sandbox" && <SandboxSettings onError={setError} />}
       {nav.kind === "tab" && nav.id === "images" && <PicturesPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}

@@ -166,11 +166,6 @@ confirmation of an approval — are always the return value and never go through
 `onReply`, so a package that drops it posts nothing for them, and with
 **Progress** off nothing at all.
 
-A question an extension asks mid-run is relayed to you with the rest. If your
-transport answers it with buttons that any member of a group can press (as
-Telegram's do), the request you are given carries `canAnswer(senderId)`: check it
-with the id of whoever pressed, and ignore the press when it is false.
-
 ### Interrupting
 
 A message that is *only* `stop`, `wait`, `cancel`, `abort`, `halt`, `hold on`
@@ -188,14 +183,14 @@ Honour `ctx.signal`. A polling loop should check `signal.aborted` and pass the
 signal to `fetch`, or disabling the channel will leave it running.
 
 ::: danger Do not await ask() in your receive loop
-An extension command can block until somebody answers a question — and the
-answer is the *next message*, which your loop has to still be receiving. Await
-`ask` inside the loop that fetches messages and it can never arrive: the chat
-hangs until the dialog times out.
+A running `ask` can be ended by a later message — `stop` — and that message has
+to be received while it runs. Await `ask` inside the loop
+that fetches messages and it can never arrive: the chat hangs until the agent
+finishes.
 
 Hand each message to an async function and do not await it. Ordering is safe
-without you: the portal serialises messages per conversation, and an answer to
-an open question jumps that queue.
+without you: the portal serialises messages per conversation, and a `stop` jumps
+that queue.
 :::
 
 You do not handle the channel's [instructions](/channels/#per-channel-instructions).

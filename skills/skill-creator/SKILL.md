@@ -12,14 +12,18 @@ time. If you have explained something twice, it belongs in a skill.
 
 ## Where it goes
 
+In your own skills folder: your instructions name it, in the line that starts
+"Your own skills are in". Everything there is loaded for every conversation
+you have, from the next one on.
+
 ```bash
-mkdir -p "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills/<skill-name>"
+mkdir -p "<your skills folder>/<skill-name>"
 ```
 
-`${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills` is the only place you can write
-skills to, and everything there is loaded for every session. Use that
-expression rather than a hardcoded path — it differs between installs, and
-`PI_CODING_AGENT_DIR` moves it when it is set.
+Nowhere else. A skill under `$HOME/.pi/agent/skills`, or anywhere else you
+might think of, is not loaded. If your instructions name no skills folder, you
+do not write skills in this conversation: say what the skill would hold and
+leave it to the person you work for.
 
 The folder name is not what matters; the `name` in the frontmatter is. Keep
 them the same anyway, or the next person to look will be confused.
@@ -126,14 +130,14 @@ when run with no arguments.
 
 ## After writing one
 
-Skills load when a session starts, so a new one is not visible in the
-conversation that created it. Tell the user to run `/reload`, or that it will
-be there next time.
+Skills load when a conversation starts, so a new one is not visible in the
+conversation that created it. Tell the person it is there from your next
+conversation, and on your Skills tab now.
 
 Then check your work:
 
 ```bash
-cat "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills/<name>/SKILL.md"
+cat "<your skills folder>/<name>/SKILL.md"
 ```
 
 Confirm the frontmatter is quoted, the name is unique, and the description
@@ -142,9 +146,8 @@ reads as a trigger rather than a title.
 ## Editing and removing
 
 Same folder. Rewrite `SKILL.md` to change it; delete the folder to remove it.
-There is also a Skills tab in the portal where the user can edit, disable or
-delete any of these — a skill switched off there has its `SKILL.md` renamed, so
-if one seems to have vanished, that is where it went.
+The person you work for sees what is there on your Skills tab, on your page in
+the portal.
 
 ## Before you write
 
@@ -152,7 +155,7 @@ Two questions worth asking first, because a skill that exists is a skill that
 loads for every session:
 
 - **Is it reusable?** A one-off answer is not a skill.
-- **Does one already cover this?** Check `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills` first and
+- **Does one already cover this?** Check your skills folder first and
   extend rather than duplicate — two skills with overlapping descriptions means
   neither reliably wins.
 

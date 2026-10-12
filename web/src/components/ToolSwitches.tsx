@@ -28,9 +28,27 @@ import { t, tp } from "../i18n";
  * And a project's that does not exist yet, in the dialog that makes it: there is
  * nothing to ask or to save, so it starts from the portal-wide default and hands
  * each choice to the dialog, which sends them along with the project.
+ *
+ * And an agent's, on its page, for every chat in its home and every run it does
+ * on its own; and a routine's, on its page, for every run of it. Those are the
+ * same kind of list as a project's, each between the layers under it and what a
+ * chat switches for itself.
  */
-export function ToolSwitches(props: { sessionId: string } | { project: string } | { onDraft: (off: string[]) => void }) {
+export function ToolSwitches(
+  props: { sessionId: string } | { project: string } | { agent: string } | { routine: string } | { onDraft: (off: string[]) => void },
+) {
   const project = "project" in props ? props.project : undefined;
+  const agent = "agent" in props ? props.agent : undefined;
+  const routine = "routine" in props ? props.routine : undefined;
+  // A layer under the chats rather than a chat: answered and saved the same way, by a different address.
+  const layer: { get: () => ReturnType<typeof api.projectTools>; set: (off: string[]) => ReturnType<typeof api.setProjectTools> } | undefined =
+    project !== undefined
+      ? { get: () => api.projectTools(project), set: (off) => api.setProjectTools(project, off) }
+      : agent !== undefined
+        ? { get: () => api.agentTools(agent), set: (off) => api.setAgentTools(agent, off) }
+        : routine !== undefined
+          ? { get: () => api.routineTools(routine), set: (off) => api.setRoutineTools(routine, off) }
+          : undefined;
   const sessionId = "sessionId" in props ? props.sessionId : "";
   const onDraft = "onDraft" in props ? props.onDraft : undefined;
   const drafting = onDraft !== undefined;
@@ -56,8 +74,8 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
           live: false,
           tools: r.tools.map((tool) => ({ ...tool, enabled: !r.off.includes(tool.name) })),
         }))
-      : project !== undefined
-        ? api.projectTools(project)
+      : layer
+        ? layer.get()
         : api.tools(sessionId)
     )
       .then((r) => {
@@ -81,7 +99,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
     return () => {
       cancelled = true;
     };
-  }, [project, sessionId, drafting, tries]);
+  }, [project, agent, routine, sessionId, drafting, tries]);
 
   const flip = async (names: string[], enabled: boolean) => {
     const wanted = nextOff(off, names, enabled);
@@ -95,7 +113,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
     setBusy(true);
     setFlipError("");
     try {
-      const r = await (project !== undefined ? api.setProjectTools(project, wanted) : api.setTools(sessionId, wanted));
+      const r = await (layer ? layer.set(wanted) : api.setTools(sessionId, wanted));
       setOff(r.off);
     } catch (e) {
       // Put it back rather than showing a switch that did not take, and say why.
@@ -152,7 +170,11 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
         <p className="px-3 pb-1.5 pt-2 text-[10px] text-fg-faint">
           {forProject
             ? t("These are the tools earlier chats had. What you switch here is what every chat in this project starts with; the portal-wide defaults stay as they are.")
-            : t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
+            : agent !== undefined
+              ? t("These are the tools earlier chats had. What you switch here is what every chat in this agent's home starts with, and every run it does on its own; the portal-wide defaults stay as they are.")
+              : routine !== undefined
+                ? t("These are the tools earlier chats had. What you switch here is what every run of this routine starts with, against what its agent and project leave.")
+                : t("Not started yet — these are the tools earlier chats had. What you switch here holds for this chat from its first message; the defaults stay as they are.")}
         </p>
       )}
       <ToolGroupList tools={tools} names={names} busy={busy} onFlip={flip} />
@@ -161,7 +183,7 @@ export function ToolSwitches(props: { sessionId: string } | { project: string } 
           {t("Applies from the next message, for this conversation. Settings → Tools sets what every conversation starts with.")}
         </p>
       )}
-      {project !== undefined && (
+      {(project !== undefined || agent !== undefined || routine !== undefined) && (
         <p className="px-3 py-1.5 text-[10px] text-fg-faint">
           {t("Chats already running here have it from their next message. A chat that switched a tool for itself keeps its own choice.")}
         </p>

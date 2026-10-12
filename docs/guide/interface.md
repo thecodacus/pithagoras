@@ -141,6 +141,9 @@ in two places:
   names stays in the group of its extension.
 - **Projects → Tools** on a project's row sets what every chat in that project starts
   with, against the portal-wide default; see [Projects](/guide/projects#tools).
+- **Tools** on an agent's page sets what every chat in its home and every run it does on
+  its own starts with ([Agents](/guide/agents#tools)), and **Tools** on a routine's page
+  what every run of it starts with ([Routines](/guide/routines#tools)).
 - The **tools** control of a chat switches them for that chat only, from its
   next message. It is there before the first message too, so a tool can be
   kept away from a chat from the start.
@@ -151,7 +154,11 @@ could not be read and offers **Try again**, and a switch the portal did not save
 snaps back with the reason beside it.
 
 Both are safety tools as much as convenience: a browser or shell tool that a
-chat has no business with is simply not there to be talked into.
+chat has no business with is simply not there to be talked into. An MCP server is a
+group like any other, switched whole or tool by tool; a tool switched off is not
+reachable through the adapter's `mcp` tool either, and one the MCP configuration
+leaves out is not listed at all; see
+[MCP servers](/guide/mcp#what-the-tool-lists-show).
 
 ## One server per data directory
 

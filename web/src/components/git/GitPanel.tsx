@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LuArrowDown, LuArrowLeft, LuArrowUp, LuCloudDownload, LuGitBranch, LuRefreshCw } from "react-icons/lu";
-import { gitApi, type GhState, type GitState } from "../../git-api";
+import { gitApi, type GhState, type GitState, type RepoChoice } from "../../git-api";
 import { Branches } from "./Branches";
 import { Changes } from "./Changes";
 import { Ctx, useGit, type Busy, type GitCtx, type View } from "./context";
@@ -8,6 +8,8 @@ import { ErrorNote, Quiet, TextButton } from "./bits";
 import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
+import { Select } from "../Select";
+import { local } from "../../safe-storage";
 import { labelOf, msg, t, tp, useLanguage } from "../../i18n";
 import { below } from "../../paths";
 
@@ -18,6 +20,11 @@ export const GIT_TABS: { id: GitTab; label: string }[] = [
   { id: "branches", label: msg("Branches") },
   { id: "pulls", label: msg("Pull requests") },
 ];
+
+/** Which of a folder's repositories was last looked at, kept per chat in this browser. */
+const choiceKey = (sessionId: string) => `gitRepo:${sessionId}`;
+/** A scan walks the folder, so it is not done again for every read of the state — but after a clone, soon. */
+const SCAN_AGAIN_MS = 20_000;
 
 /** While the agent works, what it commits or checks out from the shell is noticed this often. */
 const WHILE_RUNNING_MS = 8000;
@@ -36,6 +43,11 @@ const WHILE_RUNNING_MS = 8000;
  * What it drills into — a diff, a commit, a pull request — goes on top of the
  * tab, with a way back, rather than beside it: the panel is often a third of
  * the screen, and a list beside a diff leaves room for neither.
+ *
+ * A chat's folder may hold repositories of its own — a project with a clone in
+ * it — so the folder is scanned for them, and with more than one to show (or
+ * none around the folder itself) a picker above the tabs says which one this
+ * is. Everything below it is that repository's.
  *
  * Not drawn again for a draw of the chat that changed none of what it is
  * given: with a large diff open, each word of a reply would draw every line of it.
@@ -70,40 +82,108 @@ export const GitPanel = memo(function GitPanel({
   const [stack, setStack] = useState<View[]>([]);
   const [gh, setGh] = useState<GhState | null>(null);
   const asked = useRef(0);
+  // Which repository: null until picked, then the first of the folder's own.
+  const [choice, setChoice] = useState<string | null>(() => local.get(choiceKey(sessionId)));
+  const [found, setFound] = useState<{ repos: RepoChoice[]; truncated: boolean } | null>(null);
+  const scanned = useRef(0);
+  const repoPath = choice ?? "";
+  // One object per repository, since the panels below take it as what to ask for.
+  const target = useMemo(() => ({ session: sessionId, repo: repoPath }), [sessionId, repoPath]);
 
   // Whether pull requests can be had: asked apart, since it asks GitHub, and
   // what is on this disk is not held back while it answers. Again on Refresh.
+  // A reply for a repository that is not the one shown any more is dropped: the pick changes the target
+  // in place, and the last repository's answer may still be on its way (GitHub asked uncached is slow).
+  const current = useRef(target);
+  current.current = target;
   const askGh = useCallback(
     (fresh = false) =>
-      gitApi.gh(sessionId, fresh).then(setGh, (e) =>
-        setGh({ installed: true, authed: false, repo: null, url: null, defaultBranch: null, note: (e as Error).message }),
+      gitApi.gh(target, fresh).then(
+        (next) => {
+          if (current.current === target) setGh(next);
+        },
+        (e) => {
+          if (current.current === target) setGh({ installed: true, authed: false, repo: null, url: null, defaultBranch: null, note: (e as Error).message });
+        },
       ),
-    [sessionId],
+    [target],
   );
   const isRepo = state?.repo === true;
   useEffect(() => {
     if (isRepo) void askGh();
   }, [isRepo, askGh]);
 
+  // The repositories there are: when the panel opens, when the agent has been at work, on Refresh, and while
+  // there is none to show — a clone made since is looked for. Not for every read of the state.
+  const scan = useCallback(
+    (force = false) => {
+      if (!force && Date.now() - scanned.current < SCAN_AGAIN_MS) return;
+      scanned.current = Date.now();
+      gitApi.repos(sessionId).then(setFound, () => {
+        // The state's own read says what is wrong; a list that is not there is no list.
+        scanned.current = 0;
+      });
+    },
+    [sessionId],
+  );
+  useEffect(() => scan(true), [scan]);
+
   const reload = useCallback(
     async () => {
       const ask = ++asked.current;
       try {
-        const next = await gitApi.state(sessionId);
+        const next = await gitApi.state(target);
         if (ask !== asked.current) return;
         setState(next);
         setLoadError(null);
+        // No repository here: whether a clone has been made since.
+        if (!next.repo) scan();
       } catch (e) {
         if (ask !== asked.current) return;
         setLoadError((e as Error).message);
       }
     },
-    [sessionId],
+    [target, scan],
   );
+
+  // Another repository is another place: nothing of the last one is shown for it.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    asked.current++;
+    setState(null);
+    setGh(null);
+    setLoadError(null);
+    setError(null);
+    setSaid(null);
+    setStack([]);
+  }, [target]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Picked for the person: the first clone when the folder is in no repository itself, and no pick is kept
+  // for one that is not there any more. The folder itself is always there to pick, so that a folder with
+  // a clone in it can still be made a repository.
+  useEffect(() => {
+    if (!found) return;
+    const listed = (p: string) => found.repos.some((r) => r.path === p);
+    if (choice === null) {
+      if (!listed("") && found.repos.length) setChoice(found.repos[0].path);
+    } else if (choice !== "" && !listed(choice) && !found.truncated) {
+      setChoice(null);
+      local.remove(choiceKey(sessionId));
+    }
+  }, [found, choice, sessionId]);
+
+  const pick = (path: string) => {
+    setChoice(path);
+    local.set(choiceKey(sessionId), path);
+  };
 
   // The agent wrote something: read it again, once it has stopped for a moment.
   useEffect(() => {
@@ -115,14 +195,17 @@ export const GitPanel = memo(function GitPanel({
   // Its turn ended — a commit it made from the shell is no file activity — and while it works, now and then.
   const wasRunning = useRef(running);
   useEffect(() => {
-    if (wasRunning.current && !running) void reload();
+    if (wasRunning.current && !running) {
+      void reload();
+      scan();
+    }
     wasRunning.current = running;
     if (!running) return;
     const t = setInterval(() => {
       if (document.visibilityState === "visible") void reload();
     }, WHILE_RUNNING_MS);
     return () => clearInterval(t);
-  }, [running, reload]);
+  }, [running, reload, scan]);
 
   // Back to the page after a while elsewhere: whatever happened meanwhile.
   useEffect(() => {
@@ -163,9 +246,13 @@ export const GitPanel = memo(function GitPanel({
     // A path of the repository as one in the chat's folder, undefined outside
     // it. At the repository's top every path is in it; the folder itself is
     // not a file in it.
-    const inFolder = (p: string) => (state.prefix ? below(state.prefix, p) || undefined : p);
+    const inFolder = (p: string) => {
+      const rel = state.prefix ? below(state.prefix, p) || undefined : p;
+      // A clone is a folder in the chat's: its files are there, under its name.
+      return rel === undefined || !repoPath ? rel : `${repoPath}/${rel}`;
+    };
     return {
-      id: sessionId,
+      id: target,
       repo: { ...state, gh },
       act,
       busy,
@@ -180,10 +267,19 @@ export const GitPanel = memo(function GitPanel({
           }
         : undefined,
     };
-  }, [state, gh, sessionId, reload, act, busy, onOpenFile]);
+  }, [state, gh, target, repoPath, act, busy, onOpenFile]);
+
+  // With more than one to pick from, or one that is not the folder's own (a clone in a folder that is in no repository is
+  // what to pick the folder itself from again), which is not the whole story.
+  const picker = found && (found.repos.length > 1 || repoPath || found.repos.some((r) => r.path !== "")) ? <RepoPicker repos={found.repos} value={repoPath} onPick={pick} disabled={!!busy} /> : null;
 
   if (!state) {
-    return loadError ? <ErrorNote onRetry={() => void reload()}>{loadError}</ErrorNote> : <Quiet>{t("Loading…")}</Quiet>;
+    return (
+      <>
+        {picker}
+        {loadError ? <ErrorNote onRetry={() => void reload()}>{loadError}</ErrorNote> : <Quiet>{t("Loading…")}</Quiet>}
+      </>
+    );
   }
   // A read that failed after an earlier one worked: what is shown is the last state, not this one.
   const stale = loadError && (
@@ -193,8 +289,9 @@ export const GitPanel = memo(function GitPanel({
   if (!state.repo) {
     return (
       <div className="flex flex-col items-start gap-2 p-3 text-xs text-fg-subtle">
+        {picker}
         <p>{t("This chat's folder is not in a git repository.")}</p>
-        <TextButton primary disabled={!!busy} onClick={() => void act(msg("Making a repository"), () => gitApi.init(sessionId))}>
+        <TextButton primary disabled={!!busy} onClick={() => void act(msg("Making a repository"), () => gitApi.init(target))}>
           {t("Make it one (git init)")}
         </TextButton>
         {error && <ErrorNote onClose={() => setError(null)}>{error}</ErrorNote>}
@@ -207,7 +304,12 @@ export const GitPanel = memo(function GitPanel({
   return (
     <Ctx.Provider value={ctx}>
       <div className="flex h-full min-h-0 flex-col text-sm" data-git-tab={tab}>
-        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => void act(msg("Refreshing"), () => askGh(true))} />
+        {picker}
+        <BranchBar onBranches={() => onTab("branches")} onRefresh={() => {
+            scan(true);
+            void act(msg("Refreshing"), () => askGh(true));
+          }}
+        />
         {state.operation && <Operation />}
         {busy && (
           <p role="status" className="shrink-0 border-b border-line bg-accent/5 px-3 py-1 text-[11px] text-accent">
@@ -247,6 +349,25 @@ export const GitPanel = memo(function GitPanel({
     </Ctx.Provider>
   );
 });
+
+/** Which of the chat's folder's repositories this is: the one the folder is in, or a clone below it. */
+function RepoPicker({ repos, value, onPick, disabled }: { repos: RepoChoice[]; value: string; onPick: (path: string) => void; disabled?: boolean }) {
+  // The folder itself is always there to pick: when it is in no repository it is not listed, and is
+  // still what to pick to make it one. A pick that the scan has not listed (yet, or any more) is shown as it is.
+  const around = repos.some((r) => r.path === "");
+  const listed = !value || repos.some((r) => r.path === value);
+  const options = [
+    ...(around ? [] : [{ value: "", label: "." }]),
+    ...(listed ? [] : [{ value, label: value }]),
+    ...repos.map((r) => ({ value: r.path, label: r.path || r.name })),
+  ];
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-line px-2 py-1.5 text-xs text-fg-subtle">
+      <span className="shrink-0">{t("Repository")}</span>
+      <Select size="sm" value={value} onChange={onPick} disabled={disabled} aria-label={t("Repository")} className="min-w-0 flex-1 font-mono" options={options} />
+    </div>
+  );
+}
 
 /** Where the repository is: the branch, how far it is from its upstream, and the ways to bring the two together. */
 function BranchBar({ onBranches, onRefresh }: { onBranches: () => void; onRefresh: () => void }) {

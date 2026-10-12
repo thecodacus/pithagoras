@@ -15,7 +15,7 @@ import { DATA_DIR } from "./data-dir.js";
  * In a file of its own so that the check at startup can read it without
  * loading the database module, which opens the database as it is used.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** The database file. */
 export const dbFile = () => path.join(DATA_DIR, "portal.db");

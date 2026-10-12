@@ -1,7 +1,8 @@
 import { lstatSync } from "node:fs";
 import path from "node:path";
 import express, { type Router } from "express";
-import { AgentError, DEFAULT_AGENT, agentOf, channelsOf, createAgent, defaultAgent, getAgent, listAgents, orbOf, renameAgent, setOrb, setVoice, type Agent } from "../agents.js";
+import { agentSkillsDir, listAgentSkills, readAgentSkill } from "../agent-skills.js";
+import { AgentError, DEFAULT_AGENT, agentOf, channelsOf, createAgent, defaultAgent, getAgent, listAgents, newChatAgent, orbOf, renameAgent, setNewChatAgent, setOrb, setVoice, type Agent } from "../agents.js";
 import { agentFileStatus, isInitialised, runWizard, writeAgentFile, type WizardInput } from "../agent-setup.js";
 import { listAgentSessions, listSessions } from "../db.js";
 import { deleteNote, listNotes, markNoteRead, markNotesRead, unreadNotes } from "../activity.js";
@@ -11,6 +12,7 @@ import { EXECUTOR_KIND } from "../executor-kind.js";
 import { FileError } from "../workspace-files.js";
 import { CONTEXT_FILES } from "../pi/context-files.js";
 import { fail } from "./files.js";
+import { userFor } from "../sandbox/identity.js";
 
 /**
  * The agents: listing them, making one, naming it, and its own files and setup.
@@ -22,12 +24,15 @@ const failed = (res: express.Response, e: unknown) =>
   res.status(e instanceof AgentError ? e.status : 400).json({ error: (e as Error).message });
 
 /** An agent as the page sees it: what it is, whether it is set up, and what uses it. */
-export function agentToApi(a: Agent, chats = 0) {
+export function agentToApi(a: Agent, chats = 0, newChats = newChatAgent().id === a.id) {
   return {
     id: a.id,
     name: a.name,
     home: a.home,
+    sandboxUser: userFor(a.id),
     first: a.id === DEFAULT_AGENT,
+    // Whether the New button starts its chats with it.
+    newChats,
     initialised: isInitialised(a.home),
     chats,
     channels: channelsOf(a.id),
@@ -61,7 +66,8 @@ export function agentsRouter(): Router {
       const a = agentOf(s.workspace, agents);
       if (a) counts.set(a.id, (counts.get(a.id) ?? 0) + 1);
     }
-    res.json({ agents: agents.map((a) => agentToApi(a, counts.get(a.id) ?? 0)) });
+    const picked = newChatAgent().id;
+    res.json({ agents: agents.map((a) => agentToApi(a, counts.get(a.id) ?? 0, a.id === picked)) });
   });
 
   /** A new agent, with its home. Given the wizard's answers, it is set up as well. */
@@ -93,6 +99,21 @@ export function agentsRouter(): Router {
     if (!agent) res.status(404).json({ error: "No such agent" });
     return agent;
   };
+
+  /** `{ on }`: whether the New button starts a chat with it. Off hands that back to the first agent. */
+  router.put("/agents/:id/new-chats", (req, res) => {
+    try {
+      const on = req.body?.on;
+      if (typeof on !== "boolean") return res.status(400).json({ error: "on must be a boolean" });
+      const off = !on;
+      // Off only matters for the agent that has it: another's pick stays.
+      if (!off || newChatAgent().id === req.params.id) setNewChatAgent(off ? DEFAULT_AGENT : req.params.id);
+      else if (!getAgent(req.params.id)) throw new AgentError("No such agent", 404);
+      res.json(agentToApi(getAgent(req.params.id)!));
+    } catch (e) {
+      failed(res, e);
+    }
+  });
 
   /** Its avatar: the voice-mode orb's look and personality, the same on every device. */
   router.put("/agents/:id/orb", (req, res) => {
@@ -156,6 +177,20 @@ export function agentsRouter(): Router {
     if (!agent) return;
     if (!deleteNote(agent.id, req.params.note)) return res.status(404).json({ error: "No such note" });
     res.json({ ok: true });
+  });
+
+  /** The skills the agent wrote for itself, for its Skills tab. */
+  router.get("/agents/:id/skills", (req, res) => {
+    const agent = agentOr404(req.params.id, res);
+    if (agent) res.json({ folder: agentSkillsDir(agent), skills: listAgentSkills(agent) });
+  });
+
+  router.get("/agents/:id/skills/:skill", (req, res) => {
+    const agent = agentOr404(req.params.id, res);
+    if (!agent) return;
+    const content = readAgentSkill(agent, req.params.skill);
+    if (content === null) return res.status(404).json({ error: "No such skill" });
+    res.json({ content });
   });
 
   router.get("/agents/:id/setup", (req, res) => {

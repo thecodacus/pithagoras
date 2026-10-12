@@ -5,7 +5,6 @@ import { writeFileAtomic } from "../atomic-write.js";
 import { isSwitchedOff, sourceOf } from "../extension-switch.js";
 import { piAgentDir, readPiSettings } from "../pi-settings.js";
 import { BROWSER_MCP } from "../tool-policy.js";
-import { mcpServersRemoved } from "../db.js";
 
 /**
  * MCP servers, as configured for `pi-mcp-adapter`.
@@ -84,6 +83,22 @@ function stripComments(text: string): string {
   return out;
 }
 
+let lastReadable: McpFile | undefined;
+
+/**
+ * The configuration as it last could be read: the file now, or, while it
+ * cannot be parsed, what it was before. What the servers offer is judged by
+ * this (db.ts mcpView), and so is which servers a write took out: a typo in
+ * the file must neither withdraw a tool nor hand back one that was withdrawn,
+ * nor make the write that fixes it forget the servers it leaves out.
+ * Undefined where the file has not been readable since the portal started.
+ */
+export function readableMcpConfig(): McpFile | undefined {
+  const { config, error } = readMcpFile();
+  if (!error) lastReadable = config;
+  return lastReadable;
+}
+
 export function readMcpFile(): { config: McpFile; raw: string; error?: string } {
   const file = mcpConfigPath();
   if (!existsSync(file)) return { config: { mcpServers: {} }, raw: "" };
@@ -121,6 +136,17 @@ export function mcpServerNames(): string[] {
  * removed from the configuration leaves its entry there, and its tools with it.
  */
 export const mcpCachePath = (): string => path.join(piAgentDir(), "mcp-cache.json");
+
+/** The adapter's cache as it is on disk, or null where it is not there or cannot be read. */
+export function readMcpCache(): { servers?: Record<string, { tools?: unknown; resources?: unknown } | undefined> } | null {
+  try {
+    const cache = JSON.parse(readFileSync(mcpCachePath(), "utf8"));
+    const servers = cache?.servers;
+    return servers && typeof servers === "object" && !Array.isArray(servers) ? cache : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Take the named servers out of the adapter's cache. A cache that is not there
@@ -198,8 +224,31 @@ export function serversAndBrowsers(): { servers: string[]; browsers: string[] } 
  */
 export function writeMcpText(text: string): void {
   const file = mcpConfigPath();
+  const before = Object.keys(readableMcpConfig()?.mcpServers ?? {});
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileAtomic(file, text.endsWith("\n") ? text : text + "\n", 0o600);
+  for (const listener of [...writtenListeners]) {
+    try {
+      listener(before);
+    } catch (e) {
+      console.error(`[portal] could not take in the MCP configuration that was written: ${(e as Error).message}`);
+    }
+  }
+}
+
+const writtenListeners = new Set<(before: string[]) => void>();
+
+/**
+ * Told after every write of the file, whoever wrote it — a route of the panel,
+ * a feature switched off, the browser moved over — with the servers it had
+ * before: what the configuration offers decides which tools a running chat may
+ * still use (see mcp-offer.ts), and a chat that has to be restarted to notice
+ * a server switched off is a switch that looks broken. Returns the way to stop
+ * listening.
+ */
+export function onMcpWritten(listener: (before: string[]) => void): () => void {
+  writtenListeners.add(listener);
+  return () => writtenListeners.delete(listener);
 }
 
 export function writeMcpFile(config: McpFile): void {
@@ -283,13 +332,11 @@ export function mcpRouter(): Router {
     if (name !== from && Object.prototype.hasOwnProperty.call(config.mcpServers, name)) {
       return res.status(409).json({ error: `A server called ${name} already exists`, code: "exists" });
     }
-    const before = Object.keys(config.mcpServers);
+    // A rename removes the old name, and its tools are not the new one's (see writeMcpText).
     if (from && from !== name) delete config.mcpServers[from];
     config.mcpServers[name] = req.body.entry;
     try {
       writeMcpFile(config);
-      // A rename removes the old name; its tools are not the new one's.
-      mcpServersRemoved(before, Object.keys(config.mcpServers));
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -299,11 +346,9 @@ export function mcpRouter(): Router {
   router.delete("/mcp/servers/:name", (req, res) => {
     const { config, error } = readMcpFile();
     if (error) return res.status(409).json({ error: `Fix the file first: ${error}` });
-    const before = Object.keys(config.mcpServers);
     delete config.mcpServers[req.params.name];
     try {
       writeMcpFile(config);
-      mcpServersRemoved(before, Object.keys(config.mcpServers));
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -378,7 +423,9 @@ export function mcpRouter(): Router {
       return res.status(400).json({ error: "No servers found in that JSON" });
     }
     try {
-      if (added.length) writeMcpFile(config);
+      if (added.length) {
+        writeMcpFile(config);
+      }
       res.json({ ok: true, added, skipped });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -389,17 +436,13 @@ export function mcpRouter(): Router {
   router.put("/mcp/raw", (req, res) => {
     const content = req.body?.content;
     if (typeof content !== "string") return res.status(400).json({ error: "content required" });
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(stripComments(content));
+      JSON.parse(stripComments(content));
     } catch (e) {
       return res.status(400).json({ error: `Not valid JSON: ${(e as Error).message}` });
     }
-    const before = mcpServerNames();
     try {
       writeMcpText(content);
-      const kept = (parsed as McpFile | null)?.mcpServers;
-      mcpServersRemoved(before, kept && typeof kept === "object" ? Object.keys(kept) : []);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

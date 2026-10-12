@@ -26,6 +26,11 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
     if (p === '/api/routines/r1' && method === 'PATCH' && opts.refuses) return reply(400, { error: opts.refuses });
     if (p === '/api/routines/r1' && method === 'PATCH') { Object.assign(routine, body, { updatedAt: opts.stamps?.shift() ?? String(Date.now()) }); return routine; }
     if (p === '/api/routines/r1/sessions') return { sessions: [] };
+    // The routine's own tools, the browser's among them: off for a routine unless switched on.
+    if (p === '/api/routines/r1/tools' && method === 'GET') {
+      return { tools: [{ name: 'browser_navigate', source: 'browser', enabled: false, defaultOn: true }, { name: 'bash', source: 'built in', enabled: true, defaultOn: true }], live: false, off: ['browser_navigate'], names: {} };
+    }
+    if (p === '/api/routines/r1/tools' && method === 'PUT') return { off: body.off, applied: 0 };
     // The schedule's preview asks after a short pause, so a slow run would find it unanswered and its error beside the one a test waits for.
     if (p === '/api/routines/preview') return { runs: [] };
     if (p === '/api/routines/report-targets') return { targets: [], default: null };
@@ -136,7 +141,7 @@ test('a click on another row overtakes a click on a name that was waiting for a 
   await portal(page);
   await page.goto('/sessions');
   await page.getByRole('main').getByText('Old name', { exact: true }).click();
-  await page.getByRole('main').getByText('/w/notes', { exact: true }).click();
+  await page.getByRole('main').locator('[data-flip="s2"] span.text-fg-faint').first().click();
   await expect(page).toHaveURL(/\/s\/s2$/);
   await page.waitForTimeout(500);
   await expect(page).toHaveURL(/\/s\/s2$/);
@@ -147,7 +152,7 @@ test('ending a rename with a click elsewhere in its row does not open the chat',
   await page.goto('/sessions');
   await page.getByRole('button', { name: 'Rename Old name' }).click();
   await page.getByLabel('Session name').fill('Kept here');
-  await page.getByRole('main').getByText('/w/site', { exact: true }).click();
+  await page.getByRole('main').locator('[data-flip="s1"] span.text-fg-faint').first().click();
   await expect.poll(() => sent.find((s) => s.method === 'PATCH')?.body).toEqual({ title: 'Kept here' });
   await page.waitForTimeout(500);
   expect(page.url()).toMatch(/\/sessions$/);
@@ -167,14 +172,20 @@ test('a rename that was saved is shown as saved, even when the list then fails t
 });
 
 test('a routine\'s switches say what they switch and whether they are on, and its choice of timing is a radio group', async ({ page }) => {
-  await portal(page);
+  const sent = await portal(page);
   await page.goto('/routines');
   await page.getByRole('button', { name: /Nightly build/ }).click();
-  // The one beside the name, and the three rows: each is a switch with its state, not a button.
+  // The one beside the name, and the two rows: each is a switch with its state, not a button.
   await expect(page.getByRole('switch', { name: 'Nightly build' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('switch', { name: /^Injection guard/ })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('switch', { name: /^Fresh session each run/ })).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByRole('switch', { name: /^Browser/ })).toHaveAttribute('aria-checked', 'false');
+  // The browser is no switch of its own any more: it is a group in the routine's tools, off, and saved as it is flipped.
+  await expect(page.getByRole('switch', { name: /^Browser/ })).toHaveCount(0);
+  await page.getByRole('button', { name: /^browser/ }).click();
+  const navigate = page.getByRole('checkbox', { name: 'browser_navigate' });
+  await expect(navigate).not.toBeChecked();
+  await navigate.check();
+  await expect.poll(() => sent.find((s) => s.method === 'PUT' && s.path === '/api/routines/r1/tools')?.body).toEqual({ off: [] });
   await page.getByRole('switch', { name: /^Fresh session each run/ }).click();
   await expect(page.getByRole('switch', { name: /^Fresh session each run/ })).toHaveAttribute('aria-checked', 'true');
   // The knob moves by the switch's own motion, which is keyed on the track being the switch's child.

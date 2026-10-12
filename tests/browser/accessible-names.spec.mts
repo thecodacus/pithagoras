@@ -33,6 +33,10 @@ async function portal(page: Page) {
     if (p === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [extension] };
     if (p === '/api/routines') return { routines: [routine] };
     if (p === '/api/routines/preview') return { runs: [] };
+    // A routine's and an agent's own tool switches: the list of checkboxes the page draws, which have to be named too.
+    if (p === '/api/routines/r1/tools' || p === '/api/agents/home/tools') {
+      return { tools: [{ name: 'bash', source: 'built in', enabled: true, defaultOn: true }, { name: 'notes_search', source: 'notes', enabled: false, defaultOn: true, cached: true }], live: false, off: ['notes_search'], names: {} };
+    }
     if (p === '/api/workspaces') return { root: '/w', workspaces: [{ name: 'site', path: '/w/site', isGit: true }] };
     if (p === '/api/projects') return { root: '/w', home: '/h', projects: [{ name: 'site', path: '/w/site', isGit: true, sessions: 0, hasInstructions: false, hasTools: false }] };
     if (p === '/api/pi-settings') return { path: '/a/settings.json', content: '{}' };
@@ -60,6 +64,7 @@ const scenes: Scene[] = [
   { name: 'advanced', url: '/settings/advanced', shows: field('settings.json') },
   { name: 'sessions', url: '/sessions', shows: field(/Search by name/) },
   { name: 'agents', url: '/agents', shows: (page) => page.getByText('Home').first() },
+  { name: "an agent's tools", url: '/agents?agent=home&tab=tools', open: (page) => page.getByRole('button', { name: /^notes/ }).click(), shows: (page) => page.getByRole('checkbox').first() },
   { name: 'an agent', url: '/agents?agent=home&tab=files', open: (page) => page.getByRole('button', { name: 'SOUL.md' }).click(), shows: field('SOUL.md') },
   { name: 'routines', url: '/routines', shows: (page) => page.getByText('Morning').first() },
   { name: 'a routine', url: '/routines', open: (page) => page.getByRole('button', { name: /Morning/ }).first().click(), shows: field('Routine name') },

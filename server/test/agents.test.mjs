@@ -49,8 +49,9 @@ test("an agent has a home, files and chats of its own", async () => {
   const chats = (await call("GET", "/api/sessions")).body.sessions;
   assert.ok(chats.some((s) => s.id === named.body.id), "a conversation started on the Agent page is listed with the chats");
   const listed = await call("GET", "/api/agent/sessions?agent=research-bot");
-  assert.deepEqual(listed.body.sessions.map((s) => s.id), [named.body.id]);
-  assert.equal((await call("GET", "/api/agent/sessions")).body.sessions.length, 0, "the first agent's list has none of its chats");
+  assert.deepEqual(listed.body.sessions.map((s) => s.id).sort(), [chat.body.id, named.body.id].sort(), "the chat the + starts is a conversation of the agent like the one started on its page");
+  assert.deepEqual((await call("GET", "/api/agent/sessions")).body.sessions.map((s) => s.id), [homeChat.body.id], "the first agent's list has its own chat, and none of the other agent's");
+  assert.equal(listed.body.sessions.find((s) => s.id === chat.body.id).channel, null);
 
   const projects = await call("GET", "/api/projects?bare=1");
   assert.deepEqual(projects.body.agents.map((a) => a.name), ["Nova", "Research Bot"]);
@@ -340,4 +341,46 @@ test("a routine's chat that its agent's delete left in place takes messages agai
   // The same run again, in the same chat: not "being deleted", which every run after it would meet until the portal restarted.
   const again = await call("POST", `/api/routines/${routine.id}/run`);
   assert.equal(again.body.lastOutput, first.body.lastOutput);
+});
+
+test("the New button's chat goes to the agent picked for new chats, the first agent's until one is, and again when that agent is deleted", async () => {
+  const homePath = path.join(home, "agent-home");
+  const picked = (await call("POST", "/api/agents", { name: "Default Pick" })).body;
+  const other = (await call("POST", "/api/agents", { name: "Other Pick" })).body;
+  const flags = async () => Object.fromEntries((await call("GET", "/api/agents")).body.agents.map((a) => [a.id, a.newChats]));
+  assert.equal((await call("POST", "/api/sessions", {})).body.workspace, homePath);
+  assert.equal((await flags()).home, true, "the first agent has them until another is picked");
+
+  const on = await call("PUT", `/api/agents/${picked.id}/new-chats`, { on: true });
+  assert.equal(on.status, 200, JSON.stringify(on.body));
+  assert.equal(on.body.newChats, true);
+  const now = await flags();
+  assert.deepEqual(Object.keys(now).filter((id) => now[id]), [picked.id], "one agent has them");
+  // The sidebar's house comes from this route, not from /api/agents.
+  const shown = (await call("GET", "/api/projects?bare=1")).body.agents;
+  assert.deepEqual(shown.filter((x) => x.newChats).map((x) => x.id), [picked.id], "the sidebar's list marks the picked agent and no other");
+  assert.ok(shown.length >= 3 && shown.every((x) => x.newChats === (x.id === picked.id)), "every other agent is marked off");
+  assert.equal((await call("POST", "/api/sessions", {})).body.workspace, picked.home);
+  assert.equal((await call("POST", "/api/sessions", { agent: other.id })).body.workspace, other.home, "an agent named is the one used");
+  assert.equal((await call("POST", "/api/sessions", { workspace: homePath })).body.workspace, homePath, "so is a folder named, Home included");
+
+  assert.equal((await call("PUT", `/api/agents/${other.id}/new-chats`, { on: false })).body.newChats, false);
+  assert.equal((await flags())[picked.id], true, "off for an agent that does not have them leaves the pick alone");
+  assert.equal((await call("PUT", "/api/agents/nobody/new-chats", { on: true })).status, 404);
+  assert.equal((await call("PUT", "/api/agents/nobody/new-chats", { on: false })).status, 404);
+  for (const body of [undefined, {}, { on: "false" }, { on: 0 }, { on: null }]) {
+    const bad = await call("PUT", `/api/agents/${other.id}/new-chats`, body);
+    assert.equal(bad.status, 400, JSON.stringify(body));
+    assert.equal(bad.body.error, "on must be a boolean");
+  }
+  assert.equal((await flags())[picked.id], true, "a malformed body does not move the pick");
+
+  await call("PUT", `/api/agents/${picked.id}/new-chats`, { on: false });
+  assert.equal((await call("POST", "/api/sessions", {})).body.workspace, homePath, "off hands them back to the first agent");
+
+  await call("PUT", `/api/agents/${picked.id}/new-chats`, { on: true });
+  await call("DELETE", `/api/agents/${picked.id}`);
+  assert.equal((await call("POST", "/api/sessions", {})).body.workspace, homePath, "a deleted agent is not the pick");
+  const again = (await call("POST", "/api/agents", { name: "Default Pick" })).body;
+  assert.equal(again.newChats, false, "one made later under its name does not inherit it");
 });

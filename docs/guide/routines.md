@@ -111,12 +111,37 @@ agent to read it. Exempt the routine that needs it, leave the rest alone, and
 read the audit occasionally.
 :::
 
-## The browser
+## Tools
 
-**Browser** on a routine's page lets its runs drive the agent's
-[browser](/guide/browser), which is signed into the agent's own accounts. It is
-off by default, and every page a run opens is recorded in
-[Audit](/guide/sessions#audit).
+**Tools** on a routine's page is the same list a chat's tools control and a
+project's show, grouped the same way (built in, extensions, each MCP server, the
+browser). What you switch there is what every run of the routine starts with,
+saved as each switch is flipped, apart from the form's **Save**. A routine's
+switches are exceptions to what the layers under it leave, both ways: a tool on
+where they have it off, off where they have it on. A tool the routine never
+mentioned keeps following them, so a later change to the default still reaches it.
+
+The layers, each an exception to the one before it:
+
+1. **Settings → Tools**, the default for every conversation;
+2. **the agent** whose home the routine runs in (see [Agents](/guide/agents#tools));
+3. **the project** it runs in (see [Projects](/guide/projects#tools));
+4. **the routine**;
+5. **the run's own chat**, which can still switch a tool for itself and has the last word.
+
+An agent and a project do not both apply to one place: a project is under the
+workspace root, an agent's home is not.
+
+### The browser
+
+The browser's tools are a group in that list, and having them is having the
+[browser](/guide/browser), which is signed into the agent's own accounts. For a
+routine they are off unless switched on, as the **Browser** switch that used to be
+here was: a routine that had it on keeps the browser, one that had it off stays
+without, until its browser group is switched. A new routine starts without it.
+Through the API, `browser` on a routine still switches all of the browser's tools
+for it at once, and a browser tool that turns up later starts the way the
+browser was last set for the routine. Every page a run opens is recorded in [Audit](/guide/sessions#audit).
 
 ## Letting the agent manage them
 

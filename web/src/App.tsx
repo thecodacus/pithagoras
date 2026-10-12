@@ -253,7 +253,7 @@ function Shell({
     return r.sessions;
   }, []);
 
-  /** A chat started in `workspace`, or in Home without one, and opened. */
+  /** A chat started in `workspace`, or where "New" goes (the agent picked for new chats) without one, and opened. */
   const startChat = useStable(async (workspace?: string) => {
     const s = await api.createSession(workspace);
     await refreshSessions();
@@ -745,7 +745,7 @@ function Shell({
             }}
           />
         ) : view === "agents" ? (
-          <AgentPage onSelect={(id) => navigate(`/s/${id}`)} />
+          <AgentPage onSelect={(id) => navigate(`/s/${id}`)} onNewChat={startChat} reloadPlaces={reloadPlaces} />
         ) : view === "routines" ? (
           <RoutinesPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "browser" ? (
@@ -792,6 +792,13 @@ function Shell({
             }}
             onDeleteMessage={async (seq) => {
               await api.deleteMessage(active.id, seq);
+            }}
+            onTakeBackQueued={async (seq) => {
+              await api.takeBackQueued(active.id, seq);
+            }}
+            onSendQueuedNow={async (seq) => {
+              await api.sendQueuedNow(active.id, seq);
+              refreshSessions();
             }}
             onAbort={async () => {
               await api.abort(active.id);

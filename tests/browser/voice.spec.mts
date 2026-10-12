@@ -192,17 +192,21 @@ test('End cancels PCM buffering before any audio can start', async ({ page }) =>
 test('live transcription begins before turn completion and previews recognized words', async ({ page }) => {
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
-  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'Recognized while you speak.' } }));
+  const purposes: (string | null)[] = [];
+  await page.route('**/voice/transcribe*', route => { purposes.push(new URL(route.request().url()).searchParams.get('purpose')); return route.fulfill({ json: { text: 'Recognized while you speak.' } }); });
   await page.route('**/voice/speech', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
   await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
-  const request = page.waitForRequest('**/voice/transcribe');
+  const request = page.waitForRequest('**/voice/transcribe*');
   await page.getByRole('button', { name: 'Inject speech' }).click();
   await request;
   await expect(page.getByTestId('sent')).toHaveText('0');
   await expect(page.getByLabel('Live transcription')).toHaveText('Recognized while you speak.');
   await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 12000 });
+  // Voice mode asks for the speech model, not the dictation one: no purpose goes with its requests.
+  expect(purposes.length).toBeGreaterThan(0);
+  expect(purposes.every(purpose => purpose === null)).toBe(true);
   await page.getByRole('button', { name: 'End voice mode' }).click();
 });
 
@@ -363,11 +367,11 @@ test('without speech synthesis voice mode is not offered, because it speaks its 
 });
 
 test('dictation in send mode sends what was said to the chat it was started in', async ({ page }) => {
-  const asked: string[] = [];
+  const asked: string[] = [], purposes: (string | null)[] = [];
   await page.addInitScript(() => localStorage.setItem('dictationMode', 'send'));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
-  await page.route('**/voice/transcribe', route => { asked.push(new URL(route.request().url()).pathname); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
+  await page.route('**/voice/transcribe*', route => { const url = new URL(route.request().url()); asked.push(url.pathname); purposes.push(url.searchParams.get('purpose')); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Dictate a message' }).click();
   await expect(page.getByRole('button', { name: 'Stop dictating' })).toBeVisible({ timeout: 25000 });
@@ -375,14 +379,16 @@ test('dictation in send mode sends what was said to the chat it was started in',
   await expect(page.getByTestId('sent')).toHaveText('1', { timeout: 15000 });
   await expect(page.getByTestId('last-send')).toContainText('A dictated sentence.');
   expect(asked.at(-1)).toBe('/api/sessions/test/voice/transcribe');
+  // Dictation asks for the dictation model; voice mode does not (see the hands-free test).
+  expect(purposes.at(-1)).toBe('dictation');
 });
 
 test('a sentence being dictated when another chat is opened is not sent to that chat', async ({ page }) => {
-  const asked: string[] = [];
+  const asked: string[] = [], purposes: (string | null)[] = [];
   await page.addInitScript(() => localStorage.setItem('dictationMode', 'send'));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
-  await page.route('**/voice/transcribe', route => { asked.push(new URL(route.request().url()).pathname); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
+  await page.route('**/voice/transcribe*', route => { const url = new URL(route.request().url()); asked.push(url.pathname); purposes.push(url.searchParams.get('purpose')); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
   // The chat switched to answers as the one the page starts in does.
   await page.route('**/api/sessions/other/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/other/canvases', route => route.fulfill({ json: [] }));
@@ -393,6 +399,8 @@ test('a sentence being dictated when another chat is opened is not sent to that 
   await page.getByRole('button', { name: 'Inject speech' }).click();
   // Mid-sentence: heard, not yet ended by a pause.
   await expect(page.getByText('Hearing you')).toBeVisible({ timeout: 15000 });
+  // The sentence is already being transcribed for the chat it was started in, which is what the switch has to keep from the other one.
+  await expect.poll(() => asked.length, { timeout: 15000 }).toBeGreaterThan(0);
   await page.getByRole('button', { name: 'Switch chat' }).click();
   // The sentence is not to be sent to the chat it was not started in, which only waiting for as long as a send takes shows.
   await page.waitForTimeout(2500);
@@ -403,9 +411,10 @@ test('a sentence being dictated when another chat is opened is not sent to that 
 test('Smart Turn ends a finished turn sooner than the silence that would end it otherwise', async ({ page }) => {
   const failures: string[] = [];
   page.on('pageerror', e => failures.push(e.message));
-  // Three seconds of silence, or five for Smart Turn's longest pause. The page plays the sample's first 2.5 s, "And
-  // so my fellow Americans", which ends at 2.3 s: a turn sent before 5.3 s is one the model ended.
-  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, vad: { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 3000 }, smartTurn: { enabled: true, checkMs: 200, threshold: 0.5, fallbackMs: 5000 } } }));
+  // Five seconds of silence end the turn either way: the plain rule's, and Smart Turn's longest pause. The page plays
+  // the sample's first 2.5 s, "And so my fellow Americans", which ends at 2.3 s: a turn sent before 7.3 s is one the
+  // model ended. The model answers within a second of the pause; the rest is room for a machine that is busy.
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, vad: { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 5000 }, smartTurn: { enabled: true, checkMs: 200, threshold: 0.5, fallbackMs: 5000 } } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
   const model = page.waitForResponse('**/voice-assets/smart-turn-v3.2-cpu.onnx');
   await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'A test voice turn.' } }));
@@ -418,7 +427,7 @@ test('Smart Turn ends a finished turn sooner than the silence that would end it 
   const injected = Date.now();
   await page.getByRole('button', { name: 'Inject speech' }).click();
   await expect(page.getByTestId('sent')).not.toHaveText('0', { timeout: 20000 });
-  expect(Date.now() - injected).toBeLessThan(4500);
+  expect(Date.now() - injected).toBeLessThan(6500);
   expect(failures).toEqual([]);
 });
 

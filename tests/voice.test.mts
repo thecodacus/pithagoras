@@ -1,6 +1,6 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, chmodSync } from 'node:fs';
+import { writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express from 'express';
 import { speechChunks, samplesWav } from '../web/src/voice.js';
@@ -8,13 +8,19 @@ import { inProcessHome } from "./helpers.mts";
 const dir = inProcessHome('pithagoras-voice-');
 // No Docker here, whatever this machine has: the managed service is tested on its own.
 process.env.DOCKER_SOCKET = join(dir, 'no-docker.sock');
-const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice } = await import('../server/src/api/voice.js');
+const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice, errorLineRetry } = await import('../server/src/api/voice.js');
 const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
-const { getDb, getSkipThinkingProviders, getVoiceInstructions } = await import('../server/src/db.js');
+const { getDb, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel } = await import('../server/src/db.js');
 const { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS } = await import('../server/src/pi/voice-first.js');
 const upstream = express();
 let calls = 0;
 let busyAttempts = 0;
+let speechCalls = 0;
+// The next this many speech requests fail, as a model that is still coming up does.
+let failSpeech = 0;
+// A speech model that is slow, or that answers with something other than 24 kHz audio.
+let slowSpeechMs = 0;
+let badSpeech: 'json' | 'rate' | undefined;
 let nativeRequest: any;
 let speechBody = "";
 let transcriptionBody = "";
@@ -25,7 +31,17 @@ upstream.post('/inference', express.raw({ type: () => true }), (req, res) => {
   calls++; assert.match(transcriptionBody, /name="file"; filename="recording.wav"/);
   res.json({ text: ' Test the session. ' });
 });
-upstream.post('/v1/audio/speech', express.raw({ type: () => true }), (req, res) => {
+let dictationBody = "";
+upstream.post('/dictation', express.raw({ type: () => true }), (req, res) => {
+  dictationBody = req.body.toString();
+  res.json({ text: ' Dictated elsewhere. ' });
+});
+upstream.post('/v1/audio/speech', express.raw({ type: () => true }), async (req, res) => {
+  speechCalls++;
+  if (failSpeech > 0) { failSpeech--; return res.status(503).json({ detail: 'loading' }); }
+  if (slowSpeechMs) await new Promise(r => setTimeout(r, slowSpeechMs));
+  if (badSpeech === 'json') return res.json({ detail: 'not audio' });
+  if (badSpeech === 'rate') return res.set({ 'Content-Type': 'audio/pcm', 'X-Sample-Rate': '16000' }).send(Buffer.from([0, 0, 255, 127]));
   if (req.get('content-type') === 'application/json') {
     nativeRequest = JSON.parse(req.body.toString());
     // Chatterbox and Kokoro have no streaming mode: they answer with one complete WAV.
@@ -88,6 +104,59 @@ test('voice is opt-in, checks session existence, and proxies actual multipart co
 test('a voice that is not in the library is refused rather than spoken in another', () => {
   assert.throws(() => validateConfig({ ...settings, voice: 'missing' }));
   assert.throws(() => validateConfig({ ...settings, voice: '../other' }));
+});
+test('dictation can name a model of its own; voice mode and an empty setting keep the general one', async () => {
+  const put = (body: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const transcribe = async (query = '') => {
+    const res = await fetch(`${base}/sessions/test/voice/transcribe${query}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: new Uint8Array(pcmWav(Buffer.alloc(32))) });
+    assert.equal(res.status, 200);
+    return transcriptionBody.match(/name="model"\r\n\r\n(.*)\r\n/)?.[1];
+  };
+  const saved = await put({ ...settings, sttModel: 'fast-asr', dictationModel: ' accurate-asr ' });
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).dictationModel, 'accurate-asr');
+  assert.equal(await transcribe(), 'fast-asr');
+  assert.equal(await transcribe('?purpose=dictation'), 'accurate-asr');
+  // "Auto": empty means dictation uses the general model.
+  assert.equal((await put({ ...settings, sttModel: 'fast-asr', dictationModel: '' })).status, 200);
+  assert.equal(await transcribe('?purpose=dictation'), 'fast-asr');
+  // Only the dictation model is set: voice mode sends no model field.
+  assert.equal((await put({ ...settings, sttModel: '', dictationModel: 'accurate-asr' })).status, 200);
+  assert.equal(await transcribe(), undefined);
+  assert.equal(await transcribe('?purpose=dictation'), 'accurate-asr');
+  assert.throws(() => validateConfig({ ...settings, dictationModel: 'a model' }));
+  assert.throws(() => validateConfig({ ...settings, dictationModel: 3 }));
+  // The managed service names its own model, so a leftover one is dropped.
+  assert.equal(connectManagedVoice().dictationModel, '');
+});
+test('dictation can name an endpoint of its own; voice mode and an empty setting keep the voice one', async () => {
+  const put = (body: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const transcribe = async (query = '') => {
+    transcriptionBody = dictationBody = '';
+    const res = await fetch(`${base}/sessions/test/voice/transcribe${query}`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: new Uint8Array(pcmWav(Buffer.alloc(32))) });
+    assert.equal(res.status, 200);
+    return { text: (await res.json()).text, voice: transcriptionBody !== '', own: dictationBody !== '' };
+  };
+  const own = `http://127.0.0.1:${port}/dictation`;
+  const saved = await put({ ...settings, dictationUrl: ` ${own} ` });
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).dictationUrl, own);
+  // Dictation goes to its own address; voice mode keeps the general one.
+  assert.deepEqual(await transcribe('?purpose=dictation'), { text: 'Dictated elsewhere.', voice: false, own: true });
+  assert.deepEqual(await transcribe(), { text: 'Test the session.', voice: true, own: false });
+  // Empty: dictation uses the voice address like voice mode.
+  assert.equal((await put({ ...settings, dictationUrl: '' })).status, 200);
+  assert.deepEqual(await transcribe('?purpose=dictation'), { text: 'Test the session.', voice: true, own: false });
+  assert.equal((await put({ ...settings })).status, 200);
+  assert.deepEqual(await transcribe('?purpose=dictation'), { text: 'Test the session.', voice: true, own: false });
+  // The same check as for the voice address.
+  for (const bad of ['not a url', 'ftp://example.test/x', 'http://user:pw@example.test/x', 'http://example.test/x#frag'])
+    assert.throws(() => validateConfig({ ...settings, dictationUrl: bad }), undefined, bad);
+  assert.throws(() => validateConfig({ ...settings, dictationUrl: 3 }));
+  assert.equal(validateConfig({ ...settings, dictationUrl: '  ' }).dictationUrl, '');
+  // The managed service has one address for both, so a leftover one is dropped.
+  await put({ ...settings, dictationUrl: own });
+  assert.equal(connectManagedVoice().dictationUrl, '');
 });
 test('selected input language is sent to Whisper and invalid languages are rejected', async () => {
   for (const language of ['en', 'hi', 'bn']) {
@@ -284,6 +353,192 @@ test('Kokoro speaks with a voice of its own, at the speed chosen, and an agent c
   assert.throws(() => validateConfig({ ...kokoro, kokoroVoice: 'jf_alpha' }), /Kokoro's voices/);
   assert.throws(() => validateConfig({ ...kokoro, speed: 3 }), /speaking speed/);
   assert.deepEqual([validateConfig(settings).kokoroVoice, validateConfig(settings).speed], ['af_heart', 1]);
+});
+
+test('the spoken error line is made once when voice mode starts, kept, and read at error time without asking the speech model', async () => {
+  const { existsSync, readdirSync } = await import('node:fs');
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, ...patch }) });
+  const make = (text = 'An error occurred.', session = 'test') => fetch(`${base}/sessions/${session}/voice/error-line`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  const read = (text = 'An error occurred.', session = 'test') => fetch(`${base}/sessions/${session}/voice/error-line?text=${encodeURIComponent(text)}`);
+  errorLineRetry.waitsMs = [0, 0];
+  const files = () => existsSync(join(dir, 'voice')) ? readdirSync(join(dir, 'voice')).filter(name => name.endsWith('.wav')) : [];
+  assert.equal((await put({ runtime: 'kokoro' })).status, 200);
+  // Before voice mode has started there is no file, and that is said, not synthesized on the spot.
+  const before = speechCalls;
+  const missing = await read();
+  assert.equal(missing.status, 404);
+  assert.match((await missing.json()).error, /has not been made/);
+  assert.equal(speechCalls, before);
+  // Made at the start: one call to the engine, one file.
+  const made = await make();
+  assert.deepEqual(await made.json(), { ready: true, generated: true });
+  assert.equal(speechCalls, before + 1);
+  assert.equal(nativeRequest.input, 'An error occurred.');
+  assert.equal(files().length, 1);
+  // Read at error time: the stored WAV, and no call to the engine.
+  const stored = await read();
+  assert.equal(stored.status, 200);
+  assert.equal(stored.headers.get('content-type'), 'audio/wav');
+  assert.deepEqual(wavPcm(Buffer.from(await stored.arrayBuffer())), Buffer.from([0, 0, 255, 127]));
+  assert.equal(speechCalls, before + 1);
+  // Every later start finds it and does not ask again.
+  assert.deepEqual(await (await make()).json(), { ready: true, generated: false });
+  assert.equal(speechCalls, before + 1);
+  assert.equal(files().length, 1);
+  // Another language is another line, and the first is still there for when the language is changed back.
+  assert.equal((await read('Es ist ein Fehler aufgetreten.')).status, 404);
+  assert.deepEqual(await (await make('Es ist ein Fehler aufgetreten.')).json(), { ready: true, generated: true });
+  assert.equal(speechCalls, before + 2);
+  assert.equal((await read()).status, 200);
+  assert.equal(files().length, 2);
+  // Another voice, or another engine, finds no line until the next start has made one.
+  assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'bf_emma' })).status, 200);
+  assert.equal((await read()).status, 404);
+  assert.deepEqual(await (await make()).json(), { ready: true, generated: true });
+  assert.equal(nativeRequest.voice, 'bf_emma');
+  assert.equal((await put({ runtime: 'audio-cpp' })).status, 200);
+  assert.equal((await read()).status, 404);
+  // The speech model is not there at the start: nothing is stored, the failure is reported, and the line stays missing.
+  assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'am_onyx', breezeUrl: 'http://127.0.0.1:9/v1/audio/speech' })).status, 200);
+  const failed = await make();
+  assert.equal(failed.status, 502);
+  assert.ok((await failed.json()).error);
+  assert.equal((await read()).status, 404);
+  const count = files().length;
+  // Not text for a line, and no speech synthesis to make it with.
+  assert.equal((await make('')).status, 400);
+  assert.equal((await make('x'.repeat(201))).status, 400);
+  assert.equal((await read('')).status, 400);
+  assert.equal((await put({ runtime: 'none', breezeUrl: '' })).status, 200);
+  assert.equal((await make()).status, 409);
+  assert.equal(files().length, count);
+  assert.equal((await put({})).status, 200);
+});
+
+test('a failed spoken error line is tried again at the start, and again at every later start until it exists', async () => {
+  const { readdirSync, writeFileSync: write } = await import('node:fs');
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, ...patch }) });
+  const make = () => fetch(`${base}/sessions/test/voice/error-line`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'A line for retries.' }) });
+  const read = () => fetch(`${base}/sessions/test/voice/error-line?text=${encodeURIComponent('A line for retries.')}`);
+  errorLineRetry.waitsMs = [0, 0];
+  const warned: string[] = [];
+  const warn = console.warn; console.warn = (...args: unknown[]) => { warned.push(args.join(' ')); };
+  try {
+    assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'bm_fable' })).status, 200);
+    // The model is up on the third try: one start, three calls, one file, a warning per failed try.
+    let before = speechCalls; failSpeech = 2;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: true });
+    assert.equal(speechCalls - before, 3);
+    assert.equal(warned.length, 2);
+    assert.match(warned[0], /try 1 of 3.*HTTP 503/);
+    assert.match(warned[1], /try 2 of 3/);
+    assert.equal((await read()).status, 200);
+    // Found at the next start: the engine is not asked, and a success stops the retrying.
+    before = speechCalls;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: false });
+    assert.equal(speechCalls, before);
+    // Another voice: the model fails on all three tries. The start reports it, nothing is stored, one warning per try.
+    assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'bm_george' })).status, 200);
+    warned.length = 0; before = speechCalls; failSpeech = 99;
+    const failed = await make();
+    assert.equal(failed.status, 502);
+    assert.equal(speechCalls - before, 3);
+    assert.equal(warned.length, 3);
+    assert.match(warned[2], /try 3 of 3.*tried again when voice mode next starts/);
+    assert.equal((await read()).status, 404);
+    // The error time reads the file only, and does not ask the model while the line is missing.
+    before = speechCalls;
+    assert.equal((await read()).status, 404);
+    assert.equal(speechCalls, before);
+    // The next start tries again, on its own, without an error having happened, and makes it now that the model is up.
+    failSpeech = 0; before = speechCalls;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: true });
+    assert.equal(speechCalls - before, 1);
+    assert.equal((await read()).status, 200);
+    // A damaged file is no line: it is made again, not served.
+    const folder = join(dir, 'voice');
+    for (const file of readdirSync(folder).filter(n => n.endsWith('.wav'))) write(join(folder, file), Buffer.from('broken'));
+    assert.equal((await read()).status, 404);
+    before = speechCalls;
+    assert.deepEqual(await (await make()).json(), { ready: true, generated: true });
+    assert.equal(speechCalls - before, 1);
+    assert.equal((await read()).status, 200);
+    // The waits between the tries are the ones set.
+    errorLineRetry.waitsMs = [30, 60];
+    assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'bm_lewis' })).status, 200);
+    failSpeech = 2; const started = Date.now();
+    assert.equal((await make()).status, 200);
+    assert.ok(Date.now() - started >= 85, 'the tries wait as long as set');
+  } finally {
+    console.warn = warn; failSpeech = 0; errorLineRetry.waitsMs = [1000, 3000];
+    await put({});
+  }
+});
+
+test('an error that comes while the line is still being made waits for it, and a line that is not 24 kHz audio is not kept', async () => {
+  const { readdirSync, rmSync, statSync, utimesSync } = await import('node:fs');
+  const folder = join(dir, 'voice');
+  const wavs = () => existsSync(folder) ? readdirSync(folder).filter(n => n.endsWith('.wav')) : [];
+  const put = (patch: object) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, ...patch }) });
+  const make = (text: string) => fetch(`${base}/sessions/test/voice/error-line`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  const read = (text: string) => fetch(`${base}/sessions/test/voice/error-line?text=${encodeURIComponent(text)}`);
+  errorLineRetry.waitsMs = [0, 0];
+  const warn = console.warn; console.warn = () => {};
+  try {
+    assert.equal((await put({ runtime: 'kokoro', kokoroVoice: 'af_nova' })).status, 200);
+    // The first engine call is slow: the error asks for the line while it is made, and gets it, not a 404.
+    slowSpeechMs = 300;
+    const making = make('Waiting for the line.');
+    await new Promise(r => setTimeout(r, 80));
+    const early = await read('Waiting for the line.');
+    assert.equal(early.status, 200);
+    assert.equal(early.headers.get('content-type'), 'audio/wav');
+    assert.equal((await making).status, 200);
+    // A line that is being made and fails is still a 404 for the error, which then shows the text only.
+    // The wait between the tries keeps the make in flight (the engine answers a failure at once), so the read has to wait for it.
+    failSpeech = 99; errorLineRetry.waitsMs = [300, 0];
+    const failing = make('Waiting in vain.');
+    await new Promise(r => setTimeout(r, 30));
+    const askedAt = Date.now();
+    assert.equal((await read('Waiting in vain.')).status, 404);
+    assert.ok(Date.now() - askedAt >= 200, 'the read waited for the make that failed');
+    assert.equal((await failing).status, 502);
+    failSpeech = 0; slowSpeechMs = 0; errorLineRetry.waitsMs = [0, 0];
+    // Used lines are the ones kept: a line used after eight newer ones were made survives, the least recently used goes.
+    for (const name of wavs()) rmSync(join(folder, name));
+    const named = async (text: string) => { const before = new Set(wavs()); assert.equal((await make(text)).status, 200); return wavs().find(n => !before.has(n))!; };
+    const age = (name: string, secondsAgo: number) => { const at = new Date(Date.now() - secondsAgo * 1000); utimesSync(join(folder, name), at, at); };
+    const used = await named('Used often.');
+    age(used, 1000);
+    const others: string[] = [];
+    for (let i = 1; i <= 7; i++) { const name = await named(`Line number ${i}.`); age(name, 500 - i); others.push(name); }
+    assert.equal(wavs().length, 8);
+    assert.deepEqual(await (await make('Used often.')).json(), { ready: true, generated: false });
+    assert.ok(statSync(join(folder, used)).mtimeMs > Date.now() - 5000, 'a hit marks the line as used');
+    await named('The ninth line.');
+    assert.ok(wavs().includes(used), 'the line used last is kept');
+    assert.ok(!wavs().includes(others[0]), 'the one unused longest is cleared away');
+    // The same on a read at error time.
+    age(used, 2000);
+    assert.equal((await read('Used often.')).status, 200);
+    assert.ok(statSync(join(folder, used)).mtimeMs > Date.now() - 5000);
+    // Breeze answering with something that is not 24 kHz PCM stores nothing, with the errors /voice/speech gives.
+    assert.equal((await put({ runtime: 'audio-cpp' })).status, 200);
+    const count = wavs().length;
+    badSpeech = 'json';
+    let refused = await make('Not audio.');
+    assert.equal(refused.status, 502);
+    assert.match((await refused.json()).error, /Expected PCM audio from the Breeze API/);
+    badSpeech = 'rate';
+    refused = await make('Wrong rate.');
+    assert.equal(refused.status, 502);
+    assert.match((await refused.json()).error, /Unsupported Breeze sample rate: 16000/);
+    assert.equal(wavs().length, count);
+    assert.equal((await read('Wrong rate.')).status, 404);
+  } finally {
+    console.warn = warn; failSpeech = 0; slowSpeechMs = 0; badSpeech = undefined; errorLineRetry.waitsMs = [1000, 3000];
+    await put({});
+  }
 });
 
 test('VAD settings preserve defaults, accept tuning and reject invalid thresholds', () => {
@@ -511,6 +766,24 @@ test('the providers that skip thinking on the first spoken call: the default lis
   assert.equal(getSkipThinkingProviders(), undefined);
   // What is not a list of provider names.
   for (const bad of ['llama-swap', [42], ['two words'], ['a/b'], Array(51).fill('x')]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad).slice(0, 40));
+  await put(undefined);
+});
+test('the voice model: none by default, a provider/model is saved and read back, and anything else is refused', async () => {
+  const put = (voiceModel: unknown) => fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, voiceModel }) });
+  await put(undefined);
+  assert.equal(getVoiceModel(), undefined);
+  assert.equal((await put(' fast/small-model:q4 ')).status, 200);
+  assert.deepEqual(getVoiceModel(), { provider: 'fast', modelId: 'small-model:q4' });
+  assert.equal(((await (await fetch(`${base}/voice`)).json()) as any).voiceModel, 'fast/small-model:q4');
+  // Kept when the managed voice saves the settings again.
+  assert.equal(connectManagedVoice().voiceModel, 'fast/small-model:q4');
+  // A model id may hold slashes of its own: only the first one ends the provider.
+  await put('router/vendor/model');
+  assert.deepEqual(getVoiceModel(), { provider: 'router', modelId: 'vendor/model' });
+  // Empty is the way back to the chat's own.
+  await put('');
+  assert.equal(getVoiceModel(), undefined);
+  for (const bad of [42, 'no-slash', '/model', 'provider/', 'two words/model', 'x'.repeat(301)]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad).slice(0, 40));
   await put(undefined);
 });
 test('VOICE_RESPONSE_INSTRUCTIONS=false is shown to the page, and leaves a saved text alone', async () => {

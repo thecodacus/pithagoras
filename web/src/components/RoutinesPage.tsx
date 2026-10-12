@@ -23,6 +23,7 @@ import { pollWhileVisible } from "../poll";
 import { formatDateTime, labelOf, msg, t, tp, tx } from "../i18n";
 import { useFlash } from "../use-flash";
 import { serverTime, sinceThen } from "../time";
+import { ToolSwitches } from "./ToolSwitches";
 
 
 const STATUS_STYLE: Record<string, string> = {
@@ -594,7 +595,6 @@ function RoutineDetail({
   const [instructions, setInstructions] = useState(r.instructions);
   const [fresh, setFresh] = useState(r.freshSession);
   const [guard, setGuard] = useState(r.guard);
-  const [browser, setBrowser] = useState(r.browser);
   const [workspace, setWorkspace] = useState(r.workspace ?? "");
   // "" = inherit the portal default, "off" = stay quiet, else "channel\u0000target".
   const [report, setReport] = useState(reportValue(r));
@@ -612,7 +612,6 @@ function RoutineDetail({
     instructions !== from.instructions ||
     fresh !== from.freshSession ||
     guard !== from.guard ||
-    browser !== from.browser ||
     workspace !== (from.workspace ?? "") ||
     report !== reportValue(from);
   const dirty = differs(r);
@@ -625,13 +624,12 @@ function RoutineDetail({
     setInstructions(from.instructions);
     setFresh(from.freshSession);
     setGuard(from.guard);
-    setBrowser(from.browser);
     setWorkspace(from.workspace ?? "");
     setReport(reportValue(from));
   };
   // The fields as they are now, for a save that finishes after more was typed.
-  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, guard, browser, workspace, report });
-  live.current = { name, mode, schedule, runAt, instructions, fresh, guard, browser, workspace, report };
+  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, guard, workspace, report });
+  live.current = { name, mode, schedule, runAt, instructions, fresh, guard, workspace, report };
 
   // What the form was last filled from: the fields are filled again from the routine
   // for another routine, after this form's own save (see the Save button), or when
@@ -778,22 +776,6 @@ function RoutineDetail({
           <SwitchTrack on={guard} />
         </button>
 
-        <button
-          type="button"
-          role="switch"
-          aria-checked={browser}
-          onClick={() => setBrowser(!browser)}
-          className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
-        >
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-fg">{t("Browser")}</p>
-            <p className="text-[11px] text-fg-subtle">
-              {t("Lets this routine drive the agent's browser, which is signed into the agent's own accounts. Off by default. Every page it opens is recorded in Audit.")}
-            </p>
-          </div>
-          <SwitchTrack on={browser} />
-        </button>
-
         {/* Not a label: it would pass a click on the hint to the Select's button. */}
         <div className="block pt-1">
           <span className="mb-1 block text-xs text-fg-subtle">{t("Report to")}</span>
@@ -816,6 +798,19 @@ function RoutineDetail({
             {targets.length === 0 &&
               ` ${t("Nothing to pick yet — message a channel that can start a conversation, and it appears here.")}`}
           </p>
+        </div>
+      </section>
+
+      {/* Saved as each switch is flipped, like a project's: not part of the form's Save. The Browser switch
+          that was here is the browser's group in this list. Drawn again when the routine moves, since the
+          layers under it are those of where it runs. */}
+      <section className="mb-6">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Tools")}</h3>
+        <p className="mt-1 text-[11px] text-fg-faint">
+          {t("What every run starts with, against what its agent and project leave. The browser's tools are off for a routine unless switched on here; every page a run opens is recorded in Audit. Saved as each switch is flipped.")}
+        </p>
+        <div className="mt-2 rounded-xl border border-line bg-raised/40">
+          <ToolSwitches key={`${r.id}\u0000${r.workspace ?? ""}`} routine={r.id} />
         </div>
       </section>
 
@@ -881,7 +876,6 @@ function RoutineDetail({
                 instructions,
                 freshSession: fresh,
                 guard,
-                browser,
                 // Only when it changed: a place that has gone would refuse the save.
                 ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),
