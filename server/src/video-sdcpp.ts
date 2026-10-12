@@ -139,7 +139,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
       }
       const formats = json.output_formats_by_mode?.vid_gen;
       if (Array.isArray(formats) && !formats.includes("webm")) {
-        throw fail(`This stable-diffusion.cpp server cannot make a WebM, which is what a browser plays (it makes ${formats.join(", ") || "nothing"}): build it with WebM support`);
+        throw fail(`This stable-diffusion.cpp server cannot make a WebM, which is what a browser plays (it makes ${without(formats.join(", "), key).slice(0, 100) || "nothing"}): build it with WebM support`);
       }
       const fps = json.defaults_by_mode?.vid_gen?.fps;
       return { fps: Number.isInteger(fps) && fps > 0 ? fps : undefined };
@@ -155,10 +155,11 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
     const caps = await capabilities(root);
     const submitted = await call(route(root, "vid_gen"), "POST", bodyOf(config, request, caps?.fps));
     if (submitted.status !== 202 && submitted.status !== 200) {
-      const why = said(submitted.json);
+      // In the server's words, with the key out first (it may repeat it) and then the cut: every answer of its that is shown is shown so.
+      const why = without(said(submitted.json), key).replace(/\s+/g, " ").slice(0, 300);
       if (submitted.status === 404) throw fail(`The server at ${root.origin} has no video route (${route(root, "vid_gen").pathname}): is it a stable-diffusion.cpp server started with a video model?`);
       if (submitted.status === 429) throw fail(`The video endpoint's queue is full${why ? ` (${why})` : ""}: try again when a clip has finished`);
-      throw fail(`The video endpoint answered ${submitted.status}${why ? `: ${without(why, key).replace(/\s+/g, " ").slice(0, 300)}` : ""}`);
+      throw fail(`The video endpoint answered ${submitted.status}${why ? `: ${why}` : ""}`);
     }
     const id = text(submitted.json?.id);
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw fail("The video endpoint accepted the request, but did not name the job");

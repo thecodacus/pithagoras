@@ -49,9 +49,10 @@ export function posterAvailable(): boolean {
   probed = { at: now, tool: which, ok: ran.status === 0 };
   return probed.ok;
 }
-/** For a test that puts ffmpeg in place, or takes it away. */
+/** For a test that puts ffmpeg in place, or takes it away: it is asked about again, and what it could not make is tried again. */
 export const forgetPosterProbe = (): void => {
   probed = undefined;
+  failed.clear();
 };
 
 /** The poster of this very file: its name has the clip's id, and the size and time of the file it was made from, so a file that was written over is never given the poster of the one before. */
@@ -87,6 +88,15 @@ async function turn<T>(job: () => Promise<T>): Promise<T> {
     waiting.shift()?.();
   }
 }
+
+/**
+ * The posters that ffmpeg could not make, by their name (the clip's id, and the size and time of the file): a clip it
+ * cannot read from a pipe — an MP4 with its index at the end — is not tried again for every tile that asks, which would stream
+ * the whole file through ffmpeg each time. A file that is written over has another name and is tried once more. Kept to
+ * no more than this, and started again beyond it; a restart tries them again.
+ */
+const failed = new Set<string>();
+const MAX_FAILED = 10_000;
 
 /** Asked for twice at once (two tiles of one clip): made once. */
 const making = new Map<string, Promise<boolean>>();
@@ -166,6 +176,8 @@ function make(fd: number, size: number, modifiedMs: number, id: string, name: st
       return true;
     } catch (e) {
       console.error("[portal] videos: poster failed:", (e as Error).message);
+      if (failed.size >= MAX_FAILED) failed.clear();
+      failed.add(name);
       return false;
     }
   }).finally(() => making.delete(name));
@@ -191,7 +203,9 @@ export async function openPoster(whole: Opened, id: string, listed: () => boolea
         return undefined;
       }
     };
-    return open() ?? ((await make(whole.fd, whole.size, modifiedMs, id, name, listed)) ? open() : undefined);
+    const kept = open();
+    if (kept || failed.has(name)) return kept;
+    return (await make(whole.fd, whole.size, modifiedMs, id, name, listed)) ? open() : undefined;
   } finally {
     closeSync(whole.fd);
   }

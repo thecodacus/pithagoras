@@ -538,7 +538,9 @@ function VideoDetails({ video }: { video: GalleryVideo }) {
     ],
     ...(params.model ? [[t("Model"), params.model] as [string, string]] : []),
     ...(params.size ? [[t("Video size"), params.size] as [string, string]] : []),
-    ...(params.madeFrames !== undefined || params.frames !== undefined ? [[t("Frames"), String(params.madeFrames ?? params.frames)] as [string, string]] : []),
+    ...(params.madeFrames !== undefined || params.frames !== undefined
+      ? [[t("Frames"), params.madeFrames !== undefined && params.frames !== undefined && params.madeFrames !== params.frames ? t("{made} (asked for {asked})", { made: params.madeFrames, asked: params.frames }) : String(params.madeFrames ?? params.frames)] as [string, string]]
+      : []),
     ...(params.madeFps !== undefined || params.fps !== undefined ? [[t("Frame rate"), String(params.madeFps ?? params.fps)] as [string, string]] : []),
     ...(seconds !== undefined ? [[t("Length"), secondsLabel(seconds)] as [string, string]] : []),
     ...(params.negativePrompt ? [[t("Negative prompt"), params.negativePrompt] as [string, string]] : []),

@@ -65,7 +65,7 @@ export function videoGenerationConfig(): VideoGenerationConfig {
   const raw = savedSettings();
   return {
     enabled: raw.enabled === true,
-    backend: typeof raw.backend === "string" && raw.backend in BACKENDS ? (raw.backend as VideoBackendId) : DEFAULT_BACKEND,
+    backend: typeof raw.backend === "string" && Object.hasOwn(BACKENDS, raw.backend) ? (raw.backend as VideoBackendId) : DEFAULT_BACKEND,
     baseUrl: text(raw.baseUrl),
     model: text(raw.model),
     // One saved outside the sizes is as good as none.
@@ -114,7 +114,7 @@ export function parseVideoGenerationPatch(body: unknown): VideoGenerationPatch |
     patch.enabled = b.enabled;
   }
   if (b.backend !== undefined) {
-    if (typeof b.backend !== "string" || !(b.backend in BACKENDS)) return `The backend is one of ${Object.keys(BACKENDS).join(", ")}`;
+    if (typeof b.backend !== "string" || !Object.hasOwn(BACKENDS, b.backend)) return `The backend is one of ${Object.keys(BACKENDS).join(", ")}`;
     patch.backend = b.backend as VideoBackendId;
   }
   if (b.baseUrl !== undefined) {

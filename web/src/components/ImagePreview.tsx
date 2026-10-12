@@ -66,8 +66,11 @@ interface ImagePreviewProps {
  */
 export function ImagePreview({ state, kind = "picture", video, detail, edit = false, src, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {
   const clip = kind === "video";
+  // A poster that could not be had (the portal has none for this clip: ffmpeg cannot make a frame of every file) is no reason to say the clip is gone: its own first frame is shown instead.
+  const [posterGone, setPosterGone] = useState<string>();
+  const poster = !!src && !(clip && !!video && posterGone === src);
   // What the frame shows once there: the picture, or the poster of a clip, or the clip's own first frame.
-  const still = src ?? (clip ? video : undefined);
+  const still = poster ? src : clip ? video : undefined;
   // Taken once: whether it was being made when it first appeared here.
   const arriving = useRef(state === "making").current;
   // What has loaded, and what has not, by the address: another picture in the same place starts over.
@@ -79,7 +82,7 @@ export function ImagePreview({ state, kind = "picture", video, detail, edit = fa
   const frameEl = useRef<HTMLDivElement>(null);
   // A clip with no poster is fetched, for its first frame, only once it is near the screen: a gallery of hundreds does not ask for every start at once.
   const [near, setNear] = useState(typeof IntersectionObserver === "undefined");
-  const needsClip = clip && !src && state === "done" && !!still;
+  const needsClip = clip && !poster && state === "done" && !!still;
   useEffect(() => {
     const el = frameEl.current;
     if (!needsClip || near || !el) return;
@@ -112,7 +115,7 @@ export function ImagePreview({ state, kind = "picture", video, detail, edit = fa
   }, [arriving, ready]);
 
   const picture = state === "done" && still && !missing && (needsClip ? near : true) && (
-    clip && !src ? (
+    clip && !poster ? (
       // Muted and never played here: the first frame is all it is for. Its size says the clip's shape.
       <video
         key={still}
@@ -137,7 +140,7 @@ export function ImagePreview({ state, kind = "picture", video, detail, edit = fa
         loading={arriving ? "eager" : "lazy"}
         decoding="async"
         onLoad={(e) => loadedNow(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
-        onError={() => setGone(still)}
+        onError={() => (clip && video ? setPosterGone(still) : setGone(still))}
       />
     )
   );

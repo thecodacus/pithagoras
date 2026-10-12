@@ -36,8 +36,8 @@ visit (the description and the seed are not kept).
 | Field | Sent as | Meaning |
 | --- | --- | --- |
 | **Model** | `model` | Instead of the model saved for the add-on. Empty uses that one. stable-diffusion.cpp's own server runs the one model it was started with and ignores it; a gateway in front of it may choose a model by it. |
-| **Width** and **Height** | `width`, `height` | Both, or neither: each a whole number from 64 to 4096. Many video models need sides that are multiples of 16 or 32, which the server says in its error when they are not. Empty uses the size saved for the add-on, and then the server's. |
-| **Frames** | `video_frames` | How many frames the video has, a whole number from 1 to 1000. stable-diffusion.cpp makes **4n + 1** frames (33, 49, 81, …) and rounds a count **down** to the nearest, so asking for 50 gives 49. The video's details say how many it made. |
+| **Width** and **Height** | `width`, `height` | Both, or neither: each a whole number from 64 to 4096. What a model takes is its own: many need sides that are multiples of 16 or 32. A server may refuse a size or bring it to one its model takes, and then the video comes out at another size than asked; the Details show the size that was asked for. Empty uses the size saved for the add-on, and then the server's. |
+| **Frames** | `video_frames` | How many frames the video has, a whole number from 1 to 1000. A model takes only some counts, and the server may round the count to one it takes, up or down, by a rule of its model; the video's Details say how many frames it made, as the server reports them, and the count that was asked for beside it where they differ ("80 (asked for 81)"). |
 | **Frame rate** | `fps` | Frames per second, from 1 to 120. A video plays for its frames over its frame rate: under the fields the form says so for what it has, "33 frames at 16 frames per second play for about 2.1 s". |
 | **How many** | — | One to four. Each is a request of its own for one video, so a server that makes one at a time queues the rest. |
 
@@ -106,7 +106,9 @@ and how long ago.
   tiles show that, a few kilobytes instead of megabytes; for that it needs **ffmpeg**, found on the
   `PATH` or where the `FFMPEG_PATH` environment variable says. Without ffmpeg nothing else changes:
   a tile fetches the start of its video and the browser draws the first frame, only once the tile is
-  near the screen. A poster is made again when the file has changed, and goes with the video. At most
+  near the screen. The same is the tile of a video ffmpeg cannot make a frame of (an MP4 whose index is at the end,
+  for one, cannot be read from a pipe): the video is still there and plays, it is not tried again until the file changes
+  or the portal restarts, and its tile shows the first frame the browser draws. A poster is made again when the file has changed, and goes with the video. At most
   two are made at a time. A video is handed to ffmpeg on its standard input, from the file that was
   checked, and ffmpeg may open nothing else.
 - **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*: from a

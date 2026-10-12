@@ -137,6 +137,22 @@ test("what the server refuses, fails or loses is told in its words, and no key i
   }
 });
 
+test("what the server says when it refuses a request has no key in it and is cut, whichever status it refuses with", async () => {
+  const long = "x".repeat(2000);
+  for (const status of [400, 429, 500]) {
+    const sd = await fakeSd({ submit: { status, body: { error: `rate limit for key ${KEY}`, message: long } } });
+    try {
+      const failed = await gen.generateVideo(config(sd.origin), { prompt: "x" }, FAST).then(() => undefined, (e) => e as Error);
+      assert.ok(failed instanceof gen.VideoGenerationError, String(status));
+      assert.ok(!failed.message.includes(KEY), `${status} gave the key back`);
+      assert.match(failed.message, /rate limit for key \[key\]/, String(status));
+      assert.ok(failed.message.length < 450, `${status}: ${failed.message.length} characters`);
+    } finally {
+      sd.server.close();
+    }
+  }
+});
+
 test("a clip over the limit is refused, and a MP4 is as good as a WebM", async () => {
   const small = await fakeSd();
   const mp4 = await fakeSd({ jobs: [completed({ output_format: "mp4", b64_json: MP4.toString("base64") })] });
@@ -271,7 +287,7 @@ test("a change to the settings is checked, and the key is never given back", () 
   });
   assert.deepEqual(patch({ frames: null, fps: null, timeoutSeconds: null, storageLimitMb: null }), { frames: null, fps: null, timeoutSeconds: null, storageLimitMb: null });
   for (const bad of [
-    { enabled: "yes" }, { backend: "other" }, { baseUrl: "ftp://host" }, { baseUrl: "http://user:pw@host" }, { baseUrl: "http://host?key=1" }, { baseUrl: 5 },
+    { enabled: "yes" }, { backend: "other" }, { backend: "toString" }, { backend: "__proto__" }, { backend: "constructor" }, { backend: "hasOwnProperty" }, { baseUrl: "ftp://host" }, { baseUrl: "http://user:pw@host" }, { baseUrl: "http://host?key=1" }, { baseUrl: 5 },
     { model: "x".repeat(201) }, { size: "auto" }, { size: 5 }, { frames: 0 }, { fps: 200 }, { timeoutSeconds: 29 }, { timeoutSeconds: 14401 }, { timeoutSeconds: 60.5 },
     { storageLimitMb: 0 }, { storageLimitMb: -5 }, { apiKey: "k".repeat(4001) },
   ]) assert.equal(typeof patch(bad), "string", JSON.stringify(bad));
@@ -281,6 +297,26 @@ test("a change to the settings is checked, and the key is never given back", () 
   assert.ok(!state.includes(KEY), "the key is not in what the page is told");
   assert.equal(gen.videoGenerationState().keySet, true);
   assert.equal(gen.videoGenerationReady(), true);
+});
+
+test("a backend that is not one of the portal's is never read from the settings, whatever Object has under that name", async () => {
+  const { getSetting, putSetting } = await import("../server/src/db.ts");
+  const before = getSetting("video_generation") ?? "{}";
+  putSetting("video_generation", JSON.stringify({ enabled: true, baseUrl: "http://one.example:1234", backend: "toString" }));
+  try {
+    assert.equal(gen.videoGenerationConfig().backend, "sdcpp");
+    assert.equal(gen.videoGenerationState().backend, "sdcpp");
+    const sd = await fakeSd();
+    try {
+      // A clip is asked for through the backend there is, not through a function of Object.
+      const made = await gen.generateVideo({ ...gen.videoGenerationConfig(), baseUrl: sd.origin }, { prompt: "x" }, FAST);
+      assert.deepEqual(made.bytes, WEBM);
+    } finally {
+      sd.server.close();
+    }
+  } finally {
+    putSetting("video_generation", before);
+  }
 });
 
 test("switched on there must be an address, a key belongs to the server it was given for, and the default time limit is not saved as a choice", () => {

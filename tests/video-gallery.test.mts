@@ -835,7 +835,8 @@ test("a frame that ffmpeg cannot make is no poster, and only a few are made at t
   const dir = path.join(temp, "failing-ffmpeg");
   mkdirSync(dir, { recursive: true });
   const script = path.join(dir, "ffmpeg");
-  writeFileSync(script, `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\ncat > /dev/null\necho "Invalid data found when processing input" >&2\nexit 1\n`);
+  const runs = path.join(dir, "runs.log");
+  writeFileSync(script, `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\necho run >> ${JSON.stringify(runs)}\ncat > /dev/null\necho "Invalid data found when processing input" >&2\nexit 1\n`);
   chmodSync(script, 0o755);
   process.env.FFMPEG_PATH = script;
   posters.forgetPosterProbe();
@@ -844,6 +845,13 @@ test("a frame that ffmpeg cannot make is no poster, and only a few are made at t
     const failed = await call("GET", `/videos/${video.id}/poster`);
     assert.equal(failed.status, 404, "the page falls back to the clip's own first frame");
     assert.equal(existsSync(posters.postersDir()) ? readdirSync(posters.postersDir()).filter((n) => n.startsWith(video.id)).length : 0, 0);
+    // Not tried again for every tile that asks: ffmpeg would stream the whole file through its pipe each time.
+    for (let i = 0; i < 3; i++) assert.equal((await call("GET", `/videos/${video.id}/poster`)).status, 404);
+    assert.equal(readFileSync(runs, "utf8").trim().split("\n").length, 1, "ffmpeg was run once for a clip it cannot make a frame of");
+    // A file that is written over is another file, and is tried once more.
+    writeFileSync(path.join(temp, "videos", `${video.id}.webm`), clip("broken, but written over"));
+    assert.equal((await call("GET", `/videos/${video.id}/poster`)).status, 404);
+    assert.equal(readFileSync(runs, "utf8").trim().split("\n").length, 2);
 
     // Many asked at once: ffmpeg is run for at most two of them at a time.
     const slow = path.join(dir, "slow");

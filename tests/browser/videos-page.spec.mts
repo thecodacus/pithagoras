@@ -77,7 +77,7 @@ const feature = (over: Record<string, unknown> = {}) => {
   return { ready: f.enabled && f.baseUrl !== '', ...f };
 };
 
-async function portal(page: Page, { clips = [] as Clip[], videos = feature(), flagOn = true, jobs = [] as Job[], failList = false, pictureList = [] as Pic[] } = {}) {
+async function portal(page: Page, { clips = [] as Clip[], videos = feature(), flagOn = true, jobs = [] as Job[], failList = false, pictureList = [] as Pic[], noPoster = [] as string[] } = {}) {
   const list = [...clips];
   const state = {
     jobs: [...jobs], generated: [] as any[], deleted: [] as string[][], stopped: [] as string[], listed: [] as string[], files: [] as string[], posters: [] as string[], thumbs: [] as string[], limit: 4,
@@ -136,6 +136,8 @@ async function portal(page: Page, { clips = [] as Clip[], videos = feature(), fl
     if (/^\/api\/videos\/[0-9a-f]{12}\/poster$/.test(p)) {
       const id = p.split('/')[3];
       state.posters.push(id);
+      // As the portal answers for a clip ffmpeg cannot make a frame of.
+      if (noPoster.includes(id)) return reply(404, { error: 'This video has no poster picture', code: 'missing' });
       await route.fulfill({ body: svg(id), contentType: 'image/svg+xml' });
       return DONE;
     }
@@ -338,8 +340,22 @@ test('a clip with a poster shows it, and one without shows its first frame from 
   await expect(frame).toHaveJSProperty('paused', true);
 });
 
+test('a clip the portal could not make a poster of is not taken for gone: its tile shows the first frame from the clip itself and opens', async ({ page }) => {
+  const odd = clip({ prompt: 'No frame for ffmpeg', poster: true });
+  const p = await portal(page, { clips: [odd], noPoster: [odd.id] });
+  await page.goto('/videos');
+  // The poster was asked for, said 404, and the tile went on to the clip's own first frame.
+  await expect.poll(() => p.state.posters).toContain(odd.id);
+  const frame = tile(page, 'No frame for ffmpeg').locator('video');
+  await expect(frame).toHaveAttribute('src', `/api/videos/${odd.id}/file`);
+  await expect(page.getByText('This video is no longer in the folder.')).toHaveCount(0);
+  await expect(page.getByText('No video was made', { exact: true })).toHaveCount(0);
+  await tile(page, 'No frame for ffmpeg').click();
+  await expect(viewer(page).locator('video')).toHaveAttribute('src', `/api/videos/${odd.id}/file`);
+});
+
 test('a click on a clip plays it in the viewer, which steps through the gallery and has the page\'s buttons', async ({ page }) => {
-  const a = clip({ prompt: 'First clip', age: 1, params: { size: '832x480', madeFrames: 33, madeFps: 16, seed: 7 } });
+  const a = clip({ prompt: 'First clip', age: 1, params: { size: '832x480', frames: 40, madeFrames: 33, madeFps: 16, seed: 7 } });
   const b = clip({ prompt: 'Second clip', age: 2 });
   const c = clip({ prompt: 'Third clip', age: 3 });
   await portal(page, { clips: [a, b, c] });
@@ -365,6 +381,8 @@ test('a click on a clip plays it in the viewer, which steps through the gallery 
   await expect(details).toContainText('First clip');
   await expect(details).toContainText('832x480');
   await expect(details).toContainText('2.1 s');
+  // The server rounded the frames: what it made, and what was asked for beside it.
+  await expect(details).toContainText('33 (asked for 40)');
   await expect(details).toContainText('Seed');
   await expect(details).toContainText(a.fileName);
 
