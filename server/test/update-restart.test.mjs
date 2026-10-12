@@ -55,6 +55,14 @@ test("the replacement is started first, detached, with the command line the port
   assert.equal(seen.stopped, 1);
 });
 
+test("a copy that cannot be started leaves the portal running, and the status it ends with as it was", async () => {
+  const { seen, deps } = fakes({}, true, "0::/system.slice/cron.service\n");
+  await assert.rejects(restartPortal(launch, { ...deps, show: async () => "MainPID=811\nRestart=no\n", pids: [4242, 4000] }), /ENOENT/);
+  await pause(40);
+  assert.equal(seen.stopped, 0);
+  assert.equal(requestedExit(), 0);
+});
+
 /** The control groups of a process in a system service, in a user's service, in a terminal, and under cgroup v1. */
 const SYSTEM = "0::/system.slice/pithagoras.service\n";
 const USER = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/pithagoras.service\n";
@@ -101,9 +109,12 @@ test("the portal exits for its manager when it is the service, starts itself els
   assert.equal(await mode({}, USER, unit(4000)), "exit");
   assert.equal(await mode({}, TERMINAL, unit(PORTAL)), "self");
   assert.equal(await mode({}, "", unit(PORTAL)), "self");
-  // A job of another service, as cron's: it is in the service's control group and is not its main process. Nothing
-  // starts it again when it ends, so it starts its own copy, which the service's end does not take with it.
-  assert.equal(await mode({}, "0::/system.slice/cron.service\n", unit(811)), "self");
+  // In a service's control group without being its main process or its child: a job of cron, `npm start` whose shell
+  // does not exec (dash), a wrapper script. Which of them it is cannot be told, and it has to work for all: it starts
+  // its own copy, for cron, and stops with the status that has a unit start it, for the others.
+  assert.equal(await mode({}, "0::/system.slice/cron.service\n", unit(811)), "both");
+  assert.equal(await mode({}, SYSTEM, unit(4001)), "both", "the unit's process is another one: npm, or a wrapper");
+  assert.equal(await mode({}, SYSTEM, async () => undefined), "both", "systemctl cannot be read");
   assert.equal(await mode({ PORTAL_UPDATE_RESTART: "self" }, SYSTEM, unit(PORTAL)), "self");
   assert.equal(await mode({ PORTAL_UPDATE_RESTART: "exit" }, TERMINAL, unit(PORTAL)), "exit");
   assert.equal(await mode({ PORTAL_UPDATE_RESTART: "exit" }, "0::/system.slice/cron.service\n", unit(811)), "exit");
@@ -132,13 +143,27 @@ test("as a systemd service the portal starts nothing of its own, which the servi
   assert.equal(requestedExit(), RESTART_EXIT);
 });
 
-test("a job in another service's control group, cron's, keeps the restart that starts its own copy", async () => {
+test("a job in another service's control group, cron's, starts its own copy, and stops with the status as well", async () => {
   const { seen, deps } = fakes({}, false, "0::/system.slice/cron.service\n");
   await restartPortal(launch, { ...deps, show: unit(811), pids: PIDS });
   await pause(40);
-  assert.equal(seen.spawned.length, 1, "its own copy, as there is nothing else to start it");
+  assert.equal(seen.spawned.length, 1, "its own copy: nothing else starts a job of cron again");
   assert.equal(seen.spawned[0].options.detached, true);
   assert.equal(seen.stopped, 1);
+  assert.equal(requestedExit(), RESTART_EXIT, "cron does not look at it");
+});
+
+test("a portal under a shell that does not exec is not the unit's process or its child: it starts a copy and stops with the status, for the unit to start it again", async () => {
+  // ExecStart=/usr/bin/npm start on Debian and Ubuntu: npm (the unit's MainPID 4000), `sh -c node server/dist/index.js`
+  // (4001), and the portal (4242, whose parent is the shell).
+  const { seen, deps } = fakes({}, false, SYSTEM);
+  const asked = [];
+  await restartPortal(launch, { ...deps, show: unit(4000, "on-failure", asked), pids: [4242, 4001] });
+  await pause(40);
+  assert.equal(asked.length, 1, "systemd was asked");
+  assert.equal(seen.spawned.length, 1);
+  assert.equal(seen.stopped, 1);
+  assert.equal(requestedExit(), RESTART_EXIT);
 });
 
 test("a service that is not set to start again is found out before the update, only where the portal is that service", async () => {

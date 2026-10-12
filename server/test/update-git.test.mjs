@@ -37,7 +37,7 @@ let n = 0;
  * A new checkout of the origin with a build in it, and an updater for it with an install and a build that only write
  * down what they make: `npm.fails` is the step that fails, after it has written something half way.
  */
-function portal(clone = []) {
+function portal(clone = [], wrap = (files) => files) {
   const dir = path.join(home, `portal-${++n}`);
   git(home, "clone", ...clone, origin, dir);
   for (const [folder, file] of [["node_modules", "dep.txt"], ["server/dist", "index.js"], ["web/dist", "index.html"]]) {
@@ -65,7 +65,7 @@ function portal(clone = []) {
       }
       return npm.fails === step ? { code: 1, stdout: "", output: `${step} failed` } : { code: 0, stdout: "", output: "" };
     },
-    artifacts: fileArtifacts(dir),
+    artifacts: wrap(fileArtifacts(dir)),
     running: () => 0,
     restart: async () => void restarts++,
     inContainer: () => false,
@@ -183,6 +183,31 @@ test("a build made on the host after an update is not told to be built again", a
   assert.equal(seen.rebuild, false);
   await refused(restarted.start(third), "current");
   assert.deepEqual(p.built, ["ci --prefer-offline --no-audit --no-fund", "run build"], "nothing was built again");
+});
+
+test("a record that cannot be written after the build leaves the old files in place, and says the build failed", async () => {
+  // The disk fills up while the build runs, and the build just fits: the record of it cannot be written.
+  let marks = 0;
+  const p = portal([], (files) => ({
+    ...files,
+    markBuilt: async (sha, onlyIfUnknown) => {
+      if (++marks === 2) throw new Error("ENOSPC: no space left on device, write");
+      return files.markBuilt(sha, onlyIfUnknown);
+    },
+  }));
+  const newest = publish("j.txt", "j\n");
+  await p.u.start(newest);
+  const run = await settled(p.u);
+  assert.equal(run.state, "failed");
+  // Not the restart's: nothing was thrown away, and the old files are what is in place.
+  assert.equal(run.failed.step, "build");
+  assert.equal(run.failed.oldFilesBack, true);
+  assert.match(run.failed.message, /ENOSPC/);
+  assert.equal(readFileSync(path.join(p.dir, "node_modules/dep.txt"), "utf8"), "old");
+  assert.equal(readFileSync(path.join(p.dir, "server/dist/index.js"), "utf8"), "old");
+  assert.equal(readFileSync(path.join(p.dir, "web/dist/index.html"), "utf8"), "old");
+  assert.equal(p.restarts(), 0);
+  assert.equal((await p.again().status()).rebuild, true, "and the build to do is still told");
 });
 
 test("an install that fails leaves the old node_modules in place", async () => {

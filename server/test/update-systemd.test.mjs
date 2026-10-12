@@ -63,6 +63,8 @@ async function service(policy, settle, { how = "restart", start = "main" } = {})
     child: ["sh", "-c", '"$0" "$@"; true', process.execPath, ...portal],
     // A subshell between them: the portal's parent is not the main process, which only waits.
     grandchild: ["sh", "-c", '( "$0" "$@"; true ) & wait', process.execPath, ...portal],
+    // Two shells that do not exec and pass the status on, as `npm start` under dash has them: npm, `sh -c node …`, node.
+    shells: ["sh", "-c", '"$0" "$@"; exit $?', "sh", "-c", '"$0" "$@"; exit $?', process.execPath, ...portal],
   }[start];
   execFileSync("systemd-run", ["--user", "--quiet", "--collect", `--unit=${unit}`, `--property=Restart=${policy}`, "--property=RestartSec=100ms", "--property=StandardOutput=null", "--property=StandardError=null", "--", ...command]);
   try {
@@ -105,11 +107,19 @@ test("a portal that is the child of a service's main process, as under npm start
   assert.match(seen[0].problem, /Restart=no/);
 });
 
-test("a portal that a service only runs a job for is not taken for it: it keeps starting its own copy, and is not told to change the unit", { skip: !manager && "no user manager of systemd" }, async () => {
+test("a portal under shells that do not exec, as npm start has under dash, starts a copy and stops with the status, and systemd starts it again", { skip: !manager && "no user manager of systemd" }, async () => {
+  const seen = await service("on-failure", (marker) => until(() => lives(marker).length >= 2, 15_000), { start: "shells" });
+  assert.ok(seen.length >= 2, "started again");
+  assert.equal(seen[0].mode, "both", "the main process is not the portal or its parent");
+  assert.equal(seen[0].unit, null);
+  assert.equal(seen[0].problem, null);
+});
+
+test("a portal that a service only runs a job for is not taken for the unit's own process: it starts a copy and stops with the status, and is not told to change the unit", { skip: !manager && "no user manager of systemd" }, async () => {
   // In the unit's control group, as a cron job is in cron.service, and not the unit's main process or its child.
   const seen = await service("no", (marker) => until(() => lives(marker).length >= 1, 15_000), { how: "plan", start: "grandchild" });
   assert.equal(seen.length, 1);
-  assert.equal(seen[0].mode, "self");
+  assert.equal(seen[0].mode, "both");
   assert.equal(seen[0].unit, null);
   assert.equal(seen[0].problem, null);
 });

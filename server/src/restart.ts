@@ -57,7 +57,11 @@ const readCgroup = (): string | undefined => {
   }
 };
 
-export type RestartMode = "self" | "exit";
+/**
+ * `exit`: the portal only stops, with a status that makes whatever runs it start it again. `self`: it starts its
+ * replacement itself. `both`: it starts its replacement and stops with that status.
+ */
+export type RestartMode = "self" | "exit" | "both";
 
 /** This process and the one that started it: `npm start` is the unit's main process, and runs the portal as its child. */
 export const ownPids = (): number[] => [process.pid, process.ppid];
@@ -89,10 +93,16 @@ export interface RestartPlan {
 }
 
 /**
- * `exit`: the portal only stops, with a status that makes whatever runs it start it again. `self`: it starts its
- * replacement itself. `PORTAL_UPDATE_RESTART` says which; unset, a portal that is the main process of a systemd
- * service exits, since what it starts itself is in the service's control group and is ended with it, and anything
- * else starts its own.
+ * How the portal restarts, by where it runs. `PORTAL_UPDATE_RESTART` (`self`, `exit`) says outright. Unset:
+ * - in a systemd service's control group, as the unit's main process or its child (`ExecStart=node …`, or an `npm
+ *   start` whose shell execs the command): `exit`. What the portal started itself would be in the service's control
+ *   group and be ended with it, so the unit has to start it.
+ * - in a service's control group otherwise (`npm start` under dash, which does not exec; a wrapper script; a job of
+ *   cron): `both`. The portal cannot be told apart from cron's job by who its parents are, and has to work for
+ *   both. Under cron the status is not looked at and its copy lives on, since cron.service is not stopped. Under a
+ *   unit whose process is the shell or npm, the status travels up through them to the unit, which starts the portal
+ *   again and ends the copy with the old control group; the instance lock settles a race between them.
+ * - anywhere else: `self`.
  */
 export async function restartPlan(
   env: NodeJS.ProcessEnv = process.env,
@@ -102,7 +112,8 @@ export async function restartPlan(
 ): Promise<RestartPlan> {
   if (env.PORTAL_UPDATE_RESTART === "self") return { mode: "self" };
   const service = await ownService(cgroup, show, pids);
-  return env.PORTAL_UPDATE_RESTART === "exit" || service ? { mode: "exit", service } : { mode: "self" };
+  if (env.PORTAL_UPDATE_RESTART === "exit" || service) return { mode: "exit", service };
+  return { mode: serviceOf(cgroup) ? "both" : "self" };
 }
 
 /** Restart policies that start a program again that ended with a status other than 0. */
@@ -154,14 +165,14 @@ const real = (): RestartDeps => ({
 
 /**
  * Restarts the portal: stops it as a SIGTERM does (running chats are wound down, channels closed), after starting
- * the replacement first, detached, so that it outlives this process; or, in `exit` mode (see `restartPlan`), with
- * the status `RESTART_EXIT` and nothing started.
+ * the replacement first, detached, so that it outlives this process, or with the status `RESTART_EXIT` and nothing
+ * started, or both (see `restartPlan`).
  *
  * Throws, before anything is stopped, when the replacement cannot be started: the old portal stays up.
  */
 export async function restartPortal(launch: Launch = LAUNCH, deps: RestartDeps = real()): Promise<void> {
-  if ((await restartPlan(deps.env, deps.cgroup ?? "", deps.show, deps.pids)).mode === "exit") exitStatus = RESTART_EXIT;
-  else {
+  const { mode } = await restartPlan(deps.env, deps.cgroup ?? "", deps.show, deps.pids);
+  if (mode !== "exit") {
     if (!launch.script) throw new Error("The portal was not started from a file, so it cannot start itself again. Start it again by hand.");
     const child = deps.spawn("sh", ["-c", WAIT_THEN_START, "sh", String(deps.pid), launch.execPath, ...launch.execArgv, launch.script, ...launch.args], {
       cwd: launch.cwd,
@@ -176,5 +187,7 @@ export async function restartPortal(launch: Launch = LAUNCH, deps: RestartDeps =
     });
     child.unref();
   }
+  // Ended with the status that has a manager start it again, wherever one may be; not set when the copy could not be started.
+  if (mode !== "self") exitStatus = RESTART_EXIT;
   setTimeout(deps.stop, deps.delayMs);
 }

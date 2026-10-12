@@ -629,13 +629,32 @@ test("the failure says whether the old files are back: they are where nothing wa
   assert.ok(true);
 });
 
-test("a build that goes wrong in the step after the build is the restart's failure, with the old files thrown away", async () => {
-  const w = world();
-  w.artifacts.discard = async () => { throw new Error("EBUSY: rm node_modules.update-old"); };
-  const { u, calls } = updater(w);
-  await u.start(w.target.sha);
-  const run = await settled(u);
-  assert.equal(run.failed.step, "restart");
-  assert.equal(run.failed.oldFilesBack, false);
-  assert.equal(calls.restart, 0);
+test("what fails after the build is said from what happened to the old files, not from the step", async () => {
+  const failure = async (setup) => {
+    const w = world();
+    setup(w);
+    const { u } = updater(w);
+    await u.start(w.target.sha);
+    return { failed: (await settled(u)).failed, w };
+  };
+  // The record cannot be written after the build: the old files are put back, and the build is what failed.
+  let marks = 0;
+  const record = await failure((w) => {
+    const mark = w.artifacts.markBuilt;
+    w.artifacts.markBuilt = async (...args) => { if (++marks === 2) throw new Error("ENOSPC: no space left on device"); return mark(...args); };
+  });
+  assert.deepEqual([record.failed.step, record.failed.oldFilesBack], ["build", true]);
+  assert.match(record.failed.message, /ENOSPC/);
+  assert.ok(record.w.ran.includes("files restore"));
+  assert.ok(!record.w.ran.includes("files discard"), "nothing was thrown away");
+
+  // The old files cannot be thrown away: the new build is the one in place, and they are not back.
+  const discard = await failure((w) => {
+    w.artifacts.discard = async () => { throw new Error("EBUSY: rm node_modules.update-old"); };
+  });
+  assert.deepEqual([discard.failed.step, discard.failed.oldFilesBack], ["build", false]);
+
+  // The restart fails: the build has replaced them.
+  const restart = await failure((w) => (w.restartFails = "The portal was not started from a file"));
+  assert.deepEqual([restart.failed.step, restart.failed.oldFilesBack], ["restart", false]);
 });

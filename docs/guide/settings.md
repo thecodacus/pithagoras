@@ -238,12 +238,12 @@ the `.update-old` folders, which can be moved back by hand.)
   or `nohup`: the portal starts a copy of itself with the command line it was
   started with, detached and writing where the portal wrote, and then stops as it
   does on SIGTERM; the copy waits until the old one is gone.
-- Run as a **systemd service**, as the unit's own process (`ExecStart=node server/dist/index.js`,
-  or `npm start`, whose child the portal is): the portal stops with status 75 and
-  leaves the start to systemd. It knows from its control group and from the
-  unit's `MainPID`, which is the portal or its parent. A copy that the portal
-  started itself would be in the service's control group and be ended with it,
-  so it does not start one. The unit has to start it again:
+- Run as a **systemd service**, as the unit's own process (`ExecStart=/usr/bin/node
+  server/dist/index.js`): the portal stops with status 75 and leaves the start to
+  systemd. It knows from its control group and from the unit's `MainPID`, which
+  is the portal or its parent. A copy that the portal started itself would be in
+  the service's control group and be ended with it, so it does not start one. The
+  unit has to start it again:
 
   ```ini
   [Service]
@@ -256,11 +256,19 @@ the `.update-old` folders, which can be moved back by hand.)
   default), `on-success`, `on-abnormal` and so on would leave the portal down, so
   the check refuses the update beforehand, says why, and changes nothing. systemd
   logs the stop as a failure, status 75, and starts the portal after `RestartSec`.
-- Started by a job of a service, not as its main process, such as `@reboot cd
-  /srv/pithagoras && npm start` in a crontab: it is in the service's control
-  group (`cron.service`) but nothing restarts it when it ends, so it starts its
-  own copy as in the first case, which the service does not end. Only a portal
-  that is the unit's own process (or its child) exits for the unit.
+- In a **systemd service's control group without being its process**: `ExecStart=npm
+  start` on Debian and Ubuntu, where `/bin/sh` is dash and does not exec the
+  command, so the shell and npm stand between systemd and the portal; a wrapper
+  script that does not `exec` it; a job of cron, which runs in `cron.service`. The
+  portal cannot tell these apart, and has to work for all of them, so it does
+  both: it starts its own copy, as above, and stops with status 75. For cron, which
+  does not look at the status and does not end with its job, the copy lives on.
+  For a unit whose process is npm or a shell, the status passes up to systemd,
+  which starts the unit again (and ends the copy with the old control group, the
+  new portal turns away a second start of itself). This needs `Restart=on-failure`
+  or `Restart=always` in that unit too, and the check cannot warn about a unit
+  that does not have it, since it cannot tell which unit is the portal's. Better, in
+  the unit: `ExecStart=/usr/bin/node server/dist/index.js`, or `exec` in the wrapper.
 - Run by something else that restarts it (pm2, a container's restart policy,
   `while true`): set `PORTAL_UPDATE_RESTART=exit`. The portal then only stops, with
   status 75, and its manager starts the new build; started by itself too, it would

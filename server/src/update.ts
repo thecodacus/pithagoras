@@ -230,6 +230,8 @@ export class Updater {
   private checkedAt: string | null = null;
   /** The target the portal has told about last. */
   private raised: string | undefined;
+  /** The old files have been, or are being, thrown away: the new build is the one in place, whatever happens next. */
+  private discarded = false;
 
   constructor(private readonly deps: UpdateDeps) {}
 
@@ -422,13 +424,13 @@ export class Updater {
 
   /** Says where it failed, puts the old files back, and only then lets another update begin. */
   private async fail(run: RunView, step: Step, message: string, output: string): Promise<void> {
-    // After the build has worked the old files are thrown away: a restart that fails leaves the new ones in place.
-    const failed = { step, message, output: tail(output), oldFilesBack: step !== "restart" };
+    const failed = { step, message, output: tail(output), oldFilesBack: false };
     console.error(`[update] failed at ${step}: ${message}${failed.output ? `\n${failed.output}` : ""}`);
     try {
       await this.deps.artifacts.restore();
+      // Back where they were put aside, or never put aside: not once they have been thrown away for the new build.
+      failed.oldFilesBack = !this.discarded;
     } catch (e) {
-      failed.oldFilesBack = false;
       console.error(`[update] the old files could not be put back: ${(e as Error).message}`);
       failed.message += `. The old files could not be put back: ${(e as Error).message}`;
     }
@@ -455,6 +457,7 @@ export class Updater {
   private async execute(run: RunView, merge: boolean): Promise<void> {
     const files = this.deps.artifacts;
     let at: Step = "fetch";
+    this.discarded = false;
     try {
       console.log(`[update] ${run.from.sha.slice(0, 7)} -> ${run.to.sha.slice(0, 7)}`);
       this.mark(run, "fetch", "done");
@@ -476,10 +479,11 @@ export class Updater {
       at = "build";
       await files.keepBuild();
       if (!(await this.step(run, "build", "npm run build", "npm", ["run", "build"], BUILD_MS))) return;
-      // From here on the new files are the ones in place, and a failure is the restart's.
-      at = "restart";
       await files.markBuilt((await this.readHead()).current.sha);
+      // From here on the new files are the ones in place: what fails after this does not find the old ones.
+      this.discarded = true;
       await files.discard();
+      at = "restart";
       this.mark(run, "restart", "running");
       run.state = "restarting";
       console.log("[update] restarting");
