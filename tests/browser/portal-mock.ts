@@ -59,6 +59,8 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
     config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '', cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
   };
   if (path === '/api/voice') return { enabled: false };
+  // A portal that is not run from a checkout: nothing to update, no notice.
+  if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };
   if (/^\/api\/sessions\/[^/]+\/background$/.test(path)) return { supported: true, jobs: [], statuses: [], widgets: [] };
   if (/^\/api\/sessions\/[^/]+\/events\/before$/.test(path)) return { events: [], more: false };
   if (path === '/api/projects' && url.searchParams.has('bare')) return { root: '/w', home: '/h', projects: [] };

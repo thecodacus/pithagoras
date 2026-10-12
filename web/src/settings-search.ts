@@ -57,6 +57,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "about", section: msg("This portal"), title: msg("Where the agent runs"), words: "executor container host docker" },
   { tab: "about", section: msg("This portal"), title: msg("Workspaces"), words: "folder path directory workspace ordner" },
   { tab: "about", section: msg("This portal"), title: msg("pi's files"), words: "settings.json models.json auth.json agent directory dateien" },
+  { tab: "about", section: msg("Update"), title: msg("Update the portal"), words: "update upgrade pull git rebuild restart new version main aktualisieren neue version neu starten" },
   { tab: "advanced", section: msg("settings.json"), title: msg("settings.json"), words: "raw json edit file advanced datei" },
 ];
 

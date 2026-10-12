@@ -9,7 +9,7 @@ German. Navigation runs down the left edge, in four groups:
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
 | **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
-| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
+| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **Logs**, **About** (with **Update**), **Advanced** |
 
 Plus a page for every extension that exposes configuration.
 
@@ -176,6 +176,62 @@ Where this portal keeps what it keeps, set when it was deployed through its
 environment: whether the agent runs on this host or in a container per chat, the
 workspace root where each chat's folder is made, and where pi keeps its files
 (`settings.json`, `models.json`, `auth.json` and installed packages).
+
+### Update
+
+A portal that runs from a git checkout of the repository (`npm start`, or a
+service that runs `node server/dist/index.js` in it) can update itself, so that
+nobody has to log in to the host. The folder is the one the portal itself runs
+from. The section shows the branch and commit that are checked out, and how
+many new commits `origin/main` has. The portal looks for them when it starts,
+every six hours, and when this page opens: a `git fetch` of `origin/main`
+and a count of the commits the checkout lacks. A failed look is written to the
+[log](#logs) and tried again at the next time; it is not shown as an error.
+`PORTAL_UPDATE_CHECK=off` leaves out the looks the portal makes by itself.
+
+**Update** asks `origin` once more, then shows the commit you are on and the one
+it would move to, and asks for a confirmation. It says how many chats and
+routines are running: the restart stops them as stopping the portal does, and a
+chat carries on when you send it a message. Once you confirm, the portal runs
+these steps, one update at a time:
+
+1. `git fetch origin main`
+2. `git merge --ff-only origin/main`
+3. `npm ci --prefer-offline --no-audit --no-fund`
+4. `npm run build`
+5. restarts, and this page loads again when the portal is back.
+
+The page shows each step as it goes. Nothing is reset, forced or discarded: an
+update is **refused**, with the reason and before anything is changed, when the
+checkout has changes to files git tracks (files git does not track are no
+reason), is not on a branch, or has commits of its own that `origin/main` lacks,
+so that it cannot be moved straight to it. Fix that on the host and press
+Update again.
+
+A step that fails stops the update where it is, names the step and shows the
+last lines the program printed, and the portal goes on running its old build.
+After a failure in `npm ci` or `npm run build` the new commit is already
+checked out; Update then says so and builds it again, without a merge.
+
+**The restart.** The portal starts a copy of itself with the command line it
+was started with, and then stops as it does on SIGTERM; the copy waits until the
+old one is gone. A portal that something else keeps running (systemd with
+`Restart=always`, a container's restart policy, pm2) would be started twice, so
+set `PORTAL_UPDATE_RESTART=exit` there: the portal then only stops, and its
+manager starts the new build. With a manager that does not restart a program
+that has ended, neither way brings the portal back.
+
+**The notice.** When a look finds new commits, a line at the top of every page says
+*N new commits on main, update available*, with **Update** (the same question,
+then the same steps), **Details** (this page) and a button to put it away until
+the next new commit on main (a failed update's line can be put away the same way). A browser with [notifications](#notifications) on is
+told once for each new commit on `origin/main`, when nobody is looking.
+
+Anyone who can sign in can update the portal, as they can already run commands
+on the host. The section is not there when the portal is not a git checkout.
+In a Docker container, which cannot rebuild itself, there is no button and no
+notice: the section says to update the image instead, see
+[Updating](/guide/deploying#updating).
 
 ## Shortcuts
 

@@ -95,6 +95,8 @@ export const serverEnv = (home, port, overrides = {}) => ({
   ...withoutCredentials(process.env),
   PORT: String(port), ...homeEnv(home),
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
+  // The checkout a test server runs from is the developer's own: it does not fetch from its remote on a schedule.
+  PORTAL_UPDATE_CHECK: "off",
   ...overrides,
 });
 

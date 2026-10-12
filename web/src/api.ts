@@ -848,6 +848,12 @@ export const api = {
     if (opts.limit) q.set("limit", String(opts.limit));
     return json<LogsResponse>(`/api/logs?${q}`);
   },
+  /** Where an update can be made, the commit checked out, and the update that is running; the remote is not asked. */
+  update: () => json<UpdateStatus>("/api/update"),
+  /** Asks the remote what is new, and says what an update would do and what stands in its way. */
+  checkUpdate: () => json<UpdateCheck>("/api/update/check", { method: "POST" }),
+  /** `expect` is the commit that was shown; a remote that has moved on since is refused. */
+  startUpdate: (expect: string) => json<{ run: UpdateRun }>("/api/update", { method: "POST", body: JSON.stringify({ expect }) }),
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
@@ -1387,6 +1393,57 @@ export interface LogsResponse {
   /** Lines after `since` were let go before they were read, so `lines` does not join what the page holds. */
   gap?: boolean;
   lines: LogLine[];
+}
+
+/** A commit, as Settings → About names it. */
+export interface UpdateCommit {
+  sha: string;
+  subject: string;
+  date: string;
+}
+
+export type UpdateStep = "fetch" | "merge" | "install" | "build" | "restart";
+
+export interface UpdateRun {
+  state: "running" | "restarting" | "failed";
+  steps: { id: UpdateStep; state: "pending" | "running" | "done" | "skipped" | "failed" }[];
+  from: UpdateCommit;
+  to: UpdateCommit;
+  startedAt: string;
+  /** English, from the server and from the program that failed. */
+  failed?: { step: UpdateStep; message: string; output: string };
+}
+
+/** New commits on origin/main, which the portal found on one of its looks. */
+export interface UpdateNotice {
+  count: number;
+  target: UpdateCommit;
+  since: string;
+}
+
+/** `kind` is where an update can be made: from a git checkout; not from a container's image; not at all. */
+export interface UpdateStatus {
+  kind: "git" | "container" | "none";
+  /** Changes with each start of the portal. */
+  boot: string;
+  branch?: string | null;
+  current?: UpdateCommit;
+  notice?: UpdateNotice | null;
+  /** The new commit is checked out but its build failed: Update builds it again. */
+  rebuild?: boolean;
+  run?: UpdateRun | null;
+}
+
+export interface UpdateCheck {
+  branch: string | null;
+  current: UpdateCommit;
+  target: UpdateCommit | null;
+  behind: number;
+  ahead: number;
+  changed: number;
+  problem: { code: "fetch" | "detached" | "dirty" | "diverged"; message: string } | null;
+  /** Chats and runs going now, which the restart stops. */
+  running: number;
 }
 
 /** One decision the guard made, for the audit view. */
