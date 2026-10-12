@@ -1,6 +1,7 @@
 import express, { type Router } from "express";
 import { canvasEvents, listCanvases } from "../canvases.js";
 import { eventsBefore, getSession, replayStart, type EventRow } from "../db.js";
+import { watchStream } from "../login-streams.js";
 import { eventJson, replaySince } from "../event-replay.js";
 import { sessions } from "../session-manager.js";
 
@@ -149,7 +150,10 @@ export function eventsRouter(): Router {
     };
     sessions.on(`session:${session.id}`, onEvent);
 
+    // Ended when the password changes: this login is not the portal's any more, and the stream was checked only as it opened.
+    const unwatch = watchStream(req, () => res.destroy());
     res.on("close", () => {
+      unwatch();
       gone = true;
       clearInterval(heartbeat);
       sessions.off(`session:${session.id}`, onEvent);

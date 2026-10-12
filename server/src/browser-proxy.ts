@@ -3,6 +3,7 @@ import https from "node:https";
 import type { Duplex } from "node:stream";
 import type { Express } from "express";
 import { isAuthedUpgrade, requireAuth } from "./auth.js";
+import { watchStream } from "./login-streams.js";
 import { config } from "./extensions/browser-service.js";
 import { viewerConnected, viewerDisconnected } from "./extensions/browser-frames.js";
 
@@ -129,6 +130,8 @@ export function attachBrowserUpgrade(server: http.Server): void {
     // the visitor's cookie — a browser names where the page came from.
     if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized");
     if (req.headers.origin && !fromHere(req.headers.origin, req.headers)) return refuse(socket, 403, "Forbidden");
+    // The stream is checked only as it opens: it ends when the password it was opened under goes.
+    socket.once("close", watchStream(req, () => socket.destroy()));
     const proxied = https.request({
       host: UPSTREAM_HOST,
       port: upstreamPort(),

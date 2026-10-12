@@ -18,11 +18,23 @@ export const MIN_PASSWORD_LENGTH = 8;
 /** The example in the old .env.example and the README, which is public: nobody's password. */
 export const EXAMPLE_PASSWORD = "change-me";
 
-const COST = { N: 16384, r: 8, p: 1 };
+/**
+ * 64 MiB and about 0.3 s a login: N=2^16, r=8, p=2 is one of OWASP's equivalent settings for scrypt (the first
+ * on its list, N=2^17 with p=1, takes twice the memory). The memory is what holds off offline guessing on a copied
+ * database. 64 MiB is small enough for a portal in a container with a limit: the thread pool does four at a time,
+ * so a flood of logins holds 256 MiB at most, and the throttle in front of the login lets ten through per source.
+ * Node's default, which this was, is a quarter of the memory.
+ */
+const COST = { N: 65536, r: 8, p: 2 };
 const KEY_BYTES = 32;
+/** What a stored cost may ask of this machine: a damaged row does not get to allocate gigabytes. */
+const MAX_MEMORY = 128 * 1024 * 1024;
 
-const derive = (password: string, salt: Buffer, length: number, cost: { N: number; r: number; p: number }): Promise<Buffer> =>
-  new Promise((resolve, reject) => crypto.scrypt(password, salt, length, cost, (e, key) => (e ? reject(e) : resolve(key))));
+type Cost = { N: number; r: number; p: number };
+
+const derive = (password: string, salt: Buffer, length: number, cost: Cost): Promise<Buffer> =>
+  // Node's own limit is 32 MiB, under what the cost above needs.
+  new Promise((resolve, reject) => crypto.scrypt(password, salt, length, { ...cost, maxmem: 2 * MAX_MEMORY }, (e, key) => (e ? reject(e) : resolve(key))));
 
 /**
  * `scrypt:N:r:p:salt:hash`, the cost in the string, so that it can be raised
@@ -38,7 +50,7 @@ export async function hashPassword(password: string): Promise<string> {
 /** Whether `password` is the one `stored` is the hash of. Also reads `salt:hash`, which is how earlier portals remembered theirs. */
 export async function passwordMatches(password: string, stored: string): Promise<boolean> {
   const parts = stored.split(":");
-  let cost = COST;
+  let cost: Cost = { N: 16384, r: 8, p: 1 };
   let salt: string | undefined;
   let hash: string | undefined;
   if (parts.length === 2) [salt, hash] = parts;
@@ -46,7 +58,7 @@ export async function passwordMatches(password: string, stored: string): Promise
     cost = { N: Number(parts[1]), r: Number(parts[2]), p: Number(parts[3]) };
     [salt, hash] = parts.slice(4);
   }
-  if (!salt || !hash) return false;
+  if (!salt || !hash || 128 * cost.N * cost.r > MAX_MEMORY) return false;
   const expected = Buffer.from(hash, "hex");
   if (expected.length === 0) return false;
   try {

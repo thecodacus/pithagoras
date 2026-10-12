@@ -159,9 +159,11 @@ asks for one on its first start, in the browser; see
 **Change password** takes the current password once and the new one twice, which
 has to be at least 8 characters and not `change-me`, the example the older
 guides gave. Every other browser is signed out by the change and asks for the new
-password; the one you changed it in stays signed in. A wrong current password
-counts as a wrong guess at the login, so it is held back after ten of them in a
-row in fifteen minutes.
+password, and what it had open is closed with it: a chat's live view, a terminal,
+the agent's browser. The one you changed it in stays signed in. Wrong current
+passwords are counted on their own, apart from the sign-in's: after ten from one
+source in fifteen minutes the page is told to wait, and not even the right one is
+taken until the time is up.
 
 With `PORTAL_ALLOW_NO_PASSWORD=1` there is no login and so no password; the page
 says so. A lost password is not recovered here (you cannot get in to this page

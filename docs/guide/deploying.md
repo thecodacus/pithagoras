@@ -77,7 +77,8 @@ log says it is waiting. This works the same in Docker and on a headless machine:
 open the address from any browser that can reach it.
 
 **Changing it.** **Settings → Password** takes the current password and the new
-one twice; it signs out every other browser. See [Settings](/guide/settings#password).
+one twice; it signs out every other browser and closes what they had open. See
+[Settings](/guide/settings#password).
 
 **An install from before.** A portal that took its password from `PORTAL_PASSWORD`
 moves it into the database on its first start after the upgrade and says so in the
@@ -100,9 +101,16 @@ npm run reset-password
 ```
 
 A running portal needs no restart: it is waiting on its setup screen at once, every
-login is ended, and you choose a new password as on the first start (so do it
-straight away, for the same reason). A leftover `PORTAL_PASSWORD` is not read
+login is ended and so is every chat view, terminal and browser stream that was open
+(within a couple of seconds), and you choose a new password as on the first start (so
+do it straight away, for the same reason). A leftover `PORTAL_PASSWORD` is not read
 again, so the reset cannot be undone by a restart.
+
+A portal that was started with `PORTAL_ALLOW_NO_PASSWORD=1` and a password is not
+opened by the reset either: it waits on the setup screen like any other. A *restart*
+with the variable still set and no password does run with no login (on this machine
+only, unless `ALLOW_OPEN=1`), so choose a new password before restarting, or take the
+variable out. The command says so when the variable is set where it runs.
 
 ## HTTPS
 
@@ -452,7 +460,7 @@ A portal with no password does not run without a login by itself: it waits on th
 - `PORTAL_ALLOW_NO_PASSWORD=1` lets it start with no login and no password to choose (there is none to change in Settings either). It then listens on `127.0.0.1` only, so a reverse proxy on the same host reaches it and nothing else does.
 - `ALLOW_OPEN=1` on top of that makes it listen on every interface. This is what a proxy in another container, or on another machine, needs; anyone who can reach the port can then run commands, so the port must be closed to everything but the proxy.
 
-A password the portal already holds wins over `PORTAL_ALLOW_NO_PASSWORD`: the login applies.
+A password the portal already holds wins over `PORTAL_ALLOW_NO_PASSWORD`: the login applies, and a password removed with the reset command leaves the running portal on its setup screen, not open. Only a start with no password at all runs with no login.
 
 Both Compose files pass both variables on. They bind to the host (`network_mode: host`), so `127.0.0.1` there is the host's own loopback, which a container on Docker's bridge network cannot reach: for a proxy in such a container, set `ALLOW_OPEN=1` and keep the port closed with the host's firewall. With a password, or while it waits for one, the portal listens on every interface and neither is needed.
 

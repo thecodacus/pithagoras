@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import https from "node:https";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
@@ -163,9 +164,9 @@ async function portalOf(overrides = {}, at = testHome("pithagoras-auth-own-")) {
 
 const RESET = fileURLToPath(new URL("../dist/reset-password.js", import.meta.url));
 /** Runs the command that removes a lost password on `at`'s data, answering what it asks with `input`. */
-function resetPassword(at, input) {
+function resetPassword(at, input, env = {}) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [RESET], { env: serverEnv(at, 0), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [RESET], { env: serverEnv(at, 0, { PORTAL_ALLOW_NO_PASSWORD: "", ...env }), stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
     child.stdout.on("data", (d) => { out += d; });
     child.stderr.on("data", (d) => { out += d; });
@@ -178,7 +179,7 @@ test("a password is kept as a salted scrypt hash that only that password matches
   const a = await kept.hashPassword("hunter2hunter2");
   const b = await kept.hashPassword("hunter2hunter2");
   assert.notEqual(a, b, "each has a salt of its own");
-  assert.match(a, /^scrypt:16384:8:1:[0-9a-f]{32}:[0-9a-f]{64}$/);
+  assert.match(a, /^scrypt:65536:8:2:[0-9a-f]{32}:[0-9a-f]{64}$/);
   assert.equal(await kept.passwordMatches("hunter2hunter2", a), true);
   assert.equal(await kept.passwordMatches("hunter2hunter3", a), false);
   assert.equal(await kept.passwordMatches("", a), false);
@@ -188,6 +189,11 @@ test("a password is kept as a salted scrypt hash that only that password matches
   const legacy = `${salt.toString("hex")}:${crypto.scryptSync("an old one", salt, 32).toString("hex")}`;
   assert.equal(await kept.passwordMatches("an old one", legacy), true);
   assert.equal(await kept.passwordMatches("another", legacy), false);
+  // The cost is the one the string names: a hash made at Node's default, as this first was, still reads.
+  const cheap = `scrypt:16384:8:1:${salt.toString("hex")}:${crypto.scryptSync("made cheaply", salt, 32).toString("hex")}`;
+  assert.equal(await kept.passwordMatches("made cheaply", cheap), true);
+  // And one that names a cost that would take gigabytes is a damaged row, not an allocation.
+  assert.equal(await kept.passwordMatches("x", `scrypt:1073741824:8:1:${salt.toString("hex")}:${"ab".repeat(32)}`), false);
   // Nothing a damaged row could hold throws, or matches.
   for (const junk of ["", "x", ":", "a:b:c", "scrypt:1:2:3", "scrypt:16384:8:1:zz:zz", "scrypt:3:8:1:aa:bb"]) assert.equal(await kept.passwordMatches("x", junk), false, junk);
 
@@ -435,6 +441,151 @@ test("a lost password is removed by the reset command, after asking, from a runn
   assert.match(nothing.out, /no portal database/);
 });
 
+/** A stream open on a portal, read in the background: `ended` says whether the portal has closed it. */
+async function openStream(at, cookie, route, method = "GET") {
+  const res = await fetch(`${at}${route}`, { method, headers: { Cookie: cookie } });
+  assert.equal(res.status, 200, route);
+  const stream = { ended: false };
+  (async () => {
+    try { for await (const chunk of res.body) void chunk; } catch { /* reset */ }
+    stream.ended = true;
+  })();
+  return stream;
+}
+// The command that removes a password is another process: the portal finds out on a timer of two seconds.
+const ends = async (stream, what) => {
+  for (let end = Date.now() + 10_000; !stream.ended && Date.now() < end; ) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(stream.ended, true, `${what} was not ended`);
+};
+const staysOpen = async (stream, what) => {
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  assert.equal(stream.ended, false, what);
+};
+
+test("changing the password ends the event and terminal streams other browsers have open, and the one it was changed in keeps its own", async () => {
+  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD });
+  try {
+    const mine = cookieOf(await login(PASSWORD, p.base));
+    const other = cookieOf(await login(PASSWORD, p.base));
+    const chat = (await (await post(p.base, "/api/sessions", {}, mine)).json()).id;
+    const shell = (await (await post(p.base, "/api/terminal", {}, other)).json()).id;
+    const streams = {
+      myEvents: await openStream(p.base, mine, `/api/sessions/${chat}/events`),
+      theirEvents: await openStream(p.base, other, `/api/sessions/${chat}/events`),
+      theirTerminal: await openStream(p.base, other, `/api/terminal/${shell}/stream`),
+    };
+    const changed = await post(p.base, "/api/auth/password", { current: PASSWORD, password: "the brand new one" }, mine);
+    assert.equal(changed.status, 200);
+    await ends(streams.theirEvents, "the other browser's event stream");
+    await ends(streams.theirTerminal, "the other browser's terminal");
+    // Not by its next check either: that is on a timer, and it must find the browser that changed it still signed in.
+    await staysOpen(streams.myEvents, "the event stream of the browser that changed it");
+    // A stream opened from now on is under the new password, and the cookie of the change opens it.
+    const again = await openStream(p.base, cookieOf(changed), `/api/sessions/${chat}/events`);
+    await staysOpen(again, "a stream opened after the change");
+    assert.equal((await fetch(`${p.base}/api/sessions/${chat}/events`, { headers: { Cookie: other } })).status, 401);
+    await fetch(`${p.base}/api/terminal/${shell}`, { method: "DELETE", headers: { Cookie: cookieOf(changed) } });
+  } finally {
+    await p.stop();
+  }
+});
+
+test("changing the password ends the agent's browser stream another login has open, and a reset ends every stream", async () => {
+  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD, BROWSER_HTTPS_PORT: String(upstreamPort), BROWSER_USER: "agent", BROWSER_PASSWORD });
+  try {
+    browser.mode = "accept";
+    const mine = cookieOf(await login(PASSWORD, p.base));
+    const other = cookieOf(await login(PASSWORD, p.base));
+    const open = async (cookie) => {
+      const stream = upgrade({ Cookie: cookie }, "", "/browser-ui/websockify", p.port);
+      await until(() => stream.text().includes("RFB 003.008"), "the stream open");
+      return stream;
+    };
+    const theirs = await open(other);
+    const own = await open(mine);
+    const changed = await post(p.base, "/api/auth/password", { current: PASSWORD, password: "the brand new one" }, mine);
+    assert.equal(changed.status, 200);
+    await Promise.race([theirs.closed, new Promise((_, no) => setTimeout(() => no(new Error("the other login's stream is still open")), 5000))]);
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    assert.equal(own.socket.destroyed, false, "the stream of the login that changed it");
+
+    // Removed by the command, which is another process: every stream goes, the one that was kept too.
+    const chat = (await (await post(p.base, "/api/sessions", {}, cookieOf(changed))).json()).id;
+    const events = await openStream(p.base, cookieOf(changed), `/api/sessions/${chat}/events`);
+    assert.equal((await resetPassword(p.home, "reset\n")).code, 0);
+    await ends(events, "the event stream, after the reset");
+    await Promise.race([own.closed, new Promise((_, no) => setTimeout(() => no(new Error("the browser stream is still open after the reset")), 5000))]);
+    own.socket.destroy();
+    theirs.socket.destroy();
+  } finally {
+    await p.stop();
+  }
+});
+
+test("a password that is removed from a portal that also has PORTAL_ALLOW_NO_PASSWORD never opens it: it waits on the setup screen, on the address it was bound to", async () => {
+  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "1" });
+  // An address of this machine that is not the loopback one, where there is one: the portal is bound to every address for its login.
+  const lan = Object.values(os.networkInterfaces()).flat().find((a) => a && a.family === "IPv4" && !a.internal)?.address;
+  const where = [p.base, ...(lan ? [`http://${lan}:${p.port}`] : [])];
+  try {
+    for (const at of where) assert.equal((await settingsAt(at)).status, 401, `a login is asked for at ${at}`);
+    const cookie = cookieOf(await login(PASSWORD, p.base));
+    assert.equal((await settingsAt(p.base, cookie)).status, 200);
+
+    // The command is told what a restart does here, and does not say there is a setup screen where there will be none.
+    const asked = await resetPassword(p.home, "no\n", { PORTAL_ALLOW_NO_PASSWORD: "1" });
+    assert.match(asked.out, /started again with no password runs with no login at all/);
+    const done = await resetPassword(p.home, "reset\n", { PORTAL_ALLOW_NO_PASSWORD: "1" });
+    assert.equal(done.code, 0, done.out);
+    assert.match(done.out, /waiting on its setup screen[^]*before the portal is restarted/);
+
+    for (const at of where) {
+      assert.deepEqual(await statusAt(at), { authRequired: true, authed: false, setup: true }, at);
+      assert.equal((await settingsAt(at)).status, 401, `still not open at ${at}`);
+      assert.equal((await post(at, "/api/sessions", {})).status, 401, `nor to a request that changes things at ${at}`);
+      assert.equal((await settingsAt(at, cookie)).status, 401, "and the login from before is gone");
+    }
+    assert.equal((await post(p.base, "/api/auth/login", { password: PASSWORD })).status, 409);
+    // The setup screen is what is there, and works as it does on a new install.
+    const chosen = await post(p.base, "/api/auth/setup", { password: "chosen after the reset" });
+    assert.equal(chosen.status, 200);
+    assert.equal((await settingsAt(p.base, cookieOf(chosen))).status, 200);
+    assert.equal((await settingsAt(p.base)).status, 401);
+
+    // Only a start with neither a password nor a way to choose one is open by choice, and that is loopback only.
+    await resetPassword(p.home, "reset\n");
+    await p.stop();
+    const restarted = await portalOf({ PORTAL_ALLOW_NO_PASSWORD: "1" }, p.home);
+    try {
+      assert.deepEqual(await statusAt(restarted.base), { authRequired: false, authed: true });
+      if (lan) await assert.rejects(fetch(`http://${lan}:${restarted.port}/api/auth/status`), "bound to this machine only");
+    } finally {
+      await restarted.stop();
+    }
+  } finally {
+    await p.stop();
+  }
+});
+
+test("wrong current passwords sent to the change route are held back after ten, on a count of their own, and the right one is held back too", async () => {
+  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD });
+  try {
+    const cookie = cookieOf(await login(PASSWORD, p.base));
+    const change = (current) => post(p.base, "/api/auth/password", { current, password: "a brand new one" }, cookie);
+    for (let i = 1; i <= 10; i++) assert.equal((await change(`guess ${i}`)).status, 403, `guess ${i}`);
+    const held = await change("guess 11");
+    assert.equal(held.status, 429);
+    assert.ok(Number(held.headers.get("retry-after")) > 0);
+    // Whoever holds the cookie cannot walk on to the password by trying again, nor can the person with the right one until the window is over.
+    assert.equal((await change(PASSWORD)).status, 429);
+    assert.equal((await login(PASSWORD, p.base)).status, 200, "the login has a count of its own");
+    // Nothing was changed by any of it.
+    assert.equal((await login("a brand new one", p.base)).status, 401);
+  } finally {
+    await p.stop();
+  }
+});
+
 test("PORTAL_ALLOW_NO_PASSWORD still runs without a login, and then there is no password to choose or change", async () => {
   const p = await portalOf({ PORTAL_ALLOW_NO_PASSWORD: "1" });
   try {
@@ -589,14 +740,14 @@ test("the window's budget is a fresh one when the window is over", () => {
 // --- the agent's browser ---
 
 /** A request for the upgrade to a stream, as a browser makes it, with `after` as the bytes the page sends first. */
-function upgrade(headers = {}, after = "", url = "/browser-ui/websockify") {
-  const socket = net.connect(port, "127.0.0.1");
+function upgrade(headers = {}, after = "", url = "/browser-ui/websockify", at = port) {
+  const socket = net.connect(at, "127.0.0.1");
   let text = "";
   socket.on("data", (d) => { text += d; });
   // Refused and closed on is what some of these are about; the answer is what is read.
   socket.on("error", () => {});
   const lines = [
-    `GET ${url} HTTP/1.1`, `Host: 127.0.0.1:${port}`, "Connection: Upgrade", "Upgrade: websocket",
+    `GET ${url} HTTP/1.1`, `Host: 127.0.0.1:${at}`, "Connection: Upgrade", "Upgrade: websocket",
     "Sec-WebSocket-Version: 13", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
     ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`),
   ];
