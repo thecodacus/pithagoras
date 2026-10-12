@@ -15,3 +15,28 @@
  * cut off is told from an extension's too: those have no answer with a path.
  */
 export const GENERATED_PICTURE_MARK = "portalImage";
+
+/** A picture the agent put in front of the person with show_image, or made or changed for them with generate_image or edit_image: its path in the chat's folder. */
+export interface ShownPicture {
+  path: string;
+  title?: string;
+}
+
+/**
+ * The picture a show_image, generate_image or edit_image call ended with, when it succeeded.
+ *
+ * All answer with a path in the chat's folder and a title. generate_image and
+ * edit_image are taken only with the mark the portal's own tool sets: an
+ * extension may bring a tool of that name, whose path is not one in the
+ * chat's folder. Here rather than in the page, so that a channel that sends the
+ * picture on reads the same calls as the page that draws it.
+ */
+export function shownPicture(payload: any): ShownPicture | undefined {
+  if (payload?.isError) return undefined;
+  // pi has spelled it both ways: see the page's toolNameOf.
+  const name = String(payload?.toolName ?? payload?.name ?? "");
+  const details = payload?.result?.details;
+  if (name === "generate_image" || name === "edit_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
+  if (typeof details?.path !== "string" || !details.path) return undefined;
+  return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
+}

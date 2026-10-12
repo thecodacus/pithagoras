@@ -73,6 +73,7 @@ export default defineConfig({
         text: "The agent",
         items: [
           { text: "Agent and channels", link: "/channels/" },
+          { text: "Signal", link: "/channels/signal" },
           { text: "Writing a channel", link: "/channels/writing-a-channel" },
         ],
       },

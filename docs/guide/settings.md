@@ -83,8 +83,10 @@ reads, see [Images](/guide/images#stable-diffusion-settings). The tools do not u
 
 ## Channels
 
-Two-way links into the agent, and the packages that provide them. See
-[Agent and channels](/channels/).
+Two-way links into the agent, and the packages that provide them: Telegram,
+Slack, Discord, Signal and a webhook ship with the portal. See
+[Agent and channels](/channels/), and [Signal](/channels/signal) for setting up
+signal-cli and linking it to your phone.
 
 ## Extensions
 

@@ -376,6 +376,8 @@ const de: Locale = {
     "You are answering over {channel}. Keep replies short — they are read on a phone. Never paste secrets or full file contents.": "Du antwortest über {channel}. Halte die Antworten kurz — sie werden auf einem Handy gelesen. Füge nie Geheimnisse oder ganze Dateiinhalte ein.",
     "this channel": "diesen Kanal",
     "Leave empty for none. The agent's own memory is shared across channels; this is not.": "Leer lassen für keine. Das Gedächtnis des Agenten teilen alle Kanäle; diese Anweisungen nicht.",
+    "Scan to connect": "Zum Verbinden scannen",
+    "Code to scan": "Code zum Scannen",
     "Connection": "Verbindung",
     "stored": "gespeichert",
     "not set": "nicht gesetzt",

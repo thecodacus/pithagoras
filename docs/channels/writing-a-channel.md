@@ -4,7 +4,7 @@ A channel package is a normal npm package with a marker, a manifest, and a
 `start()` that owns its transport. Publish it to a GitHub repo and it installs
 straight into the portal.
 
-The four packages in the repo's `channels/` directory are reference
+The five packages in the repo's `channels/` directory are reference
 implementations of exactly this format — read them alongside this page.
 
 ## Layout
@@ -93,6 +93,7 @@ Called once when the channel is enabled. Return an object with `stop()`.
 | `ask(text, meta)` | Send to the agent; resolves with its reply. `meta.session` is required. |
 | `log(message)` | Surfaced in the channel's status. |
 | `signal` | `AbortSignal`, aborted when the channel is disabled or the portal shuts down. |
+| `showPairing(pairing)` | Shows `{ code, hint }` on the channel's page as a QR code, until `showPairing(null)`. See [Something to scan](#something-to-scan). |
 
 `ask` is the entire interface to the agent.
 
@@ -122,6 +123,7 @@ the builtins settled on:
 | Telegram | `chat:<chat id>` | A DM and a group have different chat ids, so they separate for free. |
 | Slack | `channel:<channel>` | Per channel, not per thread — a thread is a digression inside one conversation. |
 | Discord | `channel:<channel id>` | A DM is a channel too, so servers and DMs separate for free. |
+| Signal | `chat:<number>`, `group:<group id>` | A group has an id of its own; a direct chat is the other person's number, or their account id when they hide it. |
 | Webhook | whatever the caller sends, else `default` | Only the caller knows what a conversation is. |
 
 Your key is prefixed with the channel's slug before it is stored, so two
@@ -178,6 +180,35 @@ instruction and reaches the agent intact.
 
 Anything else in `meta` is yours — it travels with the message so you can route
 the reply back where it came from.
+
+### Pictures
+
+A picture sent with a message goes in `meta.images`, as base64:
+
+```js
+const reply = await ctx.ask(text, {
+  session: `chat:${chatId}`,
+  from: { id: userId, name },
+  images: [{ data: base64, mimeType: "image/png" }],
+  onReply: (body) => send(chatId, body),
+  onPicture: (picture) => sendPicture(chatId, picture),
+});
+```
+
+They are held to the rules of a picture sent in the browser: PNG, JPEG, GIF or
+WebP by their bytes, whatever `mimeType` says, at most 5 MB each and eight with
+a message. Anything else and `ask` answers with what was wrong, and the agent
+sees none of it. Leave out what your platform says is not a picture, or too
+large, before you ask, and tell the person: what is dropped silently is waited
+for. `text` may be empty when there are pictures.
+
+`meta.onPicture` is how pictures come back. When the agent shows one
+(`show_image`, or one it made with `generate_image` or `edit_image`), it is
+handed to you as `{ data, mimeType, name, title? }`, `data` in base64, at the
+moment it is shown and whatever **Progress** and **Tool activity** say. With
+**Progress** on it falls between the words around it, as long as you send in
+the order you are handed things. A package without `onPicture` gets the words
+only.
 
 Honour `ctx.signal`. A polling loop should check `signal.aborted` and pass the
 signal to `fetch`, or disabling the channel will leave it running.
@@ -276,6 +307,26 @@ Anything npm understands works: `user/repo`, `github:user/repo#v2`, a git URL,
 an https tarball, or a published npm name. The loader picks it up immediately —
 a reinstall of the same version is cache-busted, so you do not need a restart to
 see a change.
+
+## Something to scan
+
+A platform that is joined by scanning a code — Signal's linked devices, say —
+puts the code on the channel's page with `ctx.showPairing`:
+
+```js
+ctx.showPairing({ code: uri, hint: "Open the app → Linked devices, and scan this." });
+// … once it is scanned, or when the code is replaced by a new one:
+ctx.showPairing(null);
+```
+
+The page draws `code` as a QR code with `hint` above it and the code as text
+below, and polls, so a new code replaces the old one within seconds. It is not a
+log line: nothing of it stays once it is taken back or the channel stops. The
+code goes to the browser, so it must be something to scan, never a key.
+
+Do the waiting after `start()` has returned, not in it. `start()` holds up the
+other channels until it settles, and a code can wait minutes for somebody to
+pick up their phone.
 
 ## Things to know
 
