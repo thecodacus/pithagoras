@@ -47,6 +47,6 @@ function Fixture() {
   const [shown, setShown] = React.useState(events);
   (window as any).emit = (type: string, payload: any) => setShown((list) => [...list, { seq: ++seq, type, at: Date.now(), payload }]);
   (window as any).madePayload = made;
-  return <div style={{ height: '100vh' }}><Chat session={session} events={shown} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={false} /></div>;
+  return <div style={{ height: '100vh' }}><Chat session={session} events={shown} onSend={noop} onEditMessage={noop} onDeleteMessage={noop} onTakeBackQueued={noop} onSendQueuedNow={noop} onAbort={noop} onClientCommand={noop} onRename={noop} loading={false} /></div>;
 }
 createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);
