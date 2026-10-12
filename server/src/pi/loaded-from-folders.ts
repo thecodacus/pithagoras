@@ -53,6 +53,8 @@ export const LOADED_IN_FOLDERS: LoadedEntry[] = [
   // pi: the project's instructions, from the folder and from every one above it, and the folders it loads
   // its settings, system prompt, extensions, skills, prompts and themes from, and its packages.
   // The MCP adapter's `.pi/mcp.json` and `.agents/mcp.json` are in them.
+  // pi reads the first of these a folder has, AGENTS.override.md before AGENTS.md (pi 1.x).
+  { name: "AGENTS.override.md", by: "pi", as: "instructions", above: true },
   { name: "AGENTS.md", by: "pi", as: "instructions", above: true },
   { name: "CLAUDE.md", by: "pi", as: "instructions", above: true },
   { name: ".pi", by: "pi", as: "instructions", folder: true },

@@ -41,7 +41,7 @@ export async function fakeModel(reply = () => "Done.") {
       providers: {
         fake: {
           baseUrl: url, api: "openai-completions", apiKey: "none",
-          models: [{ id: "m", name: "M", reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 100 }],
+          models: [{ id: "m", name: "M", reasoning: false, input: ["text"], contextWindow: 200000, maxTokens: 100 }],
         },
       },
     }),
