@@ -64,6 +64,13 @@ export interface Executor {
   readonly resumes?: boolean;
 }
 
+/** The environment variable each cloud provider's key is in, as pi reads it. */
+const PROVIDER_KEYS: Record<string, string> = {
+  openrouter: "OPENROUTER_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+};
+
 function piArgs(opts: LaunchOptions, sessionDir: string): string[] {
   const args = ["--mode", "rpc", "--session-dir", sessionDir];
   if (opts.provider) args.push("--provider", opts.provider);
@@ -149,14 +156,13 @@ export class ContainerExecutor implements Executor {
 
     // By name only: docker copies the value from its own environment, which is
     // this one, and a value on the command line is readable by anybody on the
-    // host who lists processes while the task runs.
-    const passthrough = [
-      "OPENROUTER_API_KEY",
-      "ANTHROPIC_API_KEY",
-      "OPENAI_API_KEY",
-      "PI_PROVIDER",
-      "PI_MODEL",
-    ].flatMap((key) => (process.env[key] ? ["-e", key] : []));
+    // host who lists processes while the task runs. Of the provider keys, only
+    // the one for the provider the chat runs on: the others are not its to have,
+    // and a key in its environment is a provider pi may reach for (#15).
+    const keys = opts.provider
+      ? (PROVIDER_KEYS[opts.provider] ? [PROVIDER_KEYS[opts.provider]] : [])
+      : Object.values(PROVIDER_KEYS);
+    const passthrough = [...keys, "PI_PROVIDER", "PI_MODEL"].flatMap((key) => (process.env[key] ? ["-e", key] : []));
 
     const args = [
       "run",

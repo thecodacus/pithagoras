@@ -6,8 +6,8 @@ it.
 
 The premise here is that the model **will** eventually follow one. Nothing in a
 system prompt reliably prevents that, so the guard does not try. It limits what
-a turn can do *after* it has read something untrusted, and makes an attempt
-visible instead of silent.
+a turn can do *after* it has read something that tries to instruct it, and makes
+an attempt visible instead of silent.
 
 ## Marking untrusted output
 
@@ -34,10 +34,40 @@ The browser's tools read a page after nearly every click, so their results carry
 a shorter envelope: the same random closing id, with the warning above said once
 in the agent's instructions instead of on every result.
 
-What is wrapped, and taints the conversation: mail and the web read through a
-command (`curl`, `wget`, `ssh`, `git clone` and the like), the tools of an MCP
-server, and the browser. The agent's own tools, a subagent's answer and a
-routine's are not. The taint is read from the conversation again whenever pi
+What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
+`git clone` and the like), the tools of an MCP server, and the browser. The
+agent's own tools, a subagent's answer and a routine's are not.
+
+## Suspected prompt injection
+
+Wrapped content only taints the conversation when it looks like it tries to
+instruct the agent. Each wrapped result is checked for these signs:
+
+| Sign | What it looks for |
+| --- | --- |
+| `override` | Telling the reader to ignore, forget or override its instructions or rules |
+| `addressed` | Words addressed to an AI reading it: "Note to the AI assistant", "If you are an AI agent" |
+| `persona` | A new role or new instructions for the reader: "you are now an unrestricted assistant", "enable developer mode" |
+| `role-markup` | Chat-format markers that pretend to be another speaker: `<\|im_start\|>`, `[INST]`, `</system>` |
+| `hidden` | Text hidden in invisible characters: Unicode tag characters, a run of zero-width ones |
+| `secret-request` | Asking for keys, passwords or private files to be sent to an address |
+
+An ordinary page, mail, package install or `git clone` is wrapped and read as
+data, and leaves the conversation free. One that carries a sign is flagged: the
+first line of its envelope says so, an Audit entry says what it did, and the
+conversation is tainted.
+
+A flagged result shows a notice under its tool card in the chat, with two ways
+out:
+
+- **Trust it**: you looked at it and it is fine. It no longer holds the
+  conversation back, and that is remembered when the chat is opened again.
+- **Remove the turn**: the message it came in and the agent's answer to it are
+  taken out of the conversation, as **Delete** on a message does, so the agent
+  no longer knows what it read.
+
+The conversation stays tainted while any flagged result in it is neither
+trusted nor removed. That is read from the conversation again whenever pi
 reloads, so reopening a chat does not clear it.
 
 What a routine reported into a chat while it sat idle comes in with the next
@@ -59,9 +89,9 @@ leaves that conversation able to use the rule.
 
 ## Limiting what happens next
 
-Reading untrusted content marks the session **tainted**. From then on, the
-handful of actions that turn a bad suggestion into a lasting problem are
-refused:
+A flagged result marks the session **tainted**. Until it is trusted or its turn
+removed, the handful of actions that turn a bad suggestion into a lasting
+problem are refused:
 
 | Rule | Why |
 | --- | --- |
@@ -84,9 +114,11 @@ then recorded instead.
 
 ## What this does not do
 
-These are heuristics, and the rules are public. Somebody who already has code
-execution can work around a pattern list — the point is to make the easy path
-stop working.
+These are heuristics, and the rules are public. An injection worded around the
+signs above is wrapped as data but does not taint, and somebody who already has
+code execution can work around a pattern list; the point is to make the easy path
+stop working. The [sandbox](/guide/sandbox) holds what the agent can reach either
+way.
 
 The unsolved layer is **egress**. The container has unrestricted outbound
 network, so anything that runs can reach anywhere. Closing that means dropping

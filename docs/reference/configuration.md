@@ -83,7 +83,7 @@ The Browser add-on's `BROWSER_*` variables are in [Docker add-ons](/guide/add-on
 Settings that are kept in the browser rather than on the server — theme, language,
 notifications, confirmations, shortcuts — are in [The interface](/guide/interface).
 
-The host executor inherits the portal environment. The container executor currently forwards `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PI_PROVIDER`, and `PI_MODEL`; it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
+The host executor inherits the portal environment. The container executor forwards `PI_PROVIDER`, `PI_MODEL` and, of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, only the key of the provider the chat runs on (none for a provider of its own, such as llama.cpp); it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
 
 Both Compose files forward `PI_IMAGE` and the three `TASK_*` limits. These limits apply only to `EXECUTOR=container`: memory must be an integer of at least 6 MiB, CPUs must be positive (fractions are allowed), and the process limit must be a positive integer. Empty values inherit defaults; zero, negative and non-numeric values are rejected explicitly.
 
