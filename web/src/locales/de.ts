@@ -610,6 +610,7 @@ const de: Locale = {
     "Chats, messages, files, skills, routines, projects, voices, channels, providers, MCP servers and extensions. Unsaved changes are still asked about: there is no other copy of them.": "Chats, Nachrichten, Dateien, Skills, Routinen, Projekte, Stimmen, Kanäle, Anbieter, MCP-Server und Erweiterungen. Nach ungespeicherten Änderungen wird trotzdem gefragt: Es gibt keine andere Kopie davon.",
     "Signed in": "Angemeldet",
     "Signing out asks for the password here again. Other browsers stay signed in.": "Nach dem Abmelden wird hier wieder nach dem Passwort gefragt. Andere Browser bleiben angemeldet.",
+    "Signing out asks you to sign in here again. Other browsers stay signed in.": "Nach dem Abmelden musst du dich hier wieder anmelden. Andere Browser bleiben angemeldet.",
     "Sign out": "Abmelden",
     "The portal's password is shorter than 8 characters. It keeps working because it was already in use, but anybody who can reach the portal can try to guess it. Set a longer PORTAL_PASSWORD and restart.": "Das Passwort des Portals ist kürzer als 8 Zeichen. Es funktioniert weiter, weil es schon in Gebrauch war, aber jeder, der das Portal erreicht, kann versuchen, es zu erraten. Setz ein längeres PORTAL_PASSWORD und starte neu.",
     "This browser does not offer them here — they need a secure connection (HTTPS, or localhost).": "Dieser Browser bietet sie hier nicht an — sie brauchen eine sichere Verbindung (HTTPS oder localhost).",
@@ -1011,6 +1012,8 @@ const de: Locale = {
     "Password": "Passwort",
     "Checking…": "Wird geprüft…",
     "Sign in": "Anmelden",
+    "Sign in with {name}": "Mit {name} anmelden",
+    "or with the password": "oder mit dem Passwort",
     // components/Markdown.tsx
     "Picture from {host} not loaded": "Bild von {host} nicht geladen",
     // components/McpPanel.tsx

@@ -33,9 +33,10 @@ an empty field inherits, and clearing one hands the setting back.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORTAL_PASSWORD` | — | Required. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
+| `PORTAL_PASSWORD` | — | Required unless single sign-on (`OIDC_ISSUER`) is set up. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one or single sign-on. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
 | `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all, on `127.0.0.1` only. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
 | `PORTAL_SECRET` | random | Signs the cookie. Set it to survive restarts. |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `PORTAL_PUBLIC_URL`, `OIDC_SCOPES`, `OIDC_NAME`, `OIDC_ONLY`, `OIDC_ALLOWED_EMAILS`, `OIDC_ALLOWED_GROUPS`, `OIDC_GROUPS_CLAIM`, `OIDC_ALLOWED_SUBJECTS`, `OIDC_END_SESSION` | — | Signing in through an OpenID Connect provider, instead of the password or beside it. See [Single sign-on](/guide/deploying#single-sign-on). |
 | `PORT` | `4100` | Listen port. |
 | `TZ` | UTC in the image | The time zone of the portal's clock, such as `Europe/Berlin`. The quiet hours of an agent's heartbeat and the schedule of a repeating routine are read on it, and Settings → Add-ons → Memory's tidy-up time. Both Compose files pass it on. |
 | `DATA_DIR` | `./data` (image: `/data`) | Where `portal.db` lives, with the `backups/` made before a database upgrade and `images/`: the Images page's own pictures, and the pictures sent with a chat's messages, in a folder per chat (removed with it). The pictures the agent makes go in a `generated-images` folder inside the chat's own folder instead. Only one portal may run on it at a time. |

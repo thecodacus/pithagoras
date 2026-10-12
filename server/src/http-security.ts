@@ -2,8 +2,9 @@ import type { RequestHandler } from 'express';
 import { existsSync } from 'node:fs';
 import net from 'node:net';
 
-export function bindHost(password: string | undefined, allowOpen: string | undefined): string {
-  return password || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
+/** `login` is whatever stands for one: the password, the sign-in provider, or whether there is either. */
+export function bindHost(login: string | boolean | undefined, allowOpen: string | undefined): string {
+  return login || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
 }
 
 /**

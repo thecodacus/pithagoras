@@ -1,8 +1,15 @@
 import { useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, type SingleSignOn } from "../api";
 import { t } from "../i18n";
 
-export function Login({ onSuccess }: { onSuccess: () => void }) {
+/**
+ * Where the provider's sign-in starts: the portal sends the browser on to it, and
+ * it comes back to the page it was on. The server checks that page is the portal's own.
+ */
+const ssoStart = () => `/api/auth/oidc/start?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+
+/** The password form, the single sign-on button, or both: `sso.only` leaves the password out. */
+export function Login({ onSuccess, sso }: { onSuccess: () => void; sso?: SingleSignOn }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,26 +41,45 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           </p>
         </div>
 
-        <input
-          autoFocus
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={t("Password")}
-          aria-label={t("Password")}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? "login-error" : undefined}
-          className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-fg outline-none transition placeholder:text-fg-faint focus:border-accent/50 focus:ring-4 focus:ring-accent/10"
-        />
-        {error && <p id="login-error" role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+        {sso && (
+          <a
+            href={ssoStart()}
+            className="block w-full rounded-xl bg-accent px-3 py-2.5 text-center text-sm font-medium text-accent-fg transition hover:opacity-90"
+          >
+            {t("Sign in with {name}", { name: sso.name })}
+          </a>
+        )}
+        {sso && !sso.only && (
+          <div className="my-4 flex items-center gap-3 text-xs text-fg-faint" aria-hidden="true">
+            <span className="h-px flex-1 bg-line" />
+            {t("or with the password")}
+            <span className="h-px flex-1 bg-line" />
+          </div>
+        )}
+        {!sso?.only && (
+          <>
+            <input
+              autoFocus={!sso}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("Password")}
+              aria-label={t("Password")}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "login-error" : undefined}
+              className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-fg outline-none transition placeholder:text-fg-faint focus:border-accent/50 focus:ring-4 focus:ring-accent/10"
+            />
+            {error && <p id="login-error" role="alert" className="mt-2 text-xs text-danger">{error}</p>}
 
-        <button
-          type="submit"
-          disabled={busy || !password}
-          className="mt-3 w-full rounded-xl bg-accent px-3 py-2.5 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:opacity-40"
-        >
-          {busy ? t("Checking…") : t("Sign in")}
-        </button>
+            <button
+              type="submit"
+              disabled={busy || !password}
+              className="mt-3 w-full rounded-xl bg-accent px-3 py-2.5 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:opacity-40"
+            >
+              {busy ? t("Checking…") : t("Sign in")}
+            </button>
+          </>
+        )}
       </form>
     </div>
   );

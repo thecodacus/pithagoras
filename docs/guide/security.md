@@ -119,6 +119,42 @@ behind the portal's login like every other route: without it they answer 401, an
 websocket opened from another site is refused. The portal does not hand its own
 login cookie, or the visitor's `Authorization` header, on to the browser.
 
+## Signing in through a provider
+
+With [single sign-on](/guide/deploying#single-sign-on) set up, the provider
+decides who someone is, and the portal's allow-list decides whether they may come
+in. The sign-in fails closed: anything that is not exactly right gives no login.
+
+- The authorization code flow, with PKCE (`S256`), `state` and `nonce`. What the
+  answer must match is kept in a short-lived cookie for that browser, sealed so
+  that only the portal can read or make one. It lasts ten minutes and is used
+  once: the same answer brought back again is refused, also from a copy of the
+  cookie, and an answer brought to a browser that did not start the sign-in is
+  refused too.
+- The ID token must be signed with one of the provider's published keys (never
+  `none`, never the client secret), and its issuer, audience, expiry, age and
+  nonce must match, with a minute of leeway for the clocks. When the provider
+  changes its keys, the portal fetches them again.
+- The provider's address is `https` only, the redirect URL is the configured one
+  and is never taken from a request's `Host` header, and the page a sign-in goes
+  on to is a path of the portal's own, never another site.
+- A failed sign-in counts against the same limit as a wrong password. The client
+  secret and the provider's tokens are not logged or kept. A refresh token is
+  never stored.
+
+What it does not do:
+
+- It does not tell people apart. Everyone on the allow-list is the same single
+  user, with the same rights.
+- It does not follow the provider's session. A login lasts 30 days, as with the
+  password. To end the login of someone the provider no longer lets in, take them
+  off the allow-list (which ends every login made before) or change
+  `PORTAL_SECRET`.
+- It does not replace the password. Unless `OIDC_ONLY=1`, the password login stays
+  open beside it, and anyone who can reach the port can try passwords.
+- It is only as strong as the provider: whoever controls an account the allow-list
+  names, or the provider itself, can sign in.
+
 ## People are a separate layer
 
 The guard also enforces what a teammate may do, checked per tool call so it

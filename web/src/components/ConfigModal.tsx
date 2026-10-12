@@ -602,17 +602,22 @@ function CommandCharacter() {
 function SignOut({ onError }: { onError: (e: string) => void }) {
   const [required, setRequired] = useState(false);
   const [short, setShort] = useState(false);
+  const [sso, setSso] = useState(false);
   useEffect(() => {
-    api.authStatus().then((s) => { setRequired(s.authRequired); setShort(Boolean(s.shortPassword)); }).catch(() => {});
+    api.authStatus().then((s) => { setRequired(s.authRequired); setShort(Boolean(s.shortPassword)); setSso(Boolean(s.oidc)); }).catch(() => {});
   }, []);
   if (!required) return null;
   const signOut = () =>
     api
       .logout()
-      .then(() => window.dispatchEvent(new Event(SIGNED_OUT)))
+      // Where the portal is set up to end the session at the provider too, the browser goes there.
+      .then((r) => (r.endSession ? window.location.assign(r.endSession) : window.dispatchEvent(new Event(SIGNED_OUT))))
       .catch((e) => onError((e as Error).message));
   return (
-    <Section title={t("Signed in")} hint={t("Signing out asks for the password here again. Other browsers stay signed in.")}>
+    <Section
+      title={t("Signed in")}
+      hint={sso ? t("Signing out asks you to sign in here again. Other browsers stay signed in.") : t("Signing out asks for the password here again. Other browsers stay signed in.")}
+    >
       <button onClick={signOut} className={btnCls}>
         {t("Sign out")}
       </button>

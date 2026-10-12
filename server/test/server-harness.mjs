@@ -88,13 +88,15 @@ export function inProcessHome(prefix) {
 }
 
 /**
- * What the server is started with: everything in `home`, no password, pi on the
+ * What the server is started with: everything in `home`, no password nor sign-in provider, pi on the
  * host. `overrides` change any of it, a test of the login giving it a password.
  */
 export const serverEnv = (home, port, overrides = {}) => ({
   ...withoutCredentials(process.env),
   PORT: String(port), ...homeEnv(home),
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
+  // A developer's own sign-in provider is not the test's: every test that wants one names it.
+  ...Object.fromEntries(Object.keys(process.env).filter((name) => name.startsWith("OIDC_")).map((name) => [name, ""])),
   ...overrides,
 });
 

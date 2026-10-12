@@ -1,8 +1,9 @@
 # Deploying
 
 Pithagoras ships as a container. It expects to run somewhere private — there is
-a single password and no per-user separation, so put it behind Tailscale or a
-VPN rather than on a public address.
+a single login (a password, or a [single sign-on](#single-sign-on) provider) and
+no per-user separation, so put it behind Tailscale or a VPN rather than on a
+public address.
 
 ## Docker Compose
 
@@ -64,6 +65,104 @@ HTTPS or on `localhost`, and the embedded browser needs it. Either put a proxy
 in front (`tailscale serve` is the shortest), or give the portal the
 certificate itself: mount the folder with `PORTAL_TLS_DIR` (it appears at
 `/certs`) and set `PORTAL_TLS_CERT` and `PORTAL_TLS_KEY` to the files in it.
+
+## Single sign-on
+
+The portal can sign you in through an OpenID Connect provider (Authentik,
+Keycloak, Entra ID, Google, Zitadel, Authelia and the like), instead of the
+password or beside it. The login page then has a **Sign in with …** button. What
+the provider lets in gets the same login cookie the password gives, so the API,
+the event streams and the agent's browser work as they do with a password. It is
+still one login for one person: everyone on the allow-list below signs in as the
+same user.
+
+At the provider, make an OpenID Connect client for the authorization code flow:
+
+- Redirect URI: the portal's address followed by `/api/auth/oidc/callback`, such
+  as `https://portal.example.com/api/auth/oidc/callback`.
+- Confidential, with a client secret, or public without one: the portal uses PKCE
+  either way.
+- With `OIDC_END_SESSION=1`, also allow the portal's address with a `/` at the end
+  (`https://portal.example.com/`) as the post-logout redirect URI.
+
+Then set, in `.env`:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `OIDC_ISSUER` | — | The provider's issuer URL, exactly as its `/.well-known/openid-configuration` names it (a trailing `/` counts). `https` only, plain `http` only for a provider on the same machine. Setting it switches single sign-on on. |
+| `OIDC_CLIENT_ID` | — | Required with `OIDC_ISSUER`. |
+| `OIDC_CLIENT_SECRET` | — | The client's secret. Leave it out for a public client. |
+| `OIDC_REDIRECT_URL` | from `PORTAL_PUBLIC_URL` | The redirect URI as registered at the provider. It must end in `/api/auth/oidc/callback`. The portal never works it out from the address a request came to. |
+| `PORTAL_PUBLIC_URL` | — | The portal's address, such as `https://portal.example.com`. Only used to make the redirect URL when `OIDC_REDIRECT_URL` is not set. |
+| `OIDC_SCOPES` | `openid email profile` | The scopes asked for. They must include `openid`. |
+| `OIDC_NAME` | `SSO` | What the button says after "Sign in with". |
+| `OIDC_ONLY` | — | `1` hides the password form and refuses the password login. |
+| `OIDC_ALLOWED_EMAILS` | — | Email addresses that may sign in, comma-separated. Only counts when the provider says the email is verified (`email_verified`). Case does not matter. |
+| `OIDC_ALLOWED_GROUPS` | — | Groups that may sign in, comma-separated, compared exactly. Read from the claim `OIDC_GROUPS_CLAIM`. |
+| `OIDC_GROUPS_CLAIM` | `groups` | The claim the groups are in. |
+| `OIDC_ALLOWED_SUBJECTS` | — | The provider's subject IDs (`sub`) that may sign in, comma-separated. |
+| `OIDC_END_SESSION` | — | `1` sends the browser on to the provider's sign-out page after the portal's own sign-out, where the provider has one. |
+
+Nobody gets in just because the provider knows them. Someone signs in only when
+an allow-list names them: their subject, their verified email, or one of their
+groups. With all three lists empty, nobody gets in, and the portal says so when it
+starts. When the ID token leaves out a claim a list needs (some providers keep the
+email or the groups for the userinfo endpoint), the portal asks the userinfo
+endpoint for it.
+
+With single sign-on set up, `PORTAL_PASSWORD` is optional, and the portal listens
+on every interface as it does with a password. When it starts, it reads the
+provider's discovery document and keys. If the provider cannot be reached, calls
+itself by another issuer, does not offer PKCE with `S256`, or signs ID tokens with
+nothing but a shared secret, the portal stops with a message rather than start
+with a login it cannot check.
+
+A login lasts 30 days, as with the password. When the provider's own session or
+token runs out, the portal's login does not end, and blocking an account at the
+provider does not end a login the account already has. Changing the issuer, the
+client ID or an allow-list ends every login made before, as changing the password
+does. So does changing `PORTAL_SECRET`.
+
+### Authentik
+
+Under **Applications**, create an application with an **OAuth2/OpenID Provider**,
+client type *Confidential*, and the redirect URI above (mode *strict*). The issuer
+is shown on the provider's page, with a `/` at the end:
+
+```bash
+OIDC_ISSUER=https://authentik.example.com/application/o/pithagoras/
+OIDC_CLIENT_ID=<Client ID>
+OIDC_CLIENT_SECRET=<Client Secret>
+OIDC_REDIRECT_URL=https://portal.example.com/api/auth/oidc/callback
+OIDC_NAME=Authentik
+OIDC_ALLOWED_GROUPS=Pithagoras users
+```
+
+The `profile` scope carries the names of the user's groups in `groups`.
+
+### Keycloak
+
+In the realm, create a client: *OpenID Connect*, **Client authentication** on,
+**Standard flow** on, the redirect URI above under **Valid redirect URIs**, and the
+portal's address under **Valid post logout redirect URIs**. Copy the secret from
+**Credentials**:
+
+```bash
+OIDC_ISSUER=https://keycloak.example.com/realms/home
+OIDC_CLIENT_ID=pithagoras
+OIDC_CLIENT_SECRET=<secret>
+OIDC_REDIRECT_URL=https://portal.example.com/api/auth/oidc/callback
+OIDC_NAME=Keycloak
+OIDC_ALLOWED_EMAILS=you@example.com
+OIDC_END_SESSION=1
+```
+
+The email counts only when **Email verified** is on for the user. For groups, add a
+**Group Membership** mapper named `groups` to the client's dedicated scope, with
+**Full group path** off.
+
+Entra ID does not send `email_verified`, so an email list lets nobody in there. Use
+`OIDC_ALLOWED_SUBJECTS` or groups (Entra gives the groups' object IDs).
 
 ## Workspace paths
 
@@ -274,12 +373,12 @@ anyway. This is the right home for `apt-get install` lines.
 
 ## Environment
 
-Everything here is optional except the password and, with the Compose files,
-`WORKSPACES_DIR`.
+Everything here is optional except the password (or [single sign-on](#single-sign-on),
+whose variables are listed there) and, with the Compose files, `WORKSPACES_DIR`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORTAL_PASSWORD` | — | Required. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
+| `PORTAL_PASSWORD` | — | Required unless [single sign-on](#single-sign-on) is set up. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one or single sign-on. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
 | `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. See [Running without a password](#running-without-a-password). |
 | `ALLOW_OPEN` | — | `1` makes a portal with no password listen on every interface instead of `127.0.0.1` only. Both Compose files pass it. |
 | `PORTAL_SECRET` | random | Signs the session cookie. Set it to survive restarts. |
@@ -402,7 +501,7 @@ Existing session directories must be writable by that portal user. For a custom 
 
 ## Running without a password
 
-Without `PORTAL_PASSWORD` the portal does not start: it runs arbitrary commands, so an empty or misspelt password must not quietly open the port. Two settings, both deliberate, change that:
+Without `PORTAL_PASSWORD` the portal does not start: it runs arbitrary commands, so an empty or misspelt password must not quietly open the port. [Single sign-on](#single-sign-on) is a login too: with `OIDC_ISSUER` set, neither setting below is needed. Otherwise two settings, both deliberate, change that:
 
 - `PORTAL_ALLOW_NO_PASSWORD=1` lets it start with no login. It then listens on `127.0.0.1` only, so a reverse proxy on the same host reaches it and nothing else does.
 - `ALLOW_OPEN=1` on top of that makes it listen on every interface. This is what a proxy in another container, or on another machine, needs; anyone who can reach the port can then run commands, so the port must be closed to everything but the proxy.

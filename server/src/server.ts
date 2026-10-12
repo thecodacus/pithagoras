@@ -78,7 +78,8 @@ import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, requireAuth, signOut } from "./auth.js";
+import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, passwordLogin, requireAuth, signOut } from "./auth.js";
+import { endSessionUrl, oidc, oidcRouter } from "./oidc-login.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -164,12 +165,22 @@ app.use(cookieParser());
 
 app.get("/api/auth/status", (req, res) => {
   const authed = isAuthed(req);
-  // Said to a login only: to anyone else it would say which password to guess.
-  res.json({ authRequired: authEnabled, authed, ...(authed && keptShortPassword ? { shortPassword: true } : {}) });
+  res.json({
+    authRequired: authEnabled,
+    authed,
+    // What the login page offers: the provider's button, and the password form unless it is the only way.
+    ...(oidc ? { oidc: { name: oidc.config.name, only: !passwordLogin } } : {}),
+    // Said to a login only: to anyone else it would say which password to guess.
+    ...(authed && keptShortPassword ? { shortPassword: true } : {}),
+  });
 });
 
-app.post("/api/auth/login", loginThrottle(), (req, res) => {
+// One count of attempts for every way in: a sign-in through the provider that fails counts like a wrong password.
+const loginAttempts = loginThrottle();
+
+app.post("/api/auth/login", loginAttempts, (req, res) => {
   if (!authEnabled) return res.json({ ok: true });
+  if (!passwordLogin) return res.status(403).json({ error: `The password login is switched off. Sign in with ${oidc?.config.name}.` });
   if (!checkPassword(req.body?.password)) {
     return res.status(401).json({ error: "Wrong password" });
   }
@@ -179,8 +190,11 @@ app.post("/api/auth/login", loginThrottle(), (req, res) => {
 
 app.post("/api/auth/logout", (req, res) => {
   signOut(req, res);
-  res.json({ ok: true });
+  const endSession = endSessionUrl();
+  res.json({ ok: true, ...(endSession ? { endSession } : {}) });
 });
+
+app.use(oidcRouter(loginAttempts));
 
 // Understory's model server, in "the chat's" mode: its own token, not a portal login.
 app.use(memoryLlmRouter((id) => sessions.currentModel(id)));
@@ -1625,7 +1639,7 @@ const tls =
     ? { cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }
     : null;
 
-const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
+const host = bindHost(authEnabled, process.env.ALLOW_OPEN);
 // Before anything can start a run: a catch-up routine marked running in the same
 // moment would be taken for one the last server left.
 const cutOff = sessions.recoverOrphans();
@@ -1637,7 +1651,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
-  console.log(`  auth:     ${authEnabled ? "password" : "DISABLED"}`);
+  console.log(`  auth:     ${authEnabled ? [passwordLogin && "password", oidc && `single sign-on (${oidc.config.issuer})`].filter(Boolean).join(" + ") : "DISABLED"}`);
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();

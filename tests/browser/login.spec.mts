@@ -2,17 +2,23 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /** A portal with a password: signed in once the right one is posted, signed out again when `expired` says so, and not answering while `down`. */
-async function portal(page: Page, state: { authed: boolean; expired?: boolean; down?: boolean }) {
-  const calls = { status: 0, login: [] as unknown[], rename: 0 };
+async function portal(page: Page, state: { authed: boolean; expired?: boolean; down?: boolean; sso?: { name: string; only: boolean } }) {
+  const calls = { status: 0, login: [] as unknown[], rename: 0, ssoStarts: [] as string[] };
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
-  await mockPortal(page, async ({ path: p, method, route, json }) => {
+  await mockPortal(page, async ({ path: p, method, route, json, url }) => {
     // What a proxy answers while the portal behind it restarts: a page of its own, not JSON.
     if (state.down && p.startsWith('/api/auth/')) {
       if (p === '/api/auth/status') calls.status++;
       await route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Bad Gateway</h1>' });
       return DONE;
     }
-    if (p === '/api/auth/status') { calls.status++; return { authRequired: true, authed: state.authed }; }
+    if (p === '/api/auth/status') { calls.status++; return { authRequired: true, authed: state.authed, ...(state.sso ? { oidc: state.sso } : {}) }; }
+    // The portal sends the browser on to the provider; here it is a page that says where the browser came.
+    if (p === '/api/auth/oidc/start') {
+      calls.ssoStarts.push(url.search);
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>At the provider</h1>' });
+      return DONE;
+    }
     if (p === '/api/auth/login') {
       const body = json();
       calls.login.push(body);
@@ -39,6 +45,8 @@ test('without a login the page asks for the password, and the right one opens th
   await expect(password).toBeVisible();
   await expect(page.getByText('Old name')).toHaveCount(0);
   await expect(signIn).toBeDisabled();
+  // No sign-in provider is set up, so there is no button for one.
+  await expect(page.getByRole('link', { name: /Sign in with/ })).toHaveCount(0);
 
   await password.fill('secret');
   await signIn.click();
@@ -114,4 +122,27 @@ test('a password sent while the portal is away says that, not the proxy\'s statu
   // Still the form: nothing was refused.
   await expect(page.getByPlaceholder('Password')).toBeVisible();
   expect(calls.login).toEqual([]);
+});
+
+test('with a sign-in provider the page offers its button beside the password, and the button starts there from this page', async ({ page }) => {
+  const calls = await portal(page, { authed: false, sso: { name: 'Example ID', only: false } });
+  await page.goto('/sessions?tab=files');
+  const button = page.getByRole('link', { name: 'Sign in with Example ID' });
+  await expect(button).toBeVisible();
+  await expect(page.getByPlaceholder('Password')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  await button.click();
+  await expect(page.getByRole('heading', { name: 'At the provider' })).toBeVisible();
+  // Back to the page it was on: the server checks the path is the portal's own.
+  expect(calls.ssoStarts).toEqual([`?returnTo=${encodeURIComponent('/sessions?tab=files')}`]);
+  expect(calls.login).toEqual([]);
+});
+
+test('with the provider as the only way in, the page has no password form', async ({ page }) => {
+  await portal(page, { authed: false, sso: { name: 'Example ID', only: true } });
+  await page.goto('/sessions');
+  await expect(page.getByRole('link', { name: 'Sign in with Example ID' })).toBeVisible();
+  await expect(page.getByPlaceholder('Password')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Sign in' })).toHaveCount(0);
+  await expect(page.getByText('or with the password')).toHaveCount(0);
 });

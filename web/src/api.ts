@@ -402,6 +402,19 @@ export interface VoiceConfig {
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; /** The saved settings point at the managed service, whether or not its container is there. */ connected?: boolean; }
 /** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
 export interface VoiceHardware { gpus: { index: number; uuid?: string; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** Cards the host lists that Docker cannot hand to a container: for voice there are none. */ unusable?: string[]; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; /** The UUID of the GPU chosen on the page, empty where none is, or the one chosen is no longer there. */ chosen: string; reserveMiB: number; suggestion: VoiceChoice; }
+/** Who is signed in, and how one signs in: `oidc` where a single sign-on provider is set up, `only` when the password is not offered. */
+export interface AuthStatus {
+  authRequired: boolean;
+  authed: boolean;
+  shortPassword?: boolean;
+  oidc?: SingleSignOn;
+}
+
+export interface SingleSignOn {
+  name: string;
+  only: boolean;
+}
+
 export const api = {
   listFiles: (sessionId: string, dir: string) =>
     json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
@@ -466,10 +479,11 @@ export const api = {
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
-  authStatus: () => json<{ authRequired: boolean; authed: boolean; shortPassword?: boolean }>("/api/auth/status"),
+  authStatus: () => json<AuthStatus>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
-  logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+  /** `endSession` is the provider's sign-out page, where the portal is set up to end the session there too. */
+  logout: () => json<{ ok: true; endSession?: string }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
   /** Without a workspace the chat starts in the home of the agent New is set to. */

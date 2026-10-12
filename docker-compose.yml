@@ -36,6 +36,22 @@ services:
       ALLOW_OPEN: ${ALLOW_OPEN:-}
       # Keeps logins valid across restarts; generate with: openssl rand -hex 32
       PORTAL_SECRET: ${PORTAL_SECRET:-}
+      # Single sign-on through an OpenID Connect provider, instead of the password or
+      # beside it. Only OIDC_ISSUER, OIDC_CLIENT_ID, the redirect URL and an
+      # allow-list are needed; see docs/guide/deploying.md, "Single sign-on".
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
+      PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_NAME: ${OIDC_NAME:-}
+      OIDC_ONLY: ${OIDC_ONLY:-}
+      OIDC_ALLOWED_EMAILS: ${OIDC_ALLOWED_EMAILS:-}
+      OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
+      OIDC_ALLOWED_SUBJECTS: ${OIDC_ALLOWED_SUBJECTS:-}
+      OIDC_END_SESSION: ${OIDC_END_SESSION:-}
       # The time zone of the portal's clock, such as Europe/Berlin. It is UTC unless
       # this says otherwise, and the quiet hours of an agent's heartbeat and a
       # repeating routine's schedule are read on that clock.

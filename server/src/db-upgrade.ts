@@ -111,7 +111,7 @@ function maintenance() {
   const server = tlsAt ? createHttpsServer({ cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }, answer) : createHttpServer(answer);
   // The page is a courtesy: a port it cannot have is said, and the upgrade goes on without it.
   server.on("error", (e) => console.error(`[portal] the upgrade page could not be shown: ${e.message}`));
-  server.listen(Number(process.env.PORT || 4100), bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN));
+  server.listen(Number(process.env.PORT || 4100), bindHost(process.env.PORTAL_PASSWORD || process.env.OIDC_ISSUER, process.env.ALLOW_OPEN));
   return {
     say: (message: string) => { state.message = message; },
     fail: (error: string, damaged: boolean, title?: string) => { state.failed = error; state.damaged = damaged; state.title = title; },

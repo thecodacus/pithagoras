@@ -3,7 +3,7 @@ import { appendLiveEvents, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
+import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SingleSignOn, type SessionStatus } from "./api";
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
@@ -48,6 +48,8 @@ export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).
   useLanguage();
   const [authed, setAuthed] = useState<boolean | null>(null);
+  /** The single sign-on provider the login page offers, where there is one. */
+  const [sso, setSso] = useState<SingleSignOn | undefined>();
   /** The portal did not answer when asked who is signed in: not the same as nobody being. */
   const [unreachable, setUnreachable] = useState(false);
   const failed = useRef(0);
@@ -58,6 +60,7 @@ export default function App() {
       (s) => {
         failed.current = 0;
         setUnreachable(false);
+        setSso(s.oidc);
         setAuthed(s.authed);
       },
       (e) => {
@@ -106,7 +109,7 @@ export default function App() {
         <div className="fixed right-4 top-4 z-10">
           <ThemeSwitcher />
         </div>
-        <Login onSuccess={() => setAuthed(true)} />
+        <Login sso={sso} onSuccess={() => setAuthed(true)} />
       </>
     );
   }
