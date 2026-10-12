@@ -117,6 +117,17 @@ export default function (pi) {
   pi.on("session_start", () => {
     pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "later_shown"));
   });
+  // A tool for a plan mode that sets a fixed list of what is active, which does not name the gateway.
+  pi.registerTool({
+    name: "ask_q",
+    label: "Ask",
+    description: "Ask a question.",
+    parameters: { type: "object", properties: {} },
+    async execute() { return text("ask_q ran"); },
+  });
+  pi.on("before_agent_start", () => {
+    if (globalThis.__fixedList) pi.setActiveTools(["read", "bash", "ask_q"]);
+  });
   pi.registerTool({
     name: "mcp_page",
     label: "Page",
@@ -532,6 +543,24 @@ test("a lazy tool its extension shows at last is reached, and the tools tool is 
   } finally {
     globalThis.__showLater = false;
     client.dispose();
+  }
+});
+
+test("an extension's fixed list of active tools does not take the way to a lazy tool from the model", async () => {
+  globalThis.__fixedList = true;
+  try {
+    const { results, requests } = await run([via("call", { name: "ask_q", args: {} })], { toolsLazy: ["ask_q"], lazySets: ["asking"] });
+    const offered = names(requests[0]);
+    assert.ok(offered.includes("tools"), "the gateway is offered though the list did not name it");
+    assert.ok(!offered.includes("ask_q"), "and the lazy tool is still not offered one by one");
+    assert.ok(offered.includes("read") && offered.includes("bash"), "what the extension set is active");
+    assert.equal(results[0].isError, false);
+    assert.match(textOf(results[0]), /ask_q ran/);
+    // With nothing lazy in the list there is nothing to reach: the list is the extension's, and no gateway is added.
+    const plain = await run([], {});
+    assert.deepEqual(names(plain.requests[0]).sort(), ["ask_q", "bash", "read"]);
+  } finally {
+    globalThis.__fixedList = false;
   }
 });
 

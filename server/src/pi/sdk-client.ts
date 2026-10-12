@@ -1227,7 +1227,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     session.setActiveToolsByName = (names: string[]) => {
       this.wanted = new Set([...names, ...this.heldBack(session, names, this.fromExtension)]);
       const active = names.filter((name) => !this.keptOut(name));
-      // An extension that shows a lazy tool again leaves out the gateway, which it never saw: the tool is reachable now.
+      // An extension's list leaves out the gateway, which it never saw, or which was idle when it took its snapshot:
+      // when a lazy tool is reachable now, so is the way to it.
       if (this.wanted.has(GATEWAY_TOOL) && !this.keptOut(GATEWAY_TOOL) && !active.includes(GATEWAY_TOOL)) active.push(GATEWAY_TOOL);
       original(active);
       // A lazy tool that registers now brings rules of its own, which the gateway says in its place. It registers
@@ -1329,7 +1330,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
     if (!always && !active.every((name) => names.includes(name))) return [];
     // An extension's list is not taken for a lazy tool's: it was shown that (hearExtensions), so it said what it meant.
-    const kept = (name: string) => (always ? this.switchedOff.has(name) || (name === GATEWAY_TOOL && !this.hasLazy()) : this.keptOut(name));
+    // The gateway is the portal's, whatever an extension's list says (a fixed list never names it): whether it is
+    // offered is for keptOut to say, by whether a lazy tool is reachable.
+    const kept = (name: string) => (always ? this.switchedOff.has(name) || name === GATEWAY_TOOL : this.keptOut(name));
     return [...this.wanted].filter((name) => kept(name) && !names.includes(name) && known.has(name));
   }
 
