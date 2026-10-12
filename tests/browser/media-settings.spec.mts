@@ -164,3 +164,41 @@ test('a search opens the section or the group it leads to, and lights it up', as
   await expect(toggle(page, 'Image model')).toHaveAttribute('aria-expanded', 'true');
   await expect(section(page, 'Image model').getByLabel('Maximum picture size')).toBeVisible();
 });
+
+for (const [label, width] of [['wide', 1280], ['phone', 390]] as const) {
+  test(`what opens is directly under the heading, and the switches sit in the heading's row or above it, never between (${label})`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await portal(page, { imageAddress: 'https://images.example.com/v1', videoAddress: 'https://video.example.com' });
+    await page.goto('/settings/media');
+    for (const [name, switches] of [['Image model', ['Image generation', 'Image editing']], ['Video model', ['Video generation']]] as const) {
+      const region = section(page, name);
+      const heading = region.getByRole('heading', { level: 3 });
+      const box = async (locator: ReturnType<Page['locator']>) => (await locator.boundingBox())!;
+      const opener = toggle(page, name);
+      const body = region.locator(`[id="${await opener.getAttribute('aria-controls')}"]`);
+      await expect(opener).toHaveAttribute('aria-expanded', 'false');
+      await heading.scrollIntoViewIfNeeded();
+      // Closed: where the switches are.
+      const closed = await Promise.all(switches.map(async (switchName) => (await box(region.getByRole('switch', { name: switchName, exact: true }))).y - (await box(heading)).y));
+
+      await opener.click();
+      await expect(body).toBeVisible();
+      const head = await box(heading);
+      const under = await box(body);
+      // The body begins right under the heading, with nothing between them.
+      expect(under.y - (head.y + head.height), `${name}: the body is under the heading`).toBeGreaterThanOrEqual(0);
+      expect(under.y - (head.y + head.height), `${name}: and directly`).toBeLessThanOrEqual(24);
+      for (const [i, switchName] of switches.entries()) {
+        const at = await box(region.getByRole('switch', { name: switchName, exact: true }));
+        const beside = at.y >= head.y - 1 && at.y + at.height <= head.y + head.height + 1;
+        const above = at.y + at.height <= head.y + 1;
+        expect(beside || above, `${switchName}: in the heading's row or above it`).toBe(true);
+        expect(at.y + at.height, `${switchName}: not between the heading and the body`).toBeLessThanOrEqual(under.y);
+        // And it has not moved for the opening of the section.
+        expect(at.y - head.y, `${switchName}: stays where it was`).toBeCloseTo(closed[i], 0);
+      }
+      await opener.click();
+      await expect(body).toBeHidden();
+    }
+  });
+}
