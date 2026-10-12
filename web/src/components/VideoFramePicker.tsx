@@ -11,9 +11,9 @@ import { Empty, ErrorBanner, btnCls, ghostCls } from "./SettingsUi";
 const PAGE = 24;
 
 /**
- * The pictures to start a clip from: the gallery of the Images page, newest first, in a dialog, with a way to bring
+ * The pictures to start a clip from: the pictures of the gallery, newest first, in a dialog, with a way to bring
  * in one of the person's own. A click on a picture chooses it and closes the dialog. The pictures are the page's
- * small copies where the portal made them, as the Images page's tiles are.
+ * small copies where the portal made them, as the gallery's tiles are.
  */
 export function VideoFramePicker({ onPick, onClose }: { onPick: (picture: GalleryPicture) => void; onClose: () => void }) {
   const [pictures, setPictures] = useState<GalleryPicture[]>([]);
@@ -74,7 +74,7 @@ export function VideoFramePicker({ onPick, onClose }: { onPick: (picture: Galler
   };
 
   return (
-    <Modal title={t("Start from a picture")} subtitle={t("The picture is the first frame of the clip. Choose one from the Images page, or bring in your own.")} wide onClose={onClose}>
+    <Modal title={t("Start from a picture")} subtitle={t("The picture is the first frame of the clip. Choose one from the gallery, or bring in your own.")} wide onClose={onClose}>
       <div className="space-y-3 px-5 py-4">
         {error && <ErrorBanner onClose={() => setError(null)}>{error}</ErrorBanner>}
         <div>
@@ -104,7 +104,7 @@ export function VideoFramePicker({ onPick, onClose }: { onPick: (picture: Galler
             ))}
           </div>
         ) : pictures.length === 0 ? (
-          <Empty>{t("There are no pictures yet. Bring in one from this computer, or make some on the Images page.")}</Empty>
+          <Empty>{t("There are no pictures yet. Bring in one from this computer, or make some on the Media page.")}</Empty>
         ) : (
           <ul className="gallery-grid" aria-label={t("Pictures")}>
             {pictures.map((p) => (

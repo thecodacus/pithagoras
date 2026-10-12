@@ -2,7 +2,7 @@ import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvents, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
@@ -37,8 +37,7 @@ const RoutinesPage = lazyComponent(() => import("./components/RoutinesPage"), "R
 const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditPage");
 const BrowserPage = lazyComponent(() => import("./components/BrowserPage"), "BrowserPage");
 const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
-const ImagesPage = lazyComponent(() => import("./components/ImagesPage"), "ImagesPage");
-const VideosPage = lazyComponent(() => import("./components/VideosPage"), "VideosPage");
+const MediaPage = lazyComponent(() => import("./components/MediaPage"), "MediaPage");
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
@@ -127,8 +126,10 @@ export default function App() {
       <Route path="/routines" element={<Shell view="routines" />} />
       <Route path="/browser" element={<Shell view="browser" />} />
       <Route path="/memory" element={<Shell view="memory" />} />
-      <Route path="/images" element={<Shell view="images" />} />
-      <Route path="/videos" element={<Shell view="videos" />} />
+      <Route path="/media" element={<Shell view="media" />} />
+      {/* Where the pictures and the videos were while each had a page: old links and bookmarks. */}
+      <Route path="/images" element={<MediaRedirect show="images" />} />
+      <Route path="/videos" element={<MediaRedirect show="videos" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
@@ -141,6 +142,14 @@ export default function App() {
   );
 }
 
+/** The gallery of one kind that was a page of its own, as one of the two kinds of the Media page, with the filters it had. */
+function MediaRedirect({ show }: { show: "images" | "videos" }) {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  params.set("show", show);
+  return <Navigate to={{ pathname: "/media", search: `?${params}` }} replace />;
+}
+
 /** Once per page load, not once per page: the Shell is drawn again on every route. */
 let setupAsked = false;
 
@@ -149,7 +158,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "videos" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
@@ -197,22 +206,19 @@ function Shell({
   const [hasBrowser, setHasBrowser] = useState(false);
   // Whether Understory is the agent's memory, which is when its page is in the sidebar.
   const [hasMemory, setHasMemory] = useState(false);
-  // Likewise whether image generation is on and has an address, which is when the Images page is.
-  const [hasImages, setHasImages] = useState(false);
-  // And whether video generation is, which is when the Videos page is.
-  const [hasVideos, setHasVideos] = useState(false);
+  // Likewise whether image generation or video generation is on and has an address, which is when the Media page is.
+  const [hasMedia, setHasMedia] = useState(false);
   useEffect(() => {
     const ask = () =>
       api
         .featureFlags()
         .then((f) => {
           setHasMemory(f.understory?.enabled === true);
-          setHasImages(f.images?.enabled === true);
-          setHasVideos(f.videos?.enabled === true);
+          setHasMedia(f.images?.enabled === true || f.videos?.enabled === true);
         })
         .catch(() => {});
     ask();
-    // Said by Settings when it switches Understory (Add-ons), the images (Agent → Images) or the videos (Agent → Videos), so the sidebar follows at once.
+    // Said by Settings when it switches Understory (Add-ons), the images or the videos (Agent → Media), so the sidebar follows at once.
     window.addEventListener("features-changed", ask);
     return () => window.removeEventListener("features-changed", ask);
   }, []);
@@ -694,8 +700,7 @@ function Shell({
         view={view}
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
-        hasImages={hasImages}
-        hasVideos={hasVideos}
+        hasMedia={hasMedia}
         places={places}
         onNavigate={onNavigate}
         onOpenFolder={onOpenFolder}
@@ -758,10 +763,8 @@ function Shell({
           <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "memory" ? (
           <MemoryPage />
-        ) : view === "images" ? (
-          <ImagesPage />
-        ) : view === "videos" ? (
-          <VideosPage />
+        ) : view === "media" ? (
+          <MediaPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : active ? (

@@ -737,7 +737,7 @@ export const api = {
   videosFeature: () => json<{ videos: VideosFeature }>("/api/features/videos"),
   /**
    * Only whether each is on — cheap, for the sidebar and the chat's menus.
-   * `images`: image generation is on and has an address, which is when the Images page is in the sidebar; `videos` is the same for the Videos page.
+   * `images`: image generation is on and has an address, which is when the Media page is in the sidebar; `videos` is the same for videos.
    */
   featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean }; videos?: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
@@ -1672,7 +1672,7 @@ export interface GalleryVideo {
     negativePrompt?: string;
     madeFrames?: number;
     madeFps?: number;
-    /** A clip made from a picture: the picture of the Images page, or its path in the chat's folder. */
+    /** A clip made from a picture: the picture of the gallery, or its path in the chat's folder. */
     firstFrame?: { picture?: string; path?: string };
   };
   createdAt: number;
@@ -1702,7 +1702,7 @@ export interface VideoJob {
   queuePosition?: number;
   prompt: string;
   size?: string;
-  /** A clip made from a picture: the picture's id in the Images gallery. */
+  /** A clip made from a picture: the picture's id in the gallery. */
   from?: string;
   startedAt: number;
   finishedAt?: number;
@@ -1721,7 +1721,7 @@ export interface VideoRequest {
   seed?: number;
   sampleSteps?: number;
   negativePrompt?: string;
-  /** The picture of the Images page to start from. */
+  /** The picture of the gallery to start from. */
   firstFrame?: string;
   count?: number;
 }

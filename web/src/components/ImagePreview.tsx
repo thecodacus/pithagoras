@@ -61,7 +61,7 @@ interface ImagePreviewProps {
  *
  * Only a picture that was watched being made arrives with a transition: one
  * drawn from the history just is there, and costs nothing while it is not.
- * It knows nothing of chats or tools, so that the Images page can use it as
+ * It knows nothing of chats or tools, so that the Media page can use it as
  * well; what goes in `actions` and around it is the caller's.
  */
 export function ImagePreview({ state, kind = "picture", video, detail, edit = false, src, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {

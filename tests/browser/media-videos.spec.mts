@@ -3,8 +3,9 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /**
- * The Videos page (web/src/components/VideosPage.tsx) over a portal that is made up: the clips of its gallery, and
- * the jobs that make more, which the test lets finish when it likes.
+ * The videos of the Media page (web/src/components/MediaPage.tsx) over a portal that makes videos and no pictures: the
+ * clips of its gallery, and the jobs that make more, which the test lets finish when it likes. The page with both kinds
+ * is media-page.spec.mts.
  */
 
 interface Clip {
@@ -60,7 +61,7 @@ const clip = (over: Partial<Clip> & { age?: number } = {}): Clip => {
   return { id: hex(n), origin: 'page', chat: null, folder: null, kind: 'generated', prompt: `Clip ${n}`, params: {}, createdAt: Date.now() - age * 60_000, bytes: 2_000_000, fileName: `video-${n}.webm`, poster: false, ...rest };
 };
 let pictures = 1000;
-/** A picture of the Images page, to start a clip from. */
+/** A picture of the gallery, to start a clip from. */
 const pic = (over: Partial<Pic> = {}): Pic => {
   const n = pictures++;
   return { id: hex(n), origin: 'page', chat: null, folder: null, kind: 'generated', prompt: `Picture ${n}`, params: {}, from: null, createdAt: Date.now() - n, bytes: 100_000, fileName: `image-${n}.png`, thumb: false, ...over };
@@ -141,7 +142,7 @@ async function portal(page: Page, { clips = [] as Clip[], videos = feature(), fl
       await route.fulfill({ body: svg(id), contentType: 'image/svg+xml' });
       return DONE;
     }
-    // The pictures a clip starts from: the Images page's gallery.
+    // The pictures a clip starts from: the pictures of the gallery.
     if (p === '/api/images' && method === 'GET') {
       const ids = url.searchParams.get('ids');
       if (ids) return { pictures: ids.split(',').map((id) => pictureList.find((x) => x.id === id)).filter(Boolean) };
@@ -178,21 +179,21 @@ const viewer = (page: Page) => page.getByRole('dialog', { name: 'Video viewer' }
 const maker = (page: Page) => page.getByRole('region', { name: 'Make a video' });
 const describe = (page: Page) => page.getByPlaceholder('Describe the video: the subject, what moves, the camera');
 
-test('the sidebar has Videos only while video generation is on and has an address', async ({ page }) => {
+test('the sidebar has Media only while video generation is on and has an address', async ({ page }) => {
   await portal(page, { flagOn: false });
   await page.goto('/sessions');
   await expect(page.getByRole('button', { name: 'Sessions' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Videos' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Media' })).toHaveCount(0);
 });
 
-test('Videos in the sidebar opens the page: the form first, the gallery under it, newest first, each with where it is from and how long it plays', async ({ page }) => {
+test('Media in the sidebar opens the page, with the videos in it: the form first, the gallery under it, newest first, each with where it is from and how long it plays', async ({ page }) => {
   const a = clip({ prompt: 'A fox in the snow', age: 30, params: { madeFrames: 33, madeFps: 16 } });
   const b = clip({ prompt: 'A red bicycle', age: 5, origin: 'chat', chat: { id: 'c1', title: 'Holiday plans' }, params: { frames: 48, fps: 24 } });
   await portal(page, { clips: [a, b] });
   await page.goto('/sessions');
-  await page.getByRole('button', { name: 'Videos' }).first().click();
-  await expect(page).toHaveURL(/\/videos$/);
-  await expect(page.getByRole('heading', { name: 'Videos' })).toBeVisible();
+  await page.getByRole('button', { name: 'Media' }).first().click();
+  await expect(page).toHaveURL(/\/media$/);
+  await expect(page.getByRole('heading', { name: 'Media' })).toBeVisible();
   await expect(maker(page)).toBeVisible();
   await expect(grid(page).getByRole('listitem')).toHaveCount(2);
   await expect(grid(page).getByRole('button')).toHaveCount(2);
@@ -208,21 +209,22 @@ test('Videos in the sidebar opens the page: the form first, the gallery under it
 
 test('with nothing made yet the gallery says so', async ({ page }) => {
   await portal(page);
-  await page.goto('/videos');
+  await page.goto('/media');
   await expect(page.getByText('No videos yet. Describe one above to make the first.')).toBeVisible();
 });
 
 test('a gallery that cannot be read says why', async ({ page }) => {
   await portal(page, { failList: true });
-  await page.goto('/videos');
+  await page.goto('/media');
   await expect(page.getByRole('alert')).toContainText('The gallery could not be read');
 });
 
 test('with video generation switched off the page says so, with the way to the setting, and still shows what there is', async ({ page }) => {
-  await portal(page, { clips: [clip({ prompt: 'Left over' })], videos: feature({ enabled: false }), flagOn: false });
-  await page.goto('/videos');
+  // The portal says it is on and the settings say they are not: the form says what is missing.
+  await portal(page, { clips: [clip({ prompt: 'Left over' })], videos: feature({ enabled: false }) });
+  await page.goto('/media');
   await expect(maker(page)).toContainText('Video generation is switched off, or has no address.');
-  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Videos' })).toHaveAttribute('href', '/settings/videos');
+  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Media' })).toHaveAttribute('href', '/settings/media');
   await expect(describe(page)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Make the video' })).toHaveCount(0);
   await expect(tile(page, 'Left over')).toBeVisible();
@@ -230,7 +232,7 @@ test('with video generation switched off the page says so, with the way to the s
 
 test('a clip is described and made: the settings go as named fields, the wait shows where it is, and the clip arrives where the wait was', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/videos');
+  await page.goto('/media');
   // What is used where a field is left empty is shown in it.
   await expect(page.getByLabel('Width')).toHaveAttribute('placeholder', '832');
   await expect(page.getByLabel('Height')).toHaveAttribute('placeholder', '480');
@@ -271,7 +273,7 @@ test('a clip is described and made: the settings go as named fields, the wait sh
 
 test('a setting that is wrong is said when the video is asked for, with the field marked, and nothing is sent', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/videos');
+  await page.goto('/media');
   await describe(page).fill('A fox');
   await page.getByLabel('Width').fill('832');
   await page.getByRole('button', { name: 'Make the video' }).click();
@@ -296,7 +298,7 @@ test('a setting that is wrong is said when the video is asked for, with the fiel
 
 test('a request the portal refuses says why in the form', async ({ page }) => {
   await portal(page);
-  await page.goto('/videos');
+  await page.goto('/media');
   await describe(page).fill('refuse me');
   await page.getByRole('button', { name: 'Make the video' }).click();
   await expect(maker(page).getByRole('alert')).toContainText('4 clips are being made already');
@@ -304,7 +306,7 @@ test('a request the portal refuses says why in the form', async ({ page }) => {
 
 test('a clip that is not made says why in its frame, and Dismiss takes it off the page; Stop drops one that is being made', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/videos');
+  await page.goto('/media');
   await describe(page).fill('First');
   await page.getByRole('button', { name: 'Make the video' }).click();
   await describe(page).fill('Second');
@@ -326,7 +328,7 @@ test('a clip with a poster shows it, and one without shows its first frame from 
   const withPoster = clip({ prompt: 'Has a poster', poster: true });
   const without = clip({ prompt: 'Has none', poster: false, age: 1 });
   const p = await portal(page, { clips: [withPoster, without] });
-  await page.goto('/videos');
+  await page.goto('/media');
   await expect(tile(page, 'Has a poster')).toBeVisible();
   const poster = tile(page, 'Has a poster').locator('img');
   await expect(poster).toHaveAttribute('src', `/api/videos/${withPoster.id}/poster`);
@@ -343,7 +345,7 @@ test('a clip with a poster shows it, and one without shows its first frame from 
 test('a clip the portal could not make a poster of is not taken for gone: its tile shows the first frame from the clip itself and opens', async ({ page }) => {
   const odd = clip({ prompt: 'No frame for ffmpeg', poster: true });
   const p = await portal(page, { clips: [odd], noPoster: [odd.id] });
-  await page.goto('/videos');
+  await page.goto('/media');
   // The poster was asked for, said 404, and the tile went on to the clip's own first frame.
   await expect.poll(() => p.state.posters).toContain(odd.id);
   const frame = tile(page, 'No frame for ffmpeg').locator('video');
@@ -359,7 +361,7 @@ test('a click on a clip plays it in the viewer, which steps through the gallery 
   const b = clip({ prompt: 'Second clip', age: 2 });
   const c = clip({ prompt: 'Third clip', age: 3 });
   await portal(page, { clips: [a, b, c] });
-  await page.goto('/videos');
+  await page.goto('/media');
   await tile(page, 'Second clip').click();
   await expect(viewer(page)).toBeVisible();
   const player = viewer(page).locator('video');
@@ -396,7 +398,7 @@ test('the arrow keys step to another clip, except while the player itself has th
   const a = clip({ prompt: 'One', age: 1 });
   const b = clip({ prompt: 'Two', age: 2 });
   await portal(page, { clips: [a, b] });
-  await page.goto('/videos');
+  await page.goto('/media');
   await tile(page, 'One').click();
   const player = viewer(page).locator('video');
   await expect(player).toHaveAttribute('src', `/api/videos/${a.id}/file`);
@@ -417,7 +419,7 @@ test('Run again makes a clip once more as it was asked for; one made from a pict
   const inChat = clip({ prompt: 'From a chat picture', kind: 'animated', age: 3, origin: 'chat', chat: { id: 'c1', title: 'A chat' }, params: { firstFrame: { path: 'x.png' } } });
   const found = clip({ prompt: '', origin: 'folder', folder: { name: 'work', home: false }, kind: 'unknown', age: 4 });
   const p = await portal(page, { clips: [plain, animated, lostFrame, inChat, found], pictureList: [picture] });
-  await page.goto('/videos');
+  await page.goto('/media');
 
   await tile(page, 'Made once').click();
   await viewer(page).getByRole('button', { name: 'Run again' }).click();
@@ -448,11 +450,11 @@ test('Run again makes a clip once more as it was asked for; one made from a pict
   await expect(viewer(page).getByRole('link', { name: 'Open the chat' })).toHaveAttribute('href', '/s/c1');
 });
 
-test('a clip is made from a picture of the Images page: chosen in a dialog, shown as the first frame, and sent as its id', async ({ page }) => {
+test('a clip is made from a picture of the gallery: chosen in a dialog, shown as the first frame, and sent as its id', async ({ page }) => {
   const a = pic({ prompt: 'A lighthouse' });
   const b = pic({ prompt: 'A harbour' });
   const p = await portal(page, { pictureList: [a, b] });
-  await page.goto('/videos');
+  await page.goto('/media');
   await expect(describe(page)).toBeVisible();
   await page.getByRole('button', { name: 'Start from a picture' }).click();
   const dialog = page.getByRole('dialog', { name: 'Start from a picture' });
@@ -473,12 +475,12 @@ test('a clip is made from a picture of the Images page: chosen in a dialog, show
   await expect(page.getByPlaceholder('Describe the video: the subject, what moves, the camera')).toBeVisible();
 });
 
-test('a picture sent here from the Images page is the first frame, and the address is cleared of it', async ({ page }) => {
+test('a picture named in the address is the first frame, and the address is cleared of it', async ({ page }) => {
   const a = pic({ prompt: 'A lighthouse' });
   const p = await portal(page, { pictureList: [a] });
-  await page.goto(`/videos?from=${a.id}`);
+  await page.goto(`/media?from=${a.id}`);
   await expect(maker(page)).toContainText('A lighthouse');
-  await expect(page).toHaveURL(/\/videos$/);
+  await expect(page).toHaveURL(/\/media$/);
   await page.getByPlaceholder('Describe what happens next: what moves, and how').fill('It rains');
   await page.getByRole('button', { name: 'Make the video' }).click();
   await expect.poll(() => p.state.generated.length).toBe(1);
@@ -487,7 +489,7 @@ test('a picture sent here from the Images page is the first frame, and the addre
 
 test('a picture that is not in the gallery any more cannot be the first frame, and it is said', async ({ page }) => {
   await portal(page, { pictureList: [] });
-  await page.goto(`/videos?from=${hex(424242)}`);
+  await page.goto(`/media?from=${hex(424242)}`);
   await expect(page.getByRole('alert')).toContainText('The picture to start from is not in the gallery any more.');
   await expect(maker(page)).not.toContainText('First frame');
 });
@@ -497,7 +499,7 @@ test('clips are ticked and deleted together after asking, and the question says 
   const b = clip({ prompt: 'In a chat', age: 2, origin: 'chat', chat: { id: 'c1', title: 'Holiday plans' } });
   const c = clip({ prompt: 'Keep me', age: 3 });
   const p = await portal(page, { clips: [a, b, c] });
-  await page.goto('/videos');
+  await page.goto('/media');
   await cell(page, 'Mine').getByRole('checkbox').check();
   await cell(page, 'In a chat').getByRole('checkbox').check();
   const bar = page.getByRole('group', { name: 'Selected videos' });
@@ -517,7 +519,7 @@ test('a clip is deleted from the viewer after asking, and the viewer moves on', 
   const a = clip({ prompt: 'Doomed', age: 1 });
   const b = clip({ prompt: 'Survivor', age: 2 });
   const p = await portal(page, { clips: [a, b] });
-  await page.goto('/videos');
+  await page.goto('/media');
   await tile(page, 'Doomed').click();
   await viewer(page).getByRole('button', { name: 'Delete' }).click();
   const dialog = page.getByRole('alertdialog', { name: 'Delete this video?' });
@@ -531,11 +533,11 @@ test('the filters are in the address, so that a link and Back keep them', async 
   const mine = clip({ prompt: 'Made here', age: 1 });
   const theirs = clip({ prompt: 'From a chat', age: 2, origin: 'chat', chat: { id: 'c1', title: 'A chat' }, kind: 'animated' });
   await portal(page, { clips: [mine, theirs] });
-  await page.goto('/videos?origin=chat&kind=animated');
+  await page.goto('/media?origin=chat&kind=animated');
   await expect(tile(page, 'From a chat')).toBeVisible();
   await expect(tile(page, 'Made here')).toHaveCount(0);
   await page.getByRole('radio', { name: 'From a description' }).click();
-  await expect(page).toHaveURL(/\/videos\?origin=chat&kind=generated$/);
+  await expect(page).toHaveURL(/\/media\?origin=chat&kind=generated$/);
   await expect(page.getByText('No videos match these filters.')).toBeVisible();
   await page.goBack();
   await expect(tile(page, 'From a chat')).toBeVisible();
@@ -543,7 +545,7 @@ test('the filters are in the address, so that a link and Back keep them', async 
 
 test('the clips made on the page show what they take of the disk, beside the limit when there is one', async ({ page }) => {
   await portal(page, { clips: [clip({ bytes: 3_000_000 }), clip({ bytes: 1_000_000, origin: 'chat', chat: { id: 'c1', title: 'A chat' } })], videos: feature({ storageLimitMb: 2048 }) });
-  await page.goto('/videos');
+  await page.goto('/media');
   await expect(page.getByText('2.9 MB')).toBeVisible();
   await expect(page.getByText('kept from this page, of 2.0 GB')).toBeVisible();
 });
@@ -551,7 +553,7 @@ test('the clips made on the page show what they take of the disk, beside the lim
 test('the gallery is paged: the next page is asked for with the one before it, and Show more is there for a keyboard', async ({ page }) => {
   const many = Array.from({ length: 30 }, (_, i) => clip({ prompt: `Clip number ${i + 1}`, age: i + 1 }));
   const p = await portal(page, { clips: many });
-  await page.goto('/videos');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(24);
   await page.getByRole('button', { name: 'Show more' }).click();
   await expect(grid(page).getByRole('listitem')).toHaveCount(30);

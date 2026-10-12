@@ -39,8 +39,8 @@ const problemText = (problem: Problem): string => {
  * The settings are fields of their own, empty where the add-on's or the server's own is meant (the add-on's model,
  * size, frames and frame rate are shown in them as what is used), and kept for the next visit, not the words. The
  * model, the size, how long the clip is and how many are in view; the seed, the steps and a negative prompt under
- * "Advanced". A clip made from a picture is asked for with the picture as its first frame: the Images page's
- * gallery is where the picture comes from.
+ * "Advanced". A clip made from a picture is asked for with the picture as its first frame: the gallery's
+ * pictures are where it comes from.
  */
 export function VideoMaker({
   features,

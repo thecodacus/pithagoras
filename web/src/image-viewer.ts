@@ -2,7 +2,7 @@
  * What the picture viewer works with, and the arithmetic of looking at one.
  *
  * The viewer (components/ImageViewer.tsx) takes a list of pictures from whoever
- * opens it — the chat, and later the Images page — and knows nothing about where
+ * opens it — the chat, and the Media page — and knows nothing about where
  * they come from. Here are the list's shape, how a picture and the one it was
  * edited from find each other, and the zoom and pan in numbers, so that they can
  * be checked without a page.

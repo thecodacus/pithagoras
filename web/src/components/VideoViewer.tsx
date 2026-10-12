@@ -9,7 +9,7 @@ import { stepped } from "../image-viewer";
 import { t } from "../i18n";
 import { iconButton } from "./ImageViewer";
 
-/** What the viewer works with for one clip: the Videos page makes these from its gallery, the chat from a clip the agent made. */
+/** What the viewer works with for one clip: the Media page makes these from its gallery, the chat from a clip the agent made. */
 export interface ViewerVideo {
   /** Tells it from the others in the list. */
   id: string;

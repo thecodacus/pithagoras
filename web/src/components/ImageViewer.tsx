@@ -11,6 +11,8 @@ import { t } from "../i18n";
 
 /** Wide enough for a finger on a phone, and for the pointer beside it. */
 export const iconButton = "grid h-10 w-10 shrink-0 place-items-center rounded-lg text-fg-muted transition hover:bg-fg/10 hover:text-fg disabled:pointer-events-none disabled:opacity-35 sm:h-9 sm:w-9";
+/** The viewer's own buttons, with a look for the ones that are on: the ones a page adds in `actions` match them. */
+export const viewerButton = `${iconButton} aria-pressed:bg-accent/15 aria-pressed:text-accent`;
 const textButton = "inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs text-fg-muted transition hover:bg-fg/10 hover:text-fg sm:h-9";
 
 /** What can take the keyboard: the viewer's own buttons, and what a page puts in `actions`. */
@@ -20,7 +22,7 @@ const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:
  * A picture over the whole page, fitted to the screen, on a calm backdrop.
  *
  * It takes a list of pictures and the one to start at, and knows nothing of
- * where they come from: the chat opens it, and the Images page can the same way.
+ * where they come from: the chat opens it, and the Media page the same way.
  *
  * - A dialog: labelled, with the keyboard kept inside it (Tab goes round), the
  *   page behind it not scrollable, and focus given back to the picture it

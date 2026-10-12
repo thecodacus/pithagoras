@@ -77,10 +77,10 @@ test('video generation needs an endpoint before it can be switched on, and the k
   expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
 });
 
-test('the Videos page is in the sidebar while video generation is on, and the switch moves it at once', async ({ page }) => {
+test('the Media page is in the sidebar while video generation is on, and the switch moves it at once', async ({ page }) => {
   await portal(page);
   await page.goto('/settings/media');
-  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Videos' });
+  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Media' });
   await expect(entry).toHaveCount(0);
   const panel = videoPanel(page);
   await panel.getByLabel('API address').fill('https://video.example.com');

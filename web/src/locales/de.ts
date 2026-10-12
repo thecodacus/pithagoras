@@ -1224,7 +1224,6 @@ const de: Locale = {
     "Always allow": "Immer erlauben",
     "Allow": "Erlauben",
     // components/PortalExtensions.tsx
-    "Images": "Bilder",
     "Voice": "Sprachsteuerung",
     "Install and manage the add-ons for your sessions.": "Die Add-ons für deine Sitzungen installieren und verwalten.",
     "installed": "installiert",
@@ -1905,8 +1904,20 @@ const de: Locale = {
     "Show the edited version": "Die bearbeitete Version zeigen",
     "Edited version": "Bearbeitete Version",
     "Download the picture": "Das Bild herunterladen",
-    // components/ImagesPage.tsx
-    "Make and change pictures with the image endpoint you set up, without a chat, and keep what the agent made in chats.": "Erstelle und ändere Bilder mit dem Bild-Endpunkt, den du eingerichtet hast, ohne Chat, und behalte, was der Agent in Chats erstellt hat.",
+    // components/MediaPage.tsx (the pictures and the videos of its gallery)
+    "Media": "Medien",
+    "A video": "Ein Video",
+    "Delete these {n} files?": "Diese {n} Dateien löschen?",
+    "{n} files could not be deleted: {why}": "{n} Dateien konnten nicht gelöscht werden: {why}",
+    "Only pictures can be edited: leave the videos out": "Nur Bilder lassen sich bearbeiten: lass die Videos weg",
+    "Look for new pictures and videos": "Nach neuen Bildern und Videos suchen",
+    "Selected items": "Ausgewählte Elemente",
+    "Tick pictures and videos to download or delete them, or pictures to edit them. A click on one opens it.": "Hake Bilder und Videos an, um sie herunterzuladen oder zu löschen, oder Bilder, um sie zu bearbeiten. Ein Klick darauf öffnet es.",
+    "Make": "Erstellen",
+    "Show": "Anzeigen",
+    "Nothing matches these filters.": "Nichts passt zu diesen Filtern.",
+    "Nothing here yet. Describe a picture or a video above to make the first.": "Noch nichts da. Beschreibe oben ein Bild oder ein Video, um das erste zu erstellen.",
+    "Make and change pictures and videos with the endpoints you set up, without a chat, and keep what the agent made in chats.": "Erstelle und ändere Bilder und Videos mit den Endpunkten, die du eingerichtet hast, ohne Chat, und behalte, was der Agent in Chats erstellt hat.",
     "Look for new pictures": "Nach neuen Bildern suchen",
     "pictures": { one: "Bild", other: "Bilder" },
     "being made": "in Arbeit",
@@ -2488,7 +2499,7 @@ const de: Locale = {
     "profiling switched off": "Messung ausgeschaltet",
     // voice.ts
     "Code is shown in the transcript.": "Der Code steht im Chatverlauf.",
-    // The Videos page and video generation (components/VideosPage.tsx, VideoMaker.tsx, VideoViewer.tsx, VideoCall.tsx, VideoFramePicker.tsx, FeatureAddons.tsx)
+    // Video generation (components/VideoParts.tsx, VideoMaker.tsx, VideoViewer.tsx, VideoCall.tsx, VideoFramePicker.tsx, FeatureAddons.tsx)
     "Videos": "Videos",
     "Video model": "Videomodell",
     "Making videos, on the Media page and for the agent.": "Videos erstellen, auf der Medien-Seite und für den Agenten.",
@@ -2508,7 +2519,6 @@ const de: Locale = {
     "Off: no videos are made.": "Aus: Es werden keine Videos erstellt.",
     "Save the address of a video endpoint first.": "Speichere zuerst die Adresse eines Video-Endpunkts.",
     "Which chats' agents get the tools is set in the tool lists (Settings → Agent → Tools), in the Media group.": "Welche Chats ihrem Agenten die Tools geben, wird in den Tool-Listen festgelegt (Einstellungen → Agent → Tools), in der Gruppe „Medien“.",
-    "Make short videos with the video endpoint you set up, without a chat, and keep what the agent made in chats.": "Erstelle kurze Videos mit dem Video-Endpunkt, den du eingerichtet hast, ohne Chat, und behalte, was der Agent in Chats erstellt hat.",
     "Look for new videos": "Nach neuen Videos suchen",
     "videos": { one: "Video", other: "Videos" },
     "kept from this page, of {limit}": "von dieser Seite gespeichert, von {limit}",
@@ -2547,9 +2557,9 @@ const de: Locale = {
     "With a seed, each of the videos takes the next one, so that they are not all the same.": "Mit einem Seed bekommt jedes der Videos den nächsten, damit sie nicht alle gleich sind.",
     "What the video should not show": "Was das Video nicht zeigen soll",
     "{n} videos are being made: wait for one to finish, or stop one": "{n} Videos sind in Arbeit: Warte, bis eines fertig ist, oder stoppe eines",
-    "The picture is the first frame of the clip. Choose one from the Images page, or bring in your own.": "Das Bild ist der erste Frame des Clips. Wähle eines von der Bilder-Seite oder bring ein eigenes mit.",
+    "The picture is the first frame of the clip. Choose one from the gallery, or bring in your own.": "Das Bild ist der erste Frame des Clips. Wähle eines aus der Galerie oder bring ein eigenes mit.",
     "Use a picture from this computer": "Ein Bild von diesem Computer verwenden",
-    "There are no pictures yet. Bring in one from this computer, or make some on the Images page.": "Es gibt noch keine Bilder. Bring eines von diesem Computer mit oder erstelle welche auf der Bilder-Seite.",
+    "There are no pictures yet. Bring in one from this computer, or make some on the Media page.": "Es gibt noch keine Bilder. Bring eines von diesem Computer mit oder erstelle welche auf der Medien-Seite.",
     "Start from {name}": "Mit {name} beginnen",
     "Video viewer": "Videobetrachter",
     "Download the video": "Das Video herunterladen",
@@ -2589,7 +2599,6 @@ const de: Locale = {
     "Ctrl\u0004key": "Strg",
     "Alt\u0004key": "Alt",
     "Shift\u0004key": "Umschalt",
-    "Media": "Medien",
   },
 };
 

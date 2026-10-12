@@ -12,8 +12,7 @@ import {
   LuFolderKanban,
   LuGlobe,
   LuBrain,
-  LuImage,
-  LuVideo,
+  LuImages,
   LuMessagesSquare,
   LuPlus,
   LuSearch,
@@ -42,8 +41,7 @@ export const Sidebar = memo(function Sidebar({
   view,
   hasBrowser,
   hasMemory = false,
-  hasImages = false,
-  hasVideos = false,
+  hasMedia = false,
   places,
   onSelect,
   onNewChat,
@@ -59,15 +57,13 @@ export const Sidebar = memo(function Sidebar({
   executor: string;
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
-  view: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "videos" | "audit";
+  view: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit";
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
   /** Understory is the agent's memory: its page is there to read. */
   hasMemory?: boolean;
-  /** Image generation is on and has an address: the Images page is there to make pictures in and to look through them. */
-  hasImages?: boolean;
-  /** Video generation is on and has an address: the Videos page is there to make clips in and to look through them. */
-  hasVideos?: boolean;
+  /** Image or video generation is on and has an address: the Media page is there to make pictures and videos in and to look through them. */
+  hasMedia?: boolean;
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
   places?: Places | null;
   onSelect: (id: string) => void;
@@ -194,10 +190,8 @@ export const Sidebar = memo(function Sidebar({
     ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
     // Likewise: only while Understory holds the agent's memory.
     ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
-    // And only while there is an image endpoint to make pictures with.
-    ...(hasImages ? [{ to: "images" as const, icon: <LuImage />, label: t("Images") }] : []),
-    // The same for clips.
-    ...(hasVideos ? [{ to: "videos" as const, icon: <LuVideo />, label: t("Videos") }] : []),
+    // And only while there is an endpoint to make pictures or videos with.
+    ...(hasMedia ? [{ to: "media" as const, icon: <LuImages />, label: t("Media") }] : []),
     { to: "audit", icon: <LuShield />, label: t("Audit") },
   ];
   const anyRunning = sessions.some((s) => s.status === "running");
@@ -364,7 +358,7 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "videos" | "audit";
+type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit";
 
 function RailButton({
   icon,

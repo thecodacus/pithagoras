@@ -1,5 +1,5 @@
-/* ───────────────────── The Images page's gallery ─────────────────────
- * components/ImagesPage.tsx. Every tile is an ImagePreview — a picture, one
+/* ───────────────────── The Media page's gallery ─────────────────────
+ * components/MediaPage.tsx. Every tile is an ImagePreview — a picture, one
  * being made, one that was not — made the same shape, so that a grid of them
  * has no ragged edge and a picture arrives where its wait was.
  *

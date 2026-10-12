@@ -413,10 +413,10 @@ test('image generation needs an endpoint before it can be switched on, and the k
   expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
 });
 
-test('the Images page is in the sidebar while image generation is on, and the switch moves it at once', async ({ page }) => {
+test('the Media page is in the sidebar while image generation is on, and the switch moves it at once', async ({ page }) => {
   await portal(page);
   await page.goto('/settings/media');
-  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Images' });
+  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Media' });
   await expect(entry).toHaveCount(0);
   const panel = imagePanel(page);
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
