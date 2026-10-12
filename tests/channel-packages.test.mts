@@ -604,16 +604,20 @@ test("what signal-cli replays from more than a day ago is taken as read but not 
     const stream = await s.daemon.connected();
     const old = (message: string, daysAgo: number) => {
       const event = dm(KIM, message);
-      event.envelope.timestamp = Date.now() - daysAgo * 24 * 60 * 60_000;
+      Object.assign(event.envelope, { serverReceivedTimestamp: Date.now() - daysAgo * 24 * 60 * 60_000 });
       return event;
     };
     stream.push(old("please delete the old branch", 3));
     stream.push(old("and the tag", 2));
     stream.push(dm(KIM, "good morning"));
-    await until(() => s.logged.some((l) => l.startsWith("skipped")), "the skipped ones are named");
-    assert.deepEqual(s.asked.map((a) => a.text), ["good morning"], "only what is recent reaches the agent");
+    // Sent now from a phone whose clock is two days behind: the server's time is what counts.
+    const behind = dm(KIM, "my clock is wrong");
+    Object.assign(behind.envelope, { timestamp: Date.now() - 2 * 24 * 60 * 60_000, serverReceivedTimestamp: Date.now() });
+    stream.push(behind);
+    await until(() => s.logged.some((l) => l.startsWith("skipped")) && s.asked.length === 2, "the skipped ones are named");
+    assert.deepEqual(s.asked.map((a) => a.text), ["good morning", "my clock is wrong"], "only what is recent reaches the agent");
     assert.ok(s.logged.includes("skipped 2 messages older than a day, which came while this channel was not reading"));
-    assert.equal((s.kept.value as any).lastEventId, "3", "nor are they replayed again");
+    assert.equal((s.kept.value as any).lastEventId, "4", "nor are they replayed again");
   } finally {
     await s.done();
   }

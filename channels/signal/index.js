@@ -385,8 +385,10 @@ export async function start(ctx) {
     const message = read(params?.envelope);
     if (!message) return;
     keep(id);
-    // Taken as read, so that it is not replayed again, but not answered.
-    const sent = Number(params.envelope.timestamp);
+    // Taken as read, so that it is not replayed again, but not answered. Aged
+    // by when Signal's server took it in: the sender's own timestamp is their
+    // device's clock, and one a few days behind would never be answered.
+    const sent = Number(params.envelope.serverReceivedTimestamp ?? params.envelope.timestamp);
     if (Number.isFinite(sent) && sent > 0 && Date.now() - sent > MAX_AGE_MS) {
       stale++;
       // Counted, and said once the replay is through, rather than a line for each.

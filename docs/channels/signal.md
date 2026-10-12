@@ -196,7 +196,8 @@ the agent like any other chat with it.
   Signal has delivered it to signal-cli, and it is not sent again. Changing the
   daemon's address or the number starts afresh.
 
-  Of what is replayed, a message more than a day old is not answered: an answer
+  Of what is replayed, a message that reached Signal's server more than a day
+  ago is not answered (by the server's clock, not the sender's): an answer
   days late, or a request acted on long after it was made, is worse than none.
   The activity says how many were skipped. A channel that is switched off
   forgets where it was, so switched on again it starts from then: what was said
