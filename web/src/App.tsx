@@ -3,7 +3,7 @@ import { appendLiveEvents, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
+import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus, type SingleSignOn } from "./api";
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
@@ -50,6 +50,8 @@ export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   /** No password has been chosen yet: the first start, or after it was removed with the reset command. */
   const [setup, setSetup] = useState(false);
+  /** The single sign-on provider the login page offers, where there is one. */
+  const [sso, setSso] = useState<SingleSignOn | undefined>();
   /** The portal did not answer when asked who is signed in: not the same as nobody being. */
   const [unreachable, setUnreachable] = useState(false);
   const failed = useRef(0);
@@ -61,6 +63,7 @@ export default function App() {
         failed.current = 0;
         setUnreachable(false);
         setSetup(Boolean(s.setup));
+        setSso(s.oidc);
         setAuthed(s.authed);
       },
       (e) => {
@@ -109,7 +112,7 @@ export default function App() {
         <div className="fixed right-4 top-4 z-10">
           <ThemeSwitcher />
         </div>
-        {setup ? <Setup onSuccess={() => { setSetup(false); setAuthed(true); }} /> : <Login onSuccess={() => setAuthed(true)} onSetup={() => setSetup(true)} />}
+        {setup ? <Setup onSuccess={() => { setSetup(false); setAuthed(true); }} /> : <Login sso={sso} onSuccess={() => setAuthed(true)} onSetup={() => setSetup(true)} />}
       </>
     );
   }

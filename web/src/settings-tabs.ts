@@ -17,6 +17,7 @@ export const TAB_IDS = [
   "extensions",
   "browser",
   "password",
+  "sso",
   "shortcuts",
   "logs",
   "about",

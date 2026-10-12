@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, type SingleSignOn } from "../api";
 import { MIN_PASSWORD_LENGTH, passwordMistake } from "../password";
 import { t } from "../i18n";
 
@@ -18,7 +18,14 @@ function Brand({ children }: { children?: React.ReactNode }) {
   );
 }
 
-export function Login({ onSuccess, onSetup }: { onSuccess: () => void; onSetup: () => void }) {
+/**
+ * Where the provider's sign-in starts: the portal sends the browser on to it, and it comes back to the page it was
+ * on. The server checks that the page is the portal's own.
+ */
+const ssoStart = () => `/api/auth/oidc/start?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+
+/** The password form, the single sign-on button, or both: `sso.only` leaves the password out. */
+export function Login({ onSuccess, onSetup, sso }: { onSuccess: () => void; onSetup: () => void; sso?: SingleSignOn }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,7 +42,8 @@ export function Login({ onSuccess, onSetup }: { onSuccess: () => void; onSetup: 
       if (err instanceof ApiError && err.status === 409 && err.body.setup) return onSetup();
       // The server's own word where it refused (a wrong password, too many tries). Anything else is
       // not the server saying no: a proxy's "HTTP 502" while the portal restarts reads like a broken login.
-      setError(err instanceof ApiError && (err.status === 401 || err.status === 429) ? err.message : t("Cannot reach the portal"));
+      // 403: the password login was switched off while this page was open, and the server says to use the provider.
+      setError(err instanceof ApiError && (err.status === 401 || err.status === 403 || err.status === 429) ? err.message : t("Cannot reach the portal"));
     } finally {
       setBusy(false);
     }
@@ -46,22 +54,38 @@ export function Login({ onSuccess, onSetup }: { onSuccess: () => void; onSetup: 
       <form onSubmit={submit} className="w-full max-w-[19rem]">
         <Brand />
 
-        <input
-          autoFocus
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={t("Password")}
-          aria-label={t("Password")}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? "login-error" : undefined}
-          className={fieldCls}
-        />
-        {error && <p id="login-error" role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+        {sso && (
+          <a href={ssoStart()} className="block w-full rounded-xl bg-accent px-3 py-2.5 text-center text-sm font-medium text-accent-fg transition hover:opacity-90">
+            {t("Sign in with {name}", { name: sso.name })}
+          </a>
+        )}
+        {sso && !sso.only && (
+          <div className="my-4 flex items-center gap-3 text-xs text-fg-faint" aria-hidden="true">
+            <span className="h-px flex-1 bg-line" />
+            {t("or with the password")}
+            <span className="h-px flex-1 bg-line" />
+          </div>
+        )}
+        {!sso?.only && (
+          <>
+            <input
+              autoFocus={!sso}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("Password")}
+              aria-label={t("Password")}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "login-error" : undefined}
+              className={fieldCls}
+            />
+            {error && <p id="login-error" role="alert" className="mt-2 text-xs text-danger">{error}</p>}
 
-        <button type="submit" disabled={busy || !password} className={buttonCls}>
-          {busy ? t("Checking…") : t("Sign in")}
-        </button>
+            <button type="submit" disabled={busy || !password} className={buttonCls}>
+              {busy ? t("Checking…") : t("Sign in")}
+            </button>
+          </>
+        )}
       </form>
     </div>
   );

@@ -37,6 +37,7 @@ import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
 import { LogsPanel } from "./LogsPanel";
 import { PasswordPanel } from "./PasswordPanel";
+import { SsoPanel } from "./SsoPanel";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { formatTokens } from "../transcript";
@@ -113,6 +114,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     tabs: [
       { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
       { id: "password", label: msg("Password"), icon: <LuKeyRound />, hint: msg("The password that signs in to this portal") },
+      { id: "sso", label: msg("Single sign-on"), icon: <LuShieldCheck />, hint: msg("Signing in through an OpenID Connect provider") },
       { id: "add-ons", label: msg("Add-ons"), icon: <LuPuzzle />, hint: msg("Optional parts of the portal itself") },
       { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
       { id: "logs", label: msg("Logs"), icon: <LuScrollText />, hint: msg("What the server prints, and a file to take away") },
@@ -286,6 +288,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "password" && <PasswordPanel />}
+      {nav.kind === "tab" && nav.id === "sso" && <SsoPanel />}
       {nav.kind === "tab" && nav.id === "logs" && <LogsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
@@ -606,17 +609,22 @@ function CommandCharacter() {
 function SignOut({ onError }: { onError: (e: string) => void }) {
   const [required, setRequired] = useState(false);
   const [short, setShort] = useState(false);
+  const [sso, setSso] = useState(false);
   useEffect(() => {
-    api.authStatus().then((s) => { setRequired(s.authRequired); setShort(Boolean(s.shortPassword)); }).catch(() => {});
+    api.authStatus().then((s) => { setRequired(s.authRequired); setShort(Boolean(s.shortPassword)); setSso(Boolean(s.oidc)); }).catch(() => {});
   }, []);
   if (!required) return null;
   const signOut = () =>
     api
       .logout()
-      .then(() => window.dispatchEvent(new Event(SIGNED_OUT)))
+      // Where Settings → Single sign-on ends the session at the provider too, the browser goes there.
+      .then((r) => (r.endSession ? window.location.assign(r.endSession) : window.dispatchEvent(new Event(SIGNED_OUT))))
       .catch((e) => onError((e as Error).message));
   return (
-    <Section title={t("Signed in")} hint={t("Signing out asks for the password here again. Other browsers stay signed in.")}>
+    <Section
+      title={t("Signed in")}
+      hint={sso ? t("Signing out asks you to sign in here again. Other browsers stay signed in.") : t("Signing out asks for the password here again. Other browsers stay signed in.")}
+    >
       <button onClick={signOut} className={btnCls}>
         {t("Sign out")}
       </button>

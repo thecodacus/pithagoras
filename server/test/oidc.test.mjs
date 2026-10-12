@@ -4,7 +4,9 @@ import crypto from "node:crypto";
 import http from "node:http";
 import net from "node:net";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
-import { ENTRY, freePort, runToEnd, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
 /**
  * Signing in through an OpenID Connect provider, against a fake one in this
@@ -12,9 +14,10 @@ import { ENTRY, freePort, runToEnd, serverEnv, startServer, testHome } from "./s
  * endpoints. The test plays the browser — it follows the portal to the
  * provider, and comes back with a code the fake provider hands out for an ID
  * token the test made — so that every way an answer can be wrong is tried.
+ * The portal is set up for it the way a person does it: signed in with the
+ * password, under Settings → Single sign-on.
  */
-for (const name of Object.keys(process.env)) if (name.startsWith("OIDC_")) delete process.env[name];
-const { readOidcConfig, safeReturnTo, admitted } = await import("../dist/oidc.js");
+const { parseOidcConfig, safeReturnTo, admitted } = await import("../dist/oidc.js");
 
 const CLIENT_ID = "portal-client";
 const CLIENT_SECRET = "the-clients-own-secret-0123456789";
@@ -75,20 +78,46 @@ after(() => idp.close());
 
 // --- the portal ---
 
-const oidcEnv = (portalPort, extra = {}) => ({
-  OIDC_ISSUER: issuer, OIDC_CLIENT_ID: CLIENT_ID, OIDC_CLIENT_SECRET: CLIENT_SECRET,
-  OIDC_REDIRECT_URL: `http://127.0.0.1:${portalPort}/api/auth/oidc/callback`, OIDC_NAME: "Example ID",
-  OIDC_ALLOWED_EMAILS: "Allowed@Example.com", OIDC_ALLOWED_GROUPS: "portal admins", OIDC_ALLOWED_SUBJECTS: "subject-on-the-list",
-  OIDC_END_SESSION: "1", PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET,
-  ...extra,
+/** What Settings → Single sign-on is saved with, for a portal on `portalPort`. */
+const ssoSettings = (portalPort, extra = {}) => ({
+  issuer, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET,
+  redirectUrl: `http://127.0.0.1:${portalPort}/api/auth/oidc/callback`, name: "Example ID",
+  allowedEmails: ["Allowed@Example.com"], allowedGroups: ["portal admins"], allowedSubjects: ["subject-on-the-list"],
+  endSession: true, ...extra,
 });
+const portalEnv = { PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET };
+
+const passwordLogin = (at, password = PASSWORD) =>
+  fetch(`${at}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+
+/** Saves the settings as the page does: with the current password, as a login. Answers the response and the cookie it signs this browser in with. */
+async function saveSso(at, cookie, settings, { only, current = PASSWORD } = {}) {
+  const res = await fetch(`${at}/api/auth/sso`, {
+    method: "PUT", headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ current, settings, ...(only === undefined ? {} : { only }) }),
+  });
+  const set = res.headers.getSetCookie().find((c) => c.startsWith("pi_portal_auth="));
+  return { res, body: await res.json(), cookie: set ? set.split(";")[0] : cookie };
+}
+
+/** A portal with the password moved in from the environment, set up for the fake provider. */
+async function ssoPortal(prefix, extra = {}, { only } = {}) {
+  const home = testHome(prefix);
+  const port = await freePort();
+  const started = await startServer(serverEnv(home, port, portalEnv));
+  const signedIn = (await passwordLogin(started.base)).headers.getSetCookie()[0].split(";")[0];
+  const saved = await saveSso(started.base, signedIn, ssoSettings(port, extra), { only });
+  assert.equal(saved.res.status, 200, JSON.stringify(saved.body));
+  return { ...started, home, port, admin: saved.cookie };
+}
 
 let base;
+let home;
+let portalPort;
 let log = "";
 before(async () => {
-  const port = await freePort();
-  const started = await startServer(serverEnv(testHome("pithagoras-oidc-"), port, oidcEnv(port, { PORTAL_PASSWORD: PASSWORD })));
-  base = started.base;
+  const started = await ssoPortal("pithagoras-oidc-");
+  ({ base, home, port: portalPort } = started);
   started.child.stdout.on("data", (d) => { log += d; });
   started.child.stderr.on("data", (d) => { log += d; });
 });
@@ -147,26 +176,31 @@ async function refused(res, status, words, what = "") {
 
 // --- what the portal is told, and says ---
 
-test("the settings are read as the deployment gives them, and one that cannot be right is said at start", () => {
-  const env = { OIDC_ISSUER: "https://id.example.com/realms/home", OIDC_CLIENT_ID: "portal", PORTAL_PUBLIC_URL: "https://portal.example.com/" };
-  const config = readOidcConfig(env);
-  assert.equal(config.redirectUrl.href, "https://portal.example.com/api/auth/oidc/callback", "derived from the public URL");
+test("the settings are read as the page sends them, and ones that cannot be right are said", () => {
+  const ok = { issuer: "https://id.example.com/realms/home", clientId: "portal", redirectUrl: "https://portal.example.com/api/auth/oidc/callback" };
+  const config = parseOidcConfig(ok, false);
+  assert.equal(config.redirectUrl.href, "https://portal.example.com/api/auth/oidc/callback");
   assert.equal(config.scopes, "openid email profile");
   assert.equal(config.name, "SSO");
+  assert.equal(config.groupsClaim, "groups");
   assert.equal(config.only, false);
   assert.equal(config.clientSecret, undefined, "a public client");
-  assert.equal(readOidcConfig({}), null);
-  const wrong = (extra, message) => assert.throws(() => readOidcConfig({ ...env, ...extra }), message);
-  wrong({ OIDC_ISSUER: "http://id.example.com" }, /must be an https URL/);
-  wrong({ OIDC_ISSUER: "not a url" }, /not a URL/);
-  wrong({ OIDC_CLIENT_ID: "" }, /OIDC_CLIENT_ID is not/);
-  wrong({ PORTAL_PUBLIC_URL: "" }, /set OIDC_REDIRECT_URL/);
-  wrong({ OIDC_REDIRECT_URL: "https://portal.example.com/somewhere-else" }, /followed by \/api\/auth\/oidc\/callback/);
-  wrong({ OIDC_SCOPES: "email profile" }, /must include openid/);
-  // Without a provider, OIDC_ONLY would leave a portal with no login at all.
-  assert.throws(() => readOidcConfig({ OIDC_ONLY: "1" }), /OIDC_ONLY is set but OIDC_ISSUER is not/);
+  assert.equal(parseOidcConfig(ok, true).only, true);
+  const wrong = (extra, message) => assert.throws(() => parseOidcConfig({ ...ok, ...extra }, false), message);
+  wrong({ issuer: "http://id.example.com" }, /must be an https URL/);
+  wrong({ issuer: "not a url" }, /not a URL/);
+  wrong({ issuer: "" }, /issuer is required/);
+  wrong({ clientId: "" }, /client ID is required/);
+  wrong({ redirectUrl: "" }, /redirect URL is required/);
+  wrong({ redirectUrl: "https://portal.example.com/somewhere-else" }, /followed by \/api\/auth\/oidc\/callback/);
+  wrong({ scopes: "email profile" }, /must include openid/);
+  wrong({ allowedEmails: "a@example.com" }, /must be a list/);
+  wrong({ endSession: "yes" }, /on or off/);
+  assert.throws(() => parseOidcConfig(null, false), /not an object/);
   // Plain http for a provider on this machine, to try it out.
-  assert.equal(readOidcConfig({ ...env, OIDC_ISSUER: "http://127.0.0.1:9000" }).issuer, "http://127.0.0.1:9000");
+  assert.equal(parseOidcConfig({ ...ok, issuer: "http://127.0.0.1:9000" }, false).issuer, "http://127.0.0.1:9000");
+  // Lists are trimmed, and emails compared in lower case.
+  assert.deepEqual([...parseOidcConfig({ ...ok, allowedEmails: [" A@Example.com ", "", "a@example.com"] }, false).allowedEmails], ["a@example.com"]);
 });
 
 test("where a login goes on to is a page of the portal's own, never another origin or an API route", () => {
@@ -178,7 +212,7 @@ test("where a login goes on to is a page of the portal's own, never another orig
 });
 
 test("the allow-list lets in what it names, and an email only once the provider has verified it", () => {
-  const config = readOidcConfig({ ...oidcEnv(1), OIDC_ISSUER: "https://id.example.com" });
+  const config = parseOidcConfig({ ...ssoSettings(1), issuer: "https://id.example.com" }, false);
   assert.equal(admitted({ sub: "subject-on-the-list" }, config), "subject");
   assert.equal(admitted({ sub: "x", email: "ALLOWED@example.com", email_verified: true }, config), "email");
   assert.equal(admitted({ sub: "x", email: "allowed@example.com", email_verified: false }, config), null);
@@ -187,7 +221,7 @@ test("the allow-list lets in what it names, and an email only once the provider 
   assert.equal(admitted({ sub: "x", groups: ["others", "portal admins"] }, config), "group");
   assert.equal(admitted({ sub: "x", groups: "portal admins" }, config), "group");
   assert.equal(admitted({ sub: "x", groups: ["Portal Admins"] }, config), null, "a group's name is compared as it is");
-  const nobody = readOidcConfig({ ...oidcEnv(1), OIDC_ISSUER: "https://id.example.com", OIDC_ALLOWED_EMAILS: "", OIDC_ALLOWED_GROUPS: "", OIDC_ALLOWED_SUBJECTS: "" });
+  const nobody = parseOidcConfig({ ...ssoSettings(1), issuer: "https://id.example.com", allowedEmails: [], allowedGroups: [], allowedSubjects: [] }, false);
   assert.equal(admitted({ sub: "subject-on-the-list", email: "allowed@example.com", email_verified: true, groups: ["portal admins"] }, nobody), null);
 });
 
@@ -421,6 +455,148 @@ test("neither the client secret nor a token reaches the log", () => {
   assert.ok(!/eyJ[A-Za-z0-9_-]{20,}\./.test(log), "an ID token");
 });
 
+const getSso = (cookie, at = base) => fetch(`${at}/api/auth/sso`, { headers: cookie ? { Cookie: cookie } : {} });
+
+test("the settings page is never sent the client secret, and saving asks for the current password", async () => {
+  let admin = await signIn();
+  assert.equal((await getSso(undefined)).status, 401);
+  const shown = await (await getSso(admin)).json();
+  assert.equal(shown.mode, "password");
+  assert.equal(shown.callbackPath, "/api/auth/oidc/callback");
+  assert.equal(shown.settings.hasSecret, true);
+  assert.equal(shown.settings.clientSecret, undefined);
+  assert.ok(!JSON.stringify(shown).includes(CLIENT_SECRET));
+  assert.deepEqual(shown.settings.allowedEmails, ["allowed@example.com"]);
+
+  for (const current of ["", "not the password"]) {
+    const { res } = await saveSso(base, admin, ssoSettings(portalPort, { name: "Changed" }), { current });
+    assert.equal(res.status, 403, String(current));
+  }
+  assert.equal((await (await getSso(admin)).json()).settings.name, "Example ID", "nothing was saved");
+
+  // Left out, the secret kept is used again: the provider still takes this client's sign-ins.
+  const { clientSecret, ...withoutSecret } = ssoSettings(portalPort);
+  let saved = await saveSso(base, admin, withoutSecret);
+  assert.equal(saved.res.status, 200);
+  assert.equal(saved.body.settings.hasSecret, true);
+  admin = saved.cookie;
+  await signIn();
+  // But never for another provider or client: it would be sent to them.
+  saved = await saveSso(base, admin, { ...withoutSecret, clientId: "another-client" });
+  assert.equal(saved.res.status, 200);
+  assert.equal(saved.body.settings.hasSecret, false);
+  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort));
+  assert.equal(saved.body.settings.hasSecret, true);
+  void clientSecret;
+});
+
+test("settings that cannot be right, or a provider that does not answer to them, are refused with the reason and nothing is kept", async () => {
+  const admin = await signIn();
+  const refusedWith = async (settings, words) => {
+    const { res, body } = await saveSso(base, admin, settings);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.match(body.error, words);
+  };
+  await refusedWith(ssoSettings(portalPort, { redirectUrl: `http://127.0.0.1:${portalPort}/elsewhere` }), /followed by \/api\/auth\/oidc\/callback/);
+  await refusedWith(ssoSettings(portalPort, { issuer: "http://id.example.com" }), /must be an https URL/);
+  await refusedWith(ssoSettings(portalPort, { issuer: `http://127.0.0.1:${await freePort()}` }), /discovery document .* could not be read/);
+  await refusedWith(ssoSettings(portalPort, { issuer: `${issuer}/` }), /calls itself "http:\/\/127\.0\.0\.1:\d+", not/);
+  try {
+    provider.meta = { code_challenge_methods_supported: ["plain"] };
+    await refusedWith(ssoSettings(portalPort), /does not offer PKCE with S256/);
+    provider.meta = { id_token_signing_alg_values_supported: ["HS256", "none"] };
+    await refusedWith(ssoSettings(portalPort), /signs ID tokens with HS256, none/);
+  } finally {
+    provider.meta = {};
+  }
+  // The password login cannot be switched off with nobody who may sign in instead.
+  const { res } = await saveSso(base, admin, ssoSettings(portalPort, { allowedEmails: [], allowedGroups: [], allowedSubjects: [] }), { only: true });
+  assert.equal(res.status, 400);
+  // The admin's login still holds: nothing changed.
+  assert.equal((await api(admin)).status, 200);
+});
+
+test("a change to who may sign in ends every other login, and the one who saved it is signed in again; the button's name changes nothing", async () => {
+  const other = await signIn();
+  let admin = await signIn();
+  let saved = await saveSso(base, admin, ssoSettings(portalPort, { name: "Example ID" }));
+  assert.equal((await api(other)).status, 200, "the same settings again");
+  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort, { allowedEmails: ["Allowed@Example.com", "someone-else@example.com"] }));
+  assert.equal((await api(other)).status, 401, "another list");
+  assert.equal((await api(admin)).status, 401, "the cookie it saved with too");
+  assert.equal((await api(saved.cookie)).status, 200, "signed in again with the change");
+  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort));
+  assert.equal(saved.res.status, 200);
+});
+
+test("a provider that says it names itself in every answer (RFC 9207) has an answer without its name refused", async () => {
+  let admin = await signIn();
+  provider.meta = { authorization_response_iss_parameter_supported: true };
+  try {
+    admin = (await saveSso(base, admin, ssoSettings(portalPort))).cookie;
+  } finally {
+    provider.meta = {};
+  }
+  let flow = await begin();
+  const without = await finish(flow, await sign(claimsFor(flow)));
+  assert.equal(without.status, 400);
+  assert.equal(cookieNamed(without, AUTH), undefined);
+  assert.match(await without.text(), /did not come from/);
+  flow = await begin();
+  assert.equal((await finish(flow, await sign(claimsFor(flow)), { query: { iss: issuer } })).status, 303);
+  // The provider as it was, read again.
+  assert.equal((await saveSso(base, admin, ssoSettings(portalPort))).res.status, 200);
+});
+
+const SSO_ONLY_OFF = fileURLToPath(new URL("../dist/sso-only-off.js", import.meta.url));
+const RESET = fileURLToPath(new URL("../dist/reset-password.js", import.meta.url));
+/** Runs one of the server's commands on `at`'s data, answering what it asks with `input`. */
+function command(file, at, input) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [file], { env: serverEnv(at, 0, { PORTAL_ALLOW_NO_PASSWORD: "" }), stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { out += d; });
+    child.on("close", (code) => resolve({ code, out }));
+    child.stdin.end(input);
+  });
+}
+
+test("OIDC only hides and refuses the password and ends what it signed in; the server command switches it back on after asking", async () => {
+  const byPassword = cookieNamed(await passwordLogin(base), AUTH).split(";")[0];
+  const saved = await saveSso(base, await signIn(), ssoSettings(portalPort), { only: true });
+  assert.equal(saved.res.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.only, true);
+  assert.deepEqual(await (await fetch(`${base}/api/auth/status`)).json(), { authRequired: true, authed: false, oidc: { name: "Example ID", only: true } });
+  const refusedLogin = await passwordLogin(base);
+  assert.equal(refusedLogin.status, 403);
+  assert.equal(refusedLogin.headers.getSetCookie().length, 0);
+  assert.match((await refusedLogin.json()).error, /switched off\. Sign in with Example ID/);
+  assert.equal((await api(byPassword)).status, 401, "a login the password gave");
+  assert.equal((await api(saved.cookie)).status, 200);
+  const bySso = await signIn();
+  assert.equal((await api(bySso)).status, 200, "the provider still signs in");
+  // The password itself stays: it is what saving the settings asks for.
+  assert.equal((await (await getSso(bySso)).json()).only, true);
+
+  const no = await command(SSO_ONLY_OFF, home, "no\n");
+  assert.equal(no.code, 1);
+  assert.match(no.out, /signs in through its single sign-on provider only/);
+  assert.match(no.out, /Nothing was changed/);
+  assert.equal((await passwordLogin(base)).status, 403);
+
+  const yes = await command(SSO_ONLY_OFF, home, "on\n");
+  assert.equal(yes.code, 0, yes.out);
+  assert.match(yes.out, /The password login is on again/);
+  // The running portal takes it at once, and every login ends with it.
+  assert.equal((await api(bySso)).status, 401);
+  assert.equal((await passwordLogin(base)).status, 200);
+  assert.deepEqual(await (await fetch(`${base}/api/auth/status`)).json(), { authRequired: true, authed: false, oidc: { name: "Example ID", only: false } });
+  const again = await command(SSO_ONLY_OFF, home, "on\n");
+  assert.equal(again.code, 0);
+  assert.match(again.out, /nothing to switch back on/);
+});
+
 // The last of the shared portal's tests: it leaves this address locked out.
 test("failed answers are throttled like wrong passwords", async () => {
   let last;
@@ -433,108 +609,39 @@ test("failed answers are throttled like wrong passwords", async () => {
   assert.equal((await finish(flow, await sign(claimsFor(flow)))).status, 429, "a good answer too, until the window is over");
 });
 
-// --- starting ---
+// --- other portals ---
 
-const startWith = (extra) => runToEnd([ENTRY], serverEnv(testHome("pithagoras-oidc-start-"), 0, oidcEnv(1, extra)), { ms: 20_000 });
-
-test("a provider that does not answer, calls itself by another name or is plain http elsewhere stops the portal at start", async () => {
-  const down = await startWith({ OIDC_ISSUER: `http://127.0.0.1:${await freePort()}` });
-  assert.equal(down.code, 1);
-  assert.match(down.err, /discovery document .* could not be read/);
-  const renamed = await startWith({ OIDC_ISSUER: `${issuer}/` });
-  assert.equal(renamed.code, 1);
-  assert.match(renamed.err, /calls itself "http:\/\/127\.0\.0\.1:\d+", not/);
-  const plain = await startWith({ OIDC_ISSUER: "http://id.example.com" });
-  assert.equal(plain.code, 1);
-  assert.match(plain.err, /must be an https URL/);
-  const only = await runToEnd([ENTRY], serverEnv(testHome("pithagoras-oidc-start-"), 0, { OIDC_ONLY: "1", PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "" }), { ms: 20_000 });
-  assert.equal(only.code, 1);
-  assert.match(only.err, /OIDC_ONLY is set but OIDC_ISSUER is not/);
-});
-
-test("a provider that offers no PKCE, or signs only with a shared secret, stops the portal at start", async () => {
+test("without the portal's password single sign-on does not apply: not on the setup screen, and not where there is no login", async () => {
+  const p = await ssoPortal("pithagoras-oidc-setup-");
   try {
-    provider.meta = { code_challenge_methods_supported: ["plain"] };
-    assert.match((await startWith({})).err, /does not offer PKCE with S256/);
-    provider.meta = { id_token_signing_alg_values_supported: ["HS256", "none"] };
-    assert.match((await startWith({})).err, /signs ID tokens with HS256, none/);
+    assert.equal((await command(RESET, p.home, "reset\n")).code, 0);
+    assert.deepEqual(await (await fetch(`${p.base}/api/auth/status`)).json(), { authRequired: true, authed: false, setup: true });
+    const start = await fetch(`${p.base}/api/auth/oidc/start`, { redirect: "manual" });
+    assert.equal(start.status, 404);
+    assert.match(await start.text(), /not set up on this portal/);
+    // A new password, and the provider is offered again, with the settings kept.
+    const chosen = await fetch(`${p.base}/api/auth/setup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "a new long password" }) });
+    assert.equal(chosen.status, 200);
+    const admin = chosen.headers.getSetCookie()[0].split(";")[0];
+    assert.deepEqual((await (await fetch(`${p.base}/api/auth/status`)).json()).oidc, { name: "Example ID", only: false });
+    // Taken out: the page shows no button, and the routes say so.
+    const removed = await saveSso(p.base, admin, null, { current: "a new long password" });
+    assert.equal(removed.res.status, 200);
+    assert.equal((await (await fetch(`${p.base}/api/auth/status`)).json()).oidc, undefined);
+    assert.equal((await fetch(`${p.base}/api/auth/oidc/start`, { redirect: "manual" })).status, 404);
+    assert.equal((await fetch(`${p.base}/api/settings`, { headers: { Cookie: removed.cookie } })).status, 200, "the one who took it out stays signed in");
   } finally {
-    provider.meta = {};
+    p.child.kill();
   }
-});
 
-test("with single sign-on alone the portal starts with no password, OIDC_ONLY refuses the password, and an empty allow-list is said", async () => {
+  // A portal with no login at all, by PORTAL_ALLOW_NO_PASSWORD: there is nothing to set up.
   const port = await freePort();
-  const { child, base: there } = await startServer(serverEnv(testHome("pithagoras-oidc-only-"), port, oidcEnv(port, {
-    OIDC_ONLY: "1", PORTAL_PASSWORD: PASSWORD, OIDC_ALLOWED_EMAILS: "", OIDC_ALLOWED_GROUPS: "", OIDC_ALLOWED_SUBJECTS: "",
-  })));
-  assert.deepEqual(await (await fetch(`${there}/api/auth/status`)).json(), { authRequired: true, authed: false, oidc: { name: "Example ID", only: true } });
-  const res = await fetch(`${there}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: PASSWORD }) });
-  assert.equal(res.status, 403);
-  assert.equal(res.headers.getSetCookie().length, 0);
-  assert.equal((await fetch(`${there}/api/settings`)).status, 401);
-  child.kill();
-  await new Promise((r) => child.once("exit", r));
-  const warned = await runToEnd([ENTRY], serverEnv(testHome("pithagoras-oidc-start-"), 0, oidcEnv(1, { OIDC_ALLOWED_EMAILS: "", OIDC_ALLOWED_GROUPS: "", OIDC_ALLOWED_SUBJECTS: "" })), { ms: 10_000 });
-  // It started with no password, and was stopped by the timer.
-  assert.match(warned.out, /pithagoras listening/, warned.err);
-  assert.match(warned.err, /lets nobody in/);
-  assert.match(warned.out, /auth: +single sign-on/);
-});
-
-test("a provider that says it names itself in every answer (RFC 9207) has an answer without its name refused", async () => {
-  provider.meta = { authorization_response_iss_parameter_supported: true };
-  const port = await freePort();
-  let started;
+  const open = await startServer(serverEnv(testHome("pithagoras-oidc-open-"), port));
   try {
-    started = await startServer(serverEnv(testHome("pithagoras-oidc-iss-"), port, oidcEnv(port)));
+    assert.equal((await (await getSso(undefined, open.base)).json()).mode, "open");
+    const { res } = await saveSso(open.base, "", ssoSettings(port), { current: "anything" });
+    assert.equal(res.status, 409);
   } finally {
-    provider.meta = {};
+    open.child.kill();
   }
-  const at = started.base;
-  let flow = await begin(undefined, at);
-  const without = await finish(flow, await sign(claimsFor(flow)), { at });
-  assert.equal(without.status, 400);
-  assert.equal(cookieNamed(without, AUTH), undefined);
-  assert.match(await without.text(), /did not come from/);
-  flow = await begin(undefined, at);
-  assert.equal((await finish(flow, await sign(claimsFor(flow)), { at, query: { iss: issuer } })).status, 303);
-  started.child.kill();
-  await new Promise((r) => started.child.once("exit", r));
-});
-
-test("with no password to sign in with, a secret that is the guide's old command or short stops the portal at start", async () => {
-  for (const secret of ["$(openssl rand -hex 32)", "short-secret"]) {
-    const refusedStart = await startWith({ PORTAL_SECRET: secret, PORTAL_PASSWORD: "" });
-    assert.equal(refusedStart.code, 1, secret);
-    assert.match(refusedStart.err, /the secret is all the login cookie rests on/, secret);
-    const only = await startWith({ PORTAL_SECRET: secret, PORTAL_PASSWORD: PASSWORD, OIDC_ONLY: "1" });
-    assert.equal(only.code, 1, `${secret}, OIDC_ONLY`);
-  }
-  // A password in the key, as before single sign-on: the old command is warned about, and the portal starts.
-  const port = await freePort();
-  const { child } = await startServer(serverEnv(testHome("pithagoras-oidc-secret-"), port, oidcEnv(port, { PORTAL_SECRET: "$(openssl rand -hex 32)", PORTAL_PASSWORD: PASSWORD })));
-  child.kill();
-  await new Promise((r) => child.once("exit", r));
-});
-
-test("switching OIDC_ONLY on ends the logins the password gave", async () => {
-  const home = testHome("pithagoras-oidc-switch-");
-  const run = async (extra) => {
-    const port = await freePort();
-    return startServer(serverEnv(home, port, oidcEnv(port, { PORTAL_PASSWORD: PASSWORD, ...extra })));
-  };
-  const stop = async ({ child }) => { child.kill(); await new Promise((r) => child.once("exit", r)); };
-  const first = await run({});
-  const res = await fetch(`${first.base}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: PASSWORD }) });
-  const cookie = cookieNamed(res, AUTH).split(";")[0];
-  assert.equal((await fetch(`${first.base}/api/settings`, { headers: { Cookie: cookie } })).status, 200);
-  await stop(first);
-  // A restart that changes nothing keeps it.
-  const same = await run({});
-  assert.equal((await fetch(`${same.base}/api/settings`, { headers: { Cookie: cookie } })).status, 200, "same settings");
-  await stop(same);
-  const only = await run({ OIDC_ONLY: "1" });
-  assert.equal((await fetch(`${only.base}/api/settings`, { headers: { Cookie: cookie } })).status, 401, "the password is no way in any more");
-  await stop(only);
 });

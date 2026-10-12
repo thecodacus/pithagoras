@@ -9,7 +9,7 @@
  */
 
 export interface Login {
-  /** The hash of the password now, or undefined where there is none. */
+  /** What logins are signed under now (the password's hash, with the provider's settings where single sign-on is set up), or undefined where there is no password. */
   hash(): string | undefined;
 }
 

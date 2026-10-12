@@ -80,7 +80,11 @@ import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
-import { authMode, changePassword, checkPassword, isAuthed, issueCookie, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
+import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
+import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
+import { CALLBACK_PATH, OidcConfigError, allowsAnyone, discover, parseOidcConfig, shownForm } from "./oidc.js";
+import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
+import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -168,20 +172,27 @@ app.use(cookieParser());
 app.get("/api/auth/status", (req, res) => {
   const authed = isAuthed(req);
   const mode = authMode();
+  const sso = activeSso();
   // `setup` says that no password has been chosen yet: the page asks for one instead of for the password.
   // The warning about a short one is said to a login only: to anyone else it would say which password to guess.
   res.json({
     authRequired: mode !== "open",
     authed,
     ...(mode === "setup" ? { setup: true } : {}),
+    // What the login page offers besides the password: the provider's button, and whether it is the only way in.
+    ...(sso ? { oidc: { name: sso.name, only: sso.only } } : {}),
     ...(authed && shortPassword() ? { shortPassword: true } : {}),
   });
 });
 
-app.post("/api/auth/login", loginThrottle(), async (req, res) => {
+// One count of attempts for the password and the provider: a sign-in through it that fails counts like a wrong password.
+const loginAttempts = loginThrottle();
+
+app.post("/api/auth/login", loginAttempts, async (req, res) => {
   const mode = authMode();
   if (mode === "open") return res.json({ ok: true });
   if (mode === "setup") return res.status(409).json({ error: "No password has been chosen yet.", setup: true });
+  if (passwordRefused()) return res.status(403).json({ error: `The password login is switched off. Sign in with ${activeSso()?.name}.` });
   if (!(await checkPassword(req.body?.password))) {
     return res.status(401).json({ error: "Wrong password" });
   }
@@ -206,9 +217,64 @@ app.post("/api/auth/password", requireAuth, loginThrottle(), async (req, res) =>
   res.json({ ok: true });
 });
 
-app.post("/api/auth/logout", (req, res) => {
+app.post("/api/auth/logout", async (req, res) => {
   signOut(req, res);
-  res.json({ ok: true });
+  const endSession = await endSessionUrl();
+  res.json({ ok: true, ...(endSession ? { endSession } : {}) });
+});
+
+app.use(oidcRouter(loginAttempts));
+
+// Settings → Single sign-on. The client secret is never sent back: the page is told only whether there is one.
+app.get("/api/auth/sso", requireAuth, (_req, res) => {
+  const config = ssoConfig();
+  res.json({ mode: authMode(), callbackPath: CALLBACK_PATH, settings: config ? shownForm(config) : null, only: config?.only ?? false });
+});
+
+/**
+ * Saves the provider's settings, or with `settings: null` takes single sign-on out. Asks for the current
+ * password, like changing it does: whoever saves names who else may sign in. The provider is read before
+ * anything is kept, so settings it does not answer to are refused with its reason. A change to who may sign
+ * in, or to whether the password may, ends every other login; this browser is signed in again under it.
+ */
+app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
+  if (authMode() !== "password") return res.status(409).json({ error: "Single sign-on needs the portal's own password to be set." });
+  if (!(await checkPassword(req.body?.current))) return res.status(403).json({ error: "The current password is wrong." });
+  const { settings, only } = req.body ?? {};
+  if (settings === null) {
+    removeSso();
+    sweep();
+    issueCookie(res);
+    return res.json({ settings: null, only: false });
+  }
+  if (only !== undefined && typeof only !== "boolean") return res.status(400).json({ error: "OIDC only must be on or off." });
+  const kept = ssoConfig();
+  const input = settings && typeof settings === "object" ? { ...settings } : settings;
+  // The secret kept is used again when none is typed, but only for the same provider and client: it is not sent to another.
+  if (input && typeof input === "object" && input.clientSecret === undefined && kept?.clientSecret && input.issuer === kept.issuer && input.clientId === kept.clientId) {
+    input.clientSecret = kept.clientSecret;
+  }
+  let config;
+  try {
+    config = parseOidcConfig(input, only === true);
+  } catch (e) {
+    if (e instanceof OidcConfigError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  if (config.only && !allowsAnyone(config)) {
+    return res.status(400).json({ error: "Name somebody who may sign in before the password login is switched off." });
+  }
+  let provider;
+  try {
+    provider = await discover(config);
+  } catch (e) {
+    return res.status(400).json({ error: (e as Error).message });
+  }
+  saveSso(config);
+  rememberProvider(provider);
+  sweep();
+  issueCookie(res);
+  res.json({ settings: shownForm(config), only: config.only, ...(config.endSession && !provider.endSessionEndpoint ? { noEndSession: true } : {}) });
 });
 
 // Understory's model server, in "the chat's" mode: its own token, not a portal login.
@@ -1706,6 +1772,12 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
   console.log(`  auth:     ${{ password: "password", setup: "waiting for a password to be chosen", open: "DISABLED" }[authMode()]}`);
+  const sso = activeSso();
+  if (sso) {
+    console.log(`  sso:      ${sso.issuer}${sso.only ? " (the only way in: the password login is off)" : ""}`);
+    // Read now, so that a provider that does not answer is in the log before anyone presses the button.
+    providerFor(sso).catch((e) => console.error(`[auth] single sign-on cannot reach ${sso.issuer}: ${(e as Error).message}. Sign-ins through it fail until it can.`));
+  }
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();

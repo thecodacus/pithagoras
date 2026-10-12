@@ -404,6 +404,46 @@ export interface VoiceConfig {
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; /** The saved settings point at the managed service, whether or not its container is there. */ connected?: boolean; }
 /** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
 export interface VoiceHardware { gpus: { index: number; uuid?: string; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** Cards the host lists that Docker cannot hand to a container: for voice there are none. */ unusable?: string[]; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; /** The UUID of the GPU chosen on the page, empty where none is, or the one chosen is no longer there. */ chosen: string; reserveMiB: number; suggestion: VoiceChoice; }
+/** Who is signed in, and how one signs in. */
+export interface AuthStatus {
+  authRequired: boolean;
+  authed: boolean;
+  setup?: boolean;
+  shortPassword?: boolean;
+  oidc?: SingleSignOn;
+}
+
+/** The provider the login page offers, and whether it is the only way in. */
+export interface SingleSignOn {
+  name: string;
+  only: boolean;
+}
+
+/** Settings → Single sign-on as the page is shown it: the client secret never, only whether there is one. */
+export interface SsoSettings {
+  issuer: string;
+  clientId: string;
+  hasSecret: boolean;
+  redirectUrl: string;
+  scopes: string;
+  name: string;
+  endSession: boolean;
+  allowedEmails: string[];
+  allowedGroups: string[];
+  groupsClaim: string;
+  allowedSubjects: string[];
+}
+
+/** What the page saves: a secret left out keeps the one there is, for the same provider and client. */
+export type SsoInput = Omit<SsoSettings, "hasSecret"> & { clientSecret?: string | null };
+
+export interface SsoState {
+  mode: "password" | "setup" | "open";
+  callbackPath: string;
+  settings: SsoSettings | null;
+  only: boolean;
+}
+
 export const api = {
   listFiles: (sessionId: string, dir: string) =>
     json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
@@ -468,8 +508,8 @@ export const api = {
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
-  /** `setup`: no password has been chosen yet, so the page asks for one. */
-  authStatus: () => json<{ authRequired: boolean; authed: boolean; setup?: boolean; shortPassword?: boolean }>("/api/auth/status"),
+  /** `setup`: no password has been chosen yet, so the page asks for one. `oidc`: a single sign-on provider is offered too. */
+  authStatus: () => json<AuthStatus>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
   /** Chooses the first password of a portal that has none, and signs in with it. */
@@ -478,7 +518,15 @@ export const api = {
   /** Every other browser is signed out by it; this one stays signed in. */
   changePassword: (current: string, password: string) =>
     json<{ ok: true }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, password }) }),
-  logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+  /** `endSession` is the provider's sign-out page, where Settings → Single sign-on asks for the session there to end too. */
+  logout: () => json<{ ok: true; endSession?: string }>("/api/auth/logout", { method: "POST" }),
+  sso: () => json<SsoState>("/api/auth/sso"),
+  /** Saves Settings → Single sign-on, or with `settings: null` takes it out. Asks for the current password; this browser is signed in again under the change. */
+  saveSso: (current: string, settings: SsoInput | null, only: boolean) =>
+    json<{ settings: SsoSettings | null; only: boolean; noEndSession?: true }>("/api/auth/sso", {
+      method: "PUT",
+      body: JSON.stringify({ current, settings, only }),
+    }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
   /** Without a workspace the chat starts in the home of the agent New is set to. */

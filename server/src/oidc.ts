@@ -1,13 +1,14 @@
 import { createRemoteJWKSet, type JWTPayload, type RemoteJWKSet } from "jose";
 
 /**
- * Signing in through an OpenID Connect provider: what the deployment asks for,
- * and what the provider says about itself.
+ * Signing in through an OpenID Connect provider: what Settings → Single sign-on
+ * keeps, and what the provider says about itself.
  *
- * Everything here fails closed. A setting that is not quite right, or a
- * provider that does not answer or calls itself by another name, stops the
- * portal at start with a message, rather than leaving it open or with a login
- * that nobody can use. The flow itself is in oidc-login.ts.
+ * Everything here fails closed. Settings that are not quite right, or a provider
+ * that does not answer or calls itself by another name, are refused when they are
+ * saved, with a message, rather than leaving a login that lets the wrong people in
+ * or nobody. Nothing here reads the database or the environment: the settings are
+ * kept by sso-settings.ts, and the flow itself is in oidc-login.ts.
  */
 
 /** The path the provider sends the browser back to. Fixed: the configured redirect URL must name it. */
@@ -32,13 +33,22 @@ export interface OidcConfig {
   allowedSubjects: Set<string>;
 }
 
+/** The settings as they are kept, and as the Settings page sends them: plain values, the lists as lists. */
+export interface SsoSettings {
+  issuer: string;
+  clientId: string;
+  clientSecret?: string;
+  redirectUrl: string;
+  scopes: string;
+  name: string;
+  endSession: boolean;
+  allowedEmails: string[];
+  allowedGroups: string[];
+  groupsClaim: string;
+  allowedSubjects: string[];
+}
+
 export class OidcConfigError extends Error {}
-
-const flag = (value: string | undefined) => /^(1|true|yes)$/i.test(value ?? "");
-
-/** A comma-separated list. Commas only, since a group's name may have a space in it. */
-const list = (value: string | undefined, fold = (s: string) => s) =>
-  new Set((value ?? "").split(",").map((s) => fold(s.trim())).filter(Boolean));
 
 const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
 
@@ -56,52 +66,92 @@ function providerUrl(value: unknown, what: string, loopbackHttp: boolean): URL {
   throw new OidcConfigError(`${what} must be an https URL (plain http only for a provider on this machine): ${url.href}`);
 }
 
-/** What the environment asks for, or null where it asks for no single sign-on. Throws on a setting that cannot be right. */
-export function readOidcConfig(env: NodeJS.ProcessEnv): OidcConfig | null {
-  const issuer = (env.OIDC_ISSUER ?? "").trim();
-  if (!issuer) {
-    // Said, rather than ignored: OIDC_ONLY without a provider would be a portal with no login at all.
-    const stray = Object.keys(env).filter((name) => name.startsWith("OIDC_") && (env[name] ?? "").trim() !== "");
-    if (stray.length) throw new OidcConfigError(`${stray.join(", ")} ${stray.length === 1 ? "is" : "are"} set but OIDC_ISSUER is not`);
-    return null;
-  }
-  const issuerUrl = providerUrl(issuer, "OIDC_ISSUER", true);
-  if (issuerUrl.search || issuerUrl.hash) throw new OidcConfigError("OIDC_ISSUER must not have a query or a fragment");
-  const clientId = (env.OIDC_CLIENT_ID ?? "").trim();
-  if (!clientId) throw new OidcConfigError("OIDC_ISSUER is set but OIDC_CLIENT_ID is not");
+const MAX_TEXT = 2048;
+const MAX_ENTRIES = 1000;
 
-  // Never taken from a request's Host header: that is the sender's to choose.
-  const redirect = (env.OIDC_REDIRECT_URL ?? "").trim() ||
-    ((env.PORTAL_PUBLIC_URL ?? "").trim() ? `${(env.PORTAL_PUBLIC_URL ?? "").trim().replace(/\/+$/, "")}${CALLBACK_PATH}` : "");
-  if (!redirect) throw new OidcConfigError(`set OIDC_REDIRECT_URL to the portal's address followed by ${CALLBACK_PATH} (or PORTAL_PUBLIC_URL to the portal's address)`);
+/** A text setting: trimmed, and an empty one is `fallback`. */
+function text(value: unknown, what: string, fallback = ""): string {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "string" || value.length > MAX_TEXT) throw new OidcConfigError(`${what} must be a text of at most ${MAX_TEXT} characters`);
+  return value.trim() || fallback;
+}
+
+/** A list setting: each entry trimmed, empty ones left out. */
+function entries(value: unknown, what: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_ENTRIES || !value.every((v) => typeof v === "string" && v.length <= MAX_TEXT)) {
+    throw new OidcConfigError(`${what} must be a list of at most ${MAX_ENTRIES} entries`);
+  }
+  return [...new Set(value.map((v: string) => v.trim()).filter(Boolean))];
+}
+
+/** Reads settings as sent or as kept, into what the sign-in works with. Throws on a setting that cannot be right. */
+export function parseOidcConfig(input: unknown, only: boolean): OidcConfig {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new OidcConfigError("The settings are not an object");
+  const raw = input as Record<string, unknown>;
+  const issuer = text(raw.issuer, "The issuer");
+  if (!issuer) throw new OidcConfigError("The issuer is required");
+  const issuerUrl = providerUrl(issuer, "The issuer", true);
+  if (issuerUrl.search || issuerUrl.hash) throw new OidcConfigError("The issuer must not have a query or a fragment");
+  const clientId = text(raw.clientId, "The client ID");
+  if (!clientId) throw new OidcConfigError("The client ID is required");
+  const clientSecret = raw.clientSecret === undefined || raw.clientSecret === null ? "" : text(raw.clientSecret, "The client secret");
+
+  // Configured, never taken from a request's Host header: that is the sender's to choose.
+  const redirect = text(raw.redirectUrl, "The redirect URL");
+  if (!redirect) throw new OidcConfigError(`The redirect URL is required: the portal's address followed by ${CALLBACK_PATH}`);
   let redirectUrl: URL;
   try {
     redirectUrl = new URL(redirect);
   } catch {
-    throw new OidcConfigError(`OIDC_REDIRECT_URL is not a URL: ${JSON.stringify(redirect)}`);
+    throw new OidcConfigError(`The redirect URL is not a URL: ${JSON.stringify(redirect)}`);
   }
-  if (redirectUrl.protocol !== "https:" && redirectUrl.protocol !== "http:") throw new OidcConfigError("OIDC_REDIRECT_URL must be an http or https URL");
+  if (redirectUrl.protocol !== "https:" && redirectUrl.protocol !== "http:") throw new OidcConfigError("The redirect URL must be an http or https URL");
   if (redirectUrl.pathname !== CALLBACK_PATH || redirectUrl.search || redirectUrl.hash || redirectUrl.username || redirectUrl.password) {
-    throw new OidcConfigError(`OIDC_REDIRECT_URL must be the portal's address followed by ${CALLBACK_PATH}, and nothing else: ${redirectUrl.href}`);
+    throw new OidcConfigError(`The redirect URL must be the portal's address followed by ${CALLBACK_PATH}, and nothing else: ${redirectUrl.href}`);
   }
 
-  const scopes = (env.OIDC_SCOPES ?? "").trim().split(/\s+/).filter(Boolean);
-  if (scopes.length && !scopes.includes("openid")) throw new OidcConfigError("OIDC_SCOPES must include openid");
+  const scopes = text(raw.scopes, "The scopes").split(/\s+/).filter(Boolean);
+  if (scopes.length && !scopes.includes("openid")) throw new OidcConfigError("The scopes must include openid");
+  const name = text(raw.name, "The button's name", "SSO");
+  if (name.length > 60) throw new OidcConfigError("The button's name must be at most 60 characters");
+  if (raw.endSession !== undefined && typeof raw.endSession !== "boolean") throw new OidcConfigError("End the session at the provider must be on or off");
 
   return {
     issuer,
     clientId,
-    ...((env.OIDC_CLIENT_SECRET ?? "") ? { clientSecret: env.OIDC_CLIENT_SECRET } : {}),
+    ...(clientSecret ? { clientSecret } : {}),
     redirectUrl,
     scopes: scopes.length ? scopes.join(" ") : "openid email profile",
-    name: (env.OIDC_NAME ?? "").trim() || "SSO",
-    only: flag(env.OIDC_ONLY),
-    endSession: flag(env.OIDC_END_SESSION),
-    allowedEmails: list(env.OIDC_ALLOWED_EMAILS, (s) => s.toLowerCase()),
-    allowedGroups: list(env.OIDC_ALLOWED_GROUPS),
-    groupsClaim: (env.OIDC_GROUPS_CLAIM ?? "").trim() || "groups",
-    allowedSubjects: list(env.OIDC_ALLOWED_SUBJECTS),
+    name,
+    only,
+    endSession: raw.endSession === true,
+    allowedEmails: new Set(entries(raw.allowedEmails, "The allowed emails").map((e) => e.toLowerCase())),
+    allowedGroups: new Set(entries(raw.allowedGroups, "The allowed groups")),
+    groupsClaim: text(raw.groupsClaim, "The groups claim", "groups"),
+    allowedSubjects: new Set(entries(raw.allowedSubjects, "The allowed subjects")),
   };
+}
+
+/** What is kept of the settings: the secret too. */
+export const keptForm = (config: OidcConfig): SsoSettings => ({
+  issuer: config.issuer,
+  clientId: config.clientId,
+  ...(config.clientSecret ? { clientSecret: config.clientSecret } : {}),
+  redirectUrl: config.redirectUrl.href,
+  scopes: config.scopes,
+  name: config.name,
+  endSession: config.endSession,
+  allowedEmails: [...config.allowedEmails],
+  allowedGroups: [...config.allowedGroups],
+  groupsClaim: config.groupsClaim,
+  allowedSubjects: [...config.allowedSubjects],
+});
+
+/** What the Settings page is shown: everything but the secret, of which it learns only that there is one. */
+export function shownForm(config: OidcConfig): Omit<SsoSettings, "clientSecret"> & { hasSecret: boolean } {
+  const { clientSecret, ...rest } = keptForm(config);
+  return { ...rest, hasSecret: Boolean(clientSecret) };
 }
 
 /** Whether the allow-list lets anybody in: an empty one refuses everyone. */
@@ -111,11 +161,12 @@ export const allowsAnyone = (config: OidcConfig) =>
 /**
  * What the cookies are signed with depends on this too, so that changing the
  * provider or who may sign in ends every login made before: somebody taken off
- * the list is not let in for another thirty days on the cookie they hold.
+ * the list is not let in for another thirty days on the cookie they hold. So does
+ * switching the password login off or on.
  */
 export const fingerprint = (config: OidcConfig) =>
   JSON.stringify([
-    config.issuer, config.clientId, config.groupsClaim,
+    config.issuer, config.clientId, config.groupsClaim, config.only,
     [...config.allowedEmails].sort(), [...config.allowedGroups].sort(), [...config.allowedSubjects].sort(),
   ]);
 
@@ -157,15 +208,15 @@ export async function discover(config: OidcConfig, fetchImpl: typeof fetch = fet
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("not a JSON object");
     meta = body as Record<string, unknown>;
   } catch (e) {
-    throw new OidcConfigError(`the provider's discovery document ${where} could not be read: ${(e as Error).message}`);
+    throw new OidcConfigError(`The provider's discovery document ${where} could not be read: ${(e as Error).message}`);
   }
   // The exact string: it is what every ID token's `iss` is compared with.
   if (meta.issuer !== config.issuer) {
-    throw new OidcConfigError(`the provider calls itself ${JSON.stringify(meta.issuer)}, not ${JSON.stringify(config.issuer)}: OIDC_ISSUER must be exactly what it says`);
+    throw new OidcConfigError(`The provider calls itself ${JSON.stringify(meta.issuer)}, not ${JSON.stringify(config.issuer)}: the issuer must be exactly what it says`);
   }
   const endpoint = (name: string, required: boolean) => {
     if (meta[name] === undefined && !required) return undefined;
-    return providerUrl(meta[name], `the provider's ${name}`, loopbackHttp);
+    return providerUrl(meta[name], `The provider's ${name}`, loopbackHttp);
   };
   const authorizationEndpoint = endpoint("authorization_endpoint", true)!;
   const tokenEndpoint = endpoint("token_endpoint", true)!;
@@ -174,14 +225,14 @@ export async function discover(config: OidcConfig, fetchImpl: typeof fetch = fet
   const endSessionEndpoint = endpoint("end_session_endpoint", false);
 
   const responseTypes = strings(meta.response_types_supported);
-  if (responseTypes && !responseTypes.includes("code")) throw new OidcConfigError("the provider does not offer the authorization code flow");
+  if (responseTypes && !responseTypes.includes("code")) throw new OidcConfigError("The provider does not offer the authorization code flow");
   const challenges = strings(meta.code_challenge_methods_supported);
-  if (challenges && !challenges.includes("S256")) throw new OidcConfigError("the provider does not offer PKCE with S256");
+  if (challenges && !challenges.includes("S256")) throw new OidcConfigError("The provider does not offer PKCE with S256");
 
   const offered = strings(meta.id_token_signing_alg_values_supported) ?? ["RS256"];
   const algorithms = offered.filter((alg) => ASYMMETRIC.includes(alg));
   if (!algorithms.length) {
-    throw new OidcConfigError(`the provider signs ID tokens with ${offered.join(", ") || "nothing"}, and the portal only takes ones signed with a key of the provider's (${ASYMMETRIC.join(", ")})`);
+    throw new OidcConfigError(`The provider signs ID tokens with ${offered.join(", ") || "nothing"}, and the portal only takes ones signed with a key of the provider's (${ASYMMETRIC.join(", ")})`);
   }
 
   let tokenAuth: OidcProvider["tokenAuth"] = "none";
@@ -190,7 +241,7 @@ export async function discover(config: OidcConfig, fetchImpl: typeof fetch = fet
     const methods = strings(meta.token_endpoint_auth_methods_supported) ?? ["client_secret_basic"];
     if (methods.includes("client_secret_basic")) tokenAuth = "client_secret_basic";
     else if (methods.includes("client_secret_post")) tokenAuth = "client_secret_post";
-    else throw new OidcConfigError(`the provider takes a client secret neither as client_secret_basic nor as client_secret_post (it offers ${methods.join(", ")})`);
+    else throw new OidcConfigError(`The provider takes a client secret neither as client_secret_basic nor as client_secret_post (it offers ${methods.join(", ")})`);
   }
 
   // The ID token's keys. A key the portal has not seen sends it back for them,
@@ -201,7 +252,7 @@ export async function discover(config: OidcConfig, fetchImpl: typeof fetch = fet
   try {
     await jwks.reload();
   } catch (e) {
-    throw new OidcConfigError(`the provider's keys at ${jwksUri.href} could not be read: ${(e as Error).message}`);
+    throw new OidcConfigError(`The provider's keys at ${jwksUri.href} could not be read: ${(e as Error).message}`);
   }
 
   return {
@@ -255,22 +306,3 @@ export function needsUserinfo(claims: JWTPayload, config: OidcConfig): boolean {
   return (config.allowedEmails.size > 0 && (claims.email === undefined || claims.email_verified === undefined)) ||
     (config.allowedGroups.size > 0 && claims[config.groupsClaim] === undefined);
 }
-
-/** Said once, the same way, for every way single sign-on can be set up wrong. */
-export function refuseToStart(message: string): never {
-  console.error(
-    `\n  Single sign-on (OIDC_ISSUER) is not set up right: ${message}.\n` +
-      "  The portal does not start with a login it cannot check.\n"
-  );
-  process.exit(1);
-}
-
-/** What this portal's environment asks for, read once at start; null without single sign-on. */
-export const oidcConfig: OidcConfig | null = (() => {
-  try {
-    return readOidcConfig(process.env);
-  } catch (e) {
-    if (e instanceof OidcConfigError) refuseToStart(e.message);
-    throw e;
-  }
-})();

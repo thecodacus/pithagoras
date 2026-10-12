@@ -128,7 +128,9 @@ a hidden page keeps checking every fifteen seconds.
 ### Sign out
 
 Appears when the portal has a password. It signs out this browser only, and the
-login it held stops working anywhere a copy of its cookie was taken. A login that
+login it held stops working anywhere a copy of its cookie was taken. With
+**End the session at the provider too** under [Single sign-on](#single-sign-on),
+the browser goes on to the provider's sign-out page. A login that
 runs out — after thirty days, or when the portal restarts without
 `PORTAL_SECRET` — brings the password screen back rather than failing every
 request with *Unauthorized*.
@@ -173,6 +175,31 @@ With `PORTAL_ALLOW_NO_PASSWORD=1` there is no login and so no password; the page
 says so. A lost password is not recovered here (you cannot get in to this page
 without it): it is removed with a command on the server, see
 [Deploying](/guide/deploying#a-lost-password).
+
+## Single sign-on
+
+Signing in through an OpenID Connect provider, beside the password or instead of
+it; how to set up the provider's side, and what each field means, is in
+[Deploying](/guide/deploying#single-sign-on).
+
+- **Provider**: the issuer URL, the client ID and secret, the redirect URL (filled
+  in from the address the page is open at), the scopes and the name on the login
+  page's button. The secret is never shown again once saved: an empty field keeps
+  it, and **Remove the kept secret** is for a public client.
+- **Who may sign in**: emails, groups and subjects, one a line. Only who is named
+  gets in, and an email only when the provider says it is verified.
+- **End the session at the provider too**: signing out of the portal goes on to the
+  provider's sign-out page.
+- **OIDC only**: the password form is hidden and the password login refused. If the
+  provider stops letting you in, `npm run sso-only-off` on the server switches the
+  password login back on; see [Deploying](/guide/deploying#oidc-only).
+
+**Save** asks for the portal's current password, and the provider is read before
+anything is kept: settings it does not answer to are refused with its reason. A
+change to the provider, to who may sign in or to **OIDC only** signs out every other
+browser; this one stays signed in. **Take out single sign-on** removes the button
+and the settings, after asking. Wrong passwords here are counted like those of
+**Password**.
 
 ## Add-ons
 

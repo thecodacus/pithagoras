@@ -3,6 +3,8 @@ import type { NextFunction, Request, Response } from "express";
 import { getDb, getSetting, isSignedOut, putSetting, recordSignOut } from "./db.js";
 import { allowNoPassword, tlsFiles } from "./http-security.js";
 import { bindLogin, sweep } from "./login-streams.js";
+import { fingerprint } from "./oidc.js";
+import { ssoConfig } from "./sso-settings.js";
 import {
   EXAMPLE_PASSWORD,
   MIN_PASSWORD_LENGTH,
@@ -28,6 +30,10 @@ import {
  * every request, so that the command which removes a lost one (reset-password)
  * takes effect in a running portal. Until one is chosen, the portal is in
  * setup: it answers nothing but the page that asks for one.
+ *
+ * A sign-in through an OpenID Connect provider (Settings → Single sign-on,
+ * oidc-login.ts) ends in the same cookie, and needs the password to be set: the
+ * cookie is signed with its hash, and the provider's settings are added to the key.
  */
 const SECRET = process.env.PORTAL_SECRET || crypto.randomBytes(32).toString("hex");
 // What a .env written from the deploying guide's old example holds: nothing runs a command in that
@@ -148,12 +154,37 @@ if (authMode() === "open") {
 /** Whether the password that signs in is shorter than the minimum, because the portal ran with it before there was one. */
 export const shortPassword = (): boolean => authMode() === "password" && Boolean(getSetting(PASSWORD_SHORT_KEY));
 
-/** What the cookies are signed with: the secret and the password's hash, so a new password refuses every old cookie. */
-let keyed: { hash: string; key: Buffer } | undefined;
-const keyFor = (hash: string): Buffer => {
-  if (keyed?.hash !== hash) keyed = { hash, key: crypto.createHash("sha256").update(`${SECRET}\0${hash}`).digest() };
+/**
+ * What a login is signed under: the password's hash, so a new password refuses every old cookie, and with single
+ * sign-on its provider and allow-list, so that a change to who may sign in does the same. Undefined while no
+ * password is set. Without single sign-on it is the hash alone, as it was before there was any.
+ */
+const loginIdentity = (): string | undefined => {
+  const hash = storedHash();
+  if (!hash) return undefined;
+  const sso = ssoConfig();
+  return sso ? `${hash}\0${fingerprint(sso)}` : hash;
+};
+
+/** What the cookies are signed with: the secret and the login's identity. */
+let keyed: { identity: string; key: Buffer } | undefined;
+const keyFor = (identity: string): Buffer => {
+  if (keyed?.identity !== identity) keyed = { identity, key: crypto.createHash("sha256").update(`${SECRET}\0${identity}`).digest() };
   return keyed.key;
 };
+
+/** A key of its own for another purpose, from the same secret and login: the sign-in's state cookie is sealed with one. */
+export function derivedKey(purpose: string): Buffer {
+  const identity = loginIdentity();
+  if (!identity) throw new Error("There is no password to sign in under.");
+  return crypto.createHmac("sha256", keyFor(identity)).update(`pithagoras:${purpose}`).digest();
+}
+
+/** The name of the short-lived cookie a sign-in through the provider keeps its state in, beside the login's. */
+export const OIDC_STATE_COOKIE = `${COOKIE}_oidc`;
+
+/** Whether the password login is switched off: single sign-on is set up as the only way in. */
+export const passwordRefused = (): boolean => authMode() === "password" && ssoConfig()?.only === true;
 
 const macOf = (expiry: string, key: Buffer) => crypto.createHmac("sha256", key).update(expiry).digest("hex");
 
@@ -163,12 +194,12 @@ function sign(expiry: number, key: Buffer): string {
 
 /** The token's expiry and signature, if it is one this portal signed under this password and it has not run out. */
 function genuine(token: string | undefined): { expiry: number; mac: string } | null {
-  const hash = storedHash();
-  if (!token || !hash) return null;
+  const identity = loginIdentity();
+  if (!token || !identity) return null;
   const [expiryStr, mac] = token.split(".");
   const expiry = Number(expiryStr);
   if (!Number.isFinite(expiry) || expiry < Date.now()) return null;
-  const expected = macOf(expiryStr, keyFor(hash));
+  const expected = macOf(expiryStr, keyFor(identity));
   const a = Buffer.from(mac ?? "");
   const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b) ? { expiry, mac } : null;
@@ -184,13 +215,13 @@ function verify(token: string | undefined): boolean {
  * Secure one is kept from the plain-HTTP services beside the portal. Where the
  * portal itself is plain HTTP, a Secure cookie would never be stored at all.
  */
-const secure = (res: Response) => Boolean(tlsFiles()) || res.req.secure;
+export const secure = (res: Response) => Boolean(tlsFiles()) || res.req.secure;
 
 /** Signs this browser in, under the password as it is now: after setting or changing it, so that the new hash is the one signed with. */
 export function issueCookie(res: Response): void {
-  const hash = storedHash();
-  if (!hash) throw new Error("There is no password to sign in with.");
-  res.cookie(COOKIE, sign(Date.now() + MAX_AGE_MS, keyFor(hash)), {
+  const identity = loginIdentity();
+  if (!identity) throw new Error("There is no password to sign in with.");
+  res.cookie(COOKIE, sign(Date.now() + MAX_AGE_MS, keyFor(identity)), {
     httpOnly: true,
     sameSite: "lax",
     secure: secure(res),
@@ -277,7 +308,8 @@ function upgradeCookie(req: { headers: { cookie?: string } }): string | undefine
   return undefined;
 }
 
-bindLogin({ hash: storedHash });
+// A stream ends when what its login was signed under changes: the password, or the provider's settings.
+bindLogin({ hash: loginIdentity });
 
 export function isAuthedUpgrade(req: { headers: { cookie?: string } }): boolean {
   return authMode() === "open" || verify(upgradeCookie(req));

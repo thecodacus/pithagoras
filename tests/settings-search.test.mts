@@ -21,6 +21,13 @@ test("changing the password is found on its own page, by the English word and th
   }
 });
 
+test("single sign-on is found on its own page, by what people call it", () => {
+  for (const q of ["sso", "oidc", "openid connect", "keycloak", "single sign-on", "einmalanmeldung"]) {
+    assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "sso"), `${q} leads to Single sign-on`);
+  }
+  assert.ok(searchSettings("oidc only", SETTINGS_INDEX).some((e) => e.tab === "sso" && e.title === "OIDC only"));
+});
+
 test("the picture tools are found in Tools, the image endpoint on the Images page", () => {
   for (const q of ["show_image", "generate_image", "edit_image"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
   for (const q of ["image generation", "image editing", "bildgenerierung"]) {

@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
 import express, { type RequestHandler, type Response } from "express";
 import { errors as joseErrors, jwtVerify, type JWTPayload } from "jose";
-import { OIDC_STATE_COOKIE, issueCookie, keyFor, secure } from "./auth.js";
+import { OIDC_STATE_COOKIE, authMode, derivedKey, issueCookie, secure } from "./auth.js";
 import {
-  CALLBACK_PATH, PROVIDER_TIMEOUT_MS, admitted, discover, needsUserinfo, oidcConfig, refuseToStart, safeReturnTo,
-  type OidcProvider,
+  CALLBACK_PATH, PROVIDER_TIMEOUT_MS, admitted, discover, needsUserinfo, safeReturnTo,
+  type OidcConfig, type OidcProvider,
 } from "./oidc.js";
+import { ssoConfig } from "./sso-settings.js";
 
 /**
  * Signing in through an OpenID Connect provider: the authorization code flow
@@ -19,15 +20,36 @@ import {
  * then the allow-list decides. What it lets in gets the portal's own login
  * cookie, the one the password gives, so nothing behind the login changes. The
  * provider's tokens are not kept, nor written anywhere.
+ *
+ * The settings are read on every request (Settings → Single sign-on, sso-settings.ts), and single sign-on
+ * applies only while the portal has a password: the login cookie is signed with its hash.
  */
 
-/** The provider, read at start: a portal set up for it does not start without it. */
-export const oidc: OidcProvider | null = oidcConfig
-  ? await discover(oidcConfig).catch((e) => refuseToStart((e as Error).message))
-  : null;
+/** Single sign-on as it applies now: set up, and on a portal with a password. */
+export const activeSso = (): OidcConfig | null => (authMode() === "password" ? ssoConfig() : null);
 
-if (oidc?.config.endSession && !oidc.endSessionEndpoint) {
-  console.warn("\n  OIDC_END_SESSION is set, but the provider names no end_session_endpoint: signing out ends the portal's login only.\n");
+/** How long a provider that could not be read is left alone before it is asked again. */
+const RETRY_DISCOVERY_MS = 30_000;
+
+/** The provider's discovery document and keys, read once for an issuer (and kind of client), and again after a failure. */
+let discovered: { key: string; at: number; failed: boolean; result: Promise<OidcProvider> } | undefined;
+
+const discoveryKey = (config: OidcConfig) => `${config.issuer}\0${config.clientSecret ? "confidential" : "public"}`;
+
+/** The provider for these settings: what discovery found, with the settings as they are now. */
+export async function providerFor(config: OidcConfig): Promise<OidcProvider> {
+  const key = discoveryKey(config);
+  if (!discovered || discovered.key !== key || (discovered.failed && Date.now() - discovered.at > RETRY_DISCOVERY_MS)) {
+    const entry = { key, at: Date.now(), failed: false, result: discover(config) };
+    entry.result.catch(() => { entry.failed = true; });
+    discovered = entry;
+  }
+  return { ...(await discovered.result), config };
+}
+
+/** Keeps what was found when the settings were saved, so that the first sign-in does not read it again. */
+export function rememberProvider(provider: OidcProvider): void {
+  discovered = { key: discoveryKey(provider.config), at: Date.now(), failed: false, result: Promise.resolve(provider) };
 }
 
 /** How long a sign-in at the provider may take, from the button to the answer. */
@@ -49,6 +71,9 @@ const same = (a: string, b: string) => {
 };
 
 interface Pending {
+  /** The provider the sign-in was started with: settings changed in between do not finish it. */
+  issuer: string;
+  clientId: string;
   state: string;
   nonce: string;
   verifier: string;
@@ -57,7 +82,7 @@ interface Pending {
 }
 
 /** AES-GCM: what the cookie holds is unreadable to anyone but the portal, and any change to it is found. */
-const sealKey = () => keyFor("oidc-state");
+const sealKey = () => derivedKey("oidc-state");
 
 function seal(pending: Pending): string {
   const iv = crypto.randomBytes(12);
@@ -75,6 +100,7 @@ function unseal(token: unknown): Pending | null {
     decipher.setAuthTag(raw.subarray(12, 28));
     const pending = JSON.parse(Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString("utf8")) as Pending;
     if (typeof pending.state !== "string" || typeof pending.nonce !== "string" || typeof pending.verifier !== "string") return null;
+    if (typeof pending.issuer !== "string" || typeof pending.clientId !== "string") return null;
     if (typeof pending.expires !== "number" || pending.expires < Date.now()) return null;
     return pending;
   } catch {
@@ -212,11 +238,11 @@ async function withUserinfo(provider: OidcProvider, claims: JWTPayload, accessTo
 
 export function oidcRouter(throttle: RequestHandler): express.Router {
   const router = express.Router();
-  const provider = oidc;
-  if (!provider) return router;
-  const { config } = provider;
+  const notSetUp = new Refusal(404, "Single sign-on is not set up on this portal.", "not set up");
 
-  router.get("/api/auth/oidc/start", (req, res) => {
+  router.get("/api/auth/oidc/start", async (req, res) => {
+    const config = activeSso();
+    if (!config) return refusalPage(res, notSetUp);
     // The state cookie is kept for the host it is set on, and the provider sends the browser back to the redirect
     // URL's: a portal opened by another name (an IP, a Tailscale name) starts again there first. The target is the
     // configured address, never the request's; `moved` stops a proxy that rewrites Host from sending it round again.
@@ -227,7 +253,15 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
       there.searchParams.set("moved", "1");
       return res.set("Cache-Control", "no-store").redirect(303, there.href);
     }
+    let provider: OidcProvider;
+    try {
+      provider = await providerFor(config);
+    } catch (e) {
+      console.warn(`[auth] sign-in through ${config.name} cannot start: ${(e as Error).message}`);
+      return refusalPage(res, new Refusal(502, `${config.name} cannot be reached at the moment. Try again later, or sign in with the password.`));
+    }
     const pending: Pending = {
+      issuer: config.issuer, clientId: config.clientId,
       state: random(), nonce: random(), verifier: random(), returnTo: safeReturnTo(req.query.returnTo), expires: Date.now() + STATE_TTL_MS,
     };
     res.cookie(OIDC_STATE_COOKIE, seal(pending), { ...cookieOptions(res), maxAge: STATE_TTL_MS });
@@ -244,6 +278,8 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
   });
 
   router.get(CALLBACK_PATH, throttle, async (req, res) => {
+    const config = activeSso();
+    if (!config) return refusalPage(res, notSetUp);
     const pending = unseal(req.cookies?.[OIDC_STATE_COOKIE]);
     // Single use whatever happens next: the browser does not keep it.
     res.clearCookie(OIDC_STATE_COOKIE, cookieOptions(res));
@@ -254,6 +290,15 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
       const { state, code, error, iss } = req.query;
       if (typeof state !== "string" || !same(state, pending.state)) throw new Refusal(400, "This sign-in does not belong to this browser. Start it again.", "state does not match");
       if (!take(pending.state, pending.expires)) throw new Refusal(400, "This sign-in was used already. Start it again.", "state used before");
+      if (pending.issuer !== config.issuer || pending.clientId !== config.clientId) {
+        throw new Refusal(400, "Single sign-on was set up differently while this sign-in was under way. Start it again.", "settings changed");
+      }
+      let provider: OidcProvider;
+      try {
+        provider = await providerFor(config);
+      } catch (e) {
+        throw new Refusal(502, `${config.name} cannot be reached at the moment. Try again later.`, `discovery: ${(e as Error).message}`);
+      }
       // RFC 9207: an answer that names its issuer must name this one, and one that always does must not leave it out.
       if (iss !== undefined || provider.issParameter) {
         if (typeof iss !== "string" || iss !== config.issuer) throw new Refusal(400, "The answer did not come from this portal's sign-in provider.", "iss does not match");
@@ -282,11 +327,14 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
   return router;
 }
 
-/** Where signing out sends the browser after the portal's own logout, when the deployment asks for the provider's too. */
-export function endSessionUrl(): string | undefined {
-  if (!oidc?.config.endSession || !oidc.endSessionEndpoint) return undefined;
-  const to = new URL(oidc.endSessionEndpoint);
-  to.searchParams.set("client_id", oidc.config.clientId);
-  to.searchParams.set("post_logout_redirect_uri", `${oidc.config.redirectUrl.origin}/`);
+/** Where signing out sends the browser after the portal's own logout, where the settings ask for the provider's too. */
+export async function endSessionUrl(): Promise<string | undefined> {
+  const config = activeSso();
+  if (!config?.endSession) return undefined;
+  const provider = await providerFor(config).catch(() => undefined);
+  if (!provider?.endSessionEndpoint) return undefined;
+  const to = new URL(provider.endSessionEndpoint);
+  to.searchParams.set("client_id", config.clientId);
+  to.searchParams.set("post_logout_redirect_uri", `${config.redirectUrl.origin}/`);
   return to.href;
 }

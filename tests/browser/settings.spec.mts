@@ -21,7 +21,7 @@ interface Portal {
   /** What the server says came of saving a provider, besides. */
   providerNote?: string;
   /** A portal with a password, and what its status says of it. */
-  login?: { shortPassword?: boolean };
+  login?: { shortPassword?: boolean; sso?: boolean; endSession?: string };
   /** The password the portal takes as the current one when it is changed. */
   currentPassword?: string;
 }
@@ -44,7 +44,8 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
   await mockPortal(page, async ({ path: p, method, json }) => {
     calls.push(`${method} ${p}`);
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    if (p === '/api/auth/status') return { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}) };
+    if (p === '/api/auth/status') return { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}), ...(login?.sso ? { oidc: { name: 'Example ID', only: true } } : {}) };
+    if (p === '/api/auth/logout') return { ok: true, ...(login?.endSession ? { endSession: login.endSession } : {}) };
     if (p === '/api/auth/password' && method === 'POST') {
       const sent = json();
       if (sent.current !== currentPassword) return reply(403, { error: 'The current password is wrong.' });
@@ -427,6 +428,19 @@ test('a password of the right length says nothing about it', async ({ page }) =>
   const signedIn = page.getByRole('dialog').locator('section', { hasText: 'Signed in' });
   await expect(signedIn.getByRole('button', { name: 'Sign out' })).toBeVisible();
   await expect(signedIn.getByRole('note')).toHaveCount(0);
+});
+
+test('signing out of a portal set up to end the session at the provider goes on to the provider', async ({ page }) => {
+  const endSession = 'https://id.example.test/logout?client_id=portal';
+  await portal(page, { login: { sso: true, endSession } });
+  await page.route('https://id.example.test/**', (route) => route.fulfill({ contentType: 'text/html', body: '<h1>Signed out at the provider</h1>' }));
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/browser');
+  const signedIn = page.getByRole('dialog').locator('section', { hasText: 'Signed in' });
+  await expect(signedIn).toContainText('Signing out asks you to sign in here again.');
+  await signedIn.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('heading', { name: 'Signed out at the provider' })).toBeVisible();
+  expect(page.url()).toBe(endSession);
 });
 
 test('the password is changed under Settings → Password: the current one once, the new one twice, and the form is clear afterwards', async ({ page }) => {
