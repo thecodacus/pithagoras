@@ -225,7 +225,8 @@ export function safeReturnTo(value: unknown): string {
   } catch {
     return "/";
   }
-  if (url.origin !== base || url.pathname === "/api" || url.pathname.startsWith("/api/")) return "/";
+  // Checked again on what is returned: dot segments collapse, so `/.//host` comes out as `//host`.
+  if (url.origin !== base || url.pathname.startsWith("//") || url.pathname === "/api" || url.pathname.startsWith("/api/")) return "/";
   return url.pathname + url.search;
 }
 

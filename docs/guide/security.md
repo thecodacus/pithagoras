@@ -146,6 +146,9 @@ What it does not do:
 
 - It does not tell people apart. Everyone on the allow-list is the same single
   user, with the same rights.
+- It does not make a weak secret safe. Without a password that signs you in, the
+  login cookie rests on `PORTAL_SECRET` alone, so the portal refuses to start with
+  a short one or the old example's command text.
 - It does not follow the provider's session. A login lasts 30 days, as with the
   password. To end the login of someone the provider no longer lets in, take them
   off the allow-list (which ends every login made before) or change

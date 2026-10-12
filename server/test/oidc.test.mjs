@@ -18,6 +18,7 @@ const { readOidcConfig, safeReturnTo, admitted } = await import("../dist/oidc.js
 const CLIENT_ID = "portal-client";
 const CLIENT_SECRET = "the-clients-own-secret-0123456789";
 const PASSWORD = "correct horse battery";
+const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 // --- the provider ---
 
@@ -77,7 +78,7 @@ const oidcEnv = (portalPort, extra = {}) => ({
   OIDC_ISSUER: issuer, OIDC_CLIENT_ID: CLIENT_ID, OIDC_CLIENT_SECRET: CLIENT_SECRET,
   OIDC_REDIRECT_URL: `http://127.0.0.1:${portalPort}/api/auth/oidc/callback`, OIDC_NAME: "Example ID",
   OIDC_ALLOWED_EMAILS: "Allowed@Example.com", OIDC_ALLOWED_GROUPS: "portal admins", OIDC_ALLOWED_SUBJECTS: "subject-on-the-list",
-  OIDC_END_SESSION: "1", PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: "a-fixed-secret-for-the-tests",
+  OIDC_END_SESSION: "1", PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET,
   ...extra,
 });
 
@@ -96,8 +97,8 @@ const AUTH = "pi_portal_auth";
 const STATE = "pi_portal_auth_oidc";
 
 /** The browser pressing the button: where the portal sends it, and the state cookie it is given. */
-async function begin(returnTo) {
-  const res = await fetch(`${base}/api/auth/oidc/start${returnTo === undefined ? "" : `?returnTo=${encodeURIComponent(returnTo)}`}`, { redirect: "manual" });
+async function begin(returnTo, at = base) {
+  const res = await fetch(`${at}/api/auth/oidc/start${returnTo === undefined ? "" : `?returnTo=${encodeURIComponent(returnTo)}`}`, { redirect: "manual" });
   assert.equal(res.status, 303);
   const to = new URL(res.headers.get("location"));
   const set = cookieNamed(res, STATE);
@@ -115,12 +116,12 @@ const sign = (claims, { key = keyA.privateKey, kid = "key-a", alg = "RS256" } = 
 
 let codes = 0;
 /** The browser coming back from the provider with a code for `idToken`. `query` and `cookie` change what it brings. */
-async function finish(flow, idToken, { query = {}, cookie = flow.cookie, accessToken } = {}) {
+async function finish(flow, idToken, { query = {}, cookie = flow.cookie, accessToken, at = base } = {}) {
   const code = `code-${++codes}`;
   provider.codes.set(code, { idToken, accessToken, challenge: flow.to.searchParams.get("code_challenge"), redirectUri: flow.to.searchParams.get("redirect_uri") });
   const params = new URLSearchParams({ code, state: flow.state, ...query });
   for (const [k, v] of Object.entries(query)) if (v === undefined) params.delete(k);
-  return fetch(`${base}/api/auth/oidc/callback?${params}`, { redirect: "manual", headers: cookie ? { Cookie: cookie } : {} });
+  return fetch(`${at}/api/auth/oidc/callback?${params}`, { redirect: "manual", headers: cookie ? { Cookie: cookie } : {} });
 }
 
 const api = (cookie) => fetch(`${base}/api/settings`, { headers: cookie ? { Cookie: cookie } : {} });
@@ -169,7 +170,8 @@ test("the settings are read as the deployment gives them, and one that cannot be
 
 test("where a login goes on to is a page of the portal's own, never another origin or an API route", () => {
   assert.equal(safeReturnTo("/sessions/abc?tab=files"), "/sessions/abc?tab=files");
-  for (const elsewhere of ["//evil.example/x", "/\\evil.example", "https://evil.example/", "evil.example", "/\t/evil.example", "/api/settings", "/api", "", undefined, ["/x"], `/${"a".repeat(3000)}`]) {
+  // Dot segments collapse into `//` once the path is read, so the result is checked as well as what was asked.
+  for (const elsewhere of ["//evil.example/x", "/.//evil.example", "/a/..//evil.example/x", "/%2e//evil.example", "/./api/settings", "/\\evil.example", "https://evil.example/", "evil.example", "/\t/evil.example", "/api/settings", "/api", "", undefined, ["/x"], `/${"a".repeat(3000)}`]) {
     assert.equal(safeReturnTo(elsewhere), "/", JSON.stringify(elsewhere));
   }
 });
@@ -294,6 +296,14 @@ test("claims the ID token leaves out are asked of the userinfo endpoint, for the
   await refused(res, 502);
 });
 
+test("an account the ID token lets in already is not turned away by a userinfo endpoint that fails", async () => {
+  // Groups are listed and the token has none, but its verified email is on the list: the userinfo endpoint is not asked.
+  const flow = await begin();
+  const res = await finish(flow, await sign(claimsFor(flow)), { accessToken: "a-token-the-userinfo-endpoint-refuses" });
+  assert.equal(res.status, 303, await res.clone().text());
+  assert.ok(cookieNamed(res, AUTH));
+});
+
 test("an answer is taken once: the same state again is refused, without asking the provider", async () => {
   const flow = await begin();
   const token = await sign(claimsFor(flow));
@@ -330,7 +340,7 @@ test("a provider's refusal, and an answer that names another issuer, are said an
 });
 
 test("a login goes on to the page it was asked from, and never to another origin", async () => {
-  for (const [asked, landed] of [["/sessions?x=1", "/sessions?x=1"], ["//evil.example/", "/"], ["https://evil.example/", "/"], ["/\\evil.example", "/"], [undefined, "/"]]) {
+  for (const [asked, landed] of [["/sessions?x=1", "/sessions?x=1"], ["//evil.example/", "/"], ["/.//evil.example", "/"], ["https://evil.example/", "/"], ["/\\evil.example", "/"], [undefined, "/"]]) {
     const flow = await begin(asked);
     const res = await finish(flow, await sign(claimsFor(flow)));
     assert.equal(res.status, 303);
@@ -355,6 +365,29 @@ test("a provider that changes its keys is followed, and a token signed with the 
   provider.keys = [await jwkOf(keyA, "key-a", "RS256"), await jwkOf(keyB, "key-b", "ES256")];
   await new Promise((r) => setTimeout(r, 1_200));
   await signIn();
+});
+
+test("a sign-in started at another name of the portal starts again at the redirect URL's, where the state cookie will be sent", async () => {
+  const port = new URL(base).port;
+  // fetch keeps the Host header to itself, so the request is made as a browser at another name would make it.
+  const atAnotherName = (route) => new Promise((resolve, reject) => {
+    http.get(`${base}${route}`, { headers: { Host: `portal-by-another-name:${port}` } }, (r) => { r.resume(); resolve(r); }).on("error", reject);
+  });
+  const stateCookie = (r) => (r.headers["set-cookie"] ?? []).find((c) => c.startsWith(`${STATE}=`));
+  const res = await atAnotherName(`/api/auth/oidc/start?returnTo=${encodeURIComponent("/sessions")}`);
+  assert.equal(res.statusCode, 303);
+  assert.equal(stateCookie(res), undefined, "no state cookie for the host the provider does not send the browser back to");
+  const to = new URL(res.headers.location);
+  assert.equal(to.hostname, "127.0.0.1", "the configured address, not the one the request named");
+  assert.equal(to.pathname, "/api/auth/oidc/start");
+  assert.equal(to.searchParams.get("returnTo"), "/sessions");
+  // Once moved, it goes on, also where a proxy in front still says another name.
+  const moved = await atAnotherName("/api/auth/oidc/start?returnTo=%2F&moved=1");
+  assert.equal(new URL(moved.headers.location).origin, issuer);
+  assert.ok(stateCookie(moved));
+  // A callback without the cookie says where to open the portal.
+  const flow = await begin();
+  await refused(await finish(flow, await sign(claimsFor(flow)), { cookie: null }), 400, /Open the portal at http:\/\/127\.0\.0\.1:\d+ and start it again/);
 });
 
 test("signing out ends the login and names the provider's end of the session", async () => {
@@ -436,4 +469,61 @@ test("with single sign-on alone the portal starts with no password, OIDC_ONLY re
   assert.match(warned.out, /pithagoras listening/, warned.err);
   assert.match(warned.err, /lets nobody in/);
   assert.match(warned.out, /auth: +single sign-on/);
+});
+
+test("a provider that says it names itself in every answer (RFC 9207) has an answer without its name refused", async () => {
+  provider.meta = { authorization_response_iss_parameter_supported: true };
+  const port = await freePort();
+  let started;
+  try {
+    started = await startServer(serverEnv(testHome("pithagoras-oidc-iss-"), port, oidcEnv(port)));
+  } finally {
+    provider.meta = {};
+  }
+  const at = started.base;
+  let flow = await begin(undefined, at);
+  const without = await finish(flow, await sign(claimsFor(flow)), { at });
+  assert.equal(without.status, 400);
+  assert.equal(cookieNamed(without, AUTH), undefined);
+  assert.match(await without.text(), /did not come from/);
+  flow = await begin(undefined, at);
+  assert.equal((await finish(flow, await sign(claimsFor(flow)), { at, query: { iss: issuer } })).status, 303);
+  started.child.kill();
+  await new Promise((r) => started.child.once("exit", r));
+});
+
+test("with no password to sign in with, a secret that is the guide's old command or short stops the portal at start", async () => {
+  for (const secret of ["$(openssl rand -hex 32)", "short-secret"]) {
+    const refusedStart = await startWith({ PORTAL_SECRET: secret, PORTAL_PASSWORD: "" });
+    assert.equal(refusedStart.code, 1, secret);
+    assert.match(refusedStart.err, /the secret is all the login cookie rests on/, secret);
+    const only = await startWith({ PORTAL_SECRET: secret, PORTAL_PASSWORD: PASSWORD, OIDC_ONLY: "1" });
+    assert.equal(only.code, 1, `${secret}, OIDC_ONLY`);
+  }
+  // A password in the key, as before single sign-on: the old command is warned about, and the portal starts.
+  const port = await freePort();
+  const { child } = await startServer(serverEnv(testHome("pithagoras-oidc-secret-"), port, oidcEnv(port, { PORTAL_SECRET: "$(openssl rand -hex 32)", PORTAL_PASSWORD: PASSWORD })));
+  child.kill();
+  await new Promise((r) => child.once("exit", r));
+});
+
+test("switching OIDC_ONLY on ends the logins the password gave", async () => {
+  const home = testHome("pithagoras-oidc-switch-");
+  const run = async (extra) => {
+    const port = await freePort();
+    return startServer(serverEnv(home, port, oidcEnv(port, { PORTAL_PASSWORD: PASSWORD, ...extra })));
+  };
+  const stop = async ({ child }) => { child.kill(); await new Promise((r) => child.once("exit", r)); };
+  const first = await run({});
+  const res = await fetch(`${first.base}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: PASSWORD }) });
+  const cookie = cookieNamed(res, AUTH).split(";")[0];
+  assert.equal((await fetch(`${first.base}/api/settings`, { headers: { Cookie: cookie } })).status, 200);
+  await stop(first);
+  // A restart that changes nothing keeps it.
+  const same = await run({});
+  assert.equal((await fetch(`${same.base}/api/settings`, { headers: { Cookie: cookie } })).status, 200, "same settings");
+  await stop(same);
+  const only = await run({ OIDC_ONLY: "1" });
+  assert.equal((await fetch(`${only.base}/api/settings`, { headers: { Cookie: cookie } })).status, 401, "the password is no way in any more");
+  await stop(only);
 });

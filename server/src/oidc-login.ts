@@ -174,9 +174,18 @@ async function verifyIdToken(provider: OidcProvider, idToken: string, nonce: str
   return claims;
 }
 
-/** The claims the ID token left out, from the userinfo endpoint: only for the same subject, and only what the allow-list reads. */
+/** What the allow-list reads of the claims. */
+const identityOf = (claims: JWTPayload, groupsClaim: string) =>
+  ({ sub: claims.sub!, email: claims.email, email_verified: claims.email_verified, groups: claims[groupsClaim] });
+
+/**
+ * The claims the ID token left out, from the userinfo endpoint: only for the same subject, and only what the
+ * allow-list reads. Not asked when the token lets the account in already, so that a userinfo endpoint that
+ * fails does not turn away somebody the token names.
+ */
 async function withUserinfo(provider: OidcProvider, claims: JWTPayload, accessToken: string | undefined): Promise<JWTPayload> {
   if (!provider.userinfoEndpoint || !accessToken || !needsUserinfo(claims, provider.config)) return claims;
+  if (admitted(identityOf(claims, provider.config.groupsClaim), provider.config)) return claims;
   let info: Record<string, unknown> | null = null;
   try {
     const res = await fetch(provider.userinfoEndpoint, {
@@ -208,6 +217,15 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
   const { config } = provider;
 
   router.get("/api/auth/oidc/start", (req, res) => {
+    // The state cookie is kept for the host it is set on, and the provider sends the browser back to the redirect
+    // URL's: a portal opened by another name (an IP, a Tailscale name) starts again there first. The target is the
+    // configured address, never the request's; `moved` stops a proxy that rewrites Host from sending it round again.
+    if (req.hostname.toLowerCase() !== config.redirectUrl.hostname.toLowerCase() && req.query.moved === undefined) {
+      const there = new URL("/api/auth/oidc/start", config.redirectUrl.origin);
+      there.searchParams.set("returnTo", safeReturnTo(req.query.returnTo));
+      there.searchParams.set("moved", "1");
+      return res.set("Cache-Control", "no-store").redirect(303, there.href);
+    }
     const pending: Pending = {
       state: random(), nonce: random(), verifier: random(), returnTo: safeReturnTo(req.query.returnTo), expires: Date.now() + STATE_TTL_MS,
     };
@@ -229,7 +247,9 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
     // Single use whatever happens next: the browser does not keep it.
     res.clearCookie(OIDC_STATE_COOKIE, cookieOptions(res));
     try {
-      if (!pending) throw new Refusal(400, "This sign-in was not started in this browser, or took too long. Start it again.", "no state cookie");
+      if (!pending) {
+        throw new Refusal(400, `This sign-in was not started in this browser, or took too long. Open the portal at ${config.redirectUrl.origin} and start it again.`, "no state cookie");
+      }
       const { state, code, error, iss } = req.query;
       if (typeof state !== "string" || !same(state, pending.state)) throw new Refusal(400, "This sign-in does not belong to this browser. Start it again.", "state does not match");
       if (!take(pending.state, pending.expires)) throw new Refusal(400, "This sign-in was used already. Start it again.", "state used before");
@@ -244,7 +264,7 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
 
       const tokens = await redeem(provider, code, pending.verifier);
       const claims = await withUserinfo(provider, await verifyIdToken(provider, tokens.idToken, pending.nonce), tokens.accessToken);
-      const by = admitted({ sub: claims.sub!, email: claims.email, email_verified: claims.email_verified, groups: claims[config.groupsClaim] }, config);
+      const by = admitted(identityOf(claims, config.groupsClaim), config);
       if (!by) {
         throw new Refusal(403, "The sign-in worked, but this account is not one that may use this portal.", `not on the allow-list: sub ${said(claims.sub)}${typeof claims.email === "string" ? `, email ${said(claims.email)}${claims.email_verified === true ? "" : " (not verified)"}` : ""}`);
       }

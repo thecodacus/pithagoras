@@ -106,6 +106,23 @@ if (passwordLogin) {
   if (!stamp || !isStamp(stamp, PASSWORD)) putSetting(LOGIN_STAMP, stampOf(PASSWORD));
 }
 
+/**
+ * Without a password that is a way in, the login cookie rests on the secret alone: everything else in its
+ * key (the issuer, the client ID, the allow-list) can be read or guessed from outside. A secret that is
+ * the guide's old command, or too short to be one nobody can guess, would let anybody make a login.
+ * Left out, the secret is a random one, which only costs the logins at a restart.
+ */
+const MIN_SECRET_LENGTH = 32;
+const givenSecret = process.env.PORTAL_SECRET ?? "";
+if (oidcConfig && !passwordLogin && givenSecret && (/^\$\(/.test(givenSecret) || givenSecret.length < MIN_SECRET_LENGTH)) {
+  console.error(
+    "\n  PORTAL_SECRET is a shell command or shorter than " + MIN_SECRET_LENGTH + " characters. With single sign-on and no\n" +
+      "  password login, the secret is all the login cookie rests on, so the portal refuses to start\n" +
+      "  with one that anybody could guess. Put the output of `openssl rand -hex 32` there.\n"
+  );
+  process.exit(1);
+}
+
 if (PASSWORD && oidcConfig?.only) {
   console.warn("\n  OIDC_ONLY is set: the password login is refused, and PORTAL_PASSWORD is not used to sign in.\n");
 }
@@ -130,8 +147,9 @@ if (!authEnabled) {
 /**
  * What the cookies are signed with: the secret and the password, so a new password refuses every old cookie,
  * and the single sign-on provider and its allow-list, so that a change to who may sign in does the same.
+ * The password only while it is a way in: switching OIDC_ONLY on ends the logins it gave.
  */
-const KEY = crypto.createHash("sha256").update(`${SECRET}\0${PASSWORD}${oidcConfig ? `\0${fingerprint(oidcConfig)}` : ""}`).digest();
+const KEY = crypto.createHash("sha256").update(`${SECRET}\0${passwordLogin ? PASSWORD : ""}${oidcConfig ? `\0${fingerprint(oidcConfig)}` : ""}`).digest();
 
 /** A key of its own for another purpose, from the same secret: the sign-in's state cookie is sealed with one. */
 export const keyFor = (purpose: string): Buffer => crypto.createHmac("sha256", KEY).update(`pithagoras:${purpose}`).digest();

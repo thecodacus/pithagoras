@@ -108,7 +108,12 @@ an allow-list names them: their subject, their verified email, or one of their
 groups. With all three lists empty, nobody gets in, and the portal says so when it
 starts. When the ID token leaves out a claim a list needs (some providers keep the
 email or the groups for the userinfo endpoint), the portal asks the userinfo
-endpoint for it.
+endpoint for it, unless the token lets the account in already.
+
+The sign-in through the provider ends at the address of `OIDC_REDIRECT_URL`. A
+button pressed on the portal opened by another name (its IP address, another host
+name) first sends the browser to that address, and you are signed in there. So
+open the portal at that address.
 
 With single sign-on set up, `PORTAL_PASSWORD` is optional, and the portal listens
 on every interface as it does with a password. When it starts, it reads the
@@ -117,11 +122,18 @@ itself by another issuer, does not offer PKCE with `S256`, or signs ID tokens wi
 nothing but a shared secret, the portal stops with a message rather than start
 with a login it cannot check.
 
+Without a password that signs you in (none set, or `OIDC_ONLY=1`), the login cookie
+rests on `PORTAL_SECRET` alone: the rest of what it is signed with, such as the
+issuer, the client ID and the allow-list, can be read or guessed from outside. The
+portal then refuses to start with a secret shorter than 32 characters or one that
+is the old `$(openssl rand -hex 32)` text. Set it to the output of that command.
+
 A login lasts 30 days, as with the password. When the provider's own session or
 token runs out, the portal's login does not end, and blocking an account at the
 provider does not end a login the account already has. Changing the issuer, the
 client ID or an allow-list ends every login made before, as changing the password
-does. So does changing `PORTAL_SECRET`.
+does. So do changing `PORTAL_SECRET`, and switching `OIDC_ONLY` on, which ends the
+logins the password gave.
 
 ### Authentik
 
