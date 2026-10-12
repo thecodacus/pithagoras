@@ -31,6 +31,7 @@ import { askPrimaryTool } from "./ask-primary.js";
 import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
+import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, portalBrowserOn, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
@@ -325,6 +326,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   /** The extensions' event bus, when this client made one. */
   bus?: { emit(channel: string, data: unknown): void };
   unbridge?: Bridge;
+  private unbridgeUi?: () => void;
 
   // Only to one running here that takes it: after a restart, the bus is new
   // and nobody on it, and "sent" would be a message that went nowhere.
@@ -337,6 +339,13 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   subagentStop(id: string): boolean {
     if (!this.bus || !this.unbridge?.takes(id, "stop")) return false;
     this.bus.emit(SUBAGENT_STOP, { id });
+    return true;
+  }
+
+  /** What a page says to an extension's own half in this chat: see extension-ui.ts. False where there is no bus to say it on. */
+  tellExtension(extension: string, data: unknown): boolean {
+    if (!this.bus) return false;
+    this.bus.emit(UI_RECEIVE, { extension, data });
     return true;
   }
 
@@ -593,6 +602,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
           return model ? { model } : {};
         },
       );
+      client.unbridgeUi = bridgeExtensionUi(eventBus, (event) => client.emit("event", event));
     }
     if (resourceLoader) {
       client.voiceFirst = voiceFirst;
@@ -1167,6 +1177,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   dispose(): void {
     this.unbridge?.();
+    this.unbridgeUi?.();
     if (this.disposed) return;
     this.disposed = true;
     this.canvases?.interrupt();

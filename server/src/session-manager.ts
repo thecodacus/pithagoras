@@ -286,6 +286,8 @@ const EPHEMERAL_EVENTS = new Set([
   "portal_reload",
   // The versions of a chat's messages, which a stream also starts with.
   "portal_versions",
+  // What an extension says to its browser half: the two keep their own state, and a page that opens later asks.
+  "portal_extension_ui",
 ]);
 
 /** How long a chat's pi may go unused before it is let go: see startReaper. */
@@ -532,8 +534,9 @@ class SessionManager extends EventEmitter {
   private record(sessionId: string, type: string, payload: unknown): EventRow | undefined {
     // A status line or a widget describes the chat; nobody is using it. An
     // extension that refreshes one every second kept the idle clock at zero, and
-    // the reaper never let go of the chat.
-    if (type !== "extension_ui_request" || isDialog((payload as { method?: unknown })?.method)) this.touch(sessionId);
+    // the reaper never let go of the chat. What an extension says to its
+    // browser half is the same: said on its own clock, with nobody there.
+    if (type !== "portal_extension_ui" && (type !== "extension_ui_request" || isDialog((payload as { method?: unknown })?.method))) this.touch(sessionId);
     if (EPHEMERAL_EVENTS.has(type)) {
       // Still deliver it to anyone attached right now, with a negative seq so
       // it can never be confused with a stored event during replay.
@@ -1051,6 +1054,17 @@ class SessionManager extends EventEmitter {
 
   subagentStop(sessionId: string, id: string): boolean {
     return this.live.get(sessionId)?.client.subagentStop?.(id) ?? false;
+  }
+
+  /**
+   * What a page says to an extension's own half in a chat, starting the chat's
+   * pi if it is not running: a panel opened on a chat left alone for a while
+   * still reaches its extension. False where the executor cannot reach the
+   * extensions.
+   */
+  async tellExtension(sessionId: string, extension: string, data: unknown): Promise<boolean> {
+    const client = await this.ensureClient(sessionId);
+    return client.tellExtension?.(extension, data) ?? false;
   }
 
   /** The session's model is being loaded, or has finished loading. */

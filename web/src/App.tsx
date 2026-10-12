@@ -27,6 +27,9 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
+import { setNavigate, startExtensions } from "./extensions/loader";
+import { extensionMessage } from "./extensions/channel";
+import { useSlot } from "./extensions/slots";
 
 // What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
 // open over them, are fetched when they are first opened, so that they are not in the file everyone waits for.
@@ -38,6 +41,7 @@ const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditP
 const BrowserPage = lazyComponent(() => import("./components/BrowserPage"), "BrowserPage");
 const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
 const ImagesPage = lazyComponent(() => import("./components/ImagesPage"), "ImagesPage");
+const ExtensionPage = lazyComponent(() => import("./components/ExtensionPage"), "ExtensionPage");
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
@@ -128,6 +132,8 @@ export default function App() {
       <Route path="/memory" element={<Shell view="memory" />} />
       <Route path="/images" element={<Shell view="images" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
+      {/* A page an extension brought: /x/<extension>/<page id>, and an extension's name may have a slash in it. */}
+      <Route path="/x/*" element={<Shell view="extension" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
       <Route path="/s/:sessionId/settings/:tab" element={<Shell settings />} />
@@ -147,10 +153,16 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit" | "extension";
 }) {
-  const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
+  const { sessionId, tab, "*": extensionPage = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
   const navigate = useNavigate();
+  // What the installed extensions draw in the portal: see extensions/loader.ts.
+  useEffect(() => {
+    setNavigate(navigate);
+    startExtensions();
+  }, [navigate]);
+  const pages = useSlot("nav.page");
   const [mobileNav, setMobileNav] = useState(false);
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
   // The drawer covers the page and keeps the keyboard; widened to a window with the sidebar in place, it is only the sidebar.
@@ -463,6 +475,12 @@ function Shell({
           reload();
           return;
         }
+        // An extension to what its browser half drew in this chat: theirs, and nothing of the conversation.
+        if (ev.type === "portal_extension_ui") {
+          const { extension, data } = ev.payload as { extension: string; data: unknown };
+          extensionMessage(sessionId, extension, data);
+          return;
+        }
         // Live-only events (dialogs) use a negative seq and must not move the
         // resume cursor, or reconnecting would skip real history.
         if (ev.seq > 0) seq = ev.seq;
@@ -686,7 +704,7 @@ function Shell({
         sessions={sessions}
         executor={executor}
         activeId={sessionId ?? null}
-        view={view}
+        view={view === "extension" ? `x/${extensionPage}` : view}
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
         hasImages={hasImages}
@@ -707,7 +725,7 @@ function Shell({
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
-          <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
+          <span className="truncate text-sm text-fg">{(view === "extension" && pages.find((p) => p.key === extensionPage)?.title) || active?.title || "Pithagoras"}</span>
         </header>
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
         {/* Not for the first miss: a server restarting, or a wifi that blinked,
@@ -756,6 +774,8 @@ function Shell({
           <ImagesPage />
         ) : view === "audit" ? (
           <AuditPage />
+        ) : view === "extension" ? (
+          <ExtensionPage entryKey={extensionPage} />
         ) : active ? (
           <Chat
             session={active}

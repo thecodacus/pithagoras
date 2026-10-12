@@ -7,6 +7,7 @@ import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
+import { clientHalf, type ClientHalf } from "../extension-ui.js";
 
 const run = promisify(execFile);
 
@@ -199,8 +200,65 @@ export async function switchPackage(spec: string, enabled: boolean): Promise<boo
   return stashed !== undefined;
 }
 
+/**
+ * The browser halves the portal loads: of the packages its own settings
+ * install, the ones switched on. Never a package a folder brings: an agent can
+ * write that folder, and what it put there would run in the page of everyone
+ * who opens the portal.
+ */
+async function clientHalves(): Promise<ClientHalf[]> {
+  const settings = readPiSettings();
+  const listed = Array.isArray(settings.packages) ? settings.packages : [];
+  const halves: ClientHalf[] = [];
+  for (const pkg of await installedPackages(settings)) {
+    if (!pkg.path || (pkg.scope && !/^user/i.test(pkg.scope))) continue;
+    const entry = listed.find((e) => sourceOf(e) === pkg.spec);
+    if (entry === undefined || isSwitchedOff(entry)) continue;
+    const half = clientHalf(pkg.path);
+    if (half && !halves.some((h) => h.name === half.name)) halves.push(half);
+  }
+  return halves;
+}
+
+/** Where a page fetches a file of a package's web folder from. */
+const clientUrl = (half: ClientHalf, file: string) =>
+  `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}?v=${half.rev}`;
+
 export function extensionsRouter(): Router {
   const router = express.Router();
+
+  router.get("/extension-ui", async (_req, res) => {
+    try {
+      const halves = await clientHalves();
+      res.json({
+        extensions: halves.map((half) => ({
+          name: half.name,
+          version: half.version,
+          entry: clientUrl(half, half.entry),
+          ...(half.style ? { style: clientUrl(half, half.style) } : {}),
+        })),
+      });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // A file of a package's web folder. The package's name may have a slash in it (`@scope/name`), so it is found by
+  // what the path starts with.
+  router.get("/extension-ui/*file", async (req, res) => {
+    try {
+      const asked = (req.params as unknown as { file: string[] }).file.join("/");
+      const half = (await clientHalves()).find((h) => asked.startsWith(`${h.name}/`));
+      const file = half ? asked.slice(half.name.length + 1) : "";
+      if (!half || !file) return res.status(404).json({ error: "Not found" });
+      // Asked for by the module's revision, so what a page holds is never stale; checked each time all the same.
+      res.sendFile(file, { root: half.dir, dotfiles: "deny", cacheControl: false, headers: { "Cache-Control": "no-cache" } }, (error) => {
+        if (error && !res.headersSent) res.status(404).json({ error: "Not found" });
+      });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
 
   router.get("/extensions", async (_req, res) => {
     try {

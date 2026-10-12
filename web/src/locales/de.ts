@@ -409,6 +409,8 @@ const de: Locale = {
     "Close the files": "Dateien schließen",
     "Git": "Git",
     "Close the git panel": "Git-Bereich schließen",
+    "Close {panel}": "{panel} schließen",
+    "Hide {panel}": "{panel} ausblenden",
     "Terminal": "Terminal",
     "Close the terminal": "Terminal schließen",
     "Speaker": "Sprecher",
@@ -732,6 +734,7 @@ const de: Locale = {
     "pi publishes no schema for extension settings, so these keys are recovered by reading the package's source. A key built dynamically at runtime won't appear here — use Advanced to edit settings.json directly.": "pi veröffentlicht kein Schema für Einstellungen von Erweiterungen, darum werden diese Schlüssel aus dem Quellcode des Pakets gelesen. Ein Schlüssel, der erst zur Laufzeit gebildet wird, erscheint hier nicht — bearbeite settings.json dann direkt unter Erweitert.",
     "pi's own settings file, where installed extensions keep their configuration.": "pis eigene Einstellungsdatei, in der installierte Erweiterungen ihre Konfiguration ablegen.",
     "Save file": "Datei speichern",
+    "Its interface could not be loaded: {reason}": "Die Oberfläche konnte nicht geladen werden: {reason}",
     // components/ConfirmDialog.tsx
     "OK": "OK",
     // components/ContextPill.tsx
@@ -784,6 +787,9 @@ const de: Locale = {
     "This part of the portal ran into a problem and could not be shown.": "Dieser Teil des Portals ist auf ein Problem gestoßen und konnte nicht angezeigt werden.",
     "Could not be opened": "Konnte nicht geöffnet werden",
     "The part of the portal that opens this could not be loaded. This happens when the portal was updated while this page was open.": "Der Teil des Portals, der dies öffnet, konnte nicht geladen werden. Das passiert, wenn das Portal aktualisiert wurde, während diese Seite offen war.",
+    // components/ExtensionPage.tsx
+    "This page's extension could not be loaded.": "Die Erweiterung dieser Seite konnte nicht geladen werden.",
+    "This page's extension is not installed, or is switched off.": "Die Erweiterung dieser Seite ist nicht installiert oder ausgeschaltet.",
     // components/ExtensionDialog.tsx
     "This question has expired. Your answer was not delivered.": "Diese Frage ist abgelaufen. Deine Antwort wurde nicht zugestellt.",
     "Extension": "Erweiterung",

@@ -15,6 +15,7 @@ import {
   LuImage,
   LuMessagesSquare,
   LuPlus,
+  LuPuzzle,
   LuSearch,
   LuSettings,
   LuShield,
@@ -27,6 +28,7 @@ import { pick, useFlip } from "../motion";
 import { HOME, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t, useLanguage } from "../i18n";
+import { useSlot } from "../extensions/slots";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
@@ -57,7 +59,7 @@ export const Sidebar = memo(function Sidebar({
   executor: string;
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
-  view: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
+  view: "chat" | Destination;
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
   /** Understory is the agent's memory: its page is there to read. */
@@ -79,6 +81,7 @@ export const Sidebar = memo(function Sidebar({
 }) {
   // Not drawn again with every token of a chat, so the language is asked for here.
   useLanguage();
+  const pages = useSlot("nav.page");
   const [storedCollapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
   const collapsed = forceExpanded ? false : storedCollapsed;
   const toggleSidebar = () => {
@@ -193,6 +196,13 @@ export const Sidebar = memo(function Sidebar({
     // And only while there is an image endpoint to make pictures with.
     ...(hasImages ? [{ to: "images" as const, icon: <LuImage />, label: t("Images") }] : []),
     { to: "audit", icon: <LuShield />, label: t("Audit") },
+    // The pages the installed extensions brought, after the portal's own.
+    // An extension's icon is a bare <svg>, sized here as the portal's own icons size themselves: by the text beside them.
+    ...pages.map((page) => ({
+      to: `x/${page.key}` as const,
+      icon: page.icon ? <span className="contents [&>svg]:h-[1em] [&>svg]:w-[1em]"><page.icon /></span> : <LuPuzzle />,
+      label: page.title,
+    })),
   ];
   const anyRunning = sessions.some((s) => s.status === "running");
 
@@ -358,7 +368,8 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
+/** A page of the portal's, or one an extension brought: `x/<extension>/<page id>`. */
+type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit" | `x/${string}`;
 
 function RailButton({
   icon,

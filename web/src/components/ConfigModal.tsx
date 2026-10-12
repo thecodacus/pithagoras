@@ -67,6 +67,7 @@ import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
+import { useExtensions } from "../extensions/loader";
 import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
 
@@ -1091,6 +1092,8 @@ function ExtensionsPanel({
 }) {
   const [spec, setSpec] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // Why a package's interface is not in the page, where it brings one: see extensions/loader.ts.
+  const { failures } = useExtensions();
   // The same, readable by a second Enter that comes before the draw.
   const busyRef = useRef(false);
   /** What the last switch did to the conversations that were open. */
@@ -1273,6 +1276,11 @@ function ExtensionsPanel({
 
                 {ext.description && (
                   <p className="mt-1 line-clamp-2 text-xs text-fg-subtle">{ext.description}</p>
+                )}
+                {failures[ext.name] && (
+                  <p role="alert" className="mt-1 break-words text-xs text-warn">
+                    {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}
+                  </p>
                 )}
 
                 <div className="mt-1.5 flex items-center gap-3">

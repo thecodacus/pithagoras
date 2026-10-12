@@ -22,7 +22,7 @@ import { createPortal } from "react-dom";
 import { Fragment, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -49,6 +49,8 @@ import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands"
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, SPLIT, SPLIT_LEAST, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
 import { labelOf, msg, t } from "../i18n";
+import { useSlot, type Panels } from "../extensions/slots";
+import { channelFor } from "../extensions/channel";
 import { tabKeys } from "../tab-keys";
 import { STEP, arrowSteps } from "../resize-keys";
 
@@ -77,10 +79,14 @@ const ASIDE: Record<Dock, string> = {
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
 
+type OwnPanel = "browser" | "agents" | "files" | "git" | "terminal";
+/** A panel an extension brought (the `chat.panel` slot), by its entry's key: `x:<extension>/<id>`. */
+type ExtensionPanel = `x:${string}`;
 /** The panels that sit beside the conversation, each in a place of its own. */
-type AsidePanel = "browser" | "agents" | "files" | "git" | "terminal";
-/** What each panel is called: in its header, and on its close button. */
-const PANEL: Record<AsidePanel, { label: string; close: string }> = {
+type AsidePanel = OwnPanel | ExtensionPanel;
+const isOwn = (kind: AsidePanel): kind is OwnPanel => !kind.startsWith("x:");
+/** What each of the portal's own panels is called: in its header, and on its close button. */
+const PANEL: Record<OwnPanel, { label: string; close: string }> = {
   browser: { label: msg("Browser"), close: msg("Close the browser") },
   agents: { label: msg("Subagents"), close: msg("Close the subagents") },
   files: { label: msg("Files"), close: msg("Close the files") },
@@ -124,7 +130,8 @@ const moveInto = (parent: HTMLElement, box: HTMLElement) => {
  * once per chat, holding nothing of it but these.
  */
 function panelBoxes(park: { readonly current: HTMLElement | null }, pressed: { readonly current: (kind: AsidePanel) => void }) {
-  const boxes: Partial<Record<AsidePanel, HTMLDivElement>> = {};
+  // By kind. A plain record: an extension's panel is of a kind no list names beforehand.
+  const boxes: Record<string, HTMLDivElement> = {};
   const slots: Partial<Record<AsidePanel, (el: HTMLDivElement | null) => void>> = {};
   const box = (kind: AsidePanel) => {
     let el = boxes[kind];
@@ -335,9 +342,47 @@ export function Chat({
   // again later or for another chat, is not sent back to it.
   const fileAnswered = useCallback(() => setFileAsked(null), []);
   useEffect(() => setFileAsked(null), [session.id]);
+  // The panels the installed extensions brought, and their controls for the header: see extensions/slots.ts.
+  const panelEntries = useSlot("chat.panel");
+  const headerActions = useSlot("chat.header.action");
+  const [extensionsOpen, setExtensionsOpen] = useState<readonly string[]>([]);
+  // Only what is still there: an extension taken out takes its panels with it.
+  const extensionPanels = extensionsOpen.filter((key) => panelEntries.some((entry) => entry.key === key));
+  const shownKey = extensionPanels.join("\n");
+  const showExtensionPanel = useCallback((key: string, show: boolean) => {
+    setExtensionsOpen((open) => (show ? (open.includes(key) ? open : [...open, key]) : open.filter((k) => k !== key)));
+  }, []);
+  /** An extension's own panels, for its controls in the header: the same object until one opens or closes. */
+  const panelsOf = useMemo(() => {
+    const shown = shownKey ? shownKey.split("\n") : [];
+    const made = new Map<string, Panels>();
+    return (extension: string): Panels => {
+      let panels = made.get(extension);
+      if (!panels) {
+        panels = {
+          isOpen: (id) => shown.includes(`${extension}/${id}`),
+          open: (id) => showExtensionPanel(`${extension}/${id}`, true),
+          close: (id) => showExtensionPanel(`${extension}/${id}`, false),
+        };
+        made.set(extension, panels);
+      }
+      return panels;
+    };
+  }, [shownKey, showExtensionPanel]);
+  const chat = useMemo(() => ({ id: session.id, title: session.title, workspace: session.workspace }), [session.id, session.title, session.workspace]);
+  // What closes each extension's panel, the same function each time it is drawn: it is handed to the extension's component.
+  const closers = useRef(new Map<string, () => void>());
+  const closerOf = (key: string) => {
+    let close = closers.current.get(key);
+    if (!close) closers.current.set(key, (close = () => showExtensionPanel(key, false)));
+    return close;
+  };
   useWorkPanels(
-    { browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else setCanvasOpen(false); },
+    {
+      browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen,
+      ...Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
+    },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
     // An edit not saved outweighs keeping Git in view: with both kept nothing
     // could go, and the fallback closed Files — edit and all — unasked.
@@ -355,7 +400,7 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal"].filter(Boolean) as AsidePanel[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1491,12 +1536,35 @@ export function Chat({
     if (voiceMode) void dictation.stop();
   }, [voiceMode, dictation.stop]);
 
-  const closePanel: Record<AsidePanel, () => void> = {
+  const closeOwn: Record<OwnPanel, () => void> = {
     browser: () => setWatching(false),
     agents: () => setAgentsOpen(false),
     files: () => void closeFiles(),
     git: () => setGit(false),
     terminal: () => setTerminal(false),
+  };
+  const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : showExtensionPanel(kind.slice(2), false));
+  /** The entry an extension's panel is drawn from. */
+  const entryOf = (kind: AsidePanel) => (isOwn(kind) ? undefined : panelEntries.find((entry) => entry.key === kind.slice(2)));
+  /** What a panel is called: in its header, and on its close button. */
+  const panelName = (kind: AsidePanel) => {
+    if (isOwn(kind)) return { label: t(PANEL[kind].label), close: t(PANEL[kind].close) };
+    const title = entryOf(kind)?.title ?? "";
+    return { label: title, close: t("Close {panel}", { panel: title }) };
+  };
+
+  /** What an extension's panel shows: its entry's component, made anew for each chat, which failing to draw takes down alone. */
+  const extensionBody = (kind: AsidePanel) => {
+    const entry = entryOf(kind);
+    if (!entry) return null;
+    const Body = entry.component;
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface" data-extension={entry.extension}>
+        <ErrorBoundary resetKey={`${entry.key}:${session.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
+          <Body key={session.id} chat={chat} channel={channelFor(session.id, entry.extension)} close={closerOf(entry.key)} />
+        </ErrorBoundary>
+      </div>
+    );
   };
 
   /** What is in a panel: its header, which carries it, and what it shows. */
@@ -1534,7 +1602,7 @@ export function Chat({
             ))}
           </div>
         ) : (
-          <span className="text-[11px] text-fg-subtle">{t(PANEL[kind].label)}</span>
+          <span className="text-[11px] text-fg-subtle">{panelName(kind).label}</span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
           {kind === "browser" && (
@@ -1549,9 +1617,9 @@ export function Chat({
             </button>
           )}
           <button
-            onClick={closePanel[kind]}
+            onClick={() => closePanel(kind)}
             title={t("Collapse")}
-            aria-label={t(PANEL[kind].close)}
+            aria-label={panelName(kind).close}
             className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
           >
             ✕
@@ -1604,6 +1672,7 @@ export function Chat({
           )}
         </div>
       )}
+      {extensionBody(kind)}
     </>
   );
 
@@ -1684,7 +1753,7 @@ export function Chat({
         key={kind}
         ref={asideRef(kind)}
         data-dock="float"
-        aria-label={t("{panel}, floating", { panel: t(PANEL[kind].label) })}
+        aria-label={t("{panel}, floating", { panel: panelName(kind).label })}
         style={{ left: at.x, top: at.y, width: at.w, height: at.h }}
         className={`chat-aside flex flex-col overflow-hidden ${ASIDE.float} ${onTop === kind ? "!z-[21]" : ""} ${COVER}`}
       >
@@ -1695,7 +1764,7 @@ export function Chat({
           title={t("Drag to resize")}
           role="button"
           tabIndex={0}
-          aria-label={t("Resize {panel}", { panel: t(PANEL[kind].label) })}
+          aria-label={t("Resize {panel}", { panel: panelName(kind).label })}
           aria-description={t("The arrow keys make the window larger or smaller, Home gives it its first size back.")}
           className="chat-aside-grip max-md:hidden"
         />
@@ -1748,6 +1817,12 @@ export function Chat({
               {t("interrupted — send a message to resume")}
             </span>
           )}
+          {/* The installed extensions' own controls. One that fails to draw is left out, and the header stays. */}
+          {headerActions.map((entry) => (
+            <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null}>
+              <entry.component key={session.id} chat={chat} channel={channelFor(session.id, entry.extension)} panels={panelsOf(entry.extension)} />
+            </ErrorBoundary>
+          ))}
           {agents.length > 0 && (
             <PanelToggle
               open={agentsOpen}
@@ -1796,6 +1871,14 @@ export function Chat({
           <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label={t("Session canvases")} title={t("Session canvases")}>
             <LuFileText />
           </PanelToggle>
+          {panelEntries.map((entry) => {
+            const open = extensionPanels.includes(entry.key);
+            return (
+              <PanelToggle key={entry.key} open={open} onClick={() => showExtensionPanel(entry.key, !open)} label={entry.title} title={open ? t("Hide {panel}", { panel: entry.title }) : entry.title}>
+                {entry.icon ? <entry.icon /> : <LuPuzzle />}
+              </PanelToggle>
+            );
+          })}
         </div>
         </div>
       </header>

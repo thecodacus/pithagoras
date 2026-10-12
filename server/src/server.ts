@@ -1298,6 +1298,23 @@ app.post("/api/sessions/:id/subagents/:agent/stop", (req, res) => {
   res.json({ ok: true });
 });
 
+// What an extension's browser half says to its own half in this chat: see extension-ui.ts.
+app.post("/api/sessions/:id/extension-ui", async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const extension = typeof req.body?.extension === "string" ? req.body.extension : "";
+  if (!extension) return res.status(400).json({ error: "Which extension it is for is missing" });
+  try {
+    if (!(await sessions.tellExtension(session.id, extension, req.body.data ?? null))) {
+      return res.status(409).json({ error: "The extension cannot be reached: this chat's agent does not run its extensions here" });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(`[portal] could not reach an extension of ${session.id}:`, e);
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
 // --- per-session config (the web equivalent of the TUI's slash commands) ---
 
 /**
