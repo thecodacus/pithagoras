@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuTrash2, LuUserX } from "react-icons/lu";
+import { LuBan, LuCircleCheck, LuGlobe, LuKeyRound, LuRefreshCw, LuShield, LuShieldAlert, LuShieldCheck, LuTrash2, LuUserX } from "react-icons/lu";
 import { confirmDialog } from "./ConfirmDialog";
 import { PageHeader, Stat } from "./PageHeader";
 import { ErrorBanner, LoadFailed, Segments } from "./SettingsUi";
@@ -25,6 +25,8 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   answered: { label: msg("You answered"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-accent" },
   browsed: { label: msg("Page opened"), icon: <LuGlobe className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
   cleared: { label: msg("Log cleared"), icon: <LuTrash2 className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
+  flagged: { label: msg("Suspected injection"), icon: <LuShieldAlert className="h-3.5 w-3.5" />, tone: "text-warn" },
+  trusted: { label: msg("You trusted"), icon: <LuShieldCheck className="h-3.5 w-3.5" />, tone: "text-ok" },
 };
 
 const FILTERS = [

@@ -25,6 +25,8 @@ import {
   getDb,
   getDefaultContextLimit,
   getSession,
+  recordAudit,
+  trustedResults,
   getSettingDefaults,
   getSettings,
   listAgentSessions,
@@ -78,8 +80,7 @@ import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, passwordLogin, requireAuth, signOut } from "./auth.js";
-import { endSessionUrl, oidc, oidcRouter } from "./oidc-login.js";
+import { authMode, changePassword, checkPassword, isAuthed, issueCookie, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -103,6 +104,7 @@ import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { applyOnStart } from "./sandbox/apply.js";
+import { trustFlagged } from "./pi/guard.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { logsRouter } from "./api/logs.js";
@@ -165,36 +167,49 @@ app.use(cookieParser());
 
 app.get("/api/auth/status", (req, res) => {
   const authed = isAuthed(req);
+  const mode = authMode();
+  // `setup` says that no password has been chosen yet: the page asks for one instead of for the password.
+  // The warning about a short one is said to a login only: to anyone else it would say which password to guess.
   res.json({
-    authRequired: authEnabled,
+    authRequired: mode !== "open",
     authed,
-    // What the login page offers: the provider's button, and the password form unless it is the only way.
-    ...(oidc ? { oidc: { name: oidc.config.name, only: !passwordLogin } } : {}),
-    // Said to a login only: to anyone else it would say which password to guess.
-    ...(authed && keptShortPassword ? { shortPassword: true } : {}),
+    ...(mode === "setup" ? { setup: true } : {}),
+    ...(authed && shortPassword() ? { shortPassword: true } : {}),
   });
 });
 
-// One count of attempts for every way in: a sign-in through the provider that fails counts like a wrong password.
-const loginAttempts = loginThrottle();
-
-app.post("/api/auth/login", loginAttempts, (req, res) => {
-  if (!authEnabled) return res.json({ ok: true });
-  if (!passwordLogin) return res.status(403).json({ error: `The password login is switched off. Sign in with ${oidc?.config.name}.` });
-  if (!checkPassword(req.body?.password)) {
+app.post("/api/auth/login", loginThrottle(), async (req, res) => {
+  const mode = authMode();
+  if (mode === "open") return res.json({ ok: true });
+  if (mode === "setup") return res.status(409).json({ error: "No password has been chosen yet.", setup: true });
+  if (!(await checkPassword(req.body?.password))) {
     return res.status(401).json({ error: "Wrong password" });
   }
   issueCookie(res);
   res.json({ ok: true });
 });
 
-app.post("/api/auth/logout", (req, res) => {
-  signOut(req, res);
-  const endSession = endSessionUrl();
-  res.json({ ok: true, ...(endSession ? { endSession } : {}) });
+// The first password, chosen by whoever opens a portal that has none yet: signed in with it at once.
+app.post("/api/auth/setup", async (req, res) => {
+  const refused = await setUpPassword(req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
+  issueCookie(res);
+  res.json({ ok: true });
 });
 
-app.use(oidcRouter(loginAttempts));
+// Throttled like the login, since it too takes a guess at the password. Every other login ends with the change,
+// and this browser is signed in again under the new one.
+app.post("/api/auth/password", requireAuth, loginThrottle(), async (req, res) => {
+  const refused = await changePassword(req.body?.current, req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
+  issueCookie(res);
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  signOut(req, res);
+  res.json({ ok: true });
+});
 
 // Understory's model server, in "the chat's" mode: its own token, not a portal login.
 app.use(memoryLlmRouter((id) => sessions.currentModel(id)));
@@ -839,6 +854,8 @@ const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
+  // The results flagged as a suspected prompt injection that the person trusted, for the chat to say so.
+  trustedResults: [...trustedResults(s.id)],
 });
 
 app.get("/api/sessions", (_req, res) => {
@@ -1032,6 +1049,43 @@ const editFailure = (res: express.Response, e: unknown) => {
   if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
   res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
 };
+
+/**
+ * The person trusts a result the guard flagged as a suspected prompt injection
+ * in this conversation: it no longer holds the conversation back. Removing the
+ * turn it is in, the other way out, is the message removal below.
+ */
+app.post("/api/sessions/:id/flagged/:result/trust", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "No such conversation" });
+  if (!/^[0-9a-f]{16}$/.test(req.params.result)) return res.status(400).json({ error: "That is not a flagged result" });
+  trustFlagged(session.id, req.params.result);
+  recordAudit({ kind: "trusted", reason: "You looked at a result flagged as a suspected prompt injection and trusted it", sessionId: session.id });
+  res.json({ ok: true });
+});
+
+/**
+ * Takes back a message that was sent mid-run and that the agent has not read
+ * yet; 409 once it has. `/send` stops the run and sends it first instead, the
+ * others behind it in their order.
+ */
+app.delete("/api/sessions/:id/queued/:seq", async (req, res) => {
+  try {
+    await sessions.takeBackWaiting(req.params.id, Number(req.params.seq), false);
+    res.json({ ok: true });
+  } catch (e) {
+    editFailure(res, e);
+  }
+});
+
+app.post("/api/sessions/:id/queued/:seq/send", async (req, res) => {
+  try {
+    await sessions.takeBackWaiting(req.params.id, Number(req.params.seq), true);
+    res.json({ ok: true, status: "running" });
+  } catch (e) {
+    editFailure(res, e);
+  }
+});
 
 /** Removes a message and the agent's answer to it. */
 app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
@@ -1639,7 +1693,7 @@ const tls =
     ? { cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }
     : null;
 
-const host = bindHost(authEnabled, process.env.ALLOW_OPEN);
+const host = bindHost(authMode() !== "open", process.env.ALLOW_OPEN);
 // Before anything can start a run: a catch-up routine marked running in the same
 // moment would be taken for one the last server left.
 const cutOff = sessions.recoverOrphans();
@@ -1651,7 +1705,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
-  console.log(`  auth:     ${authEnabled ? [passwordLogin && "password", oidc && `single sign-on (${oidc.config.issuer})`].filter(Boolean).join(" + ") : "DISABLED"}`);
+  console.log(`  auth:     ${{ password: "password", setup: "waiting for a password to be chosen", open: "DISABLED" }[authMode()]}`);
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();

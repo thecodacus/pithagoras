@@ -35,7 +35,7 @@ function Fixture() {
   const session: Session = { id: chat, title: 'A little room to think', workspace: '/workspaces/pithagoras', executor: 'host', status: running ? 'running' : 'idle', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' };
   return <>
     <main data-testid="workspace" style={{ maxWidth: 980, height: 'calc(100vh - 96px)', minHeight: 540, margin: '16px auto 0' }}>
-      <Chat session={session} events={events} onClientCommand={() => {}} onEditMessage={async () => {}} onDeleteMessage={async () => {}} onRename={async () => {}} onAbort={async () => { setAborted(n => n + 1); setRunning(false); }} onSend={async (message, options) => {
+      <Chat session={session} events={events} onClientCommand={() => {}} onEditMessage={async () => {}} onDeleteMessage={async () => {}} onTakeBackQueued={async () => {}} onSendQueuedNow={async () => {}} onRename={async () => {}} onAbort={async () => { setAborted(n => n + 1); setRunning(false); }} onSend={async (message, options) => {
         setVoiceSend(options?.voice === true);
         setLastSend(JSON.stringify({ message, images: options?.images?.length ?? 0, steer: options?.steer === true }));
         setSent(n => n + 1); setRunning(true);

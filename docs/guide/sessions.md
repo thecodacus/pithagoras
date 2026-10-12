@@ -23,7 +23,12 @@ not wait for the work to finish. Close the tab if you like.
 While a run is in progress you can keep typing. Words sent mid-run steer it: the
 agent takes them in after the step it is on, instead of when the whole run is
 over. Until then the message sits in the transcript marked *Waiting — goes in
-after the current step*. A message that did not get that far — the run was
+after the current step*. While it waits it can be changed: press ↑ in an empty
+box to take the latest waiting message back into the box (with its pictures) and
+send it again when you are done, or use the buttons under it to delete it or to
+**send it directly**, which stops the run and sends that message at once, with
+the others still waiting going in behind it in their order. Once the agent has
+taken a message in, it can no longer be taken back. A message that did not get that far — the run was
 stopped, or the portal restarted, before the agent took it in — says so and has
 a button to send it again. **Stop** aborts the current run, and pressed while pi
 is still starting for a message, it keeps that message from being sent at all:

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -297,6 +297,18 @@ test("a version whose conversation pi's file no longer starts with is refused, a
   assert.deepEqual(sessions.messageVersions("replaced"), { [vAgain]: [seqs[1], vAgain] });
 });
 
+/**
+ * A disk that takes nothing more in `dir`, and gives it back. The folder is put
+ * aside and a file left in its place, so a write under it fails for every user;
+ * permissions would not do it, as root ignores them and the tests also run as root.
+ */
+function fullDisk(dir) {
+  return {
+    fill: () => { renameSync(dir, `${dir}.away`); writeFileSync(dir, ""); },
+    empty: () => { if (statSync(dir).isFile()) { rmSync(dir); renameSync(`${dir}.away`, dir); } },
+  };
+}
+
 test("a version kept when there was no file of pi's is refused once there is one", async () => {
   const { file, seqs } = chat("nofile", ["g", "h"]);
   const text = readFileSync(file, "utf8");
@@ -323,20 +335,21 @@ test("a switch whose file and then whose putting back both fail still shows what
   const lAgain = sentMessages("twice")[1].seq;
   const shown = readFileSync(moved, "utf8");
   // Once cut, the disk takes nothing more, and keeping the version being taken fails too.
+  const disk = fullDisk(dir);
   const cut = sessions.cut;
   sessions.cut = async function (...args) {
     const done = await cut.apply(this, args);
-    chmodSync(dir, 0o500);
+    disk.fill();
     getDb().exec(`CREATE TRIGGER no_keep BEFORE INSERT ON message_versions WHEN NEW.seq = ${seqs[1]} BEGIN SELECT RAISE(ABORT, 'database is locked'); END`);
     const undo = done.undo;
-    return { ...done, undo: async () => (chmodSync(dir, 0o700), undo()) };
+    return { ...done, undo: async () => (disk.empty(), undo()) };
   };
   try {
     // The error from the rollback took the place of the switch's own, and what was shown was never put back.
-    await assert.rejects(sessions.switchVersion("twice", lAgain, seqs[1]), /EACCES|permission/);
+    await assert.rejects(sessions.switchVersion("twice", lAgain, seqs[1]), /ENOTDIR|not a directory/);
   } finally {
     sessions.cut = cut;
-    chmodSync(dir, 0o700);
+    disk.empty();
     getDb().exec("DROP TRIGGER IF EXISTS no_keep");
   }
   assert.deepEqual(sentMessages("twice").map((m) => m.message), ["k", "l again"]);
@@ -386,17 +399,18 @@ test("a switch undone on a disk that takes nothing more still shows the conversa
   await until(() => answers("fulldisk").includes("answer to s2 again"));
   const again = sentMessages("fulldisk")[1].seq;
   // Once cut, the disk takes nothing more: not the switch's file, and not the undoing's either.
+  const disk = fullDisk(dir);
   const cut = sessions.cut;
   sessions.cut = async function (...args) {
     const done = await cut.apply(this, args);
-    chmodSync(dir, 0o500);
+    disk.fill();
     return done;
   };
   try {
-    await assert.rejects(sessions.switchVersion("fulldisk", again, seqs[1]), /EACCES|permission/);
+    await assert.rejects(sessions.switchVersion("fulldisk", again, seqs[1]), /ENOTDIR|not a directory/);
   } finally {
     sessions.cut = cut;
-    chmodSync(dir, 0o700);
+    disk.empty();
   }
   // The file was written first and threw: the transcript was never put back, and neither version could be reached.
   assert.deepEqual(sentMessages("fulldisk").map((m) => m.message), ["s1", "s2 again"]);

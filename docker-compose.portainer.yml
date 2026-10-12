@@ -27,34 +27,20 @@ services:
       PORTAL_CONTAINER_NAME: pithagoras
       # With host networking the portal binds PORT directly on the host.
       PORT: ${PORT:-4100}
+      # The password is chosen in the browser on the first start and kept in the
+      # portal's database. This is read only by a portal upgraded from a release
+      # that took its password from here, to move it there once; it is ignored after.
       PORTAL_PASSWORD: ${PORTAL_PASSWORD:-}
-      # The portal refuses to start without a password unless this is set, so an
-      # empty or misspelt PORTAL_PASSWORD cannot quietly open the port. Set it
+      # Runs the portal with no login at all and no password to choose. Set it
       # only for a portal behind a reverse proxy which authenticates already;
       # then nothing here stops whoever reaches the port.
       PORTAL_ALLOW_NO_PASSWORD: ${PORTAL_ALLOW_NO_PASSWORD:-}
-      # Without a password the portal listens on 127.0.0.1 only, which a proxy on
+      # Without a login the portal listens on 127.0.0.1 only, which a proxy on
       # this host reaches and one in another container does not. Set this to 1 for
       # that proxy; then nothing but the proxy's own login stands in the way.
       ALLOW_OPEN: ${ALLOW_OPEN:-}
       # Keeps logins valid across restarts; generate with: openssl rand -hex 32
       PORTAL_SECRET: ${PORTAL_SECRET:-}
-      # Single sign-on through an OpenID Connect provider, instead of the password or
-      # beside it. Only OIDC_ISSUER, OIDC_CLIENT_ID, the redirect URL and an
-      # allow-list are needed; see docs/guide/deploying.md, "Single sign-on".
-      OIDC_ISSUER: ${OIDC_ISSUER:-}
-      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
-      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
-      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
-      PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-}
-      OIDC_SCOPES: ${OIDC_SCOPES:-}
-      OIDC_NAME: ${OIDC_NAME:-}
-      OIDC_ONLY: ${OIDC_ONLY:-}
-      OIDC_ALLOWED_EMAILS: ${OIDC_ALLOWED_EMAILS:-}
-      OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
-      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-}
-      OIDC_ALLOWED_SUBJECTS: ${OIDC_ALLOWED_SUBJECTS:-}
-      OIDC_END_SESSION: ${OIDC_END_SESSION:-}
       # The time zone of the portal's clock, such as Europe/Berlin. It is UTC unless
       # this says otherwise, and the quiet hours of an agent's heartbeat and a
       # repeating routine's schedule are read on that clock.

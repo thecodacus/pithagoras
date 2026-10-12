@@ -1,9 +1,8 @@
 # Deploying
 
 Pithagoras ships as a container. It expects to run somewhere private — there is
-a single login (a password, or a [single sign-on](#single-sign-on) provider) and
-no per-user separation, so put it behind Tailscale or a VPN rather than on a
-public address.
+a single password and no per-user separation, so put it behind Tailscale or a
+VPN rather than on a public address.
 
 ## Docker Compose
 
@@ -13,26 +12,30 @@ cd Pithagoras
 ```
 
 Create a `.env` next to `docker-compose.yml`. This writes one, with a secret of
-its own (change the password and the folder first, between the single quotes,
-where `%`, `$` and `\` are taken as they are, and neither can hold a `'`):
+its own (change the folder first, between the single quotes, where `%`, `$` and
+`\` are taken as they are, and it cannot hold a `'`):
 
 ```bash
-printf "PORTAL_PASSWORD='%s'\nWORKSPACES_DIR='%s'\nPORTAL_SECRET=%s\n" 'something-long' '/path/to/repos' "$(openssl rand -hex 32)" > .env
+printf "WORKSPACES_DIR='%s'\nPORTAL_SECRET=%s\n" '/path/to/repos' "$(openssl rand -hex 32)" > .env
 ```
 
-The two typed values go into the file in single quotes on purpose. Compose reads
-a `.env` value without quotes as its own syntax: `$name` becomes a variable (or
+The typed value goes into the file in single quotes on purpose. Compose reads a
+`.env` value without quotes as its own syntax: `$name` becomes a variable (or
 nothing), `$$` becomes one `$`, and ` #` starts a comment. The portal would then
-get another password than the one you typed, and the sign-in would refuse it.
-Between single quotes the value is taken as it is. If you write the file by
-hand, quote a password that has a `$` or a `#` in it the same way.
+get another folder than the one you typed. Between single quotes the value is
+taken as it is. If you write the file by hand, quote a value that has a `$` or a
+`#` in it the same way.
+
+There is no password in it: the portal asks for one in the browser the first
+time you open it, see [The password](#the-password).
 
 Write `PORTAL_SECRET=` followed by the output of `openssl rand -hex 32` if you
 make the file by hand. Compose does not run commands in a `.env`: the text
 `PORTAL_SECRET=$(openssl rand -hex 32)` would be the secret itself, the same for
 everyone who copied it from here. The portal says so when it starts with one.
 
-`.env.example` lists every variable Compose reads. `WORKSPACES_DIR` is the host
+`.env.example` lists every variable Compose reads, bar `PORTAL_PASSWORD`, which only
+an install from before has. `WORKSPACES_DIR` is the host
 folder your repositories are in, and it is required: there is no default, and
 Compose stops with a message until it is set, rather than mount a folder nobody
 chose. `PORTAL_DATA_DIR` (optional) is an absolute host path to keep the
@@ -50,13 +53,65 @@ Then:
 docker compose up -d --build
 ```
 
-Open `http://<host>:4100`, sign in, and add a model provider under **Settings →
-Providers** — the setup assistant offers to find a local server, or take a key.
-Nothing else is needed for a first chat.
+Open `http://<host>:4100`, choose a password when the page asks for one, and add
+a model provider under **Settings → Providers** — the setup assistant offers to
+find a local server, or take a key. Nothing else is needed for a first chat.
 
 The portal listens on `:4100`. Compose uses `network_mode: host`, so it binds
 that port directly on the host — which is also what lets pi reach a llama-server
 running on the same machine at `localhost`.
+
+## The password
+
+The portal runs arbitrary commands on the host, so it is behind one password. The
+password is chosen in the browser and kept, hashed (scrypt), in the portal's
+database; there is no `PORTAL_PASSWORD` to set, in Compose, in `.env` or anywhere
+else.
+
+**The first start.** A portal with no password shows a page that asks for one, at
+least 8 characters, typed twice, and signs you in with it. Until it is chosen the
+portal answers nothing else, and **whoever opens it first chooses the password**:
+open it yourself as soon as it is up, and keep the port closed to others until
+you have, which is easy on Tailscale or a VPN and not on a public address. The
+log says it is waiting. This works the same in Docker and on a headless machine:
+open the address from any browser that can reach it.
+
+**Changing it.** **Settings → Password** takes the current password and the new
+one twice; it signs out every other browser, and closes every chat view, terminal and
+browser stream that was open, in the one you changed it in as well (that page opens
+them again with its new login). See [Settings](/guide/settings#password).
+
+**An install from before.** A portal that took its password from `PORTAL_PASSWORD`
+moves it into the database on its first start after the upgrade and says so in the
+log. The variable is ignored from then on (a value that differs from the password
+in the database is said to be ignored at each start), so remove it from `.env`.
+Logins made before the upgrade are asked for the password once more. See
+[Upgrading](/guide/upgrading#the-password-moves-into-the-database).
+
+### A lost password
+
+Nothing recovers a password from the portal, which keeps only its hash. A server
+command removes it instead, after asking you to type `reset`:
+
+```bash
+# Docker Compose (the container is called pithagoras in both Compose files)
+docker exec -it pithagoras node server/dist/reset-password.js
+
+# Native, from the folder the portal runs from (or with the same DATA_DIR)
+npm run reset-password
+```
+
+A running portal needs no restart: it is waiting on its setup screen at once, every
+login is ended and so is every chat view, terminal and browser stream that was open
+(within a couple of seconds), and you choose a new password as on the first start (so
+do it straight away, for the same reason). A leftover `PORTAL_PASSWORD` is not read
+again, so the reset cannot be undone by a restart.
+
+A portal that was started with `PORTAL_ALLOW_NO_PASSWORD=1` and a password is not
+opened by the reset either: it waits on the setup screen like any other. A *restart*
+with the variable still set and no password does run with no login (on this machine
+only, unless `ALLOW_OPEN=1`), so choose a new password before restarting, or take the
+variable out. The command says so when the variable is set where it runs.
 
 ## HTTPS
 
@@ -65,116 +120,6 @@ HTTPS or on `localhost`, and the embedded browser needs it. Either put a proxy
 in front (`tailscale serve` is the shortest), or give the portal the
 certificate itself: mount the folder with `PORTAL_TLS_DIR` (it appears at
 `/certs`) and set `PORTAL_TLS_CERT` and `PORTAL_TLS_KEY` to the files in it.
-
-## Single sign-on
-
-The portal can sign you in through an OpenID Connect provider (Authentik,
-Keycloak, Entra ID, Google, Zitadel, Authelia and the like), instead of the
-password or beside it. The login page then has a **Sign in with …** button. What
-the provider lets in gets the same login cookie the password gives, so the API,
-the event streams and the agent's browser work as they do with a password. It is
-still one login for one person: everyone on the allow-list below signs in as the
-same user.
-
-At the provider, make an OpenID Connect client for the authorization code flow:
-
-- Redirect URI: the portal's address followed by `/api/auth/oidc/callback`, such
-  as `https://portal.example.com/api/auth/oidc/callback`.
-- Confidential, with a client secret, or public without one: the portal uses PKCE
-  either way.
-- With `OIDC_END_SESSION=1`, also allow the portal's address with a `/` at the end
-  (`https://portal.example.com/`) as the post-logout redirect URI.
-
-Then set, in `.env`:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `OIDC_ISSUER` | — | The provider's issuer URL, exactly as its `/.well-known/openid-configuration` names it (a trailing `/` counts). `https` only, plain `http` only for a provider on the same machine. Setting it switches single sign-on on. |
-| `OIDC_CLIENT_ID` | — | Required with `OIDC_ISSUER`. |
-| `OIDC_CLIENT_SECRET` | — | The client's secret. Leave it out for a public client. |
-| `OIDC_REDIRECT_URL` | from `PORTAL_PUBLIC_URL` | The redirect URI as registered at the provider. It must end in `/api/auth/oidc/callback`. The portal never works it out from the address a request came to. |
-| `PORTAL_PUBLIC_URL` | — | The portal's address, such as `https://portal.example.com`. Only used to make the redirect URL when `OIDC_REDIRECT_URL` is not set. |
-| `OIDC_SCOPES` | `openid email profile` | The scopes asked for. They must include `openid`. |
-| `OIDC_NAME` | `SSO` | What the button says after "Sign in with". |
-| `OIDC_ONLY` | — | `1` hides the password form and refuses the password login. |
-| `OIDC_ALLOWED_EMAILS` | — | Email addresses that may sign in, comma-separated. Only counts when the provider says the email is verified (`email_verified`). Case does not matter. |
-| `OIDC_ALLOWED_GROUPS` | — | Groups that may sign in, comma-separated, compared exactly. Read from the claim `OIDC_GROUPS_CLAIM`. |
-| `OIDC_GROUPS_CLAIM` | `groups` | The claim the groups are in. |
-| `OIDC_ALLOWED_SUBJECTS` | — | The provider's subject IDs (`sub`) that may sign in, comma-separated. |
-| `OIDC_END_SESSION` | — | `1` sends the browser on to the provider's sign-out page after the portal's own sign-out, where the provider has one. |
-
-Nobody gets in just because the provider knows them. Someone signs in only when
-an allow-list names them: their subject, their verified email, or one of their
-groups. With all three lists empty, nobody gets in, and the portal says so when it
-starts. When the ID token leaves out a claim a list needs (some providers keep the
-email or the groups for the userinfo endpoint), the portal asks the userinfo
-endpoint for it, unless the token lets the account in already.
-
-The sign-in through the provider ends at the address of `OIDC_REDIRECT_URL`. A
-button pressed on the portal opened by another name (its IP address, another host
-name) first sends the browser to that address, and you are signed in there. So
-open the portal at that address.
-
-With single sign-on set up, `PORTAL_PASSWORD` is optional, and the portal listens
-on every interface as it does with a password. When it starts, it reads the
-provider's discovery document and keys. If the provider cannot be reached, calls
-itself by another issuer, does not offer PKCE with `S256`, or signs ID tokens with
-nothing but a shared secret, the portal stops with a message rather than start
-with a login it cannot check.
-
-Without a password that signs you in (none set, or `OIDC_ONLY=1`), the login cookie
-rests on `PORTAL_SECRET` alone: the rest of what it is signed with, such as the
-issuer, the client ID and the allow-list, can be read or guessed from outside. The
-portal then refuses to start with a secret shorter than 32 characters or one that
-is the old `$(openssl rand -hex 32)` text. Set it to the output of that command.
-
-A login lasts 30 days, as with the password. When the provider's own session or
-token runs out, the portal's login does not end, and blocking an account at the
-provider does not end a login the account already has. Changing the issuer, the
-client ID or an allow-list ends every login made before, as changing the password
-does. So do changing `PORTAL_SECRET` and switching `OIDC_ONLY` on or off: that ends
-every login, the provider's too, so everyone signs in again.
-
-### Authentik
-
-Under **Applications**, create an application with an **OAuth2/OpenID Provider**,
-client type *Confidential*, and the redirect URI above (mode *strict*). The issuer
-is shown on the provider's page, with a `/` at the end:
-
-```bash
-OIDC_ISSUER=https://authentik.example.com/application/o/pithagoras/
-OIDC_CLIENT_ID=<Client ID>
-OIDC_CLIENT_SECRET=<Client Secret>
-OIDC_REDIRECT_URL=https://portal.example.com/api/auth/oidc/callback
-OIDC_NAME=Authentik
-OIDC_ALLOWED_GROUPS=Pithagoras users
-```
-
-The `profile` scope carries the names of the user's groups in `groups`.
-
-### Keycloak
-
-In the realm, create a client: *OpenID Connect*, **Client authentication** on,
-**Standard flow** on, the redirect URI above under **Valid redirect URIs**, and the
-portal's address under **Valid post logout redirect URIs**. Copy the secret from
-**Credentials**:
-
-```bash
-OIDC_ISSUER=https://keycloak.example.com/realms/home
-OIDC_CLIENT_ID=pithagoras
-OIDC_CLIENT_SECRET=<secret>
-OIDC_REDIRECT_URL=https://portal.example.com/api/auth/oidc/callback
-OIDC_NAME=Keycloak
-OIDC_ALLOWED_EMAILS=you@example.com
-OIDC_END_SESSION=1
-```
-
-The email counts only when **Email verified** is on for the user. For groups, add a
-**Group Membership** mapper named `groups` to the client's dedicated scope, with
-**Full group path** off.
-
-Entra ID does not send `email_verified`, so an email list lets nobody in there. Use
-`OIDC_ALLOWED_SUBJECTS` or groups (Entra gives the groups' object IDs).
 
 ## Workspace paths
 
@@ -286,6 +231,7 @@ Inside `/data`:
 | `/data/sessions/<id>` | Per-session working area, and pi's file of the chat's conversation: it is what the agent remembers. Do not clear it |
 | `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings, skills and packages |
 | `/data/channels` | Installed third-party channel packages |
+| `/data/channel-state` | What a channel keeps between its starts, such as where Signal's stream was |
 | `/data/agent-home` | The first agent's home: its `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` |
 | `/data/agents/<id>` | The home of every other [agent](/guide/agents) |
 | `/data/images` | The pictures the [Images page](/guide/images) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |
@@ -385,14 +331,13 @@ anyway. This is the right home for `apt-get install` lines.
 
 ## Environment
 
-Everything here is optional except the password (or [single sign-on](#single-sign-on),
-whose variables are listed there) and, with the Compose files, `WORKSPACES_DIR`.
+Everything here is optional except, with the Compose files, `WORKSPACES_DIR`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORTAL_PASSWORD` | — | Required unless [single sign-on](#single-sign-on) is set up. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one or single sign-on. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
-| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. See [Running without a password](#running-without-a-password). |
-| `ALLOW_OPEN` | — | `1` makes a portal with no password listen on every interface instead of `127.0.0.1` only. Both Compose files pass it. |
+| `PORTAL_PASSWORD` | — | Not a setting any more: the password is chosen in the browser ([The password](#the-password)). An install from before that has it set has it moved into the database once, on the first start after the upgrade, and the variable is ignored from then on. |
+| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all, and with no password to choose. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. See [Running without a password](#running-without-a-password). |
+| `ALLOW_OPEN` | — | `1` makes a portal with no login listen on every interface instead of `127.0.0.1` only. Both Compose files pass it. |
 | `PORTAL_SECRET` | random | Signs the session cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Port to listen on. |
 | `TZ` | UTC | The time zone of the portal's clock, such as `Europe/Berlin`. A container keeps UTC unless it is told one. The quiet hours of an [agent's heartbeat](/guide/agents#its-heartbeat) and the schedule of a repeating [routine](/guide/routines) are read on this clock. Both Compose files pass it from `.env` or the shell. |
@@ -450,8 +395,7 @@ node --input-type=module -e 'import Database from "better-sqlite3"; const db = n
 
 A working installation prints `{ ok: 1 }`.
 
-The server needs the `pi` CLI on your `PATH`, as the image has it, and a
-password, as above. Everything it keeps for itself goes in `./data` unless you
+The server needs the `pi` CLI on your `PATH`, as the image has it. Everything it keeps for itself goes in `./data` unless you
 set `DATA_DIR`: the database, `bin/`, `agent-home/`, `channels/` and the local
 browser's profile. Nothing is written to `/data`, which only the image has.
 The one exception is pi's conversation files, which go to `./data/sessions`
@@ -460,12 +404,12 @@ unless `SESSION_DIR` is set, also when `DATA_DIR` is: set both, or a moved
 
 ```bash
 npm install
-PORTAL_PASSWORD='a password of 8 or more characters' npm run dev:server   # API on :4100
+npm run dev:server   # API on :4100
 npm run dev:web      # Vite dev server, proxying to it
 ```
 
-To try it without a login, set
-`PORTAL_ALLOW_NO_PASSWORD=1` instead of the password; the server then listens on
+The page asks for a password the first time. To try it without a login, set
+`PORTAL_ALLOW_NO_PASSWORD=1` for the server instead; it then listens on
 `127.0.0.1` only, unless `ALLOW_OPEN=1` is set.
 
 And the docs site you are reading:
@@ -513,12 +457,14 @@ Existing session directories must be writable by that portal user. For a custom 
 
 ## Running without a password
 
-Without `PORTAL_PASSWORD` the portal does not start: it runs arbitrary commands, so an empty or misspelt password must not quietly open the port. [Single sign-on](#single-sign-on) is a login too: with `OIDC_ISSUER` set, neither setting below is needed. Otherwise two settings, both deliberate, change that:
+A portal with no password does not run without a login by itself: it waits on the page that asks for one ([The password](#the-password)), and answers nothing else. Two settings, both deliberate, run it with no login at all instead:
 
-- `PORTAL_ALLOW_NO_PASSWORD=1` lets it start with no login. It then listens on `127.0.0.1` only, so a reverse proxy on the same host reaches it and nothing else does.
+- `PORTAL_ALLOW_NO_PASSWORD=1` lets it start with no login and no password to choose (there is none to change in Settings either). It then listens on `127.0.0.1` only, so a reverse proxy on the same host reaches it and nothing else does.
 - `ALLOW_OPEN=1` on top of that makes it listen on every interface. This is what a proxy in another container, or on another machine, needs; anyone who can reach the port can then run commands, so the port must be closed to everything but the proxy.
 
-Both Compose files pass both variables on. They bind to the host (`network_mode: host`), so `127.0.0.1` there is the host's own loopback, which a container on Docker's bridge network cannot reach: for a proxy in such a container, set `ALLOW_OPEN=1` and keep the port closed with the host's firewall. With a password, the portal listens on every interface and neither is needed.
+A password the portal already holds wins over `PORTAL_ALLOW_NO_PASSWORD`: the login applies, and a password removed with the reset command leaves the running portal on its setup screen, not open. Only a start with no password at all runs with no login.
+
+Both Compose files pass both variables on. They bind to the host (`network_mode: host`), so `127.0.0.1` there is the host's own loopback, which a container on Docker's bridge network cannot reach: for a proxy in such a container, set `ALLOW_OPEN=1` and keep the port closed with the host's firewall. With a password, or while it waits for one, the portal listens on every interface and neither is needed.
 
 Login attempts are limited per direct network source. A reverse proxy shares that limit across its clients; untrusted forwarding headers do not bypass it. The production UI sends a Content Security Policy that permits the local browser, microphone processing, and configured HTTP/WebSocket services.
 

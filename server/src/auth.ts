@@ -1,8 +1,18 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { getDb, getSetting, isSignedOut, putSetting, recordSignOut } from "./db.js";
-import { tlsFiles } from "./http-security.js";
-import { allowsAnyone, fingerprint, oidcConfig } from "./oidc.js";
+import { allowNoPassword, tlsFiles } from "./http-security.js";
+import { bindLogin, sweep } from "./login-streams.js";
+import {
+  EXAMPLE_PASSWORD,
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_HELD_KEY,
+  PASSWORD_KEY,
+  PASSWORD_SHORT_KEY,
+  hashPassword,
+  passwordMatches,
+  passwordProblem,
+} from "./password.js";
 
 /**
  * Shared-password gate.
@@ -11,11 +21,14 @@ import { allowsAnyone, fingerprint, oidcConfig } from "./oidc.js";
  * network it should not be drivable by anything that happens to reach the port.
  * The cookie is an HMAC of an expiry stamp — no session store needed, except
  * for the ones signed out early, which are remembered until they would expire.
- * The key holds the password as well as the secret, so changing the password
- * ends every login that was made under the old one. A sign-in through an
- * OpenID Connect provider (oidc-login.ts) ends in the same cookie.
+ * The key holds the password's hash as well as the secret, so changing the
+ * password ends every login that was made under the old one.
+ *
+ * The password is kept hashed in the portal's settings and read from there on
+ * every request, so that the command which removes a lost one (reset-password)
+ * takes effect in a running portal. Until one is chosen, the portal is in
+ * setup: it answers nothing but the page that asks for one.
  */
-const PASSWORD = process.env.PORTAL_PASSWORD || "";
 const SECRET = process.env.PORTAL_SECRET || crypto.randomBytes(32).toString("hex");
 // What a .env written from the deploying guide's old example holds: nothing runs a command in that
 // file, so the secret is the command's own text, the same on every install that copied it.
@@ -29,148 +42,133 @@ if (/^\$\(/.test(process.env.PORTAL_SECRET ?? "")) {
 const COOKIE = (process.env.VOICE_COMPARISON === "true" || process.env.VOICE_PIPELINE_MODE === "sequential") ? "pi_portal_sequential_auth" : "pi_portal_auth";
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-/** The password is a way in: one is set, and single sign-on has not been made the only way. */
-export const passwordLogin = PASSWORD.length > 0 && !oidcConfig?.only;
-export const authEnabled = passwordLogin || oidcConfig !== null;
-/** The example in .env.example and the README, which is public: nobody's password. */
-const EXAMPLE_PASSWORD = "change-me";
-const MIN_PASSWORD_LENGTH = 8;
-/** Running without a login is a deliberate choice, never what an empty .env falls back to. */
-const allowNoPassword = /^(1|true|yes)$/i.test(process.env.PORTAL_ALLOW_NO_PASSWORD ?? "");
+/** What an earlier portal remembered of the password it ran with: the hash of the PORTAL_PASSWORD of its last start. */
+const LEGACY_STAMP = "login_password";
 
-if (!authEnabled && !allowNoPassword) {
-  console.error(
-    "\n  PORTAL_PASSWORD is not set. This portal runs arbitrary commands on the\n" +
-      "  host, so it refuses to start without a login rather than open the port.\n" +
-      "  Set PORTAL_PASSWORD or OIDC_ISSUER (and PORTAL_SECRET to keep logins across restarts),\n" +
-      "  or set PORTAL_ALLOW_NO_PASSWORD=1 when a reverse proxy authenticates in\n" +
-      "  front of it and nothing else can reach the port.\n"
-  );
-  process.exit(1);
-}
+const storedHash = (): string | undefined => getSetting(PASSWORD_KEY);
 
 /**
- * A short password only stops a portal it is new to. The minimum came after
- * installs that already had a shorter one, which must still start: the portal
- * remembers the password it ran with (salted and hashed, in its own settings),
- * and one it has run with before keeps working, with a warning. An install
- * from before it remembered anything is told by having been used.
+ * `password`: a password is set and the login applies. `setup`: none is set yet, so the portal waits for the
+ * person who opens it to choose one. `open`: none, by PORTAL_ALLOW_NO_PASSWORD's choice, and no login at all.
  */
-const LOGIN_STAMP = "login_password";
+export type AuthMode = "password" | "setup" | "open";
+export const authMode = (): AuthMode => (storedHash() ? "password" : openByChoice ? "open" : "setup");
 
-const stampOf = (password: string): string => {
-  const salt = crypto.randomBytes(16);
-  return `${salt.toString("hex")}:${crypto.scryptSync(password, salt, 32).toString("hex")}`;
-};
-
-function isStamp(stamp: string, password: string): boolean {
-  const [salt, hash] = stamp.split(":");
-  if (!salt || !hash) return false;
-  const expected = Buffer.from(hash, "hex");
-  return crypto.timingSafeEqual(crypto.scryptSync(password, Buffer.from(salt, "hex"), expected.length), expected);
-}
+/**
+ * Open is a state the portal starts in and stays in, never one it falls into: it was bound to an address for
+ * its login (all of them), and a password that goes while it runs (reset-password) must find it waiting on the
+ * setup screen, not with no login on that address. Decided once, after a PORTAL_PASSWORD has been moved in.
+ */
+let openByChoice = false;
 
 /** Whether this portal has been used before: it holds a chat. A new one holds settings of its own already. */
 const hasBeenUsed = (): boolean => getDb().prepare("SELECT 1 FROM sessions LIMIT 1").get() !== undefined;
 
-const tooShort = passwordLogin && PASSWORD !== EXAMPLE_PASSWORD && PASSWORD.length < MIN_PASSWORD_LENGTH;
-
-/** The password is shorter than the minimum, but this portal has run with it before. */
-export const keptShortPassword = tooShort && (() => {
-  const stamp = getSetting(LOGIN_STAMP);
-  return stamp ? isStamp(stamp, PASSWORD) : hasBeenUsed();
-})();
-
-if (passwordLogin && (PASSWORD === EXAMPLE_PASSWORD || (tooShort && !keptShortPassword))) {
-  console.error(
-    "\n  PORTAL_PASSWORD is the example from .env.example or shorter than " + MIN_PASSWORD_LENGTH + " characters.\n" +
-      "  This portal runs arbitrary commands on the host and listens on every\n" +
-      "  interface once it has a password, so it refuses to start with one that\n" +
-      "  anybody could guess. Choose a longer one.\n"
-  );
-  process.exit(1);
+/**
+ * A short password only stops a portal it is new to. The minimum came after
+ * installs that already had a shorter one, which must still sign in: the one
+ * they ran with is the one the portal remembered (salted and hashed, in its own
+ * settings), and an install from before it remembered anything is told by having been used.
+ */
+async function wasInUse(password: string): Promise<boolean> {
+  const stamp = getSetting(LEGACY_STAMP);
+  return stamp ? passwordMatches(password, stamp) : hasBeenUsed();
 }
 
-if (keptShortPassword) {
+/** Stores a password the person chose, or moved in. Held first: if the rest is cut short, `PORTAL_PASSWORD` is still not read again. */
+function keepPassword(hash: string, short = false): void {
+  putSetting(PASSWORD_HELD_KEY, "1");
+  putSetting(PASSWORD_SHORT_KEY, short ? "1" : "");
+  putSetting(PASSWORD_KEY, hash);
+}
+
+/**
+ * The password of an install from before it was kept here: PORTAL_PASSWORD, moved into the database on the
+ * first start. After that the variable is not read as a password, and the log says so; a start where it
+ * differs from the password in the database is said again, so that nobody edits .env and wonders why the
+ * old one still signs in. One that the portal has held a password of its own since — even if it has been
+ * removed with reset-password — is not moved either, or the reset would be undone by the next restart.
+ */
+async function moveEnvPassword(): Promise<void> {
+  const env = process.env.PORTAL_PASSWORD || "";
+  if (!env) return;
+  const held = storedHash();
+  if (held || getSetting(PASSWORD_HELD_KEY)) {
+    if (held && (await passwordMatches(env, held))) return;
+    console.warn(
+      "\n  PORTAL_PASSWORD is ignored: the portal keeps its password in its database now (Settings → Password).\n" +
+        "  Remove the variable from your environment.\n"
+    );
+    return;
+  }
+  const short = env.length < MIN_PASSWORD_LENGTH;
+  if (env === EXAMPLE_PASSWORD || (short && !(await wasInUse(env)))) {
+    console.warn(
+      "\n  PORTAL_PASSWORD is the example from the old .env.example or shorter than " + MIN_PASSWORD_LENGTH + " characters, so it is\n" +
+        "  not taken as the password. Choose one on the setup screen, and remove the variable.\n"
+    );
+    return;
+  }
+  keepPassword(await hashPassword(env), short);
+  putSetting(LEGACY_STAMP, "");
+  console.log(
+    "\n  PORTAL_PASSWORD was moved into the portal's database. The password is kept there from now on, and the\n" +
+      "  variable is ignored: change the password under Settings → Password, and remove the variable.\n"
+  );
+}
+await moveEnvPassword();
+openByChoice = allowNoPassword() && !storedHash();
+
+if (authMode() === "setup") {
   console.warn(
-    "\n  WARNING: PORTAL_PASSWORD is shorter than " + MIN_PASSWORD_LENGTH + " characters. This portal ran with it\n" +
+    "\n  No password is set yet. Open the portal in a browser to choose one: until then it answers nothing\n" +
+      "  else, and whoever opens it first chooses the password. This portal runs arbitrary commands on the\n" +
+      "  host, so keep the port to yourself until you have.\n"
+  );
+}
+
+if (authMode() === "password" && getSetting(PASSWORD_SHORT_KEY)) {
+  console.warn(
+    "\n  WARNING: the password is shorter than " + MIN_PASSWORD_LENGTH + " characters. This portal ran with it\n" +
       "  before the minimum, so it keeps working, but a new or changed password\n" +
       "  has to be longer. Anybody who can reach the port can try to guess it,\n" +
       "  and the portal runs arbitrary commands on this machine.\n"
   );
 }
 
-// What this start ran with, so that a change to the password is known next time.
-if (passwordLogin) {
-  const stamp = getSetting(LOGIN_STAMP);
-  if (!stamp || !isStamp(stamp, PASSWORD)) putSetting(LOGIN_STAMP, stampOf(PASSWORD));
-}
-
-/**
- * Without a password that is a way in, the login cookie rests on the secret alone: everything else in its
- * key (the issuer, the client ID, the allow-list) can be read or guessed from outside. A secret that is
- * the guide's old command, or too short to be one nobody can guess, would let anybody make a login.
- * Left out, the secret is a random one, which only costs the logins at a restart.
- */
-const MIN_SECRET_LENGTH = 32;
-const givenSecret = process.env.PORTAL_SECRET ?? "";
-if (oidcConfig && !passwordLogin && givenSecret && (/^\$\(/.test(givenSecret) || givenSecret.length < MIN_SECRET_LENGTH)) {
-  console.error(
-    "\n  PORTAL_SECRET is a shell command or shorter than " + MIN_SECRET_LENGTH + " characters. With single sign-on and no\n" +
-      "  password login, the secret is all the login cookie rests on, so the portal refuses to start\n" +
-      "  with one that anybody could guess. Put the output of `openssl rand -hex 32` there.\n"
-  );
-  process.exit(1);
-}
-
-if (PASSWORD && oidcConfig?.only) {
-  console.warn("\n  OIDC_ONLY is set: the password login is refused, and PORTAL_PASSWORD is not used to sign in.\n");
-}
-
-if (oidcConfig && !allowsAnyone(oidcConfig)) {
+if (authMode() === "open") {
   console.warn(
-    "\n  WARNING: single sign-on is set up, but OIDC_ALLOWED_EMAILS, OIDC_ALLOWED_GROUPS and\n" +
-      "  OIDC_ALLOWED_SUBJECTS are all empty, so the provider's sign-in lets nobody in.\n" +
-      "  Name the people or groups who may use this portal.\n"
-  );
-}
-
-if (!authEnabled) {
-  console.warn(
-    "\n  WARNING: PORTAL_ALLOW_NO_PASSWORD is set and PORTAL_PASSWORD is not — the\n" +
+    "\n  WARNING: PORTAL_ALLOW_NO_PASSWORD is set and no password is — the\n" +
       "  portal is open to anyone who can reach it, and it can run arbitrary\n" +
       "  commands on this machine. Only the proxy in front of it stops them.\n" +
       "  It binds loopback unless ALLOW_OPEN=1 explicitly exposes it.\n"
   );
 }
 
-/**
- * What the cookies are signed with: the secret and the password, so a new password refuses every old cookie,
- * and the single sign-on provider and its allow-list, so that a change to who may sign in does the same.
- * The password only while it is a way in, so switching OIDC_ONLY on ends the logins it gave. The key is the
- * same for every login, so the provider's end with them, and switching it off again ends those made meanwhile.
- */
-const KEY = crypto.createHash("sha256").update(`${SECRET}\0${passwordLogin ? PASSWORD : ""}${oidcConfig ? `\0${fingerprint(oidcConfig)}` : ""}`).digest();
+/** Whether the password that signs in is shorter than the minimum, because the portal ran with it before there was one. */
+export const shortPassword = (): boolean => authMode() === "password" && Boolean(getSetting(PASSWORD_SHORT_KEY));
 
-/** A key of its own for another purpose, from the same secret: the sign-in's state cookie is sealed with one. */
-export const keyFor = (purpose: string): Buffer => crypto.createHmac("sha256", KEY).update(`pithagoras:${purpose}`).digest();
+/** What the cookies are signed with: the secret and the password's hash, so a new password refuses every old cookie. */
+let keyed: { hash: string; key: Buffer } | undefined;
+const keyFor = (hash: string): Buffer => {
+  if (keyed?.hash !== hash) keyed = { hash, key: crypto.createHash("sha256").update(`${SECRET}\0${hash}`).digest() };
+  return keyed.key;
+};
 
-/** The name of the short-lived cookie a sign-in through the provider keeps its state in, beside the login's. */
-export const OIDC_STATE_COOKIE = `${COOKIE}_oidc`;
+const macOf = (expiry: string, key: Buffer) => crypto.createHmac("sha256", key).update(expiry).digest("hex");
 
-const macOf = (expiry: string) => crypto.createHmac("sha256", KEY).update(expiry).digest("hex");
-
-function sign(expiry: number): string {
-  return `${expiry}.${macOf(String(expiry))}`;
+function sign(expiry: number, key: Buffer): string {
+  return `${expiry}.${macOf(String(expiry), key)}`;
 }
 
-/** The token's expiry and signature, if it is one this portal signed and it has not run out. */
+/** The token's expiry and signature, if it is one this portal signed under this password and it has not run out. */
 function genuine(token: string | undefined): { expiry: number; mac: string } | null {
-  if (!token) return null;
+  const hash = storedHash();
+  if (!token || !hash) return null;
   const [expiryStr, mac] = token.split(".");
   const expiry = Number(expiryStr);
   if (!Number.isFinite(expiry) || expiry < Date.now()) return null;
-  const expected = macOf(expiryStr);
+  const expected = macOf(expiryStr, keyFor(hash));
   const a = Buffer.from(mac ?? "");
   const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b) ? { expiry, mac } : null;
@@ -186,10 +184,13 @@ function verify(token: string | undefined): boolean {
  * Secure one is kept from the plain-HTTP services beside the portal. Where the
  * portal itself is plain HTTP, a Secure cookie would never be stored at all.
  */
-export const secure = (res: Response) => Boolean(tlsFiles()) || res.req.secure;
+const secure = (res: Response) => Boolean(tlsFiles()) || res.req.secure;
 
+/** Signs this browser in, under the password as it is now: after setting or changing it, so that the new hash is the one signed with. */
 export function issueCookie(res: Response): void {
-  res.cookie(COOKIE, sign(Date.now() + MAX_AGE_MS), {
+  const hash = storedHash();
+  if (!hash) throw new Error("There is no password to sign in with.");
+  res.cookie(COOKIE, sign(Date.now() + MAX_AGE_MS, keyFor(hash)), {
     httpOnly: true,
     sameSite: "lax",
     secure: secure(res),
@@ -207,37 +208,78 @@ export function signOut(req: Request, res: Response): void {
   res.clearCookie(COOKIE, { httpOnly: true, sameSite: "lax", secure: secure(res) });
 }
 
-export function checkPassword(candidate: unknown): boolean {
-  if (typeof candidate !== "string" || !passwordLogin) return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(PASSWORD);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+export async function checkPassword(candidate: unknown): Promise<boolean> {
+  const hash = storedHash();
+  return typeof candidate === "string" && hash !== undefined && (await passwordMatches(candidate, hash));
+}
+
+/** Why a request to set or change the password was refused: the status to answer with, and the words. */
+export interface Refusal {
+  status: number;
+  error: string;
+}
+
+/** Chooses the first password, on the setup screen. Whoever signs in with it is the caller's to do (issueCookie). */
+export async function setUpPassword(password: unknown): Promise<Refusal | null> {
+  const taken = (): Refusal | null =>
+    storedHash() ? { status: 409, error: "A password is set already." }
+      : authMode() === "open" ? { status: 409, error: "This portal runs without a login: PORTAL_ALLOW_NO_PASSWORD is set." }
+      : null;
+  const refused = taken();
+  if (refused) return refused;
+  const problem = passwordProblem(password);
+  if (problem) return { status: 400, error: problem };
+  const hash = await hashPassword(password as string);
+  // Hashing takes a moment, and another request may have chosen a password in it: the first one stands.
+  const late = taken();
+  if (late) return late;
+  keepPassword(hash);
+  return null;
+}
+
+/**
+ * Changes the password to `next`, given the one it is now. The caller signs this browser in again (issueCookie):
+ * every other login is ended by the change, because the cookies are signed with the password's hash, and so is
+ * every stream that was open under the old one, the changer's too: a cookie can be copied, and so can what is open with it.
+ */
+export async function changePassword(current: unknown, next: unknown): Promise<Refusal | null> {
+  if (authMode() !== "password") return { status: 409, error: "No password is set." };
+  const problem = passwordProblem(next);
+  if (problem) return { status: 400, error: problem };
+  if (!(await checkPassword(current))) return { status: 403, error: "The current password is wrong." };
+  keepPassword(await hashPassword(next as string));
+  // Every stream ends, the changer's too: the page opens them again with the cookie it is signed in with by the caller.
+  sweep();
+  return null;
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!authEnabled) return next();
+  if (authMode() === "open") return next();
   if (verify(req.cookies?.[COOKIE])) return next();
   res.status(401).json({ error: "Unauthorized" });
 }
 
 export function isAuthed(req: Request): boolean {
-  return !authEnabled || verify(req.cookies?.[COOKIE]);
+  return authMode() === "open" || verify(req.cookies?.[COOKIE]);
 }
 
-/**
- * The same question for a request cookie-parser never saw: an upgrade is
- * handed to the server before Express, so its cookies are still the raw header.
- */
-export function isAuthedUpgrade(req: { headers: { cookie?: string } }): boolean {
-  if (!authEnabled) return true;
+/** The login's cookie of a request cookie-parser never saw: an upgrade is handed to the server before Express, so its cookies are still the raw header. */
+function upgradeCookie(req: { headers: { cookie?: string } }): string | undefined {
   for (const part of (req.headers.cookie ?? "").split(";")) {
     const at = part.indexOf("=");
     if (at < 0 || part.slice(0, at).trim() !== COOKIE) continue;
     try {
-      return verify(decodeURIComponent(part.slice(at + 1).trim()));
+      return decodeURIComponent(part.slice(at + 1).trim());
     } catch {
-      return false;
+      return undefined;
     }
   }
-  return false;
+  return undefined;
 }
+
+bindLogin({ hash: storedHash });
+
+export function isAuthedUpgrade(req: { headers: { cookie?: string } }): boolean {
+  return authMode() === "open" || verify(upgradeCookie(req));
+}
+

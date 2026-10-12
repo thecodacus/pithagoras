@@ -261,7 +261,7 @@ export function OrbStudio({ agent, orb, voice, onSaved }: { agent: string; orb: 
           <div
             role="tablist"
             aria-label={t("Avatar sections")}
-            className="flex gap-1 overflow-x-auto border-b border-line"
+            className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line"
             onKeyDown={tabKeys}
           >
             {TABS.map(([id, label]) => (

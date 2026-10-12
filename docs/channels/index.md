@@ -62,7 +62,7 @@ manifest and a `start()`, and the ones that ship in the repo are ordinary
 examples of the format rather than privileged cases. Install another from a
 GitHub repo and it behaves identically.
 
-Four ship in the repo, between them covering every shape a transport takes:
+Five ship in the repo, between them covering every shape a transport takes:
 
 | Package | Shape | Notes |
 | --- | --- | --- |
@@ -70,6 +70,7 @@ Four ship in the repo, between them covering every shape a transport takes:
 | `pithagoras-channel-slack` | WebSocket | Socket Mode, which exists so an app needs no public URL. |
 | `pithagoras-channel-discord` | WebSocket | The Gateway, with the heartbeat it demands. |
 | `pithagoras-channel-webhook` | A listener | POST a message, the reply comes back in the response. |
+| `pithagoras-channel-signal` | Server-sent events | Through a [signal-cli](https://github.com/AsamK/signal-cli) daemon you run, on its own number or linked to yours. See [Signal](/channels/signal). |
 
 Slack sends a mention in a channel the app also reads twice, once as a message
 and once as a mention, and the agent answers it once. People joining, and
@@ -79,6 +80,11 @@ rather than waiting for the agent to finish.
 
 None of them needs a dependency: `fetch` and `WebSocket` are both globals on
 Node 22, which the portal requires anyway.
+
+Signal ignores everybody it is not told to answer, without a word: on a
+personal number the agent writes as you, and a stranger must not get an answer
+from it. Who it answers, and how to set up signal-cli for it, is on
+[its own page](/channels/signal).
 
 ::: tip Why Telegram polls and the others do not
 Telegram's Bot API offers two delivery modes — `getUpdates`, or a webhook it
@@ -105,7 +111,9 @@ Settings → Channels.
 3. **Enable it** with the toggle.
 
 Clicking a configured channel opens its own page, where the credentials live
-alongside its **instructions**.
+alongside its **instructions**. A channel that needs something scanned to finish
+setting up, as Signal does to link to your phone, shows it there as a QR code
+under **Scan to connect**, for as long as it waits for it.
 
 ## Per-channel instructions
 
@@ -212,7 +220,9 @@ reply rather than whichever finished first.
 
 ::: warning Untested against a real service
 The supervisor, the session resolution and the reply path are exercised
-end to end. The four builtin packages have not been run against real Telegram,
-Slack or Discord credentials — that needs tokens I do not have. Treat the first
-connection to each as the real test.
+end to end. The builtin packages have not been run against real Telegram,
+Slack, Discord or Signal accounts — that needs tokens and numbers I do not have.
+The Signal package has been run against a real signal-cli daemon up to the
+code that links it, not past it. Treat the first connection to each as the real
+test.
 :::

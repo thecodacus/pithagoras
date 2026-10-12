@@ -1,8 +1,9 @@
 # Channel packages
 
 The channels that ship with the portal: `telegram` (long polling), `slack` (Socket
-Mode), `discord` (the Gateway) and `webhook` (a listener). They are loaded from this
-folder, none of them needs a dependency, and each is a package in the same form as one
+Mode), `discord` (the Gateway), `signal` (a signal-cli daemon you run, see
+[Signal](https://thecodacus.github.io/pithagoras/channels/signal)) and `webhook` (a
+listener). They are loaded from this folder, none of them needs a dependency, and each is a package in the same form as one
 you would write: there is nothing special about them beyond where they live.
 
 How a channel works, what its package looks like (`manifest`, `start(ctx)`, and

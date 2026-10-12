@@ -1026,25 +1026,29 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   /**
    * The rule as it should be, in the prompt of every turn after a run's first.
    *
-   * pi takes that prompt afresh between turns, and that is how a message
-   * queued into a run that is going is answered: from pi's own prompt, which
-   * has the rule once it is on, or from one an extension set for the run when
-   * it started, which keeps whatever it was given then. pi-background-tasks
-   * sets one for every run on the test host. So the prompt each turn is to be
-   * sent is made to say what the rule says now, whoever built it.
+   * pi takes that prompt afresh between turns, from the options the run was
+   * started with: what it appends to its own prompt, and the whole text where
+   * an extension forced one for the run (pi-background-tasks sets one for every
+   * run on the test host). Those say what they were given when the run started,
+   * so a message queued into a run that is going would be answered without the
+   * rule, or with an earlier wording of it. So before pi builds each turn's
+   * prompt from them, both are made to say what the rule says now.
    */
   private sayAudioRuleEachTurn(): void {
-    const agent = this.session?.agent;
+    const session = this.session;
+    const agent = session?.agent;
     const rule = this.audioRule;
     const loader = this.loader;
     const prepare = agent?.prepareNextTurnWithContext;
     if (!rule || !loader || typeof prepare !== "function") return;
     agent.prepareNextTurnWithContext = async (turn: unknown, signal: unknown) => {
-      const next = await prepare.call(agent, turn, signal);
-      const prompt = next?.context?.systemPrompt;
-      if (typeof prompt !== "string") return next;
-      const said = rule.into(prompt, loader.appendedByPi());
-      return said === prompt ? next : { ...next, context: { ...next.context, systemPrompt: said } };
+      const options = session._runSystemPromptOptions as { appendSystemPrompt?: unknown; forceSystemPrompt?: unknown } | undefined;
+      if (options) {
+        const after = loader.appendedByPi();
+        if (typeof options.appendSystemPrompt === "string") options.appendSystemPrompt = rule.into(options.appendSystemPrompt, after).trim();
+        if (typeof options.forceSystemPrompt === "string") options.forceSystemPrompt = rule.into(options.forceSystemPrompt, after);
+      }
+      return prepare.call(agent, turn, signal);
     };
   }
 
@@ -1275,19 +1279,21 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * extension that registers a tool later (`lifecycle: "lazy"` is the whole
    * point of an MCP server that connects on first use) has it activated by
    * `refreshTools()`, and a reload activates every extension tool again. Each
-   * ends in `setActiveToolsByName`, so that is where the names come out.
+   * ends in `_setActiveTools`, pi's own `setActiveToolsByName` included, so
+   * that is where the names come out. (Before pi 1.0 each ended in
+   * `setActiveToolsByName`; a reload no longer goes through it.)
    */
   private guardActiveTools(): void {
     const session = this.session;
-    if (typeof session?.setActiveToolsByName !== "function") return;
-    const original = session.setActiveToolsByName.bind(session) as (names: string[]) => void;
+    if (typeof session?._setActiveTools !== "function") return;
+    const original = session._setActiveTools.bind(session) as (names: string[]) => void;
     this.activate = original;
     try {
       this.wanted = new Set<string>(session.getActiveToolNames?.() ?? []);
     } catch {
       this.wanted = new Set();
     }
-    session.setActiveToolsByName = (names: string[]) => {
+    session._setActiveTools = (names: string[]) => {
       this.wanted = new Set([...names, ...this.heldBack(session, names, this.fromExtension)]);
       original(names.filter((name) => !this.switchedOff.has(name)));
     };
