@@ -101,11 +101,17 @@ const readAt = promisify(read);
 async function feed(fd: number, size: number, into: NodeJS.WritableStream & { destroyed?: boolean }): Promise<void> {
   const chunk = Buffer.alloc(64 * 1024);
   for (let at = 0; at < size && !into.destroyed; ) {
+    // A file that cannot be read is the clip's failure, and ends the call.
     const { bytesRead } = await readAt(fd, chunk, 0, Math.min(chunk.length, size - at), at);
     if (bytesRead === 0) break;
     at += bytesRead;
-    // A copy: the buffer is read into again before a write that waits has been made.
-    if (!into.write(Buffer.from(chunk.subarray(0, bytesRead)))) await Promise.race([once(into, "drain"), once(into, "close")]);
+    try {
+      // A copy: the buffer is read into again before a write that waits has been made.
+      if (!into.write(Buffer.from(chunk.subarray(0, bytesRead)))) await Promise.race([once(into, "drain"), once(into, "close")]);
+    } catch {
+      // ffmpeg has what it needs and has gone: what it answers with is what counts, not what is left unwritten.
+      return;
+    }
   }
   into.end();
 }

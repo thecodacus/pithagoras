@@ -56,6 +56,7 @@ export default defineConfig({
           { text: "Terminal and background jobs", link: "/guide/terminal" },
           { text: "Memory and audit", link: "/guide/memory" },
           { text: "Images", link: "/guide/images" },
+          { text: "Videos", link: "/guide/videos" },
         ],
       },
       {

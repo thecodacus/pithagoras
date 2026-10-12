@@ -174,7 +174,8 @@ one go. An MCP server is its own group rather than a share of the adapter that
 attached it — three servers used to arrive as one pile of forty tools called
 `pi-mcp-adapter`, and nobody thinks of them that way.
 The portal's own picture tools, `show_image`, `generate_image` and `edit_image`,
-are together in one **Images** group, whichever of them is on offer.
+are together in one **Images** group, whichever of them is on offer, and the video tools,
+`generate_video` and `show_video`, in one **Videos** group.
 
 ::: tip The browser is one of them
 It used to have a switch of its own beside the composer, which was a second

@@ -231,7 +231,9 @@ export function VideoMaker({
         </div>
         <p className="mt-1.5 text-[11px] text-fg-faint">
           {length !== undefined ? t("{frames} frames at {fps} frames per second play for about {length}.", { frames, fps, length: secondsLabel(length) }) : t("How long a clip plays is its frames over its frame rate.")}{" "}
-          {t("stable-diffusion.cpp makes 4n + 1 frames (33, 49, 81, …) and rounds a count down to the nearest. A longer clip takes much longer to make.")}
+          {/* What the one backend there is does with a count: said only while it is the backend. */}
+          {features.backend === "sdcpp" && t("stable-diffusion.cpp makes 4n + 1 frames (33, 49, 81, …) and rounds a count down to the nearest.")}{" "}
+          {t("A longer clip takes much longer to make.")}
         </p>
 
         <button type="button" onClick={() => change({ open: !form.open })} aria-expanded={form.open} className={`${ghostCls} mt-2`}>

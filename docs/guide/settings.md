@@ -7,7 +7,7 @@ German. Navigation runs down the left edge, in four groups:
 | Group | Pages |
 | --- | --- |
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
-| **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
+| **Agent** | **Tools**, **Images**, **Videos**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
 | **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
 
@@ -80,6 +80,12 @@ switches for **Image generation**, **Image editing**, **Several pictures per edi
 `show_image`, `generate_image` and `edit_image`, is set only in the Tools list, where they are together in one **Images** group. **Stable Diffusion extra settings** (off by default) is
 for an endpoint that is a stable-diffusion.cpp server: it lets the Images page offer and send the settings only that server
 reads, see [Images](/guide/images#stable-diffusion-settings). The tools do not use it.
+
+**Videos** holds the video endpoint behind video generation: its address, key, model, size, frames and frame rate, the time
+limit, the disk limit for the Videos page, and the switch for **Video generation**, see
+[Opt-in features](/guide/features#video-generation). The switch turns the feature on or off as a whole: the
+[Videos page](/guide/videos) and the existence of the tools. Whether a chat's agent gets the tools, `generate_video` and
+`show_video`, is set only in the Tools list, where they are together in one **Videos** group.
 
 ## Channels
 

@@ -1,13 +1,14 @@
 # Opt-in features
 
-Three capabilities ship with Pithagoras and are **off** until you switch them on
+Four capabilities ship with Pithagoras and are **off** until you switch them on
 in **Settings**: a **subagent tool** and **Understory** as the agent's memory
-under **Add-ons**, and **image generation and editing** under **Agent → Images**. A fresh
+under **Add-ons**, **image generation and editing** under **Agent → Images**, and
+**video generation** under **Agent → Videos**. A fresh
 install has none of them. (The Add-ons page also holds the Docker-based
 [Browser and Voice](/guide/add-ons).) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
-Settings → MCP. Switching one off removes it. Image generation and editing are
+Settings → MCP. Switching one off removes it. Image and video generation are
 the portal's own tools and keep their settings in the portal.
 
 The first two are reference implementations behind a seam the portal already
@@ -387,6 +388,82 @@ What was decided for it:
 - **The setting is read at each call.** A list is refused when the endpoint is no
   longer said to take it, and a path still does where the tool was loaded with a
   list. Only the tool's shape is decided when a chat loads.
+
+## Video generation
+
+**Settings → Agent → Videos.** The page for the video endpoint and the switch for **Video generation**. It is
+built on the same pattern as [image generation](#image-generation), and takes the same trouble not to assume
+one server or model: the address, the model and the key are yours.
+
+Switched on, with an address, the [Videos page](/guide/videos) can make videos, and a chat's agent can have two
+tools: `generate_video`, in which the agent describes a video (or gives a picture as its first frame), a video
+model you set up makes it, and it plays in the chat; and `show_video`, which plays a video that is in the chat's
+folder. Switched off, or without an address, there are no such tools at all, and the page says in its form
+that it is not set up, with a link here. Whether a chat's agent actually has them is answered only in the
+**tool lists** (Settings → Agent → Tools, a project's Tools, the tools control of a chat), where they sit in one
+**Videos** group of their own, beside **Images**. The switch here does not decide it, and the Videos page does not
+look at those lists.
+
+While it is on and has an address the sidebar has a [Videos](/guide/videos) page, with a form to make videos and a
+gallery of everything made, here and in chats.
+
+### The video endpoint
+
+There is no single standard for video generation yet, so how a video is asked for belongs to a **backend**, and
+the jobs, the gallery, the page and the tool know nothing of it. There is one backend for now:
+**stable-diffusion.cpp's server**, spoken to through its native job API. Nothing about one model is built in; the
+server is started with the video model you choose.
+
+| Field | Meaning |
+| --- | --- |
+| **API address** | The server's own address, such as `http://localhost:1234`. The portal adds `/sdcpp/v1/…` to it; the address of the same server's image endpoint, ending in `/v1`, works as well. No login, query or `#` in it: the key has its own field. |
+| **API key** | Sent as `Authorization: Bearer …` to this address, and nowhere else, for a server behind a gateway that needs one. Left empty for a server that needs none. A saved key is never shown again — the page is only told that one is set — so leave the field empty to keep it, or choose **Remove the saved key**. Giving the address of another server without a key drops the saved one: a key belongs to the server it was given for. |
+| **Model** | Sent as `model`. stable-diffusion.cpp's server runs the one model it was started with and ignores it; a gateway in front of it may choose a model by it. Empty sends none. |
+| **Video size** | Sent as `width` and `height`, such as `832x480`, each side a whole number from 64 to 4096. Empty sends none (the server's own). The agent can ask for another size in a call. |
+| **Frames** and **Frame rate** | How many frames a video has and how fast they play, used where a request does not say: whole numbers from 1 to 1000 and from 1 to 120. Empty is the server's own. A length in seconds, which the agent's tool takes, is worked out from the frame rate here, else the server's own, else 16. stable-diffusion.cpp makes 4n + 1 frames and rounds a count down. |
+| **Time limit** | How long the portal waits for one video, in whole seconds, from the request to the file, the wait in the server's queue included: **1800** (half an hour) unless you set another, from 30 to 14400. When it runs out, the error names the limit and this setting; a video the server has begun goes on there. A setup saved without one has the default. |
+| **Disk limit for the Videos page** | How many megabytes the videos made **on the Videos page** may take together; empty is no limit. At the limit no new video is made on the page until some are deleted or the limit is raised. Nothing is ever deleted for it. The agent's videos are files in its chats' folders and are not counted. |
+| **Video generation** | The switch of the feature, as **Image generation** is for pictures: on the Videos page, and for the tools being there at all. Needs an address. |
+
+A video is asked for as a job (`POST /sdcpp/v1/vid_gen` with `output_format: "webm"`), asked about until it is done
+(`GET /sdcpp/v1/jobs/{id}`), and taken out of the answer as base64; see [Videos](/guide/videos#what-it-takes-from-the-endpoint)
+for the fields and the steps. Before it sends anything the portal asks the server what it can do, so a server with
+**no video model loaded**, or **built without WebM support** (a browser plays neither of the other formats it can make), says so in
+plain words. Other request and answer shapes are not translated; an endpoint that speaks one needs a small adapter in front.
+
+The address, model, size, frames, frame rate, time limit and key are read at each call, so changing them needs no
+restart. Switching the tools on or off, though, is decided when a chat loads: a switch reloads the idle open chats, and a busy
+one has it after it is idle and reloaded (`/reload`). The tools belong to the in-process agent (`EXECUTOR=host`), as
+`show_image` does.
+
+### The agent's video tools
+
+`generate_video(prompt, title?, size?, seconds?, path?)` makes one video, saves it and shows it. `seconds` is more than 0 and at
+most 600. It is the picture tool's twin and keeps its rules: the video is written to a `generated-videos` folder inside the chat's folder under a name the
+portal makes (`video-20261001-101500-a1b2c3.webm`), never one the agent or the endpoint chose, and never over an existing
+file; nothing is written until the endpoint has answered with a real video, and a failure — nothing configured, the
+server's error, an answer that is no video, the time limit — is an error result the agent sees and can pass on. `path` is a
+picture in the chat's folder, which is the first frame of the video; it is read and checked as `edit_image` checks a picture,
+and a picture outside the folder is refused. A picture only attached to a message is not in the folder, and the tool's
+description says so. The call waits for the video and stopping the chat stops the wait.
+
+Its answer is the video's path and a title, with the mark only the portal's tool sets (`portalVideo`), and the chat plays the
+video only with that mark: another extension's `generate_video`, which pi may keep in the portal's place, stays a plain tool
+card. `show_video(path, title?)` plays a WebM or an MP4 of the chat's folder by what its bytes say, and nothing else. Voice mode
+shows no videos and its instructions say nothing of these tools.
+
+Only the primary user's conversations can have the agent make a video: like any tool that is not a plain read, it is refused in
+a conversation with a teammate unless a [tool rule](/people/rules) allows it. A video can cost money at a hosted endpoint, and
+always costs minutes of its model.
+
+### What is accepted from the video endpoint
+
+- **A real video.** What the server sends must be a WebM or an MP4 by its first bytes, whatever it is called or served as. An AVI,
+  an animated WebP, an HTML page — anything else — is refused and not kept.
+- **A size and a time.** At most 100 MB per video, and the [time limit](#the-video-endpoint) in all. The video comes in one answer,
+  as base64, so a long video is held in memory a few times over while it is decoded: the limit keeps that within reason.
+- **No other place.** The portal asks the address you gave, and no address the server's answers name: the job is asked about by
+  the id the server gave, on the address you gave, and a redirect is refused.
 
 ## Memory: Understory
 

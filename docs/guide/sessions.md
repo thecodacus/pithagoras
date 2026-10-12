@@ -273,6 +273,29 @@ file — which is the chat's, so that asks every time. What lies in these folder
 never listed, such as pictures made before the gallery existed, is found there too, as a
 picture of the folder.
 
+## Videos the agent makes
+
+With [video generation](/guide/features#video-generation) on, a `generate_video` call is not shown as a tool line
+either, but as the video from the moment it is asked for. A video takes minutes, so the wait is the main thing:
+
+- **While it is made**, a frame in the shape of the size the agent asked for (a square when nothing says) holds
+  the place, says "Making a video" and, after a few seconds, how long it has taken. Nothing in it pretends to know how far the
+  server is.
+- **When it is made**, the browser's own **player** takes the frame's place, with the title under it: play and pause, the slider, the
+  volume and full screen. It does not play by itself, and only the start of the file is fetched until you play it, which shows its first frame; the
+  rest comes in the parts the player asks for. The portal serves it from the chat's folder, by its path, and only what its bytes say is a WebM or an MP4.
+- **When it fails**, the frame says so quietly, with the reason in a line or two, and the whole of it under **Details**. A call that was
+  cut off, because the run was stopped or the portal restarted before the video came back, says it was interrupted.
+- **The call itself** — the tool's name and what the agent gave it: the prompt, the title, the size, the length, the first frame — is
+  under **Details**, below the player.
+- **A video the agent shows** with `show_video` is a player under its tool line, in the middle of the conversation as a picture is. One
+  whose file is gone from the folder says so.
+- **A tool of the same name** that another extension brings is the plain tool line it always was; only the portal's own calls
+  are drawn as videos.
+
+[Voice mode](/guide/voice) has no window for videos and the voice instructions say nothing of the video tools: a video is
+for the chat. Every video the agent makes this way is also in the [Videos](/guide/videos) page's gallery, from the moment it is saved.
+
 ## Drafts and what is running
 
 What you have typed into a chat's box and not sent is kept per chat, so half a
@@ -289,9 +312,9 @@ A status that names one of the chat's slash commands runs it when clicked.
 ## Sidebar and the sessions page
 
 The sidebar opens with New, then the places — Sessions, Projects, Agents,
-Routines and [Audit](#audit), with Browser, Memory and Images added while the
+Routines and [Audit](#audit), with Browser, Memory, Images and Videos added while the
 [browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
-holds the agent's memory and an [image endpoint](/guide/images) is set up — then **Pinned**, then **Recents**. The button at its
+holds the agent's memory, an [image endpoint](/guide/images) is set up and a [video endpoint](/guide/videos) is set up — then **Pinned**, then **Recents**. The button at its
 top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with a search of its own.
 

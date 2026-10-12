@@ -2,7 +2,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { request } from "node:http";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
@@ -401,7 +401,9 @@ test("a file that has stopped being a clip is not served, and a file that is gon
   assert.ok(!ids.includes(lost.id), "a clip whose file is gone is dropped from the list");
   // A file too large for a clip is not played either.
   const huge = gallery.addPageVideo({ bytes: clip("h"), ext: "webm", kind: "generated", prompt: "huge", params: {} });
-  writeFileSync(path.join(dir, `${huge.id}.webm`), Buffer.concat([WEBM, Buffer.alloc(MAX_VIDEO_BYTES)]));
+  // A sparse file: its size is what is looked at, and nothing is read or held.
+  writeFileSync(path.join(dir, `${huge.id}.webm`), WEBM);
+  truncateSync(path.join(dir, `${huge.id}.webm`), MAX_VIDEO_BYTES + 1);
   const big = await call("GET", `/videos/${huge.id}/file`);
   assert.equal(big.status, 413);
   rmSync(path.join(dir, `${huge.id}.webm`));
@@ -620,6 +622,7 @@ test("every clip in the folders the tool writes into is listed, recorded or not,
   put(alpha, "fake.webm", Buffer.from("<html><script>alert(1)</script></html>"));
   put(alpha, "empty.webm", Buffer.alloc(0));
   put(alpha, ".half-written.upload", clip("half"));
+  truncateSync(put(alpha, "huge.webm", clip("huge")), MAX_VIDEO_BYTES + 1);
   put(alpha, "pic.png", PNG);
   put(alpha, "movie.mov", Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(40)]));
   symlinkSync(path.join(outside, "secret.webm"), path.join(alpha, GENERATED_VIDEOS_DIR, "linked.webm"));
