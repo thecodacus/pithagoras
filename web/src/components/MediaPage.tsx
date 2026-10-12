@@ -234,6 +234,11 @@ export function MediaPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [selecting]);
 
+  /** A picture or a video was started while the gallery shows only the other kind: its tile has no place there, so the gallery shows both. */
+  const reveal = (kind: "images" | "videos") => {
+    if (picturesOn && videosOn && wanted.show !== "all" && wanted.show !== kind) setFilter({ ...wanted, show: "all" });
+  };
+
   const openPicture = useCallback((id: string) => setOpened({ kind: "picture", id }), []);
   const openVideo = useCallback((id: string) => setOpened({ kind: "video", id }), []);
 
@@ -575,7 +580,10 @@ export function MediaPage() {
             sources={sources}
             onSources={setSources}
             onFind={find}
-            onStarted={pictures.started}
+            onStarted={(made) => {
+              pictures.started(made);
+              reveal("images");
+            }}
             onUploaded={() => pictures.refreshTop()}
           />
         )}
@@ -589,7 +597,10 @@ export function MediaPage() {
             promptRef={videoPromptRef}
             firstFrame={firstFrame}
             onFirstFrame={setFirstFrame}
-            onStarted={videos.started}
+            onStarted={(made) => {
+              videos.started(made);
+              reveal("videos");
+            }}
           />
         )}
 

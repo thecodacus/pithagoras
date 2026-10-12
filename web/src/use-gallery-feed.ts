@@ -74,6 +74,8 @@ export function useGalleryFeed<Item extends FeedItem, Job extends FeedJob, Filte
   const filterKey = filter ? JSON.stringify(filter) : null;
   const latestFilter = useRef(filter);
   latestFilter.current = filter;
+  const availableNow = useRef(available);
+  availableNow.current = available;
 
   // The gallery, as far as it has been loaded.
   const [list, setList] = useState<Listing<Item>>(EMPTY as Listing<Item>);
@@ -187,6 +189,8 @@ export function useGalleryFeed<Item extends FeedItem, Job extends FeedJob, Filte
   const ignored = useRef<Set<string> | null>(null);
   const running = useRef<Set<string>>(new Set());
   const poll = useCallback(() => {
+    // Asked for by the page's Refresh whether this kind is made or not.
+    if (!availableNow.current) return;
     source.jobs().then(
       (r) => {
         ignored.current ??= new Set(r.jobs.filter((j) => j.state === "done").map((j) => j.id));

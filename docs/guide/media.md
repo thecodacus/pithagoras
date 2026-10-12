@@ -316,7 +316,8 @@ shows its first frame, with a mark that it plays.
 
 - **Both, or one.** Where both kinds are made, *Show* is **All**, **Pictures** or **Videos**; where only one is,
   that is all the page shows, and there is no choice. Choosing one kind also opens its form, until you choose
-  the other.
+  the other. A picture or a video started while the gallery shows only the other kind brings the gallery back to
+  both, so that the one being made has its tile.
 - **Together.** The portal keeps a list of pictures and a list of videos, and the page asks for a page of each
   and shows them as one, in the order of the time each was made. Where a list has more than has been loaded,
   nothing older than its last item is shown yet, so that nothing is left out between: **Show more**, and nearing

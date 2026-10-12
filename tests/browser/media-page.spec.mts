@@ -248,6 +248,8 @@ test('a page of each is asked for, and Show more reads on in the list that has n
   const manyPictures = Array.from({ length: 50 }, (_, i) => pic({ prompt: `Picture number ${i + 1}`, age: i + 1 }));
   const manyVideos = Array.from({ length: 30 }, (_, i) => vid({ prompt: `Video number ${i + 1}`, age: 100 + i }));
   const p = await portal(page, { pictures: manyPictures, videos: manyVideos });
+  // Without the observer that reads on as the end comes near, so that the button is the only thing that does.
+  await page.addInitScript(() => delete (window as any).IntersectionObserver);
   await page.goto('/media');
   // A page of the pictures is 48 and of the videos 24; the videos are all older than the 48th picture, which is as far as the gallery is known.
   await expect(gallery(page).getByRole('listitem')).toHaveCount(48);
@@ -294,6 +296,38 @@ test('a picture and a video are made from the same page: the form is the one of 
   await expect(page.getByPlaceholder('Describe the picture')).toHaveValue('A lighthouse at dusk');
   await choice.getByRole('radio', { name: 'A video' }).click();
   await expect(page.getByPlaceholder('Describe the video: the subject, what moves, the camera')).toHaveValue('A fox in the snow');
+});
+
+test('a video started while only pictures are shown brings the videos into the gallery, so that its tile is not left out', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A lighthouse' })] });
+  await page.goto('/media?show=images');
+  await expect(show(page, 'Pictures')).toBeChecked();
+  await page.getByRole('radiogroup', { name: 'Make' }).getByRole('radio', { name: 'A video' }).click();
+  await page.getByPlaceholder('Describe the video: the subject, what moves, the camera').fill('A fox in the snow');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect(page).toHaveURL(/\/media$/);
+  await expect(show(page, 'All')).toBeChecked();
+  // The picture, and the video being made.
+  await expect(gallery(page).getByRole('listitem')).toHaveCount(2);
+  await expect(page.getByText('Making a video', { exact: true })).toBeVisible();
+});
+
+test('a picture started while only videos are shown does the same, and one of the kind shown leaves the filter as it is', async ({ page }) => {
+  await portal(page, { videos: [vid({ prompt: 'A fox' })] });
+  await page.goto('/media?show=videos');
+  await page.getByRole('radiogroup', { name: 'Make' }).getByRole('radio', { name: 'A picture' }).click();
+  await page.getByPlaceholder('Describe the picture').fill('A lighthouse at dusk');
+  await page.getByRole('button', { name: 'Make the picture' }).click();
+  await expect(show(page, 'All')).toBeChecked();
+  await expect(gallery(page).getByRole('listitem')).toHaveCount(2);
+
+  await show(page, 'Videos').click();
+  await expect(page).toHaveURL(/\/media\?show=videos$/);
+  await page.getByRole('radiogroup', { name: 'Make' }).getByRole('radio', { name: 'A video' }).click();
+  await page.getByPlaceholder('Describe the video: the subject, what moves, the camera').fill('A river');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect(gallery(page).getByRole('listitem')).toHaveCount(2);
+  await expect(page).toHaveURL(/\/media\?show=videos$/);
 });
 
 test('the form follows the filter: videos shown, the form of videos is open', async ({ page }) => {
