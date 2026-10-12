@@ -2,7 +2,7 @@ import { VoiceLibrary, kokoroVoiceOptions } from './VoiceLibrary';
 import { VoiceEngines } from './VoiceEngines';
 import { Select } from "./Select";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_VAD, api, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
+import { DEFAULT_VAD, api, type AvailableModel, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
@@ -37,7 +37,7 @@ function UninstallQuestion({ removeData }: { removeData: { current: boolean } })
 }
 
 /** What the install and the uninstall write into the settings, apart from what is edited on this page. */
-const managed = (c: VoiceConfig) => ({ enabled: c.enabled, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel });
+const managed = (c: VoiceConfig) => ({ enabled: c.enabled, runtime: c.runtime, whisperUrl: c.whisperUrl, breezeUrl: c.breezeUrl, sttModel: c.sttModel, dictationModel: c.dictationModel, dictationUrl: c.dictationUrl });
 
 export function VoiceAddon({ onError }: { onError: (message: string) => void }) {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
@@ -105,6 +105,9 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const [readFailed, setReadFailed] = useState<string | null>(null);
   const readConfig = () => api.voice().then(value => { setReadFailed(null); setConfig(value); }, e => setReadFailed((e as Error).message));
   useEffect(() => { void readConfig(); }, []);
+  // Every model there is, to name one for spoken turns rather than the chat's.
+  const [models, setModels] = useState<AvailableModel[]>([]);
+  useEffect(() => { api.allModels().then(r => setModels(r.models)).catch(() => {}); }, []);
   if (!config) return readFailed ? <div className="mt-4"><LoadFailed error={readFailed} onRetry={readConfig} /></div> : null;
   const update = (patch: Partial<VoiceConfig>) => { setConfig({ ...config, ...patch }); setSaved(false); setEdited(true); };
   const instructions = config.responseInstructions ?? "";
@@ -145,6 +148,14 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
       : <div className="block text-xs text-fg-muted">{t("Speech generation")}<Select<number> aria-label={t("Speech generation")} size="sm" className="mt-1.5 w-full" value={config.cfgScale ?? 4} onChange={cfgScale => update({ cfgScale })} options={[{ value: 1, label: t("Fast"), hint: t("Lighter voice guidance") }, { value: 4, label: t("Expressive"), hint: t("Stronger voice guidance") }]} /></div>)}
     {chatterbox && <p className="text-xs text-fg-faint">{t("Chatterbox speaks your input language and clones the selected reference voice; it has no designed voice.")} {NUMBER_PACK_LANGUAGES.includes(config.language ?? "") ? t("Numbers are written out before synthesis so they are spoken correctly.") : t("Numbers stay as digits in this language, which Chatterbox reads unreliably.")}</p>}
     {chatterbox && (config.voice || "design") === "design" && <p role="alert" className="text-xs text-danger">{t("Choose a voice with a recording above: Chatterbox cannot speak with a designed voice.")}</p>}
+    {!listening && <div className="block text-xs text-fg-muted">{t("Voice model")}
+      <Select aria-label={t("Voice model")} size="sm" className="mt-1.5 w-full" value={config.voiceModel ?? ""} onChange={voiceModel => update({ voiceModel })} options={[
+        { value: "", label: t("Same as the chat"), hint: t("The model the chat is on") },
+        ...(!config.voiceModel || models.some(m => `${m.provider}/${m.id}` === config.voiceModel) ? [] : [{ value: config.voiceModel, label: config.voiceModel }]),
+        ...models.map(m => ({ value: `${m.provider}/${m.id}`, label: m.name || m.id, hint: `${m.provider}/${m.id}` })),
+      ]} />
+      <p className="mt-1.5 text-xs text-fg-faint">{t("The model that answers spoken messages, so a slow chat model does not slow down a conversation. A spoken message that starts a run is answered by it and the chat goes back to its own model afterwards; the model picker of the chat is not changed.")}</p>
+    </div>}
     {!listening && <div className="space-y-2">
       <label className="block text-xs text-fg-muted">{t("Reply without thinking first on")}
         <input aria-label={t("Reply without thinking first on")} className={`mt-1.5 ${inputCls}`} value={providersText ?? (config.skipThinkingProviders ?? []).join(", ")}
@@ -209,6 +220,8 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
     <div className="block text-xs text-fg-muted">{t("Speech runtime")}<Select aria-label={t("Speech runtime")} size="sm" className="mt-1.5 w-full" value={config.runtime ?? "breeze"} onChange={v => setRuntime(v as VoiceConfig["runtime"])} options={[{ value: "breeze", label: "Breeze Python" }, { value: "audio-cpp", label: "Breeze audio.cpp", hint: t("Streaming") }, { value: "chatterbox", label: "Chatterbox audio.cpp", hint: t("Multilingual") }, { value: "kokoro", label: "Kokoro audio.cpp", hint: t("Built-in voices") }, { value: "none", label: t("No speech synthesis"), hint: t("Dictation only") }]} /></div>
     {([['whisperUrl', msg('Speech recognition URL')], ...(listening ? [] : [['breezeUrl', msg('Speech synthesis URL')] as const])] as const).map(([key, label]) => <label key={key} className="block text-xs text-fg-muted">{t(label)}<input className={`mt-1.5 ${inputCls}`} value={config[key]} onChange={e => update({ [key]: e.target.value })} /></label>)}
     <label className="block text-xs text-fg-muted">{t("Speech recognition model")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Whisper.cpp needs none; audio.cpp names its model, e.g. qwen3-asr")} value={config.sttModel ?? ""} onChange={e => update({ sttModel: e.target.value })} /></label>
+    <label className="block text-xs text-fg-muted">{t("Dictation model")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Empty uses the speech recognition model above")} value={config.dictationModel ?? ""} onChange={e => update({ dictationModel: e.target.value })} /><span className="mt-1 block text-xs text-fg-faint">{t("The model the microphone button of the message box transcribes with. Voice mode keeps using the one above, so a conversation can have the quick model and dictation the accurate one.")}</span></label>
+    <label className="block text-xs text-fg-muted">{t("Dictation endpoint")}<input className={`mt-1.5 ${inputCls}`} placeholder={t("Empty uses the speech recognition URL above")} value={config.dictationUrl ?? ""} onChange={e => update({ dictationUrl: e.target.value })} /><span className="mt-1 block text-xs text-fg-faint">{t("The address the microphone button of the message box sends its recordings to. Voice mode keeps using the one above, so dictation can run on another service.")}</span></label>
       </div>
     </details>
     <div className="sticky -bottom-4 z-10 -mx-5 !-mb-4 flex justify-end border-t border-line bg-raised px-5 pt-3 pb-7">

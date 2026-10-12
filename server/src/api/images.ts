@@ -7,6 +7,7 @@ import {
   deletePicture,
   listPictures,
   openListed,
+  openListedThumb,
   picturesById,
   type PictureKind,
   type PictureOrigin,
@@ -222,6 +223,21 @@ export function imagesRouter(): Router {
       return fail(res, e);
     }
     // One of the page's own never changes under its id; one in a chat's folder is that folder's, and the browser asks.
+    sendPicture(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache");
+  });
+
+  /**
+   * The small copy of a picture, which the tiles of the gallery show instead of the file. It is
+   * made here, the first time it is asked for and again when the file has changed, and kept for
+   * every view after that, of any person and any device. A picture that gets none is sent whole.
+   */
+  router.get("/images/:id/thumb", async (req, res) => {
+    let opened: Awaited<ReturnType<typeof openListedThumb>>;
+    try {
+      opened = await openListedThumb(req.params.id);
+    } catch (e) {
+      return fail(res, e);
+    }
     sendPicture(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache");
   });
 

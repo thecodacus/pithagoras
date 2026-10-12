@@ -22,6 +22,10 @@ export interface LaunchOptions {
   sessionFile?: string;
   /** Give this session the routine tools. Channel sessions only. */
   routineTools?: boolean;
+  /** Give this session the ask_question tool. Chats a person talks to in the portal's pages only. */
+  questions?: boolean;
+  /** Whether a dialog an extension opens is shown to a person. Off for a routine, a heartbeat and a channel's chat, where it is answered at once with its no-answer value. */
+  dialogs?: boolean;
   /** The routine being run, when this is a routine session. Enables reporting. */
   routineSlug?: string | null;
   /** Lowest role the conversation serves; decides which context files load. */
@@ -38,6 +42,8 @@ export interface LaunchOptions {
   subagentModel?: () => string | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
   heartbeatAgent?: string;
+  /** Told the chat's model when a spoken turn is about to run on another. */
+  rememberChatModel?: (provider: string, modelId: string) => void;
 }
 
 export interface Executor {
@@ -85,6 +91,8 @@ export class HostExecutor implements Executor {
       sessionDir: path.join(this.sessionRoot, opts.sessionId),
       sessionFile: opts.sessionFile,
       routineTools: opts.routineTools,
+      questions: opts.questions,
+      dialogs: opts.dialogs,
       routineSlug: opts.routineSlug,
       role: opts.role,
       sessionId: opts.sessionId,
@@ -94,6 +102,7 @@ export class HostExecutor implements Executor {
       toolsOff: opts.toolsOff,
       subagentModel: opts.subagentModel,
       heartbeatAgent: opts.heartbeatAgent,
+      rememberChatModel: opts.rememberChatModel,
       provider: opts.provider,
       modelId: opts.model,
       thinkingLevel: opts.thinkingLevel,
@@ -192,7 +201,7 @@ export class ContainerExecutor implements Executor {
 
     await removeStoppedRunner(opts.sessionId);
     const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
-    return new PiRpcClient(child);
+    return new PiRpcClient(child, opts.dialogs);
   }
 
   async cleanup(sessionId: string): Promise<void> {

@@ -2,6 +2,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { PiClient, PiCommand, PiState, PiStats } from "./types.js";
 import type { ImageContent } from "../prompt-images.js";
+import { isDialog } from "./ui-requests.js";
 
 /** A message pi emits on stdout. `type: 'response'` replies to a command; everything else is an event. */
 export interface PiMessage {
@@ -37,7 +38,12 @@ export class PiRpcClient extends EventEmitter implements PiClient {
   >();
   private closed = false;
 
-  constructor(private readonly child: ChildProcessWithoutNullStreams) {
+  /**
+   * `dialogs` is false where nobody can answer a dialog an extension opens (see showsDialogs): pi's RPC mode
+   * sends each as a request and waits for the answer, so it is answered here at once with "cancelled", which
+   * pi turns into the no-answer value, and the request goes to no page. As the SDK client does on the host.
+   */
+  constructor(private readonly child: ChildProcessWithoutNullStreams, private readonly dialogs = true) {
     super();
     this.setMaxListeners(0);
 
@@ -89,6 +95,10 @@ export class PiRpcClient extends EventEmitter implements PiClient {
         waiter.resolve(msg);
         return;
       }
+    }
+    if (!this.dialogs && msg.type === "extension_ui_request" && isDialog(msg.method) && typeof msg.id === "string") {
+      this.respondUi(msg.id, { cancelled: true });
+      return;
     }
     this.emit("event", msg);
   }

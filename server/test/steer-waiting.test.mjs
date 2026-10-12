@@ -330,6 +330,44 @@ test("a message sent while Stop is winding the run down waits for it, and starts
   sessions.waiting.delete("winding");
 });
 
+test("a message sent now starts a run once the run is stopped, and the others follow it as follow-ups, not steers", async () => {
+  createSession({ id: "sendnow", title: "sendnow", workspace: home, executor: "host" });
+  let idle = false;
+  const client = {
+    ...busyClient(),
+    isIdle: () => idle,
+    abort: async () => void (idle = true),
+    prompt: async (message, options) => {
+      client.sent.push({ message, steer: options.steer, idle });
+      idle = false;
+    },
+  };
+  sessions.ensureClient = async () => client;
+  sessions.live.set("sendnow", { client, executor: {} });
+  try {
+    await sessions.prompt("sendnow", "one");
+    await sessions.prompt("sendnow", "two", { steer: true });
+    await sessions.prompt("sendnow", "three", { steer: true });
+    const [, , three] = payloads("sendnow", "portal_prompt");
+    await sessions.takeBackWaiting("sendnow", three.seq, true);
+  } finally {
+    sessions.live.delete("sendnow");
+  }
+  // pi takes a steer in before the first model request of the run it joins, so it
+  // would be answered together with the chosen message.
+  assert.deepEqual(client.sent.slice(3), [
+    { message: "three", steer: undefined, idle: true },
+    { message: "one", steer: undefined, idle: false },
+    { message: "two", steer: undefined, idle: false },
+  ]);
+  assert.deepEqual(payloads("sendnow", "portal_prompt").map((p) => [p.message, p.queued, p.steer]), [
+    ["three", undefined, undefined],
+    ["one", true, undefined],
+    ["two", true, undefined],
+  ]);
+  sessions.waiting.delete("sendnow");
+});
+
 test("a pi whose queue cannot be cleared keeps what it holds, and it is placed where pi reads it", async () => {
   createSession({ id: "noclear", title: "noclear", workspace: home, executor: "container" });
   const client = busyClient();

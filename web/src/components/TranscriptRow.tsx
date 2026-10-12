@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { DiagramPlugin } from "streamdown";
-import { LuAudioLines, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
+import { LuAudioLines, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuPencil, LuRotateCw, LuSend, LuTrash2 } from "react-icons/lu";
 import { api } from "../api";
 import { copyText } from "../clipboard";
 import { sentPictureId, shownPictureId } from "../chat-pictures";
@@ -15,6 +15,7 @@ import { PictureButton } from "./ChatPictures";
 import { CompactionMarker, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { Markdown, type MarkdownProps } from "./Markdown";
 import { PictureCall } from "./PictureCall";
+import { QuestionRecord } from "./QuestionCard";
 import { ReplyStatsLine } from "./ReplyStats";
 
 function ContextChip({ label, body }: { label: string; body: string }) {
@@ -53,6 +54,9 @@ export type RowActions = {
   retry: (seq: number, text: string) => void;
   again: (item: { images?: SentImage[] }, text: string) => Promise<void>;
   remove: (seq: number) => Promise<void>;
+  /** A message that waits for the agent: take it back for good, or stop the run and send it first. */
+  dropQueued: (seq: number) => Promise<void>;
+  sendQueued: (seq: number) => Promise<void>;
   switchVersion: (seq: number, to: number) => void;
 };
 
@@ -108,6 +112,8 @@ export const TranscriptRow = memo(function TranscriptRow({
   useLanguage();
   // Worked out once per entry, not for each draw.
   const context = useMemo(() => (item.kind === "user" ? splitContext(item.text) : null), [item]);
+  // An open question is drawn above the message box (see QuestionCard); what is kept here is its record.
+  if (item.kind === "question") return item.state === "open" ? null : <QuestionRecord item={item} enter={enter} />;
   if (item.kind === "user") {
     const { text, blocks } = context!;
     // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -135,8 +141,9 @@ export const TranscriptRow = memo(function TranscriptRow({
     }
     // Sent into the run and waiting for the agent to take it in: shown
     // as sent, at the foot of the conversation, and moved to where it
-    // was read once it has been. Nothing to edit or retry until then —
-    // and one that never got there can only be sent again. Waiting
+    // was read once it has been. It can be taken back or sent first (the
+    // server refuses once the agent has it), not retried — and one that
+    // never got there can only be sent again. Waiting
     // until the server says otherwise, run or no run: pi can still
     // hold one after its run is over, or be taking it in, and offered
     // again it would be read twice.
@@ -166,6 +173,16 @@ export const TranscriptRow = memo(function TranscriptRow({
               </span>
             )}
             {text && <CopyAction text={text} />}
+            {waits && (
+              <>
+                <MessageAction label={t("Stop the run and send this message now")} onClick={() => void act.sendQueued(item.seq)}>
+                  <LuSend className="h-3 w-3" />
+                </MessageAction>
+                <MessageAction label={t("Delete this waiting message")} danger onClick={() => void act.dropQueued(item.seq)}>
+                  <LuTrash2 className="h-3 w-3" />
+                </MessageAction>
+              </>
+            )}
             {!waits && (
               <MessageAction label={t("Send again as a new message")} onClick={() => act.again(item, text)}>
                 <LuRotateCw className="h-3 w-3" />

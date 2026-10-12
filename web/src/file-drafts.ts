@@ -11,6 +11,8 @@ export interface FileDraft {
   /** The file's modification time then: what a save is checked against. */
   mtime: number;
   size: number;
+  /** Whether the file was shown as the source because it is to be written in; a draft kept before this was known has none. */
+  writing?: boolean;
 }
 
 /** Held in memory and mirrored to session storage, so a reload does not lose an edit either. */
@@ -21,7 +23,7 @@ const WAIT_MS = 400;
 
 const valid = (d: unknown): d is FileDraft => {
   const x = d as Partial<FileDraft> | null;
-  return !!x && typeof x.path === "string" && typeof x.text === "string" && typeof x.saved === "string" && typeof x.mtime === "number" && typeof x.size === "number";
+  return !!x && typeof x.path === "string" && typeof x.text === "string" && typeof x.saved === "string" && typeof x.mtime === "number" && typeof x.size === "number" && (x.writing === undefined || typeof x.writing === "boolean");
 };
 
 /**

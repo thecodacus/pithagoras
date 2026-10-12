@@ -1,7 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName, weightOf } from "../web/src/edit-sources.ts";
+import { MAX_SOURCES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName } from "../web/src/edit-sources.ts";
 import type { GalleryPicture } from "../web/src/api.ts";
 import { inProcessHome } from "./helpers.mts";
 
@@ -69,16 +69,14 @@ test("a picture moves one place earlier or later, and not past either end", () =
   assert.notEqual(moved(list, 0, -1), list);
 });
 
-test("pictures that cannot go together are said so: several for an endpoint that takes one, or more than an edit weighs", () => {
+test("pictures that cannot go together are said so: several for an endpoint that takes one, and no weight is too much (the portal scales it down)", () => {
   const [a, b] = some(2);
   assert.equal(refusal([a], false), undefined);
   assert.equal(refusal([a, b], true), undefined);
   assert.equal(refusal([a, b], false), "one");
-  assert.equal(weightOf([a, b]), 2000);
-  const heavy = picture({ bytes: MAX_SOURCES_BYTES });
-  assert.equal(refusal([heavy], true), undefined, "exactly as much as an edit takes is not over");
-  assert.equal(refusal([heavy, a], true), "weight");
-  assert.equal(refusal([heavy, a], false), "one", "the endpoint's own limit is named first");
+  const heavy = picture({ bytes: editing.MAX_EDIT_TOTAL_BYTES });
+  assert.equal(refusal([heavy, a], true), undefined, "more than an edit takes together is not refused: it is scaled down");
+  assert.equal(refusal([heavy, a], false), "one", "the endpoint's own limit is named");
 });
 
 test("a picture is called by what it was made from, or its file, on one line and not longer than there is room for", () => {
@@ -91,7 +89,6 @@ test("a picture is called by what it was made from, or its file, on one line and
 
 test("the form's limits are the ones the portal checks", () => {
   assert.equal(MAX_SOURCES, editing.MAX_EDIT_PICTURES);
-  assert.equal(MAX_SOURCES_BYTES, editing.MAX_EDIT_TOTAL_BYTES);
 });
 
 test("a picture dragged to another place takes that place, and the others keep their order", () => {
