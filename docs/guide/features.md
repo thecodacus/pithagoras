@@ -460,8 +460,9 @@ always costs minutes of its model.
 
 ### What is accepted from the video endpoint
 
-- **A real video.** What the server sends must be a WebM or an MP4 by its first bytes, whatever it is called or served as. An AVI,
-  an animated WebP, an HTML page — anything else — is refused and not kept.
+- **A real video.** What the server sends must be a WebM or an MP4 by its first bytes, whatever it is called or served as. A WebM is
+  an EBML file whose document type, read from its header, is `webm` or `matroska` (stable-diffusion.cpp writes its WebM clips
+  with `matroska`). An AVI, an animated WebP, an HTML page, an EBML file of another type — anything else — is refused and not kept.
 - **A size and a time.** At most 100 MB per video, and the [time limit](#the-video-endpoint) in all. The video comes in one answer,
   as base64, so a long video is held in memory a few times over while it is decoded: the limit keeps that within reason.
 - **No other place.** The portal asks the address you gave, and no address the server's answers name: the job is asked about by

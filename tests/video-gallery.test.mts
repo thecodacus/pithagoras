@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import path from "node:path";
 import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
-import { KEY, MP4, PNG, WEBM, completed, fakeSd } from "./video-fixtures.mts";
+import { KEY, MATROSKA, MP4, PNG, WEBM, completed, fakeSd } from "./video-fixtures.mts";
 
 // The clips of the Media page: the gallery, its jobs, its API, the agent's tool and the posters.
 const temp = realpathSync(inProcessHome("pitha-vgallery-"));
@@ -400,6 +400,19 @@ test("a clip is deleted with its file, singly or several at once, and what could
   assert.equal((await call("POST", "/videos/delete", { ids: [] })).status, 400);
   assert.equal((await call("POST", "/videos/delete", { ids: ["x"] })).status, 400);
   assert.equal((await call("POST", "/videos/delete", { ids: Array.from({ length: 201 }, (_, i) => i.toString(16).padStart(12, "0")) })).status, 400);
+});
+
+test("a clip of a stable-diffusion.cpp server, whose document type is matroska, is listed, and served as the WebM it is", async () => {
+  const made = gallery.addPageVideo({ bytes: MATROSKA, ext: "webm", kind: "generated", prompt: "from sd.cpp", params: {} });
+  const served = await call("GET", `/videos/${made.id}/file`);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("content-type"), "video/webm");
+  assert.deepEqual(served.bytes, MATROSKA);
+  assert.ok((await listed("?limit=100")).videos.some((v: any) => v.id === made.id));
+  // An EBML file of another type is not, whatever the name says.
+  const other = gallery.addPageVideo({ bytes: clip("o"), ext: "webm", kind: "generated", prompt: "other", params: {} });
+  writeFileSync(path.join(temp, "videos", `${other.id}.webm`), Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x86, 0x42, 0x82, 0x83]), Buffer.from("foo"), Buffer.alloc(40)]));
+  assert.equal((await call("GET", `/videos/${other.id}/file`)).status, 400);
 });
 
 test("a file that has stopped being a clip is not served, and a file that is gone leaves the list", async () => {

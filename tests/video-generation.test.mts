@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inProcessHome } from "./helpers.mts";
-import { KEY, MP4, PNG, WEBM, completed, fakeSd, type FakeSd } from "./video-fixtures.mts";
+import { KEY, MATROSKA, MP4, PNG, WEBM, completed, fakeSd, type FakeSd } from "./video-fixtures.mts";
 
 inProcessHome("pitha-videos-");
 
 const gen = await import("../server/src/video-generation.ts");
 const { sdcppRoot } = await import("../server/src/video-sdcpp.ts");
-const { videoType } = await import("../server/src/video-files.ts");
+const { ebmlDocType, videoType } = await import("../server/src/video-files.ts");
 const { VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS, forClip, framesFor, parseVideoSettings, parseVideoSize } = await import("../server/src/video-settings.ts");
 const { parseRange } = await import("../server/src/http-range.ts");
 
@@ -151,6 +151,16 @@ test("a finished job whose file is no WebM or MP4 says what was sent: the format
       says: "It says output_format gif, mime_type not given; the file starts with 47 49 46 38 39 61 2d 61; frame_count 17, resolution 640x360.",
     },
     {
+      name: "a file of the EBML family that is not one a browser plays",
+      job: completed({ output_format: "webm", mime_type: "video/webm", b64_json: ebml("foo").toString("base64") }),
+      says: "It says output_format webm, mime_type video/webm; the file starts with 1a 45 df a3 86 42 82 83 (an EBML file of document type foo); frame_count 33, resolution not given.",
+    },
+    {
+      name: "an EBML header that says no type",
+      job: completed({ b64_json: Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x83, 0x42, 0x86, 0x81, 0x01]), Buffer.alloc(30)]).toString("base64") }),
+      says: "the file starts with 1a 45 df a3 83 42 86 81 (an EBML file with no readable document type);",
+    },
+    {
       name: "nothing but the bytes",
       job: { status: "completed", result: { b64_json: Buffer.from([0, 1, 2]).toString("base64") } },
       says: "It says output_format not given, mime_type not given; the file starts with 00 01 02; frame_count not given, resolution not given.",
@@ -265,13 +275,58 @@ test("a server that is not there says where the portal looked", async () => {
   await assert.rejects(gen.generateVideo(config(origin), { prompt: "x" }, FAST), (e: Error) => e instanceof gen.VideoGenerationError && e.message.includes(`Could not reach the video endpoint at ${origin}`) && e.message.includes("ECONNREFUSED") && !e.message.includes(KEY));
 });
 
+/** An EBML element: its id, the size of its payload (short enough for one byte), and the payload. */
+const element = (id: number[], payload: Buffer) => Buffer.concat([Buffer.from(id), Buffer.from([0x80 | payload.length]), payload]);
+/** The start of a file of the EBML family, built element by element: the header, the document type among its children, and what a writer puts after it. */
+const ebml = (docType: string, { before = [] as Buffer[], after = [] as Buffer[] } = {}) => {
+  const children = Buffer.concat([...before, element([0x42, 0x82], Buffer.from(docType, "latin1")), ...after]);
+  return Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x80 | children.length]), children, Buffer.alloc(24)]);
+};
+
+test("a clip whose document type is matroska, as stable-diffusion.cpp writes it, is a WebM; another type, or a type found by chance, is not", () => {
+  assert.equal(videoType(MATROSKA.subarray(0, 64))?.ext, "webm");
+  assert.equal(videoType(MATROSKA.subarray(0, 64))?.mimeType, "video/webm");
+  assert.equal(ebmlDocType(MATROSKA.subarray(0, 64)), "matroska");
+  assert.equal(ebmlDocType(WEBM.subarray(0, 64)), "webm");
+  for (const type of ["webm", "matroska"]) assert.equal(videoType(ebml(type))?.ext, "webm", type);
+  // The type is the one the header names, whole.
+  for (const type of ["foo", "webmx", "xmatroska", "matroska2", "Matroska", "", "mp4"]) assert.equal(videoType(ebml(type)), undefined, `type "${type}"`);
+  // Not found by looking for a word: another element that says webm or matroska is not the type, and the type is read where the format puts it.
+  const version = element([0x42, 0x86], Buffer.from([1]));
+  assert.equal(videoType(ebml("foo", { before: [element([0x42, 0x87], Buffer.from("webm"))] })), undefined, "webm in another element");
+  assert.equal(videoType(ebml("foo", { after: [element([0x42, 0x87], Buffer.from("matroska"))] })), undefined, "matroska in another element");
+  assert.equal(videoType(ebml("matroska", { before: [version, element([0x42, 0xf7], Buffer.from([1]))], after: [element([0x42, 0x87], Buffer.from([4]))] }))?.ext, "webm", "among the elements a writer puts in a header");
+  // A header without a type, cut off before it, or that does not add up has none.
+  const without = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x83]), version, Buffer.from("webm"), Buffer.alloc(30)]);
+  assert.equal(videoType(without), undefined, "no type element, though the word is there");
+  assert.equal(videoType(MATROSKA.subarray(0, 12)), undefined, "cut off before the type");
+  assert.equal(videoType(MATROSKA.subarray(0, 18)), undefined, "cut off inside the type");
+  assert.equal(videoType(Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0xff]), Buffer.from("matroska"), Buffer.alloc(40)])), undefined, "a header of unknown size");
+  assert.equal(videoType(Buffer.concat([Buffer.from("xx"), MATROSKA.subarray(0, 62)])), undefined, "not at the start of the file");
+  // And the MP4 path is as it was.
+  assert.equal(videoType(MP4.subarray(0, 64))?.ext, "mp4");
+  assert.equal(videoType(MP4.subarray(0, 64))?.mimeType, "video/mp4");
+});
+
+test("the clip of a stable-diffusion.cpp server, with its document type matroska, is taken as a WebM", async () => {
+  const sd = await fakeSd({ jobs: [completed({ output_format: "webm", b64_json: MATROSKA.toString("base64") })] });
+  try {
+    const made = await gen.generateVideo(config(sd.origin), { prompt: "x" }, FAST);
+    assert.equal(made.ext, "webm");
+    assert.deepEqual(made.bytes, MATROSKA);
+  } finally {
+    sd.server.close();
+  }
+});
+
 test("the container of a clip is told by its bytes: WebM and MP4, nothing a name or a server can claim", () => {
   assert.equal(videoType(WEBM.subarray(0, 64))?.ext, "webm");
   assert.equal(videoType(MP4.subarray(0, 64))?.ext, "mp4");
   assert.equal(videoType(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'></svg>")), undefined);
   assert.equal(videoType(Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(20)])), undefined, "a QuickTime movie is not played by a browser");
-  // An EBML header of another kind of document is not a WebM.
+  // An EBML header that is none, or of another kind of document, is not a WebM.
   assert.equal(videoType(Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from("matroska"), Buffer.alloc(40)])), undefined);
+  assert.equal(videoType(ebml("html")), undefined);
   assert.equal(videoType(Buffer.alloc(0)), undefined);
 });
 

@@ -521,8 +521,9 @@ This is the rule for pictures, applied to videos, by the same code:
 - The agent's videos are listed from the moment its tool saves them, with what they were asked for.
   **Videos that nobody listed are found as well:** the portal looks in `generated-videos` of every
   agent's home, of every project and of every folder a chat works in, and lists each file there whose
-  first bytes say it is a **WebM** or an **MP4** (a QuickTime movie is not played by a browser, and is
-  left out), of at most **100 MB**, whatever it is called. A link is never followed, a file that is no
+  first bytes say it is a **WebM** or an **MP4** (a WebM is an EBML file whose document type, read from
+  its header, is `webm` or `matroska`, which is what stable-diffusion.cpp writes; an EBML file of another type, and a
+  QuickTime movie, which a browser does not play, are left out), of at most **100 MB**, whatever it is called. A link is never followed, a file that is no
   video is left out, and nothing else in those folders is looked at.
 - A video that was found is *from the folder*: which chat made it cannot be told, and what it was
   asked for was not kept. It is one entry with a video the agent recorded, never two. It has no

@@ -1,6 +1,6 @@
 import { readBody, sendRequest, without } from "./image-generation.js";
 import { decodeBase64 } from "./prompt-images.js";
-import { MAX_VIDEO_BYTES, VIDEO_HEAD, videoType } from "./video-files.js";
+import { MAX_VIDEO_BYTES, VIDEO_HEAD, ebmlDocType, videoType } from "./video-files.js";
 import { VIDEO_TIMEOUT_SECONDS, framesFor } from "./video-settings.js";
 import { VideoGenerationError, type MadeVideo, type VideoBackend, type VideoGenerationConfig, type VideoRequest, type VideoRun } from "./video-types.js";
 
@@ -223,15 +223,20 @@ function resolutionOf(result: any, job: any, key: string): string {
 
 /**
  * What the portal says of a finished job whose file is no WebM or MP4, so that it can be read without the server's log:
- * what the job calls the file (`output_format`, `mime_type`), what the file's first bytes are, and how many frames and
- * what size the job says it made. What a field does not say is said not to be given.
+ * what the job calls the file (`output_format`, `mime_type`), what the file's first bytes are (and, for an EBML file,
+ * the document type it says it is), and how many frames and what size the job says it made. What a field does not say
+ * is said not to be given.
  */
 function notPlayable(result: any, job: any, head: Buffer, key: string): string {
   const frames = result?.frame_count ?? job?.frame_count;
   const bytes = [...head.subarray(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+  // A file of the Matroska family that a browser does not play as a WebM: what it says it is, as the format has it.
+  const ebml = head.length >= 4 && head.readUInt32BE(0) === 0x1a45dfa3;
+  const doc = ebml ? ebmlDocType(head.subarray(0, VIDEO_HEAD)) : undefined;
+  const kind = !ebml ? "" : doc !== undefined ? ` (an EBML file of document type ${named(doc, key) || "none"})` : " (an EBML file with no readable document type)";
   return [
     "What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays.",
-    `It says output_format ${named(result?.output_format, key, 20) || "not given"}, mime_type ${named(result?.mime_type, key) || "not given"}; the file starts with ${bytes || "nothing"};`,
+    `It says output_format ${named(result?.output_format, key, 20) || "not given"}, mime_type ${named(result?.mime_type, key) || "not given"}; the file starts with ${bytes || "nothing"}${kind};`,
     `frame_count ${named(frames, key) || "not given"}, resolution ${resolutionOf(result, job, key) || "not given"}.`,
   ].join(" ");
 }
