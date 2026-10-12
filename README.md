@@ -62,7 +62,7 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
 - **Add-ons** — the agent's own browser, and opt-in features: a subagent tool, Understory
   memory with a Memory page, and image generation and editing through an endpoint you choose,
   with an Images page to make pictures without a chat and a gallery of them.
-- **Channels and people** — reach the agent from Telegram, Slack, Discord or a webhook, with
+- **Channels and people** — reach the agent from Telegram, Slack, Discord, Signal or a webhook, with
   roles, approvals and an audit log.
 - **Routines** — scheduled runs that report to a channel.
 - **Portal** — installable app, light/dark theme, English and German.
@@ -118,7 +118,7 @@ composer. Defaults you set apply to **newly started** sessions only.
 ## Sessions and workspaces
 
 A **session** is a conversation, and it works in a folder. **New** starts one in **Home**, the
-agent's own directory, where its SOUL.md, PrimaryUser.md and MEMORY.md are. A **project** is an
+own directory of the first agent (or of the one you picked for New), where its SOUL.md, PrimaryUser.md and MEMORY.md are. A **project** is an
 extra folder you make on purpose, on the Projects tab: `"Cool Project"` becomes `cool-project`,
 with instructions of its own saved as its `AGENTS.md`. Opening a project opens its chat, and
 `/new` or `/clear` starts a fresh one in it. Deleting a session never deletes a folder.

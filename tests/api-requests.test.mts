@@ -44,6 +44,9 @@ test('speech sent to be transcribed goes through the same path: a login that is 
   assert.deepEqual(await api.transcribe('s1', new Float32Array(160)), { text: 'Hello there', serverTiming: 'stt;dur=12' });
   assert.equal(seen.at(-1)!.url, '/api/sessions/s1/voice/transcribe');
   assert.equal((seen.at(-1)!.init!.headers as any)['Content-Type'], 'audio/wav');
+  answer(reply(200, '{"text":"Hello there"}'));
+  await api.transcribe('s1', new Float32Array(160), undefined, 'dictation');
+  assert.equal(seen.at(-1)!.url, '/api/sessions/s1/voice/transcribe?purpose=dictation');
 });
 
 test('a file sent from this computer is as much a request: a gone login is heard, the portal being away is said, a refusal is an ApiError', async () => {

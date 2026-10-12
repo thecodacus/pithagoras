@@ -12,7 +12,9 @@ import {
 } from "../db.js";
 import { resolveChannelSession, scopeKey, unscopeKey } from "../agent.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
-import { sessions, CommandFailed, stripThinkingMarkers } from "../session-manager.js";
+import { sessions, CommandFailed, IMAGE_ROOT, stripThinkingMarkers, type SentPicture } from "../session-manager.js";
+import { ImageError, parseImages, saveImages } from "../prompt-images.js";
+import { picturesRefused } from "../pi/builtins.js";
 import { ruleApplies } from "../pi/guard.js";
 import { readAnswer, recordAnswer, type QuestionRow } from "../questions.js";
 import { recordApproval } from "../approvals.js";
@@ -30,6 +32,7 @@ import {
 import { loadChannels, type LoadedChannel } from "./loader.js";
 import { neutralise, notesBlock } from "./framing.js";
 import { parseConfig, type ChannelRow } from "./row.js";
+import { readChannelState, removeChannelState, writeChannelState } from "./state.js";
 
 /**
  * Runs the enabled channels.
@@ -73,7 +76,22 @@ interface Running {
     }
   ) => Promise<{ value?: unknown; cancelled?: boolean } | null>;
   log: { at: string; text: string }[];
+  /** What the package asks to be scanned or typed in to finish setting it up: see ctx.showPairing. */
+  pairing?: Pairing;
 }
+
+/**
+ * A code a channel needs somebody to take to their phone — Signal's link to a
+ * new device, say — and a line on what to do with it. Shown on the channel's
+ * page as a QR code, and as text for one that is typed in.
+ */
+export interface Pairing {
+  code: string;
+  hint: string;
+}
+
+/** Long enough for any link a QR code can hold, which is all this is for. */
+const MAX_PAIRING = 2000;
 
 /** Kept per channel and shown on its page — enough to see what happened. */
 const MAX_LOG = 50;
@@ -135,10 +153,10 @@ class ChannelSupervisor {
     return getDb().prepare("SELECT * FROM channels").all() as ChannelRow[];
   }
 
-  status(id: string): { state: ChannelState; error?: string; since?: string; log: Running["log"] } {
+  status(id: string): { state: ChannelState; error?: string; since?: string; log: Running["log"]; pairing?: Pairing } {
     const live = this.running.get(id);
     if (!live) return { state: "stopped", log: [] };
-    return { state: live.state, error: live.error, since: live.since, log: live.log };
+    return { state: live.state, error: live.error, since: live.since, log: live.log, ...(live.pairing ? { pairing: live.pairing } : {}) };
   }
 
   /** Serialised: two overlapping syncs would start the same channel twice. */
@@ -170,6 +188,9 @@ class ChannelSupervisor {
     for (const id of [...this.retries.keys()]) {
       if (!wanted.has(id)) this.clearRetry(id);
     }
+    // A channel switched off forgets where it was: switched on again, it starts
+    // from now rather than answering everything said while it was off.
+    for (const row of rows) if (!row.enabled) removeChannelState(row.id);
 
     for (const [id, row] of wanted) {
       if (this.running.has(id)) continue;
@@ -218,6 +239,26 @@ class ChannelSupervisor {
         signal: controller.signal,
         ask: (text: string, meta: Record<string, unknown> = {}) =>
           this.ask(row.id, text, meta),
+        // Not through log: a code to scan is not something that happened, it
+        // is wanted until it is scanned, and the next code replaces it.
+        // Only while this start of the channel is the one running: one that
+        // was stopped does not put its code on the next one's page.
+        showPairing: (pairing: unknown) => {
+          if (this.running.get(row.id) !== live) return;
+          const code = typeof (pairing as Pairing | null)?.code === "string" ? (pairing as Pairing).code.trim() : "";
+          const hint = typeof (pairing as Pairing | null)?.hint === "string" ? (pairing as Pairing).hint.trim() : "";
+          live.pairing = code && code.length <= MAX_PAIRING ? { code, hint } : undefined;
+        },
+        // Kept across starts, for a package that has to know where it left off.
+        // Not by a start that has been stopped: it would write over what the
+        // one after it keeps.
+        state: {
+          get: () => readChannelState(row.id),
+          set: (value: unknown) => {
+            if (this.running.get(row.id) !== live) return;
+            writeChannelState(row.id, value);
+          },
+        },
       });
       live.stop = handle?.stop;
       live.send = handle?.send;
@@ -615,6 +656,17 @@ class ChannelSupervisor {
       );
     }
 
+    // Pictures that came with it, held to the rules a browser's are: what their
+    // bytes say they are, five megabytes and eight at most. Said as the answer
+    // when they are not, since somebody sent them and is waiting.
+    let pictures: ReturnType<typeof parseImages>;
+    try {
+      pictures = parseImages(meta.images);
+    } catch (e) {
+      if (e instanceof ImageError) return e.message;
+      throw e;
+    }
+
     const { session } = resolveChannelSession({
       channelSlug: row.slug,
       key,
@@ -660,9 +712,20 @@ class ChannelSupervisor {
       return answer ? "" : "Cancelled.";
     }
 
+    // A command acts on the session and never reaches the model: pictures sent
+    // with one would be lost without a word.
+    const refused = pictures.length ? await picturesRefused(text) : undefined;
+    if (refused) return refused;
+
     const packageReply =
       typeof meta.onReply === "function"
         ? (meta.onReply as (text: string) => void | Promise<void>)
+        : undefined;
+    // Optional too: a package that cannot send a picture leaves it out, and the
+    // agent's words are all that go back.
+    const packagePicture =
+      typeof meta.onPicture === "function"
+        ? (meta.onPicture as (picture: SentPicture) => void | Promise<void>)
         : undefined;
 
     // Both off and nothing is relayed: the package gets one reply at the end,
@@ -680,6 +743,9 @@ class ChannelSupervisor {
       const pending = pendingNotes(session.id);
       return {
         message: withInstructions(text, row.instructions, person, pending.map(n => n.text)),
+        // Kept only now that it is this message's turn: one that never gets
+        // there leaves no files behind.
+        images: saveImages(IMAGE_ROOT, session.id, pictures),
         onAccepted: () => consumeNotes(session.id, pending.map(n => n.id)),
       };
     }, {
@@ -709,6 +775,7 @@ class ChannelSupervisor {
           ? (chunk: string) => packageReply(stripThinkingMarkers(chunk))
           : undefined,
       streamText: wantsProgress,
+      onPicture: packagePicture,
       // Dialogs are relayed whatever the toggles say. They are not progress
       // chatter — the run is stopped until somebody answers, and silence here
       // means the command hangs until it times out.

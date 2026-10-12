@@ -21,7 +21,7 @@ import { isValidSlug, slugify } from "./slug.js";
  * Projects: the folders a chat can work in.
  *
  * Every chat works in a folder. Most do not need one of their own, so "New"
- * starts chats in Home, which is the agent's own home directory and lives
+ * starts chats in Home, the home directory of the agent New is set to, which lives
  * outside the workspace root — so it is not here, and none of this can touch it.
  * A project is an extra folder you make on purpose, with instructions of its
  * own. Nothing here is tied to a session: deleting a chat never touches a

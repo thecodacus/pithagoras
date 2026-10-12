@@ -29,6 +29,7 @@ import { activity, buildTranscript, keepItems, type Item, type SentImage } from 
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
 import { useResolvedTheme } from "../theme";
 import { ComposerBar } from "./ComposerBar";
+import { QuestionCard } from "./QuestionCard";
 import { useChatPictures } from "./ChatPictures";
 import { confirmDialog } from "./ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
@@ -183,6 +184,8 @@ export function Chat({
   onSend,
   onEditMessage,
   onDeleteMessage,
+  onTakeBackQueued,
+  onSendQueuedNow,
   onAbort,
   onClientCommand,
   onRename,
@@ -205,6 +208,10 @@ export function Chat({
   onEditMessage: (seq: number, message: string) => Promise<void>;
   /** Remove a sent message and the agent's answer to it. */
   onDeleteMessage: (seq: number) => Promise<void>;
+  /** Take back a message that waits for the agent to read it. */
+  onTakeBackQueued: (seq: number) => Promise<void>;
+  /** Stop the run and send a waiting message now, the others still waiting behind it. */
+  onSendQueuedNow: (seq: number) => Promise<void>;
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
@@ -759,6 +766,10 @@ export function Chat({
   // Entries that have not changed are the same entries as in the last draw, so that their rows are not drawn again (see TranscriptRow).
   const lastItems = useRef<Item[]>([]);
   const items = useMemo(() => (lastItems.current = keepItems(lastItems.current, buildTranscript(events, { ended }))), [events, ended]);
+  // The agent's questions that are still open, the oldest first, above the message box. One that has just been
+  // answered here is put away at once, before its record comes back on the stream.
+  const [handed, setHanded] = useState<string[]>([]);
+  const asking = items.find((it): it is Extract<Item, { kind: "question" }> => it.kind === "question" && it.state === "open" && !handed.includes(it.questionId));
   // A click on a picture opens it over the chat, not in a tab of its own.
   const pictures = useChatPictures(items, session);
   // What arrived while the chat was open slides in; what was there when it
@@ -1257,6 +1268,17 @@ export function Chat({
     await onSend(text, images.length || steer ? { images: images.length ? images : undefined, steer: steer || undefined } : undefined);
   };
 
+  /** The latest message that waits for the agent to read it, back in the box for rewriting; sent again, it takes the place of the one that waited. */
+  const takeBackLatest = async (item: { seq: number; text: string; images?: SentImage[] }) => {
+    const id = session.id;
+    // Fetched first: a picture that cannot be fetched leaves the message waiting where it was.
+    const images = await Promise.all(
+      (item.images ?? []).map((image) => refetchImage(api.imageUrl(id, image.name), t("A picture"))),
+    );
+    await onTakeBackQueued(item.seq);
+    putBack(id, splitContext(item.text).text, images);
+  };
+
   const attempt = async (fn: () => Promise<void>) => {
     const id = session.id;
     setActionError(null);
@@ -1270,6 +1292,8 @@ export function Chat({
 
   // What the rows can do. Rows are drawn only when what they show changes, so they are handed one object
   // that stays the same, whose functions do what these do now (see useStableActions).
+  // Results trusted while this page is open, before the chat's details say so.
+  const trustedHere = useRef(new Set<string>());
   const rowActions = useStableActions<RowActions>({
     openPicture: pictures.open,
     showInTerminal,
@@ -1291,6 +1315,8 @@ export function Chat({
       void attempt(() => onEditMessage(seq, text));
     },
     again: (item, text) => attempt(() => sendAgain(item, text)),
+    dropQueued: (seq) => attempt(() => onTakeBackQueued(seq)),
+    sendQueued: (seq) => attempt(() => onSendQueuedNow(seq)),
     remove: async (seq) => {
       if (
         await confirmDialog({
@@ -1305,6 +1331,16 @@ export function Chat({
         void attempt(() => onDeleteMessage(seq));
       }
     },
+    trustFlagged: async (id) => {
+      let done = false;
+      await attempt(async () => {
+        await api.trustFlagged(session.id, id);
+        trustedHere.current.add(id);
+        done = true;
+      });
+      return done;
+    },
+    isTrusted: (id) => trustedHere.current.has(id) || (session.trustedResults ?? []).includes(id),
     switchVersion: (seq, to) => {
       setSwitching(seq);
       void attempt(async () => {
@@ -1500,7 +1536,6 @@ export function Chat({
         ) : (
           <span className="text-[11px] text-fg-subtle">{t(PANEL[kind].label)}</span>
         )}
-        {kind === "terminal" && terminalTab === "shell" && <span className="max-md:hidden truncate font-mono text-[10px] text-fg-faint">{session.workspace}</span>}
         <div className="ml-auto flex items-center gap-0.5">
           {kind === "browser" && (
             <button
@@ -1706,7 +1741,6 @@ export function Chat({
               </button>
             </h2>
           )}
-          <p className="truncate font-mono text-[11px] text-fg-faint">{session.workspace}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {session.status === "interrupted" && (
@@ -1852,6 +1886,21 @@ export function Chat({
           {!loading && running && phase && !statusShownElsewhere && <StatusIndicator phase={phase} />}
         </div>
       </div>
+
+      {!loading && asking && (
+        <div className="px-4 pt-2 sm:px-6">
+          <div className="mx-auto w-full max-w-3xl">
+            <QuestionCard
+              key={asking.questionId}
+              sessionId={session.id}
+              requestId={asking.questionId}
+              title={asking.title}
+              questions={asking.questions}
+              onDone={() => setHanded((ids) => [...ids, asking.questionId])}
+            />
+          </div>
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {
@@ -2039,6 +2088,21 @@ export function Chat({
                 if (sending) return;
                 if (chosen.needsArgument) complete(chosen);
                 else void attempt(() => submit(`${trigger}${chosen.name}`, true));
+                return;
+              }
+            }
+            // Up in an empty box brings the latest message that still waits for
+            // the agent back into it, to be changed and sent again.
+            if (
+              e.key === "ArrowUp" &&
+              !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey &&
+              !isComposing(e) &&
+              !input && !attached.length
+            ) {
+              const waiting = [...items].reverse().find((it) => it.kind === "user" && it.queued);
+              if (waiting?.kind === "user") {
+                e.preventDefault();
+                void attempt(() => takeBackLatest(waiting));
                 return;
               }
             }

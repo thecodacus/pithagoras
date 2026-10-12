@@ -158,6 +158,8 @@ export interface PiClient extends EventEmitter {
 
   /** Answer an extension dialog. Returns false if the request is unknown/expired. */
   respondUi(id: string, response: { cancelled?: boolean; value?: unknown }): boolean;
+  /** The dialogs (confirm, select, input, editor, questions) still waiting, as sent, for a page that opens meanwhile. Only where the portal draws them. */
+  openDialogRequests?(): Record<string, unknown>[];
 }
 
 /** What is in a chat's box, and what is selected in it: where a paste goes. */

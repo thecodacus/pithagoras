@@ -163,8 +163,8 @@ test('a chat is started in a folder from its line', async ({ page }) => {
   await page.goto('/sessions');
   await folder(side, 'Home').hover();
   await side.getByRole('button', { name: 'New chat in Home' }).click();
-  // Home is where a chat starts without one.
-  await expect.poll(() => sent.find((s) => s.method === 'POST' && s.path === '/api/sessions')?.body ?? null).toEqual({});
+  // Home's own folder is named, not left out: a chat started without one goes to the agent picked for new chats.
+  await expect.poll(() => sent.find((s) => s.method === 'POST' && s.path === '/api/sessions')?.body ?? null).toEqual({ workspace: HOME });
 });
 
 test('the chats can be listed together again, as they were', async ({ page }) => {
@@ -207,6 +207,33 @@ test('without projects the sidebar lists the chats as before', async ({ page }) 
   await expect(side.getByRole('button', { name: 'Group the chats by folder' })).toHaveCount(0);
 });
 
+test('with a second agent and no projects the sidebar gathers the chats by agent', async ({ page }) => {
+  await portal(page, [chat('h1', 'Home chat', HOME, 30), chat('a1', 'Scout chat', '/data/agents/scout', 5)]);
+  // Asked after the portal's, so heard first.
+  await page.route('**/api/projects*', (route) => route.fulfill({ json: {
+    root: '/w', home: HOME, projects: [],
+    agents: [{ id: 'home', name: 'Nova', home: HOME }, { id: 'scout', name: 'Scout', home: '/data/agents/scout' }],
+  } }));
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(folder(side, 'Nova')).toBeVisible();
+  await expect(folder(side, 'Scout')).toBeVisible();
+  await expect(side.locator('[data-folder]')).toHaveCount(2);
+});
+
+test('the house marks the agent that New starts chats with, not the first agent', async ({ page }) => {
+  await portal(page, [chat('h1', 'Home chat', HOME, 30), chat('a1', 'Scout chat', '/data/agents/scout', 5)]);
+  await page.route('**/api/projects*', (route) => route.fulfill({ json: {
+    root: '/w', home: HOME, projects: [],
+    agents: [{ id: 'home', name: 'Nova', home: HOME, newChats: false }, { id: 'scout', name: 'Scout', home: '/data/agents/scout', newChats: true }],
+  } }));
+  await page.goto('/sessions');
+  const side = sidebar(page);
+  await expect(folder(side, 'Scout')).toBeVisible();
+  await expect(side.locator('[data-folder="agent:scout"] [data-icon="house"]')).toHaveCount(1);
+  await expect(side.locator('[data-folder="home"] [data-icon="house"]')).toHaveCount(0);
+});
+
 test('a folder shut while searching is shut only for the search', async ({ page }) => {
   const many = Array.from({ length: 12 }, (_, i) => chat(`h${i}`, `Home chat ${i}`, HOME, i + 1));
   await portal(page, [...many, chat('s1', 'Home and site', '/w/site', 40)]);
@@ -229,10 +256,10 @@ test('a folder shut while searching is shut only for the search', async ({ page 
 
   // The same on the Sessions page.
   const main = page.getByRole('main');
-  await main.getByPlaceholder('Search by name or workspace…').fill('site');
+  await main.getByPlaceholder('Search by name or folder…').fill('site');
   await folder(main, 'site').click();
   await expect(folder(main, 'site')).toHaveAttribute('aria-expanded', 'false');
-  await main.getByPlaceholder('Search by name or workspace…').fill('');
+  await main.getByPlaceholder('Search by name or folder…').fill('');
   await expect(folder(main, 'site')).toHaveAttribute('aria-expanded', 'true');
   expect(await page.evaluate(() => localStorage.getItem('sessionsFoldersOpen'))).toBeNull();
 });

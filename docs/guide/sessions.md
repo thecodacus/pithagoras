@@ -5,7 +5,8 @@ folder it works in. It is the normal unit of work in the portal.
 
 ## Where a session works
 
-**New** starts a chat in **Home**, the first agent's own directory; a chat in a
+**New** starts a chat with the agent picked for new chats, in **Home** (the first
+agent's own directory) by default; a chat in a
 project works in that project's folder, and a chat with another agent in that
 agent's home. See [Projects](/guide/projects) and [Agents](/guide/agents). The session is named after its
 first message, and you can rename it.
@@ -22,7 +23,12 @@ not wait for the work to finish. Close the tab if you like.
 While a run is in progress you can keep typing. Words sent mid-run steer it: the
 agent takes them in after the step it is on, instead of when the whole run is
 over. Until then the message sits in the transcript marked *Waiting — goes in
-after the current step*. A message that did not get that far — the run was
+after the current step*. While it waits it can be changed: press ↑ in an empty
+box to take the latest waiting message back into the box (with its pictures) and
+send it again when you are done, or use the buttons under it to delete it or to
+**send it directly**, which stops the run and sends that message at once, with
+the others still waiting going in behind it in their order. Once the agent has
+taken a message in, it can no longer be taken back. A message that did not get that far — the run was
 stopped, or the portal restarted, before the agent took it in — says so and has
 a button to send it again. **Stop** aborts the current run, and pressed while pi
 is still starting for a message, it keeps that message from being sent at all:
@@ -80,6 +86,41 @@ Two keys work from anywhere on the page:
 | --- | --- |
 | `/` | Jump to the message box with the command list open. Not while you are typing somewhere else, where it is a character. It is the [command character](/guide/commands#the-command-character), so it is another key if you chose one |
 | `Esc` | In the message box, **stop the run**, whatever is typed: the words stay in the box, so it costs you nothing. Not while an input method is composing a word, and not while the command list is open, where it closes the list |
+
+## Questions from the agent
+
+When the agent cannot go on without a decision or a fact only you have, it uses
+its `ask_question` tool: its questions appear in the chat, just above the
+message box (not over the page, so the rest of the chat stays usable), and the
+agent waits for your answers. A question is one of four kinds: **choose
+one**, **choose several**, **free text**, or **put the options in order** (best
+first, moved with the arrows; they start in the order the agent listed them,
+and that order only counts as your answer once you have moved something or
+pressed **Keep this order**). A question the agent asks without options is
+answered in free text.
+A choice may also take an answer of your own when the agent allows it, and a
+question marked *optional* may be left empty. **Submit** is available once every
+other question is answered. **Cancel** puts the questions away, and the agent
+is told that you did not answer.
+
+The agent waits for as long as it takes: there is no time limit by default. It
+ends when you answer, when you cancel, or when you press Stop in the message
+box, which also takes the questions away in every window that has them. If you
+would rather the agent carries on by itself after a while, **Settings → Tools →
+Questions from the agent** sets a limit of 5, 15, 30 or 60 minutes. The portal
+keeps a question with its chat until it ends: after a reload, a visit to
+another chat or a restart of the portal it is there again. Answered while the
+portal restarts or after, your answers reach the agent as a new message once the
+portal is back. Once it ends, the chat
+keeps a short record of it where it was asked: each question and your answer,
+or that it was cancelled or not answered in time.
+
+The tool exists wherever you answer in the portal's own pages: in your chats,
+and in the conversations you start on the Agent page. It does not exist in a
+routine, a heartbeat or a chat reached through a channel, where nobody could
+answer in the web UI: there the agent asks in plain text, and the person
+answers with their next message. It is in the tools list like any other, in a
+group named `ask-question`, and can be switched off there.
 
 ## Looking at a picture
 
@@ -256,21 +297,22 @@ The sidebar opens with New, then the places — Sessions, Projects, Agents,
 Routines and [Audit](#audit), with Browser, Memory and Images added while the
 [browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
 holds the agent's memory and an [image endpoint](/guide/images) is set up — then **Pinned**, then **Recents**. The button at its
-top edge folds it to a rail of icons; under each chat's title it shows the folder it works in. Recents is capped at twelve; anything past that is reachable from
-the Sessions page, which lists everything with search over names and workspace
-paths.
+top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
+the Sessions page, which lists everything with a search of its own.
 
 Pinning is stored server-side and drives the ordering (`pinned DESC,
 updated_at DESC`), so the sidebar and the Sessions page never disagree.
 
 With more chats than the sidebar lists, it has a search field above them. It looks
-through every chat by name and folder, not only the ones shown, and Escape clears
-it. The Sessions page has the same search with more room.
+through every chat by its name, and by its folder's name where the chats are gathered by
+folder (below), not only the ones shown, and Escape clears it. A pinned chat is found by
+its name only, as its row shows no folder. It never goes by a chat's path. The Sessions page has the same search with more room; in its
+list of all chats, each row names the folder it works in.
 
 ### By folder
 
-Once there is a project, the chats below **Pinned** are gathered by the folder
-they work in: each agent's home, named after the agent, and each project, a
+Once there is a project or more than one agent, the chats below **Pinned** are
+gathered by the folder they work in: each agent's home, named after the agent, and each project, a
 chat in a project's subfolder counting as the project's. Each folder opens to show its chats — the sidebar up to eight,
 then *N more in …*, which opens the Sessions page at that folder — and remembers
 whether it was left open. The folder of the chat you open is opened for you. A

@@ -4,7 +4,7 @@ A channel package is a normal npm package with a marker, a manifest, and a
 `start()` that owns its transport. Publish it to a GitHub repo and it installs
 straight into the portal.
 
-The four packages in the repo's `channels/` directory are reference
+The five packages in the repo's `channels/` directory are reference
 implementations of exactly this format — read them alongside this page.
 
 ## Layout
@@ -93,6 +93,8 @@ Called once when the channel is enabled. Return an object with `stop()`.
 | `ask(text, meta)` | Send to the agent; resolves with its reply. `meta.session` is required. |
 | `log(message)` | Surfaced in the channel's status. |
 | `signal` | `AbortSignal`, aborted when the channel is disabled or the portal shuts down. |
+| `showPairing(pairing)` | Shows `{ code, hint }` on the channel's page as a QR code, until `showPairing(null)`. See [Something to scan](#something-to-scan). |
+| `state` | `get()` and `set(value)`: a little JSON kept across starts. See [Keeping your place](#keeping-your-place). |
 
 `ask` is the entire interface to the agent.
 
@@ -122,6 +124,7 @@ the builtins settled on:
 | Telegram | `chat:<chat id>` | A DM and a group have different chat ids, so they separate for free. |
 | Slack | `channel:<channel>` | Per channel, not per thread — a thread is a digression inside one conversation. |
 | Discord | `channel:<channel id>` | A DM is a channel too, so servers and DMs separate for free. |
+| Signal | `chat:<account id>`, `group:<group id>` | A group has an id of its own; a direct chat is the other person's account id, which stays the same whether their number is known or not. |
 | Webhook | whatever the caller sends, else `default` | Only the caller knows what a conversation is. |
 
 Your key is prefixed with the channel's slug before it is stored, so two
@@ -166,11 +169,6 @@ confirmation of an approval — are always the return value and never go through
 `onReply`, so a package that drops it posts nothing for them, and with
 **Progress** off nothing at all.
 
-A question an extension asks mid-run is relayed to you with the rest. If your
-transport answers it with buttons that any member of a group can press (as
-Telegram's do), the request you are given carries `canAnswer(senderId)`: check it
-with the id of whoever pressed, and ignore the press when it is false.
-
 ### Interrupting
 
 A message that is *only* `stop`, `wait`, `cancel`, `abort`, `halt`, `hold on`
@@ -184,18 +182,47 @@ instruction and reaches the agent intact.
 Anything else in `meta` is yours — it travels with the message so you can route
 the reply back where it came from.
 
+### Pictures
+
+A picture sent with a message goes in `meta.images`, as base64:
+
+```js
+const reply = await ctx.ask(text, {
+  session: `chat:${chatId}`,
+  from: { id: userId, name },
+  images: [{ data: base64, mimeType: "image/png" }],
+  onReply: (body) => send(chatId, body),
+  onPicture: (picture) => sendPicture(chatId, picture),
+});
+```
+
+They are held to the rules of a picture sent in the browser: PNG, JPEG, GIF or
+WebP by their bytes, whatever `mimeType` says, at most 5 MB each and eight with
+a message. Anything else and `ask` answers with what was wrong, and the agent
+sees none of it. Leave out what your platform says is not a picture, or too
+large, before you ask, and tell the person: what is dropped silently is waited
+for. `text` may be empty when there are pictures.
+
+`meta.onPicture` is how pictures come back. When the agent shows one
+(`show_image`, or one it made with `generate_image` or `edit_image`), it is
+handed to you as `{ data, mimeType, name, title? }`, `data` in base64, at the
+moment it is shown and whatever **Progress** and **Tool activity** say. With
+**Progress** on it falls between the words around it, as long as you send in
+the order you are handed things. A package without `onPicture` gets the words
+only.
+
 Honour `ctx.signal`. A polling loop should check `signal.aborted` and pass the
 signal to `fetch`, or disabling the channel will leave it running.
 
 ::: danger Do not await ask() in your receive loop
-An extension command can block until somebody answers a question — and the
-answer is the *next message*, which your loop has to still be receiving. Await
-`ask` inside the loop that fetches messages and it can never arrive: the chat
-hangs until the dialog times out.
+A running `ask` can be ended by a later message — `stop` — and that message has
+to be received while it runs. Await `ask` inside the loop
+that fetches messages and it can never arrive: the chat hangs until the agent
+finishes.
 
 Hand each message to an async function and do not await it. Ordering is safe
-without you: the portal serialises messages per conversation, and an answer to
-an open question jumps that queue.
+without you: the portal serialises messages per conversation, and a `stop` jumps
+that queue.
 :::
 
 You do not handle the channel's [instructions](/channels/#per-channel-instructions).
@@ -281,6 +308,46 @@ Anything npm understands works: `user/repo`, `github:user/repo#v2`, a git URL,
 an https tarball, or a published npm name. The loader picks it up immediately —
 a reinstall of the same version is cache-busted, so you do not need a restart to
 see a change.
+
+## Something to scan
+
+A platform that is joined by scanning a code — Signal's linked devices, say —
+puts the code on the channel's page with `ctx.showPairing`:
+
+```js
+ctx.showPairing({ code: uri, hint: "Open the app → Linked devices, and scan this." });
+// … once it is scanned, or when the code is replaced by a new one:
+ctx.showPairing(null);
+```
+
+The page draws `code` as a QR code with `hint` above it and the code as text
+below, and polls, so a new code replaces the old one within seconds. It is not a
+log line: nothing of it stays once it is taken back or the channel stops. The
+code goes to the browser, so it must be something to scan, never a key.
+
+Do the waiting after `start()` has returned, not in it. `start()` holds up the
+other channels until it settles, and a code can wait minutes for somebody to
+pick up their phone.
+
+## Keeping your place
+
+A package is stopped and started again whenever the portal restarts or the
+channel's form is saved, and forgets everything in between. `ctx.state` is the
+exception: a value that is still there at the next start.
+
+```js
+const kept = ctx.state.get();          // what was set last, or undefined
+ctx.state.set({ cursor: lastEventId }); // replaces it; null forgets it
+```
+
+It is for a cursor, the Signal package's last event id say, so that a stream
+that can be resumed is resumed rather than missing what came while the channel
+was stopped. At most 64 KB of JSON, kept in a file per channel. It is kept
+across a restart of the portal and a save of the form, and forgotten when the
+channel is switched off or removed: switched on again, a channel starts from
+then, not from where it was before somebody turned it off. `set` from a start that has been stopped is ignored, so a package
+that is still shutting down does not write over the one that replaced it. Not
+for secrets: those are fields marked `secret`.
 
 ## Things to know
 

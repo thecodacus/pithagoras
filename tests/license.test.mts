@@ -22,7 +22,7 @@ test('every package of the repository says it is Apache-2.0, as LICENSE is', () 
   assert.match(read('LICENSE'), /Apache License\s+Version 2\.0/);
   const files = packageFiles();
   // The channels and the subagent extension are published on their own, so each carries the field.
-  for (const expected of ['package.json', 'server/package.json', 'web/package.json', 'docs/package.json', 'extensions/subagent/package.json', 'channels/discord/package.json', 'channels/slack/package.json', 'channels/telegram/package.json', 'channels/webhook/package.json']) {
+  for (const expected of ['package.json', 'server/package.json', 'web/package.json', 'docs/package.json', 'extensions/subagent/package.json', 'channels/discord/package.json', 'channels/signal/package.json', 'channels/slack/package.json', 'channels/telegram/package.json', 'channels/webhook/package.json']) {
     assert.ok(files.includes(expected), `${expected} is looked at`);
   }
   for (const file of files) assert.equal(json(file).license, 'Apache-2.0', file);
@@ -55,6 +55,15 @@ test('the notices give the licence of every file the web build copies into voice
   assert.match(notices, /ISC License\s+Copyright \(c\) 2022-present ricky0123/);
   assert.match(notices, /MIT License\s+Copyright \(c\) 2020-present Silero Team/);
   assert.match(notices, /MIT License\s+Copyright \(c\) Microsoft Corporation/);
+});
+
+test('the notices name sharp at the version that is installed, and libvips, which comes with it under the LGPL', () => {
+  const notices = read('THIRD_PARTY_NOTICES.md');
+  const { version, license } = installed('sharp');
+  assert.equal(license, 'Apache-2.0', 'sharp changed its licence: the notices have to be read again');
+  assert.ok(notices.includes(`\`sharp\` ${version}`), `sharp ${version} is the version the notices describe`);
+  assert.match(notices, /libvips[^\n]*LGPL-3\.0-or-later/);
+  assert.ok(notices.includes('https://www.gnu.org/licenses/lgpl-3.0.txt'), 'the LGPL text is linked');
 });
 
 test('the web build puts the notices next to the voice files', () => {

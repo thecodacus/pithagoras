@@ -9,7 +9,7 @@ German. Navigation runs down the left edge, in four groups:
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
 | **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
-| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **About**, **Advanced** |
+| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
 
 Plus a page for every extension that exposes configuration.
 
@@ -83,8 +83,10 @@ reads, see [Images](/guide/images#stable-diffusion-settings). The tools do not u
 
 ## Channels
 
-Two-way links into the agent, and the packages that provide them. See
-[Agent and channels](/channels/).
+Two-way links into the agent, and the packages that provide them: Telegram,
+Slack, Discord, Signal and a webhook ship with the portal. See
+[Agent and channels](/channels/), and [Signal](/channels/signal) for setting up
+signal-cli and linking it to your phone.
 
 ## Extensions
 
@@ -150,6 +152,25 @@ language it is in, so an English page does not carry the German text.
 Installs the optional parts of the portal itself: Browser, Voice, Subagents and
 Memory, see [Docker add-ons](/guide/add-ons) and
 [Opt-in features](/guide/features).
+
+## Logs
+
+What the portal's server prints, which used to be readable only on the host. The
+newest lines are at the bottom and the list follows them as they come, until you
+scroll up to read something; scroll back down and it follows again. Errors are
+red and warnings amber. **Warnings and errors** and **Errors** hide the rest, and
+the search box keeps the lines that contain what you type. Node's own warnings
+are in the list too, not only what the portal logs itself.
+
+**Download** saves everything the portal still holds as a text file, one line per
+entry with its time and level, to attach to an issue. Read the file first and
+remove what is personal before you attach it: it can hold folder paths on the
+host, chat ids, the identifiers of people who wrote to a channel, and the file
+paths an agent was refused. The portal keeps the last 2000 lines (and no more
+than about 2 MB of text) in memory, so a restart starts the list again; for what
+happened before one, and for a crash, which ends the process and the list with
+it, the host's own log (`docker logs` for a container) is still where to look.
+Lines of the chats' own tools, and of containers, are not in it.
 
 ## About
 

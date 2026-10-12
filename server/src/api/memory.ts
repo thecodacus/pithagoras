@@ -14,6 +14,8 @@ import * as service from "../extensions/understory-service.js";
  * an HTTPS portal), and the token stays on the server. Only these reads are
  * handed on; the few changes below go through Understory's own write path in
  * the container the portal runs, never through its HTTP API, which has none.
+ * The one thing beyond the reads is the librarian chat, handed on in the same
+ * way: Understory's agent answers there, and writes through its own tools.
  *
  * It is not a documented API, so a failure says what Understory answered
  * rather than pretending the memory is empty.
@@ -58,8 +60,27 @@ export function notePath(value: unknown): string | undefined {
   return name === "index.md" || name === "log.md" ? undefined : value;
 }
 
+/** The most messages of a conversation passed on: the page keeps its history under this (HISTORY_MESSAGES in web/src/memory-chat.ts), this is a ceiling. */
+const MAX_CHAT_MESSAGES = 200;
+
+/**
+ * A conversation as Understory's chat takes it (the AI SDK's UI messages), cut
+ * down to what it reads: an id, a role and parts, ending with the user's turn.
+ */
+export function chatMessages(value: unknown): { id: string; role: "user" | "assistant"; parts: unknown[] }[] | undefined {
+  if (!Array.isArray(value) || !value.length || value.length > MAX_CHAT_MESSAGES) return undefined;
+  const messages: { id: string; role: "user" | "assistant"; parts: unknown[] }[] = [];
+  for (const m of value) {
+    if (!m || typeof m !== "object" || (m.role !== "user" && m.role !== "assistant") || !Array.isArray(m.parts)) return undefined;
+    messages.push({ id: typeof m.id === "string" ? m.id : `m${messages.length}`, role: m.role, parts: m.parts });
+  }
+  return messages.at(-1)!.role === "user" ? messages : undefined;
+}
+
 export function memoryRouter(): Router {
   const router = express.Router();
+  // Whether Understory's librarian is in the middle of a turn that this portal started. See the chat route.
+  let librarianRunning = false;
 
   /** Whether notes can be changed here, and what the bundle's links look like. */
   router.get("/memory/health", async (_req, res) => {
@@ -126,6 +147,72 @@ export function memoryRouter(): Router {
 
   /** Everything gone: an empty index and log, as a new memory has. */
   router.post("/memory/wipe", changing(() => service.wipe()));
+
+  /**
+   * The librarian: Understory's own agent, which Understory's web UI chats with.
+   * It reads and writes the memory with its own tools, so — like a note edited
+   * by hand — it is offered only in the Understory the portal runs. The page
+   * keeps the conversation and sends it whole each time; the answer is
+   * Understory's stream of UI message chunks, passed on as it comes.
+   */
+  router.post("/memory/chat", async (req, res) => {
+    if (!(await writable().catch(() => false))) {
+      return res.status(409).json({ error: "The librarian can be asked only in the Understory the portal runs, while it is running and the agent's memory." });
+    }
+    const at = understoryAt();
+    if (!at) return res.status(409).json({ error: "Understory is not the agent's memory." });
+    if (Array.isArray(req.body?.messages) && req.body.messages.length > MAX_CHAT_MESSAGES) {
+      return res.status(400).json({ error: "This conversation is too long to send: clear the chat and ask again." });
+    }
+    const messages = chatMessages(req.body?.messages);
+    if (!messages) return res.status(400).json({ error: "messages must be a conversation: user and assistant messages with parts, ending in the user's" });
+    // Understory's chat does not end its run when the connection drops: the librarian goes on with its steps, writes included.
+    // So a second question waits until the first has really ended, rather than two librarians working on one memory.
+    if (librarianRunning) return res.status(409).json({ error: "The librarian is still working on the previous question. Try again in a moment." });
+    librarianRunning = true;
+    // Whether the page is still listening. Its leaving (Stop, Clear chat, a closed tab) does not cut the stream to Understory:
+    // that would not stop the run, only hide when it ends. The rest of the answer is read and dropped.
+    let listening = true;
+    res.on("close", () => (listening = false));
+    try {
+      const answer = await fetch(`${at.origin}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(at.token ? { authorization: `Bearer ${at.token}` } : {}) },
+        body: JSON.stringify({ messages }),
+      });
+      if (!answer.ok || !answer.body) {
+        const text = await answer.text().catch(() => "");
+        let said = `status ${answer.status}`;
+        try {
+          const body = JSON.parse(text);
+          if (body && typeof body.error === "string") said = body.error;
+        } catch {}
+        if (listening) res.status(502).json({ error: `Understory did not take the question: ${said}.` });
+        return;
+      }
+      if (listening) {
+        res.status(200);
+        res.setHeader("content-type", answer.headers.get("content-type") ?? "text/event-stream");
+        res.setHeader("cache-control", "no-cache, no-transform");
+        res.setHeader("x-accel-buffering", "no");
+        res.flushHeaders();
+      }
+      for await (const chunk of answer.body as unknown as AsyncIterable<Uint8Array>) if (listening) res.write(chunk);
+      if (listening) res.end();
+    } catch (e) {
+      if (!listening) return;
+      if (res.headersSent) {
+        // The answer is cut off: say so in the stream's own way, or the page would show half a sentence as a whole one.
+        // The empty line first ends an event that was cut in the middle.
+        const why = `Understory stopped answering: ${(e as Error).message}.`;
+        res.write(`\n\ndata: ${JSON.stringify({ type: "error", errorText: why })}\n\n`);
+        return res.end();
+      }
+      res.status(502).json({ error: `Could not reach Understory at ${at.origin}: ${(e as Error).message}.` });
+    } finally {
+      librarianRunning = false;
+    }
+  });
 
   for (const [name, read] of Object.entries(READS)) {
     router.get(`/memory/${name}`, async (req, res) => {
