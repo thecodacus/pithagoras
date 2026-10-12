@@ -23,6 +23,14 @@ test("the picture tools are found in Tools, the image endpoint on the Images pag
   }
 });
 
+test("the video tools are found in Tools, the video endpoint on the Videos page", () => {
+  for (const q of ["show_video", "generate_video"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
+  for (const q of ["video generation", "videogenerierung", "frame rate", "stable-diffusion.cpp"]) {
+    const found = searchSettings(q, SETTINGS_INDEX);
+    assert.ok(found.length && found.every((e) => e.tab === "videos"), `${q} leads to Videos`);
+  }
+});
+
 test("where an entry is, is searched too", () => {
   const found = searchSettings("web access brave", [{ tab: "extensions", ext: "npm:pi-web-access", title: "Brave API key", where: "pi-web-access" }]);
   assert.equal(found.length, 1);

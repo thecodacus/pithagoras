@@ -558,6 +558,9 @@ export const api = {
     }),
   /** A picture sent with a message, as the transcript shows it. */
   imageUrl: (id: string, name: string) => `/api/sessions/${id}/images/${encodeURIComponent(name)}`,
+  /** A clip in the chat's folder, by its path there, as pictureUrl is for a picture: the player asks for the parts it needs. */
+  videoUrl: (id: string, path: string, version?: string | number) =>
+    `/api/sessions/${id}/video?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /**
    * A picture in the chat's folder, by its path there. `version` is anything
    * that changes when the file does — the agent rewrites pictures in place.
@@ -724,11 +727,13 @@ export const api = {
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
   /** Image generation alone: nothing of Understory or Docker asked for. */
   imagesFeature: () => json<{ images: ImagesFeature }>("/api/features/images"),
+  /** Video generation alone, as images are. */
+  videosFeature: () => json<{ videos: VideosFeature }>("/api/features/videos"),
   /**
    * Only whether each is on — cheap, for the sidebar and the chat's menus.
-   * `images`: image generation is on and has an address, which is when the Images page is in the sidebar.
+   * `images`: image generation is on and has an address, which is when the Images page is in the sidebar; `videos` is the same for the Videos page.
    */
-  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean } }>("/api/features/flags"),
+  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean }; videos?: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>
@@ -773,6 +778,32 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+  /** `changed`: the agent got or lost its video tools, which chats have from their next load. */
+  setVideosFeature: (patch: VideosFeaturePatch) =>
+    json<{ videos: VideosFeature; changed: boolean; reloaded: number; waiting: number }>("/api/features/videos", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  /** A page of the clips, newest first; `before` is the `next` of the page before. */
+  videoPage: (query: { origin?: VideoOrigin; kind?: VideoKind; before?: string; limit?: number; again?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    for (const [name, value] of Object.entries(query)) if (value !== undefined && value !== false) params.set(name, value === true ? "1" : String(value));
+    return json<VideoPage>(`/api/videos${params.size ? `?${params}` : ""}`);
+  },
+  /** Some clips by their ids, as far as they are there. */
+  galleryVideos: (ids: string[]) => json<{ videos: GalleryVideo[] }>(`/api/videos?ids=${ids.join(",")}`),
+  /** What is being made, and what was, with the most that run at once. */
+  videoJobs: () => json<{ jobs: VideoJob[]; limit: number }>("/api/videos/jobs"),
+  /** Stops a clip that is being made, or clears one that is done. */
+  stopVideoJob: (id: string) => json<{ ok: true }>(`/api/videos/jobs/${id}`, { method: "DELETE" }),
+  /** One job for each clip; answers at once. */
+  makeVideos: (request: VideoRequest) => json<{ jobs: VideoJob[] }>("/api/videos/generate", { method: "POST", body: JSON.stringify(request) }),
+  /** The clip as the file it is, which a player asks for in parts. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
+  videoFileUrl: (id: string) => `/api/videos/${id}/file`,
+  /** The poster picture of a clip, for the clips the gallery says can have one (`GalleryVideo.poster`). */
+  videoPosterUrl: (id: string) => `/api/videos/${id}/poster`,
+  /** Each as asked, files and all: what could not be deleted is said for each. */
+  deleteVideos: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/videos/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   /** A page of the gallery, newest first; `before` is the `next` of the page before. */
   galleryPage: (query: { origin?: PictureOrigin; kind?: PictureKind; before?: string; limit?: number; again?: boolean } = {}) => {
     const params = new URLSearchParams();
@@ -1568,6 +1599,125 @@ export interface ImagesFeaturePatch {
   /** null takes a saved limit away: the default again. */
   timeoutSeconds?: number | null;
   sdExtras?: boolean;
+}
+
+/** Video generation as the page is told it: never the key, only whether one is set. */
+export interface VideosFeature {
+  enabled: boolean;
+  /** How the endpoint is spoken to: one of `backends`. */
+  backend: string;
+  backends: { id: string; label: string }[];
+  /** The API's base, such as http://host:1234. */
+  baseUrl: string;
+  model: string;
+  /** "832x480" or empty for the endpoint's own. */
+  size: string;
+  /** How many frames a clip has, and how fast they play, when the form says nothing; none for the endpoint's own. */
+  frames: number | null;
+  fps: number | null;
+  keySet: boolean;
+  /** How long a clip may take in all, in whole seconds. */
+  timeoutSeconds: number;
+  /** The most the page's own clips may take of the disk, in megabytes: 0 is no limit. */
+  storageLimitMb: number;
+  /** Whether clips can be made: switched on, and with an address to ask. The portal says it, so that the page does not work it out again. */
+  ready: boolean;
+}
+
+/** What the page may change of it. A key left out keeps the saved one; "" takes it away. */
+export interface VideosFeaturePatch {
+  enabled?: boolean;
+  backend?: string;
+  baseUrl?: string;
+  model?: string;
+  size?: string;
+  frames?: number | null;
+  fps?: number | null;
+  apiKey?: string;
+  /** null takes a saved limit away: the default again. */
+  timeoutSeconds?: number | null;
+  /** null takes the limit away. */
+  storageLimitMb?: number | null;
+}
+
+/** Made on the page, made by the agent in a chat, or found in a folder the agent's tool writes into, with no chat to name. */
+export type VideoOrigin = "page" | "chat" | "folder";
+/** Made from a description, made from a picture as its first frame, or found with nothing to tell how it was made. */
+export type VideoKind = "generated" | "animated" | "unknown";
+
+/** A clip of the gallery, as the portal tells of it. */
+export interface GalleryVideo {
+  id: string;
+  origin: VideoOrigin;
+  /** The chat whose agent made it, for the agent's clips. */
+  chat: { id: string; title: string } | null;
+  /** The folder it was found in, for one that was found: Home, or the project's name or the way to the folder under the workspace root. */
+  folder: { name: string; home: boolean } | null;
+  kind: VideoKind;
+  prompt: string;
+  /** What it was asked for with, as far as that is known; `madeFrames` and `madeFps` are what the server says it made. */
+  params: {
+    model?: string;
+    size?: string;
+    frames?: number;
+    fps?: number;
+    seed?: number;
+    sampleSteps?: number;
+    negativePrompt?: string;
+    madeFrames?: number;
+    madeFps?: number;
+    /** A clip made from a picture: the picture of the Images page, or its path in the chat's folder. */
+    firstFrame?: { picture?: string; path?: string };
+  };
+  createdAt: number;
+  bytes: number;
+  fileName: string;
+  /** The portal can make a poster picture of it (see `videoPosterUrl`). */
+  poster: boolean;
+}
+
+export interface VideoPage {
+  videos: GalleryVideo[];
+  /** Where the next page starts, or null at the end. */
+  next: string | null;
+  /** How many there are with the filters, and how much of the disk the page's own take. */
+  total: number;
+  pageBytes: number;
+}
+
+/** A clip that is being made, was, or was not. */
+export interface VideoJob {
+  id: string;
+  kind: "generate" | "animate";
+  state: "running" | "done" | "failed";
+  /** While it runs, and the server says: waiting its turn there, or being made. */
+  stage?: "waiting" | "making";
+  /** Which place in the server's queue, while it waits. */
+  queuePosition?: number;
+  prompt: string;
+  size?: string;
+  /** A clip made from a picture: the picture's id in the Images gallery. */
+  from?: string;
+  startedAt: number;
+  finishedAt?: number;
+  videoId?: string;
+  error?: string;
+}
+
+/** What the page asks the portal to make, and only what is set. */
+export interface VideoRequest {
+  prompt: string;
+  model?: string;
+  /** `832x480`. */
+  size?: string;
+  frames?: number;
+  fps?: number;
+  seed?: number;
+  sampleSteps?: number;
+  negativePrompt?: string;
+  /** The picture of the Images page to start from. */
+  firstFrame?: string;
+  count?: number;
 }
 
 /** The model that keeps Understory's memory, as the page is told it: never the key. */

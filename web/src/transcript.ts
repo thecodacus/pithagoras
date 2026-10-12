@@ -4,6 +4,7 @@ import { argsSummary } from "./tool-args";
 import { toolArgsOf, toolNameOf } from "./tool-payload";
 import { msg, t } from "./i18n";
 import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
+import { GENERATED_VIDEO_MARK } from "../../server/src/generated-video";
 import type { AgentQuestion } from "./components/QuestionCard";
 
 /** A picture that went with a message, by the name the server keeps it under. */
@@ -37,6 +38,26 @@ export function shownPicture(payload: any): ShownPicture | undefined {
   const name = toolNameOf(payload);
   const details = payload?.result?.details;
   if (name === "generate_image" || name === "edit_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
+  if (typeof details?.path !== "string" || !details.path) return undefined;
+  return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
+}
+
+/** A clip the agent put in front of the person with show_video, or made for them with generate_video: its path in the chat's folder. */
+export interface ShownVideo {
+  path: string;
+  title?: string;
+}
+
+/**
+ * The clip a show_video or generate_video call ended with, when it succeeded. Both answer with a path in the
+ * chat's folder and a title; generate_video is taken only with the mark the portal's own tool sets, as an
+ * extension may bring a tool of that name whose path is not one in the chat's folder.
+ */
+export function shownVideo(payload: any): ShownVideo | undefined {
+  if (payload?.isError) return undefined;
+  const name = toolNameOf(payload);
+  const details = payload?.result?.details;
+  if (name === "generate_video" ? details?.[GENERATED_VIDEO_MARK] !== true : name !== "show_video") return undefined;
   if (typeof details?.path !== "string" || !details.path) return undefined;
   return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
 }
@@ -134,6 +155,11 @@ export type Item =
       pictureSeq?: number;
       /** A call of the portal's own generate_image or edit_image, as its start says (see generated-picture.ts), not of a tool of that name an extension brings. */
       portalPicture?: true;
+      /** The clip a show_video or generate_video call ended with, and the seq of the end that showed it: what versions its URL. */
+      video?: ShownVideo;
+      videoSeq?: number;
+      /** A call of the portal's own generate_video, as its start says (see generated-video.ts), not of a tool of that name an extension brings. */
+      portalVideo?: true;
       args?: unknown;
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
@@ -526,6 +552,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           status: "running",
           detail: summarizeToolInput(p),
           ...(p[GENERATED_PICTURE_MARK] === true ? { portalPicture: true as const } : {}),
+          ...(p[GENERATED_VIDEO_MARK] === true ? { portalVideo: true as const } : {}),
           ...(args !== undefined ? { args } : {}),
           ...(ev.at !== undefined ? { since: ev.at } : {}),
         });
@@ -584,6 +611,11 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             if (picture) {
               it.picture = picture;
               it.pictureSeq = ev.seq;
+            }
+            const video = shownVideo(p);
+            if (video) {
+              it.video = video;
+              it.videoSeq = ev.seq;
             }
             break;
           }

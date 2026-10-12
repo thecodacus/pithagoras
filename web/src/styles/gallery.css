@@ -24,6 +24,8 @@
 .gallery-meta > svg { flex-shrink: 0; width: 11px; height: 11px; }
 .gallery-meta > span { flex: 1; min-width: 0; }
 .gallery-meta > time { flex-shrink: 0; }
+/* How long a clip plays, between where it is from and when. */
+.gallery-meta > span.gallery-length { flex: none; font-variant-numeric: tabular-nums; }
 
 /* The box on a picture's corner, which ticks it: it has a round place of its own, so that it is found on any picture and by a thumb, and the picture marked. A click on the picture itself opens it. */
 .gallery-check-hit { position: absolute; top: 4px; left: 4px; z-index: 5; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9999px; border: 1px solid rgb(var(--line)); background: rgb(var(--surface) / .88); cursor: pointer; transition: opacity .15s; }

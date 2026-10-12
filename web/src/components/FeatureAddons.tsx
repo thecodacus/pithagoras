@@ -1,8 +1,9 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuWandSparkles } from "react-icons/lu";
-import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice } from "../api";
+import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuVideo, LuWandSparkles } from "react-icons/lu";
+import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice, type VideosFeaturePatch } from "../api";
 import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
+import { VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS } from "../../../server/src/video-settings";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { forgetNoteDrafts } from "../note-drafts";
@@ -715,7 +716,7 @@ interface ImagesDraft {
 /** What the server takes as a time limit, in seconds. */
 const TIMEOUT = TIMEOUT_SECONDS;
 /** Empty is the default, as it is for the model and the size: it takes a saved limit away. */
-const timeoutOk = (typed: string) => typed.trim() === "" || (/^\d+$/.test(typed.trim()) && Number(typed) >= TIMEOUT.min && Number(typed) <= TIMEOUT.max);
+const timeoutOk = (typed: string, limits: { min: number; max: number } = TIMEOUT) => typed.trim() === "" || (/^\d+$/.test(typed.trim()) && Number(typed) >= limits.min && Number(typed) <= limits.max);
 
 /** The same for editing, which has its own address, model and key. */
 interface ImagesEditDraft {
@@ -1020,6 +1021,255 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       />
       <p className="text-[11px] text-fg-faint">
         {t("Switch this on only if the image endpoint, for generating and for editing, is a stable-diffusion.cpp server. It adds a seed, the steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description, which that server reads out of it; any other endpoint would take the block as part of the description. For making and changing pictures on the Images page: the agent's tools do not use these settings. While this is off none of them is sent, whatever was typed or kept before.")}
+      </p>
+      {busy && (
+        <p className="flex items-center gap-2 text-xs text-fg-subtle">
+          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
+        </p>
+      )}
+      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+    </div>
+  );
+}
+
+/** The form's copy of the video endpoint's settings, before they are saved. */
+interface VideosDraft {
+  baseUrl: string;
+  model: string;
+  size: string;
+  /** As typed: whole numbers, or empty for the endpoint's own. */
+  frames: string;
+  fps: string;
+  timeout: string;
+  /** As typed: whole megabytes, or empty for no limit. */
+  storage: string;
+  /** Typed anew; empty keeps the one saved. */
+  apiKey: string;
+}
+
+/** A setting that is a whole number in a range, or empty for none. */
+const wholeOrEmpty = (typed: string, min: number, max: number) => typed.trim() === "" || (/^\d+$/.test(typed.trim()) && Number(typed) >= min && Number(typed) <= max);
+const STORAGE_MB = { min: 1, max: 100_000_000 };
+
+export function VideosAddon({ onError }: { onError: (e: string) => void }) {
+  // Its own, as the image endpoint's is: a Docker that cannot be reached is not this tab's to wait on.
+  const [videos, setVideos, failed, retry] = useFirstRead(() => api.videosFeature().then((r) => r.videos));
+  const [draft, setDraft] = useState<VideosDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Said in the language shown, whenever it is drawn.
+  const [note, setNote] = useState<(() => string) | null>(null);
+  // What is changed here and not saved is in no other place.
+  useUnsavedDraft(!!draft);
+
+  if (!videos) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
+  const form: VideosDraft = draft ?? {
+    baseUrl: videos.baseUrl,
+    model: videos.model,
+    size: videos.size,
+    frames: videos.frames === null ? "" : String(videos.frames),
+    fps: videos.fps === null ? "" : String(videos.fps),
+    timeout: String(videos.timeoutSeconds),
+    storage: videos.storageLimitMb ? String(videos.storageLimitMb) : "",
+    apiKey: "",
+  };
+  const edit = (patch: Partial<VideosDraft>) => setDraft({ ...form, ...patch });
+  const valid =
+    timeoutOk(form.timeout, VIDEO_TIMEOUT_SECONDS) &&
+    wholeOrEmpty(form.frames, VIDEO_LIMITS.frames.min, VIDEO_LIMITS.frames.max) &&
+    wholeOrEmpty(form.fps, VIDEO_LIMITS.fps.min, VIDEO_LIMITS.fps.max) &&
+    wholeOrEmpty(form.storage, STORAGE_MB.min, STORAGE_MB.max);
+
+  const change = async (patch: VideosFeaturePatch) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const { videos: saved, changed, waiting } = await api.setVideosFeature(patch);
+      setVideos(saved);
+      // The form's settings are saved now, so it shows them as the server has them; the key typed is not shown again.
+      if (patch.baseUrl !== undefined) setDraft(null);
+      if (changed) setNote(() => () => reloadNote(waiting));
+      // The Videos page is in the sidebar while there is an endpoint to make clips with.
+      window.dispatchEvent(new Event("features-changed"));
+      return true;
+    } catch (e) {
+      onError((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** A number setting as it is sent: only when it differs from the saved one, so that saving the rest does not state a value the person never chose. */
+  const numberPatch = <K extends "frames" | "fps" | "storageLimitMb">(name: K, typed: string, saved: number | null): Partial<Record<K, number | null>> => {
+    const next = typed.trim() === "" ? null : Number(typed);
+    return (next === saved ? {} : { [name]: next }) as Partial<Record<K, number | null>>;
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="rounded-xl border border-line bg-raised/40 p-3">
+        <Header Icon={LuVideo} title={t("Video generation")}>
+          {tx("Short videos from a description, or from a picture as the first frame, made by a video model you set up: on the Videos page, and by the agent with a {tool} tool, whose clips play in the chat. A clip takes minutes, so it is made as a job that goes on when the page is closed.", { tool: <code>generate_video</code> })}
+        </Header>
+      </div>
+
+      <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
+        <legend className="px-1 text-xs text-fg-muted">{t("The video endpoint")}</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="text-xs text-fg-muted sm:col-span-2">
+            {t("API address")}
+            <input
+              value={form.baseUrl}
+              onChange={(e) => edit({ baseUrl: e.target.value })}
+              placeholder="https://video.example.com"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("API key")}
+            <input
+              type="password"
+              value={form.apiKey}
+              onChange={(e) => edit({ apiKey: e.target.value })}
+              placeholder={videos.keySet ? t("saved — type to replace") : t("none needed for a local server")}
+              autoComplete="off"
+              className={`${inputCls} mt-1 text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Model")}
+            <input
+              value={form.model}
+              onChange={(e) => edit({ model: e.target.value })}
+              placeholder="video-model"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Video size")}
+            <input
+              value={form.size}
+              onChange={(e) => edit({ size: e.target.value })}
+              placeholder="832x480"
+              spellCheck={false}
+              autoComplete="off"
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs text-fg-muted">
+              {t("Frames")}
+              <input
+                inputMode="numeric"
+                value={form.frames}
+                onChange={(e) => edit({ frames: e.target.value })}
+                placeholder={t("the server's own")}
+                aria-invalid={!wholeOrEmpty(form.frames, VIDEO_LIMITS.frames.min, VIDEO_LIMITS.frames.max)}
+                className={`${inputCls} mt-1 font-mono text-xs`}
+              />
+            </label>
+            <label className="text-xs text-fg-muted">
+              {t("Frame rate")}
+              <input
+                inputMode="numeric"
+                value={form.fps}
+                onChange={(e) => edit({ fps: e.target.value })}
+                placeholder={t("the server's own")}
+                aria-invalid={!wholeOrEmpty(form.fps, VIDEO_LIMITS.fps.min, VIDEO_LIMITS.fps.max)}
+                className={`${inputCls} mt-1 font-mono text-xs`}
+              />
+            </label>
+          </div>
+          <label className="text-xs text-fg-muted">
+            {t("Time limit (seconds)")}
+            <input
+              inputMode="numeric"
+              value={form.timeout}
+              onChange={(e) => edit({ timeout: e.target.value })}
+              placeholder={String(VIDEO_TIMEOUT_SECONDS.default)}
+              aria-invalid={!timeoutOk(form.timeout, VIDEO_TIMEOUT_SECONDS)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+          <label className="text-xs text-fg-muted">
+            {t("Disk limit for the Videos page (MB)")}
+            <input
+              inputMode="numeric"
+              value={form.storage}
+              onChange={(e) => edit({ storage: e.target.value })}
+              placeholder={t("no limit")}
+              aria-invalid={!wholeOrEmpty(form.storage, STORAGE_MB.min, STORAGE_MB.max)}
+              className={`${inputCls} mt-1 font-mono text-xs`}
+            />
+          </label>
+        </div>
+        <p className="text-[11px] text-fg-faint">
+          {tx("The address of a {server} server, such as {example}: the portal asks it for a clip as a job of its native API ({route}), asks how it is doing until it is done, and takes the WebM it makes. The address of the image endpoint of the same server, with its {v1}, works too. The key goes only to this address. Leave the model, the size, the frames and the frame rate empty for the server's own.", {
+            server: <b>{(videos.backends.find((b) => b.id === videos.backend) ?? videos.backends[0])?.label ?? "stable-diffusion.cpp"}</b>,
+            example: <code>http://localhost:1234</code>,
+            route: <code>/sdcpp/v1</code>,
+            v1: <code>/v1</code>,
+          })}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The model is sent as {model}: stable-diffusion.cpp's server runs the one model it was started with and ignores it, but a gateway in front of it may choose a model by it.", { model: "model" })}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The time limit is how long the portal waits for one clip, in the server's queue and while it is made, before it gives up: {min} to {max} seconds, {default} by default. A clip the server has begun is not stopped by this: it goes on there.", VIDEO_TIMEOUT_SECONDS)}
+        </p>
+        <p className="text-[11px] text-fg-faint">
+          {t("The disk limit is how much the clips made on the Videos page may take together. At the limit no new clip is made there until some are deleted or the limit is raised; nothing is ever deleted for it. The clips the agent makes are in its chats' folders and are not counted. Leave it empty for no limit.")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {draft && (
+            <button
+              type="button"
+              className={primaryCls}
+              disabled={!valid}
+              onClick={() =>
+                void change({
+                  baseUrl: form.baseUrl,
+                  model: form.model,
+                  size: form.size,
+                  ...numberPatch("frames", form.frames, videos.frames),
+                  ...numberPatch("fps", form.fps, videos.fps),
+                  ...numberPatch("storageLimitMb", form.storage, videos.storageLimitMb || null),
+                  // Only when changed, so that saving the rest does not state a limit the person never chose.
+                  ...(form.timeout.trim() === "" ? { timeoutSeconds: null } : Number(form.timeout) !== videos.timeoutSeconds ? { timeoutSeconds: Number(form.timeout) } : {}),
+                  ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+                })
+              }
+            >
+              {t("Save")}
+            </button>
+          )}
+          {draft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setDraft(null)}>
+              {t("Discard")}
+            </button>
+          )}
+          {videos.keySet && !draft && (
+            <button type="button" className="text-xs text-fg-muted hover:text-danger" onClick={() => void change({ apiKey: "" })}>
+              {t("Remove the saved key")}
+            </button>
+          )}
+        </div>
+      </fieldset>
+
+      <SwitchRow
+        title={t("Video generation")}
+        detail={videos.enabled ? t("On: clips are made on the Videos page, and the agent can have a generate_video tool.") : t("Off: no clips are made, on the Videos page or by the agent.")}
+        on={videos.enabled}
+        onChange={(enabled) => void change({ enabled })}
+        disabled={busy || !!draft || (!videos.baseUrl && !videos.enabled)}
+        note={draft ? t("Save or discard the changes first.") : !videos.baseUrl && !videos.enabled ? t("Save the address of a video endpoint first.") : undefined}
+      />
+      <p className="text-[11px] text-fg-faint">
+        {t("The agent's clips are made in a generated-videos folder inside the chat's folder. Making one can cost money at a hosted endpoint, and always costs minutes of its model, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the generate_video and show_video tools is set in the tool lists (Settings → Agent → Tools, a project's Tools, and the tools control of a chat).")}
       </p>
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">

@@ -12,6 +12,7 @@ export const TAB_IDS = [
   "tools",
   "sandbox",
   "images",
+  "videos",
   "skills",
   "mcp",
   "extensions",

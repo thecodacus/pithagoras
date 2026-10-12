@@ -26,19 +26,23 @@ const BUILT_IN = msg("built in");
  * is called: a group an extension's tool of the same name could be filed in by accident.
  */
 const PICTURES = "<portal:images>";
+/** The same for the portal's video tools. */
+const VIDEOS = "<portal:videos>";
 
 /** The tools that make up pictures: showing one, making one, changing one. */
 const PICTURE_TOOLS = ["show_image", "generate_image", "edit_image"];
+/** And the tools that make up videos: showing a clip, making one. */
+const VIDEO_TOOLS = ["show_video", "generate_video"];
 
 /**
  * What to file a tool under. The portal's own picture tools share one group, whichever way each was
  * registered; an extension's tool of the same name is not the portal's and stays in its own.
  */
 const sourceOf = (tool: PortalTool): string =>
-  tool.inline && PICTURE_TOOLS.includes(tool.name) ? PICTURES : tool.source?.trim() || BUILT_IN;
+  tool.inline && PICTURE_TOOLS.includes(tool.name) ? PICTURES : tool.inline && VIDEO_TOOLS.includes(tool.name) ? VIDEOS : tool.source?.trim() || BUILT_IN;
 
 /** Where a group goes in the list: what is installed first, what the portal brings after it, what is built in last. */
-const shippedRank = (source: string): number => (source === BUILT_IN ? 2 : source === PICTURES ? 1 : 0);
+const shippedRank = (source: string): number => (source === BUILT_IN ? 2 : source === PICTURES || source === VIDEOS ? 1 : 0);
 
 export function groupTools(tools: PortalTool[]): ToolGroup[] {
   const groups = new Map<string, PortalTool[]>();
@@ -97,7 +101,7 @@ export function toggleOpen(open: string[], source: string): string[] {
 }
 
 /** Where a group of tools comes from, as it is: a package's spec, or what the portal brings itself, in words. */
-export const sourceName = (source: string): string => (source === BUILT_IN ? t(BUILT_IN) : source === PICTURES ? t("Images") : source);
+export const sourceName = (source: string): string => (source === BUILT_IN ? t(BUILT_IN) : source === PICTURES ? t("Images") : source === VIDEOS ? t("Videos") : source);
 
 /**
  * What a group is called on the page.
@@ -111,6 +115,6 @@ export const sourceName = (source: string): string => (source === BUILT_IN ? t(B
 export function displayName(source: string, names: Record<string, string> = {}): string {
   const given = names[source]?.trim();
   if (given) return given;
-  if (source === BUILT_IN || source === PICTURES) return sourceName(source);
+  if (source === BUILT_IN || source === PICTURES || source === VIDEOS) return sourceName(source);
   return source.replace(/^@[^/]+\//, "") || source;
 }

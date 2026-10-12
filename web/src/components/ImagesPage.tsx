@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { LuCheck, LuDownload, LuFolder, LuImage, LuInfo, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuWandSparkles } from "react-icons/lu";
+import { LuCheck, LuDownload, LuFolder, LuImage, LuInfo, LuMessageSquare, LuRefreshCw, LuRepeat, LuTrash2, LuVideo, LuWandSparkles } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob, type PictureKind, type PictureOrigin } from "../api";
 import { MAX_SOURCES, addSources, sourceName } from "../edit-sources";
 import { appendPage, fieldsText, madeButNotListed, mergeTop, readFilter, sameList, tiles, viewerList, viewerPicture, type Filter, type Tile } from "../images-gallery";
@@ -97,6 +97,11 @@ export function ImagesPage() {
   const [fitted, setFitted] = useState<string[]>([]);
   useEffect(() => {
     api.imagesFeature().then((r) => setFeatures(r.images), (e: Error) => setError(e.message));
+  }, []);
+  // Whether a clip can be made from a picture here: the Videos page is there while video generation is on.
+  const [videosOn, setVideosOn] = useState(false);
+  useEffect(() => {
+    api.featureFlags().then((f) => setVideosOn(f.videos?.enabled === true), () => {});
   }, []);
 
   // The gallery, as far as it has been loaded. A filter asks again from the top, and an answer to what was asked before it is not wanted.
@@ -628,6 +633,7 @@ export function ImagesPage() {
                 picture={picture}
                 makes={makes}
                 canEdit={changes}
+                videos={videosOn}
                 onShown={shown}
                 onEdit={editIt}
                 // While the form is in Edit, the pictures are taken into it from here as well, one after another, with the viewer open.
@@ -705,6 +711,7 @@ function ViewerActions({
   picture,
   makes,
   canEdit,
+  videos,
   onShown,
   onEdit,
   use,
@@ -715,6 +722,8 @@ function ViewerActions({
   /** Whether pictures can be made, and whether they can be changed: what the buttons that make one again say. */
   makes: boolean;
   canEdit: boolean;
+  /** Whether video generation is on: a clip can be started from this picture. */
+  videos: boolean;
   onShown: (picture: GalleryPicture) => void;
   onEdit: (picture: GalleryPicture) => void;
   /** Where the form is in Edit: whether this picture is one of the edit's, whether the edit has all it takes, and a way to take it in or out. */
@@ -761,6 +770,12 @@ function ViewerActions({
         <button type="button" onClick={() => onEdit(picture)} aria-label={t("Edit it")} title={canEdit ? t("Edit it") : t("Edit it (editing is not set up)")} className={viewerButton}>
           <LuWandSparkles aria-hidden className="h-[18px] w-[18px]" />
         </button>
+      )}
+      {videos && (
+        // To the Videos page with this picture as the first frame of the clip to be made.
+        <Link to={`/videos?from=${picture.id}`} aria-label={t("Make a video from it")} title={t("Make a video from it")} className={viewerButton}>
+          <LuVideo aria-hidden className="h-[18px] w-[18px]" />
+        </Link>
       )}
       {again && (
         <button type="button" onClick={() => onAgain(picture)} aria-label={t("Run again")} title={t("Run again")} className={viewerButton}>

@@ -38,6 +38,7 @@ const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditP
 const BrowserPage = lazyComponent(() => import("./components/BrowserPage"), "BrowserPage");
 const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
 const ImagesPage = lazyComponent(() => import("./components/ImagesPage"), "ImagesPage");
+const VideosPage = lazyComponent(() => import("./components/VideosPage"), "VideosPage");
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
@@ -127,6 +128,7 @@ export default function App() {
       <Route path="/browser" element={<Shell view="browser" />} />
       <Route path="/memory" element={<Shell view="memory" />} />
       <Route path="/images" element={<Shell view="images" />} />
+      <Route path="/videos" element={<Shell view="videos" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
@@ -147,7 +149,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "videos" | "audit";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
@@ -197,6 +199,8 @@ function Shell({
   const [hasMemory, setHasMemory] = useState(false);
   // Likewise whether image generation is on and has an address, which is when the Images page is.
   const [hasImages, setHasImages] = useState(false);
+  // And whether video generation is, which is when the Videos page is.
+  const [hasVideos, setHasVideos] = useState(false);
   useEffect(() => {
     const ask = () =>
       api
@@ -204,10 +208,11 @@ function Shell({
         .then((f) => {
           setHasMemory(f.understory?.enabled === true);
           setHasImages(f.images?.enabled === true);
+          setHasVideos(f.videos?.enabled === true);
         })
         .catch(() => {});
     ask();
-    // Said by Settings when it switches Understory (Add-ons) or the images (Agent → Images), so the sidebar follows at once.
+    // Said by Settings when it switches Understory (Add-ons), the images (Agent → Images) or the videos (Agent → Videos), so the sidebar follows at once.
     window.addEventListener("features-changed", ask);
     return () => window.removeEventListener("features-changed", ask);
   }, []);
@@ -690,6 +695,7 @@ function Shell({
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
         hasImages={hasImages}
+        hasVideos={hasVideos}
         places={places}
         onNavigate={onNavigate}
         onOpenFolder={onOpenFolder}
@@ -754,6 +760,8 @@ function Shell({
           <MemoryPage />
         ) : view === "images" ? (
           <ImagesPage />
+        ) : view === "videos" ? (
+          <VideosPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : active ? (
