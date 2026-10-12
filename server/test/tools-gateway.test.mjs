@@ -57,6 +57,66 @@ export default function (pi) {
     parameters: { type: "object", properties: { amount: { type: "number" }, mode: { type: "string", enum: ["up", "down"] } }, required: ["amount"] },
     async execute(_id, p) { return text("amount is " + typeof p.amount + " " + JSON.stringify(p.amount)); },
   });
+  // A tool whose extension wrote a rule for the prompt about it.
+  pi.registerTool({
+    name: "rule_tool",
+    label: "Rule",
+    description: "Weigh a ruled thing.",
+    promptGuidelines: ["RULE-MARKER: say the word cheese before you weigh a ruled thing."],
+    parameters: { type: "object", properties: {} },
+    async execute() { return text("weighed"); },
+  });
+  // Tools that take a while and note when they start and end: sequential ones, as the browser's are, and ones that are not.
+  const log = (globalThis.__gatewayLog ??= []);
+  for (const [name, mode] of [["seq_a", "sequential"], ["seq_b", "sequential"], ["seq_c", "sequential"], ["par_a", undefined], ["par_b", undefined]]) {
+    pi.registerTool({
+      name,
+      label: name,
+      description: "Wait a moment, as " + name + ".",
+      ...(mode ? { executionMode: mode } : {}),
+      parameters: { type: "object", properties: {} },
+      async execute() {
+        log.push("start " + name);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        log.push("end " + name);
+        return text(name + " done");
+      },
+    });
+  }
+  // A tool the extension keeps hidden until its moment, as pi-goal-x does its goal tools.
+  pi.registerTool({
+    name: "hid_secret",
+    label: "Hidden",
+    description: "Do what is not to be done yet.",
+    parameters: { type: "object", properties: {} },
+    async execute() { return text("hidden ran"); },
+  });
+  pi.on("session_start", () => {
+    pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "hid_secret"));
+  });
+  // And one it takes out of the set later, with every message, when the switches have long been applied.
+  pi.registerTool({
+    name: "late_hidden",
+    label: "Late",
+    description: "Do what is not to be done yet, later.",
+    parameters: { type: "object", properties: {} },
+    async execute() { return text("late ran"); },
+  });
+  pi.on("before_agent_start", () => {
+    pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "late_hidden"));
+    if (globalThis.__showLater) pi.setActiveTools([...pi.getActiveTools(), "later_shown"]);
+  });
+  // One it keeps hidden from the start and shows when its moment has come.
+  pi.registerTool({
+    name: "later_shown",
+    label: "Later",
+    description: "Do what is to be done at last.",
+    parameters: { type: "object", properties: {} },
+    async execute() { return text("later ran"); },
+  });
+  pi.on("session_start", () => {
+    pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "later_shown"));
+  });
   pi.registerTool({
     name: "mcp_page",
     label: "Page",
@@ -323,4 +383,178 @@ test("a call of a lazy tool tells the portal's pages which tool it called, and a
   // A search calls nothing, so it is of no tool.
   assert.equal(through.results[1].toolName, "tools");
   assert.equal(through.results[1].portalCalledTool, undefined);
+});
+
+/** The system prompt of a request: pi sends it as the first message. */
+const systemOf = (request) =>
+  request.messages
+    .filter((m) => m.role === "system" || m.role === "developer")
+    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+    .join("\n");
+
+test("the rules a lazy tool's extension wrote for the prompt stay in the prompt, and its schema and description do not", async () => {
+  const direct = await run([], {});
+  assert.match(systemOf(direct.requests[0]), /RULE-MARKER/, "the rule of a tool that is offered is in the prompt");
+  const through = await run([], { toolsLazy: ["rule_tool"], lazySets: ["ruled"] });
+  assert.ok(!names(through.requests[0]).includes("rule_tool"));
+  assert.doesNotMatch(JSON.stringify(through.requests[0].tools), /Weigh a ruled thing/, "the description is not in what the model is sent");
+  assert.match(systemOf(through.requests[0]), /RULE-MARKER: say the word cheese/, "but its rule is said, where it is lazy");
+  // Once, however many lazy tools have it, and not when nothing is lazy.
+  const twice = await run([], { toolsLazy: ["rule_tool", "docs_open"], lazySets: ["ruled"] });
+  assert.equal(systemOf(twice.requests[0]).split("RULE-MARKER").length, 2);
+  const none = await run([], { toolsOff: ["rule_tool"] });
+  assert.doesNotMatch(systemOf(none.requests[0]), /RULE-MARKER/);
+});
+
+test("a lazy browser keeps the rule that a page is data and not instructions", async () => {
+  const { setPortalBrowser } = await import("../dist/db.js");
+  const { PORTAL_BROWSER_TOOLS } = await import("../dist/tool-policy.js");
+  const { BROWSER_UNTRUSTED_GUIDELINE } = await import("../dist/browser/tools.js");
+  setPortalBrowser(true);
+  try {
+    const direct = await run([], { cwd: chat() });
+    assert.ok(names(direct.requests[0]).includes("browser_snapshot"));
+    assert.ok(systemOf(direct.requests[0]).includes(BROWSER_UNTRUSTED_GUIDELINE), "offered one by one, the rule is in the prompt");
+    const lazyBrowser = await run([], { toolsLazy: [...PORTAL_BROWSER_TOOLS], lazySets: ["browser"] });
+    assert.deepEqual(names(lazyBrowser.requests[0]).filter((name) => name.startsWith("browser_")), []);
+    assert.ok(systemOf(lazyBrowser.requests[0]).includes(BROWSER_UNTRUSTED_GUIDELINE), "lazy, it still is: the guard's short envelope relies on it");
+    assert.match(systemOf(lazyBrowser.requests[0]), /never guess or reuse a ref/, "and so are the rules for its refs");
+  } finally {
+    setPortalBrowser(false);
+  }
+});
+
+test("calls of sequential tools in one message run one after another, in order; the other ones run together", async () => {
+  const log = (globalThis.__gatewayLog ??= []);
+  const calls = (...tools) => [tools.map((name) => via("call", { name, args: {} }))];
+
+  log.length = 0;
+  const sequential = await run(calls("seq_a", "seq_b", "seq_c"), { toolsLazy: ["seq_a", "seq_b", "seq_c"] });
+  assert.deepEqual(log, ["start seq_a", "end seq_a", "start seq_b", "end seq_b", "start seq_c", "end seq_c"]);
+  assert.deepEqual(sequential.results.map((r) => r.isError), [false, false, false]);
+  assert.deepEqual(sequential.results.map((r) => textOf(r).match(/seq_\w/)[0]), ["seq_a", "seq_b", "seq_c"]);
+
+  // As called directly, so the same.
+  log.length = 0;
+  await run(calls("seq_a", "seq_b").map((list) => list.map((c) => ({ name: c.args.name, args: {} }))), {});
+  assert.deepEqual(log, ["start seq_a", "end seq_a", "start seq_b", "end seq_b"]);
+
+  // A tool that does not say it must run alone is not held up behind another: they overlap.
+  log.length = 0;
+  await run(calls("par_a", "par_b"), { toolsLazy: ["par_a", "par_b"] });
+  assert.deepEqual(log.slice(0, 2).sort(), ["start par_a", "start par_b"]);
+});
+
+test("a call that waits for its turn is not run after the turn was stopped", async () => {
+  const log = (globalThis.__gatewayLog ??= []);
+  log.length = 0;
+  script = [[via("call", { name: "seq_a", args: {} }), via("call", { name: "seq_b", args: {} })]];
+  model.requests.length = 0;
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `gateway-${n++}`, toolsLazy: ["seq_a", "seq_b"],
+  });
+  try {
+    const settled = new Promise((resolve) => client.on("event", (e) => {
+      // The turn is stopped while the first call runs.
+      if (e?.type === "tool_execution_start" && !log.length) setTimeout(() => client.abort(), 50);
+      if (e?.type === "agent_settled") resolve();
+    }));
+    await client.prompt("Go on");
+    await settled;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.ok(!log.includes("start seq_b"), `the second call did not start: ${JSON.stringify(log)}`);
+  } finally {
+    client.dispose();
+  }
+});
+
+test("a tool its extension keeps inactive is not reached through the tools tool, and marking it lazy does not switch it on", async () => {
+  // The premise: not lazy, it is not offered, and a direct call fails.
+  const plain = await run([{ name: "hid_secret", args: {} }], {});
+  assert.ok(!names(plain.requests[0]).includes("hid_secret"));
+  assert.equal(plain.results[0].isError, true);
+  assert.match(textOf(plain.results[0]), /hid_secret not found/);
+
+  // Lazy, it is the same: not found, not described, not called. The extension's other tools are lazy still.
+  const options = { toolsLazy: ["hid_secret", "docs_open"], lazySets: ["docs"] };
+  const { results, requests } = await run(
+    [via("search", { query: "secret" }), via("describe", { name: "hid_secret" }), via("call", { name: "hid_secret", args: {} }), via("call", { name: "docs_open", args: { id: "d-3" } })],
+    options,
+  );
+  assert.ok(names(requests[0]).includes("tools"), "docs_open is lazy, so the way to it is offered");
+  assert.match(textOf(results[0]), /No lazy tool matches/);
+  assert.equal(results[1].isError, true);
+  assert.match(textOf(results[1]), /There is no lazy tool called \\"hid_secret\\"/);
+  assert.equal(results[2].isError, true);
+  assert.doesNotMatch(textOf(results[2]), /hidden ran/);
+  assert.equal(results[3].isError, false);
+  assert.match(textOf(results[3]), /opened d-3/, "what the extension did not hide stays reachable");
+
+  // Only it is lazy: there is nothing to reach, so no gateway either.
+  const alone = await run([], { toolsLazy: ["hid_secret"], lazySets: ["hidden"] });
+  assert.ok(!names(alone.requests[0]).includes("tools"));
+  assert.doesNotMatch(JSON.stringify(alone.requests[0]), /search for them with the tools tool/);
+});
+
+test("an extension taking a tool out of the set later leaves the other lazy tools reachable, and does not reach the one it took out", async () => {
+  const { results, requests } = await run(
+    [via("call", { name: "late_hidden", args: {} }), via("call", { name: "docs_open", args: { id: "d-4" } }), via("search", { query: "open" })],
+    { toolsLazy: ["late_hidden", "docs_open"], lazySets: ["docs"] },
+  );
+  assert.ok(names(requests[0]).includes("tools"));
+  assert.equal(results[0].isError, true);
+  assert.doesNotMatch(textOf(results[0]), /late ran/);
+  assert.equal(results[1].isError, false);
+  assert.match(textOf(results[1]), /opened d-4/);
+  assert.match(textOf(results[2]), /docs_open/);
+});
+
+test("a lazy tool its extension shows at last is reached, and the tools tool is offered from then on", async () => {
+  script = [];
+  model.requests.length = 0;
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `gateway-${n++}`, toolsLazy: ["later_shown"], lazySets: ["later"],
+  });
+  try {
+    const ask = async () => {
+      const settled = new Promise((resolve) => client.on("event", (e) => e?.type === "agent_settled" && resolve()));
+      await client.prompt("Go on");
+      await settled;
+      return names(model.requests.at(-1));
+    };
+    const hidden = await ask();
+    assert.ok(!hidden.includes("tools") && !hidden.includes("later_shown"), "hidden: nothing to reach");
+    globalThis.__showLater = true;
+    script = [via("call", { name: "later_shown", args: {} })];
+    const shown = await ask();
+    assert.ok(shown.includes("tools") && !shown.includes("later_shown"), "shown: reached through the tools tool");
+    assert.match(JSON.stringify(model.requests.at(-1).messages), /later ran/);
+  } finally {
+    globalThis.__showLater = false;
+    client.dispose();
+  }
+});
+
+test("taking the lazy mark away does not bring back what its extension hid", async () => {
+  script = [];
+  model.requests.length = 0;
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `gateway-${n++}`, toolsLazy: ["hid_secret", "docs_open"], lazySets: ["docs"],
+  });
+  try {
+    const ask = async () => {
+      const settled = new Promise((resolve) => client.on("event", (e) => e?.type === "agent_settled" && resolve()));
+      await client.prompt("Go on");
+      await settled;
+      return names(model.requests.at(-1));
+    };
+    assert.ok(!(await ask()).includes("hid_secret"));
+    await client.setToolsOff([], { tools: [], sets: [] });
+    const after = await ask();
+    assert.ok(after.includes("docs_open"), "the tool that was only lazy is offered one by one again");
+    assert.ok(!after.includes("hid_secret"), "and the one the extension hid is not");
+    assert.ok(!(await client.getTools()).some((t) => t.name === "hid_secret"), "nor listed");
+  } finally {
+    client.dispose();
+  }
 });

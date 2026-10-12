@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
-import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, PICTURES_SET, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { BUILT_IN_SET, DIRECT_TOOLS, PI_BUILT_IN_TOOLS, PICTURES_SET, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { mcpCatalogue, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
@@ -2255,10 +2255,11 @@ export function lazyToolSets(): string[] {
 }
 
 /**
- * Can this tool be lazy? Any tool can, but an MCP server's and one of pi's own. The MCP adapter keeps a
- * server's tools out of the prompt its own way, through its `mcp` tool, and pi's built-in tools (read,
- * bash, edit and the rest) are what a conversation works with at all. Those are told by their names: the
- * set they are filed in is the extension's that registers them again, such as the sandbox's.
+ * Can this tool be lazy? Any tool can, but an MCP server's, one of pi's own, and the few that are followed as
+ * the model types the call (DIRECT_TOOLS). The MCP adapter keeps a server's tools out of the prompt its own
+ * way, through its `mcp` tool, and pi's built-in tools (read, bash, edit and the rest) are what a conversation
+ * works with at all. Those are told by their names: the set they are filed in is the extension's that
+ * registers them again, such as the sandbox's.
  */
 export function lazyAllowed(
   tool: Pick<KnownTool, "name" | "source"> & { package?: string | null; inline?: boolean; cached?: boolean },
@@ -2266,7 +2267,7 @@ export function lazyAllowed(
 ): boolean {
   if (tool.cached || adapterTool({ source: tool.source, package: tool.package })) return false;
   if (!noServerOf(tool.name) && mcpServerOf(tool.name, servers) !== undefined) return false;
-  if (PI_BUILT_IN_TOOLS.includes(tool.name)) return false;
+  if (PI_BUILT_IN_TOOLS.includes(tool.name) || DIRECT_TOOLS.includes(tool.name)) return false;
   return toolSetOf(tool, servers) !== BUILT_IN_SET;
 }
 
@@ -2297,7 +2298,7 @@ export function lazyRefused(marks: string[]): string[] {
   return clean(marks).filter((mark) => {
     const named = tools.filter((tool) => marksTool(mark, tool, servers));
     if (named.length) return named.every((tool) => !lazyAllowed(tool, servers));
-    return mark === BUILT_IN_SET || servers.includes(mark) || PI_BUILT_IN_TOOLS.some((name) => mark === lazyToolEntry(name));
+    return mark === BUILT_IN_SET || servers.includes(mark) || [...PI_BUILT_IN_TOOLS, ...DIRECT_TOOLS].some((name) => mark === lazyToolEntry(name));
   });
 }
 

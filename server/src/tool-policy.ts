@@ -119,6 +119,14 @@ export const BUILT_IN_SET = "built in";
 export const PI_BUILT_IN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 /**
+ * The tools that are called directly, whatever is marked. The model's call of one is followed as it is typed:
+ * canvas_write fills the canvas with the text as it streams in, and keeps what came if the turn is cut off.
+ * Through the `tools` tool the call is a call of that, with the text nested in its arguments, and nothing would
+ * be written until the call is whole.
+ */
+export const DIRECT_TOOLS = ["canvas_write"];
+
+/**
  * The tool set a tool belongs to: the box the tool lists show it in, which is also what
  * can be made lazy. The portal's own picture tools are one set, whichever extension registered each.
  */

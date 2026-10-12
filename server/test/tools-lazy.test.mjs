@@ -283,6 +283,31 @@ test("pi's built-in tools stay out of reach of lazy when the sandbox registers t
   assert.deepEqual(sessions.piLazy(sessions.piOff(chat.id)).tools, ["custom_ping"]);
 });
 
+test("canvas_write cannot be lazy, as the canvas is filled while the model writes it; the other canvas tools can", async () => {
+  // Before the portal has seen one, the name alone tells it.
+  const early = await send("/api/tools/lazy", "PUT", { lazy: [lazyToolEntry("canvas_write")] });
+  assert.equal(early.status, 400);
+  assert.equal((await early.json()).code, "lazy-refused");
+
+  db.rememberTools([
+    { name: "canvas_list", source: "canvases", package: null, inline: true },
+    { name: "canvas_write", source: "canvases", package: null, inline: true },
+  ]);
+  assert.equal((await send("/api/tools/lazy", "PUT", { lazy: [lazyToolEntry("canvas_write")] })).status, 400);
+  assert.equal(db.lazyAllowed({ name: "canvas_write", source: "canvases", package: null, inline: true }), false);
+  // The set can be marked: it makes lazy the tools of it that can be.
+  assert.deepEqual((await json("/api/tools/lazy", "PUT", { lazy: ["canvases"] })).lazy, ["canvases"]);
+  assert.deepEqual([...db.lazyToolNames()], ["canvas_list"]);
+  const page = await json("/api/tools");
+  assert.deepEqual(lazyOf(page), ["canvas_list"]);
+  assert.deepEqual(page.tools.filter((t) => t.noLazy).map((t) => t.name), ["canvas_write"]);
+  const chat = await json("/api/sessions", "POST", {});
+  assert.deepEqual(sessions.piLazy(sessions.piOff(chat.id)).tools, ["canvas_list"]);
+  // And a mark that got in some other way does nothing to it.
+  db.setLazyToolSets([lazyToolEntry("canvas_write")]);
+  assert.deepEqual([...db.lazyToolNames()], []);
+});
+
 test("the page is told which tools cannot be lazy, so it offers no mark for them", async () => {
   writeMcp({ notes: {} });
   db.rememberTools([

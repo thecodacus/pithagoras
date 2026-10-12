@@ -560,7 +560,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
     const client = new SdkPiClient(session, modelRuntime, () => {});
     switchedOff = () => client.switchedOff;
-    gateway.attach({ session: () => session, lazy: () => client.lazy, off: () => client.switchedOff });
+    gateway.attach({ session: () => session, lazy: () => client.reachableLazy(), off: () => client.switchedOff });
     client.portalSessionId = opts.sessionId;
     client.canvases = canvases;
     if (eventBus && resourceLoader) {
@@ -675,6 +675,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // until then, and switching it off ahead of time switches off nothing.
     // Also with nothing switched off: the gateway is registered active, and is only wanted while a tool is lazy.
     client.applyToolsOff();
+    // Now that every tool is registered, the gateway can carry the rules of the lazy ones.
+    client.gateway?.refresh();
     return client;
   }
 
@@ -1158,14 +1160,25 @@ export class SdkPiClient extends EventEmitter implements PiClient {
   /** The `tools` tool of this session, which is told what the lazy tools are called. */
   gateway?: ToolsGateway;
 
+  /**
+   * The lazy tools the gateway reaches: those that are on, registered and that pi wants active. Not every
+   * tool pi has registered: an extension may register a tool and keep it inactive until it is time for it
+   * (pi-goal-x with no goal set), and a direct call to such a tool fails. A lazy tool is a tool that is on in
+   * every other respect, so the gateway does not reach what the model could not call if it were not lazy.
+   */
+  reachableLazy(): ReadonlySet<string> {
+    if (!this.lazy.size) return new Set();
+    try {
+      const known = new Set((this.session.getAllTools?.() ?? []).map((tool: any) => String(tool.name)));
+      return new Set([...this.lazy].filter((name) => known.has(name) && this.wanted.has(name) && !this.switchedOff.has(name)));
+    } catch {
+      return new Set();
+    }
+  }
+
   /** Whether the session has a lazy tool for the gateway to reach. */
   private hasLazy(): boolean {
-    if (!this.lazy.size) return false;
-    try {
-      return (this.session.getAllTools?.() ?? []).some((tool: any) => this.lazy.has(String(tool.name)));
-    } catch {
-      return false;
-    }
+    return this.reachableLazy().size > 0;
   }
 
   /**
@@ -1213,7 +1226,19 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     }
     session.setActiveToolsByName = (names: string[]) => {
       this.wanted = new Set([...names, ...this.heldBack(session, names, this.fromExtension)]);
-      original(names.filter((name) => !this.keptOut(name)));
+      const active = names.filter((name) => !this.keptOut(name));
+      // An extension that shows a lazy tool again leaves out the gateway, which it never saw: the tool is reachable now.
+      if (this.wanted.has(GATEWAY_TOOL) && !this.keptOut(GATEWAY_TOOL) && !active.includes(GATEWAY_TOOL)) active.push(GATEWAY_TOOL);
+      original(active);
+      // A lazy tool that registers now brings rules of its own, which the gateway says in its place. It registers
+      // itself again for that, and pi's refresh of its tools then is pi's, not the extension's whose list this was.
+      const fromExtension = this.fromExtension;
+      this.fromExtension = false;
+      try {
+        this.gateway?.refresh();
+      } finally {
+        this.fromExtension = fromExtension;
+      }
     };
     this.hearExtensions(session);
   }
@@ -1240,6 +1265,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * hidden. That takes somebody switching it on on purpose; the other reading
    * lost switched-off tools from the chat for good.
    *
+   * A lazy tool is different: it is on, and the model reaches it, so the extension is
+   * shown it among the active tools, and a list without it means what it says. An
+   * extension that hides its tool is believed, and the gateway does not reach it
+   * (reachableLazy) any more than the model could call it were it not lazy.
+   *
    * Extensions reach pi through the runtime every extension API shares, which
    * pi fills when it binds a runner — at start, and a new one on every reload.
    */
@@ -1255,6 +1285,14 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         } finally {
           this.fromExtension = false;
         }
+      };
+      // The lazy tools are active as far as an extension can tell: see above.
+      const active = runtime.getActiveTools;
+      if (typeof active !== "function") return;
+      runtime.getActiveTools = (...args: unknown[]) => {
+        const names: string[] = active.apply(runtime, args) ?? [];
+        const lazy = [...this.reachableLazy()].filter((name) => !names.includes(name));
+        return lazy.length ? [...names, ...lazy] : names;
       };
     };
     hear(session._extensionRunner);
@@ -1277,8 +1315,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * back on. Such a list keeps everything that is active; one that leaves an
    * active tool out is a choice, and means what it says. An extension's list
    * never says anything about what is switched off (hearExtensions): it keeps
-   * it. Either way a tool pi no longer has, its extension unloaded, is not
-   * wanted any more.
+   * it; it does say something about a lazy tool, which it was shown. Either way
+   * a tool pi no longer has, its extension unloaded, is not wanted any more.
    */
   private heldBack(session: any, names: string[], always = false): string[] {
     let active: string[];
@@ -1290,7 +1328,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       return [];
     }
     if (!always && !active.every((name) => names.includes(name))) return [];
-    return [...this.wanted].filter((name) => this.keptOut(name) && !names.includes(name) && known.has(name));
+    // An extension's list is not taken for a lazy tool's: it was shown that (hearExtensions), so it said what it meant.
+    const kept = (name: string) => (always ? this.switchedOff.has(name) || (name === GATEWAY_TOOL && !this.hasLazy()) : this.keptOut(name));
+    return [...this.wanted].filter((name) => kept(name) && !names.includes(name) && known.has(name));
   }
 
   /**

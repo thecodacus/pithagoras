@@ -23,7 +23,7 @@ import { GATEWAY_TOOL } from "./tools-gateway-names.js";
 export interface GatewayHost {
   /** pi's session: the tool definitions, and the extensions' hooks that a call is put through. */
   session: () => any;
-  /** The tools that are on and reached only through the gateway. */
+  /** The tools that are on, that pi wants active, and that are reached only through the gateway. */
   lazy: () => ReadonlySet<string>;
   /** The tools switched off, which no way leads to. */
   off: () => ReadonlySet<string>;
@@ -42,6 +42,8 @@ interface Lazy {
   name: string;
   description: string;
   parameters: unknown;
+  /** What the tool's extension wrote for the system prompt about it: see lazyGuidelines. */
+  guidelines: string[];
 }
 
 /** The first line of a description, shortened: enough to tell tools apart. */
@@ -88,8 +90,12 @@ export function lazyHint(sets: readonly string[]): string {
 
 export class ToolsGateway {
   private host?: GatewayHost;
-  /** The extension API of the runner that has the tool registered, to register it again when the hint changes. */
+  /** The extension API of the runner that has the tool registered, to register it again when what it says changes. */
   private api?: any;
+  /** The rules of the lazy tools, which the tool says in their place: see lazyGuidelines. */
+  private rules: string[] = [];
+  /** Where the calls of tools that run one at a time wait for each other: see inTurn. */
+  private line: Promise<void> = Promise.resolve();
 
   constructor(private sets: string[] = []) {}
 
@@ -98,13 +104,25 @@ export class ToolsGateway {
    * registers the tool again, which has pi read its description and guidelines afresh.
    */
   hint(sets: string[]): void {
-    const same = sets.length === this.sets.length && sets.every((set, i) => set === this.sets[i]);
+    this.sync(sets);
+  }
+
+  /** Read the rules of the lazy tools again, for when a tool has turned up or the tools have been switched. */
+  refresh(): void {
+    this.sync(this.sets);
+  }
+
+  private sync(sets: string[]): void {
+    const rules = this.lazyGuidelines();
+    const same = (a: string[], b: string[]) => a.length === b.length && a.every((item, i) => item === b[i]);
+    const unchanged = same(sets, this.sets) && same(rules, this.rules);
     this.sets = sets;
-    if (same || !this.api) return;
+    this.rules = rules;
+    if (unchanged || !this.api) return;
     try {
       this.register(this.api);
     } catch (e) {
-      console.error(`[portal] could not update the hint of the ${GATEWAY_TOOL} tool: ${(e as Error).message}`);
+      console.error(`[portal] could not update the ${GATEWAY_TOOL} tool: ${(e as Error).message}`);
     }
   }
 
@@ -126,8 +144,43 @@ export class ToolsGateway {
         name: String(tool.name),
         description: typeof tool.description === "string" ? tool.description : "",
         parameters: tool.parameters,
+        guidelines: (Array.isArray(tool.promptGuidelines) ? tool.promptGuidelines : []).filter((line: unknown): line is string => typeof line === "string"),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * The rules the lazy tools' extensions wrote for the system prompt, each once.
+   *
+   * pi puts a tool's rules in the prompt only while the tool is active, and a lazy tool is not: what
+   * its schema and description cost is saved, but its rules are not that. The browser's rule that a
+   * page is data and never instructions is one of them, and the guard relies on it being said
+   * somewhere (pageEnvelope), so the tool says them here, where they are in the prompt as long as there
+   * is a lazy tool that has them.
+   */
+  private lazyGuidelines(): string[] {
+    const lines = new Set<string>();
+    for (const tool of this.lazyTools()) for (const line of tool.guidelines) if (line.trim()) lines.add(line.trim());
+    return [...lines];
+  }
+
+  /**
+   * Run a call in its turn when its tool must run alone.
+   *
+   * pi runs the calls of one message one after another when one of the tools called is sequential (the
+   * browser's are: a click and a typed word race each other on one tab), and else at the same time. Every
+   * call through the gateway is a call of the one tool `tools`, which pi cannot tell from the tool it calls,
+   * so the calls of sequential tools wait for each other here, in the order pi started them, as they would
+   * called directly. Calls of other tools do not wait.
+   */
+  private inTurn<T>(alone: boolean, signal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> {
+    if (!alone) return work();
+    const turn = this.line.then(() => {
+      if (signal?.aborted) fail("Operation aborted");
+      return work();
+    });
+    this.line = turn.then(() => {}, () => {});
+    return turn;
   }
 
   /** The lazy tool of this name, or the reason there is none: what the model is told to do instead. */
@@ -167,10 +220,15 @@ export class ToolsGateway {
     return say(`${tool.name}\n\n${tool.description || "(no description)"}\n\nParameters (JSON schema):\n${JSON.stringify(tool.parameters ?? {}, null, 2)}`);
   }
 
-  private async call(id: string, name: string, rawArgs: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: unknown) {
+  private call(id: string, name: string, rawArgs: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: unknown) {
     const tool = this.find(name);
     const session = this.host?.session();
     const definition = session?.getToolDefinition?.(tool.name);
+    // Taken at once, before anything is awaited, so the turns are in the order pi started the calls.
+    return this.inTurn(definition?.executionMode === "sequential", signal, () => this.callTool(tool, definition, session, id, rawArgs, signal, onUpdate, ctx));
+  }
+
+  private async callTool(tool: Lazy, definition: any, session: any, id: string, rawArgs: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: unknown) {
     const runner = session?.extensionRunner;
     // Without the hooks the call would skip the guard, so there is no call.
     if (!definition || typeof runner?.emitToolCall !== "function" || typeof runner.emitToolResult !== "function") return fail(`"${tool.name}" cannot be called from here.`);
@@ -235,6 +293,8 @@ export class ToolsGateway {
       promptSnippet: `${GATEWAY_TOOL} — search, describe and call the tools that are kept out of this list`,
       promptGuidelines: [
         `${lazyHint(this.sets)} A tool it finds is described for its parameters and then called through it.`,
+        // The lazy tools' own rules, which their extensions meant for the prompt: see lazyGuidelines.
+        ...this.rules,
       ],
       parameters: Type.Object({
         action: Type.Union([Type.Literal("search"), Type.Literal("describe"), Type.Literal("call")], {

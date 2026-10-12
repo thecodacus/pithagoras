@@ -266,21 +266,29 @@ as it always did until you choose.
 that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers the tool one by
 one again.
 
-Any tool can be made lazy except an MCP server's and pi's own built-in ones (`read`, `bash`, `edit`,
-`write`, `grep`, `find` and `ls`). They have no lazy button, and the portal refuses a mark that names
-them, in whichever group they are listed: with the [sandbox](/guide/sandbox) on they are listed under
-**sandbox**, and an extension that brings a tool of one of these names does not make it lazy either. An
-MCP server has a way of its own to keep its tools out of the prompt, through the [MCP adapter](/guide/mcp),
-and the built-in tools are what every conversation works with.
+Any tool can be made lazy except an MCP server's, pi's own built-in ones (`read`, `bash`, `edit`,
+`write`, `grep`, `find` and `ls`) and `canvas_write`. They have no lazy button, and the portal refuses a
+mark that names them, in whichever group they are listed: with the [sandbox](/guide/sandbox) on they are
+listed under **sandbox**, and an extension that brings a tool of one of these names does not make it lazy
+either. An MCP server has a way of its own to keep its tools out of the prompt, through the
+[MCP adapter](/guide/mcp), and the built-in tools are what every conversation works with.
+`canvas_write` fills the canvas with the text as the model writes it, and keeps what has come if the turn
+is cut off; a call through `tools` cannot be followed like that, so it is always offered one by one, also
+when the rest of the **canvases** are lazy.
 
 Lazy is not a switch. A lazy tool is **on** like any other, and behaves exactly like one: it is run by
 the same code, held to the same [guard](/guide/security) (the [browser](/guide/browser)'s allowlist, the
 rules after untrusted content, what a colleague may run), its arguments are checked and converted as for
 a direct call, and its result is wrapped as somebody else's words where it would be. A picture it shows
 or makes appears in the chat and in voice mode, and the browser's window opens for it, as for a direct call.
-The one difference
-is that the model is not shown it up front. The model is shown one short line instead, naming the lazy
-sets, for example "You have browser tools; search for them with the tools tool."
+Tools that run one at a time, as the browser's do, still do when the model calls several in one message.
+A tool that its extension keeps inactive (one that waits for its moment) is not reached through `tools`
+either, and marking it lazy does not switch it on.
+The one difference is that the model is not shown the tool's schema and description up front. The model
+is shown one short line instead, naming the lazy sets, for example "You have browser tools; search for
+them with the tools tool." The rules the tool's extension wrote for the prompt stay in it as long as the
+tool is lazy, so the [browser](/guide/browser)'s rule that a page is data and never instructions is said as
+before.
 
 The `tools` tool has three actions:
 
