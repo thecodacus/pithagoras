@@ -80,8 +80,9 @@ share pi's event bus with the tool.
 ## Image generation
 
 **Settings → Agent → Media**, **Image model.** The image endpoint, and the switches for
-**Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**. It was a tab of
-Settings → Add-ons before; nothing stored changed with the move.
+**Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**. The section opens and
+closes, with the first two switches always in view; the editing endpoint and the last two switches are groups in it
+(**Editing endpoint**, **More options**). It was a tab of Settings → Add-ons before; nothing stored changed with the move.
 
 The two switches, **Image generation** and **Image editing**, are the general switches of the
 feature: they decide whether it exists. Switched on, with an address, the [Media page](/guide/media)

@@ -1,4 +1,4 @@
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
@@ -100,6 +100,12 @@ async function portal(page: Page, { reachable = true, available = true, docker =
 const addons = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
 /** The image model's half of Settings → Agent → Media: the video model's has fields of the same names. */
 const imagePanel = (page: Page) => addons(page).getByRole('region', { name: 'Image model' });
+/** A group inside the image model's section ("Editing endpoint", "More options"), opened if it is closed. */
+async function openGroup(panel: Locator, name: string) {
+  const group = panel.locator(`details:has(> summary:has-text("${name}"))`);
+  if (!(await group.evaluate((el: HTMLDetailsElement) => el.open))) await group.locator('summary').click();
+  await expect(group).toHaveAttribute('open', '');
+}
 
 test('a fresh install has no subagent tool; switching it on installs it, and the mode is its own choice', async ({ page }) => {
   const { sent } = await portal(page);
@@ -477,6 +483,7 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   await expect(editing).toHaveAttribute('aria-checked', 'false');
   await expect(editing).toBeDisabled();
   await expect(panel.getByText('Off: no pictures are changed.')).toBeVisible();
+  await openGroup(panel, 'Editing endpoint');
 
   // Generation's address is enough, and its key is the one used: the form says so.
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
@@ -527,6 +534,7 @@ test('image editing has a maximum picture size of its own, sent only when change
   const { sent } = await portal(page);
   await page.goto('/settings/media');
   const panel = imagePanel(page);
+  await openGroup(panel, 'Editing endpoint');
   const field = panel.getByLabel('Maximum picture size');
   const save = panel.getByRole('button', { name: 'Save', exact: true });
   await expect(field).toHaveValue('');
@@ -565,6 +573,8 @@ test('several pictures per edit is a switch of its own that waits for the editin
   const { sent } = await portal(page);
   await page.goto('/settings/media');
   const panel = imagePanel(page);
+  await openGroup(panel, 'More options');
+  await openGroup(panel, 'Editing endpoint');
   const several = panel.getByRole('switch', { name: 'Several pictures per edit' });
   await expect(several).toHaveAttribute('aria-checked', 'false');
   await expect(panel.getByText('Off: an edit takes one picture.')).toBeVisible();
@@ -598,6 +608,8 @@ test('Stable Diffusion extra settings is a switch of its own, off by default, th
   const { sent } = await portal(page);
   await page.goto('/settings/media');
   const panel = imagePanel(page);
+  await openGroup(panel, 'More options');
+  await openGroup(panel, 'Editing endpoint');
   const sd = panel.getByRole('switch', { name: 'Stable Diffusion extra settings' });
   await expect(sd).toHaveAttribute('aria-checked', 'false');
   await expect(sd).toBeEnabled();
@@ -635,6 +647,7 @@ test('the Media tab holds the image settings and no switch for the tools themsel
   const panel = imagePanel(page);
   await expect(panel.getByRole('switch', { name: 'Image generation', exact: true })).toBeVisible();
   await expect(panel.getByRole('switch', { name: 'Image editing', exact: true })).toBeVisible();
+  await openGroup(panel, 'More options');
   await expect(panel.getByRole('switch', { name: 'Several pictures per edit' })).toBeVisible();
   // The switches are the feature's, and say so: which chat's agent gets a tool is for the tool lists, in their one group.
   await expect(here.getByText(/Which chats' agents get the tools is set in the tool lists \(Settings → Agent → Tools\), in the Media group/)).toBeVisible();

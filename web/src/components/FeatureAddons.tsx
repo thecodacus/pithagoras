@@ -1,6 +1,6 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LuBot, LuBrain, LuCheck, LuDownload, LuImage, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert, LuVideo, LuWandSparkles } from "react-icons/lu";
+import { LuBot, LuBrain, LuCheck, LuDownload, LuMinus, LuPlus, LuRefreshCw, LuTrash2, LuTriangleAlert } from "react-icons/lu";
 import { api, type AvailableModel, type Features, type ImagesFeaturePatch, type ManagedUnderstory, type SubagentMode, type UnderstoryLlmChoice, type VideosFeaturePatch } from "../api";
 import { MAX_SIZE, TIMEOUT_SECONDS } from "../../../server/src/image-settings";
 import { VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS } from "../../../server/src/video-settings";
@@ -8,7 +8,8 @@ import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { forgetNoteDrafts } from "../note-drafts";
 import { Select } from "./Select";
-import { LoadFailed, SwitchRow, inputCls, primaryCls } from "./SettingsUi";
+import { CollapsibleSection, DetailsGroup, LoadFailed, SwitchRow, inputCls, primaryCls } from "./SettingsUi";
+import { local } from "../safe-storage";
 import { formatDateTime, msg, t, tp, tx } from "../i18n";
 
 /**
@@ -739,6 +740,59 @@ const originOf = (address: string): string => {
   }
 };
 
+/** The host of an address, for a summary: what a person knows a server by. */
+const hostOf = (address: string): string => {
+  try {
+    return new URL(address).host;
+  } catch {
+    return address;
+  }
+};
+
+const OPEN_KEY = "pithagoras.settings.media-open";
+
+/**
+ * Whether the section of a model is open: the person's last choice, kept in this browser, else open while the model
+ * is not set up. Which of the two was decided when its settings were first read, so that saving the address does not
+ * close the section under the hand. `setUp` is undefined until they are read; `locked` keeps it open.
+ */
+function useSectionOpen(id: "image" | "video", setUp: boolean | undefined, locked: boolean): [boolean, () => void] {
+  const [picked, setPicked] = useState<boolean | null>(() => {
+    try {
+      const kept = JSON.parse(local.get(OPEN_KEY) ?? "{}")[id];
+      return typeof kept === "boolean" ? kept : null;
+    } catch {
+      return null;
+    }
+  });
+  const first = useRef<boolean | undefined>(undefined);
+  if (first.current === undefined && setUp !== undefined) first.current = !setUp;
+  const open = locked || (picked ?? first.current ?? true);
+  const toggle = () => {
+    const next = !open;
+    setPicked(next);
+    try {
+      local.set(OPEN_KEY, JSON.stringify({ ...JSON.parse(local.get(OPEN_KEY) ?? "{}"), [id]: next }));
+    } catch {
+      // Not remembered, but the section works.
+    }
+  };
+  return [open, toggle];
+}
+
+/**
+ * A model's section while its settings are being read, or could not be. Not a section a search can name: one that
+ * does would be found and lit up here, and the section that replaces it would be neither.
+ */
+function ModelPending({ title, failed, onRetry }: { title: string; failed: Error | null; onRetry: () => unknown }) {
+  return (
+    <div className="mb-7">
+      <p className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{title}</p>
+      <div className="mt-2.5">{failed ? <LoadFailed error={failed} onRetry={onRetry} /> : <p className="flex items-center gap-2 text-sm text-fg-subtle"><LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Loading…")}</p>}</div>
+    </div>
+  );
+}
+
 export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   // Its own, not with Understory's: a Docker that cannot be reached is not this tab's to wait on.
   const [images, setImages, failed, retry] = useFirstRead(() => api.imagesFeature().then((r) => r.images));
@@ -749,8 +803,9 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   const [note, setNote] = useState<(() => string) | null>(null);
   // What is changed here and not saved is in no other place.
   useUnsavedDraft(!!draft || !!editDraft);
+  const [open, toggle] = useSectionOpen("image", images ? images.baseUrl !== "" : undefined, !!draft || !!editDraft);
 
-  if (!images) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
+  if (!images) return <ModelPending title={t("Image model")} failed={failed} onRetry={retry} />;
   const form = draft ?? { baseUrl: images.baseUrl, model: images.model, size: images.size, timeout: String(images.timeoutSeconds), apiKey: "" };
   const edit = (patch: Partial<ImagesDraft>) => setDraft({ ...form, ...patch });
   const editForm = editDraft ?? { baseUrl: images.editBaseUrl, model: images.editModel, maxSize: images.editMaxSize, apiKey: "" };
@@ -780,14 +835,40 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   };
 
   return (
-    // Named, as both models are on one page and have fields of the same names.
-    <div role="region" aria-label={t("Image model")} className="mt-4 space-y-3">
-      <div className="rounded-xl border border-line bg-raised/40 p-3">
-        <Header Icon={LuImage} title={t("Image generation")}>
-          {t("Pictures from a description, made by an image model you set up.")}
-        </Header>
-      </div>
-
+    <CollapsibleSection
+      title={t("Image model")}
+      hint={t("Making and changing pictures, on the Media page and for the agent.")}
+      summary={draft || editDraft ? t("Unsaved changes") : images.baseUrl ? [hostOf(images.baseUrl), images.model].filter(Boolean).join(" · ") : t("Not set up")}
+      open={open}
+      onToggle={toggle}
+      locked={!!draft || !!editDraft}
+      controls={
+        <>
+          <SwitchRow
+            title={t("Image generation")}
+            detail={images.enabled ? t("On: pictures are made on the Media page and by the agent.") : t("Off: no pictures are made.")}
+            on={images.enabled}
+            onChange={(enabled) => void change({ enabled })}
+            disabled={busy || !!draft || (!images.baseUrl && !images.enabled)}
+            note={draft ? t("Save or discard the changes first.") : !images.baseUrl && !images.enabled ? t("Save the address of an image endpoint first.") : undefined}
+          />
+          <SwitchRow
+            title={t("Image editing")}
+            detail={images.editEnabled ? t("On: pictures are changed on the Media page and by the agent.") : t("Off: no pictures are changed.")}
+            on={images.editEnabled}
+            onChange={(editEnabled) => void change({ editEnabled })}
+            disabled={busy || !!editDraft || (!(images.editBaseUrl || images.baseUrl) && !images.editEnabled)}
+            note={editDraft ? t("Save or discard the changes first.") : !(images.editBaseUrl || images.baseUrl) && !images.editEnabled ? t("Save the address of an image endpoint first.") : undefined}
+          />
+          {busy && (
+            <p className="flex items-center gap-2 text-xs text-fg-subtle">
+              <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
+            </p>
+          )}
+          {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+        </>
+      }
+    >
       <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
         <legend className="px-1 text-xs text-fg-muted">{t("The image endpoint")}</legend>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -886,140 +967,121 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         </div>
       </fieldset>
 
-      <SwitchRow
-        title={t("Image generation")}
-        detail={images.enabled ? t("On: pictures are made on the Media page and by the agent.") : t("Off: no pictures are made.")}
-        on={images.enabled}
-        onChange={(enabled) => void change({ enabled })}
-        disabled={busy || !!draft || (!images.baseUrl && !images.enabled)}
-        note={draft ? t("Save or discard the changes first.") : !images.baseUrl && !images.enabled ? t("Save the address of an image endpoint first.") : undefined}
-      />
+      <DetailsGroup
+        title={t("Editing endpoint")}
+        summary={editDraft ? t("Unsaved changes") : images.editBaseUrl ? hostOf(images.editBaseUrl) : t("Uses the image endpoint")}
+        defaultOpen={!!(images.editBaseUrl || images.editModel || images.editMaxSize)}
+      >
+        <fieldset disabled={busy} className="space-y-3">
+          <p className="text-[11px] text-fg-faint">
+            {tx("Changing pictures that exist, with an OpenAI-style {route}. The original stays; the result is a new picture.", { route: <code>images/edits</code> })}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-xs text-fg-muted sm:col-span-2">
+              {t("Editing address")}
+              <input
+                value={editForm.baseUrl}
+                onChange={(e) => editEdit({ baseUrl: e.target.value })}
+                placeholder={images.baseUrl || "https://images.example.com/v1"}
+                spellCheck={false}
+                autoComplete="off"
+                className={`${inputCls} mt-1 font-mono text-xs`}
+              />
+            </label>
+            <label className="text-xs text-fg-muted">
+              {t("Editing key")}
+              <input
+                type="password"
+                value={editForm.apiKey}
+                onChange={(e) => editEdit({ apiKey: e.target.value })}
+                placeholder={images.editKeySet ? t("saved — type to replace") : usesKeyAbove ? t("the key above is used") : t("none needed for a local server")}
+                autoComplete="off"
+                className={`${inputCls} mt-1 text-xs`}
+              />
+            </label>
+            <label className="text-xs text-fg-muted">
+              {t("Editing model")}
+              <input
+                value={editForm.model}
+                onChange={(e) => editEdit({ model: e.target.value })}
+                placeholder="image-edit-model"
+                spellCheck={false}
+                autoComplete="off"
+                className={`${inputCls} mt-1 font-mono text-xs`}
+              />
+            </label>
+            <label className="text-xs text-fg-muted">
+              {t("Maximum picture size")}
+              <input
+                value={editForm.maxSize}
+                onChange={(e) => editEdit({ maxSize: e.target.value })}
+                placeholder="2048x2048"
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={!maxSizeOk(editForm.maxSize)}
+                className={`${inputCls} mt-1 font-mono text-xs`}
+              />
+            </label>
+          </div>
+          <p className="text-[11px] text-fg-faint">
+            {t("Leave the address empty to edit with the server above, and the model empty for the server's own. A key goes only to the address it was given for.")}
+          </p>
+          <p className="text-[11px] text-fg-faint">
+            {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048. Empty is no limit.")}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {editDraft && (
+              <button
+                type="button"
+                className={primaryCls}
+                disabled={!maxSizeOk(editForm.maxSize)}
+                onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.maxSize.trim() !== images.editMaxSize ? { editMaxSize: editForm.maxSize.trim() } : {}), ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
+              >
+                {t("Save")}
+              </button>
+            )}
+            {editDraft && (
+              <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setEditDraft(null)}>
+                {t("Discard")}
+              </button>
+            )}
+            {images.editKeySet && !editDraft && (
+              <button type="button" className="text-xs text-fg-muted hover:text-danger" onClick={() => void change({ editApiKey: "" })}>
+                {t("Remove the saved editing key")}
+              </button>
+            )}
+          </div>
+        </fieldset>
+      </DetailsGroup>
 
-      <div className="rounded-xl border border-line bg-raised/40 p-3">
-        <Header Icon={LuWandSparkles} title={t("Image editing")}>
-          {tx("Changing pictures that exist, with an OpenAI-style {route}. The original stays; the result is a new picture.", { route: <code>images/edits</code> })}
-        </Header>
-      </div>
-
-      <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
-        <legend className="px-1 text-xs text-fg-muted">{t("The editing endpoint")}</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="text-xs text-fg-muted sm:col-span-2">
-            {t("Editing address")}
-            <input
-              value={editForm.baseUrl}
-              onChange={(e) => editEdit({ baseUrl: e.target.value })}
-              placeholder={images.baseUrl || "https://images.example.com/v1"}
-              spellCheck={false}
-              autoComplete="off"
-              className={`${inputCls} mt-1 font-mono text-xs`}
-            />
-          </label>
-          <label className="text-xs text-fg-muted">
-            {t("Editing key")}
-            <input
-              type="password"
-              value={editForm.apiKey}
-              onChange={(e) => editEdit({ apiKey: e.target.value })}
-              placeholder={images.editKeySet ? t("saved — type to replace") : usesKeyAbove ? t("the key above is used") : t("none needed for a local server")}
-              autoComplete="off"
-              className={`${inputCls} mt-1 text-xs`}
-            />
-          </label>
-          <label className="text-xs text-fg-muted">
-            {t("Editing model")}
-            <input
-              value={editForm.model}
-              onChange={(e) => editEdit({ model: e.target.value })}
-              placeholder="image-edit-model"
-              spellCheck={false}
-              autoComplete="off"
-              className={`${inputCls} mt-1 font-mono text-xs`}
-            />
-          </label>
-          <label className="text-xs text-fg-muted">
-            {t("Maximum picture size")}
-            <input
-              value={editForm.maxSize}
-              onChange={(e) => editEdit({ maxSize: e.target.value })}
-              placeholder="2048x2048"
-              spellCheck={false}
-              autoComplete="off"
-              aria-invalid={!maxSizeOk(editForm.maxSize)}
-              className={`${inputCls} mt-1 font-mono text-xs`}
-            />
-          </label>
-        </div>
+      <DetailsGroup title={t("More options")} summary={[images.editMultiple && t("Several pictures per edit"), images.sdExtras && t("Stable Diffusion extra settings")].filter(Boolean).join(" · ") || t("None on")}>
+        <SwitchRow
+          title={t("Several pictures per edit")}
+          detail={images.editMultiple ? t("On: an edit takes up to eight pictures.") : t("Off: an edit takes one picture.")}
+          on={images.editMultiple}
+          onChange={(editMultiple) => void change({ editMultiple })}
+          disabled={busy || !!editDraft}
+        />
         <p className="text-[11px] text-fg-faint">
-          {t("Leave the address empty to edit with the server above, and the model empty for the server's own. A key goes only to the address it was given for.")}
+          {t("Switch it on only if the editing endpoint takes more than one picture in a request.")}
         </p>
+        <SwitchRow
+          title={t("Stable Diffusion extra settings")}
+          detail={
+            images.sdExtras
+              ? t("On: the Media page shows stable-diffusion.cpp settings under Advanced.")
+              : t("Off: the Media page shows only the settings of the OpenAI image format.")
+          }
+          on={images.sdExtras}
+          onChange={(sdExtras) => void change({ sdExtras })}
+          // Saving a new address of another server takes it off again, so it waits for the save as the other switches of the endpoint do.
+          disabled={busy || !!draft || !!editDraft}
+        />
         <p className="text-[11px] text-fg-faint">
-          {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048. Empty is no limit.")}
+          {t("Only for a stable-diffusion.cpp server: it adds a seed, steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description. Any other endpoint would take the block as part of the description. The agent does not use these settings.")}
         </p>
-        <div className="flex flex-wrap items-center gap-2">
-          {editDraft && (
-            <button
-              type="button"
-              className={primaryCls}
-              disabled={!maxSizeOk(editForm.maxSize)}
-              onClick={() => void change({ editBaseUrl: editForm.baseUrl, editModel: editForm.model, ...(editForm.maxSize.trim() !== images.editMaxSize ? { editMaxSize: editForm.maxSize.trim() } : {}), ...(editForm.apiKey ? { editApiKey: editForm.apiKey } : {}) })}
-            >
-              {t("Save")}
-            </button>
-          )}
-          {editDraft && (
-            <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setEditDraft(null)}>
-              {t("Discard")}
-            </button>
-          )}
-          {images.editKeySet && !editDraft && (
-            <button type="button" className="text-xs text-fg-muted hover:text-danger" onClick={() => void change({ editApiKey: "" })}>
-              {t("Remove the saved editing key")}
-            </button>
-          )}
-        </div>
-      </fieldset>
-
-      <SwitchRow
-        title={t("Image editing")}
-        detail={images.editEnabled ? t("On: pictures are changed on the Media page and by the agent.") : t("Off: no pictures are changed.")}
-        on={images.editEnabled}
-        onChange={(editEnabled) => void change({ editEnabled })}
-        disabled={busy || !!editDraft || (!(images.editBaseUrl || images.baseUrl) && !images.editEnabled)}
-        note={editDraft ? t("Save or discard the changes first.") : !(images.editBaseUrl || images.baseUrl) && !images.editEnabled ? t("Save the address of an image endpoint first.") : undefined}
-      />
-      <SwitchRow
-        title={t("Several pictures per edit")}
-        detail={images.editMultiple ? t("On: an edit takes up to eight pictures.") : t("Off: an edit takes one picture.")}
-        on={images.editMultiple}
-        onChange={(editMultiple) => void change({ editMultiple })}
-        disabled={busy || !!editDraft}
-      />
-      <p className="text-[11px] text-fg-faint">
-        {t("Switch it on only if the editing endpoint takes more than one picture in a request.")}
-      </p>
-      <SwitchRow
-        title={t("Stable Diffusion extra settings")}
-        detail={
-          images.sdExtras
-            ? t("On: the Media page shows stable-diffusion.cpp settings under Advanced.")
-            : t("Off: the Media page shows only the settings of the OpenAI image format.")
-        }
-        on={images.sdExtras}
-        onChange={(sdExtras) => void change({ sdExtras })}
-        // Saving a new address of another server takes it off again, so it waits for the save as the other switches of the endpoint do.
-        disabled={busy || !!draft || !!editDraft}
-      />
-      <p className="text-[11px] text-fg-faint">
-        {t("Only for a stable-diffusion.cpp server: it adds a seed, steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description. Any other endpoint would take the block as part of the description. The agent does not use these settings.")}
-      </p>
-      {busy && (
-        <p className="flex items-center gap-2 text-xs text-fg-subtle">
-          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
-        </p>
-      )}
-      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
-    </div>
+      </DetailsGroup>
+    </CollapsibleSection>
   );
 }
 
@@ -1051,8 +1113,9 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
   const [note, setNote] = useState<(() => string) | null>(null);
   // What is changed here and not saved is in no other place.
   useUnsavedDraft(!!draft);
+  const [open, toggle] = useSectionOpen("video", videos ? videos.baseUrl !== "" : undefined, !!draft);
 
-  if (!videos) return failed ? <ReadFailed error={failed} onRetry={retry} /> : <Loading />;
+  if (!videos) return <ModelPending title={t("Video model")} failed={failed} onRetry={retry} />;
   const form: VideosDraft = draft ?? {
     baseUrl: videos.baseUrl,
     model: videos.model,
@@ -1097,13 +1160,32 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
   };
 
   return (
-    <div role="region" aria-label={t("Video model")} className="mt-4 space-y-3">
-      <div className="rounded-xl border border-line bg-raised/40 p-3">
-        <Header Icon={LuVideo} title={t("Video generation")}>
-          {t("Short videos from a description, or from a picture as the first frame, made by a video model you set up. A video takes minutes, so it is made as a job.")}
-        </Header>
-      </div>
-
+    <CollapsibleSection
+      title={t("Video model")}
+      hint={t("Making videos, on the Media page and for the agent.")}
+      summary={draft ? t("Unsaved changes") : videos.baseUrl ? [hostOf(videos.baseUrl), videos.model].filter(Boolean).join(" · ") : t("Not set up")}
+      open={open}
+      onToggle={toggle}
+      locked={!!draft}
+      controls={
+        <>
+          <SwitchRow
+            title={t("Video generation")}
+            detail={videos.enabled ? t("On: videos are made on the Media page and by the agent.") : t("Off: no videos are made.")}
+            on={videos.enabled}
+            onChange={(enabled) => void change({ enabled })}
+            disabled={busy || !!draft || (!videos.baseUrl && !videos.enabled)}
+            note={draft ? t("Save or discard the changes first.") : !videos.baseUrl && !videos.enabled ? t("Save the address of a video endpoint first.") : undefined}
+          />
+          {busy && (
+            <p className="flex items-center gap-2 text-xs text-fg-subtle">
+              <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
+            </p>
+          )}
+          {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
+        </>
+      }
+    >
       <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
         <legend className="px-1 text-xs text-fg-muted">{t("The video endpoint")}</legend>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -1245,22 +1327,7 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
           )}
         </div>
       </fieldset>
-
-      <SwitchRow
-        title={t("Video generation")}
-        detail={videos.enabled ? t("On: videos are made on the Media page and by the agent.") : t("Off: no videos are made.")}
-        on={videos.enabled}
-        onChange={(enabled) => void change({ enabled })}
-        disabled={busy || !!draft || (!videos.baseUrl && !videos.enabled)}
-        note={draft ? t("Save or discard the changes first.") : !videos.baseUrl && !videos.enabled ? t("Save the address of a video endpoint first.") : undefined}
-      />
-      {busy && (
-        <p className="flex items-center gap-2 text-xs text-fg-subtle">
-          <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}
-        </p>
-      )}
-      {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
-    </div>
+    </CollapsibleSection>
   );
 }
 

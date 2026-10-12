@@ -73,8 +73,14 @@ that, a session asking for a local model silently started on pi's fallback.
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
-**Media** has two sections. **Image model** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, and the
-switches for **Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**, see
+**Media** has two sections, **Image model** and **Video model**. Each has a heading and a line under it, and opens
+and closes with a click on the heading. Its **switches stay in view** either way. The line says what the section is for
+while it is open, and the address and model while it is closed. A model that is not set up starts open, to show its
+address; one that is set up starts closed, and what you open or close is kept in this browser. A section with something
+typed in it and not saved stays open, and the search of Settings opens the section, or the group in it, that it finds.
+
+**Image model** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, and the
+switches for **Image generation** and **Image editing** (always in view), and **Several pictures per edit** and **Stable Diffusion extra settings** (under **More options**). The image endpoint is in the section; **Editing endpoint**, a group of its own that opens and closes, holds the address, key, model and maximum size for editing, which are empty when editing uses the image endpoint. See
 [Opt-in features](/guide/features#image-generation). The first two switch the feature on or off as a whole: the
 [Media page](/guide/media) and the existence of the tools. Whether a chat's agent gets the tools,
 `show_image`, `generate_image` and `edit_image`, is set only in the Tools list, where they are together in one **Media** group, with the video tools. **Stable Diffusion extra settings** (off by default) is

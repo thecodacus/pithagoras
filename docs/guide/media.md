@@ -13,7 +13,8 @@ you choose, and keeps the words you typed in each. Where only one kind is made, 
 The gallery under it holds both kinds together, with a filter for **All**, **Pictures** or **Videos**.
 
 Both are set up in one place, **Settings → Agent → Media**: the **Image model** (with **Image generation** and
-**Image editing**, each with an address) and the **Video model** (**Video generation**, with an address). Those
+**Image editing**, each with an address) and the **Video model** (**Video generation**, with an address), two sections that open
+and close, with their switches always in view. Those
 switches decide whether the feature exists: whether the page can make or change pictures and make videos, and
 whether the agent can have the `generate_image`, `edit_image`, `generate_video` and `show_video` tools at all
 (`show_image` is always there). Whether a

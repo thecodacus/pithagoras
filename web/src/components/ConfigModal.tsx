@@ -219,6 +219,8 @@ export const ConfigModal = memo(function ConfigModal({
     const seek = () => {
       const el = findSection(page.current, target.section);
       if (el) {
+        // A section that is closed opens for it, and so does the one a group in it is in (see CollapsibleSection).
+        el.dispatchEvent(new Event("settings-reveal", { bubbles: true }));
         el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
         el.classList.remove("setting-flash");
         void el.offsetWidth;
