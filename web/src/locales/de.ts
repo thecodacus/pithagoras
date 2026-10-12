@@ -587,6 +587,7 @@ const de: Locale = {
     "Portal": "Portal",
     "This browser": "Dieser Browser",
     "Theme, notifications, confirmations": "Design, Benachrichtigungen, Rückfragen",
+    "The password that signs in to this portal": "Das Passwort, mit dem man sich an diesem Portal anmeldet",
     "Add-ons": "Add-ons",
     "Optional parts of the portal itself": "Optionale Teile des Portals selbst",
     "Shortcuts": "Tastenkürzel",
@@ -613,7 +614,7 @@ const de: Locale = {
     "Signed in": "Angemeldet",
     "Signing out asks for the password here again. Other browsers stay signed in.": "Nach dem Abmelden wird hier wieder nach dem Passwort gefragt. Andere Browser bleiben angemeldet.",
     "Sign out": "Abmelden",
-    "The portal's password is shorter than 8 characters. It keeps working because it was already in use, but anybody who can reach the portal can try to guess it. Set a longer PORTAL_PASSWORD and restart.": "Das Passwort des Portals ist kürzer als 8 Zeichen. Es funktioniert weiter, weil es schon in Gebrauch war, aber jeder, der das Portal erreicht, kann versuchen, es zu erraten. Setz ein längeres PORTAL_PASSWORD und starte neu.",
+    "The portal's password is shorter than 8 characters. It keeps working because it was already in use, but anybody who can reach the portal can try to guess it. Change it under Settings → Password.": "Das Passwort des Portals ist kürzer als 8 Zeichen. Es funktioniert weiter, weil es schon in Gebrauch war, aber jeder, der das Portal erreicht, kann versuchen, es zu erraten. Ändere es unter Einstellungen → Passwort.",
     "This browser does not offer them here — they need a secure connection (HTTPS, or localhost).": "Dieser Browser bietet sie hier nicht an — sie brauchen eine sichere Verbindung (HTTPS oder localhost).",
     "The browser has blocked them for this site. Allow them in its site settings, then come back.": "Der Browser hat sie für diese Seite blockiert. Erlaube sie in seinen Website-Einstellungen und komm dann zurück.",
     "Tell me when a chat is done or needs me": "Sag mir, wenn ein Chat fertig ist oder mich braucht",
@@ -1013,6 +1014,22 @@ const de: Locale = {
     "Password": "Passwort",
     "Checking…": "Wird geprüft…",
     "Sign in": "Anmelden",
+    "Choose a password": "Passwort wählen",
+    "It signs you in to this portal, which can run commands on the machine it is on. Use at least {count} characters. You can change it later under Settings.": "Damit meldest du dich an diesem Portal an, das Befehle auf dem Rechner ausführen kann, auf dem es läuft. Nimm mindestens {count} Zeichen. Du kannst es später unter Einstellungen ändern.",
+    "New password": "Neues Passwort",
+    "Repeat the password": "Passwort wiederholen",
+    "Set password": "Passwort festlegen",
+    // password.ts
+    "The password has to be at least {count} characters.": "Das Passwort muss mindestens {count} Zeichen lang sein.",
+    "The two passwords are not the same.": "Die beiden Passwörter sind nicht gleich.",
+    // components/PasswordPanel.tsx
+    "This portal runs without a login, because PORTAL_ALLOW_NO_PASSWORD is set: whatever sits in front of it signs people in, so there is no password to change here.": "Dieses Portal läuft ohne Anmeldung, weil PORTAL_ALLOW_NO_PASSWORD gesetzt ist: Wer davor sitzt, meldet die Leute an, darum gibt es hier kein Passwort zu ändern.",
+    "Every other browser is signed out by it, and asks for the new password. This one stays signed in.": "Alle anderen Browser werden dadurch abgemeldet und fragen nach dem neuen Passwort. Dieser bleibt angemeldet.",
+    "Current password": "Aktuelles Passwort",
+    "At least {count} characters.": "Mindestens {count} Zeichen.",
+    "Repeat the new password": "Neues Passwort wiederholen",
+    "The password is changed.": "Das Passwort ist geändert.",
+    "The current password is wrong.": "Das aktuelle Passwort ist falsch.",
     // components/Markdown.tsx
     "Picture from {host} not loaded": "Bild von {host} nicht geladen",
     // components/McpPanel.tsx
@@ -2414,6 +2431,7 @@ const de: Locale = {
     // session-folders.ts
     "Elsewhere": "Anderswo",
     // settings-search.ts
+    "Change password": "Passwort ändern",
     "API keys": "API-Schlüssel",
     "Whether a server answers": "Ob ein Server antwortet",
     "Default tools": "Standard-Tools",

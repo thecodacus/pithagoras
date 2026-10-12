@@ -2,8 +2,8 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /** A portal with a password: signed in once the right one is posted, signed out again when `expired` says so, and not answering while `down`. */
-async function portal(page: Page, state: { authed: boolean; expired?: boolean; down?: boolean }) {
-  const calls = { status: 0, login: [] as unknown[], rename: 0 };
+async function portal(page: Page, state: { authed: boolean; expired?: boolean; down?: boolean; setup?: boolean; removed?: boolean }) {
+  const calls = { status: 0, login: [] as unknown[], setup: [] as unknown[], rename: 0 };
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   await mockPortal(page, async ({ path: p, method, route, json }) => {
     // What a proxy answers while the portal behind it restarts: a page of its own, not JSON.
@@ -12,10 +12,20 @@ async function portal(page: Page, state: { authed: boolean; expired?: boolean; d
       await route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>Bad Gateway</h1>' });
       return DONE;
     }
-    if (p === '/api/auth/status') { calls.status++; return { authRequired: true, authed: state.authed }; }
+    if (p === '/api/auth/status') { calls.status++; return { authRequired: true, authed: state.authed, ...(state.setup ? { setup: true } : {}) }; }
+    if (p === '/api/auth/setup') {
+      const body = json();
+      calls.setup.push(body);
+      if (body.password === 'change-me') return reply(400, { error: 'That is the example password, which everybody knows. Choose another.' });
+      state.authed = true;
+      state.setup = false;
+      return { ok: true };
+    }
     if (p === '/api/auth/login') {
       const body = json();
       calls.login.push(body);
+      // The password was removed on the server while this page was open.
+      if (state.removed) return reply(409, { error: 'No password has been chosen yet.', setup: true });
       if (body.password !== 'secret') return reply(401, { error: 'Wrong password' });
       state.authed = true;
       state.expired = false;
@@ -114,4 +124,54 @@ test('a password sent while the portal is away says that, not the proxy\'s statu
   // Still the form: nothing was refused.
   await expect(page.getByPlaceholder('Password')).toBeVisible();
   expect(calls.login).toEqual([]);
+});
+
+test('a portal with no password asks for one, twice, and the one chosen opens the portal', async ({ page }) => {
+  const state = { authed: false, setup: true };
+  const calls = await portal(page, state);
+  await page.goto('/sessions');
+  const password = page.getByPlaceholder('New password');
+  const repeat = page.getByPlaceholder('Repeat the password');
+  const set = page.getByRole('button', { name: 'Set password' });
+  await expect(page.getByText('Choose a password')).toBeVisible();
+  await expect(page.getByPlaceholder('Password', { exact: true })).toHaveCount(0);
+  await expect(set).toBeDisabled();
+
+  // Told in the page, before anything is sent: too short, and two different ones.
+  await password.fill('short');
+  await repeat.fill('short');
+  await set.click();
+  await expect(page.getByRole('alert')).toHaveText('The password has to be at least 8 characters.');
+  await password.fill('a first password');
+  await repeat.fill('a first passwore');
+  await set.click();
+  await expect(page.getByRole('alert')).toHaveText('The two passwords are not the same.');
+  expect(calls.setup).toEqual([]);
+
+  // What the server refuses is shown as it says it, and the form stays.
+  await password.fill('change-me');
+  await repeat.fill('change-me');
+  await set.click();
+  await expect(page.getByRole('alert')).toContainText('example password');
+  await expect(password).toBeVisible();
+
+  await password.fill('a first password');
+  await repeat.fill('a first password');
+  await set.click();
+  // Only the password goes: the second field is for the person.
+  await expect.poll(() => calls.setup).toEqual([{ password: 'change-me' }, { password: 'a first password' }]);
+  await expect(page.getByRole('main').getByText('Old name')).toBeVisible();
+  await expect(password).toHaveCount(0);
+  expect(calls.login).toEqual([]);
+});
+
+test('a password removed on the server while the sign-in page is open turns it into the page that asks for a new one', async ({ page }) => {
+  const state = { authed: false, removed: true };
+  const calls = await portal(page, state);
+  await page.goto('/sessions');
+  await page.getByPlaceholder('Password').fill('secret');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByText('Choose a password')).toBeVisible();
+  await expect(page.getByText('No password has been chosen yet.')).toHaveCount(0);
+  expect(calls.login).toEqual([{ password: 'secret' }]);
 });

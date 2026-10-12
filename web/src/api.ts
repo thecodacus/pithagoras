@@ -466,9 +466,16 @@ export const api = {
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
-  authStatus: () => json<{ authRequired: boolean; authed: boolean; shortPassword?: boolean }>("/api/auth/status"),
+  /** `setup`: no password has been chosen yet, so the page asks for one. */
+  authStatus: () => json<{ authRequired: boolean; authed: boolean; setup?: boolean; shortPassword?: boolean }>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
+  /** Chooses the first password of a portal that has none, and signs in with it. */
+  setupPassword: (password: string) =>
+    json<{ ok: true }>("/api/auth/setup", { method: "POST", body: JSON.stringify({ password }) }),
+  /** Every other browser is signed out by it; this one stays signed in. */
+  changePassword: (current: string, password: string) =>
+    json<{ ok: true }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, password }) }),
   logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),

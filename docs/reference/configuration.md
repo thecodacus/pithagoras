@@ -33,8 +33,8 @@ an empty field inherits, and clearing one hands the setting back.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORTAL_PASSWORD` | — | Required. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
-| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all, on `127.0.0.1` only. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
+| `PORTAL_PASSWORD` | — | Not a setting any more: the password is chosen in the browser on the first start and kept hashed in the database ([Deploying](/guide/deploying#the-password)). A portal upgraded from a release that read it moves the value into the database on the first start, and ignores the variable from then on. |
+| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all and no password to choose, on `127.0.0.1` only. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
 | `PORTAL_SECRET` | random | Signs the cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Listen port. |
 | `TZ` | UTC in the image | The time zone of the portal's clock, such as `Europe/Berlin`. The quiet hours of an agent's heartbeat and the schedule of a repeating routine are read on it, and Settings → Add-ons → Memory's tidy-up time. Both Compose files pass it on. |
@@ -70,7 +70,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | The Docker socket the managed add-ons use. |
 | `PORTAL_CONTAINER_NAME` | — (Compose: `pithagoras`) | The portal's own container name; managed voice joins its network, the container executor finds its mounts through it, and the database repair steps shown by the upgrade page use it. |
 | `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file. |
-| `ALLOW_OPEN` | — | `1` lets a portal with no password listen on every interface; without it, `PORTAL_ALLOW_NO_PASSWORD=1` binds `127.0.0.1` only. Both Compose files pass it on. See [Running without a password](/guide/deploying#running-without-a-password). |
+| `ALLOW_OPEN` | — | `1` lets a portal with no login listen on every interface; without it, `PORTAL_ALLOW_NO_PASSWORD=1` binds `127.0.0.1` only. Both Compose files pass it on. See [Running without a password](/guide/deploying#running-without-a-password). |
 | `GIT_SSH_COMMAND` | `ssh -o BatchMode=yes` | What the Git panel's fetch, pull and push run ssh with. |
 | `LLAMA_DISK_CACHE_MODELS` | — | Comma-separated model names whose llama.cpp prompt cache is kept on disk between chats. The server needs `--parallel 1` and a `--slot-save-path`; chats on that model then run one at a time. See [Session prefill snapshots](/guide/voice#session-prefill-snapshots). |
 | `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |

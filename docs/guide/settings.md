@@ -9,7 +9,7 @@ German. Navigation runs down the left edge, in four groups:
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
 | **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
-| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
+| **Portal** | **This browser**, **Password**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
 
 Plus a page for every extension that exposes configuration.
 
@@ -131,6 +131,10 @@ runs out — after thirty days, or when the portal restarts without
 `PORTAL_SECRET` — brings the password screen back rather than failing every
 request with *Unauthorized*.
 
+A password that is shorter than 8 characters, which an older portal took from
+`PORTAL_PASSWORD` and which is kept because it was already in use, is said here
+too, with where to change it: **Password**.
+
 ### Language
 
 The portal speaks English and German. **Language** picks one, and is kept in this
@@ -144,6 +148,25 @@ A language is one file in `web/src/locales/`, named by its language code
 (`de.ts`), mapping each English text to its own; adding one means adding that
 file, and the tests list what it lacks. A page fetches only the file of the
 language it is in, so an English page does not carry the German text.
+
+## Password
+
+The one password that signs in to the portal, kept in its database as a salted
+scrypt hash and never in a file you have to protect. A portal that has none yet
+asks for one on its first start, in the browser; see
+[Deploying](/guide/deploying#the-password).
+
+**Change password** takes the current password once and the new one twice, which
+has to be at least 8 characters and not `change-me`, the example the older
+guides gave. Every other browser is signed out by the change and asks for the new
+password; the one you changed it in stays signed in. A wrong current password
+counts as a wrong guess at the login, so it is held back after ten of them in a
+row in fifteen minutes.
+
+With `PORTAL_ALLOW_NO_PASSWORD=1` there is no login and so no password; the page
+says so. A lost password is not recovered here (you cannot get in to this page
+without it): it is removed with a command on the server, see
+[Deploying](/guide/deploying#a-lost-password).
 
 ## Add-ons
 
