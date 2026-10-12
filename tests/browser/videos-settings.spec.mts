@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
-/** Settings → Agent → Videos (web/src/components/FeatureAddons.tsx, VideosAddon) over a portal whose video settings are made up. */
+/** The video model of Settings → Agent → Media (web/src/components/FeatureAddons.tsx, VideosAddon) over a portal whose video settings are made up. */
 async function portal(page: Page) {
   const sent: { path: string; body: any }[] = [];
   const videos = {
@@ -10,6 +10,8 @@ async function portal(page: Page) {
   };
   await mockPortal(page, async ({ path: p, method, json }) => {
     if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: false }, videos: { enabled: videos.ready } };
+    // The image model is on the same tab: not set up here.
+    if (p === '/api/features/images' && method === 'GET') return { images: { enabled: false, baseUrl: '', model: '', size: '', keySet: false, editEnabled: false, editBaseUrl: '', editModel: '', editMultiple: false, editMaxSize: '', editKeySet: false, timeoutSeconds: 300, sdExtras: false, ready: false, editReady: false } };
     if (p === '/api/features/videos' && method === 'GET') return { videos };
     if (p === '/api/features/videos' && method === 'PUT') {
       const patch = json();
@@ -29,30 +31,21 @@ async function portal(page: Page) {
 }
 
 const settings = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
-const save = (page: Page) => settings(page).getByRole('button', { name: 'Save', exact: true });
-
-test('Videos is a tab of Settings under Agent, beside Images', async ({ page }) => {
-  await portal(page);
-  await page.goto('/settings/images');
-  const rail = settings(page);
-  await expect(rail.getByRole('button', { name: /^Videos/ })).toBeVisible();
-  await rail.getByRole('button', { name: /^Videos/ }).click();
-  await expect(rail.getByRole('heading', { name: 'Making videos' })).toBeVisible();
-  await expect(rail.getByText('The video model behind generate_video and show_video, and whether the agent has them at all.')).toBeVisible();
-});
+/** The video model's half of the Media tab: the image model's has fields of the same names. */
+const videoPanel = (page: Page) => settings(page).getByRole('region', { name: 'Video model' });
+const save = (page: Page) => videoPanel(page).getByRole('button', { name: 'Save', exact: true });
 
 test('video generation needs an endpoint before it can be switched on, and the key is sent once and never shown again', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/videos');
-  const panel = settings(page);
+  await page.goto('/settings/media');
+  const panel = videoPanel(page);
   const tool = panel.getByRole('switch', { name: 'Video generation', exact: true });
   await expect(tool).toHaveAttribute('aria-checked', 'false');
   await expect(tool).toBeDisabled();
   await expect(panel.getByText('Save the address of a video endpoint first.')).toBeVisible();
-  await expect(panel.getByText('Off: no clips are made, on the Videos page or by the agent.')).toBeVisible();
-  // The one backend there is is named, and what it speaks.
+  await expect(panel.getByText('Off: no videos are made.')).toBeVisible();
+  // The one backend there is is named.
   await expect(panel.getByText('stable-diffusion.cpp', { exact: true }).first()).toBeVisible();
-  await expect(panel.getByText('/sdcpp/v1', { exact: true })).toBeVisible();
 
   await panel.getByLabel('API address').fill('https://video.example.com');
   await panel.getByLabel('API key').fill('sk-test-123');
@@ -69,7 +62,7 @@ test('video generation needs an endpoint before it can be switched on, and the k
   await expect(tool).toBeEnabled();
   await tool.click();
   await expect(tool).toHaveAttribute('aria-checked', 'true');
-  await expect(panel.getByText('On: clips are made on the Videos page, and the agent can have a generate_video tool.')).toBeVisible();
+  await expect(panel.getByText('On: videos are made on the Media page and by the agent.')).toBeVisible();
   await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ enabled: true });
 
@@ -86,10 +79,10 @@ test('video generation needs an endpoint before it can be switched on, and the k
 
 test('the Videos page is in the sidebar while video generation is on, and the switch moves it at once', async ({ page }) => {
   await portal(page);
-  await page.goto('/settings/videos');
+  await page.goto('/settings/media');
   const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Videos' });
   await expect(entry).toHaveCount(0);
-  const panel = settings(page);
+  const panel = videoPanel(page);
   await panel.getByLabel('API address').fill('https://video.example.com');
   await save(page).click();
   await expect(save(page)).toBeHidden();
@@ -103,8 +96,8 @@ test('the Videos page is in the sidebar while video generation is on, and the sw
 
 test('the time limit of a clip is half an hour, whole seconds from 30 to 14400, sent only when changed', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/videos');
-  const panel = settings(page);
+  await page.goto('/settings/media');
+  const panel = videoPanel(page);
   const field = panel.getByLabel('Time limit (seconds)');
   await expect(field).toHaveValue('1800');
 
@@ -138,11 +131,11 @@ test('the time limit of a clip is half an hour, whole seconds from 30 to 14400, 
 
 test('the size, the frames, the frame rate and the disk limit are checked as the portal checks them and sent when they change', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/videos');
-  const panel = settings(page);
+  await page.goto('/settings/media');
+  const panel = videoPanel(page);
   const frames = panel.getByLabel('Frames', { exact: true });
   const fps = panel.getByLabel('Frame rate');
-  const disk = panel.getByLabel('Disk limit for the Videos page (MB)');
+  const disk = panel.getByLabel('Disk limit (MB)');
   await expect(frames).toHaveValue('');
   await expect(frames).toHaveAttribute('placeholder', "the server's own");
   await expect(disk).toHaveAttribute('placeholder', 'no limit');
@@ -174,13 +167,13 @@ test('the size, the frames, the frame rate and the disk limit are checked as the
 test('Escape over the video endpoint that was typed in asks first, and over one that was saved does not', async ({ page }) => {
   const { sent } = await portal(page);
   const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
-  await page.goto('/settings/videos');
-  await expect(settings(page).getByLabel('API address')).toBeVisible();
+  await page.goto('/settings/media');
+  await expect(videoPanel(page).getByLabel('API address')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settings(page)).toBeHidden();
 
-  await page.goto('/settings/videos');
-  const address = settings(page).getByLabel('API address');
+  await page.goto('/settings/media');
+  const address = videoPanel(page).getByLabel('API address');
   await address.fill('https://video.example.com');
   await page.keyboard.press('Escape');
   await expect(ask).toBeVisible();
@@ -202,5 +195,5 @@ test('the search of Settings finds the video endpoint and lights it up', async (
   await expect(dialog.getByRole('option').first()).toContainText('Video generation');
   await dialog.getByRole('option').first().click();
   await expect(dialog.getByRole('switch', { name: 'Video generation', exact: true })).toBeVisible();
-  await expect(dialog.locator('[data-setting="Making videos"]')).toHaveClass(/setting-flash/);
+  await expect(dialog.locator('[data-setting="Video model"]')).toHaveClass(/setting-flash/);
 });

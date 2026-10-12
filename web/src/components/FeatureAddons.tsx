@@ -768,7 +768,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       if (patch.baseUrl !== undefined) setDraft(null);
       if (patch.editBaseUrl !== undefined) setEditDraft(null);
       if (changed) setNote(() => () => reloadNote(waiting));
-      // The Images page is in the sidebar while there is an endpoint to make pictures with.
+      // The Media page is in the sidebar while there is an endpoint to make pictures with.
       window.dispatchEvent(new Event("features-changed"));
       return true;
     } catch (e) {
@@ -780,10 +780,11 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
   };
 
   return (
-    <div className="mt-4 space-y-3">
+    // Named, as both models are on one page and have fields of the same names.
+    <div role="region" aria-label={t("Image model")} className="mt-4 space-y-3">
       <div className="rounded-xl border border-line bg-raised/40 p-3">
         <Header Icon={LuImage} title={t("Image generation")}>
-          {tx("Pictures from a description, made by an image model you set up: on the Images page, and by the agent with a {tool} tool, whose pictures appear in the chat, and in voice mode's picture window, as one shown with {show} does.", { tool: <code>generate_image</code>, show: <code>show_image</code> })}
+          {t("Pictures from a description, made by an image model you set up.")}
         </Header>
       </div>
 
@@ -847,10 +848,10 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
           </label>
         </div>
         <p className="text-[11px] text-fg-faint">
-          {tx("Any server with an OpenAI-style {route}: the portal sends the model, the prompt and the size, and takes a picture back as base64 or as an address. The key goes only to this address. Leave the model and the size empty for the server's own.", { route: <code>images/generations</code> })}
+          {tx("Any server with an OpenAI-style {route}. The key goes only to this address. Empty model and size mean the server's own.", { route: <code>images/generations</code> })}
         </p>
         <p className="text-[11px] text-fg-faint">
-          {t("The time limit is how long the portal waits for one picture, made or edited, before it gives up: {min} to {max} seconds, {default} by default. A slow or local model may need more.", TIMEOUT)}
+          {t("The time limit is how long the portal waits for one picture: {min} to {max} seconds, {default} by default.", TIMEOUT)}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {draft && (
@@ -887,23 +888,16 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
 
       <SwitchRow
         title={t("Image generation")}
-        detail={images.enabled ? t("On: pictures are made on the Images page, and the agent can have a generate_image tool.") : t("Off: no pictures are made, on the Images page or by the agent.")}
+        detail={images.enabled ? t("On: pictures are made on the Media page and by the agent.") : t("Off: no pictures are made.")}
         on={images.enabled}
         onChange={(enabled) => void change({ enabled })}
         disabled={busy || !!draft || (!images.baseUrl && !images.enabled)}
         note={draft ? t("Save or discard the changes first.") : !images.baseUrl && !images.enabled ? t("Save the address of an image endpoint first.") : undefined}
       />
-      <p className="text-[11px] text-fg-faint">
-        {t("Pictures are made in a generated-images folder inside the chat's folder. Making one can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the generate_image tool is set in the tool lists (Settings → Agent → Tools, a project's Tools, and the tools control of a chat).")}
-      </p>
 
       <div className="rounded-xl border border-line bg-raised/40 p-3">
         <Header Icon={LuWandSparkles} title={t("Image editing")}>
-          {tx("Changing pictures that exist, with an endpoint that has an OpenAI-style {route}: on the Images page, and by the agent with an {tool} tool, for a picture in the chat's folder. The original stays; the result is a new picture, shown as one made with {generate} is.", {
-            tool: <code>edit_image</code>,
-            route: <code>images/edits</code>,
-            generate: <code>generate_image</code>,
-          })}
+          {tx("Changing pictures that exist, with an OpenAI-style {route}. The original stays; the result is a new picture.", { route: <code>images/edits</code> })}
         </Header>
       </div>
 
@@ -957,10 +951,10 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
           </label>
         </div>
         <p className="text-[11px] text-fg-faint">
-          {t("Leave the address empty to edit with the server above, with its key. The model above is not used for editing, as a model that makes pictures may not change them; leave this one empty for the server's own. A key goes only to the address it was given for.")}
+          {t("Leave the address empty to edit with the server above, and the model empty for the server's own. A key goes only to the address it was given for.")}
         </p>
         <p className="text-[11px] text-fg-faint">
-          {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048, whichever way up it is. A picture beyond it is not sent: the agent is told the limit is exceeded and what it is. Leave it empty for no limit.")}
+          {t("The maximum picture size is the most pixels a picture sent to be edited may have, such as 2048x2048. Empty is no limit.")}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {editDraft && (
@@ -988,7 +982,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
 
       <SwitchRow
         title={t("Image editing")}
-        detail={images.editEnabled ? t("On: pictures are changed on the Images page, and the agent can have an edit_image tool.") : t("Off: no pictures are changed, on the Images page or by the agent.")}
+        detail={images.editEnabled ? t("On: pictures are changed on the Media page and by the agent.") : t("Off: no pictures are changed.")}
         on={images.editEnabled}
         onChange={(editEnabled) => void change({ editEnabled })}
         disabled={busy || !!editDraft || (!(images.editBaseUrl || images.baseUrl) && !images.editEnabled)}
@@ -996,23 +990,20 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
       />
       <SwitchRow
         title={t("Several pictures per edit")}
-        detail={images.editMultiple ? t("On: an edit takes up to eight pictures, on the Images page and for edit_image.") : t("Off: an edit takes one picture.")}
+        detail={images.editMultiple ? t("On: an edit takes up to eight pictures.") : t("Off: an edit takes one picture.")}
         on={images.editMultiple}
         onChange={(editMultiple) => void change({ editMultiple })}
         disabled={busy || !!editDraft}
       />
       <p className="text-[11px] text-fg-faint">
-        {t("Switch on several pictures only if the editing endpoint takes more than one in a request, to combine subjects or keep a style. The agent then names its pictures in the order the prompt refers to them, and the Images page takes up to eight pictures for an edit. What an endpoint takes is said of that endpoint, so editing moved to another server switches it off again.")}
-      </p>
-      <p className="text-[11px] text-fg-faint">
-        {t("The result is a new picture in the generated-images folder, named after the original, which is not changed. Editing can cost money at a hosted endpoint, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the edit_image tool is set in the tool lists, as for generation.")}
+        {t("Switch it on only if the editing endpoint takes more than one picture in a request.")}
       </p>
       <SwitchRow
         title={t("Stable Diffusion extra settings")}
         detail={
           images.sdExtras
-            ? t("On: the Images page shows settings that only stable-diffusion.cpp servers understand, under Advanced, and sends them in the description.")
-            : t("Off: the Images page shows and sends only the settings of the OpenAI image format.")
+            ? t("On: the Media page shows stable-diffusion.cpp settings under Advanced.")
+            : t("Off: the Media page shows only the settings of the OpenAI image format.")
         }
         on={images.sdExtras}
         onChange={(sdExtras) => void change({ sdExtras })}
@@ -1020,7 +1011,7 @@ export function ImagesAddon({ onError }: { onError: (e: string) => void }) {
         disabled={busy || !!draft || !!editDraft}
       />
       <p className="text-[11px] text-fg-faint">
-        {t("Switch this on only if the image endpoint, for generating and for editing, is a stable-diffusion.cpp server. It adds a seed, the steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description, which that server reads out of it; any other endpoint would take the block as part of the description. For making and changing pictures on the Images page: the agent's tools do not use these settings. While this is off none of them is sent, whatever was typed or kept before.")}
+        {t("Only for a stable-diffusion.cpp server: it adds a seed, steps, a negative prompt and, for edits, a strength and starting from noise, as a block in the description. Any other endpoint would take the block as part of the description. The agent does not use these settings.")}
       </p>
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">
@@ -1088,7 +1079,7 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
       // The form's settings are saved now, so it shows them as the server has them; the key typed is not shown again.
       if (patch.baseUrl !== undefined) setDraft(null);
       if (changed) setNote(() => () => reloadNote(waiting));
-      // The Videos page is in the sidebar while there is an endpoint to make clips with.
+      // The Media page is in the sidebar while there is an endpoint to make videos with.
       window.dispatchEvent(new Event("features-changed"));
       return true;
     } catch (e) {
@@ -1106,10 +1097,10 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
   };
 
   return (
-    <div className="mt-4 space-y-3">
+    <div role="region" aria-label={t("Video model")} className="mt-4 space-y-3">
       <div className="rounded-xl border border-line bg-raised/40 p-3">
         <Header Icon={LuVideo} title={t("Video generation")}>
-          {tx("Short videos from a description, or from a picture as the first frame, made by a video model you set up: on the Videos page, and by the agent with a {tool} tool, whose clips play in the chat. A clip takes minutes, so it is made as a job that goes on when the page is closed.", { tool: <code>generate_video</code> })}
+          {t("Short videos from a description, or from a picture as the first frame, made by a video model you set up. A video takes minutes, so it is made as a job.")}
         </Header>
       </div>
 
@@ -1196,7 +1187,7 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
             />
           </label>
           <label className="text-xs text-fg-muted">
-            {t("Disk limit for the Videos page (MB)")}
+            {t("Disk limit (MB)")}
             <input
               inputMode="numeric"
               value={form.storage}
@@ -1208,21 +1199,16 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
           </label>
         </div>
         <p className="text-[11px] text-fg-faint">
-          {tx("The address of a {server} server, such as {example}: the portal asks it for a clip as a job of its native API ({route}), asks how it is doing until it is done, and takes the WebM it makes. The address of the image endpoint of the same server, with its {v1}, works too. The key goes only to this address. Leave the model, the size, the frames and the frame rate empty for the server's own.", {
+          {tx("The address of a {server} server, such as {example}. The key goes only to this address. Empty model, size, frames and frame rate mean the server's own.", {
             server: <b>{(videos.backends.find((b) => b.id === videos.backend) ?? videos.backends[0])?.label ?? "stable-diffusion.cpp"}</b>,
             example: <code>http://localhost:1234</code>,
-            route: <code>/sdcpp/v1</code>,
-            v1: <code>/v1</code>,
           })}
         </p>
         <p className="text-[11px] text-fg-faint">
-          {t("The model is sent as {model}: stable-diffusion.cpp's server runs the one model it was started with and ignores it, but a gateway in front of it may choose a model by it.", { model: "model" })}
+          {t("The time limit is how long the portal waits for one video, in the server's queue and while it is made: {min} to {max} seconds, {default} by default.", VIDEO_TIMEOUT_SECONDS)}
         </p>
         <p className="text-[11px] text-fg-faint">
-          {t("The time limit is how long the portal waits for one clip, in the server's queue and while it is made, before it gives up: {min} to {max} seconds, {default} by default. A clip the server has begun is not stopped by this: it goes on there.", VIDEO_TIMEOUT_SECONDS)}
-        </p>
-        <p className="text-[11px] text-fg-faint">
-          {t("The disk limit is how much the clips made on the Videos page may take together. At the limit no new clip is made there until some are deleted or the limit is raised; nothing is ever deleted for it. The clips the agent makes are in its chats' folders and are not counted. Leave it empty for no limit.")}
+          {t("The disk limit is what the videos made on the Media page may take together; at the limit no new one is made there. Empty is no limit.")}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {draft && (
@@ -1262,15 +1248,12 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
 
       <SwitchRow
         title={t("Video generation")}
-        detail={videos.enabled ? t("On: clips are made on the Videos page, and the agent can have a generate_video tool.") : t("Off: no clips are made, on the Videos page or by the agent.")}
+        detail={videos.enabled ? t("On: videos are made on the Media page and by the agent.") : t("Off: no videos are made.")}
         on={videos.enabled}
         onChange={(enabled) => void change({ enabled })}
         disabled={busy || !!draft || (!videos.baseUrl && !videos.enabled)}
         note={draft ? t("Save or discard the changes first.") : !videos.baseUrl && !videos.enabled ? t("Save the address of a video endpoint first.") : undefined}
       />
-      <p className="text-[11px] text-fg-faint">
-        {t("The agent's clips are made in a generated-videos folder inside the chat's folder. Making one can cost money at a hosted endpoint, and always costs minutes of its model, so the tool is refused for people the agent talks to for you, unless a tool rule allows it. This switch is for the feature as a whole: whether a chat's agent gets the generate_video and show_video tools is set in the tool lists (Settings → Agent → Tools, a project's Tools, and the tools control of a chat).")}
-      </p>
       {busy && (
         <p className="flex items-center gap-2 text-xs text-fg-subtle">
           <LuRefreshCw className="h-3.5 w-3.5 animate-spin" /> {t("Applying…")}

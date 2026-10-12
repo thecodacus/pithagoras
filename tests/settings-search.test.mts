@@ -15,19 +15,19 @@ test("a setting is found by its title first, then by what it is about", () => {
   assert.deepEqual(titles("nothing like this"), []);
 });
 
-test("the picture tools are found in Tools, the image endpoint on the Images page", () => {
+test("the picture tools are found in Tools, the image endpoint on the Media tab", () => {
   for (const q of ["show_image", "generate_image", "edit_image"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
   for (const q of ["image generation", "image editing", "bildgenerierung"]) {
     const found = searchSettings(q, SETTINGS_INDEX);
-    assert.ok(found.length && found.every((e) => e.tab === "images"), `${q} leads to Images`);
+    assert.ok(found.length && found.every((e) => e.tab === "media" && e.section === "Image model"), `${q} leads to the image model of Media`);
   }
 });
 
-test("the video tools are found in Tools, the video endpoint on the Videos page", () => {
+test("the video tools are found in Tools, the video endpoint on the Media tab", () => {
   for (const q of ["show_video", "generate_video"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
   for (const q of ["video generation", "videogenerierung", "frame rate", "stable-diffusion.cpp"]) {
     const found = searchSettings(q, SETTINGS_INDEX);
-    assert.ok(found.length && found.every((e) => e.tab === "videos"), `${q} leads to Videos`);
+    assert.ok(found.length && found.every((e) => e.tab === "media" && e.section === "Video model"), `${q} leads to the video model of Media`);
   }
 });
 

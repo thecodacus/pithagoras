@@ -143,8 +143,8 @@ export function VideoMaker({
       <section aria-label={t("Make a video")} className="rounded-2xl border border-line bg-raised/40 p-3 sm:p-4">
         <p className="text-sm text-fg-muted">
           {t("Video generation is switched off, or has no address.")}{" "}
-          <Link to="/settings/videos" className="text-accent hover:underline">
-            {t("Set it up in Settings → Agent → Videos")}
+          <Link to="/settings/media" className="text-accent hover:underline">
+            {t("Set it up in Settings → Agent → Media")}
           </Link>
         </p>
       </section>

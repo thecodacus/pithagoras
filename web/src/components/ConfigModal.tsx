@@ -12,8 +12,7 @@ import {
   LuFolder,
   LuHammer,
   LuShieldCheck,
-  LuImage,
-  LuVideo,
+  LuImages,
   LuInfo,
   LuKeyboard,
   LuMonitor,
@@ -46,8 +45,7 @@ import { useNotifyState } from "../notify";
 import { setCommandTrigger, typedCharacter, useCommandTrigger, validTrigger } from "../command-trigger";
 import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
-import { PicturesPanel } from "./PicturesPanel";
-import { VideosPanel } from "./VideosPanel";
+import { MediaPanel } from "./MediaPanel";
 import { PortalExtensions } from "./PortalExtensions";
 import { Modal, useUnsavedDraft } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
@@ -95,8 +93,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     tabs: [
       { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
       { id: "sandbox", label: msg("Sandbox"), icon: <LuShieldCheck />, hint: msg("What the agent may read, change and run") },
-      { id: "images", label: msg("Images"), icon: <LuImage />, hint: msg("The image model behind making and changing pictures") },
-      { id: "videos", label: msg("Videos"), icon: <LuVideo />, hint: msg("The video model behind making clips") },
+      { id: "media", label: msg("Media"), icon: <LuImages />, hint: msg("The image and video models behind making pictures and videos") },
       { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
       { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
       { id: "extensions", label: msg("Extensions"), icon: <LuBlocks />, hint: msg("Install and manage packages") },
@@ -292,8 +289,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
       {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
       {nav.kind === "tab" && nav.id === "sandbox" && <SandboxSettings onError={setError} />}
-      {nav.kind === "tab" && nav.id === "images" && <PicturesPanel onError={setError} />}
-      {nav.kind === "tab" && nav.id === "videos" && <VideosPanel onError={setError} />}
+      {nav.kind === "tab" && nav.id === "media" && <MediaPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "extensions" && (

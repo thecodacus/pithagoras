@@ -42,8 +42,8 @@ const VideosPage = lazyComponent(() => import("./components/VideosPage"), "Video
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
-// Legacy routes ("session", "global") still resolve — old links stay valid.
-const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general" };
+// Legacy routes still resolve — old links stay valid: "session" and "global" were the defaults, and the pictures and the videos had a tab each before there was one for both.
+const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general", images: "media", videos: "media" };
 
 export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).
