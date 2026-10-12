@@ -33,6 +33,8 @@ import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor } from "./executors/index.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { describeToolCall } from "./tool-summary.js";
+import { shownPicture } from "./generated-picture.js";
+import { baseDir, readPicture } from "./workspace-files.js";
 import {
   appendEvent,
   deleteEvent,
@@ -297,7 +299,18 @@ const JOB_CLOCK_SLACK_MS = 500;
 /** How many tool calls a chat remembers the time of: a chat that has made more has forgotten its oldest. */
 const CALL_WINDOWS_KEPT = 5000;
 
-export type PreparedPrompt = { message: string; onAccepted?: () => void };
+/** What a channel's ask hands pi, once it is its turn: the words, and pictures already checked and kept. */
+export type PreparedPrompt = { message: string; images?: Attached[]; onAccepted?: () => void };
+
+/** A picture the agent showed, read from the chat's folder for a channel to send on. */
+export interface SentPicture {
+  /** Base64. */
+  data: string;
+  mimeType: string;
+  /** Its file name in the chat's folder. */
+  name: string;
+  title?: string;
+}
 type AskMessage = string | (() => PreparedPrompt);
 
 interface LiveSession {
@@ -2244,6 +2257,12 @@ class SessionManager extends EventEmitter {
        * next message, so it needs to know one is open.
        */
       onUi?: (request: any) => void;
+      /**
+       * A picture the agent put in front of the person (show_image, or one it
+       * made or changed), read from the chat's folder: a channel has no page
+       * to draw it on, so it is sent on as it is shown.
+       */
+      onPicture?: (picture: SentPicture) => void | Promise<void>;
     } = {}
   ): Promise<string> {
     const previous = this.asking.get(sessionId) ?? Promise.resolve("");
@@ -2259,7 +2278,8 @@ class SessionManager extends EventEmitter {
           opts.onReply,
           opts.streamText,
           opts.onUi,
-          opts.onStopped
+          opts.onStopped,
+          opts.onPicture
         );
       });
     // Kept only while it is the newest, so a finished chain is not held forever.
@@ -2289,7 +2309,8 @@ class SessionManager extends EventEmitter {
     onReply?: (text: string) => void | Promise<void>,
     streamText = true,
     onUi?: (request: any) => void,
-    onStopped?: () => void
+    onStopped?: () => void,
+    onPicture?: (picture: SentPicture) => void | Promise<void>
   ): Promise<string> {
     // Counted before pi is started here, not in submit: a Stop that comes while
     // it starts is counted by then, and submit would take it for one that was
@@ -2297,7 +2318,7 @@ class SessionManager extends EventEmitter {
     const stopsBefore = this.stops.get(sessionId) ?? 0;
     const abortsBefore = this.aborts.get(sessionId) ?? 0;
     await this.ensureClient(sessionId);
-    const prepared = typeof message === "function" ? message() : { message };
+    const prepared: PreparedPrompt = typeof message === "function" ? message() : { message };
 
     // pi emits one assistant message per stretch of talking, broken up by tool
     // calls. Each is flushed as it closes so a channel can relay progress
@@ -2341,6 +2362,18 @@ class SessionManager extends EventEmitter {
         case "message_end":
           flush();
           break;
+
+        // A picture shown is part of the answer, whatever the channel relays
+        // of the work: the words that go with it are the agent's, after it.
+        case "tool_execution_end": {
+          const shown = onPicture && shownPicture(payload);
+          if (!shown) break;
+          const picture = this.pictureShown(sessionId, shown.path);
+          if (!picture) break;
+          flush();
+          void Promise.resolve(onPicture!({ ...picture, ...(shown.title ? { title: shown.title } : {}) })).catch(() => {});
+          break;
+        }
 
         case "tool_execution_start": {
           if (!onReply) break;
@@ -2427,7 +2460,8 @@ class SessionManager extends EventEmitter {
       finished.catch(() => {});
       // Stopped before it was sent: nothing for the channel to wait on, and what
       // it had to tell the agent is still to be told.
-      if ((await this.prompt(sessionId, prepared.message, undefined, false, stopsBefore)) === false) {
+      const images = prepared.images ?? [];
+      if ((await this.prompt(sessionId, prepared.message, images.length ? { images } : undefined, false, stopsBefore)) === false) {
         onStopped?.();
         return "";
       }
@@ -2440,6 +2474,22 @@ class SessionManager extends EventEmitter {
     } finally {
       clearTimeout(timer);
       this.off(`session:${sessionId}`, onEvent);
+    }
+  }
+
+  /**
+   * A picture in the chat's folder, as the page would fetch it: checked by its
+   * bytes, and never through a link out of the folder. Undefined for one that
+   * is gone since, or never was one: there is nothing to send then.
+   */
+  private pictureShown(sessionId: string, rel: string): Omit<SentPicture, "title"> | undefined {
+    const session = getSession(sessionId);
+    if (!session) return undefined;
+    try {
+      const { bytes, mimeType, name } = readPicture(baseDir(session.workspace), rel);
+      return { data: bytes.toString("base64"), mimeType, name };
+    } catch {
+      return undefined;
     }
   }
 

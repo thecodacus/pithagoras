@@ -33,3 +33,16 @@ export function calledThrough(args: unknown): { name: string; args: Record<strin
   }
   return { name, args: plain(given) ? given : {} };
 }
+
+/**
+ * The tool an event of pi's is of, for a call that may have gone through the gateway to a lazy one: the end
+ * of such a call names `tools` and carries no arguments, so the portal puts the tool it called on it
+ * (CALLED_TOOL_KEY). Any other event is of the tool it names. The page and a channel read the portal's
+ * pictures by this, so a picture a lazy tool made or showed is told like one of a direct call.
+ */
+export function calledToolOf(payload: any): string {
+  // pi has spelled the name both ways.
+  const name = String(payload?.toolName ?? payload?.name ?? "");
+  const called = name === GATEWAY_TOOL ? payload?.[CALLED_TOOL_KEY] : undefined;
+  return typeof called === "string" && called ? called : name;
+}

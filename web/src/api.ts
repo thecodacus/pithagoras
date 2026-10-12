@@ -1266,6 +1266,8 @@ export interface Channel {
   error?: string;
   since?: string;
   log: { at: string; text: string }[];
+  /** A code the package asks to be scanned to finish setting it up, and what to do with it. */
+  pairing?: { code: string; hint: string };
   created_at: string;
   updated_at: string;
 }
