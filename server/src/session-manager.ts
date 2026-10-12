@@ -698,6 +698,51 @@ class SessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * Takes back messages sent mid-run that pi has not read yet: `seq` is
+   * dropped for good, or — with `direct` — sent first, after the run is
+   * stopped. Whatever else waits keeps its order and goes in behind.
+   *
+   * pi can only empty its queue as a whole, so that is what is done, and the
+   * messages that stay are sent again, as they were: the same words, pictures
+   * and lane, under new numbers, in the order they were sent. Sent now, the
+   * others go in as follow-ups, since the run they steered is gone.
+   */
+  async takeBackWaiting(sessionId: string, seq: number, direct: boolean): Promise<void> {
+    const live = this.live.get(sessionId);
+    if (!live?.client.clearQueue) throw new SessionEditError("unsupported", "This agent's queue cannot be changed.");
+    // Into pi's queue first, where the clearing below reaches them.
+    await this.whenHanded(sessionId);
+    // Nothing awaited from here to the clearing: what pi takes in meanwhile is
+    // seen by takeIn, and is not on the list any more.
+    const pulled = (this.waiting.get(sessionId) ?? []).filter((m) => m.inPi);
+    const chosen = pulled.find((m) => m.seq === seq);
+    if (!chosen) throw new SessionEditError("busy", "The agent has taken that message in already.");
+    live.client.clearQueue();
+    const rest = pulled.filter((m) => m !== chosen);
+    const again = direct ? [chosen, ...rest] : rest;
+    for (const m of pulled) {
+      this.unwait(sessionId, m);
+      deleteEvent(m.seq);
+      this.tellRemoved(sessionId, { from: m.seq, to: m.seq + 1 });
+    }
+    // The pictures of the messages sent again stay on disk; a dropped one's go.
+    if (!direct) dropImages(IMAGE_ROOT, sessionId, storedIn(chosen.prompt));
+    if (direct && live.client.running) await this.abort(sessionId);
+    for (const m of again) {
+      const images = loadImages(IMAGE_ROOT, sessionId, storedIn(m.prompt));
+      // Sent now, the others wait for the run the chosen one starts: as
+      // steers, pi would read them in its first model request, together with
+      // it. Behind it, as follow-ups, they are answered after it.
+      const steer = !direct && m.prompt.steer === true;
+      await this.prompt(sessionId, m.message, {
+        ...(m.prompt.voice === true ? { voice: true } : {}),
+        ...(images.length ? { images } : {}),
+        ...(steer ? { steer: true } : {}),
+      });
+    }
+  }
+
   /** Takes one message off the waiting list; false if it was no longer on it. */
   private unwait(sessionId: string, message: Waiting): boolean {
     const list = this.waiting.get(sessionId) ?? [];

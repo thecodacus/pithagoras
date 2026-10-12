@@ -576,6 +576,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+  /** Takes back a message sent mid-run that the agent has not read yet (409 once it has). */
+  takeBackQueued: (id: string, seq: number) =>
+    json<{ ok: true }>(`/api/sessions/${id}/queued/${seq}`, { method: "DELETE" }),
+  /** Stops the run and sends a queued message first, the others behind it in their order. */
+  sendQueuedNow: (id: string, seq: number) =>
+    json<{ ok: true }>(`/api/sessions/${id}/queued/${seq}/send`, { method: "POST" }),
   /** Shows another version of a message, and what followed it then. */
   switchVersion: (id: string, seq: number, to: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/version`, {

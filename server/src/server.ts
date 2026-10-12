@@ -1025,6 +1025,29 @@ const editFailure = (res: express.Response, e: unknown) => {
   res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
 };
 
+/**
+ * Takes back a message that was sent mid-run and that the agent has not read
+ * yet; 409 once it has. `/send` stops the run and sends it first instead, the
+ * others behind it in their order.
+ */
+app.delete("/api/sessions/:id/queued/:seq", async (req, res) => {
+  try {
+    await sessions.takeBackWaiting(req.params.id, Number(req.params.seq), false);
+    res.json({ ok: true });
+  } catch (e) {
+    editFailure(res, e);
+  }
+});
+
+app.post("/api/sessions/:id/queued/:seq/send", async (req, res) => {
+  try {
+    await sessions.takeBackWaiting(req.params.id, Number(req.params.seq), true);
+    res.json({ ok: true, status: "running" });
+  } catch (e) {
+    editFailure(res, e);
+  }
+});
+
 /** Removes a message and the agent's answer to it. */
 app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
   try {

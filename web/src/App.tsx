@@ -801,6 +801,13 @@ function Shell({
             onDeleteMessage={async (seq) => {
               await api.deleteMessage(active.id, seq);
             }}
+            onTakeBackQueued={async (seq) => {
+              await api.takeBackQueued(active.id, seq);
+            }}
+            onSendQueuedNow={async (seq) => {
+              await api.sendQueuedNow(active.id, seq);
+              refreshSessions();
+            }}
             onAbort={async () => {
               await api.abort(active.id);
               refreshSessions();

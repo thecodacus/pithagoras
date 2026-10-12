@@ -193,6 +193,8 @@ model.
 | --- | --- |
 | `DELETE /api/sessions/:id/messages/:seq` | Removes a message and the agent's answer to it. 409 while the chat is running, 404 for an unknown message |
 | `POST /api/sessions/:id/messages/:seq/edit` | `{ message }` — replaces the message: it and everything after it are dropped, and the new text is sent. The old text stays as another version |
+| `DELETE /api/sessions/:id/queued/:seq` | Takes back a message that was sent while the agent was working and has not been read yet. 409 once the agent has taken it in. The other queued messages keep their order (they are sent again under new numbers) |
+| `POST /api/sessions/:id/queued/:seq/send` | Sends a queued message now: stops the run and sends it first, with the other queued messages behind it in their order. 409 once the agent has taken it in |
 | `POST /api/sessions/:id/messages/:seq/version` | `{ to }` — shows another version of the message, and what followed it then |
 | `PUT /api/sessions/:id/draft` | `{ text, caret?: { start, end } }` — what is in the chat box, which an extension can ask for. Starts nothing |
 | `GET /api/sessions/:id/stats` | Context usage and token counts, without the model catalogue |

@@ -184,6 +184,8 @@ export function Chat({
   onSend,
   onEditMessage,
   onDeleteMessage,
+  onTakeBackQueued,
+  onSendQueuedNow,
   onAbort,
   onClientCommand,
   onRename,
@@ -206,6 +208,10 @@ export function Chat({
   onEditMessage: (seq: number, message: string) => Promise<void>;
   /** Remove a sent message and the agent's answer to it. */
   onDeleteMessage: (seq: number) => Promise<void>;
+  /** Take back a message that waits for the agent to read it. */
+  onTakeBackQueued: (seq: number) => Promise<void>;
+  /** Stop the run and send a waiting message now, the others still waiting behind it. */
+  onSendQueuedNow: (seq: number) => Promise<void>;
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
@@ -1262,6 +1268,17 @@ export function Chat({
     await onSend(text, images.length || steer ? { images: images.length ? images : undefined, steer: steer || undefined } : undefined);
   };
 
+  /** The latest message that waits for the agent to read it, back in the box for rewriting; sent again, it takes the place of the one that waited. */
+  const takeBackLatest = async (item: { seq: number; text: string; images?: SentImage[] }) => {
+    const id = session.id;
+    // Fetched first: a picture that cannot be fetched leaves the message waiting where it was.
+    const images = await Promise.all(
+      (item.images ?? []).map((image) => refetchImage(api.imageUrl(id, image.name), t("A picture"))),
+    );
+    await onTakeBackQueued(item.seq);
+    putBack(id, splitContext(item.text).text, images);
+  };
+
   const attempt = async (fn: () => Promise<void>) => {
     const id = session.id;
     setActionError(null);
@@ -1296,6 +1313,8 @@ export function Chat({
       void attempt(() => onEditMessage(seq, text));
     },
     again: (item, text) => attempt(() => sendAgain(item, text)),
+    dropQueued: (seq) => attempt(() => onTakeBackQueued(seq)),
+    sendQueued: (seq) => attempt(() => onSendQueuedNow(seq)),
     remove: async (seq) => {
       if (
         await confirmDialog({
@@ -2057,6 +2076,21 @@ export function Chat({
                 if (sending) return;
                 if (chosen.needsArgument) complete(chosen);
                 else void attempt(() => submit(`${trigger}${chosen.name}`, true));
+                return;
+              }
+            }
+            // Up in an empty box brings the latest message that still waits for
+            // the agent back into it, to be changed and sent again.
+            if (
+              e.key === "ArrowUp" &&
+              !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey &&
+              !isComposing(e) &&
+              !input && !attached.length
+            ) {
+              const waiting = [...items].reverse().find((it) => it.kind === "user" && it.queued);
+              if (waiting?.kind === "user") {
+                e.preventDefault();
+                void attempt(() => takeBackLatest(waiting));
                 return;
               }
             }

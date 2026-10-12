@@ -452,6 +452,8 @@ const de: Locale = {
     "Not sent — the portal restarted before the agent took it in": "Nicht gesendet — das Portal wurde neu gestartet, bevor der Agent sie angenommen hat",
     "Not sent — the run was stopped before the agent took it in": "Nicht gesendet — der Lauf wurde gestoppt, bevor der Agent sie angenommen hat",
     "Send again as a new message": "Als neue Nachricht erneut senden",
+    "Stop the run and send this message now": "Lauf stoppen und diese Nachricht jetzt senden",
+    "Delete this waiting message": "Diese wartende Nachricht löschen",
     "Sent in voice mode": "Im Sprachmodus gesendet",
     "Audio": "Audio",
     "Open the picture": "Das Bild öffnen",
