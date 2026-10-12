@@ -74,15 +74,14 @@ test('what the docs tell a deployment to set reaches the container: the clock, t
   }
 });
 
-test('the command the deployment guide gives for .env gives the portal the password and folder that were typed, whatever characters they hold', () => {
+test('the command the deployment guide gives for .env gives the portal the folder that was typed, whatever characters it holds, and no password', () => {
   const command = /^printf ['"].*> \.env$/m.exec(read('docs/guide/deploying.md'))?.[0];
   assert.ok(command, 'the guide has the command');
-  // A password manager's symbols. `%` and `\` are what printf reads as a conversion and an escape in its format;
+  // A folder name with the symbols a path can hold. `%` and `\` are what printf reads as a conversion and an escape in its format;
   // `$` and ` #` are what Compose reads in a value without quotes as a variable and a comment.
-  const password = 'Pa$$w0rd #x-50%off-%s-%b-\\n-$HOME-${SHELL}';
-  const folder = '/srv/my %d repos';
-  const edited = command.replace("'something-long'", () => `'${password}'`).replace("'/path/to/repos'", () => `'${folder}'`);
-  assert.notEqual(edited, command, 'the placeholders are in the command');
+  const folder = '/srv/my %d repos $HOME #x-50%off-%s-%b-\\n-${SHELL}';
+  const edited = command.replace("'/path/to/repos'", () => `'${folder}'`);
+  assert.notEqual(edited, command, 'the placeholder is in the command');
 
   const temp = mkdtempSync(path.join(process.env.TMPDIR || tmpdir(), 'pitha-env-'));
   try {
@@ -91,15 +90,18 @@ test('the command the deployment guide gives for .env gives the portal the passw
     writeFileSync(path.join(temp, 'bin', 'openssl'), '#!/bin/sh\necho 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n');
     chmodSync(path.join(temp, 'bin', 'openssl'), 0o755);
     execFileSync('bash', ['-c', edited], { cwd: temp, env: { ...process.env, PATH: `${path.join(temp, 'bin')}:${process.env.PATH}` } });
+    // The password is chosen in the browser: nothing to type here, and none written.
     assert.deepEqual(readFileSync(path.join(temp, '.env'), 'utf8').split('\n'), [
-      `PORTAL_PASSWORD='${password}'`,
       `WORKSPACES_DIR='${folder}'`,
       'PORTAL_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       '',
     ]);
 
-    // What reaches the container is what Compose makes of the file, not the file: written without quotes,
-    // this password came out as "Pa$w0rd" and the sign-in refused the one that was typed.
+    // What reaches the container is what Compose makes of the file, not the file. An install from before has its
+    // password in this file, and the portal moves it into its database on the first start after the upgrade: it has to
+    // reach the container as typed, or the sign-in would refuse the one that was typed.
+    const password = 'Pa$$w0rd #x-50%off';
+    writeFileSync(path.join(temp, '.env'), `${readFileSync(path.join(temp, '.env'), 'utf8')}PORTAL_PASSWORD='${password}'\n`);
     if (spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status !== 0) return;
     for (const file of COMPOSE) {
       const shown = JSON.parse(
@@ -129,7 +131,14 @@ test('no Compose file mounts a default workspace folder: it is asked for, and no
 
 test('.env.example lists every variable a Compose file reads', () => {
   const example = read('.env.example');
+  // Passed on only so that an install from before, whose .env still holds its password, has it moved into the
+  // database once. A new install sets none: the password is chosen in the browser, and the example does not have it.
+  const upgradeOnly = ['PORTAL_PASSWORD'];
   for (const name of new Set(COMPOSE.flatMap(readsOf))) {
+    if (upgradeOnly.includes(name)) {
+      assert.doesNotMatch(example, new RegExp(name), `${name} is not in .env.example`);
+      continue;
+    }
     assert.match(example, new RegExp(`^(# )?${name}=`, 'm'), `${name} is in .env.example`);
   }
 });

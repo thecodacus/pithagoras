@@ -1,8 +1,24 @@
 import { useState } from "react";
 import { api, ApiError } from "../api";
+import { MIN_PASSWORD_LENGTH, passwordMistake } from "../password";
 import { t } from "../i18n";
 
-export function Login({ onSuccess }: { onSuccess: () => void }) {
+const fieldCls =
+  "w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-fg outline-none transition placeholder:text-fg-faint focus:border-accent/50 focus:ring-4 focus:ring-accent/10";
+const buttonCls = "mt-3 w-full rounded-xl bg-accent px-3 py-2.5 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:opacity-40";
+
+function Brand({ children }: { children?: React.ReactNode }) {
+  return (
+    <div className="mb-6 flex flex-col items-center text-center">
+      <img src="/icon-512.png" alt="" className="h-16 w-16 object-contain p-3" draggable={false} />
+      <h1 className="mt-3 text-base font-semibold tracking-tight text-fg">Pithagoras</h1>
+      <p className="mt-1 text-xs text-fg-subtle">{t("Give it a task, close the browser, come back later.")}</p>
+      {children}
+    </div>
+  );
+}
+
+export function Login({ onSuccess, onSetup }: { onSuccess: () => void; onSetup: () => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -15,6 +31,8 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       await api.login(password);
       onSuccess();
     } catch (err) {
+      // The password was removed while this page was open: there is none to give, and the page asks for a new one.
+      if (err instanceof ApiError && err.status === 409 && err.body.setup) return onSetup();
       // The server's own word where it refused (a wrong password, too many tries). Anything else is
       // not the server saying no: a proxy's "HTTP 502" while the portal restarts reads like a broken login.
       setError(err instanceof ApiError && (err.status === 401 || err.status === 429) ? err.message : t("Cannot reach the portal"));
@@ -26,13 +44,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   return (
     <div className="flex h-screen items-center justify-center px-4">
       <form onSubmit={submit} className="w-full max-w-[19rem]">
-        <div className="mb-6 flex flex-col items-center text-center">
-          <img src="/icon-512.png" alt="" className="h-16 w-16 object-contain p-3" draggable={false} />
-          <h1 className="mt-3 text-base font-semibold tracking-tight text-fg">Pithagoras</h1>
-          <p className="mt-1 text-xs text-fg-subtle">
-            {t("Give it a task, close the browser, come back later.")}
-          </p>
-        </div>
+        <Brand />
 
         <input
           autoFocus
@@ -43,16 +55,76 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           aria-label={t("Password")}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? "login-error" : undefined}
-          className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-fg outline-none transition placeholder:text-fg-faint focus:border-accent/50 focus:ring-4 focus:ring-accent/10"
+          className={fieldCls}
         />
         {error && <p id="login-error" role="alert" className="mt-2 text-xs text-danger">{error}</p>}
 
-        <button
-          type="submit"
-          disabled={busy || !password}
-          className="mt-3 w-full rounded-xl bg-accent px-3 py-2.5 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:opacity-40"
-        >
+        <button type="submit" disabled={busy || !password} className={buttonCls}>
           {busy ? t("Checking…") : t("Sign in")}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/** The first start of a portal: nobody has chosen a password yet, and whoever opens it first does. */
+export function Setup({ onSuccess }: { onSuccess: () => void }) {
+  const [password, setPassword] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const mistake = passwordMistake(password, repeat);
+    if (mistake) return setError(mistake);
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setupPassword(password);
+      onSuccess();
+    } catch (err) {
+      // A password chosen by somebody else while this form was open is the server's word, like any other refusal of it.
+      setError(err instanceof ApiError && err.status >= 400 && err.status < 500 ? err.message : t("Cannot reach the portal"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex h-screen items-center justify-center px-4">
+      <form onSubmit={submit} className="w-full max-w-[19rem]">
+        <Brand>
+          <p className="mt-4 text-sm font-medium text-fg">{t("Choose a password")}</p>
+          <p className="mt-1 text-xs text-fg-subtle">{t("It signs you in to this portal, which can run commands on the machine it is on. Use at least {count} characters. You can change it later under Settings.", { count: MIN_PASSWORD_LENGTH })}</p>
+        </Brand>
+
+        <input
+          autoFocus
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={t("New password")}
+          aria-label={t("New password")}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? "setup-error" : undefined}
+          className={fieldCls}
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value)}
+          placeholder={t("Repeat the password")}
+          aria-label={t("Repeat the password")}
+          aria-invalid={error ? true : undefined}
+          className={`${fieldCls} mt-2`}
+        />
+        {error && <p id="setup-error" role="alert" className="mt-2 text-xs text-danger">{error}</p>}
+
+        <button type="submit" disabled={busy || !password || !repeat} className={buttonCls}>
+          {busy ? t("Saving…") : t("Set password")}
         </button>
       </form>
     </div>

@@ -50,6 +50,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "browser", section: msg("Command character"), title: msg("Command character"), words: "command trigger prefix slash palette skill start type befehl zeichen auslöser schrägstrich" },
   { tab: "browser", section: msg("Confirmations"), title: msg("Ask before deleting"), words: "confirm delete question prompt bestätigen löschen" },
   { tab: "browser", section: msg("Signed in"), title: msg("Sign out"), words: "logout log out password session abmelden" },
+  { tab: "password", section: msg("Change password"), title: msg("Change password"), words: "password passwort sign in login credentials secret change reset ändern kennwort anmeldung" },
   { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice browser terminal" },
   { tab: "shortcuts", section: msg("Chat"), title: msg("Keyboard shortcuts"), words: "keys hotkey keybinding shortcut tastenkürzel tastatur" },
   { tab: "shortcuts", section: msg("Voice mode"), title: msg("Voice mode shortcuts"), words: "voice speak microphone push to talk sprache" },

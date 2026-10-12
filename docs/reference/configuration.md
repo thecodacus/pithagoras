@@ -33,8 +33,8 @@ an empty field inherits, and clearing one hands the setting back.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORTAL_PASSWORD` | — | Required. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
-| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all, on `127.0.0.1` only. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
+| `PORTAL_PASSWORD` | — | Not a setting any more: the password is chosen in the browser on the first start and kept hashed in the database ([Deploying](/guide/deploying#the-password)). A portal upgraded from a release that read it moves the value into the database on the first start, and ignores the variable from then on. |
+| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all and no password to choose, on `127.0.0.1` only. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. |
 | `PORTAL_SECRET` | random | Signs the cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Listen port. |
 | `TZ` | UTC in the image | The time zone of the portal's clock, such as `Europe/Berlin`. The quiet hours of an agent's heartbeat and the schedule of a repeating routine are read on it, and Settings → Add-ons → Memory's tidy-up time. Both Compose files pass it on. |
@@ -72,7 +72,7 @@ an empty field inherits, and clearing one hands the setting back.
 | `PORTAL_TLS_CERT` / `PORTAL_TLS_KEY` | — | Serve over HTTPS when both name a file. |
 | `PORTAL_UPDATE_CHECK` | — | `off` stops the portal from fetching `origin/main` by itself, at the start and every six hours, to see whether there are new commits; the Update button in Settings → About still asks when it is pressed. |
 | `PORTAL_UPDATE_RESTART` | — | How the Update button restarts the portal after the build: `exit` stops it with status 75 and leaves starting it to its manager (pm2, a container's restart policy, systemd with `Restart=on-failure` or `always`), `self` starts the new copy itself. Unset: a portal that is a systemd service's own process exits; one that is only in a service's control group (`npm start` under dash, a wrapper script, a cron job) starts its own copy and also exits with status 75; anything else starts its own copy. See [Settings → About](/guide/settings#update). |
-| `ALLOW_OPEN` | — | `1` lets a portal with no password listen on every interface; without it, `PORTAL_ALLOW_NO_PASSWORD=1` binds `127.0.0.1` only. Both Compose files pass it on. See [Running without a password](/guide/deploying#running-without-a-password). |
+| `ALLOW_OPEN` | — | `1` lets a portal with no login listen on every interface; without it, `PORTAL_ALLOW_NO_PASSWORD=1` binds `127.0.0.1` only. Both Compose files pass it on. See [Running without a password](/guide/deploying#running-without-a-password). |
 | `GIT_SSH_COMMAND` | `ssh -o BatchMode=yes` | What the Git panel's fetch, pull and push run ssh with. |
 | `LLAMA_DISK_CACHE_MODELS` | — | Comma-separated model names whose llama.cpp prompt cache is kept on disk between chats. The server needs `--parallel 1` and a `--slot-save-path`; chats on that model then run one at a time. See [Session prefill snapshots](/guide/voice#session-prefill-snapshots). |
 | `UNDERSTORY_VOLUME` | `pithagoras_understory-memory` | The volume holding that Understory's memory. |
@@ -85,7 +85,7 @@ The Browser add-on's `BROWSER_*` variables are in [Docker add-ons](/guide/add-on
 Settings that are kept in the browser rather than on the server — theme, language,
 notifications, confirmations, shortcuts — are in [The interface](/guide/interface).
 
-The host executor inherits the portal environment. The container executor currently forwards `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `PI_PROVIDER`, and `PI_MODEL`; it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
+The host executor inherits the portal environment. The container executor forwards `PI_PROVIDER`, `PI_MODEL` and, of `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, only the key of the provider the chat runs on (none for a provider of its own, such as llama.cpp); it does not forward arbitrary extension variables. Explicit session provider/model choices are passed as CLI arguments.
 
 Both Compose files forward `PI_IMAGE` and the three `TASK_*` limits. These limits apply only to `EXECUTOR=container`: memory must be an integer of at least 6 MiB, CPUs must be positive (fractions are allowed), and the process limit must be a positive integer. Empty values inherit defaults; zero, negative and non-numeric values are rejected explicitly.
 

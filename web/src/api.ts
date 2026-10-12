@@ -8,6 +8,8 @@ export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
 export interface Session {
   id: string;
+  /** Results flagged as a suspected prompt injection that the person trusted (see FlaggedNotice). */
+  trustedResults?: string[];
   title: string;
   workspace: string;
   executor: string;
@@ -466,9 +468,16 @@ export const api = {
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
-  authStatus: () => json<{ authRequired: boolean; authed: boolean; shortPassword?: boolean }>("/api/auth/status"),
+  /** `setup`: no password has been chosen yet, so the page asks for one. */
+  authStatus: () => json<{ authRequired: boolean; authed: boolean; setup?: boolean; shortPassword?: boolean }>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
+  /** Chooses the first password of a portal that has none, and signs in with it. */
+  setupPassword: (password: string) =>
+    json<{ ok: true }>("/api/auth/setup", { method: "POST", body: JSON.stringify({ password }) }),
+  /** Every other browser is signed out by it; this one stays signed in. */
+  changePassword: (current: string, password: string) =>
+    json<{ ok: true }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, password }) }),
   logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
@@ -565,6 +574,9 @@ export const api = {
   pictureUrl: (id: string, path: string, version?: string | number) =>
     `/api/sessions/${id}/picture?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
+  /** Trusts a result flagged as a suspected prompt injection: it no longer holds the chat back. */
+  trustFlagged: (id: string, result: string) =>
+    json<{ ok: true }>(`/api/sessions/${id}/flagged/${result}/trust`, { method: "POST" }),
   deleteMessage: (id: string, seq: number) =>
     json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),
   /** Replaces a message: it and everything after it are dropped, and the new text is sent. */
@@ -1253,6 +1265,8 @@ export interface Channel {
   error?: string;
   since?: string;
   log: { at: string; text: string }[];
+  /** A code the package asks to be scanned to finish setting it up, and what to do with it. */
+  pairing?: { code: string; hint: string };
   created_at: string;
   updated_at: string;
 }

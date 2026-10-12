@@ -25,6 +25,8 @@ import {
   getDb,
   getDefaultContextLimit,
   getSession,
+  recordAudit,
+  trustedResults,
   getSettingDefaults,
   getSettings,
   listAgentSessions,
@@ -78,7 +80,7 @@ import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, requireAuth, signOut } from "./auth.js";
+import { authMode, changePassword, checkPassword, isAuthed, issueCookie, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -102,6 +104,7 @@ import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { applyOnStart } from "./sandbox/apply.js";
+import { trustFlagged } from "./pi/guard.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { logsRouter } from "./api/logs.js";
@@ -166,15 +169,41 @@ app.use(cookieParser());
 
 app.get("/api/auth/status", (req, res) => {
   const authed = isAuthed(req);
-  // Said to a login only: to anyone else it would say which password to guess.
-  res.json({ authRequired: authEnabled, authed, ...(authed && keptShortPassword ? { shortPassword: true } : {}) });
+  const mode = authMode();
+  // `setup` says that no password has been chosen yet: the page asks for one instead of for the password.
+  // The warning about a short one is said to a login only: to anyone else it would say which password to guess.
+  res.json({
+    authRequired: mode !== "open",
+    authed,
+    ...(mode === "setup" ? { setup: true } : {}),
+    ...(authed && shortPassword() ? { shortPassword: true } : {}),
+  });
 });
 
-app.post("/api/auth/login", loginThrottle(), (req, res) => {
-  if (!authEnabled) return res.json({ ok: true });
-  if (!checkPassword(req.body?.password)) {
+app.post("/api/auth/login", loginThrottle(), async (req, res) => {
+  const mode = authMode();
+  if (mode === "open") return res.json({ ok: true });
+  if (mode === "setup") return res.status(409).json({ error: "No password has been chosen yet.", setup: true });
+  if (!(await checkPassword(req.body?.password))) {
     return res.status(401).json({ error: "Wrong password" });
   }
+  issueCookie(res);
+  res.json({ ok: true });
+});
+
+// The first password, chosen by whoever opens a portal that has none yet: signed in with it at once.
+app.post("/api/auth/setup", async (req, res) => {
+  const refused = await setUpPassword(req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
+  issueCookie(res);
+  res.json({ ok: true });
+});
+
+// Throttled like the login, since it too takes a guess at the password. Every other login ends with the change,
+// and this browser is signed in again under the new one.
+app.post("/api/auth/password", requireAuth, loginThrottle(), async (req, res) => {
+  const refused = await changePassword(req.body?.current, req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
   issueCookie(res);
   res.json({ ok: true });
 });
@@ -827,6 +856,8 @@ const toApi = (s: ReturnType<typeof getSession> & {}) => ({
   ...s,
   pinned: Boolean(s.pinned),
   live: sessions.isRunning(s.id),
+  // The results flagged as a suspected prompt injection that the person trusted, for the chat to say so.
+  trustedResults: [...trustedResults(s.id)],
 });
 
 app.get("/api/sessions", (_req, res) => {
@@ -1020,6 +1051,20 @@ const editFailure = (res: express.Response, e: unknown) => {
   if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
   res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
 };
+
+/**
+ * The person trusts a result the guard flagged as a suspected prompt injection
+ * in this conversation: it no longer holds the conversation back. Removing the
+ * turn it is in, the other way out, is the message removal below.
+ */
+app.post("/api/sessions/:id/flagged/:result/trust", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "No such conversation" });
+  if (!/^[0-9a-f]{16}$/.test(req.params.result)) return res.status(400).json({ error: "That is not a flagged result" });
+  trustFlagged(session.id, req.params.result);
+  recordAudit({ kind: "trusted", reason: "You looked at a result flagged as a suspected prompt injection and trusted it", sessionId: session.id });
+  res.json({ ok: true });
+});
 
 /**
  * Takes back a message that was sent mid-run and that the agent has not read
@@ -1651,7 +1696,7 @@ const tls =
     ? { cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }
     : null;
 
-const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
+const host = bindHost(authMode() !== "open", process.env.ALLOW_OPEN);
 // Before anything can start a run: a catch-up routine marked running in the same
 // moment would be taken for one the last server left.
 const cutOff = sessions.recoverOrphans();
@@ -1663,7 +1708,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
-  console.log(`  auth:     ${authEnabled ? "password" : "DISABLED"}`);
+  console.log(`  auth:     ${{ password: "password", setup: "waiting for a password to be chosen", open: "DISABLED" }[authMode()]}`);
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();

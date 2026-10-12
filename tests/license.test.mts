@@ -22,7 +22,7 @@ test('every package of the repository says it is Apache-2.0, as LICENSE is', () 
   assert.match(read('LICENSE'), /Apache License\s+Version 2\.0/);
   const files = packageFiles();
   // The channels and the subagent extension are published on their own, so each carries the field.
-  for (const expected of ['package.json', 'server/package.json', 'web/package.json', 'docs/package.json', 'extensions/subagent/package.json', 'channels/discord/package.json', 'channels/slack/package.json', 'channels/telegram/package.json', 'channels/webhook/package.json']) {
+  for (const expected of ['package.json', 'server/package.json', 'web/package.json', 'docs/package.json', 'extensions/subagent/package.json', 'channels/discord/package.json', 'channels/signal/package.json', 'channels/slack/package.json', 'channels/telegram/package.json', 'channels/webhook/package.json']) {
     assert.ok(files.includes(expected), `${expected} is looked at`);
   }
   for (const file of files) assert.equal(json(file).license, 'Apache-2.0', file);

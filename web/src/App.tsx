@@ -7,7 +7,7 @@ import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type Session
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
-import { Login } from "./components/Login";
+import { Login, Setup } from "./components/Login";
 import { isTab, type Tab } from "./settings-tabs";
 import { setupDismissed } from "./setup-state";
 import { load as loadCached, prefetchSettings } from "./settings-cache";
@@ -49,6 +49,8 @@ export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).
   useLanguage();
   const [authed, setAuthed] = useState<boolean | null>(null);
+  /** No password has been chosen yet: the first start, or after it was removed with the reset command. */
+  const [setup, setSetup] = useState(false);
   /** The portal did not answer when asked who is signed in: not the same as nobody being. */
   const [unreachable, setUnreachable] = useState(false);
   const failed = useRef(0);
@@ -59,6 +61,7 @@ export default function App() {
       (s) => {
         failed.current = 0;
         setUnreachable(false);
+        setSetup(Boolean(s.setup));
         setAuthed(s.authed);
       },
       (e) => {
@@ -107,7 +110,7 @@ export default function App() {
         <div className="fixed right-4 top-4 z-10">
           <ThemeSwitcher />
         </div>
-        <Login onSuccess={() => setAuthed(true)} />
+        {setup ? <Setup onSuccess={() => { setSetup(false); setAuthed(true); }} /> : <Login onSuccess={() => setAuthed(true)} onSetup={() => setSetup(true)} />}
       </>
     );
   }
