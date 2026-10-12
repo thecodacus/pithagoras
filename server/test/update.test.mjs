@@ -484,18 +484,23 @@ test("the old node_modules and build are put aside for their steps, put back whe
   assert.ok(!build.ran.includes("files markBuilt ccc"), "a build that failed is not written down as made");
 });
 
-test("a failure is held against a second update until the old files are back", async () => {
+test("a failure is not said, and a second update not begun, until the old files are back", async () => {
   let back;
   const w = world();
   w.fails.add("npm run");
   w.artifacts.restore = () => new Promise((resolve) => (back = resolve));
   const { u } = updater(w);
   await u.start(w.target.sha);
-  const run = await settled(u);
-  assert.equal(run.state, "failed");
+  while (!back) await new Promise((r) => setTimeout(r, 2));
+  // The build has failed and the old files are on their way back.
+  assert.equal((await u.status()).run.state, "running", "not failed yet: the files a page would trust are not in place");
+  assert.equal((await u.status()).run.failed, undefined);
   await refusal(u.start(w.target.sha), "busy");
   back();
-  await new Promise((r) => setTimeout(r, 20));
+  const run = await settled(u);
+  assert.equal(run.state, "failed");
+  assert.equal(run.failed.step, "build");
+  assert.equal(run.steps.find((s) => s.id === "build").state, "failed");
   w.fails.clear();
   w.artifacts.restore = async () => {};
   await u.start(w.target.sha);

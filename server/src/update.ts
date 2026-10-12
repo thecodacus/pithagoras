@@ -422,18 +422,20 @@ export class Updater {
 
   /** Says where it failed, puts the old files back, and only then lets another update begin. */
   private async fail(run: RunView, step: Step, message: string, output: string): Promise<void> {
-    this.mark(run, step, "failed");
-    run.state = "failed";
     // After the build has worked the old files are thrown away: a restart that fails leaves the new ones in place.
-    run.failed = { step, message, output: tail(output), oldFilesBack: step !== "restart" };
-    console.error(`[update] failed at ${step}: ${message}${run.failed.output ? `\n${run.failed.output}` : ""}`);
+    const failed = { step, message, output: tail(output), oldFilesBack: step !== "restart" };
+    console.error(`[update] failed at ${step}: ${message}${failed.output ? `\n${failed.output}` : ""}`);
     try {
       await this.deps.artifacts.restore();
     } catch (e) {
-      run.failed.oldFilesBack = false;
+      failed.oldFilesBack = false;
       console.error(`[update] the old files could not be put back: ${(e as Error).message}`);
-      run.failed.message += `. The old files could not be put back: ${(e as Error).message}`;
+      failed.message += `. The old files could not be put back: ${(e as Error).message}`;
     }
+    // Said only now: a page that is told the update failed finds the old files where it says they are.
+    this.mark(run, step, "failed");
+    run.failed = failed;
+    run.state = "failed";
     this.busy = false;
   }
 

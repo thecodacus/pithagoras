@@ -15,7 +15,7 @@ const { fileArtifacts } = await import("../dist/update-files.js");
 console.log = console.error = () => {};
 
 const git = (cwd, ...args) =>
-  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 const origin = path.join(home, "origin.git");
 const seed = path.join(home, "seed");

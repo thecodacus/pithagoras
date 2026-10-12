@@ -53,6 +53,13 @@ case "$1" in
   merge) cp "$FAKE/target" "$FAKE/head"; printf '0\\t0\\n' > "$FAKE/counts" ;;
 esac
 exit 0`);
+// The portal asks systemd whether it is the main process of the service it runs in, and what the unit's restart policy is.
+// A test must not depend on the machine's own: a CI runner is itself a service that is set to `Restart=no`. This one
+// says that the unit has another main process, as it has for a portal that was started from a job of the service.
+script("systemctl", `
+echo "systemctl $*" >> "$FAKE/ran"
+printf 'MainPID=1\\nRestart=no\\n'
+exit 0`);
 // npm ci empties node_modules and installs; the build writes a server and a web app, and a file of a build that stops halfway.
 script("npm", `
 echo "npm $*" >> "$FAKE/ran"
