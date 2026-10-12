@@ -593,7 +593,17 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     client.dialogs = opts.dialogs !== false;
     client.rememberChatModel = opts.rememberChatModel;
     client.canvases = canvases;
-    if (canvases) canvases.viaGateway = () => client.reachableLazy().has("canvas_write");
+    if (canvases) {
+      canvases.viaGateway = () => client.reachableLazy().has("canvas_write");
+      // Offered by its own name, not lazy and not switched off: a call of it otherwise is answered "not found".
+      canvases.direct = () => {
+        try {
+          return session.getActiveToolNames().includes("canvas_write");
+        } catch {
+          return false;
+        }
+      };
+    }
     if (eventBus && resourceLoader) {
       client.bus = eventBus;
       client.unbridge = bridgeSubagents(

@@ -283,7 +283,10 @@ the portal refuses a mark that names them, in whichever group they are listed: w
 [sandbox](/guide/sandbox) on they are listed under **sandbox**, and an extension that brings a tool of one
 of these names does not make it lazy either. The canvas tools can be lazy, `canvas_write` too: a document
 written through `tools` fills the canvas while the model writes it, and what has come is kept if the turn
-is cut off, as for a direct call.
+is cut off, as for a direct call. Text is written only for a `canvas_write` the model can call: one offered
+by its own name, or a lazy one called through `tools`. A lazy or switched-off one called by its own name is
+answered "not found", and writes nothing. If a call through `tools` turns out to be another tool's (a key
+given twice, the last one counts), only known when the call is whole, the text that came is taken out again.
 
 **An MCP server's tools** are lazy by the server's own setting, which is the same thing as **Register tools
 directly** in [Settings → MCP](/guide/mcp), turned off: the adapter then leaves the tools to its `mcp` tool,
@@ -292,7 +295,11 @@ lazy button of an MCP server in Settings → Tools is that setting (a tool of th
 a list of tools in `directTools` is shown as it is). **MCP servers are lazy unless they register their
 tools directly**, as the adapter does by default; the add-ons the portal sets up itself, Understory for one,
 stay as they were, registered directly. A change reaches the chats that start after it. The portal's own
-`tools` tool has no part in this, and a mark that names an MCP server is refused.
+`tools` tool has no part in this, and a mark that names an MCP server is refused. The [guard](/guide/security)
+reads a call through `mcp` by the tool it reaches and what it is given, as it reads that tool called
+directly: the rules after a result that looks like a prompt injection, and what is kept from somebody who is
+not the primary user, such as the places secrets are kept. (A standing approval for a colleague is matched on
+the `mcp` call itself.)
 
 Lazy is not a switch. A lazy tool is **on** like any other, and behaves exactly like one: it is run by
 the same code, held to the same [guard](/guide/security) (the [browser](/guide/browser)'s allowlist, the

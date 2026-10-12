@@ -359,6 +359,30 @@ function parseArgs(text: string): Record<string, unknown> | undefined {
 }
 
 /**
+ * The tool an `mcp` call reaches, and what it is given, as the rules read a call of that tool: the adapter's
+ * proxy is another way to a tool a server registers directly under its own name, so the rules about what a
+ * call does (the ones after untrusted content, and what is kept from somebody who is not the primary user)
+ * hold it as they hold the direct call. Its arguments are an object or the JSON text of one; text that is not
+ * JSON reaches nothing, as the adapter refuses it. Undefined for any other call, and for an `mcp` call that names no tool.
+ */
+function viaMcp(toolName: string, input: Record<string, unknown>): { toolName: string; input: Record<string, unknown> } | undefined {
+  if (toolName !== "mcp" || typeof input.tool !== "string" || !input.tool.trim()) return undefined;
+  const given =
+    typeof input.args === "string"
+      ? parseArgs(input.args)
+      : input.args && typeof input.args === "object" && !Array.isArray(input.args)
+        ? (input.args as Record<string, unknown>)
+        : undefined;
+  return { toolName: input.tool.trim(), input: given ?? {} };
+}
+
+/** The rule that refuses this call after untrusted content: the call's own, or that of the tool an `mcp` call reaches. */
+function taintRule(toolName: string, input: Record<string, unknown>): Rule | undefined {
+  const reached = viaMcp(toolName, input);
+  return RULES.find((rule) => rule.hit(toolName, input)) ?? (reached ? RULES.find((rule) => rule.hit(reached.toolName, reached.input)) : undefined);
+}
+
+/**
  * Driving the agent's browser, in either of the two shapes the MCP adapter
  * offers: a directly registered tool named for its server, or the proxy tool
  * carrying the same thing as an argument.
@@ -782,7 +806,8 @@ export function approvalCannotHelp(toolName: string, action: string, workspace: 
   // A read is never asked for: where it is allowed it needs no approval, and an approval does not open the rest.
   if (PATH_READERS.has(toolName)) return "it is a read, which needs no approval where it is allowed and is held to the folder of this conversation where it is not";
   const input = callOf(toolName, action);
-  const never = unrunnable(toolName, input, workspace);
+  const reached = viaMcp(toolName, input);
+  const never = unrunnable(toolName, input, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
   if (never) return never;
   // A conversation that has read something untrusted refuses a push, an upload, a subagent or a schedule after
   // an approval as it did before it, and an approval spent on one would be gone.
@@ -870,7 +895,7 @@ export function trustFlagged(portalSessionId: string, id: string): void {
  * untrusted, when it has and the rules are enforced there; otherwise undefined.
  */
 function taintRuleFor(portalSessionId: string, toolName: string, input: Record<string, unknown>): Rule | undefined {
-  return taints.get(portalSessionId)?.holds() ? RULES.find((rule) => rule.hit(toolName, input)) : undefined;
+  return taints.get(portalSessionId)?.holds() ? taintRule(toolName, input) : undefined;
 }
 
 /**
@@ -1064,7 +1089,7 @@ export function guardExtension(
       }
       // The rule that refuses this call because the conversation has read something untrusted, if any.
       // It refuses whatever allows the call, so a one-off approval is not spent on it first: see below.
-      const heldByTaint = isTainted() && enforceTaint ? RULES.find((r) => r.hit(event.toolName, event.input ?? {})) : undefined;
+      const heldByTaint = isTainted() && enforceTaint ? taintRule(event.toolName, event.input ?? {}) : undefined;
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -1083,9 +1108,13 @@ export function guardExtension(
       // one-off approval is not spent on a call that is refused after all.
       if (role !== "primary" && role !== HEARTBEAT_ROLE) {
         const reads = PATH_READERS.has(event.toolName);
+        // What a server's tool is given through `mcp` is held to what is kept from this role as it is when it is called directly.
+        const reached = viaMcp(event.toolName, event.input ?? {});
         const why = reads
           ? unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
-          : READ_ONLY.has(event.toolName) ? undefined : unrunnable(event.toolName, event.input ?? {}, workspace);
+          : READ_ONLY.has(event.toolName)
+            ? undefined
+            : unrunnable(event.toolName, event.input ?? {}, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
         if (why) {
           console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}, ${why}`);
           note("refused", `Not permitted for a ${role}: ${why}`);
@@ -1136,7 +1165,7 @@ export function guardExtension(
       }
 
       if (!isTainted()) return undefined;
-      const rule = heldByTaint ?? RULES.find((r) => r.hit(event.toolName, event.input ?? {}));
+      const rule = heldByTaint ?? taintRule(event.toolName, event.input ?? {});
       if (!rule) return undefined;
 
       // Recorded even when it does not block: "this ran with the guard off" is

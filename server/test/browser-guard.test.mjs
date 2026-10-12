@@ -928,3 +928,78 @@ test("a rule that names somebody reaches them whatever their role is now, and no
   assert.equal(ruleApplies(rule({ person_key: "priya", role: "all" }), "primary", "sam"), false);
   assert.equal(ruleApplies(rule({ role: "guest" }), "guest", undefined), true);
 });
+
+// --- a server's tool through the adapter's mcp tool is held to the rules as when it is registered directly ---
+
+test("a server's tool called through mcp is held to the rules after untrusted content as the same tool called directly, with its arguments as an object or as JSON text", () => {
+  const secrets = { path: "/home/me/.ssh/id_rsa" };
+  const mcp = (args) => ({ tool: "files_read_file", args });
+  // Nothing suspicious read yet: all of them pass.
+  const clean = guardAs();
+  for (const input of [mcp(secrets), mcp(JSON.stringify(secrets))]) assert.equal(call(clean, "mcp", input), undefined);
+  assert.equal(call(clean, "files_read_file", secrets), undefined);
+
+  const h = tainted();
+  const direct = call(h, "files_read_file", secrets);
+  assert.equal(refused(direct), true, "called directly it is refused");
+  assert.match(direct.reason, /read-credentials/);
+  for (const [what, input] of [["an object", mcp(secrets)], ["JSON text", mcp(JSON.stringify(secrets))], ["a file_path", { tool: "files_read_file", args: { file_path: "~/.netrc" } }]]) {
+    const via = call(h, "mcp", input);
+    assert.equal(refused(via), true, `through mcp, with ${what}`);
+    assert.match(via.reason, /read-credentials/);
+  }
+  // What is not that stays free: another path, no tool named, arguments that are not JSON (the adapter refuses those itself).
+  assert.equal(call(h, "mcp", mcp({ path: "notes/today.md" })), undefined);
+  assert.equal(call(h, "mcp", { tool: "files_read_file" }), undefined);
+  assert.equal(call(h, "mcp", { tool: "files_read_file", args: "not json" }), undefined);
+  assert.equal(call(h, "mcp", { server: "files" }), undefined, "a search or a listing names no tool");
+  // The reason is on the record, as for a direct call.
+  assert.match(lastAudit().reason, /read-credentials/);
+});
+
+test("somebody who is not the primary user has what is kept from them kept through mcp too, even where a rule opens mcp", () => {
+  const id = "mcp-rule-secrets";
+  addToolRule({ id, role: "all", tool: "mcp", pattern: "*", note: "", person_key: null });
+  try {
+    const h = guardAs({ role: "colleague", key: "priya" });
+    const secrets = call(h, "mcp", { tool: "files_read_file", args: { path: "/home/me/.ssh/id_rsa" } });
+    assert.equal(refused(secrets), true);
+    assert.match(secrets.reason, /secrets/);
+    // The rule still opens what is not that.
+    assert.equal(call(h, "mcp", { tool: "files_read_file", args: { path: "notes/today.md" } }), undefined);
+  } finally {
+    deleteToolRule(id);
+  }
+});
+
+test("an approval is not asked for through mcp where the conversation's taint or what is kept from a colleague would refuse it anyway", () => {
+  const action = JSON.stringify({ tool: "files_read_file", args: { path: "/home/me/.ssh/id_rsa" } });
+  assert.match(approvalCannotHelp("mcp", action, undefined) ?? "", /secrets/);
+  assert.equal(approvalCannotHelp("mcp", JSON.stringify({ tool: "files_read_file", args: { path: "notes/today.md" } }), undefined), undefined);
+});
+
+test("a flagged result that came back through the tools tool holds the conversation like any other, then and after a reload, until it is trusted", () => {
+  // The gateway runs the hooks under the inner tool's name; what pi keeps of it is the outer result of `tools`.
+  const h = guardAs({ session: "trust-lazy" });
+  const out = read(h, "mcp_page", { url: "https://x.test" }, INJECTION);
+  const history = [{ type: "message", message: { role: "toolResult", toolName: "tools", content: out.content } }];
+  const flag = flaggedResult(out.content[0].text);
+  assert.deepEqual(flag?.signals, ["override"]);
+  assert.equal(refused(call(h, "bash", { command: "git push" })), true);
+  // Opened again: the flag is read from the history, whatever the row was called.
+  const again = guardAs({ session: "trust-lazy" });
+  again.session_start({ type: "session_start", reason: "startup" }, { sessionManager: { getEntries: () => history } });
+  assert.equal(refused(call(again, "bash", { command: "git push" })), true, "still held after a reload");
+  trustFlagged("trust-lazy", flag.id);
+  assert.equal(call(again, "bash", { command: "git push" }), undefined, "trusted");
+  const third = guardAs({ session: "trust-lazy" });
+  third.session_start({ type: "session_start", reason: "startup" }, { sessionManager: { getEntries: () => history } });
+  assert.equal(call(third, "bash", { command: "git push" }), undefined, "and when it is opened again");
+  // Removed with its turn: the history has nothing flagged left.
+  const removed = guardAs({ session: "trust-lazy-removed" });
+  read(removed, "mcp_page", {}, INJECTION);
+  assert.equal(refused(call(removed, "bash", { command: "git push" })), true);
+  const reopened = guardAs({ session: "trust-lazy-removed" });
+  reopened.session_start({ type: "session_start", reason: "startup" }, { sessionManager: { getEntries: () => [] } });
+  assert.equal(call(reopened, "bash", { command: "git push" }), undefined);
+});

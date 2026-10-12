@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { listCanvases,focusCanvas,readCanvas,markCanvasRead,createCanvas,deleteCanvas,beginCanvasWrite,saveCanvasPrefix,finishCanvasWrite } from '../canvases.js';
-import { GATEWAY_TOOL } from './tools-gateway-names.js';
+import { GATEWAY_TOOL, calledThrough } from './tools-gateway-names.js';
 
 /** Decode only complete JSON escape sequences; an unfinished escape stays pending. */
 function stringPrefix(raw: string,start: number): {value:string;end:number;complete:boolean} {
@@ -171,6 +171,11 @@ export class CanvasTools {
    * call through it of a tool that is not lazy is refused, and nothing it carries is written.
    */
   viaGateway:()=>boolean=()=>false;
+  /**
+   * Whether canvas_write is offered to the model by its own name now. A call of it by that name when it is not (it is lazy, or
+   * switched off) is answered "not found" and never runs, so the text it carries is nobody's to write.
+   */
+  direct:()=>boolean=()=>true;
   constructor(private session:string){}
   private apply(call:string,p:any) {
     if(typeof p?.canvas_id!=='string'||!Number.isInteger(p.revision)||!['replace','append'].includes(p.operation)||typeof p.content!=='string')return;
@@ -189,7 +194,7 @@ export class CanvasTools {
       let stream=this.streams.get(tool.id);
       if(!stream) {
         // Called as it is, or through the `tools` tool where it is lazy: the same text, one level further in.
-        if(tool.name==='canvas_write')stream=new WriteStream();
+        if(tool.name==='canvas_write'&&this.direct())stream=new WriteStream();
         else if(tool.name===GATEWAY_TOOL&&this.viaGateway())stream=new GatewayWriteStream();
         else return;
         this.streams.set(tool.id,stream);
@@ -197,12 +202,24 @@ export class CanvasTools {
       const p=stream.push(inner.delta);if(!p || !p.content)return;
       try{this.apply(tool.id,p)}catch(e){this.errors.set(tool.id,(e as Error).message);this.finish(tool.id,true);}
     }
+    // The call is whole now, and what runs is what JSON makes of it: the last of a key given twice. A call of the `tools` tool
+    // that is not a canvas_write after all leaves the text that was written on its way out of the document.
+    if(event.type==='tool_execution_start'&&event.toolName===GATEWAY_TOOL&&calledThrough(event.args)?.name!=='canvas_write')this.discard(event.toolCallId);
     if(event.type==='tool_execution_end') {
       if(event.isError)this.finish(event.toolCallId,true);
       // A call through the `tools` tool that was no write leaves its stream behind.
       this.streams.delete(event.toolCallId);
     }
     if(event.type==='agent_end'||event.type==='agent_settled'||event.type==='message_end'&&['aborted','error'].includes(event.message?.stopReason))this.interrupt();
+  }
+  /** A write that turned out to be no canvas_write: the document is as it was before it, and nothing is left open. */
+  private discard(call:string) {
+    const w=this.writes.get(call);
+    if(w) {
+      try{saveCanvasPrefix(this.session,w.id,call,w.base)}catch{/* the write is over either way */}
+      finishCanvasWrite(this.session,w.id,call,false);
+    }
+    this.writes.delete(call);this.streams.delete(call);this.errors.delete(call);
   }
   private finish(call:string,partial:boolean){const w=this.writes.get(call);if(w)finishCanvasWrite(this.session,w.id,call,partial);this.writes.delete(call);this.streams.delete(call);}
   interrupt(){for(const call of this.writes.keys())this.finish(call,true);this.streams.clear();this.errors.clear();}
