@@ -122,7 +122,7 @@ test("what the server refuses, fails or loses is told in its words, and no key i
     { name: "a state it does not have", options: { jobs: [{ status: "dancing" }] }, message: /state the portal does not know: dancing/ },
     { name: "a finished job with no clip", options: { jobs: [{ status: "completed", result: { output_format: "webm" } }] }, message: /no video in its answer/ },
     { name: "a clip that is not base64", options: { jobs: [completed({ b64_json: "not base64!" })] }, message: /not base64/ },
-    { name: "an AVI", options: { jobs: [completed({ output_format: "avi", b64_json: Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("AVI LIST"), Buffer.alloc(40)]).toString("base64") })] }, message: /not a WebM or MP4 video \(it says avi\)/ },
+    { name: "an AVI", options: { jobs: [completed({ output_format: "avi", b64_json: Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("AVI LIST"), Buffer.alloc(40)]).toString("base64") })] }, message: /not a WebM or MP4 video, which is what a browser plays\. It says output_format avi, mime_type video\/webm; the file starts with 52 49 46 46 00 00 00 00; frame_count 33, resolution not given\./ },
   ];
   for (const { name, options, message } of cases) {
     const sd = await fakeSd(options);
@@ -131,6 +131,47 @@ test("what the server refuses, fails or loses is told in its words, and no key i
       assert.ok(failed instanceof gen.VideoGenerationError, `${name}: ${failed?.message}`);
       assert.match(failed.message, message, name);
       assert.ok(!failed.message.includes(KEY), `${name} gave the key back`);
+    } finally {
+      sd.server.close();
+    }
+  }
+});
+
+test("a finished job whose file is no WebM or MP4 says what was sent: the format and type it names, the first bytes, the frames and the size", async () => {
+  const avi = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0x10, 0x20, 0x30, 0x40]), Buffer.from("AVI LIST"), Buffer.alloc(40)]);
+  const cases: { name: string; job: Record<string, unknown>; says: string }[] = [
+    {
+      name: "a size in the result",
+      job: completed({ output_format: "avi", mime_type: "video/x-msvideo", frame_count: 49, width: 832, height: 480, b64_json: avi.toString("base64") }),
+      says: "It says output_format avi, mime_type video/x-msvideo; the file starts with 52 49 46 46 10 20 30 40; frame_count 49, resolution 832x480.",
+    },
+    {
+      name: "a size and a frame count on the job itself",
+      job: { ...completed({ output_format: "gif", mime_type: undefined, frame_count: undefined, b64_json: Buffer.from("GIF89a-and-more-bytes").toString("base64") }), frame_count: 17, resolution: "640x360" },
+      says: "It says output_format gif, mime_type not given; the file starts with 47 49 46 38 39 61 2d 61; frame_count 17, resolution 640x360.",
+    },
+    {
+      name: "nothing but the bytes",
+      job: { status: "completed", result: { b64_json: Buffer.from([0, 1, 2]).toString("base64") } },
+      says: "It says output_format not given, mime_type not given; the file starts with 00 01 02; frame_count not given, resolution not given.",
+    },
+    {
+      name: "values that are not plain text",
+      job: completed({ output_format: `a\u0000b${KEY}`, mime_type: "x".repeat(200), b64_json: avi.toString("base64") }),
+      says: "output_format a?b[key], mime_type " + "x".repeat(39) + "…;",
+    },
+  ];
+  for (const { name, job, says } of cases) {
+    const sd = await fakeSd({ jobs: [job] });
+    try {
+      const failed = await gen.generateVideo(config(sd.origin), { prompt: "x" }, FAST).then(() => undefined, (e) => e as Error);
+      assert.ok(failed instanceof gen.VideoGenerationError, name);
+      assert.match(failed.message, /^What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays\. /, name);
+      assert.ok(failed.message.includes(says), `${name}: ${failed.message}`);
+      assert.ok(!failed.message.includes(KEY), `${name} gave the key back`);
+      // Short enough to read in a frame, and whole: the message is not cut.
+      assert.ok(failed.message.length < 320, `${name}: ${failed.message.length} characters`);
+      assert.ok(failed.message.endsWith("."), name);
     } finally {
       sd.server.close();
     }

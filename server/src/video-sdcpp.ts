@@ -183,7 +183,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
       } else {
         misses = 0;
         const state = text(job.json?.status);
-        if (state === "completed") return finished(job.json?.result, max);
+        if (state === "completed") return finished(job.json?.result, max, job.json, key);
         if (state === "failed") {
           const why = without(said({ error: job.json?.error }), key).replace(/\s+/g, " ").slice(0, 300);
           throw fail(`The video endpoint could not make the clip${why ? `: ${why}` : ""}`);
@@ -204,17 +204,46 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
   }
 }
 
-/** The clip in a finished job's result: decoded, and by its first bytes a WebM or an MP4. */
-function finished(result: any, max: number): MadeVideo {
+/** A value the server named, for a message: the key out first (it may repeat it, and a cut would leave a piece of it), printable characters only, and short; nothing is said of one that is not text or a number. */
+const named = (v: unknown, key: string, most = 40): string => {
+  const flat = without(typeof v === "string" || (typeof v === "number" && Number.isFinite(v)) ? String(v) : "", key).replace(/[^\x20-\x7e]/g, "?").trim();
+  return flat.length > most ? `${flat.slice(0, most - 1)}…` : flat;
+};
+
+/** The size a job says its clip has: "832x480" as it names it, or its width and height. */
+function resolutionOf(result: any, job: any, key: string): string {
+  for (const from of [result, job]) {
+    const given = from?.resolution;
+    if (given && typeof given === "object" && Number.isInteger(given.width) && Number.isInteger(given.height)) return `${given.width}x${given.height}`;
+    if (named(given, key)) return named(given, key);
+    if (Number.isInteger(from?.width) && Number.isInteger(from?.height)) return `${from.width}x${from.height}`;
+  }
+  return "";
+}
+
+/**
+ * What the portal says of a finished job whose file is no WebM or MP4, so that it can be read without the server's log:
+ * what the job calls the file (`output_format`, `mime_type`), what the file's first bytes are, and how many frames and
+ * what size the job says it made. What a field does not say is said not to be given.
+ */
+function notPlayable(result: any, job: any, head: Buffer, key: string): string {
+  const frames = result?.frame_count ?? job?.frame_count;
+  const bytes = [...head.subarray(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+  return [
+    "What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays.",
+    `It says output_format ${named(result?.output_format, key, 20) || "not given"}, mime_type ${named(result?.mime_type, key) || "not given"}; the file starts with ${bytes || "nothing"};`,
+    `frame_count ${named(frames, key) || "not given"}, resolution ${resolutionOf(result, job, key) || "not given"}.`,
+  ].join(" ");
+}
+
+/** The clip in a finished job's result: decoded, and by its first bytes a WebM or an MP4. `job` is the whole answer about the job, which may say more of it than its result. */
+function finished(result: any, max: number, job: any, key: string): MadeVideo {
   const encoded = text(result?.b64_json);
   if (!encoded) throw fail("The video endpoint finished the clip, but with no video in its answer");
   const decoded = decodeBase64(encoded, max);
   if ("error" in decoded) throw fail(decoded.error === "invalid" ? "The clip the video endpoint sent is not base64" : `The clip is over ${max / 1024 / 1024} MB`);
   const type = videoType(decoded.bytes.subarray(0, VIDEO_HEAD));
-  if (!type) {
-    const format = text(result?.output_format).slice(0, 20);
-    throw fail(`What the video endpoint sent is not a WebM or MP4 video${format ? ` (it says ${format})` : ""}, which is what a browser plays`);
-  }
+  if (!type) throw fail(notPlayable(result, job, decoded.bytes, key));
   const frames = result?.frame_count;
   const fps = result?.fps;
   return { bytes: decoded.bytes, ext: type.ext, ...(Number.isInteger(frames) && frames > 0 ? { frames } : {}), ...(Number.isInteger(fps) && fps > 0 ? { fps } : {}) };

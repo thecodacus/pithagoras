@@ -1,4 +1,4 @@
-import { failureReason, sizeRatio } from "./picture-call";
+import { sizeRatio } from "./picture-call";
 import type { Item } from "./transcript";
 
 /**
@@ -36,4 +36,9 @@ export function videoCall(args: unknown): VideoCall {
   return { title: oneLine(text(input.title) || text(input.prompt), 120), ...(ratio ? { ratio } : {}) };
 }
 
-export { failureReason };
+/**
+ * What went wrong with a clip, from the text a failed call gave back: all of it, on one line's worth of white space.
+ * The picture's version is kept to a few lines for its small card; a clip's message says what the server sent, and is
+ * what a person reads to find out why, so none of it is left out.
+ */
+export const failureReason = (output: string | undefined): string => (output ?? "").replace(/\s+/g, " ").trim();

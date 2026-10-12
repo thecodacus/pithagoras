@@ -17,6 +17,8 @@
 .gallery-tile .image-preview.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: 1; }
 .gallery-tile .image-preview-failed { padding: 8px 10px; font-size: 11.5px; }
 .gallery-tile .image-preview-failed p { -webkit-line-clamp: 3; }
+/* A clip that was not made is as high as its message, and at least as high as a square tile is wide enough for. */
+.gallery-tile .image-preview.is-clip.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: auto; min-height: 9.5rem; }
 .gallery-tile .image-preview-caption { margin-top: 4px; }
 
 /* Under the picture: where it is from and when, quietly. */

@@ -324,6 +324,25 @@ test('a clip that is not made says why in its frame, and Dismiss takes it off th
   await expect(page.locator('.image-preview')).toHaveCount(0);
 });
 
+test('a clip that is not made shows its whole message in its tile, however long, and not a few lines of it', async ({ page }) => {
+  const p = await portal(page);
+  await page.goto('/media');
+  await describe(page).fill('First');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect.poll(() => p.state.jobs.length).toBe(1);
+  const message = 'What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays. It says output_format avi, mime_type video/x-msvideo; the file starts with 52 49 46 46 10 20 30 40; frame_count 49, resolution 832x480.';
+  expect(message.length).toBeGreaterThan(200);
+  p.fail(p.state.jobs[0].id, message);
+  const reason = page.locator('.image-preview-failed p');
+  await expect(reason).toHaveText(message);
+  // Every line of it is there to be read: none is cut off by the tile, which is as high as its message.
+  expect(await reason.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  const frame = (await page.locator('.image-preview-frame').boundingBox())!;
+  const text = (await reason.boundingBox())!;
+  expect(text.y + text.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
+  expect(text.height).toBeGreaterThan(60);
+});
+
 test('a clip with a poster shows it, and one without shows its first frame from the clip itself', async ({ page }) => {
   const withPoster = clip({ prompt: 'Has a poster', poster: true });
   const without = clip({ prompt: 'Has none', poster: false, age: 1 });

@@ -201,7 +201,7 @@ export function ImagePreview({ state, kind = "picture", video, detail, edit = fa
   const style = { "--ratio": shape } as CSSProperties;
   if (compact) return <div className={`image-preview is-compact is-${shown}`} style={style}>{frame}</div>;
   return (
-    <figure className={`image-preview is-${shown}`} style={style} aria-busy={busy}>
+    <figure className={`image-preview is-${shown}${clip ? " is-clip" : ""}`} style={style} aria-busy={busy}>
       {frame}
       <span className="sr-only" role="status">{said}</span>
       {(title || actions) && (

@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildTranscript, shownVideo } from "../web/src/transcript.ts";
 import { describeCall } from "../web/src/tool-activity.ts";
-import { isVideoCall, videoCall } from "../web/src/video-call.ts";
+import { failureReason as clipFailure, isVideoCall, videoCall } from "../web/src/video-call.ts";
+import { failureReason as pictureFailure } from "../web/src/picture-call.ts";
 import { displayName, groupTools, sourceName } from "../web/src/tool-groups.ts";
 import { GENERATED_VIDEO_MARK } from "../server/src/generated-video.ts";
 
@@ -82,4 +83,13 @@ test("the picture and video tools are one group, Media, and an extension's tool 
   // What the portal brings is after what is installed and before what is built in.
   assert.deepEqual(groups.map((g) => g.source).slice(-1), ["built in"]);
   assert.ok(groups.findIndex((g) => g.source === "my-videos") < groups.findIndex((g) => g.source === "<portal:media>"));
+});
+
+test("what went wrong with a clip is given whole, where a picture's is kept to a few lines", () => {
+  const message = `What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays.\n  It says output_format avi, mime_type video/x-msvideo; ${"the file starts with 52 49 46 46; ".repeat(20)}`;
+  const whole = clipFailure(message);
+  assert.equal(whole, message.replace(/\s+/g, " ").trim(), "all of it, on one line's worth of white space");
+  assert.ok(whole.length > 400);
+  assert.equal(clipFailure(undefined), "");
+  assert.equal(pictureFailure(message).length, 240, "the picture's card keeps a few lines");
 });

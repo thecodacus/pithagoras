@@ -230,6 +230,24 @@ test("a clip that is not made says why in the endpoint's words, and Dismiss clea
   }
 });
 
+test("a clip the server finished as something a browser cannot play says what was sent on the job, whole", async () => {
+  const sd = await fakeSd({ jobs: [completed({ output_format: "avi", mime_type: "video/x-msvideo", frame_count: 33, width: 832, height: 480, b64_json: Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("AVI LIST"), Buffer.alloc(40)]).toString("base64") })] });
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    await call("POST", "/videos/generate", { prompt: "an avi" });
+    const [job] = await settled();
+    assert.equal(job.state, "failed");
+    assert.equal(
+      job.error,
+      "What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays. It says output_format avi, mime_type video/x-msvideo; the file starts with 52 49 46 46 00 00 00 00; frame_count 33, resolution 832x480.",
+    );
+    assert.equal((await call("DELETE", `/videos/jobs/${job.id}`)).status, 200);
+  } finally {
+    sd.server.close();
+  }
+});
+
 test("a request that is wrong is refused with the reason, and makes nothing", async () => {
   const sd = await fakeSd();
   await clearJobs();

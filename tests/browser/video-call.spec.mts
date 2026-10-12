@@ -77,6 +77,19 @@ test('a clip that was not made says so in its frame, with the endpoint\'s words'
   await expect(cut).toContainText('Interrupted before the video arrived');
 });
 
+test('a clip that was not made shows its whole message in its frame, which is not cut at a few lines or a few characters', async ({ page }) => {
+  await page.goto('/tests/videos.html');
+  const message = 'What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays. It says output_format avi, mime_type video/x-msvideo; the file starts with 52 49 46 46 10 20 30 40; frame_count 49, resolution 832x480, and then a good deal more that the server said about how it came to that.';
+  expect(message.length).toBeGreaterThan(240);
+  await page.evaluate((text) => {
+    (window as any).emit('tool_execution_start', { toolCallId: 'avi', toolName: 'generate_video', portalVideo: true, args: { prompt: 'An avi of a lighthouse' } });
+    (window as any).emit('tool_execution_end', { toolCallId: 'avi', toolName: 'generate_video', isError: true, result: { content: [{ type: 'text', text }] } });
+  }, message);
+  const reason = preview(page, 'An avi of a lighthouse').locator('.image-preview-failed p');
+  await expect(reason).toHaveText(message);
+  expect(await reason.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+});
+
 test('a generate_video that an extension brings is a plain tool card, running or failed', async ({ page }) => {
   await page.goto('/tests/videos.html');
   const cards = page.locator('.chat-tool', { hasText: 'generate_video' });

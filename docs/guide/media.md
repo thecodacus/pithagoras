@@ -561,7 +561,10 @@ unless you set another). See
 The same as the agent's tool, because it is the same code: the address, model, size, frames, frame
 rate and key are read when a video is made; the key goes to that address and nowhere else and **never
 reaches the page**; and what comes back must be a WebM or an MP4 by its first bytes and at most 100 MB,
-within the time limit. See [Opt-in features](/guide/features#video-generation).
+within the time limit. See [Opt-in features](/guide/features#video-generation). A clip that is none of those is
+refused with what was sent, so that it can be read in the frame without the server's log: the `output_format` and
+`mime_type` the job names, the file's first 8 bytes in hex, and its `frame_count` and resolution. A failed video's
+message is shown whole in its frame.
 
 For a stable-diffusion.cpp server the portal uses its **native job API** (`/sdcpp/v1`), because a
 video takes far longer than a request should be held open:

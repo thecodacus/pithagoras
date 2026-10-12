@@ -50,6 +50,8 @@
 .image-preview-failed > div { min-width: 0; }
 .image-preview-failed b { display: block; font-weight: 500; color: rgb(var(--fg)); }
 .image-preview-failed p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: rgb(var(--fg-subtle)); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+/* A clip's message is shown whole, however long: it says what the server sent, and is all there is to read to find out why. */
+.image-preview.is-clip .image-preview-failed p { display: block; -webkit-line-clamp: unset; overflow: visible; }
 /* In a tile there is room for the mark only: the card says the rest. */
 .image-preview.is-compact .image-preview-failed { position: absolute; inset: 0; align-items: center; justify-content: center; padding: 0; }
 
