@@ -59,7 +59,7 @@ can be a picture alone. The sent message shows them; click one to
 The model sees them, but they are not files of the chat's folder, so the agent's
 [`edit_image`](/guide/features#editing-a-picture) cannot change them: put a picture
 in the folder with the Files panel for that, or change it on the
-[Images page](/guide/images#changing-a-picture).
+[Media page](/guide/media#changing-a-picture).
 
 A photo straight off a phone is made smaller in the browser before it goes:
 2048 pixels on its longer side, as a JPEG. Models scale anything bigger down on
@@ -271,7 +271,7 @@ are made. In
 [voice mode](/guide/voice) the card of such a call carries the same preview as a
 small tile.
 
-Every picture the agent makes this way is also in the [Images](/guide/images) page's
+Every picture the agent makes this way is also in the [Media](/guide/media) page's
 gallery, from the moment it is saved, with the chat it is from, what it was asked for
 and how it was made. The page can open it, change it, make it again, and delete the
 file — which is the chat's, so that asks every time. What lies in these folders and was
@@ -299,7 +299,7 @@ either, but as the video from the moment it is asked for. A video takes minutes,
   are drawn as videos.
 
 [Voice mode](/guide/voice) has no window for videos, and while the agent has `generate_video` its voice instructions say so: a video
-is for the chat, and is made only when asked. Every video the agent makes this way is also in the [Videos](/guide/videos) page's gallery, from the moment it is saved.
+is for the chat, and is made only when asked. Every video the agent makes this way is also in the [Media](/guide/media) page's gallery, from the moment it is saved.
 
 ## Drafts and what is running
 
@@ -317,9 +317,9 @@ A status that names one of the chat's slash commands runs it when clicked.
 ## Sidebar and the sessions page
 
 The sidebar opens with New, then the places — Sessions, Projects, Agents,
-Routines and [Audit](#audit), with Browser, Memory, Images and Videos added while the
+Routines and [Audit](#audit), with Browser, Memory and Media added while the
 [browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
-holds the agent's memory, an [image endpoint](/guide/images) is set up and a [video endpoint](/guide/videos) is set up — then **Pinned**, then **Recents**. The button at its
+holds the agent's memory, or an [image endpoint](/guide/media) or a video endpoint is set up — then **Pinned**, then **Recents**. The button at its
 top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with a search of its own.
 

@@ -177,9 +177,9 @@ Inside `/data`:
 | `/data/channels` | Installed third-party channel packages |
 | `/data/agent-home` | The first agent's home: its `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` |
 | `/data/agents/<id>` | The home of every other [agent](/guide/agents) |
-| `/data/images` | The pictures the [Images page](/guide/images) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |
-| `/data/videos` | The videos the [Videos page](/guide/videos) made itself, kept until you delete them. What the agent makes is in the chat's folder, under `generated-videos` |
-| `/data/video-posters` | The small first-frame pictures the portal makes of videos when there is an `ffmpeg` (see [Videos](/guide/videos#the-gallery)); they can be deleted at any time and are made again |
+| `/data/images` | The pictures the [Media page](/guide/media) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |
+| `/data/videos` | The videos the [Media page](/guide/media) made itself, kept until you delete them. What the agent makes is in the chat's folder, under `generated-videos` |
+| `/data/video-posters` | The small first-frame pictures the portal makes of videos when there is an `ffmpeg` (see [Media](/guide/media#the-gallery)); they can be deleted at any time and are made again |
 | `/data/bin` | CLIs you add yourself — on `PATH`, survives rebuilds |
 
 `HOME` deliberately points at the volume. Otherwise every image rebuild would

@@ -1,26 +1,37 @@
-# Images
+# Media
 
-**Images** appears in the sidebar while [image generation](/guide/features#image-generation)
-is switched on and has an address, or while [editing](/guide/features#editing-a-picture)
-is. It is the page for making pictures with that endpoint **without a chat**, and for
-looking through every picture made with it — here, and by the agent in its chats. Nothing on it needs a model or a conversation:
-the page asks the portal, the portal asks the image endpoint you set up.
+**Media** appears in the sidebar while [image generation](/guide/features#image-generation) or
+[editing](/guide/features#editing-a-picture) or [video generation](/guide/features#video-generation) is
+switched on and has an address. It is the page for making pictures and videos with those endpoints
+**without a chat**, and for looking through every picture and video made with them — here, and by the
+agent in its chats. Nothing on it needs a model or a conversation: the page asks the portal, the portal
+asks the endpoint you set up.
 
-The form at the top has two modes, chosen with the switch above it: **Generate** and
-**Edit**. Both are always there. Making and changing a picture are set up apart, each
-with its own switch in **Settings → Agent → Images** (**Image generation** and **Image
-editing**, with an address), and a mode that is not set up is not hidden: it says
-*not set up*, and when you choose it the form says it is switched off or has no address,
-with a link to the setting. The page opens in **Generate**, or in **Edit** where only
-editing is set up, and it still shows what is in the gallery whatever is set up.
+The form at the top is for one kind at a time. Where both are made, **Make: A picture / A video** above
+it chooses which; it follows the gallery's filter (with only videos shown, the form for videos is open) until
+you choose, and keeps the words you typed in each. Where only one kind is made, that form is the only one.
+The gallery under it holds both kinds together, with a filter for **All**, **Pictures** or **Videos**.
 
-Those two switches decide whether the feature exists: whether the page can make or change
-pictures, and whether the agent can have the `generate_image` and `edit_image` tools at all.
-Whether a chat's agent actually gets a tool is set where every tool is, in the tool lists
-(Settings → Agent → Tools, a project's Tools, the tools control of a chat). The page does not
-depend on those lists: a tool switched off there leaves the page as it is.
+Both are set up in one place, **Settings → Agent → Media**: the **Image model** (with **Image generation** and
+**Image editing**, each with an address) and the **Video model** (**Video generation**, with an address). Those
+switches decide whether the feature exists: whether the page can make or change pictures and make videos, and
+whether the agent can have the `generate_image`, `edit_image`, `generate_video` and `show_*` tools at all. Whether a
+chat's agent actually gets a tool is set where every tool is, in the tool lists (Settings → Agent → Tools, a
+project's Tools, the tools control of a chat), where the picture and video tools are one **Media** group. The page
+does not depend on those lists: a tool switched off there leaves the page as it is.
 
-## Making a picture
+The page's address keeps what is shown (`/media?show=videos&origin=chat&kind=animated`), so a link keeps it and
+**Back** goes through it. `/images` and `/videos`, where each kind had a page, lead here with that kind shown.
+
+## Pictures
+
+The form for pictures has two modes, chosen with the switch above it: **Generate** and **Edit**. Both are
+always there. Making and changing a picture are set up apart, each with its own switch in **Settings → Agent →
+Media**, and a mode that is not set up is not hidden: it says *not set up*, and when you choose it the form says
+it is switched off or has no address, with a link to the setting. The page opens in **Generate**, or in **Edit**
+where only editing is set up, and it still shows what is in the gallery whatever is set up.
+
+### Making a picture
 
 Describe it in the box and choose **Make the picture** (`Ctrl`/`Cmd` + `Enter` does
 the same; `Enter` alone is a new line). The picture takes its place at the top of the
@@ -57,20 +68,20 @@ that is not in the format reaches an endpoint that does not know it as a field i
 refuses. Pictures that an older version made with such fields still list them under
 **Details**, as they were, and **Run again** does not send them.
 
-### Stable Diffusion settings
+#### Stable Diffusion settings
 
 Some settings are not in the OpenAI image format at all, and a server cannot be told them as
 fields. **stable-diffusion.cpp's server** takes them in its own way: as a JSON block inside the
 prompt, `<sd_cpp_extra_args>{…}</sd_cpp_extra_args>`, which it cuts out before it generates. The
 page can send them that way, and only if you say the endpoint is such a server: switch on
-**Stable Diffusion extra settings** in **Settings → Agent → Images** (off by default; one switch for
+**Stable Diffusion extra settings** in **Settings → Agent → Media** (off by default; one switch for
 generating and editing). Only stable-diffusion.cpp servers understand it, and any other endpoint would
 take the block as part of the description, so leave it off for those.
 
 **Off,** the form shows only the OpenAI fields above and **nothing of this kind is ever sent**: no
 block, not even for a value that was typed or kept earlier. Those values stay in the form's memory,
 and are not shown or sent. Under **Advanced** a quiet line tells where to switch the settings on, with
-a link to **Settings → Agent → Images**. The agent's tools never send these settings, on or off.
+a link to **Settings → Agent → Media**. The agent's tools never send these settings, on or off.
 
 **On,** the fields are plain fields of the form, right under the others in **Advanced**, in the same
 style and with no box or heading of their own, and the line about switching them on is gone. A short
@@ -99,11 +110,11 @@ that were being made; nothing is made of them.
 A picture has as long as the **Time limit** of the [image endpoint](/guide/features#the-endpoint)
 gives it: five minutes unless you set another, from 30 to 3600 seconds, the same for
 making and for changing a picture. When it runs out the frame says so, and the message
-names **Settings → Agent → Images**, where the limit is raised for a slow or local model.
+names **Settings → Agent → Media**, where the limit is raised for a slow or local model.
 
 Each picture can cost money at a hosted endpoint, as it does for the agent.
 
-## Changing a picture
+### Changing a picture
 
 Choose **Edit** at the top of the form. The pictures it works from are chosen right there, in
 the gallery under it: **tick the box on a picture to use it**, and tick it again to take it out. A
@@ -215,14 +226,112 @@ be made to fit at all is refused, with the reason and nothing sent, and so is a 
 25 MB, which the portal does not read (make a smaller copy first). A picture that fits is sent
 byte for byte.
 
+## Videos
+
+The one kind of endpoint the portal speaks to for now is a
+[stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) server started with a
+video model. How a video is asked for is a backend's business and nothing else in the portal
+knows it, so another can be added later; there is none yet (see [What it takes from the
+endpoint](#what-it-takes-from-the-endpoint)).
+
+### Making a video
+
+Describe it in the box and choose **Make the video** (`Ctrl`/`Cmd` + `Enter` does the same;
+`Enter` alone is a new line). A video takes **minutes**, so it is made as a job on the
+portal: the video takes its place at the top of the gallery as a frame that says what is
+going on, and arrives where the wait was. Closing the page, or going to another page of the
+portal, does not lose it: the portal goes on, and the page shows it again when you come back.
+
+Under the description are the settings of the video. They are fields of their own, and a
+field you leave empty is **not sent**: the add-on's own setting, or the server's own default,
+applies, and the field shows what that is as its placeholder. The page keeps them for the next
+visit (the description and the seed are not kept).
+
+| Field | Sent as | Meaning |
+| --- | --- | --- |
+| **Model** | `model` | Instead of the model saved for the add-on. Empty uses that one. stable-diffusion.cpp's own server runs the one model it was started with and ignores it; a gateway in front of it may choose a model by it. |
+| **Width** and **Height** | `width`, `height` | Both, or neither: each a whole number from 64 to 4096. What a model takes is its own: many need sides that are multiples of 16 or 32. A server may refuse a size or bring it to one its model takes, and then the video comes out at another size than asked; the Details show the size that was asked for. Empty uses the size saved for the add-on, and then the server's. |
+| **Frames** | `video_frames` | How many frames the video has, a whole number from 1 to 1000. A model takes only some counts, and the server may round the count to one it takes, up or down, by a rule of its model; the video's Details say how many frames it made, as the server reports them, and the count that was asked for beside it where they differ ("80 (asked for 81)"). |
+| **Frame rate** | `fps` | Frames per second, from 1 to 120. A video plays for its frames over its frame rate: under the fields the form says so for what it has, "33 frames at 16 frames per second play for about 2.1 s". |
+| **How many** | — | One to four. Each is a request of its own for one video, so a server that makes one at a time queues the rest. |
+
+**Advanced** adds three more:
+
+| Field | Sent as | Meaning |
+| --- | --- | --- |
+| **Seed** | `seed` | A whole number, 0 or more, or -1 for a random one. With several videos each takes the next seed, so that they are not the same video. A seed is not kept for the next visit. |
+| **Steps** | `sample_params.sample_steps` | The sampler's steps, 1 to 100. |
+| **Negative prompt** | `negative_prompt` | What the video should not show. Up to 4000 characters. |
+
+A setting that is wrong is said when you choose **Make the video**, with the field marked and
+the keyboard moved to it, and nothing is sent. A description is at most 4000 characters.
+
+#### Starting from a picture
+
+**Start from a picture** above the settings chooses the **first frame** of the video: a
+picture from the gallery, in a dialog of its own, or one from this
+computer (it is put in the gallery, as a picture for an edit is). The description then says
+what happens next. The picture is sent as `init_image`; the server brings it to the video's size
+itself. **Remove** (the **×** beside it) makes the next video from the description alone again.
+
+In the [viewer](/guide/sessions#looking-at-a-picture) of a picture, **Make a video from it** (while video
+generation is on) opens the form for videos with that picture as the first frame.
+
+### While a video is made
+
+Each video that is being made is a tile of its own, in the place it will have, with how long
+it has taken and where it is: **Waiting its turn on the server** (with its place, when the
+server says it), or **Being made on the server**. A stable-diffusion.cpp server makes one video
+at a time and queues the others, so a request may wait a while before it begins.
+
+At most **four** videos are being made at once — a guard against a click that costs more than
+meant, not a measure of what a server can do. **Stop** on a video that is being made ends the
+portal's wait and makes no video of it. A video that is still waiting in the server's queue is
+taken out of it; **one the server has begun cannot be stopped there** (its API has no way to), and
+goes on to its end — which a hosted endpoint may still charge for. A video that is not made says
+why in its frame, in the server's words, and **Dismiss** takes it off the page. A restart of the
+portal ends the videos that were being made; nothing is made of them, though the server may finish
+them.
+
+A video has as long as the **Time limit** of the [video endpoint](/guide/features#the-video-endpoint)
+gives it, from the request to the file, the wait in the server's queue included: **half an hour**
+unless you set another, from 30 to 14400 seconds. When it runs out the frame says so, and the
+message names **Settings → Agent → Media**, where the limit is raised for a slow or local model.
+
+Videos made on this page are kept until you delete them. Where you want a ceiling, the **Disk
+limit** of the video model in Settings is how many megabytes they may take together: at the limit
+**no new video is made on the page** — the form says why — until some are deleted or the limit is
+raised. Nothing is ever deleted for it. **kept from this page**, in the header, shows what they take
+of the disk (and the limit, when there is one); the agent's videos are in their chats' folders and are
+not counted.
+
 ## The gallery
 
-The gallery is the main part of the page: every picture of **this page**, every one
-the agent made in a **chat** with `generate_image` or `edit_image`, and every one that
-lies in the folders those tools write into, newest first, in a grid that is two columns
-on a phone. Under each picture, its description (the file's name for one that was found
-in a folder), where it is from (the chat's title for one the agent made, the folder for
-one that was found, how it was made for the others) and how long ago.
+The gallery is the main part of the page: every picture and video of **this page**, every one the agent made
+in a **chat** with `generate_image`, `edit_image` or `generate_video`, and every one that lies in the folders
+those tools write into, newest first, in one grid that is two columns on a phone. Under each, its description (the
+file's name for one that was found in a folder), where it is from (the chat's title for one the agent made, the
+folder for one that was found, how it was made for the others), a video's length, and how long ago. A video's tile
+shows its first frame, with a mark that it plays.
+
+- **Both, or one.** Where both kinds are made, *Show* is **All**, **Pictures** or **Videos**; where only one is,
+  that is all the page shows, and there is no choice. Choosing one kind also opens its form, until you choose
+  the other.
+- **Together.** The portal keeps a list of pictures and a list of videos, and the page asks for a page of each
+  and shows them as one, in the order of the time each was made. Where a list has more than has been loaded,
+  nothing older than its last item is shown yet, so that nothing is left out between: **Show more**, and nearing
+  the end of the grid, read on in the list that stopped first.
+- **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*: the kinds there are of
+  what is shown. With both shown they are made, changed, from a picture, from this computer and not known; a
+  kind that only pictures have (changed, from this computer) leaves the videos out, and one that only videos
+  have (from a picture) leaves the pictures out. Pictures alone have made, changed, from this computer and not
+  known; videos alone, from a description, from a picture and not known. All of it is in the address, so a link
+  keeps it and **Back** goes through it.
+- **Looking at one.** A click on a tile, or `Enter` on it, opens it in the viewer of its kind and never does
+  anything else. A picture opens in the [picture viewer](/guide/sessions#looking-at-a-picture), a video in
+  the video viewer, and each steps through the ones of its kind, in the order of the grid.
+
+### Pictures in the gallery
 
 - **Paging.** 48 at a time. The next page is loaded as you near the end of what is
   there, and **Show more** does the same. A picture far down is not fetched until
@@ -237,11 +346,7 @@ one that was found, how it was made for the others) and how long ago.
   and so is an animated picture or one the portal cannot read. At most two copies are made at
   a time, so a folder of large files makes the first view slower but not heavy on the server.
   Nothing needs setting up. Pictures in the chat itself are shown as they were.
-- **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*:
-  all, made, changed, from this computer, not known. They are in the address
-  (`/images?origin=chat&kind=edited`), so a link keeps them and **Back** goes through them.
-- **Looking at one.** A click on the picture, or `Enter` on it, opens it in the [viewer](/guide/sessions#looking-at-a-picture), in both modes, never anything else;
-  which steps through the gallery with the arrows, `←` and `→`, or a swipe, and loads
+- **The viewer.** It steps through the gallery with the arrows, `←` and `→`, or a swipe, and loads
   the next page when it gets near the end. A picture that was changed has
   **Original** and **Edited version** at the top to go from one to the other, also when
   the original is further down than the gallery has been loaded.
@@ -250,60 +355,98 @@ one that was found, how it was made for the others) and how long ago.
   stays in the place the gallery has for it, in order of time, and the arrows of the
   viewer step through the grid in the order it shows.
 
+### Videos in the gallery
+
+- **Paging.** 24 at a time (a video is much heavier than a picture). The next page is loaded as you
+  near the end of what is there, and **Show more** does the same.
+- **Posters.** A tile shows the video's **first frame**. Where the portal can make a small
+  picture of it it does so itself, the first time a tile asks, keeps it beside the gallery, and the
+  tiles show that, a few kilobytes instead of megabytes; for that it needs **ffmpeg**, found on the
+  `PATH` or where the `FFMPEG_PATH` environment variable says. Without ffmpeg nothing else changes:
+  a tile fetches the start of its video and the browser draws the first frame, only once the tile is
+  near the screen. The same is the tile of a video ffmpeg cannot make a frame of (an MP4 whose index is at the end,
+  for one, cannot be read from a pipe): the video is still there and plays, it is not tried again until the file changes
+  or the portal restarts, and its tile shows the first frame the browser draws. A poster that fails for a reason that is not the video's — ffmpeg gone for a moment, a full disk, a frame that took too long — is tried again by the next request. A poster is made again when the file has changed, and goes with the video. At most
+  two are made at a time. A video is handed to ffmpeg on its standard input, from the file that was
+  checked, and ffmpeg may open nothing else.
+- **Playing one.** The viewer is a dialog with the
+  browser's own player — play and pause, the slider, the volume, full screen — which starts playing
+  when it opens, steps through the gallery with the arrows on its sides (or `←` and `→` while the
+  player does not have the keyboard: in the player they move through the video), and loads the next
+  page when it gets near the end. `Esc`, the browser's Back button, or a click beside the video
+  closes it. **Open in a new tab** and **Download** are the file itself.
+- **A video that is being made** is a tile of its own, with the wait; when it is made it stays in
+  the place the gallery has for it, in order of time.
+- **Playback in parts.** Videos are served in the parts a player asks for (HTTP range requests), so
+  a video of tens of megabytes starts at once and the slider can be moved without fetching it all.
+
 ### What the viewer adds
 
-Beside its own buttons, the viewer has these for a gallery picture:
+Beside its own buttons, the viewer of a picture has these:
 
 | Button | Does |
 | --- | --- |
 | **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with, including **Start from: Noise only** for a change that started from noise (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
 | **Edit it** | Puts the picture in the form, in **Edit**, to be changed, in place of any that were there. Always offered: where editing is not set up it leads to the form, which says so. While the form is already in **Edit** this button is **Use in the edit** instead, which adds the picture to the ones there, or takes it out again, and leaves the viewer open. To work from several pictures, tick them in the gallery instead. |
 | **Run again** | A picture made from a description is made once more, with the model, size, file format and compression it was made with, and its Stable Diffusion settings while that switch is on: one click, one more picture. With a seed that is the same picture again, as the endpoint makes it. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
-| **Make a video from it** | Only while [video generation](/guide/videos) is on: opens the [Videos](/guide/videos#starting-from-a-picture) page with this picture as the first frame of the video to be made. |
+| **Make a video from it** | Only while [video generation](/guide/features#video-generation) is on: opens the form for videos with this picture as the first frame of the video to be made (see [Starting from a picture](#starting-from-a-picture)). |
+| **Delete** | See below. |
+| **Open in a new tab**, **Download** | The file itself. |
+
+and the viewer of a video these:
+
+| Button | Does |
+| --- | --- |
+| **Details** | The full description, when and how it was made, the model, the size, the frames and frame rate as asked and as the server made them, the length, the seed, the steps, the negative prompt, the first frame (a small copy of the picture, while it is in the gallery), the file's name and size, and for the agent's videos the chat, with a link that opens it. For one found in a folder it says which folder, and that nothing is kept of what it was asked for. |
+| **Run again** | A video made from a description is made once more, with the model, size, frames, frame rate and the other settings it was made with: one click, one more video (with a seed that is the same video again, as the server makes it). One made from a picture needs that picture to be in the gallery still, and says so when it is not. Not for one found in a folder, which has no description, and not for one the agent made from a picture of its own folder. |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |
 
 ### Selecting several
 
-The box in a picture's corner selects it, in **Generate**: nothing to switch on first. Where a mouse can
-hover the box shows when the picture is pointed at or has focus, and on a touch screen it is always
-there; once one is ticked, all of them are. A **bar** with **n selected** appears over the gallery for as
-long as something is ticked, and stays in view as you scroll:
+The box in a tile's corner selects it: nothing to switch on first, unless the form for pictures is in **Edit**,
+where the boxes of the pictures are the edit's (see [Changing a picture](#changing-a-picture)). Where a mouse can
+hover the box shows when the tile is pointed at or has focus, and on a touch screen it is always
+there; once one is ticked, all of them are. Pictures and videos can be ticked together. A **bar** with **n selected**
+appears over the gallery for as long as something is ticked, and stays in view as you scroll:
 
 | Button | Does |
 | --- | --- |
-| **Select all shown** | Takes every picture on screen. |
-| **Edit** | Puts the selected pictures in the form, in **Edit**, in the order you ticked them, and lets go of the selection. Off where the endpoint [takes one picture](#changing-a-picture) and more are selected, or more than eight; the reason is written on the bar, so that a phone and a keyboard have it too, not only in a tooltip. |
-| **Download** | Saves each selected picture as a file of its own; the browser may ask once whether this page may download several. |
+| **Select all shown** | Takes every tile on screen. |
+| **Edit** | Pictures only. Puts the selected pictures in the form, in **Edit**, in the order you ticked them, and lets go of the selection. Off where a video is selected, where the endpoint [takes one picture](#changing-a-picture) and more are selected, or more than eight; the reason is written on the bar, so that a phone and a keyboard have it too, not only in a tooltip. Not there while only videos are shown. |
+| **Download** | Saves each selected picture or video as a file of its own; the browser may ask once whether this page may download several. |
 | **Delete** | Takes them away after asking. |
 | **Clear selection** | Lets go of the selection; so does `Esc`. |
 
-A click on a picture opens it and does not change what is selected. In **Edit** the boxes are the
-pictures of the [edit](#changing-a-picture) and there is no bar; a picture is deleted from the viewer
-there, or after going back to **Generate**. What is selected belongs to what is shown: a change of
+A click on a tile opens it and does not change what is selected. In **Edit** the boxes of the pictures are the
+pictures of the [edit](#changing-a-picture), a video has none, and there is no bar; a picture is deleted from the
+viewer there, or after going back to **Generate**. What is selected belongs to what is shown: a change of
 filter, or **Back** to another one, clears it, so that nothing that is not on screen is deleted with what
 is, and so does going to **Edit**.
 
 ### Deleting
 
-A picture is deleted with its file. For a picture the page made that is the portal's own
-folder, and the question can be switched off in Settings like the others that delete.
+A picture or a video is deleted with its file. For one the page made that is the portal's own
+folder, and the question can be switched off in Settings like the others that delete. Pictures and videos
+selected together are asked about once.
 
-The agent's pictures are files in the **folder a chat works in**
-(`generated-images`), and they are not the page's to take lightly: deleting one removes
+The agent's pictures and videos are files in the **folder a chat works in** (`generated-images`,
+`generated-videos`), and they are not the page's to take lightly: deleting one removes
 it from there for good, so the chats that work there and their Files panel lose it. That
 is asked **every time, whatever Settings says**, with the chat or the folder named, and a
-delete of several says how many of them are in a folder. A picture that was found in a
+delete of several says how many of them are in a folder. One that was found in a
 folder is deleted the same way.
 
 ### What the gallery lists
 
-The page lists and serves pictures only from the places the portal knows: its own
-folder, `images`, under the portal's data folder, and the `generated-images` folder of
-the folders the agent works in — the home of every agent, the projects, and the folder of every chat. It
-never opens a path the page names — a picture is asked for by its id — and every file is
+The page lists and serves pictures and videos only from the places the portal knows: its own folders,
+`images` and `videos`, under the portal's data folder, and the `generated-images` and `generated-videos` folders
+of the folders the agent works in — the home of every agent, the projects, and the folder of every chat. It
+never opens a path the page names — a picture or video is asked for by its id — and every file is
 opened with the checks the Files panel's pictures have: a path inside the folder, no
 link followed out of it, and what its bytes say it is.
+
+#### Pictures
 
 - The agent's pictures are listed from the moment its tools save them, with what they
   were asked for. **Pictures that nobody listed are found as well:** the ones made before
@@ -362,7 +505,34 @@ link followed out of it, and what its bytes say it is.
   opened and with **Refresh**, and while the page stays open at most once a minute,
   so a gallery of thousands does not keep the portal busy.
 
+#### Videos
+
+This is the rule for pictures, applied to videos, by the same code:
+
+- The agent's videos are listed from the moment its tool saves them, with what they were asked for.
+  **Videos that nobody listed are found as well:** the portal looks in `generated-videos` of every
+  agent's home, of every project and of every folder a chat works in, and lists each file there whose
+  first bytes say it is a **WebM** or an **MP4** (a QuickTime movie is not played by a browser, and is
+  left out), of at most **100 MB**, whatever it is called. A link is never followed, a file that is no
+  video is left out, and nothing else in those folders is looked at.
+- A video that was found is *from the folder*: which chat made it cannot be told, and what it was
+  asked for was not kept. It is one entry with a video the agent recorded, never two. It has no
+  description, so a tile carries its file name instead, and there is no **Run again** for it.
+- When a chat is **deleted**, its videos stay in the gallery, as videos of its folder with what they
+  were asked for: the files are in a folder that is not the chat's to take away. A folder that cannot
+  be reached for the moment, such as a drive that is not mounted, is not a file that is gone: its
+  videos stay in the list and are shown again when it is back. A video whose file is gone is dropped
+  from the list the next time it is loaded.
+- **Deleting an agent** or a project with its folder takes its chats' videos with it; with **Keep its
+  folder** they stay, as videos of that folder.
+- The list is refreshed when you return to the tab, every half minute while it is on screen, and with
+  **Refresh**; what the agent's tool saves is listed at once, while the look through the folders for
+  videos nobody listed is made when the page is opened and with **Refresh**, and while the page stays
+  open at most once a minute.
+
 ## What it takes from the endpoint
+
+### Pictures
 
 The same as the agent's tools, because it is the same code: the address, model, size and
 key are read when a picture is made; the key goes to that address and nowhere else and
@@ -376,3 +546,64 @@ unless you set another). See
 | --- | --- |
 | Stored as | The files of the page's pictures in `images` under the portal's data folder, and the list in the portal's own database (`images`). Jobs are kept in memory. |
 | API | [`/api/images`](/reference/api#images) |
+
+### Videos
+
+The same as the agent's tool, because it is the same code: the address, model, size, frames, frame
+rate and key are read when a video is made; the key goes to that address and nowhere else and **never
+reaches the page**; and what comes back must be a WebM or an MP4 by its first bytes and at most 100 MB,
+within the time limit. See [Opt-in features](/guide/features#video-generation).
+
+For a stable-diffusion.cpp server the portal uses its **native job API** (`/sdcpp/v1`), because a
+video takes far longer than a request should be held open:
+
+1. `GET /sdcpp/v1/capabilities`, before anything is sent, so that a server with no video model
+   loaded, or one built without WebM support, is told so in plain words. A server that does not answer it
+   is asked anyway.
+2. `POST /sdcpp/v1/vid_gen` with `{ prompt, model?, negative_prompt?, width?, height?, video_frames?, fps?,
+   seed?, sample_params?: { sample_steps }, init_image?, output_format: "webm" }`. A field that was not
+   set is left out. `init_image` is the first frame as a `data:` URL.
+3. `GET /sdcpp/v1/jobs/{id}` until the job is `completed`, `failed` or `cancelled`: every second at first,
+   then every three. A few failed questions in a row do not end the wait.
+4. The clip is `result.b64_json`, the whole file as base64; the frames and frame rate the server says it
+   made are kept with the video. A server keeps a finished clip for ten minutes (its default), which is
+   long for a portal that fetches it at once.
+5. `POST /sdcpp/v1/jobs/{id}/cancel`, when the wait is stopped or runs out.
+
+The address is the server's own, such as `http://localhost:1234`; the address of the image endpoint of
+the same server, with its `/v1`, works too. The server must have been **started with a video model** and **built
+with WebM support**: an AVI or an animated WebP, which it can make too, is not something a browser plays.
+Other request and answer shapes are not translated; there is no other backend yet. Not supported: a last
+frame, control frames, LoRA and the other fields of the native API; they are not in the form.
+
+| | |
+| --- | --- |
+| Stored as | The files of the page's videos in `videos` under the portal's data folder, the posters in `video-posters`, and the list in the portal's own database (`videos`). Jobs are kept in memory. |
+| API | [`/api/videos`](/reference/api#videos) |
+
+## The agent
+
+The picture tools (`generate_image`, `edit_image`, `show_image`) are described in [Opt-in features](/guide/features#image-generation).
+
+With video generation on and an address set, a chat's agent can have two more tools. Voice mode's picture window does not
+show videos: while the model has `generate_video`, the voice instructions tell it that a video is not shown in a spoken
+conversation, only in the chat, and that it takes minutes, so that it makes one only when asked and says it will be in the chat.
+
+- **`generate_video(prompt, title?, size?, seconds?, path?)`** makes one video and shows it. `size`
+  is `WIDTHxHEIGHT`, within the limits of the form. `seconds` is how long it should play: the portal makes
+  frames of it at the frame rate set for the add-on, else the server's own, else 16. `path` is a picture
+  in the chat's folder to use as the first frame; a picture only attached to a message is not a file in
+  the folder, and the agent is told to ask for it to be put there. The video is saved in a `generated-videos`
+  folder inside the chat's folder, under a name the portal makes
+  (`video-20261001-101500-a1b2c3.webm`), never one the agent or the endpoint chose, and never over an
+  existing file; nothing is written until the endpoint has answered with a real video, so a failure leaves
+  no file and no folder. It is listed in the gallery with what it was asked for. The call waits for the
+  video, within the time limit, and stopping the chat stops the wait.
+- **`show_video(path, title?)`** shows a WebM or an MP4 that is already in the chat's folder: a video the
+  agent made some other way, or downloaded. Only the chat's folder, and only what its bytes say is a video.
+
+Both appear in the chat as a **player** under the tool line, with the tool's call under **Details**; while
+`generate_video` runs, a frame holds the place of the video (in the shape of the size asked for) and says how
+long it has taken. See [Sessions](/guide/sessions#videos-the-agent-makes). Like any tool that is not a plain
+read, they are refused in a conversation with a teammate unless a [tool rule](/people/rules) allows them. They sit
+in one **Media** group in the tool lists, with the picture tools.

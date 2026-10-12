@@ -92,8 +92,8 @@ stray file would attach the wrong conversation.
 | `settings` | Portal-wide overrides, and the small things the portal remembers (the tools it has seen, the browser switch, the model's context windows) |
 | `project_tools` | A project's tool switches |
 | `open_subagents` | The subagents still running in a session |
-| `images` | The pictures of the [Images page](/guide/images), and what each was made from |
-| `videos` | The clips of the [Videos page](/guide/videos): the page's own, the agent's and those found in its folders, and what each was asked for |
+| `images` | The pictures of the [Media page](/guide/media), and what each was made from |
+| `videos` | The clips of the [Media page](/guide/media): the page's own, the agent's and those found in its folders, and what each was asked for |
 | `voice_presets` | The saved voices |
 | `signed_out` | Logins that were ended early, until they would have expired anyway |
 

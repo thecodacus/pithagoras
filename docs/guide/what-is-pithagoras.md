@@ -63,7 +63,7 @@ portal's slash command palette, interactive menus included, and
 [Models and providers](/guide/models). **Voice** talks to the agent with local
 speech recognition and synthesis ([Voice control](/guide/voice)). The agent's
 own [browser](/guide/browser), an [Understory memory](/guide/memory),
-[image generation and editing](/guide/images) and [video generation](/guide/videos) are optional add-ons. The portal
+image generation and editing and video generation ([Media](/guide/media)) are optional add-ons. The portal
 installs as an app and speaks English and German — see
 [The interface](/guide/interface).
 

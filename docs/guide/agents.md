@@ -148,7 +148,7 @@ or stop them afterwards. The dialog says so. It asks what to do with its folder,
 and with it, its routines:
 
 - **Keep its folder**: its files and memory stay, and so do the pictures its chats
-  made, in the [Images page](/guide/images), and its routines, switched off. Make an
+  made, on the [Media page](/guide/media), and its routines, switched off. Make an
   agent with the name it had when it was deleted (its last one, if it was renamed)
   and it picks them all up again; a routine of its that is left on the Routines page
   meanwhile says that the agent whose home it was has been deleted.
