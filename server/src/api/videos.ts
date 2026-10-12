@@ -15,11 +15,11 @@ import { MAX_RUNNING_VIDEOS, MAX_VIDEO_PROMPT, parseVideoSettings } from "../vid
 import { fail, sendPicture, sendVideo } from "./files.js";
 
 /**
- * The Videos page: making clips with the video endpoint the person set up in
- * Settings → Agent → Videos, without the agent, and the gallery of what was
+ * The Media page: making clips with the video endpoint the person set up in
+ * Settings → Agent → Media, without the agent, and the gallery of what was
  * made — here and in chats.
  *
- * The same shape as the Images page's API (see images.ts), and the same rules: the
+ * The same shape as the Media page's API (see images.ts), and the same rules: the
  * page asks the portal and the portal asks the endpoint, with the same settings,
  * key and checks the agent's tool has (see video-generation.ts), so the key never
  * reaches the page; clips are listed and sent only from the two places the portal
@@ -62,7 +62,7 @@ export function parseGenerate(body: unknown): GenerateVideoJob | string {
   if (typeof settings === "string") return settings;
   const job: GenerateVideoJob = { ...settings, prompt, count };
   if (b.firstFrame !== undefined && b.firstFrame !== null) {
-    if (typeof b.firstFrame !== "string" || !IDS.test(b.firstFrame)) return "The first frame is a picture, named by its id in the gallery of the Images page";
+    if (typeof b.firstFrame !== "string" || !IDS.test(b.firstFrame)) return "The first frame is a picture, named by its id in the gallery of the Media page";
     job.firstFrame = b.firstFrame;
   }
   return job;
@@ -119,7 +119,7 @@ export function videosRouter(): Router {
     res.json({ ok: true });
   });
 
-  /** Makes clips from a description, and from a picture of the Images page where one is named: one request, and one job, for each; answers at once, without waiting for any. */
+  /** Makes clips from a description, and from a picture of the Media page where one is named: one request, and one job, for each; answers at once, without waiting for any. */
   router.post("/videos/generate", (req, res) => {
     const job = parseGenerate(req.body);
     if (typeof job === "string") return res.status(400).json({ error: job });

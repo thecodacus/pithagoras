@@ -9,7 +9,7 @@ export type { MadeVideo, VideoBackendId, VideoGenerationConfig, VideoProgress, V
 
 /**
  * Video generation as an add-on: the agent's `generate_video` tool, and the
- * Videos page, ask a video model the person has set up for a clip, and get one back.
+ * Media page, ask a video model the person has set up for a clip, and get one back.
  *
  * It is built on the same pattern as picture generation (image-generation.ts):
  * the settings are the portal's own, read each time a clip is asked for, so a

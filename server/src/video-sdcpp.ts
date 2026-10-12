@@ -122,7 +122,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
     // The chat or the page stopped it: nobody is told it failed.
     if (run.signal?.aborted) return e as Error;
     if (signal.aborted) {
-      return fail(`The video endpoint did not finish the clip within ${Math.round(timeoutMs / 1000)} seconds. Raise the time limit in Settings → Agent → Videos if it needs longer.`);
+      return fail(`The video endpoint did not finish the clip within ${Math.round(timeoutMs / 1000)} seconds. Raise the time limit in Settings → Agent → Media if it needs longer.`);
     }
     if (e instanceof VideoGenerationError) return e;
     const why = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";

@@ -11,7 +11,7 @@ import { FileError, MAX_PICTURE_BYTES, baseDir, makeFolder, readPicture, saveNew
 
 /**
  * Making a clip from a description, or from a picture as its first frame, with
- * the video model the person set up in Settings → Agent → Videos, and putting
+ * the video model the person set up in Settings → Agent → Media, and putting
  * it in front of them.
  *
  * It answers as generate_image does — the clip's path in the chat's folder and a
@@ -20,7 +20,7 @@ import { FileError, MAX_PICTURE_BYTES, baseDir, makeFolder, readPicture, saveNew
  * of its own inside the chat's, under a name made here, never one the agent or
  * the endpoint chose, and nothing is written until the endpoint has answered with
  * a real clip: a failed call leaves no file and no folder behind. It is also listed
- * in the Videos page's gallery, with what it was asked for (see video-gallery.ts).
+ * in the Media page's gallery, with what it was asked for (see video-gallery.ts).
  *
  * A clip takes minutes, in the endpoint's queue and on its model; the call waits for
  * it, within the time limit of the settings, and the chat shows how long it has taken.

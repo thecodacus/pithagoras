@@ -197,7 +197,7 @@ function startToolsUpgrade(dataDir, port) {
 
 // fixtures/portal-v3.db was made by the code of v0.1.0 (SCHEMA_VERSION 3): a routine with its Browser switch on (news), one
 // with it off in a project (tidy), a project that switches bash off, and web_search off by default. Version 4 gives routines
-// tool switches of their own and agents a table of them (#81), projects a table of the agent they work with (#127), and the Videos page a table of clips (#79).
+// tool switches of their own and agents a table of them (#81), projects a table of the agent they work with (#127), and the Media page a table of clips (#79).
 test("a database of v0.1.0 is brought to the pinned schema, and each routine keeps the browser it had", async () => {
   const dir = path.join(home, "from-v3");
   mkdirSync(dir, { recursive: true });
@@ -213,7 +213,7 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
 
   const d = new Database(file, { readonly: true });
   assert.equal(schemaFingerprint(d), PINNED.fingerprint);
-  assert.equal(d.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0, "the Videos page's table is there, and empty");
+  assert.equal(d.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0, "the Media page's table is there, and empty");
   d.close();
 
   const result = JSON.parse(/RESULT (.*)/.exec(run.output())[1]);

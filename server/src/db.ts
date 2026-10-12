@@ -398,7 +398,7 @@ function schema(db: Database.Database): void {
       PRIMARY KEY (session_id, id)
     );
 
-    -- The pictures of the Images page: the ones it made itself, which are files
+    -- The pictures of the Media page: the ones it made itself, which are files
     -- in the portal's own images folder, the ones the agent made in a chat with
     -- generate_image or edit_image, which are files in that chat's folder and
     -- are listed here as they are made, and those found lying in a folder the
@@ -426,7 +426,7 @@ function schema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_images_created ON images(created_at DESC, id DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_images_chat_file ON images(session_id, path) WHERE session_id IS NOT NULL;
 
-    -- The clips of the Videos page, as the pictures are listed above: the ones it
+    -- The clips of the Media page, as the pictures are listed above: the ones it
     -- made itself, which are files in the portal's own videos folder, the ones the
     -- agent made in a chat with generate_video, which are files in that chat's
     -- folder, and those found lying in a folder the tool writes into that nobody

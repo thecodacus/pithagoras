@@ -8,7 +8,7 @@ import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
 import { KEY, MP4, PNG, WEBM, completed, fakeSd } from "./video-fixtures.mts";
 
-// The clips of the Videos page: the gallery, its jobs, its API, the agent's tool and the posters.
+// The clips of the Media page: the gallery, its jobs, its API, the agent's tool and the posters.
 const temp = realpathSync(inProcessHome("pitha-vgallery-"));
 const root = process.env.WORKSPACE_ROOT!;
 mkdirSync(root, { recursive: true });
@@ -256,7 +256,7 @@ test("a request that is wrong is refused with the reason, and makes nothing", as
     assert.deepEqual((await call("GET", "/videos/jobs")).body.jobs, []);
 
     off();
-    await refuse({ prompt: "x" }, 409, /switched off, or has no address.*Settings → Agent → Videos/);
+    await refuse({ prompt: "x" }, 409, /switched off, or has no address.*Settings → Agent → Media/);
     gen.saveVideoGeneration({ baseUrl: "" });
     await refuse({ prompt: "x" }, 409, /switched off/);
   } finally {
@@ -294,7 +294,7 @@ test("the clips made on the page stop when they take the disk the person allowed
     const big = gallery.addPageVideo({ bytes: Buffer.concat([WEBM, Buffer.alloc(1024 * 1024)]), ext: "webm", kind: "generated", prompt: "big", params: {} });
     const refused = await call("POST", "/videos/generate", { prompt: "one more" });
     assert.equal(refused.status, 409);
-    assert.match(refused.body.error, /take 1 MB, which is the limit set in Settings → Agent → Videos\. Delete some clips, or raise the limit/);
+    assert.match(refused.body.error, /take 1 MB, which is the limit set in Settings → Agent → Media\. Delete some clips, or raise the limit/);
     assert.equal(sd.seen.length, 0);
     // Raised, or the clip deleted, it goes ahead.
     setup(sd.origin, { storageLimitMb: 10 });
@@ -317,7 +317,7 @@ test("the clips made on the page stop when they take the disk the person allowed
   }
 });
 
-test("a clip can start from a picture of the Images page, which goes to the server as the first frame", async () => {
+test("a clip can start from a picture of the gallery, which goes to the server as the first frame", async () => {
   const sd = await fakeSd();
   await clearJobs();
   try {

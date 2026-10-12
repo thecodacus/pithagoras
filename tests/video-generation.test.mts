@@ -190,7 +190,7 @@ test("a clip that takes longer than the time limit says so and names the setting
     const started = Date.now();
     await assert.rejects(
       gen.generateVideo(config(slow.origin), { prompt: "x" }, { ...FAST, timeoutMs: 300 }),
-      /did not finish the clip within 0 seconds\. Raise the time limit in Settings → Agent → Videos/,
+      /did not finish the clip within 0 seconds\. Raise the time limit in Settings → Agent → Media/,
     );
     assert.ok(Date.now() - started < 3000);
     // Told to drop the job: only one that is still queued can be, and the server says which.

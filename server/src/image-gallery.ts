@@ -10,7 +10,7 @@ import { isWithinText, realPath } from "./within.js";
 import { FileError, baseDir, openPicture, readPicture, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
 
 /**
- * The pictures of the Images page, in one list: the ones the page made itself
+ * The pictures of the Media page, in one list: the ones the page made itself
  * and the ones the agent made with generate_image or edit_image.
  *
  * A row in the `images` table names a picture and says what it was made from;

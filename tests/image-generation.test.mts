@@ -934,12 +934,12 @@ test("a picture that takes longer than the old limit is waited for, one past the
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 1 }), { prompt: "p" }), (e: Error) => {
       assert.ok(e instanceof gen.ImageGenerationError);
       assert.match(e.message, /did not answer within 1 seconds/, "it names the limit");
-      assert.match(e.message, /time limit in Settings → Agent → Images/, "and where to change it");
+      assert.match(e.message, /time limit in Settings → Agent → Media/, "and where to change it");
       return true;
     });
     // Editing has the same limit, from its target.
     assert.equal((await editing.editImage(target(origin, { timeoutSeconds: 3 }), { prompt: "p", image: PNG })).ext, "png");
-    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Images/);
+    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Media/);
     // An explicit limit of the call still wins, as the tests above use it.
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" }, { timeoutMs: 150 }), /did not answer within 0 seconds/);
   } finally {
@@ -1366,9 +1366,9 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   const one = loadEdit(folder).registered[0];
   assert.match(one.description, /set up to take ONE picture per edit/, "the limit is said, not left out");
   assert.match(one.description, /do not make the edit with one of them as if it were all/, "no picture is dropped without a word");
-  assert.match(one.description, /Settings → Agent → Images \(Several pictures per edit\)/, "and where several are switched on");
+  assert.match(one.description, /Settings → Agent → Media \(Several pictures per edit\)/, "and where several are switched on");
   assert.match(one.description, /reference for a new picture/, "one reference picture is still what it can be given");
-  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Images page/;
+  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Media page/;
   assert.match(one.description, attached, "a picture only attached to a message has no path: the agent says so rather than guess one");
 
   // With several taken, the same sentence is not there, and the limits are: the count and the weight.
@@ -1391,7 +1391,7 @@ test("a list of pictures for an endpoint that takes one is refused before anythi
     // A call that was loaded when several were on, or by a model that sends a list anyway: asked of the setting as it is now.
     await assert.rejects(
       loadEdit(folder).call({ paths: ["a.png", "b.jpg", "c.gif"], prompt: "p" }),
-      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Images/,
+      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Media/,
     );
     assert.equal(seen.length, 0, "nothing reached the endpoint");
     assert.deepEqual(readdirSync(folder).sort(), ["a.png", "b.jpg", "c.gif"], "and nothing was written");
@@ -1993,7 +1993,7 @@ test("a picture that cannot be made to fit is refused with a message, and nothin
     await refused({ prompt: "p", image: [await real(600, 400, { noise: true }), await real(600, 400, { noise: true })] }, /^Picture 1 cannot be made to fit an edit/, { maxTotalBytes: 300 });
     // Over the maximum size but no picture that can be read; one with no size to read at all.
     await refused({ prompt: "p", image: pngOf(3000, 3000) }, /^The image cannot be made to fit an edit: it cannot be read as a picture/);
-    await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024.*Settings → Agent → Images/);
+    await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024.*Settings → Agent → Media/);
     await refused({ prompt: "p", image: Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xff, 0xe0]) }, /^The image has a size that cannot be read/);
     // One refused refuses all, with its place.
     await refused({ prompt: "p", image: [await real(100, 100), await real(5000, 500), PNG] }, /^Picture 3 has a size that cannot be read/);

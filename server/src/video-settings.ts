@@ -1,7 +1,7 @@
 import { LIMITS as PICTURE_LIMITS } from "./image-settings.js";
 
 /**
- * The settings of one clip beyond its description, as the Videos page offers
+ * The settings of one clip beyond its description, as the Media page offers
  * them, and what each may be.
  *
  * What a video model takes is its own: a size, how many frames and how fast they

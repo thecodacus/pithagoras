@@ -71,7 +71,7 @@ export interface ImageGenerationConfig {
   timeoutSeconds: number;
   /**
    * The endpoint is stable-diffusion.cpp's server, which reads settings the OpenAI format does not have out of the
-   * prompt (see image-settings.ts). Off until the person says it is: nothing of the sort is shown on the Images page
+   * prompt (see image-settings.ts). Off until the person says it is: nothing of the sort is shown on the Media page
    * or sent, to this endpoint or to any other, whatever was typed or kept. It is said of the endpoint, for generating
    * and editing: either address moving to another server takes it off again.
    */
@@ -222,7 +222,7 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
   }
   if (b.size !== undefined) {
     if (typeof b.size !== "string") return 'The size looks like "1024x1024"';
-    // The same sizes the Images page and the agent's tool take: a default that the gallery refuses is none.
+    // The same sizes the Media page and the agent's tool take: a default that the gallery refuses is none.
     const size = b.size.trim() ? parseSize(b.size) : "";
     if (typeof size !== "string") return size.error;
     patch.size = size;
@@ -261,7 +261,7 @@ export const originOf = (address: string): string => {
  * does "takes several pictures", which was said of one endpoint and is not
  * assumed of another. And so does "stable-diffusion.cpp", which is said of the
  * endpoint as a whole: either address moving takes it off, since any other
- * server would read what it makes the Images page send as part of the description.
+ * server would read what it makes the Media page send as part of the description.
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
@@ -315,7 +315,7 @@ const seconds = (ms: number) => Math.round(ms / 1000);
 export const MAX_PROMPT = 4000;
 
 /**
- * A field of the request that an older version of the Images page sent as it was typed. Not sent any more: what
+ * A field of the request that an older version of the Media page sent as it was typed. Not sent any more: what
  * is not in the OpenAI format goes in the prompt (see image-settings.ts). Pictures made then still have theirs,
  * which the page shows as they were.
  */
@@ -326,7 +326,7 @@ export interface GenerateRequest {
   prompt: string;
   /** Instead of the saved size. */
   size?: string;
-  /** Instead of the saved model, for the Images page: the agent's tool has the saved one only. */
+  /** Instead of the saved model, for the Media page: the agent's tool has the saved one only. */
   model?: string;
   /** Sent as `output_format`, and `output_compression` with it. */
   outputFormat?: OutputFormat;
@@ -380,7 +380,7 @@ export async function requestPicture(
     // The chat was stopped: nobody is told it failed.
     if (options.signal?.aborted) return e as Error;
     if (signal.aborted) return new ImageGenerationError(
-        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Agent → Images if it needs longer.`,
+        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Agent → Media if it needs longer.`,
       );
     if (e instanceof ImageGenerationError) return e;
     const why = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";

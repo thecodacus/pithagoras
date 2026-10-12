@@ -9,7 +9,7 @@ import { openPoster, posterAvailable, removePosters } from "./video-posters.js";
 import { FileError, baseDir, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
 
 /**
- * The clips of the Videos page, in one list: the ones the page made itself
+ * The clips of the Media page, in one list: the ones the page made itself
  * and the ones the agent made with generate_video.
  *
  * It is the picture gallery's twin (image-gallery.ts), with the same rules, and
@@ -51,7 +51,7 @@ export interface VideoParams {
   /** What the server says it made, when it said: the frames in the clip, and its frame rate. A clip's length is the first over the second. */
   madeFrames?: number;
   madeFps?: number;
-  /** The first frame of a clip made from a picture: the picture of the Images page it was taken from, or its path in the chat's folder. */
+  /** The first frame of a clip made from a picture: the picture of the Media page it was taken from, or its path in the chat's folder. */
   firstFrame?: { picture?: string; path?: string };
 }
 

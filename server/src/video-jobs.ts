@@ -7,7 +7,7 @@ import { MAX_RUNNING_VIDEOS, forClip, type VideoSettings } from "./video-setting
 import { FileError, MAX_PICTURE_BYTES } from "./workspace-files.js";
 
 /**
- * Making clips for the Videos page: a request becomes a job that runs on the
+ * Making clips for the Media page: a request becomes a job that runs on the
  * server, so that closing the page, or going to another, does not lose a clip
  * that is being paid for in minutes of somebody's GPU. The page asks which jobs
  * there are, and shows each as the clip being made until it is in the gallery.
@@ -174,9 +174,9 @@ function paramsOf(settings: VideoSettings): VideoParams {
  */
 export function startVideos(request: GenerateVideoJob): VideoJob[] {
   const config = videoGenerationConfig();
-  if (!videoGenerationReady(config)) throw new VideoJobRefusal("Video generation is switched off, or has no address: set it up in Settings → Agent → Videos", 409);
+  if (!videoGenerationReady(config)) throw new VideoJobRefusal("Video generation is switched off, or has no address: set it up in Settings → Agent → Media", 409);
   if (config.storageLimitMb > 0 && pageVideoBytes() >= config.storageLimitMb * 1024 * 1024) {
-    throw new VideoJobRefusal(`The clips made on this page take ${Math.round(pageVideoBytes() / 1024 / 1024)} MB, which is the limit set in Settings → Agent → Videos. Delete some clips, or raise the limit`, 409);
+    throw new VideoJobRefusal(`The clips made on the Media page take ${Math.round(pageVideoBytes() / 1024 / 1024)} MB, which is the limit set in Settings → Agent → Media. Delete some clips, or raise the limit`, 409);
   }
   room(request.count);
   let firstFrame: { bytes: Buffer; mimeType: string } | undefined;
