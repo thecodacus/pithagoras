@@ -166,16 +166,17 @@ noise (below).
     chosen until one is taken out (their box says why; the picture itself can still be looked at). Pictures that did not fit — in a pick, a drop or a
     paste — are **not uploaded** and are said to be left out, never dropped without a word (if the row
     filled up while a pick was still being uploaded, the one that no longer fits stays in the gallery and
-    is said to be left out). Together they may weigh 50 MB; a row that weighs more says so, and **Change
-    the picture** waits.
+    is said to be left out). Together they may weigh 50 MB; a row that weighs more is made lighter by the
+    portal when it is sent (see the next point), so **Change the picture** does not wait for it.
   - **An endpoint that takes one.** With the switch off, the form works with one picture:
     a picture you tick, add or drop takes the place of the one there is, any others in the same pick are
     said to be left out, and the form says what to switch on and links to it. Several that came in anyway
     (a change made from several, run again) are said to be too many, and **Change the picture** waits until one is left.
   - **The size limit applies to each.** The [maximum picture size](/guide/features#editing-a-picture) of
-    the editing settings is checked for every picture; one that is over it fails the whole change in its frame
-    with a message such as "Picture 2 is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit",
-    and nothing is sent.
+    the editing settings is held for every picture: one that is over it is scaled down by the portal to fit,
+    keeping its ratio, and the change goes ahead with it. One that cannot be scaled (it is no picture that can
+    be read, or it has no size to read) fails the whole change in its frame with a message such as
+    "Picture 2 cannot be made to fit an edit: …", and nothing is sent.
 - **Strength.** With the Stable Diffusion settings on, **Strength** under **Advanced** (0 to 1; a comma is a decimal point)
   says how far the result may go from the first picture. A high one, such as 0.75 or more, **tends** to keep
   the result close to the first picture, so that the other pictures then have little or no effect; a lower
@@ -201,8 +202,18 @@ noise (below).
   be looked at, changed again and deleted like the others. A file that is no picture is refused.
   Only as many pictures as the row has room for are put in the gallery.
 
-Pictures are sent as the agent's tool sends them: under a neutral name, as they are,
-and never scaled or cut — a picture over the limit is refused, not shrunk.
+Pictures are sent as the agent's tool sends them: under a neutral name, as they are
+if they fit what an edit takes. One over the maximum size of the editing settings is
+**scaled down** by the portal to fit it (either way up, the ratio kept, nothing cut, and
+never scaled up). One that weighs more than the endpoint is sent (25 MB each, 50 MB together)
+is made lighter: first at lower quality, then smaller; a PNG with transparency becomes a WebP
+so that the transparency stays, and a PNG without becomes a JPEG; a JPEG, WebP or GIF stays
+what it is. A **mask** is scaled with the first picture to the same size, taking the nearest
+pixel, so that it stays a mask and its edges do not turn grey. The result of the edit is not
+scaled back up: it comes out as large as the picture that was sent. Only a picture that cannot
+be made to fit at all is refused, with the reason and nothing sent, and so is a file of more than
+25 MB, which the portal does not read (make a smaller copy first). A picture that fits is sent
+byte for byte.
 
 ## The gallery
 
@@ -216,6 +227,16 @@ one that was found, how it was made for the others) and how long ago.
 - **Paging.** 48 at a time. The next page is loaded as you near the end of what is
   there, and **Show more** does the same. A picture far down is not fetched until
   it is near the screen, so a gallery of hundreds stays quick.
+- **Small copies.** The tiles, and the pictures in the form of an edit, show a small copy of
+  each picture (at most 480 pixels on a side, a few tens of kilobytes instead of megabytes)
+  instead of the whole file; the viewer still opens the whole file. The portal makes a copy
+  itself the first time a tile asks for it, as a WebP picture, which keeps transparency, and
+  keeps it beside the gallery from then on, so every later view on any device loads the
+  small one. A copy is made again when the file has changed, and goes with the picture. Files
+  of 48 KB or less and GIFs (which would stop moving) have no copy and are shown as they are,
+  and so is an animated picture or one the portal cannot read. At most two copies are made at
+  a time, so a folder of large files makes the first view slower but not heavy on the server.
+  Nothing needs setting up. Pictures in the chat itself are shown as they were.
 - **Filters.** *Where from*: all, made here, from chats, from folders. *How it was made*:
   all, made, changed, from this computer, not known. They are in the address
   (`/images?origin=chat&kind=edited`), so a link keeps them and **Back** goes through them.

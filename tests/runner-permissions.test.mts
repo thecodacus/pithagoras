@@ -40,6 +40,25 @@ test('provider keys reach the container by name, never as a value on the docker 
  }finally{for(const [k,v] of Object.entries(saved)){if(v===undefined)delete process.env[k];else process.env[k]=v;}rmSync(temp,{recursive:true,force:true});}
 });
 
+test('a container is given the key of the provider its chat runs on, and no other provider\'s',async()=>{
+ const temp=scratch('pitha-runner-one-key-');const names=['OPENROUTER_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY'];
+ const saved:Record<string,string|undefined>={PATH:process.env.PATH,ARG_FILE:process.env.ARG_FILE};for(const k of names)saved[k]=process.env[k];
+ process.env.PATH=temp+':'+saved.PATH;process.env.ARG_FILE=join(temp,'args');for(const k of names)process.env[k]=`value-of-${k}`;
+ writeFileSync(join(temp,'docker'),'#!/bin/sh\nprintf "%s\\n" "$@" > "$ARG_FILE"\nif [ "$1" = "container" ] && [ "$2" = "inspect" ]; then echo "Error: No such container: $3" >&2; exit 1; fi\n',{mode:0o755});
+ const passed=async(provider:string)=>{
+  const executor=new ContainerExecutor('test-runner',join(temp,'sessions'),{memoryMb:2048,cpus:2,pidsLimit:512});
+  const client=await executor.launch({sessionId:'abc',workspacePath:temp,provider});
+  await new Promise<void>(resolve=>client.on('exit',()=>resolve()));
+  const args=readFileSync(process.env.ARG_FILE!,'utf8').split('\n');
+  return names.filter(k=>args.some((a,i)=>a===k&&args[i-1]==='-e'));
+ };
+ try {
+  assert.deepEqual(await passed('anthropic'),['ANTHROPIC_API_KEY']);
+  assert.deepEqual(await passed('openrouter'),['OPENROUTER_API_KEY']);
+  assert.deepEqual(await passed('llama-server'),[],'a provider of its own takes no cloud key');
+ }finally{for(const [k,v] of Object.entries(saved)){if(v===undefined)delete process.env[k];else process.env[k]=v;}rmSync(temp,{recursive:true,force:true});}
+});
+
 test('a container is said not to resume its conversation exactly while it starts pi without the conversation\'s file, and the host does',async()=>{
  const temp=scratch('pitha-runner-resume-');const saved={PATH:process.env.PATH,ARG_FILE:process.env.ARG_FILE};
  process.env.PATH=temp+':'+saved.PATH;process.env.ARG_FILE=join(temp,'args');

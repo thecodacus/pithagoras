@@ -1,5 +1,5 @@
 import type { GalleryPicture } from "./api";
-import { MAX_EDIT_PICTURES, MAX_EDIT_TOTAL_BYTES } from "../../server/src/image-settings";
+import { MAX_EDIT_PICTURES } from "../../server/src/image-settings";
 
 /**
  * The pictures an edit on the Images page works from, and how that list
@@ -16,8 +16,6 @@ import { MAX_EDIT_PICTURES, MAX_EDIT_TOTAL_BYTES } from "../../server/src/image-
 
 /** The most pictures one edit takes, as the portal sets it. */
 export const MAX_SOURCES = MAX_EDIT_PICTURES;
-/** What they may weigh together, as the portal sets it. */
-export const MAX_SOURCES_BYTES = MAX_EDIT_TOTAL_BYTES;
 
 export interface Added {
   list: GalleryPicture[];
@@ -90,9 +88,6 @@ export function moveTo<T extends { id: string }>(list: readonly T[], id: string,
   return next;
 }
 
-/** What the pictures weigh together. */
-export const weightOf = (list: readonly GalleryPicture[]): number => list.reduce((sum, p) => sum + p.bytes, 0);
-
 /** What a picture is called where it stands among others: what it was made from, else its file, on one line. */
 export function sourceName(picture: GalleryPicture, longest = 60): string {
   const flat = (picture.prompt || picture.fileName).replace(/\s+/g, " ").trim();
@@ -101,10 +96,9 @@ export function sourceName(picture: GalleryPicture, longest = 60): string {
 
 /**
  * Why the pictures cannot be sent as they are, in the form's own terms, or nothing when they can:
- * "one" is several where the endpoint takes one, "weight" is more than an edit takes together.
+ * "one" is several where the endpoint takes one. How much they weigh is no reason: pictures that are too heavy together are
+ * scaled down by the portal (see server/src/image-editing.ts).
  */
-export function refusal(list: readonly GalleryPicture[], multiple: boolean): "one" | "weight" | undefined {
-  if (!multiple && list.length > 1) return "one";
-  if (weightOf(list) > MAX_SOURCES_BYTES) return "weight";
-  return undefined;
+export function refusal(list: readonly GalleryPicture[], multiple: boolean): "one" | undefined {
+  return !multiple && list.length > 1 ? "one" : undefined;
 }

@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import express, { type Router } from "express";
+import { fetch as modelFetch } from "undici";
+import { waitsAgent, waitMs } from "./fetch-waits.js";
 import { chatModel, getSession } from "./db.js";
 import { modelRuntime } from "./api/providers.js";
 import { UNDERSTORY } from "./features.js";
@@ -103,6 +104,40 @@ class Refused extends Error {
   }
 }
 
+/** A wait as it will be said — seconds when whole, milliseconds when finer. */
+const sayWait = (ms: number): string => (ms % 1000 === 0 ? `${ms / 1000} seconds` : `${Math.round(ms)} milliseconds`);
+
+/** The model's own waits — long enough for one answer by default, settable from where the portal starts. A
+ * local model thinking past Node's five quiet minutes used to die mid-generation and be retried; these give it
+ * its full run, and when one of them does come round the error says so (a timeout), not like a failure of the
+ * model's server. The knife — whole milliseconds only, `0` being no wait at all — is the shared one. */
+const waitOf = (): { headers: number; body: number } => ({
+  // Until the model's answer reaches us — its headers. An answer that does not stream sends none until it is
+  // done, which is what Understory gets while it asks without streaming, so this is the whole answer there.
+  headers: waitMs(process.env.UNDERSTORY_LLM_HEADERS_TIMEOUT_MS, 30 * 60_000),
+  body: waitMs(process.env.UNDERSTORY_LLM_BODY_TIMEOUT_MS, 30 * 60_000), // between the bytes of a streaming answer
+});
+
+// The waits change only at startup, so the agent is made once with them — the same waits for the
+// agent and for what is said when one of them comes round. It takes its routing from the process's own
+// rule (fetch-waits): a model reached through a proxy must not be the one address the portal cannot
+// reach. Exposed so a test can close it — its keep-alive sockets outlive the servers.
+const upstreamWaits = waitOf();
+export const upstream = {
+  waits: upstreamWaits,
+  agent: waitsAgent(upstreamWaits),
+};
+
+/** Whether the failure is that wait coming round — the wait out for the answer's headers, or between a streaming
+ * answer's bytes. An address no one answers at fails differently (a connect timeout) and stays a plain failure. */
+const timedOut = (e: unknown): boolean => {
+  for (let err = e; err instanceof Error; err = err.cause instanceof Error ? err.cause : undefined) {
+    const code = (err as { code?: unknown }).code;
+    if (code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT") return true;
+  }
+  return false;
+};
+
 /** Where a model's chat completions go, and how to sign in there. */
 async function endpointOf(provider: string, id: string): Promise<{ url: string; headers: Record<string, string> }> {
   const rt = await modelRuntime();
@@ -159,16 +194,43 @@ export function memoryLlmRouter(modelOf: ModelOf): Router {
       // Stopped with the request: Understory giving up is the model's cue to stop too.
       const stop = new AbortController();
       res.on("close", () => !res.writableEnded && stop.abort());
-      const answer = await fetch(url, { method: "POST", headers, body: JSON.stringify({ ...req.body, model: id }), signal: stop.signal });
+      // Through an agent carrying the model waits (UNDERSTORY_LLM_*): its own pair, said differently when
+      // they come round — not the process-wide ones fetch-waits installed for everyone else in here.
+      const answer = await modelFetch(url, { method: "POST", headers, body: JSON.stringify({ ...req.body, model: id }), signal: stop.signal, dispatcher: upstream.agent });
       res.status(answer.status);
       const type = answer.headers.get("content-type");
       if (type) res.setHeader("content-type", type);
       if (!answer.body) return res.end();
-      // Through pipeline, which hears the error either side raises: Understory
-      // hanging up aborts the model's answer, and that must end here, quietly.
-      await pipeline(Readable.fromWeb(answer.body as any), res).catch(() => {});
+      // Not through pipeline, which on an error of the body tears down Understory's socket before
+      // anyone has said what happened. By hand instead: while no byte has gone yet, there is time to
+      // give a quiet model its own saying; once bytes have moved, there is no undoing.
+      const body = Readable.fromWeb(answer.body as any);
+      body.on("error", (e) => {
+        if (stop.signal.aborted) return; // Understory hung up: the answer ends here, quietly.
+        const waited = timedOut(e);
+        if (!res.headersSent) {
+          res.removeHeader("content-type");
+          return waited
+            ? res.status(504).json({ error: { message: `The model began to answer, then went quiet past its wait of ${sayWait(upstream.waits.body)}; try again, or give the wait more time — UNDERSTORY_LLM_BODY_TIMEOUT_MS.` } })
+            : res.status(502).json({ error: { message: `The model's answer ended before any of it came: ${(e as Error).message}` } });
+        }
+        console.error(
+          waited ? `[portal] the wait on the model's answer came round (UNDERSTORY_LLM_BODY_TIMEOUT_MS): ` : "[portal] the model's answer ended midway: ",
+          (e as Error).message,
+        );
+        // A cut-off answer must fail on Understory's side, not end cleanly and read as finished:
+        // half a JSON object is no answer.
+        res.destroy(e);
+      });
+      res.on("close", () => !res.writableEnded && body.destroy());
+      body.pipe(res);
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
+      if (!res.headersSent && timedOut(e)) {
+        const waited = sayWait(upstream.waits.headers);
+        console.error(`[portal] the model's answer did not come within ${waited} (UNDERSTORY_LLM_HEADERS_TIMEOUT_MS); giving it up as a timeout`);
+        return res.status(504).json({ error: { message: `The model did not answer within ${waited}; give the wait more time — UNDERSTORY_LLM_HEADERS_TIMEOUT_MS — or Understory a faster model.` } });
+      }
       const status = e instanceof Refused ? e.status : 502;
       if (!res.headersSent) res.status(status).json({ error: { message: (e as Error).message } });
       else res.end();

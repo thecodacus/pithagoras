@@ -55,6 +55,24 @@ export const ErrorBanner = forwardRef<HTMLDivElement, { children: ReactNode; onC
 });
 
 /**
+ * Something that worked but not quite as asked, said where the person sees it: the warning's colours, as a status
+ * rather than an alert, since nothing failed. Put away by hand, and by whoever owns it when something new is asked.
+ */
+export function WarnBanner({ children, onClose, className = "" }: { children: ReactNode; onClose?: () => void; className?: string }) {
+  return (
+    <div role="status" className={`flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn ${className}`}>
+      <LuCircleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">{children}</div>
+      {onClose && (
+        <button type="button" onClick={onClose} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-warn/10">
+          <LuX aria-hidden className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * What a page shows when its first read failed. Without it the page keeps its
  * skeleton, or draws "Nobody yet" as fact; both read as "wait" or "empty" and
  * neither says there is something to try again. The button is held while the

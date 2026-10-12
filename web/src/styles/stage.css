@@ -312,7 +312,8 @@
 .voice-stage-action.has-pictures i { position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #3fe1c6; color: #0b1a17; font: 600 10px/17px system-ui, sans-serif; font-style: normal; }
 .voice-stage-action.voice-stop, .voice-stage.is-docked .voice-stage-action.voice-stop { color: #fff2d2; background: #4f4430; border-color: #b69a60; }
 .voice-stage-action.voice-stop svg { width: 14px; height: 14px; fill: currentColor; }
-.voice-stage-action.voice-hold { touch-action: none; user-select: none; -webkit-user-select: none; }
+.voice-stage-action.voice-hold, .voice-avatar.is-holdable { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.voice-avatar.is-holdable { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .voice-stage-action.voice-hold.is-holding, .voice-stage.is-docked .voice-stage-action.voice-hold.is-holding { color: #0b1a17; background: #3fe1c6; border-color: #9ff3e4; box-shadow: 0 0 0 6px #3fe1c633; transform: scale(1.06); }
 
 /* Pictures waiting to go with what is said next. */
@@ -358,6 +359,7 @@
 .voice-said.is-agent > :first-child > :first-child { margin-top: 0; }
 .voice-said.is-agent > :last-child > :last-child { margin-bottom: 0; }
 .voice-said.is-agent :is(pre, table) { max-width: 100%; overflow-x: auto; }
+.voice-said.is-error { align-self: flex-start; padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: rgb(var(--danger) / .1); color: rgb(var(--danger)); white-space: pre-wrap; }
 .voice-said-pictures { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .voice-said-pictures img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; }
 

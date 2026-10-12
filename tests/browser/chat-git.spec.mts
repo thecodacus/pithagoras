@@ -1,6 +1,10 @@
 import { test, expect } from './portal-mock';
 
 test.beforeEach(async ({ page }) => {
+  // A file opened from Git is looked at as its source (markdown opens as a page unless the source was chosen).
+  await page.addInitScript(() => {
+    if (localStorage.getItem('filesMarkdownRendered') === null) localStorage.setItem('filesMarkdownRendered', '0');
+  });
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.goto('/tests/chat.html?phase=git');
 });

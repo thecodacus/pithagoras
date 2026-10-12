@@ -1,6 +1,6 @@
 /**
  * The chats gathered by the folder they work in: each agent's home, the
- * first of them where "New" starts one, and each project. A chat started in a project's subfolder belongs to
+ * one where "New" starts a chat (the agent picked for new chats), and each project. A chat started in a project's subfolder belongs to
  * the project all the same, as it does on the Projects page. One that is in
  * neither — the workspace root itself, say — goes under "Elsewhere", which is
  * only there while it has any.
@@ -21,6 +21,10 @@ export type Folder<S> = {
   name: string;
   /** The agent whose home it is, for a home. */
   agent?: string;
+  /** Whether it is the home of the agent "New" starts chats with, for a home; left out where the server did not say. */
+  newChats?: boolean;
+  /** The name of the agent a project works with: its chats carry that agent's soul and memory. Left out for a blank slate. */
+  with?: string;
   /** Where a chat started in it works; null for Elsewhere, which is no one place. */
   path: string | null;
   /** Its chats, in the order they were given. */
@@ -42,14 +46,18 @@ export const ELSEWHERE = "elsewhere";
 export const projectKey = (name: string) => `project:${name}`;
 const agentKey = (id: string) => (id === "home" ? HOME : `agent:${id}`);
 
-export type PlaceAgent = { id: string; name: string; home: string };
+/** `newChats`: the agent that "New" starts chats with; a server that does not say leaves it out. */
+export type PlaceAgent = { id: string; name: string; home: string; newChats?: boolean };
 
 /** What the chats are gathered into: where Home is, the agents' homes, and the projects. */
-export type Places = { home: string; agents?: readonly PlaceAgent[]; projects: readonly { name: string; path: string }[] };
+export type Places = { home: string; agents?: readonly PlaceAgent[]; projects: readonly { name: string; path: string; agent?: string }[] };
 
 /** The agents: the first one's home is Home, from a server that names none. */
 const agentsOf = (places: Places): PlaceAgent[] =>
   places.agents?.length ? [...places.agents] : places.home ? [{ id: "home", name: "", home: places.home }] : [];
+
+/** Whether there is more than one place to gather chats in: a project, or a second agent's home. */
+export const hasMoreThanHome = (places: Places) => places.projects.length > 0 || agentsOf(places).length > 1;
 
 /**
  * The projects that are folders of their own: not one that is an agent's
@@ -82,15 +90,19 @@ export function groupByFolder<S extends { workspace: string; updated_at: string 
     kind: "home",
     // Home where the server has not said what the agent is called.
     ...(a.name ? { name: a.name, agent: a.id } : { name: msg("Home") }),
+    ...(a.newChats === undefined ? {} : { newChats: a.newChats }),
     path: a.home,
     sessions: [],
     lastActive: "",
   }));
   const elsewhere: Folder<S> = { key: ELSEWHERE, kind: "elsewhere", name: msg("Elsewhere"), path: null, sessions: [], lastActive: "" };
+  const named = new Map(agentsOf(places).map((a) => [a.id, a.name]));
   const projects = projectsOf(places).map<Folder<S>>((p) => ({
     key: projectKey(p.name),
     kind: "project",
     name: p.name,
+    // An agent the server did not give a name is not one to say.
+    ...(p.agent && named.get(p.agent) ? { with: named.get(p.agent) } : {}),
     path: p.path,
     sessions: [],
     lastActive: "",
@@ -105,6 +117,20 @@ export function groupByFolder<S extends { workspace: string; updated_at: string 
   // Home is there even before the server has said where it is.
   const first = homes.length ? homes : [{ key: HOME, kind: "home" as const, name: msg("Home"), path: places.home, sessions: [], lastActive: "" }];
   return [...first, ...projects, ...(always || elsewhere.sessions.length ? [elsewhere] : [])];
+}
+
+/**
+ * The name of the folder a chat is listed in, as the folders show it, for the places
+ * that name it per chat (the Sessions page's rows, the search) instead of its path.
+ * "" until the places are known.
+ */
+export function folderNameOf<S extends { id: string; workspace: string; updated_at: string }>(
+  sessions: readonly S[],
+  places: Places | null | undefined,
+): (s: S) => string {
+  const names = new Map<string, string>();
+  if (places) for (const f of groupByFolder(sessions, places)) for (const s of f.sessions) names.set(s.id, folderName(f));
+  return (s) => names.get(s.id) ?? "";
 }
 
 /** How the folders are ordered: by their latest chat, by name, or as they were put. */

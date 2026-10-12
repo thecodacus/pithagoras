@@ -172,7 +172,9 @@ test('the Projects page offers to read the list again instead of a placeholder f
   await expect(page.getByRole('alert')).toContainText(FAILED);
   up('/api/projects');
   await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page.getByText('/w/demo')).toBeVisible();
+  // The list shows a project by its name; the folder's path is not drawn (issue #120).
+  await expect(page.getByRole('main').getByText('demo', { exact: true })).toBeVisible();
+  await expect(page.getByText('/w/demo')).toHaveCount(0);
 });
 
 test('Settings → Tools tells a deployment without tool switches from a portal that did not answer', async ({ page }) => {

@@ -77,6 +77,10 @@ services:
       # something else. Left empty, the card with the most room is used.
       VOICE_GPU: ${VOICE_GPU:-}
       VOICE_VRAM_RESERVE_MIB: ${VOICE_VRAM_RESERVE_MIB:-}
+      # How long, in ms, the portal waits on Understory's model before giving up and saying so —
+      # see docs/reference/configuration.md. Left empty, its 30-minute defaults stand.
+      UNDERSTORY_LLM_HEADERS_TIMEOUT_MS: ${UNDERSTORY_LLM_HEADERS_TIMEOUT_MS:-}
+      UNDERSTORY_LLM_BODY_TIMEOUT_MS: ${UNDERSTORY_LLM_BODY_TIMEOUT_MS:-}
 
 volumes:
   pithagoras-data:

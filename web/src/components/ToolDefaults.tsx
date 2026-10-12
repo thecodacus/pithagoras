@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { LuCheck, LuPencil, LuX } from "react-icons/lu";
 import { api, ApiError } from "../api";
-import { LoadFailed } from "./SettingsUi";
+import { LoadFailed, Section } from "./SettingsUi";
+import { Select } from "./Select";
 import { ToolGroupList } from "./ToolGroupList";
 import { displayName, nextOff, sourceName } from "../tool-groups";
 import { isEnter, isEscape } from "../shortcuts";
-import { t } from "../i18n";
+import { t, tp } from "../i18n";
+
+/** What ask_question may wait for, in minutes; 0 is until it is answered. The server holds the same list. */
+const QUESTION_WAITS = [0, 5, 15, 30, 60];
 
 /**
  * Which tools every conversation starts with.
@@ -31,6 +35,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
   const [tries, setTries] = useState(0);
   const [busy, setBusy] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [questionWait, setQuestionWait] = useState(0);
   /** The group being renamed, and what has been typed so far. */
   const [renaming, setRenaming] = useState<{ source: string; value: string } | null>(null);
 
@@ -42,6 +47,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
         setTools(r.tools);
         setOff(r.off);
         setNames(r.names ?? {});
+        setQuestionWait(r.questionWaitMinutes ?? 0);
       })
       // A deployment where this cannot work says so in place of the list — the
       // same as the switches beside the composer, and for the same reason. Only
@@ -63,6 +69,17 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
       onError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const changeQuestionWait = async (minutes: number) => {
+    const before = questionWait;
+    setQuestionWait(minutes);
+    try {
+      setQuestionWait((await api.setQuestionWait(minutes)).waitMinutes);
+    } catch (e) {
+      setQuestionWait(before);
+      onError((e as Error).message);
     }
   };
 
@@ -115,6 +132,19 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
           {t("What a conversation starts with. A tool switched off here is not offered to the model in any chat — the extension stays installed and its slash commands still work. One chat can switch any of them the other way for itself, from the blocks icon beside the composer, and a change here reaches every chat that has not.")}
         </p>
       </section>
+
+      <Section
+        title={t("Questions from the agent")}
+        hint={t("How long the agent's ask_question tool waits for your answer before it carries on without one. By default it waits until you answer; Stop in the message box ends the wait at any time. The setting is read each time a question is asked.")}
+      >
+        <Select
+          aria-label={t("Wait for an answer")}
+          className="w-48"
+          value={questionWait}
+          onChange={changeQuestionWait}
+          options={QUESTION_WAITS.map((m) => ({ value: m, label: m ? tp(m, "{n} minute", "{n} minutes") : t("Until answered") }))}
+        />
+      </Section>
 
       {!tools.length ? (
         <p className="rounded-xl border border-line bg-raised/40 px-3 py-2 text-xs text-fg-subtle">
