@@ -483,6 +483,13 @@ test("the settings page is never sent the client secret, and saving asks for the
   assert.equal(saved.body.settings.hasSecret, true);
   admin = saved.cookie;
   await signIn();
+  // The same provider and client with a space pasted along: still the same, and the secret is kept.
+  saved = await saveSso(base, admin, { ...withoutSecret, issuer: `${issuer} `, clientId: ` ${CLIENT_ID}` });
+  assert.equal(saved.res.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.settings.hasSecret, true);
+  assert.equal(saved.body.settings.issuer, issuer, "kept trimmed");
+  admin = saved.cookie;
+  await signIn();
   // But never for another provider or client: it would be sent to them. Nor is it taken as "none", which would make
   // the client a public one the provider refuses: the save says to type it again, or to take it away on purpose.
   const otherIssuer = `http://localhost:${idpPort}`;

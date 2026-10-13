@@ -256,7 +256,9 @@ app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   // another. For another one, a secret left out is not taken as "none" either, which would quietly make the client
   // a public one that the provider then refuses: it is to be typed again, or taken away on purpose (null).
   if (input && typeof input === "object" && input.clientSecret === undefined && kept?.clientSecret) {
-    if (input.issuer !== kept.issuer || input.clientId !== kept.clientId) {
+    // Compared as they are kept, trimmed: a space pasted along with them is not another provider.
+    const trimmed = (value: unknown) => (typeof value === "string" ? value.trim() : value);
+    if (trimmed(input.issuer) !== kept.issuer || trimmed(input.clientId) !== kept.clientId) {
       return res.status(400).json({ error: "The issuer or the client ID changed, so the kept client secret is not used for it. Type the client secret again, or remove it for a public client." });
     }
     input.clientSecret = kept.clientSecret;
