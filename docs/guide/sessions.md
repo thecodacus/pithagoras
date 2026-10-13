@@ -421,6 +421,12 @@ waiting for it to finish. Clicking it opens everything context-related:
 pi refuses to compact a session that is too short, and says so rather than
 failing quietly.
 
+Compacting while the agent is working stops its run first, and pi does not pick
+it up again. The portal does: it tells the agent that the conversation was
+compacted and to carry on, so the work goes on by itself, and that line shows in
+the chat as a message. It does not if you press Stop meanwhile, or send a
+message of your own, which carries the work on instead.
+
 ### The context window
 
 The percentage, and the moment a chat is compacted, are measured against the

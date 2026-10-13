@@ -91,7 +91,9 @@ The first four act on the session server-side and report through the event
 stream. The rest open portal UI and never reach pi.
 
 `/compact` is not awaited — it is a model call, and holding the HTTP request
-open for it would time out. It reports when it finishes.
+open for it would time out. It reports when it finishes. Sent while the agent is
+working, it stops that run to compact, and the agent then carries on with the
+work by itself (see [Context](/guide/sessions#context)).
 
 ## Extension commands
 

@@ -105,11 +105,14 @@ export async function picturesRefused(message: string): Promise<string | undefin
   return undefined;
 }
 
-/** Run a server-side builtin, returning the notice to show in the transcript. */
-export async function runBuiltin(name: string, args: string, client: PiClient): Promise<string> {
+/**
+ * Run a server-side builtin, returning the notice to show in the transcript.
+ * `compact`: how the session compacts, where it does more than the client does.
+ */
+export async function runBuiltin(name: string, args: string, client: PiClient, compact = () => client.compact()): Promise<string> {
   switch (name) {
     case "compact":
-      await client.compact();
+      await compact();
       return "Context compacted.";
 
     case "reload":

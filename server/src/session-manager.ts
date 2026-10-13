@@ -156,6 +156,8 @@ function rewrite(file: string, text: string): void {
 const SESSION_ROOT = path.resolve(process.env.SESSION_DIR || "./data/sessions");
 /** Where a container's pi finds a session's folder: see ContainerExecutor. */
 const CONTAINER_SESSION_DIR = "/sessions/";
+/** What the agent is told when a compaction cut its run short: see SessionManager.compact. */
+const COMPACTION_RESUME = "The conversation was compacted while you were working. Carry on with what you were doing.";
 /** What can go with a message besides its text. */
 export interface PromptOptions {
   voice?: boolean;
@@ -795,6 +797,10 @@ class SessionManager extends EventEmitter {
    * a minute, and without it the composer showed nothing, the transcript
    * showed nothing, and there was no Stop to press — a long compaction was
    * indistinguishable from a hung portal.
+   *
+   * A run that is going is stopped by pi to compact, and pi never picks it up
+   * again: it leaves the chat idle with the work half done. So the portal does
+   * it — see resumeAfterCompaction.
    */
   async compact(sessionId: string): Promise<void> {
     // One at a time. A second request used to overwrite the tracked promise,
@@ -804,6 +810,8 @@ class SessionManager extends EventEmitter {
     const inFlight = this.compacting.get(sessionId);
     if (inFlight) return inFlight;
 
+    const stops = this.aborts.get(sessionId) ?? 0;
+    let interrupted = false;
     // Before starting pi, not after: on a cold session that takes seconds, and
     // those are exactly the seconds with no activity line and no Stop.
     this.mark(sessionId, "running");
@@ -813,6 +821,8 @@ class SessionManager extends EventEmitter {
       // at the time, so it is honoured here instead of starting a compaction
       // that the user has already asked not to happen.
       if (this.cancelPending.delete(sessionId)) return;
+      // Read before pi stops the run: its settle clears both.
+      interrupted = this.inRun.has(sessionId) || client.isIdle?.() === false;
       await client.compact();
     })();
     // Held so a Stop, and the next prompt, can wait for it — see abort().
@@ -822,8 +832,30 @@ class SessionManager extends EventEmitter {
     } finally {
       this.compacting.delete(sessionId);
       this.cancelPending.delete(sessionId);
-      // No agent run, so no agent_settled arrives to clear it.
-      this.mark(sessionId, "idle");
+      // No agent run, so no agent_settled arrives to clear it — unless the
+      // work goes on, when the run that starts is the one to settle it.
+      // Also after a compaction that failed: pi stopped the run all the same.
+      if (!(await this.resumeAfterCompaction(sessionId, interrupted, stops))) this.mark(sessionId, "idle");
+    }
+  }
+
+  /**
+   * Carries on with the work a compaction cut short, by telling the agent so.
+   * True when it was sent, or when sending it settled the chat's status itself.
+   *
+   * Not after a Stop, which is the person asking for the work to end, and not
+   * when a message of theirs is on its way: that one carries the work on, and
+   * a second behind it would be read as something new to do.
+   */
+  private async resumeAfterCompaction(sessionId: string, interrupted: boolean, stops: number): Promise<boolean> {
+    if (!interrupted || (this.aborts.get(sessionId) ?? 0) !== stops || (this.prompting.get(sessionId) ?? 0) > 0) return false;
+    if (!this.live.get(sessionId)?.client.running) return false;
+    try {
+      return await this.prompt(sessionId, COMPACTION_RESUME);
+    } catch (e) {
+      // The chat is in error, as for any message that pi did not take.
+      console.error(`[portal] could not carry on after compacting ${sessionId}: ${(e as Error).message}`);
+      return getSession(sessionId)?.status === "error";
     }
   }
 
@@ -1632,7 +1664,7 @@ class SessionManager extends EventEmitter {
       const runs = this.runsStarted.get(sessionId) ?? 0;
       void (async () => {
         try {
-          const text = await runBuiltin(serverBuiltin.name, builtin![2], client);
+          const text = await runBuiltin(serverBuiltin.name, builtin![2], client, () => this.compact(sessionId));
           this.record(sessionId, "portal_notice", { text });
           if (command) this.endCommand(sessionId, command, { outcome: "handled", said: true });
         } catch (e) {
