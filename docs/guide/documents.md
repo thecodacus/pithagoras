@@ -13,6 +13,13 @@ It comes with the portal: open **Settings → Extensions → Discover** and
 install it under **Comes with Pithagoras**. Like any extension, you can switch
 it off or remove it under **Installed** ([Extensions](/guide/extensions)).
 
+The extension has npm packages of its own. The image comes with them, and
+`npm run build` builds its editor along with the portal. When the portal
+starts from a folder that does not have the packages yet (a checkout run by
+systemd, for example), the extension installs them with npm in the
+background. The portal's log says when the install starts and when it ends,
+or why it failed. A failed install is tried again at the next start.
+
 ## What a document is
 
 A document is a Markdown file (`.md`) directly in a folder called `documents`

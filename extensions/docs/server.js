@@ -14,6 +14,7 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readdirSync, readSync } from "node:fs";
 import path from "node:path";
+import { ensureDependencies } from "./deps.js";
 
 const DOCUMENTS = "documents";
 /** A document is read whole, so a file bigger than this is not one. */
@@ -45,7 +46,11 @@ function headingOf(text) {
   return "";
 }
 
-export default function (portal) {
+export default function (portal, { dependencies = ensureDependencies } = {}) {
+  // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
+  // in the background: the portal does not wait for an install to start the rest.
+  dependencies((line) => portal.log(line));
+
   /** The folders chats work in now, by id, with the chats that work in each. */
   function folders() {
     const found = new Map();

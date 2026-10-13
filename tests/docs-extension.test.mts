@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { ensureDependencies, missingDependencies } from '../extensions/docs/deps.js';
 import docsServer from '../extensions/docs/server.js';
 import { resolveInside } from '../server/src/workspace-files.ts';
 import { scratch } from './helpers.mts';
@@ -11,16 +12,20 @@ type Res = { status(code: number): Res; json(body: unknown): void };
 type Handler = (req: { params: Record<string, string> }, res: Res) => void;
 
 /** The Documents extension's server half, given chats that work in these folders, as the portal gives it them. */
-function server(folders: Record<string, string>) {
+function server(folders: Record<string, string>, logged: string[] = []) {
   const routes = new Map<string, Handler>();
   docsServer({
     extension: 'pithagoras-docs',
+    log: (line: string) => logged.push(line),
     router: { get: (route: string, handler: Handler) => routes.set(route, handler) },
     files: { inside: resolveInside },
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
     },
+  }, {
+    // What it needs to run is there: the test does not install anything.
+    dependencies: (log: (line: string) => void) => (log('dependencies checked'), Promise.resolve(true)),
   });
   const ask = (route: string, params: Record<string, string> = {}) => {
     let answer: { status: number; body: any } = { status: 200, body: undefined };
@@ -59,7 +64,9 @@ test('the Documents page is told every folder chats work in that has documents, 
     'README.md': '# Not in documents',
   });
   const empty = folderWith('docs-empty-', { 'notes.md': '# Not a document' });
-  const docs = server({ a: site, b: site, c: empty });
+  const logged: string[] = [];
+  const docs = server({ a: site, b: site, c: empty }, logged);
+  assert.deepEqual(logged, ['dependencies checked'], 'it sees to its dependencies as it starts, in the portal\'s log');
   const [only, ...more] = docs.folders();
   assert.deepEqual(more, [], 'a folder without documents is left out');
   assert.equal(only.path, realpathSync(site));
@@ -140,4 +147,47 @@ test('every text the Documents page shows has a German one, and no German one is
   assert.ok(shown.size > 3);
   assert.deepEqual([...shown].filter((text) => !german!.has(text)), [], 'shown without German');
   assert.deepEqual([...german!].filter((text) => !shown.has(text)), [], 'German for nothing shown');
+});
+
+/** A package folder that depends on `a` and `b` to run and on `c` to be built, with an npm that writes what it is told to. */
+function packageNeeding(npmSays: string) {
+  const dir = scratch('docs-deps-');
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'needs', dependencies: { a: '1.0.0', b: '1.0.0' }, devDependencies: { c: '1.0.0' } }));
+  const npm = path.join(dir, 'fake-npm');
+  writeFileSync(npm, `#!/bin/sh\necho "$@" >> "${dir}/asked"\n${npmSays}\n`);
+  chmodSync(npm, 0o755);
+  return { dir, npm, asked: () => readFileSync(path.join(dir, 'asked'), 'utf8').trim().split('\n') };
+}
+
+test('the Documents extension installs what it needs to run when it is missing, once, and says so in the log', async () => {
+  const { dir, npm, asked } = packageNeeding('mkdir -p node_modules/a node_modules/b && echo "{}" > node_modules/a/package.json && echo "{}" > node_modules/b/package.json');
+  mkdirSync(path.join(dir, 'node_modules', 'a'), { recursive: true });
+  writeFileSync(path.join(dir, 'node_modules', 'a', 'package.json'), '{}');
+  assert.deepEqual(missingDependencies(dir), ['b'], 'what it needs to be built is not asked for');
+  const log: string[] = [];
+  // Asked twice while it installs: one install.
+  const [first, second] = await Promise.all([ensureDependencies((line: string) => log.push(line), { dir, npm }), ensureDependencies((line: string) => log.push(line), { dir, npm })]);
+  assert.equal(first, true);
+  assert.equal(second, true);
+  assert.deepEqual(asked(), ['ci --omit=dev --ignore-scripts --no-audit --no-fund']);
+  assert.deepEqual(missingDependencies(dir), []);
+  assert.equal(log.length, 2);
+  assert.match(log[0], /^Installing its dependencies \(b\) with npm$/);
+  assert.match(log[1], /^Installed its dependencies in \d+ s$/);
+  // Everything there: npm is not asked again.
+  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), true);
+  assert.equal(asked().length, 1);
+  assert.equal(log.length, 2);
+});
+
+test('an install of the Documents extension\'s dependencies that fails is said in the log, and tried again on the next start', async () => {
+  const { dir, npm, asked } = packageNeeding('echo "npm error network unreachable" >&2; exit 1');
+  const log: string[] = [];
+  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), false);
+  assert.match(log.at(-1)!, /^Could not install its dependencies: npm exited with 1: npm error network unreachable$/);
+  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), false);
+  assert.equal(asked().length, 2);
+  // An npm that cannot be started at all is said as well.
+  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm: path.join(dir, 'no-such-npm') }), false);
+  assert.match(log.at(-1)!, /^Could not install its dependencies: spawn .*no-such-npm ENOENT$/);
 });

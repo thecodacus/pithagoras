@@ -9,7 +9,7 @@
     "docs"
   ],
   "scripts": {
-    "build": "npm run build -w server && npm run build -w web",
+    "build": "npm run build -w server && npm run build -w web && npm run build --prefix extensions/docs",
     "test": "npm run build -w server && npm test -w server && node --import tsx --test --test-timeout=120000 tests/*.test.mts",
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
