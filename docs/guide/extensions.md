@@ -208,8 +208,12 @@ chat, it is that chat's own choice, kept with the chat like any other switch.
 Each call a script makes goes through the [guard](/guide/security#marking-untrusted-output)
 like the model's own, a tool switched off in the chat stays off for scripts,
 and scripts cannot run models directly, so pictures and videos are only made
-through the [Media](/guide/media) tools and their settings. It is offered in
-chats that run on the host; the container executor has no tool switches.
+through the [Media](/guide/media) tools and their settings. A tool that an
+extension offers to scripts only is in the list too, so that it can be
+switched off like the others; one that is off is not described to the model
+and a script does not find it. Code mode itself cannot be made lazy. It is
+offered in chats that run on the host; the container executor has no tool
+switches.
 
 Before a chat has started, and in Settings → Tools, the list is what the portal
 has seen registered. The tools of a package that is switched off, narrowed to

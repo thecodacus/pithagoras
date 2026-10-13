@@ -2441,7 +2441,7 @@ export function lazyToolSets(): string[] {
 /**
  * Can this tool be marked lazy, and have the portal's `tools` tool reach it? Any tool can but pi's own
  * (read, bash, edit and the rest are what a conversation works with at all), the MCP adapter's `mcp`
- * tool, and an MCP server's. An MCP server's tool is lazy too, but not by a mark of the portal's: the
+ * tool, the portal's code mode, and an MCP server's. An MCP server's tool is lazy too, but not by a mark of the portal's: the
  * adapter has a way of its own to keep a server's tools out of the prompt, through its `mcp` tool, and
  * that is the server's setting "Register tools directly" (see lazyOfServer), the one switch for it. The
  * built-in tools are told by their names: the set they are filed in is the extension's that registers
@@ -2454,6 +2454,9 @@ export function lazyAllowed(
   if (tool.cached || adapterTool({ source: tool.source, package: tool.package })) return false;
   if (!noServerOf(tool.name) && mcpServerOf(tool.name, servers) !== undefined) return false;
   if (PI_BUILT_IN_TOOLS.includes(tool.name)) return false;
+  // Code mode is the way to make many calls in one: reached through another tool it would be one more step to it, and the
+  // box the lists show it in has no set of its own on the server to mark.
+  if (tool.inline && tool.name === CODEMODE_TOOL) return false;
   return toolSetOf(tool, servers) !== BUILT_IN_SET;
 }
 

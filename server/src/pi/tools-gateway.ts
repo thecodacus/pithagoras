@@ -92,6 +92,8 @@ export class ToolsGateway {
   private line: Promise<void> = Promise.resolve();
   /** The definition this gateway registered last: what tells its tool from an extension's of the same name, see owns. */
   private definition?: unknown;
+  /** The calls of the gateway that another tool made (a code mode script's), by their ids, with the call that made each. */
+  private madeBy = new Map<string, string>();
 
   constructor(private sets: string[] = []) {}
 
@@ -258,8 +260,14 @@ export class ToolsGateway {
     const { validateToolArguments } = await (piAi ??= piDependency("@earendil-works/pi-ai"));
     args = validateToolArguments(definition, { type: "toolCall", id, name: tool.name, arguments: args });
 
+    // A call a script made carries the call that made it to the hooks, as a tool the script calls directly does: what
+    // it reads is held for the script's own result, which is what the model is given. Without it the guard would
+    // take the read for a call of the model's, and the script's result would go unwrapped.
+    const parent = this.madeBy.get(id);
+    const madeBy = parent ? { parentToolCallId: parent } : {};
+
     // As pi does for a direct call: the hooks before it, which may refuse it or change its arguments in place.
-    const verdict = runner.hasHandlers("tool_call") ? await runner.emitToolCall({ type: "tool_call", toolName: tool.name, toolCallId: id, input: args }) : undefined;
+    const verdict = runner.hasHandlers("tool_call") ? await runner.emitToolCall({ type: "tool_call", toolName: tool.name, toolCallId: id, ...madeBy, input: args }) : undefined;
     // A stop that came while a hook was awaited keeps the tool from running, as it does for a direct call.
     if (signal?.aborted) return fail("Operation aborted");
     if (verdict?.block) {
@@ -283,6 +291,7 @@ export class ToolsGateway {
         type: "tool_result",
         toolName: tool.name,
         toolCallId: id,
+        ...madeBy,
         input: args,
         content: result?.content,
         details: result?.details,
@@ -314,6 +323,15 @@ export class ToolsGateway {
   extension = (pi: any): void => {
     this.api = pi;
     this.register(pi);
+    // Which call made a call of the gateway, as pi says it. The hooks about the gateway's own call come before it runs.
+    pi.on("tool_call", (event: any) => {
+      if (event?.toolName === GATEWAY_TOOL && typeof event.parentToolCallId === "string" && event.parentToolCallId) {
+        this.madeBy.set(String(event.toolCallId), event.parentToolCallId);
+      }
+    });
+    pi.on("tool_result", (event: any) => {
+      if (event?.toolName === GATEWAY_TOOL) this.madeBy.delete(String(event.toolCallId));
+    });
   };
 
   private register(pi: any): void {

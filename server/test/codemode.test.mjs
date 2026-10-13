@@ -49,6 +49,7 @@ const model = await fakeModel((request) => script[resultsIn(request)] ?? "Done."
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+const { guardExtension } = await import("../dist/pi/guard.js");
 
 let n = 0;
 /** One message to a conversation in `cwd`, with the results of the calls it led to, what the session listed and the file it is kept in. */
@@ -66,7 +67,15 @@ async function run(cwd, options = {}) {
     const asked = model.requests.length;
     await client.prompt("Go on");
     await settled;
-    return { results, tools, file: client.sessionFile, declared: model.requests[asked].tools?.map((t) => t.function?.name ?? t.name) ?? [] };
+    const declaredTools = model.requests[asked].tools ?? [];
+    return {
+      results,
+      tools,
+      file: client.sessionFile,
+      declared: declaredTools.map((t) => t.function?.name ?? t.name),
+      // What the model is told of the tools a script can call.
+      description: declaredTools.find((t) => (t.function?.name ?? t.name) === "codemode")?.function?.description ?? "",
+    };
   } finally {
     client.dispose();
   }
@@ -154,8 +163,44 @@ test("a tool switched off in the chat is not reached from a script, though pi le
   script = [codemode(`try { await tools.scripted({ path: ${JSON.stringify(marker)} }); return "ran"; } catch (e) { return String(e); }`)];
   const { results } = await run(cwd, { toolsOff: ["scripted"] });
   const [result] = own(results);
-  assert.match(textOf(result), /Refused: \\"scripted\\" is switched off in this conversation/);
+  assert.match(textOf(result), /tools\.scripted does not exist/, "not there for the script to call");
   assert.equal(existsSync(marker), false, "the tool never ran");
+});
+
+test("a tool that pi offers to scripts only is in the chat's tools, to be switched", async () => {
+  script = [];
+  const on = await run(chat());
+  const listed = on.tools.find((tool) => tool.name === "scripted");
+  assert.ok(listed, "a script can call it, so the chat can switch it");
+  assert.equal(listed.enabled, true);
+  assert.ok(!on.declared.includes("scripted"), "though the model is not offered it by its name");
+  const off = await run(chat(), { toolsOff: ["scripted"] });
+  assert.equal(off.tools.find((tool) => tool.name === "scripted")?.enabled, false, "and it is listed as off, to be switched on again");
+});
+
+test("a tool switched off is not described to the model as one a script can call, nor listed to a script", async () => {
+  const names = `return JSON.stringify(ALL_TOOLS.map((tool) => tool.name));`;
+  script = [codemode(names)];
+  const on = await run(chat());
+  assert.match(on.description, /scripted/, "on, the description of code mode has it");
+  assert.match(textOf(own(on.results)[0]), /scripted/);
+  script = [codemode(names)];
+  const off = await run(chat(), { toolsOff: ["scripted"] });
+  assert.doesNotMatch(off.description, /scripted/, "off, the model is not told about it");
+  const [listed] = own(off.results);
+  assert.equal(listed.isError, false, textOf(listed));
+  assert.doesNotMatch(textOf(listed), /scripted/, "nor does ALL_TOOLS list it");
+  assert.match(textOf(listed), /bash/, "the others are there");
+});
+
+test("the guard refuses a call a script makes to a tool that is switched off, whatever pi lets it find", () => {
+  const handlers = {};
+  guardExtension("t", () => ({ role: "primary", key: "me" }), "codemode-unit", true, () => ({ allowed: false, allowlist: [] }), undefined, [], () => new Set(["scripted"]))({ on: (k, f) => (handlers[k] = f) });
+  const call = (extra) => handlers.tool_call({ toolName: "scripted", toolCallId: "c/1", input: { path: "x" }, ...extra });
+  assert.equal(call({ parentToolCallId: "c" })?.block, true);
+  assert.match(call({ parentToolCallId: "c" }).reason, /switched off in this conversation, and a script does not reach it either/);
+  // The model's own call is not this check's: a tool that is off is not offered to it.
+  assert.equal(call({}), undefined);
 });
 
 test("on, the same tool is reached from a script", async () => {

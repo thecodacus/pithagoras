@@ -964,6 +964,12 @@ export function guardExtension(
      * they carried. Until it comes, what they carried holds the conversation back as a flagged result would.
      */
     const readByCalls = new Map<string, Signal[]>();
+    /**
+     * The calls that have not ended, by id. A call a tool made that ends after the tool has ended its own
+     * (a script that did not wait for it, or ran out of time) is read by nobody: not the script, which is
+     * over, and not the model, which is given the script's result. What it read holds nothing back.
+     */
+    const running = new Set<string>();
     const isTainted = () => marked || [...flagged].some((id) => !trusted.has(id)) || [...readByCalls.values()].some((signals) => signals.length > 0);
     if (portalSessionId) {
       const taint = {
@@ -987,12 +993,13 @@ export function guardExtension(
         // A history that cannot be read is not evidence of anything.
       }
       // A new conversation has read nothing yet.
-      if (event?.reason === "new") { flagged.clear(); readByCalls.clear(); marked = false; }
+      if (event?.reason === "new") { flagged.clear(); readByCalls.clear(); running.clear(); marked = false; }
       for (const id of found) flagged.add(id);
       if (portalSessionId) trusted = trustedResults(portalSessionId);
     });
 
     pi.on("tool_result", (event: any) => {
+      if (typeof event.toolCallId === "string") running.delete(event.toolCallId);
       const compact = !event.isError && isBrowserSnapshot(event.toolName, event.input ?? {});
       const formatted = compact ? (event.content ?? []).map((part: any) =>
         part?.type === 'text' && typeof part.text === 'string' ? { ...part, text: cleanBrowserSnapshot(part.text) } : part,
@@ -1018,8 +1025,10 @@ export function guardExtension(
         // Read by a call another tool made: wrapped all the same, for a script that hands it on as it is, and
         // held for the call that made it, which is flagged in its place. Not flagged here as well: that would be
         // two flags for one read, and trusting the one the model was given would leave the other holding it back.
-        const held = readByCalls.get(parent) ?? [];
-        readByCalls.set(parent, [...held, ...signals.filter((signal) => !held.includes(signal))]);
+        if (running.has(parent)) {
+          const held = readByCalls.get(parent) ?? [];
+          readByCalls.set(parent, [...held, ...signals.filter((signal) => !held.includes(signal))]);
+        }
         return { content: [{ type: "text", text: wrap.open }, ...content, { type: "text", text: wrap.close }] };
       }
       const open = signals.length
@@ -1043,6 +1052,7 @@ export function guardExtension(
     });
 
     pi.on("tool_call", (event: any) => {
+      if (typeof event.toolCallId === "string") running.add(event.toolCallId);
       const { role, key } = whoNow();
       const subject = callSubject(event.toolName, event.input ?? {});
       const note = (kind: string, reason: string) =>

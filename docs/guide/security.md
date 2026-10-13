@@ -44,8 +44,10 @@ model's own would be, and a tool switched off in the chat is refused to a script
 too. What a script's calls read goes to the script, not to the model. So the
 script's own result is wrapped whenever one of its calls read something from
 outside, and flagged with the signs those calls carried, even when the script
-keeps what it read to itself. Until the script ends, what its calls read holds
-the conversation back as a flagged result would.
+keeps what it read to itself, and also when the call reached a lazy tool through
+the `tools` tool. Until the script ends, what its calls read holds the
+conversation back as a flagged result would. A call that is still running when
+the script ends is read by nobody, and holds nothing back.
 
 ## Suspected prompt injection
 

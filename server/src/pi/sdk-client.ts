@@ -1412,6 +1412,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     } catch {
       this.wanted = new Set();
     }
+    this.keepSwitchedOffFromScripts(session);
     session._setActiveTools = (names: string[]) => {
       const held = this.heldBack(session, names, this.fromExtension);
       this.wanted = new Set([...names, ...held]);
@@ -1433,6 +1434,20 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       }
     };
     this.hearExtensions(session);
+  }
+
+  /**
+   * Take what is switched off out of what a script can call.
+   *
+   * pi lets a script call every tool that is registered for scripts (`exposure: "codemode"` or `"deferred"`), active or
+   * not, and tells the model about them in the description of `codemode`; a script lists them as `ALL_TOOLS`. Taking a
+   * tool out of the active tools, which is all a switch does, leaves that open. So the tools a script can call are the
+   * ones pi says less those switched off: out of the description and the list, and not found when called.
+   */
+  private keepSwitchedOffFromScripts(session: any): void {
+    if (typeof session?._getCallableTools !== "function") return;
+    const original = session._getCallableTools.bind(session) as (...args: unknown[]) => any[];
+    session._getCallableTools = (...args: unknown[]) => original(...args).filter((tool) => !this.switchedOff.has(String(tool?.name)));
   }
 
   /** True while an extension's `setActiveTools` is being carried out. */
@@ -1537,12 +1552,15 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * path pi tracks it by, so the list groups the way somebody thinks about it
    * — "the web search one", not four unrelated rows. A tool pi leaves inactive
    * is not listed: a tick beside something the model cannot call is a state
-   * the session is not in.
+   * the session is not in. Except one registered for scripts only, which pi
+   * never activates and a code mode script can call: listed, or there would
+   * be no way to switch it off.
    */
   async getTools(): Promise<PiTool[]> {
     const all: any[] = this.session.getAllTools?.() ?? [];
+    const forScripts = (tool: any) => tool.exposure === "codemode" || tool.exposure === "deferred";
     // Not the gateway: it is the portal's way to the lazy tools and no tool to switch.
-    const offered = (this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name))) : all).filter((tool) => !this.isGateway(String(tool.name)));
+    const offered = (this.wanted.size ? all.filter((tool) => this.wanted.has(String(tool.name)) || forScripts(tool)) : all).filter((tool) => !this.isGateway(String(tool.name)));
     return offered.map((tool) => ({
       name: String(tool.name),
       description: typeof tool.description === "string" ? tool.description : undefined,

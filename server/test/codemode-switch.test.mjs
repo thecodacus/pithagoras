@@ -60,6 +60,21 @@ test("switched on in one chat, it is that chat's, kept with it, and the others k
   assert.equal(codemodeOf(await json(`/api/sessions/${chat.id}/tools`)).enabled, false);
 });
 
+test("code mode cannot be marked lazy: its row says so, and a mark that names it is refused", async () => {
+  // The lists offer the lazy button where a row does not say noLazy, and a mark the server did not apply would read as applied.
+  const defaults = await json("/api/tools");
+  assert.equal(codemodeOf(defaults).noLazy, true);
+  assert.equal(codemodeOf(defaults).lazy, undefined);
+  for (const mark of ["codemode", "<tool>codemode"]) {
+    const res = await send("/api/tools/lazy", "PUT", { lazy: [mark] });
+    assert.equal(res.status, 400, mark);
+    assert.equal((await res.json()).code, "lazy-refused");
+  }
+  assert.deepEqual(db.lazyToolNames(), new Set());
+  // Another tool of the same name is not the portal's, and may be lazy as any extension's.
+  assert.equal(db.lazyAllowed({ name: "codemode", source: "pi-other", package: "pi-other", inline: false }), true);
+});
+
 const DB = fileURLToPath(new URL("../dist/db.js", import.meta.url));
 /** What the default is when the portal next starts on the database in `dir`. */
 async function defaultsAfterStart(dir) {
