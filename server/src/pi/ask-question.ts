@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { fail, say } from "./tool-result.js";
 import { showsDialogs } from "./ui-requests.js";
+import { oneOf } from "./tool-schema.js";
 
 /**
  * Asking the person in front of the screen something, in the chat.
@@ -153,28 +154,17 @@ export function describeAnswers(questions: Question[], answers: Answers): string
 }
 
 const optionSchema = Type.Object({
-  label: Type.String({ description: "What the person picks. Short, and different from the others." }),
-  description: Type.Optional(Type.String({ description: "One line on what choosing it means, when the label alone does not say." })),
+  label: Type.String({ description: "Short, distinct" }),
+  description: Type.Optional(Type.String({ description: "One line, if the label is not enough" })),
 });
 
 const questionSchema = Type.Object({
-  question: Type.String({ description: "The question, complete in itself." }),
-  kind: Type.Optional(
-    Type.Union(KINDS.map((k) => Type.Literal(k)), {
-      description:
-        '"single" picks one option (the default when there are options), "multiple" any number, "text" is typed in ' +
-        'freely (the default without options), "ranking" puts all the options in order, best first (they start in the ' +
-        "order you give them).",
-    }),
-  ),
-  options: Type.Optional(
-    Type.Array(Type.Union([Type.String(), optionSchema]), {
-      description: 'The choices, as plain strings ("SQLite") or {label, description}. Leave them out for a question answered in words.',
-    }),
-  ),
-  allowOther: Type.Optional(Type.Boolean({ description: "Single and multiple: also let the person type their own choice." })),
-  optional: Type.Optional(Type.Boolean({ description: "The person may leave this one unanswered." })),
-  id: Type.Optional(Type.String({ description: "A short name for the question. Defaults to q1, q2, …" })),
+  question: Type.String({ description: "Self-contained" }),
+  kind: Type.Optional(oneOf(KINDS, "Default: single with options, text without. multiple: any number. ranking: all options in order, best first")),
+  options: Type.Optional(Type.Array(Type.Union([Type.String(), optionSchema]), { description: "Strings, or {label, description}" })),
+  allowOther: Type.Optional(Type.Boolean({ description: "single/multiple: also allow a typed answer" })),
+  optional: Type.Optional(Type.Boolean({ description: "May be left unanswered" })),
+  id: Type.Optional(Type.String({ description: "Default q1, q2, …" })),
 });
 
 /**
@@ -187,19 +177,14 @@ export function askQuestionTool(waitMs: () => number = () => 0) {
       name: ASK_QUESTION_TOOL,
       label: "Ask a question",
       description:
-        "Ask the person you are working with one or more questions, shown in the chat above their message box, and " +
-        "wait for the answers. Use it when you cannot go on without a decision or a fact that only they have " +
-        "and guessing would cost them more than asking: a choice between approaches, which of several files " +
-        "to change, how they rank things. Put every question you have into one call. Do not use it for " +
-        "what you can find out yourself, or for confirming what they already told you. A question with options is " +
-        "a choice, one without is answered in words. For example: " +
-        '{"questions": [{"question": "Which database?", "options": ["SQLite", "Postgres"]}, ' +
-        '{"question": "Which features?", "kind": "multiple", "options": ["Search", "Export"]}, ' +
-        '{"question": "Anything else?", "optional": true}]}',
-      promptSnippet: `${ASK_QUESTION_TOOL} — ask the person questions (choose one, choose several, free text, rank) and wait for the answers`,
+        "Ask the person questions (shown above their message box) and wait for the answers. Only when you cannot go on without a decision or fact " +
+        "only they have and guessing would cost more; not for what you can find out or they already said. All questions in one call. " +
+        "With options it is a choice; without, a text answer. " +
+        'Example: {"questions":[{"question":"Which database?","options":["SQLite","Postgres"]},{"question":"Anything else?","optional":true}]}',
+      promptSnippet: "ask the person questions (one choice, several, text, ranking) and wait for the answers",
       parameters: Type.Object({
-        title: Type.Optional(Type.String({ description: "A heading for the questions, when they belong together." })),
-        questions: Type.Array(questionSchema, { description: `1 to ${MAX_QUESTIONS} questions, shown together.` }),
+        title: Type.Optional(Type.String({ description: "Heading for the set" })),
+        questions: Type.Array(questionSchema, { description: `1 to ${MAX_QUESTIONS}` }),
       }),
       async execute(_id: string, p: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
         const questions = readQuestions(p.questions);

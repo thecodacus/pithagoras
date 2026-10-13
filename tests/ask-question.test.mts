@@ -66,9 +66,12 @@ test('a question without options is answered in words, as the model meant it, wh
   assert.deepEqual(readAnswers(qs, { 'q1-fav-lang': 'Rust', q2_tools: 'x', q3: ['no'] }), { 'q1-fav-lang': 'Rust' });
   // The tool says so, with a call to copy.
   const { description, parameters } = tool();
-  assert.match(description, /one without is answered in words/);
-  assert.match(description, /"options": \["SQLite", "Postgres"\]/);
-  assert.match(parameters.properties.questions.items.properties.kind.description, /"text" is typed in freely \(the default without options\)/);
+  assert.match(description, /without, a text answer/);
+  assert.match(description, /"options":\["SQLite","Postgres"\]/);
+  // And the call is one the tool takes.
+  const example = JSON.parse(/Example: (\{.*\})$/.exec(description)![1]);
+  assert.deepEqual(readQuestions(example.questions).map((q) => [q.kind, q.optional]), [['single', false], ['text', true]]);
+  assert.match(parameters.properties.questions.items.properties.kind.description, /Default: single with options, text without/);
 });
 
 test('answers are held to what was asked: strangers, wrong shapes and half rankings are dropped', () => {
