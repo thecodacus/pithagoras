@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Markdown } from "./Markdown";
 import {
@@ -1324,66 +1324,95 @@ function TracePaths({
   /** The type of each note of the graph, by path. */
   types: Map<string, string | undefined>;
   colourOf: (type: string | undefined) => string;
+  /** The run kept lit. */
   pinned: string | null;
-  /** The run being pointed at, or null. */
+  /** The run being pointed at or reached with Tab, or null: lit in the graph, closed or open. */
   onPoint: (id: string | null) => void;
   onPin: (id: string | null) => void;
 }) {
+  const base = useId();
+  // A run is a row of its question, its cost and a toggle for its steps. Closed to begin with, so that a long list is short; the run the pointer is on (but not on its toggle) or that is kept lit opens, unless the person has said otherwise with the toggle. Reaching one with Tab lights it in the graph and leaves it as it is.
+  const [said, setSaid] = useState<Map<string, boolean>>(new Map());
+  const [hovered, setHovered] = useState<string | null>(null);
+  // On a run's toggle the row shows what the toggle says (and a click on it changes), not what pointing at the row would open.
+  const [onToggle, setOnToggle] = useState<string | null>(null);
   return (
-    <ul aria-label={t("Query paths")} className="-mx-1 max-h-80 space-y-1 overflow-y-auto px-1 max-sm:max-h-[45vh]">
+    <ul aria-label={t("Query paths")} className="-mx-1 max-h-[50vh] space-y-0.5 overflow-y-auto px-1">
       {traces.slice(0, 30).map((trace) => {
         const path = paths.get(trace.id);
         const steps = path?.steps ?? [];
         const kept = pinned === trace.id;
+        const open = said.get(trace.id) ?? (kept || (hovered === trace.id && onToggle !== trace.id));
         const change = path?.changed ?? trace.kind === "mutation";
+        const id = `${base}-${trace.id}`;
         return (
-          <li key={trace.id}>
-            <button
-              type="button"
-              aria-pressed={kept}
-              title={trace.input}
-              onClick={() => onPin(kept ? null : trace.id)}
-              onPointerEnter={() => onPoint(trace.id)}
-              onPointerLeave={() => onPoint(null)}
-              onFocus={() => onPoint(trace.id)}
-              onBlur={() => onPoint(null)}
-              className={`block w-full min-w-0 rounded-lg border px-2.5 py-2 text-left transition ${kept ? "border-accent/50 bg-accent/10" : "border-transparent hover:bg-fg/5 focus-visible:bg-fg/5"}`}
-            >
-              <span className="flex items-start gap-2">
-                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full bg-current shadow-[0_0_8px_currentColor] ${change ? "text-warn" : "text-accent"}`} aria-hidden />
-                <span className="line-clamp-2 min-w-0 flex-1 break-words text-sm text-fg">{trace.input}</span>
+          <li
+            key={trace.id}
+            onPointerEnter={() => (setHovered(trace.id), onPoint(trace.id))}
+            onPointerLeave={() => (setHovered(null), onPoint(null))}
+            onFocus={() => onPoint(trace.id)}
+            onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && onPoint(null)}
+            className={`rounded-lg border transition ${kept ? "border-accent/50 bg-accent/10" : "border-transparent"}`}
+          >
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                aria-pressed={kept}
+                title={trace.input}
+                onClick={() => onPin(kept ? null : trace.id)}
+                className={`flex min-w-0 flex-1 gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-fg/5 focus-visible:bg-fg/5 ${open ? "items-start" : "items-center"}`}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full bg-current shadow-[0_0_8px_currentColor] ${open ? "mt-1.5" : ""} ${change ? "text-warn" : "text-accent"}`} aria-hidden />
+                <span id={`${id}-question`} className={`min-w-0 flex-1 text-sm text-fg ${open ? "line-clamp-3 break-words" : "truncate"}`}>{trace.input}</span>
                 <span className="shrink-0 font-mono text-sm text-fg-muted">
                   {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
                 </span>
-              </span>
-              {steps.length > 0 && (
-                <span className="mt-2 flex flex-wrap items-center gap-x-0.5 gap-y-1.5 pl-4">
-                  {steps.map((step, k) => (
-                    <span key={k} className="inline-flex min-w-0 max-w-full items-center gap-0.5">
-                      {k > 0 && <LuChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-faint" aria-hidden />}
-                      {step.end ? (
-                        <span className="inline-flex items-center gap-1 text-sm text-fg">
-                          <span className={`h-2 w-2 rounded-full bg-current ${step.end === "ok" ? "text-ok" : step.end === "partial" ? "text-warn" : "text-danger"}`} aria-hidden />
-                          {step.text}
-                        </span>
-                      ) : (
-                        <span className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-sm ${step.notes.length ? "border-line bg-surface text-fg" : "border-line/60 text-fg-muted"}`}>
-                          {step.notes.map((note) => (
-                            <span key={note} className="h-2 w-2 shrink-0 rounded-full" style={{ background: colourOf(types.get(note)), boxShadow: `0 0 6px ${colourOf(types.get(note))}` }} aria-hidden />
-                          ))}
-                          <span className="shrink-0 text-fg-faint">{step.verb}</span>
-                          {step.target && <span className="truncate font-mono">{step.target}</span>}
-                        </span>
-                      )}
-                    </span>
-                  ))}
-                </span>
-              )}
-              {/* Said only once the run's own steps are known: before, there is nothing yet to say of its notes. */}
-              {path?.known && path.notes.length === 0 && (
-                <span className="mt-1 block pl-4 text-sm text-fg-faint">{path.touched === 0 ? t("This run touched no note") : t("No note of this path is in the graph")}</span>
-              )}
-            </button>
+              </button>
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={open ? `${id}-steps` : undefined}
+                aria-labelledby={`${id}-toggle ${id}-question`}
+                onPointerEnter={() => setOnToggle(trace.id)}
+                onPointerLeave={() => setOnToggle(null)}
+                onClick={() => setSaid((was) => new Map(was).set(trace.id, !open))}
+                className="shrink-0 rounded-md p-1.5 text-fg-muted transition hover:bg-fg/5 hover:text-fg"
+              >
+                <span id={`${id}-toggle`} className="sr-only">{open ? t("Hide the steps") : t("Show the steps")}</span>
+                <LuChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+              </button>
+            </div>
+            {open && (
+              <div id={`${id}-steps`} className="pb-2 pl-7 pr-2">
+                {steps.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5">
+                    {steps.map((step, k) => (
+                      <span key={k} className="inline-flex min-w-0 max-w-full items-center gap-0.5">
+                        {k > 0 && <LuChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-faint" aria-hidden />}
+                        {step.end ? (
+                          <span className="inline-flex items-center gap-1 text-sm text-fg">
+                            <span className={`h-2 w-2 rounded-full bg-current ${step.end === "ok" ? "text-ok" : step.end === "partial" ? "text-warn" : "text-danger"}`} aria-hidden />
+                            {step.text}
+                          </span>
+                        ) : (
+                          <span className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-sm ${step.notes.length ? "border-line bg-surface text-fg" : "border-line/60 text-fg-muted"}`}>
+                            {step.notes.map((note) => (
+                              <span key={note} className="h-2 w-2 shrink-0 rounded-full" style={{ background: colourOf(types.get(note)), boxShadow: `0 0 6px ${colourOf(types.get(note))}` }} aria-hidden />
+                            ))}
+                            <span className="shrink-0 text-fg-faint">{step.verb}</span>
+                            {step.target && <span className="truncate font-mono">{step.target}</span>}
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {/* Said only once the run's own steps are known: before, there is nothing yet to say of its notes. */}
+                {path?.known && path.notes.length === 0 && (
+                  <p className="mt-1 text-sm text-fg-faint">{path.touched === 0 ? t("This run touched no note") : t("No note of this path is in the graph")}</p>
+                )}
+              </div>
+            )}
           </li>
         );
       })}
@@ -1477,7 +1506,7 @@ function GraphView({
       new Map(
         traces.map((trace) => {
           const run = runs.get(trace.id);
-          return [trace.id, pathOf(trace, run && run !== "failed" ? run.steps : undefined, inGraph)] as const;
+          return [trace.id, pathOf(trace, run && run !== "failed" ? run : undefined, inGraph)] as const;
         }),
       ),
     [traces, runs, inGraph],

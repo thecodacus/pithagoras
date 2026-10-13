@@ -66,22 +66,27 @@ The look and the brain's colour are remembered in this browser. For anyone who
 asks their system to reduce motion, the looks stand still and play no secrets.
 
 **Query paths.** The button in the graph's toolbar (while Understory has runs on
-record) lists the latest runs of Understory's own agent: what it was asked or
-told, how many tokens it took, and the path it went, step by step, in the words
-Understory keeps for it (`search "owner" (2) → read owner.md → ✓`; how it ended
-is the last step: a tick, *partial* or a cross). The dot in front of a run is
-warm when the run changed the memory (a step wrote, patched or deleted a note,
-whoever asked: a change, or the librarian), and in the accent colour when it
-only read. A step that read, wrote, patched or deleted a note gets a glowing
-mark in the colour of that note's type; a search says how many notes it found
-and lights none, and a step that went by a file name another note shares still
-lights the right note, because the portal asks Understory for the full path of
-every step. Point at a run (or reach it with Tab) and the notes it touched light
-up in the graph, with the links between them, while the rest steps back; click
-it to keep it lit after you shut the list, and click it again to let it go. A
-run that touched no note says so, and one whose notes are not in the graph (they
-were deleted since) says that; neither lights anything. On a phone the list is
-short and has a scroll bar of its own.
+record) lists the latest runs of Understory's own agent, one line each: what it
+was asked or told, how many tokens it took, and a dot that is warm when the run
+changed the memory (a step wrote, patched or deleted a note, whoever asked: a
+change, or the librarian) and in the accent colour when it only read. The list
+is short because the runs are shut. The arrow at the end of a line opens a run
+and shuts it again; open, it shows the path the run went, step by step, in the
+words Understory keeps for it (`search "owner" (2) → read owner.md → ✓`; how it
+ended is the last step: a tick, *partial* or a cross). A run opens by itself
+while the pointer is on it (off its arrow) and while it is kept lit, unless you
+shut it with its arrow, and then it stays shut. A step that read, wrote,
+patched or deleted a note gets a glowing mark in the colour of that note's type;
+a search says how many notes it found and lights none, and a step that went by a
+file name another note shares still lights the right note, because the portal
+asks Understory for the full path of every step. Point at a run (open or shut,
+with the mouse or Tab) and the notes it touched light up in the graph, with the
+links between them, while the rest steps back; click it to keep it lit after you
+shut the list, and click it again to let it go. A run that touched no note says
+so, and one whose notes are not in the graph (they were deleted since) says that;
+neither lights anything. The list is at most half the window tall, which fits
+ten shut runs, and has a scroll bar of its own when there are more or some are
+open, also on a phone.
 
 The filter button in the graph's toolbar holds the colours as switches: a type
 switched off hides its notes, and so does *orphan*. What the search down the

@@ -34,11 +34,11 @@ const TRACES = [
   { id: 't2', kind: 'query', input: 'Who runs the test host?', startedAt: '2026-09-28T09:20:11Z', notation: 'search "test host" (2) → read branches.md → read owner.md → ✓', usage: { inputTokens: 4100, outputTokens: 310 } },
 ];
 /** One step of a run as Understory keeps it, with the full path of each note it touched. */
-const step = (tool: string, paths: string[] = [], write = false) => ({ tool, summary: paths[0] ?? '', paths, write });
+const step = (tool: string, paths: string[] = [], write = false, summary = paths[0] ?? '') => ({ tool, summary, paths, write });
 /** What each of them did, step by step (Understory's /api/trace): `hang` and `fail` for a run that does not answer. */
 const RUNS: Record<string, ReturnType<typeof step>[] | 'hang' | 'fail'> = {
   t1: [step('list_directory'), step('write_concept', ['/deployment/branches.md'], true)],
-  t2: [step('search_knowledge', ['/deployment/branches.md', '/people/owner.md']), step('read_concept', ['/deployment/branches.md']), step('read_concept', ['/people/owner.md'])],
+  t2: [step('search_knowledge', ['/deployment/branches.md', '/people/owner.md'], false, 'test host'), step('read_concept', ['/deployment/branches.md']), step('read_concept', ['/people/owner.md'])],
 };
 /** More notes in the graph, for runs that go by names two notes share, or one with a space in it. */
 const MORE = [
@@ -131,7 +131,10 @@ async function portal(page: Page, { enabled = true, broken = false, conformant =
         const run = runs[id];
         if (run === 'hang') return HANG;
         if (!run || run === 'fail') return reply(run ? 502 : 404, { error: run ? 'Understory did not answer' : 'trace not found' });
-        return { ...traces.find((t) => t.id === id), steps: run.map((one, i) => ({ seq: i + 1, ...one })), outcome: 'success' };
+        const notation: string = traces.find((t) => t.id === id)?.notation ?? '';
+        // As Understory ends a run: by the last step of its notation.
+        const outcome = notation.endsWith('⚠ partial') ? 'partial' : notation.endsWith('✗') ? 'failed' : 'success';
+        return { ...traces.find((t) => t.id === id), steps: run.map((one, i) => ({ seq: i + 1, ...one })), outcome };
       }
       if (p === '/api/memory/search') return url.searchParams.get('q') === 'deploy' ? [{ path: '/deployment/branches.md', title: 'Branch Deployment on Test Host', description: 'The test host deploys branches.' }] : [];
       if (p === '/api/memory/concept') {
@@ -943,6 +946,23 @@ const openPaths = async (page: Page) => {
   await page.getByRole('button', { name: 'Query paths' }).click();
   return page.getByRole('list', { name: 'Query paths' });
 };
+/** A run in that list: its row, the button that keeps it lit, the toggle of its steps (which are in the row once it is open), and opening it. */
+const aRun = (list: Locator, question: RegExp) => {
+  const row = list.getByRole('listitem').filter({ hasText: question });
+  const toggle = row.locator('button[aria-expanded]');
+  return {
+    row,
+    pin: row.locator('button[aria-pressed]'),
+    toggle,
+    /** Opened with its toggle, as a person does, unless it is open: the pointer on the toggle, which shows what the toggle says. */
+    open: async () => {
+      await toggle.hover();
+      if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      return row;
+    },
+  };
+};
 
 test('Query paths lists the runs of Understory with the path each took, what it cost, and whether it changed the memory', async ({ page }) => {
   await portal(page, {
@@ -958,15 +978,16 @@ test('Query paths lists the runs of Understory with the path each took, what it 
   // Closed to begin with, so that the graph has the room.
   await expect(page.getByRole('list', { name: 'Query paths' })).toHaveCount(0);
   const list = await openPaths(page);
-  const change = list.getByRole('button', { name: /Persist the following knowledge/ });
-  const query = list.getByRole('button', { name: /Who runs the test host/ });
-  const nothing = list.getByRole('button', { name: /What was asked of the librarian/ });
-  const gone = list.getByRole('button', { name: /What does the old note say/ });
+  const [changed, queried, noted, goneOne] = [aRun(list, /Persist the following knowledge/), aRun(list, /Who runs the test host/), aRun(list, /What was asked of the librarian/), aRun(list, /What does the old note say/)];
+  // Every run is a row of its question, what it cost and its dot, the steps shut away until it is opened.
+  await expect(list.locator('button[aria-expanded="false"]')).toHaveCount(4);
+  await expect(queried.row).not.toContainText('branches.md');
   // The tokens, in the chat's own writing.
-  await expect(change).toContainText('9.7k→2k tok');
-  await expect(query).toContainText('4.1k→310 tok');
-  await expect(nothing).toContainText('?→? tok');
+  await expect(changed.row).toContainText('9.7k→2k tok');
+  await expect(queried.row).toContainText('4.1k→310 tok');
+  await expect(noted.row).toContainText('?→? tok');
   // A change and a question differ by colour, and a path is its steps, in order, each note one of them names marked with a glow.
+  const [change, query, nothing, gone] = [await changed.open(), await queried.open(), await noted.open(), await goneOne.open()];
   await expect(change.locator('span.bg-current').first()).toHaveClass(/text-warn/);
   await expect(query.locator('span.bg-current').first()).toHaveClass(/text-accent/);
   await expect(query).toContainText(/search\s*"test host" \(2\)\s*read\s*branches\.md\s*read\s*owner\.md\s*✓/);
@@ -1020,7 +1041,7 @@ test('pointing at a path lights its notes and the links between them in the grap
   const restored = async () => (await lightAt(page, loose.x, loose.y, 2)) > rest.loose - 15;
 
   const list = await openPaths(page);
-  const query = list.getByRole('button', { name: /Who runs the test host/ });
+  const query = aRun(list, /Who runs the test host/).pin;
   // Pointed at: the two notes it went through stay, the link between them is lit, and the note it never came to steps back.
   await query.hover();
   await expect.poll(() => dimmed()).toBe(true);
@@ -1072,7 +1093,7 @@ test('a path that touched no note of the graph lights nothing and dims nothing',
   expect(found).toHaveLength(3);
   const before = await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)));
   const list = await openPaths(page);
-  await list.getByRole('button', { name: /What was asked/ }).hover();
+  await aRun(list, /What was asked/).pin.hover();
   await expect(list).toContainText('No note of this path is in the graph');
   await frames(page);
   expect(await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)))).toEqual(before);
@@ -1092,7 +1113,7 @@ test('on a phone the list of paths is short and scrolls, and nothing in it makes
   await page.goto('/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   const list = await openPaths(page);
-  await expect(list.getByRole('button')).toHaveCount(30);
+  await expect(list.getByRole('listitem')).toHaveCount(30);
   // Inside the window, short, scrolling by itself.
   const popover = page.locator('div.float-in-down').filter({ has: list });
   const box = (await popover.boundingBox())!;
@@ -1102,41 +1123,52 @@ test('on a phone the list of paths is short and scrolls, and nothing in it makes
   expect(box.y + box.height).toBeLessThanOrEqual(800);
   const sizes = await list.evaluate((el) => ({ scroll: el.scrollHeight, shown: el.clientHeight, across: el.scrollWidth, wide: el.clientWidth }));
   expect(sizes.scroll).toBeGreaterThan(sizes.shown * 2);
-  expect(sizes.shown).toBeLessThanOrEqual(800 * 0.45 + 1);
+  expect(sizes.shown).toBeLessThanOrEqual(800 * 0.5 + 1);
   expect(sizes.across).toBeLessThanOrEqual(sizes.wide + 1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   // The last of them can be got to, and tapped.
-  const last = list.getByRole('button').last();
+  const last = list.getByRole('listitem').last().locator('button[aria-pressed]');
   await last.scrollIntoViewIfNeeded();
   await last.click();
   await expect(last).toHaveAttribute('aria-pressed', 'true');
+  // Opened by being kept lit, with its long names: they are cut, and do not widen the list.
+  await expect(list.getByRole('listitem').last()).toContainText('the-notes-about');
+  expect(await list.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 /**
- * What a person reads inside `root`: each element with text of its own, with its size, its colour, and the colour behind it. A background
- * that lets the page through is laid over what is behind it; where `root` floats over the picture, over each colour of `under`, and the
- * worst of them counts.
+ * What a person reads inside `root`: each element with text of its own, with its size, and its colour as it shows against what is behind
+ * it. A colour or a background that lets the page through (its own alpha, or the `opacity` of it or of anything it is in) is laid over
+ * what is behind it; where `root` floats over the picture, over each colour of `under`, and the worst of them counts.
  */
 const readable = (root: Locator, under: number[][] = []) =>
   root.evaluate((top, under) => {
     const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
-    const over = (back: number[], layer: number[]) => {
-      const a = layer.length > 3 ? layer[3] : 1;
-      return [0, 1, 2].map((i) => layer[i] * a + back[i] * (1 - a));
+    const alphaOf = (c: number[]) => (c.length > 3 ? c[3] : 1);
+    /** How much of an element shows through opacity: its own, and that of everything it is in. */
+    const shown = (from: Element | null) => {
+      let a = 1;
+      for (let n = from; n; n = n.parentElement) a *= parseFloat(getComputedStyle(n).opacity);
+      return a;
     };
+    const over = (back: number[], colour: number[], alpha: number) => [0, 1, 2].map((i) => colour[i] * alpha + back[i] * (1 - alpha));
     const floating = top.closest('.memory-sky');
     return [top, ...top.querySelectorAll('*')].flatMap((el) => {
       const text = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').trim();
       if (!text) return [];
-      const layers: number[][] = [];
+      const layers: { colour: number[]; alpha: number }[] = [];
       for (let n: Element | null = el; n && n !== floating; n = n.parentElement) {
-        const layer = parse(getComputedStyle(n).backgroundColor);
-        if (layer.length > 3 ? layer[3] > 0 : layer.length === 3) layers.unshift(layer);
+        const colour = parse(getComputedStyle(n).backgroundColor);
+        const alpha = alphaOf(colour) * shown(n);
+        if (colour.length >= 3 && alpha > 0) layers.unshift({ colour, alpha });
       }
       const behind = floating ? under : [[255, 255, 255]];
-      const colour = parse(getComputedStyle(el).color);
-      return behind.map((base) => ({ text, size: parseFloat(getComputedStyle(el).fontSize), colour, back: layers.reduce((back, layer) => over(back, layer), base) }));
+      const written = parse(getComputedStyle(el).color);
+      return behind.map((base) => {
+        const back = layers.reduce((back, layer) => over(back, layer.colour, layer.alpha), base);
+        return { text, size: parseFloat(getComputedStyle(el).fontSize), colour: over(back, written, alphaOf(written) * shown(el)), back };
+      });
     });
   }, under);
 /** The WCAG contrast of a colour on another. */
@@ -1159,7 +1191,14 @@ for (const scheme of ['dark', 'light'] as const) {
     test(`the card over a star and the list of paths are written at the body size, and can be read, ${scheme} ${width} wide`, async ({ page }) => {
       await page.setViewportSize({ width, height });
       await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
-      await portal(page);
+      await portal(page, {
+        traces: [
+          ...TRACES,
+          { id: 't3', kind: 'query', input: 'What was asked of the librarian?', startedAt: '2026-09-28T09:25:00Z', notation: 'browse layout → ✓', usage: { inputTokens: 900, outputTokens: 40 } },
+          { id: 't4', kind: 'query', input: 'What does the old note say?', startedAt: '2026-09-28T09:26:00Z', notation: 'read gone.md → ⚠ partial', usage: { inputTokens: 800, outputTokens: 30 } },
+        ],
+        runs: { ...RUNS, t3: [step('list_directory')], t4: [step('read_concept', ['/gone.md'])] },
+      });
       await page.goto('/memory?view=graph');
       await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
       const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
@@ -1178,13 +1217,23 @@ for (const scheme of ['dark', 'light'] as const) {
       // The list: the question, what it cost, the steps and what is said of a path with no note in it; and the one kept lit, behind which the accent shows.
       await page.mouse.move(5, 5);
       const list = await openPaths(page);
-      await expect(list.getByRole('button')).toHaveCount(2);
+      await expect(list.getByRole('listitem')).toHaveCount(4);
       const popover = page.locator('div.float-in-down').filter({ has: list });
-      expectReadable(await readable(popover), 'the list');
-      await list.getByRole('button', { name: /Who runs the test host/ }).click();
+      expectReadable(await readable(popover), 'the list, shut');
+      // Opened, with the steps of each run in view, and both lines that say a run lit nothing: it touched no note, and its note is not in the graph. They must be on the screen to be measured.
+      const [change, query] = [aRun(list, /Persist the following knowledge/), aRun(list, /Who runs the test host/)];
+      for (const one of [change, query, aRun(list, /What was asked of the librarian/), aRun(list, /What does the old note say/)]) await one.open();
+      await expect(popover).toContainText('This run touched no note');
+      await expect(popover).toContainText('No note of this path is in the graph');
+      await expect(popover).toContainText('⚠ partial');
+      const seen = await readable(popover);
+      expect(seen.some((piece) => piece.text === 'This run touched no note')).toBe(true);
+      expect(seen.some((piece) => piece.text === 'No note of this path is in the graph')).toBe(true);
+      expectReadable(seen, 'the list, open');
+      await query.pin.click();
       expectReadable(await readable(popover), 'the list with a path kept');
       // The steps are not squeezed: each is as wide as its words.
-      for (const chip of await list.getByRole('button').first().locator('span.rounded-full.border').all()) expect((await chip.boundingBox())!.width).toBeGreaterThan(30);
+      for (const chip of await query.row.locator('span.rounded-full.border').all()) expect((await chip.boundingBox())!.width).toBeGreaterThan(30);
     });
   }
 }
@@ -1248,31 +1297,39 @@ test('a step goes by the path Understory gives for it: a file name two notes sha
       { id: 'a', kind: 'query', input: 'How is project A set up?', startedAt: '2026-09-28T10:00:00Z', notation: 'search "setup" (2) → read setup.md → ✓' },
       { id: 'b', kind: 'query', input: 'Is there a note called branches.md?', startedAt: '2026-09-28T10:01:00Z', notation: 'search "branches.md" (0) → browse layout → ✓' },
       { id: 'c', kind: 'query', input: 'What did my owner say?', startedAt: '2026-09-28T10:02:00Z', notation: 'read my owner.md → ✓' },
+      // Understory writes a query as it was asked, so a joint of its own can be in it.
+      { id: 'd', kind: 'query', input: 'How do I go from deploy to prod?', startedAt: '2026-09-28T10:03:00Z', notation: 'search "deploy -> prod → stage" (1) → read branches.md → ✓' },
     ],
     runs: {
-      a: [step('search_knowledge', ['/projects/a/setup.md', '/projects/b/setup.md']), step('read_concept', ['/projects/a/setup.md'])],
-      b: [step('search_knowledge'), step('list_directory')],
+      a: [step('search_knowledge', ['/projects/a/setup.md', '/projects/b/setup.md'], false, 'setup'), step('read_concept', ['/projects/a/setup.md'])],
+      b: [step('search_knowledge', [], false, 'branches.md'), step('list_directory')],
       c: [step('read_concept', ['/x/my owner.md'])],
+      d: [{ ...step('search_knowledge', ['/deployment/branches.md']), summary: 'deploy -> prod → stage' }, step('read_concept', ['/deployment/branches.md'])],
     },
   });
   await page.goto('/memory?view=graph');
   const graph = page.getByRole('group', { name: /6 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   const list = await openPaths(page);
-  const [a, b, c] = ['How is project A', 'Is there a note called', 'What did my owner'].map((name) => list.getByRole('button', { name: new RegExp(name) }));
+  const [a, b, c, d] = ['How is project A', 'Is there a note called', 'What did my owner', 'How do I go from deploy'].map((name) => aRun(list, new RegExp(name)));
   const lit = async () => (await Promise.all([...(await graph.getByRole('button').all())].map(async (button) => ((await button.getAttribute('aria-description')) === 'On the path traced' ? await button.textContent() : null)))).filter(Boolean).sort();
   // `read setup.md` is one of two notes; the step says which, and the search that found both lights neither.
-  await a.hover();
+  await a.pin.hover();
   await expect.poll(lit).toEqual(['Setup of project A']);
-  await expect(a.locator('span[style*="box-shadow"]')).toHaveCount(1);
-  await expect(a).not.toContainText('No note of this path');
+  await expect(a.row.locator('span[style*="box-shadow"]')).toHaveCount(1);
+  await expect(a.row).not.toContainText('No note of this path');
   // A search for a file's name touched no note, and the one with that name is not lit.
-  await b.hover();
+  await b.pin.hover();
   await expect.poll(lit).toEqual([]);
-  await expect(b).toContainText('This run touched no note');
+  await expect(b.row).toContainText('This run touched no note');
   // A name with a space in it is its own note, not the one whose name is the end of it.
-  await c.hover();
+  await c.pin.hover();
   await expect.poll(lit).toEqual(['My owner notes']);
+  // A query with arrows in it is one step, not cut in pieces, and the note the run read is lit all the same.
+  await d.pin.hover();
+  await expect.poll(lit).toEqual(['Branch Deployment on Test Host']);
+  await expect(d.row.locator('span.rounded-full.border').first()).toContainText(/search\s*"deploy -> prod → stage" \(1\)/);
+  await expect(d.row.locator('span.rounded-full.border')).toHaveCount(2);
 });
 
 test('the end of a run is told as Understory ends it, and a run is a change by what it did, whoever asked', async ({ page }) => {
@@ -1285,15 +1342,17 @@ test('the end of a run is told as Understory ends it, and a run is a change by w
     ],
     runs: {
       a: [step('read_concept', ['/deployment/branches.md'])],
-      b: [step('search_knowledge', ['/people/owner.md']), step('write_concept', ['/people/owner.md'], true)],
-      c: [step('search_knowledge')],
+      b: [step('search_knowledge', ['/people/owner.md'], false, 'owner'), step('write_concept', ['/people/owner.md'], true)],
+      c: [step('search_knowledge', [], false, 'owner')],
       d: [step('list_directory')],
     },
   });
   await page.goto('/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   const list = await openPaths(page);
-  const [partial, chat, failedChange, failed] = ['came to part', 'Note that the owner', 'failed before it wrote', 'A run that failed'].map((name) => list.getByRole('button', { name: new RegExp(name) }));
+  const opened: Locator[] = [];
+  for (const name of ['came to part', 'Note that the owner', 'failed before it wrote', 'A run that failed']) opened.push(await aRun(list, new RegExp(name)).open());
+  const [partial, chat, failedChange, failed] = opened;
   // How it ended is its last step, in its own words, and its own colour.
   await expect(partial).toContainText('⚠ partial');
   await expect(partial.locator('span.bg-current').last()).toHaveClass(/text-warn/);
@@ -1310,9 +1369,10 @@ test('a run whose steps have not come says nothing of its notes, and lights none
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph.locator('canvas')).toBeVisible();
   const list = await openPaths(page);
-  const [change, query] = [list.getByRole('button', { name: /Persist the following knowledge/ }), list.getByRole('button', { name: /Who runs the test host/ })];
-  for (const [run, word] of [[change, 'write'], [query, 'read']] as const) {
+  const [change, query] = [aRun(list, /Persist the following knowledge/), aRun(list, /Who runs the test host/)];
+  for (const [one, word] of [[change, 'write'], [query, 'read']] as const) {
     // The words, not the notes: no glow, and nothing said of whether it touched any.
+    const run = await one.open();
     await expect(run).toContainText(word);
     await expect(run.locator('span[style*="box-shadow"]')).toHaveCount(0);
     await expect(run).not.toContainText('touched no note');
@@ -1322,7 +1382,144 @@ test('a run whose steps have not come says nothing of its notes, and lights none
     await expect(graph.getByRole('button', { name: 'The owner' })).not.toHaveAccessibleDescription('On the path traced');
   }
   // A change asked for is still told by its asking, until its steps say otherwise.
-  await expect(change.locator('span.bg-current').first()).toHaveClass(/text-warn/);
+  await expect(change.row.locator('span.bg-current').first()).toHaveClass(/text-warn/);
+});
+
+for (const [width, height] of [[1280, 800], [390, 800]]) {
+  test(`ten runs, shut, fit the list without scrolling, ${width} wide`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    const ten = Array.from({ length: 10 }, (_, i) => ({
+      id: `r${i}`,
+      kind: i % 3 ? 'query' : 'mutation',
+      input: `A long question ${i} about how the branches of the test host are deployed and who asked for it`,
+      startedAt: '2026-09-28T09:20:11Z',
+      notation: 'browse layout → read branches.md → read owner.md → write branches.md → ✓',
+      usage: { inputTokens: 4100 + i, outputTokens: 310 },
+    }));
+    await portal(page, { traces: ten });
+    await page.goto('/memory?view=graph');
+    await expect(page.locator('.memory-sky canvas')).toBeVisible();
+    const list = await openPaths(page);
+    await expect(list.getByRole('listitem')).toHaveCount(10);
+    // Every run is one line, and none of them is open.
+    await expect(list.locator('button[aria-expanded="false"]')).toHaveCount(10);
+    await expect(list).not.toContainText('branches.md');
+    for (const row of await list.getByRole('listitem').all()) expect((await row.boundingBox())!.height).toBeLessThanOrEqual(40);
+    // So all ten are in view: nothing to scroll, and the popover inside the window.
+    const sizes = await list.evaluate((el) => ({ scroll: el.scrollHeight, shown: el.clientHeight, across: el.scrollWidth - el.clientWidth }));
+    expect(sizes.scroll).toBeLessThanOrEqual(sizes.shown + 1);
+    expect(sizes.across).toBeLessThanOrEqual(1);
+    const box = (await page.locator('div.float-in-down').filter({ has: list }).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(box.y + box.height).toBeLessThanOrEqual(height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    // The cost is still in each row, not cut off with the question.
+    for (const row of await list.getByRole('listitem').all()) await expect(row).toContainText(/\d(\.\dk)?→310 tok/);
+  });
+}
+
+test("a run opens and shuts with its toggle, by the mouse and by the keyboard, and the toggle says what it does and to which run", async ({ page }) => {
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  await expect(page.locator('.memory-sky canvas')).toBeVisible();
+  const list = await openPaths(page);
+  const run = aRun(list, /Who runs the test host/);
+  // A real button that says whether its run is open, and what it would do, with the run's question in its name.
+  await expect(run.toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(run.toggle).toHaveAccessibleName(/^Show the steps\s+Who runs the test host/);
+  await expect(run.row).not.toContainText('branches.md');
+  await expect(run.row.locator('[id$="-steps"]')).toHaveCount(0);
+  await run.toggle.click();
+  await expect(run.toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(run.toggle).toHaveAccessibleName(/^Hide the steps\s+Who runs the test host/);
+  const controls = await run.toggle.getAttribute('aria-controls');
+  await expect(page.locator(`[id="${controls}"]`)).toContainText('branches.md');
+  await expect(run.row).toContainText(/search\s*"test host" \(2\)\s*read\s*branches\.md\s*read\s*owner\.md\s*✓/);
+  // The mouse having left it, it stays as the person said.
+  await page.mouse.move(5, 5);
+  await expect(run.toggle).toHaveAttribute('aria-expanded', 'true');
+  await run.toggle.click();
+  await expect(run.toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(run.row).not.toContainText('branches.md');
+  // The keyboard: Tab to the run's button and on to its toggle; Enter opens, Space shuts.
+  await page.getByRole('button', { name: 'Query paths' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(aRun(list, /Persist the following knowledge/).pin).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(aRun(list, /Persist the following knowledge/).toggle).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(aRun(list, /Persist the following knowledge/).toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(aRun(list, /Persist the following knowledge/).row).toContainText('write');
+  await page.keyboard.press('Space');
+  await expect(aRun(list, /Persist the following knowledge/).toggle).toHaveAttribute('aria-expanded', 'false');
+  // Tab goes on to the next run, one stop for its button and one for its toggle; none is skipped.
+  await page.keyboard.press('Tab');
+  await expect(run.pin).toBeFocused();
+});
+
+test('the run the pointer is on, or that is kept lit, is open; the rest are shut; what the person shut stays shut', async ({ page }) => {
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  await expect(page.locator('.memory-sky canvas')).toBeVisible();
+  const list = await openPaths(page);
+  const [change, query] = [aRun(list, /Persist the following knowledge/), aRun(list, /Who runs the test host/)];
+  await expect(list.locator('button[aria-expanded="false"]')).toHaveCount(2);
+  // Pointed at, it opens; the pointer gone, it shuts.
+  await query.pin.hover();
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(change.toggle).toHaveAttribute('aria-expanded', 'false');
+  await page.mouse.move(5, 5);
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  // Kept lit, it stays open, with the pointer away and the list shut and opened again.
+  await query.pin.click();
+  await page.mouse.move(5, 5);
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Escape');
+  await openPaths(page);
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(change.toggle).toHaveAttribute('aria-expanded', 'false');
+  // The person shuts it with its toggle, though it is kept lit: it stays shut, the pointer on it or not.
+  await query.toggle.click();
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(query.pin).toHaveAttribute('aria-pressed', 'true');
+  await query.pin.hover();
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a run that is shut lights its notes in the graph all the same, pointed at, reached with Tab, or kept lit', async ({ page }) => {
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
+  await expect(graph.locator('canvas')).toBeVisible();
+  const list = await openPaths(page);
+  const query = aRun(list, /Who runs the test host/);
+  const owner = graph.getByRole('button', { name: 'The owner' });
+  const loose = graph.getByRole('button', { name: 'A loose note' });
+  // Opened and shut by the person: shut it stays, and the pointer on it lights the notes of its path.
+  await query.open();
+  await query.toggle.click();
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  await query.pin.hover();
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(owner).toHaveAccessibleDescription('On the path traced');
+  await expect(loose).not.toHaveAccessibleDescription('On the path traced');
+  await page.mouse.move(5, 5);
+  await expect(owner).not.toHaveAccessibleDescription('On the path traced');
+  // Reached with Tab, a run that is shut lights its notes too, and stays shut.
+  await query.pin.focus();
+  await expect(owner).toHaveAccessibleDescription('On the path traced');
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  // Kept lit with a click while it is shut, as the person left it: still shut, and lit with the pointer away and the list shut.
+  await query.pin.click();
+  await expect(query.pin).toHaveAttribute('aria-pressed', 'true');
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  await page.mouse.move(5, 5);
+  await expect(owner).toHaveAccessibleDescription('On the path traced');
+  await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0);
+  await expect(owner).toHaveAccessibleDescription('On the path traced');
+  await expect(loose).not.toHaveAccessibleDescription('On the path traced');
 });
 
 test('the search lists what matches, and says when nothing does', async ({ page }) => {

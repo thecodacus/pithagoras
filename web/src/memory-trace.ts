@@ -10,7 +10,8 @@ import type { MemoryTraceStep } from "./api";
  * are not read from it. They come from the run's own steps (`MemoryTraceStep`,
  * from Understory's `/api/trace`), which give the full path of each, and a
  * step that read, wrote, patched or deleted a note is the one that touched it.
- * A search only found notes, so it lights none: its words say how many.
+ * A search only found notes, so it lights none: its words say how many. The
+ * words of the line are made from those steps too, once they are known.
  */
 export type TraceEnd = "ok" | "partial" | "failed";
 
@@ -45,30 +46,67 @@ export interface TracePath {
   touched: number;
 }
 
+/** What Understory cuts a search's query to in the notation: its words are the notation's, so they are written the same here. */
+const QUERY_LETTERS = 30;
+const cut = (text: string) => (text.length > QUERY_LETTERS ? `${text.slice(0, QUERY_LETTERS - 1)}…` : text);
+/** A file name, as the notation writes a note: the last part of its path. */
+const fileName = (path: string) => path.split("/").pop() ?? path;
+
+/** What a step says, as Understory's notation writes it (`buildNotation`), from the step itself. */
+function wordsOf(step: MemoryTraceStep): string {
+  switch (step.tool) {
+    case "search_knowledge":
+      return `search "${cut(step.summary)}" (${step.paths.length})`;
+    case "read_concept":
+      return `read ${fileName(step.paths[0] ?? step.summary)}`;
+    case "list_directory":
+      return "browse layout";
+    case "lint_knowledge":
+      return "lint graph";
+    case "write_concept":
+      return `write ${fileName(step.paths[0] ?? "")}`;
+    case "patch_concept":
+      return `patch ${fileName(step.paths[0] ?? "")}`;
+    case "delete_concept":
+      return `delete ${fileName(step.paths[0] ?? "")}`;
+    default:
+      return step.tool;
+  }
+}
+
+const OUTCOMES: Record<string, string> = { success: "✓", partial: "⚠ partial", failed: "✗" };
+
 /**
- * What the graph shows of a run: its notation cut into steps, and, when its own
- * steps are known (`run`), which notes of the graph (`inGraph`) each touched.
+ * What the graph shows of a run: its steps in a line, and which notes of the
+ * graph (`inGraph`) each touched.
+ *
+ * Once the run's own steps are known (`run`), the line is made from them, not
+ * cut out of the notation: a search's query is written there as it was asked,
+ * and may hold an arrow. Until they are, it is the notation cut at Understory's
+ * own joint (` → `), words only, and nothing is said of the notes.
  */
-export function pathOf(trace: { kind: string; notation?: string }, run: MemoryTraceStep[] | undefined, inGraph: ReadonlySet<string>): TracePath {
-  const parts = (trace.notation ?? "")
-    .split(/\s*(?:→|->|⟶)\s*/)
+export function pathOf(trace: { kind: string; notation?: string }, run: { steps: MemoryTraceStep[]; outcome?: string } | undefined, inGraph: ReadonlySet<string>): TracePath {
+  let parts = (trace.notation ?? "")
+    .split(" → ")
     .map((text) => text.trim())
     .filter(Boolean);
-  const end = parts.length && ENDS[parts[parts.length - 1]] ? parts.pop()! : undefined;
-  // One part of the notation for each step, in order; a run that does not add up is not guessed at.
-  const lined = run && run.length === parts.length ? run : undefined;
+  let end = parts.length && ENDS[parts[parts.length - 1]] ? parts.pop()! : undefined;
+  if (run) {
+    parts = run.steps.map(wordsOf);
+    end = run.outcome && OUTCOMES[run.outcome] ? OUTCOMES[run.outcome] : end;
+  }
   const steps = parts.map((text, i): TraceStep => {
     const [verb, ...rest] = text.split(/\s+/);
-    const touching = lined && TOUCHES.has(lined[i].tool) ? lined[i].paths.filter((p) => inGraph.has(p)) : [];
-    return { text, verb, target: rest.join(" "), notes: touching };
+    const step = run?.steps[i];
+    return { text, verb, target: rest.join(" "), notes: step && TOUCHES.has(step.tool) ? step.paths.filter((p) => inGraph.has(p)) : [] };
   });
   if (end) steps.push({ text: end, verb: end, target: "", notes: [], end: ENDS[end] });
-  const touched = lined ? new Set(lined.filter((s) => TOUCHES.has(s.tool)).flatMap((s) => s.paths)).size : 0;
+  const touched = run ? new Set(run.steps.filter((s) => TOUCHES.has(s.tool)).flatMap((s) => s.paths)).size : 0;
   return {
     steps,
     notes: [...new Set(steps.flatMap((s) => s.notes))],
-    changed: run ? run.some((s) => s.write) : trace.kind === "mutation",
-    known: !!lined,
+    changed: run ? run.steps.some((s) => s.write) : trace.kind === "mutation",
+    known: !!run,
     touched,
   };
 }
