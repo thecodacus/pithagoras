@@ -32,7 +32,9 @@ reaches the model to be reasoned about.
 
 The browser's tools read a page after nearly every click, so their results carry
 a shorter envelope: the same random closing id, with the warning above said once
-in the agent's instructions instead of on every result.
+in the agent's instructions instead of on every result. Every browser tool carries
+that warning, so it is said while any of them is on, whichever of the others are
+switched off, and by the `tools` tool while they are lazy.
 
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, and the browser. The
