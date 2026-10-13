@@ -4,7 +4,7 @@ import { DATA_DIR } from "./data-dir.js";
 import { getDb } from "./db.js";
 import { ChatGone, chatFolder, folderLabel, folderOf, foundFolder, knownFolders, locateRow, newId, realFolderOf, type MediaOrigin } from "./media-folders.js";
 import { isWithinText, realPath } from "./within.js";
-import { VIDEO_HEAD, openClip, sniffVideo, type VideoExt, type VideoFormat } from "./video-files.js";
+import { VIDEO_HEAD, formatByName, formatOf, openClip, sniffVideo, type VideoExt, type VideoFormat } from "./video-files.js";
 import { copyState, openCopy, removeCopies } from "./video-copies.js";
 import { openPoster, posterAvailable, removePosters } from "./video-posters.js";
 import { FileError, baseDir, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
@@ -79,6 +79,8 @@ export interface GalleryVideo {
   format: VideoFormat;
   /** For a clip that is not played as it is: a playable WebM copy of it is `ready`, or ffmpeg is there to make one on request (`available`). */
   copy?: "ready" | "available";
+  /** Why the file could not be opened when the list was made, when it could not: it is out of reach (its folder, or the file) or over the size a clip may have. Its format is then what is known of it without opening it. */
+  unavailable?: "unreachable" | "too_large";
 }
 
 interface Row {
@@ -137,26 +139,38 @@ function downloadName(row: Row): string {
   return `video-${stamp}-${row.id.slice(0, 4)}${path.extname(row.path)}`;
 }
 
-/** What a clip's file is and what it is when listed: the kind its first bytes say, and the size and time the copy of it is named for. A file that cannot be reached is told as nothing known. */
+/** What a clip's file is and what it is when listed: the kind its first bytes say, and the size and time the copy of it is named for. A file that could not be opened says why, with the kind as far as it is known. */
 interface Looked {
   format: VideoFormat;
   size?: number;
   modifiedMs?: number;
+  unavailable?: GalleryVideo["unavailable"];
 }
 
-const UNKNOWN: VideoFormat = sniffVideo(Buffer.alloc(0));
-
 function look(row: Row, folders: Map<string, string | FileError>): Looked {
+  // A clip that cannot be opened is not an unknown one: it keeps the kind it has, which its name tells when its bytes cannot be read.
+  const unopened = (): Looked => ({ format: formatByName(row.path), unavailable: "unreachable" });
+  let at: { base: string; rel: string };
   try {
-    const at = locate(row, folders);
+    at = locate(row, folders);
+  } catch {
+    return unopened();
+  }
+  try {
     const opened = openClip(at.base, at.rel);
     try {
       return { format: opened.format, size: opened.size, modifiedMs: fstatSync(opened.fd).mtimeMs };
     } finally {
       closeSync(opened.fd);
     }
+  } catch (e) {
+    if (!(e instanceof FileError && e.code === "too_large")) return unopened();
+  }
+  // Over the size a clip may have: it is neither played nor sent, but what it is can still be read from its start.
+  try {
+    return { format: formatOf(at.base, at.rel), unavailable: "too_large" };
   } catch {
-    return { format: UNKNOWN };
+    return unopened();
   }
 }
 
@@ -173,9 +187,10 @@ function shown(row: ListedRow, looked: Looked): GalleryVideo {
     createdAt: row.created_at,
     bytes: row.bytes,
     fileName: downloadName(row),
-    poster: looked.format.playable && posterAvailable(),
+    poster: looked.format.playable && !looked.unavailable && posterAvailable(),
     format: looked.format,
     ...(copy ? { copy } : {}),
+    ...(looked.unavailable ? { unavailable: looked.unavailable } : {}),
   };
 }
 
@@ -343,12 +358,15 @@ function kindByName(name: string): VideoKind {
   return /^video-\d{8}-\d{6}-[0-9a-f]{6}(?: \(\d+\))?\.[^.]+$/.test(name) ? "generated" : "unknown";
 }
 
+/** Whether the tool would have given this name to a clip nobody could tell the kind of: it names such a clip `.bin` and no other way. */
+const namedForUnknown = (name: string): boolean => kindByName(name) === "generated" && name.endsWith(".bin");
+
 /**
  * Whether the file `name` of the `generated-videos` folder of `real` is a clip to list, and then its size and
  * time. It is opened as serving one opens it. What its first bytes say is some kind of clip is listed, played or
- * downloaded as what it is; a file they say nothing of is listed only when it is named as the tool names what it
- * makes (it is then a clip the endpoint sent that nobody could tell the kind of), and not otherwise: the folder may
- * hold other things. A file that is not listed is not opened again until it changes.
+ * downloaded as what it is; a file they say nothing of is listed only when it is named as the tool names a clip
+ * nobody could tell the kind of (`video-<time>-<id>.bin`: it is then one the endpoint sent), and not otherwise: the
+ * folder may hold other things. A file that is not listed is not opened again until it changes.
  */
 function clipAt(real: string, name: string): { size: number; mtimeMs: number } | undefined {
   const rel = `${GENERATED_VIDEOS_DIR}/${name}`;
@@ -360,7 +378,7 @@ function clipAt(real: string, name: string): { size: number; mtimeMs: number } |
     try {
       const opened = openClip(real, rel);
       try {
-        if (opened.format.id === "bin" && kindByName(name) !== "generated") {
+        if (opened.format.id === "bin" && !namedForUnknown(name)) {
           refused.set(file, stamp);
           return undefined;
         }

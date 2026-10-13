@@ -1767,6 +1767,8 @@ export interface GalleryVideo {
   format: VideoFormat;
   /** For a clip that is not played as it is: a playable WebM copy of it is `ready`, or ffmpeg is there to make one on request (`available`). */
   copy?: "ready" | "available";
+  /** Why the file could not be opened when the list was made, when it could not: out of reach (its folder or the file), or over the size a clip may have. Its format is then what is known of it without opening it. */
+  unavailable?: "unreachable" | "too_large";
 }
 
 export interface VideoFormat {

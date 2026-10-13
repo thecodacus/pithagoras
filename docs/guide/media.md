@@ -406,6 +406,13 @@ it, and the file is named for that (`.webm`, `.avi`, `.bin` for an unknown one).
   play** when the portal has an `ffmpeg` (the one that makes the posters). The copy is made on request, never
   by itself, kept beside the gallery in `video-copies`, and plays in the viewer; the original is always kept and **Download**
   still gives it. Without ffmpeg there is no such button, and the original is there to download.
+- **What a copy is bounded by.** A few megabytes of video can declare pictures of many gigabytes, so ffmpeg is first asked how
+  large the picture is, and a clip over **4096 by 4096 pixels** (or one whose picture ffmpeg cannot name) is refused before
+  anything is converted; the original is still there to download. The copy is scaled down to fit **1280 by 1280** pixels
+  and made in 4:2:0, which every browser plays. A conversion decodes with one thread and encodes with two, looks only five
+  frames ahead, may take at most **3 minutes** (a look at the picture, 20 seconds), stops at the **100 MB** a clip may have, and
+  is run with at most **4 GB** of address space and no single block of memory over **512 MB**. The cap on the address
+  space is set where the portal runs on Linux or macOS; on Windows only the cap on one block of memory applies.
 - **The agent's clips.** `generate_video` keeps such a clip in the chat's folder too, and tells the agent that a browser
   cannot play it in the chat; the chat says so in a short line, with the format and a link to the gallery, and draws no
   player. `show_video` still plays only a WebM or an MP4.
@@ -546,8 +553,9 @@ This is the rule for pictures, applied to videos, by the same code:
   whose document type, read from its header, is `webm` or `matroska`, which is what stable-diffusion.cpp writes) or an
   **MP4**, which play, and an AVI, a QuickTime movie, a WebP, a GIF, an Ogg or an EBML file of another type, which are
   listed as what they are and offered as downloads (see [Clips a browser cannot play](#clips-a-browser-cannot-play)).
-  A file the bytes say nothing of is listed only if it is named as the tool names what it makes
-  (`video-20261001-101500-a1b2c3.bin`): the folder may hold other things. A link is never followed, and nothing else in
+  A file the bytes say nothing of is listed only if it is named as the tool names such a clip, with
+  the extension `.bin` (`video-20261001-101500-a1b2c3.bin`; the same name with another extension is left alone): the
+  folder may hold other things. A link is never followed, and nothing else in
   those folders is looked at.
 - A video that was found is *from the folder*: which chat made it cannot be told, and what it was
   asked for was not kept. It is one entry with a video the agent recorded, never two. It has no
@@ -556,7 +564,10 @@ This is the rule for pictures, applied to videos, by the same code:
   were asked for: the files are in a folder that is not the chat's to take away. A folder that cannot
   be reached for the moment, such as a drive that is not mounted, is not a file that is gone: its
   videos stay in the list and are shown again when it is back. A video whose file is gone is dropped
-  from the list the next time it is loaded.
+  from the list the next time it is loaded. While a video's file cannot be opened (its folder is out
+  of reach, or the file has grown past 100 MB) it keeps the format it has (read from the start of the
+  file when it is only too large, from its name when it cannot be read) instead of turning into an **Unknown** file, and its
+  **Details** say why.
 - **Deleting an agent** or a project with its folder takes its chats' videos with it; with **Keep its
   folder** they stay, as videos of that folder.
 - The list is refreshed when you return to the tab, every half minute while it is on screen, and with

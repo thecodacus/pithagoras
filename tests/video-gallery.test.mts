@@ -2,7 +2,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { request } from "node:http";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
@@ -18,6 +18,7 @@ const gen = await import("../server/src/video-generation.ts");
 const gallery = await import("../server/src/video-gallery.ts");
 const jobsModule = await import("../server/src/video-jobs.ts");
 const posters = await import("../server/src/video-posters.ts");
+const copies = await import("../server/src/video-copies.ts");
 const images = await import("../server/src/image-gallery.ts");
 const { videosRouter } = await import("../server/src/api/videos.ts");
 const { filesRouter } = await import("../server/src/api/files.ts");
@@ -84,6 +85,8 @@ const put = (folder: string, name: string, bytes: Buffer = WEBM) => {
 };
 /** A clip as a server may finish one that a browser does not play: an AVI, which is a RIFF file with the AVI tag. */
 const AVI = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0x24, 0, 0, 0]), Buffer.from("AVI LIST"), Buffer.alloc(40)]);
+/** An AVI in the gallery as a clip of the page. */
+const aviClip = (prompt: string, bytes = AVI) => gallery.addPageVideo({ bytes, ext: "avi", kind: "generated", prompt, params: {} });
 /** A clip of a different content, as a file: the bytes of the real one with a tail that tells two apart. */
 const clip = (tag: string) => Buffer.concat([WEBM, Buffer.from(tag)]);
 
@@ -723,13 +726,15 @@ test("every clip in the folders the tool writes into is listed, recorded or not,
   put(alpha, "clip.mp4", MP4);
   put(alpha, "no extension", clip("w"));
   put(alpha, "disguised.txt", clip("d"));
-  // What is not: nothing its bytes say is a kind of clip and no name of the tool's, an empty file, a hidden one, a picture, one too large.
+  // What is not: nothing its bytes say is a kind of clip and no name of the tool's, an empty file, a hidden one, a picture, one too large, one that only has the tool's name.
   put(alpha, "notes.txt", Buffer.from("hello"));
   put(alpha, "fake.webm", Buffer.from("<html><script>alert(1)</script></html>"));
   put(alpha, "empty.webm", Buffer.alloc(0));
   put(alpha, ".half-written.upload", clip("half"));
   truncateSync(put(alpha, "huge.webm", clip("huge")), MAX_VIDEO_BYTES + 1);
   put(alpha, "pic.png", PNG);
+  // Named as the tool names a clip nobody could tell the kind of, but not `.bin`: not one the tool made, so not listed.
+  put(alpha, "video-20260103-130002-abcdef.html", Buffer.from("<html><script>alert(1)</script></html>"));
   // What is, though a browser does not play it: a QuickTime movie, an AVI, and a file the tool named that no bytes say a kind of.
   put(alpha, "movie.mov", Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(40)]));
   put(alpha, "video-20260103-130001-aaaaaa.avi", AVI);
@@ -833,6 +838,49 @@ test("a clip of a folder that is out of reach for the moment stays in the list, 
   assert.equal(((await listed("?limit=100")).videos.filter((v: any) => v.chat?.id === "away-chat")).length, 1);
   renameSync(moved, folder);
   assert.equal((await call("GET", `/videos/${id}/file`)).status, 200, "back, it plays again");
+});
+
+test("a clip that cannot be opened when the list is made keeps the kind it has, and says why: out of reach, or too large", async () => {
+  const folder = chat("unopened-chat", "Unopened");
+  const names = { webm: "video-20260106-100000-aaaaaa.webm", avi: "video-20260106-100001-bbbbbb.avi" };
+  put(folder, names.webm, clip("unopened"));
+  put(folder, names.avi, AVI);
+  for (const name of Object.values(names)) gallery.recordChatVideo({ sessionId: "unopened-chat", path: `${GENERATED_VIDEOS_DIR}/${name}`, kind: "generated", prompt: name, params: {}, bytes: 80 });
+  const mine = async () => (await listed("?limit=100")).videos.filter((v: any) => v.chat?.id === "unopened-chat");
+  const byName = (list: any[], name: string) => list.find((v: any) => v.fileName === name);
+  // Opened, they are what their bytes say, and nothing is wrong with them.
+  const before = await mine();
+  assert.deepEqual([byName(before, names.webm).format.id, byName(before, names.webm).unavailable], ["webm", undefined]);
+  assert.deepEqual([byName(before, names.avi).format.id, byName(before, names.avi).unavailable], ["avi", undefined]);
+
+  // The folder is not there, as a drive that is not mounted: the clips are the kind they were, not "unknown", and the reason is out of reach.
+  const moved = `${folder}-away`;
+  renameSync(folder, moved);
+  const away = await mine();
+  const webm = byName(away, names.webm);
+  const avi = byName(away, names.avi);
+  assert.deepEqual([webm.format.id, webm.format.playable, webm.unavailable, webm.poster], ["webm", true, "unreachable", false]);
+  assert.deepEqual([avi.format.id, avi.format.playable, avi.unavailable], ["avi", false, "unreachable"]);
+  assert.equal((await call("GET", `/videos/${webm.id}/file`)).status, 404);
+  assert.equal((await call("GET", `/videos/${avi.id}/file`)).status, 404);
+  renameSync(moved, folder);
+  assert.equal(byName(await mine(), names.webm).unavailable, undefined, "back, it is as it was");
+
+  // A file that has grown past the size of a clip: what it is is still read from its start, and it is said to be too large.
+  const own = path.join(temp, "videos");
+  const big = gallery.addPageVideo({ bytes: clip("big"), ext: "webm", kind: "generated", prompt: "big", params: {} });
+  const bigAvi = aviClip("big avi");
+  for (const [id, ext] of [[big.id, "webm"], [bigAvi.id, "avi"]]) truncateSync(path.join(own, `${id}.${ext}`), MAX_VIDEO_BYTES + 1);
+  const [grownWebm, grownAvi] = (await listed(`?ids=${big.id},${bigAvi.id}`)).videos;
+  assert.deepEqual([grownWebm.format.id, grownWebm.format.playable, grownWebm.unavailable, grownWebm.poster], ["webm", true, "too_large", false]);
+  assert.deepEqual([grownAvi.format.id, grownAvi.format.playable, grownAvi.unavailable], ["avi", false, "too_large"]);
+  assert.equal((await call("GET", `/videos/${big.id}/file`)).status, 413);
+
+  // A file that is gone is told as the kind it was named for; the next look at the list drops it.
+  rmSync(path.join(own, `${bigAvi.id}.avi`));
+  const [gone] = (await listed(`?ids=${bigAvi.id}`)).videos;
+  assert.deepEqual([gone.format.id, gone.unavailable], ["avi", "unreachable"]);
+  for (const id of [big.id, webm.id, avi.id]) await call("DELETE", `/videos/${id}`);
 });
 
 test("the clips of a folder the portal removes go with it, those of its chats included", async () => {
@@ -1085,20 +1133,35 @@ test("the schema keeps a clip's place once, in the folder of the chat or in the 
 
 // --- the playable copies ---
 
-/** A stand-in for ffmpeg that converts: it says it is there, records how it was run, and writes a WebM to the file it is given last. */
-function convertingFfmpeg(dir: string, { fail = false } = {}) {
+/**
+ * A stand-in for ffmpeg that converts: it says it is there, records how it was run, answers a look at a clip with a picture
+ * of `size`, and writes a WebM (or `output`) to the file it is given last. `fail` makes it fail both ways; `grow` makes
+ * the file that many bytes long; `hold` makes it wait, once it has begun to convert, for the test to let it go.
+ */
+function convertingFfmpeg(dir: string, { fail = false, size = "640x360", output = WEBM, grow = 0, hold = false }: { fail?: boolean; size?: string; output?: Buffer; grow?: number; hold?: boolean } = {}) {
   mkdirSync(dir, { recursive: true });
   const log = path.join(dir, "args.log");
+  const limits = path.join(dir, "limits.log");
+  const started = path.join(dir, "started");
+  const go = path.join(dir, "go");
+  for (const stale of [log, limits, started, go]) rmSync(stale, { force: true });
   const webm = path.join(dir, "out.webm");
-  writeFileSync(webm, WEBM);
+  writeFileSync(webm, output);
   const script = path.join(dir, "ffmpeg");
+  const q = (x: string) => JSON.stringify(x);
   writeFileSync(
     script,
-    `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\necho "$@" >> ${JSON.stringify(log)}\ncat > /dev/null\n` +
-      (fail ? `echo "Invalid data found when processing input" >&2\nexit 1\n` : `for last; do :; done\ncat ${JSON.stringify(webm)} > "$last"\n`),
+    `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\necho "$@" >> ${q(log)}\necho "ulimit $(ulimit -v)" >> ${q(limits)}\ncat > /dev/null\n` +
+      // A look at the clip has no output file; a conversion has one, and is a WebM.
+      `case "$*" in *" -f webm "*) ;; *)\n` +
+      (fail ? `echo "Invalid data found when processing input" >&2\n` : size ? `echo "  Stream #0:0: Video: ffv1 (FFV1 / 0x31564646), yuv420p, ${size}, SAR 1:1 DAR 16:9, 5 fps, 5 tbr, 5 tbn" >&2\necho "At least one output file must be specified" >&2\n` : `echo "At least one output file must be specified" >&2\n`) +
+      `exit 1;; esac\n` +
+      (hold ? `touch ${q(started)}\ni=0; while [ ! -e ${q(go)} ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n` : "") +
+      `for last; do :; done\ncat ${q(webm)} > "$last"\n` +
+      (grow ? `truncate -s ${grow} "$last"\n` : ""),
   );
   chmodSync(script, 0o755);
-  return { script, log };
+  return { script, log, limits, started, go };
 }
 const copyFiles = () => (existsSync(path.join(temp, "video-copies")) ? readdirSync(path.join(temp, "video-copies")) : []);
 
@@ -1141,7 +1204,7 @@ test("with ffmpeg a playable WebM copy of a clip a browser cannot play is made o
     assert.deepEqual(made.body, { ok: true });
     // Run on the clip from its standard input, and allowed to open nothing else.
     const args = readFileSync(tool.log, "utf8");
-    assert.match(args, /-protocol_whitelist pipe -i pipe:0 /);
+    assert.match(args, /-protocol_whitelist pipe -threads 1 -i pipe:0 /);
     assert.match(args, /-f webm -y .*video-copies/);
     assert.equal(copyFiles().length, 1);
     assert.match(copyFiles()[0], new RegExp(`^${avi.id}-[0-9a-f]+-[0-9a-f]+\\.webm$`));
@@ -1198,5 +1261,169 @@ test("a copy that ffmpeg cannot make says so, and leaves the original and no fil
     delete process.env.FFMPEG_PATH;
     posters.forgetPosterProbe();
     rmSync(path.join(temp, "video-copies"), { recursive: true, force: true });
+  }
+});
+
+/** Runs a test with this ffmpeg in place of the installed one; the copies it made are gone after it. */
+async function withFfmpeg(script: string, body: () => Promise<void>) {
+  process.env.FFMPEG_PATH = script;
+  posters.forgetPosterProbe();
+  try {
+    await body();
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+    rmSync(path.join(temp, "video-copies"), { recursive: true, force: true });
+  }
+}
+/** What ffmpeg was run with, a line for each run. */
+const runsOf = (tool: { log: string }) => (existsSync(tool.log) ? readFileSync(tool.log, "utf8").trim().split("\n") : []);
+
+test("a copy is made within limits: the picture is scaled down, the output and the memory are capped, and ffmpeg is told so", async () => {
+  const tool = convertingFfmpeg(path.join(temp, "bounded-ffmpeg"), { size: "4096x4096" });
+  await withFfmpeg(tool.script, async () => {
+    const avi = aviClip("bounded");
+    const made = await call("POST", `/videos/${avi.id}/copy`);
+    // The largest picture there is room for is converted.
+    assert.equal(made.status, 200);
+    const [look, conversion] = runsOf(tool);
+    assert.equal(runsOf(tool).length, 2, "one look at the clip, one conversion");
+    assert.doesNotMatch(look, / -f webm /, "the look converts nothing");
+    assert.match(conversion, / -f webm -y /);
+    // Scaled down to fit, as 4:2:0 that every browser plays; the encoder looks few frames ahead, with few threads; the file stops at a byte over the size of a clip.
+    assert.match(conversion, /-vf scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p /);
+    assert.match(conversion, / -threads 2 -lag-in-frames 5 -fs 104857601 /);
+    // No block of memory beyond what one frame needs, in the look as in the conversion.
+    for (const line of [look, conversion]) assert.match(line, /-max_alloc 536870912 /);
+    // And the address space capped, where the platform can: the stand-in says what its shell gave it.
+    if (process.platform !== "win32") assert.deepEqual(readFileSync(tool.limits, "utf8").trim().split("\n"), ["ulimit 4194304", "ulimit 4194304"]);
+  });
+});
+
+test("a clip that declares a picture over the limit is refused before it is converted, and nothing is left behind", async () => {
+  for (const size of ["8192x8192", "4097x100", "100x4097"]) {
+    const tool = convertingFfmpeg(path.join(temp, "oversized-ffmpeg"), { size });
+    await withFfmpeg(tool.script, async () => {
+      const avi = aviClip(`oversized ${size}`);
+      const made = await call("POST", `/videos/${avi.id}/copy`);
+      assert.equal(made.status, 502, size);
+      assert.match(made.body.error, /could not be made.*original can be downloaded/);
+      // Only the look at the clip ran: no conversion was begun, and no file was made.
+      const runs = runsOf(tool);
+      assert.equal(runs.length, 1, size);
+      assert.doesNotMatch(runs[0], / -f webm /);
+      assert.deepEqual(copyFiles(), []);
+      assert.equal((await listed(`?ids=${avi.id}`)).videos[0].copy, "available", "it is still the original that is there");
+      assert.deepEqual((await call("GET", `/videos/${avi.id}/file`)).bytes, AVI);
+    });
+  }
+});
+
+test("a clip whose picture ffmpeg cannot name is not converted either", async () => {
+  const tool = convertingFfmpeg(path.join(temp, "nameless-ffmpeg"), { size: "" });
+  await withFfmpeg(tool.script, async () => {
+    const avi = aviClip("nameless");
+    assert.equal((await call("POST", `/videos/${avi.id}/copy`)).status, 502);
+    assert.equal(runsOf(tool).length, 1);
+    assert.deepEqual(copyFiles(), []);
+  });
+});
+
+test("a copy is only ever sent when its bytes say it is a WebM", async () => {
+  const tool = convertingFfmpeg(path.join(temp, "serving-ffmpeg"));
+  await withFfmpeg(tool.script, async () => {
+    const avi = aviClip("served");
+    // A file in the place of this clip's copy that is something else: put there, as a copy that was made is not.
+    const file = statSync(path.join(temp, "videos", `${avi.id}.avi`));
+    mkdirSync(path.join(temp, "video-copies"), { recursive: true });
+    writeFileSync(path.join(temp, "video-copies", copies.copyName(avi.id, file.size, file.mtimeMs)), "<html><script>alert(1)</script></html>");
+    const sent = await call("GET", `/videos/${avi.id}/copy`);
+    assert.equal(sent.status, 404);
+    assert.doesNotMatch(sent.bytes.toString("utf8"), /<script>/);
+    assert.equal(runsOf(tool).length, 0, "asking for a copy makes none");
+  });
+});
+
+test("what ffmpeg makes that is not a WebM, or is over the size of a clip, is thrown away and is no copy", async () => {
+  const cases: [string, Parameters<typeof convertingFfmpeg>[1]][] = [
+    ["a page", { output: Buffer.from("<html><script>alert(1)</script></html>") }],
+    ["a WebM stopped at the limit", { grow: MAX_VIDEO_BYTES + 1 }],
+  ];
+  for (const [what, options] of cases) {
+    const tool = convertingFfmpeg(path.join(temp, "wrong-ffmpeg"), options);
+    await withFfmpeg(tool.script, async () => {
+      const avi = aviClip(what);
+      const made = await call("POST", `/videos/${avi.id}/copy`);
+      assert.equal(made.status, 502, what);
+      assert.equal(runsOf(tool).length, 2, `${what}: it was converted`);
+      assert.deepEqual(copyFiles(), [], `${what}: nothing is kept, not even the part`);
+      assert.equal((await call("GET", `/videos/${avi.id}/copy`)).status, 404, what);
+      assert.equal((await listed(`?ids=${avi.id}`)).videos[0].copy, "available", what);
+    });
+  }
+});
+
+test("a clip that changed or was deleted while it was converted gets no copy", async () => {
+  const waitFor = async (file: string) => {
+    for (let i = 0; i < 400 && !existsSync(file); i++) await pause(25);
+    assert.ok(existsSync(file), "ffmpeg never began to convert");
+  };
+  // The clip has a time of a whole second, so that a file written over can be given the very same one back: only its size tells.
+  const stamp = new Date("2026-01-01T00:00:00Z");
+  const changes: [string, (id: string, file: string) => Promise<void>][] = [
+    ["written over, its time as before", async (_id, file) => (writeFileSync(file, Buffer.concat([AVI, Buffer.from("more")])), utimesSync(file, stamp, stamp))],
+    ["touched, its size as before", async (_id, file) => utimesSync(file, stamp, new Date(stamp.getTime() + 120_000))],
+    ["deleted", async (id) => void assert.equal((await call("DELETE", `/videos/${id}`)).status, 200)],
+  ];
+  for (const [what, change] of changes) {
+    const tool = convertingFfmpeg(path.join(temp, "held-ffmpeg"), { hold: true });
+    await withFfmpeg(tool.script, async () => {
+      const avi = aviClip(what);
+      const file = path.join(temp, "videos", `${avi.id}.avi`);
+      utimesSync(file, stamp, stamp);
+      const making = call("POST", `/videos/${avi.id}/copy`);
+      await waitFor(tool.started);
+      await change(avi.id, file);
+      writeFileSync(tool.go, "");
+      assert.equal((await making).status, 502, what);
+      assert.deepEqual(copyFiles(), [], `${what}: the copy of what is not there is not kept`);
+    });
+  }
+});
+
+/** A clip of a size, as a real ffmpeg writes one: all black, so a few kilobytes whatever the picture measures. */
+function realAvi(file: string, size: string): Buffer {
+  const made = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `color=c=black:s=${size}:r=2:d=1`, "-c:v", "ffv1", "-y", file], { stdio: "ignore" });
+  assert.equal(made.status, 0, "the test clip could not be made");
+  const bytes = readFileSync(file);
+  rmSync(file);
+  return bytes;
+}
+const HAVE_VP9 = HAVE_FFMPEG && spawnSync("ffmpeg", ["-hide_banner", "-encoders"], { encoding: "utf8" }).stdout.includes("libvpx-vp9");
+const sizeOf = (file: string) => /Video: .*?, (\d+x\d+)[ ,]/.exec(spawnSync("ffmpeg", ["-hide_banner", "-i", file], { encoding: "utf8" }).stderr)?.[1];
+
+test("the ffmpeg that is installed refuses a clip of a huge picture and scales a large one down", { skip: HAVE_VP9 ? false : "ffmpeg with libvpx-vp9 is not installed here" }, async () => {
+  posters.forgetPosterProbe();
+  try {
+    const dir = path.join(temp, "real-avi");
+    mkdirSync(dir, { recursive: true });
+    // Five thousand by five thousand: a few kilobytes of file that a conversion would take gigabytes for.
+    const huge = aviClip("huge", realAvi(path.join(dir, "huge.avi"), "5000x5000"));
+    const refused = await call("POST", `/videos/${huge.id}/copy`);
+    assert.equal(refused.status, 502);
+    assert.deepEqual(copyFiles(), []);
+    // Two thousand by a thousand is converted, to fit twelve hundred and eighty on a side.
+    const wide = aviClip("wide", realAvi(path.join(dir, "wide.avi"), "2000x1000"));
+    const made = await call("POST", `/videos/${wide.id}/copy`);
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    const copy = copyFiles().find((f) => f.startsWith(wide.id));
+    assert.ok(copy, "a copy was made");
+    assert.equal(sizeOf(path.join(temp, "video-copies", copy)), "1280x640");
+    const sent = await call("GET", `/videos/${wide.id}/copy`);
+    assert.equal(sent.status, 200);
+    assert.equal(sent.headers.get("content-type"), "video/webm");
+  } finally {
+    rmSync(path.join(temp, "video-copies"), { recursive: true, force: true });
+    posters.forgetPosterProbe();
   }
 });

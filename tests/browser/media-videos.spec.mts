@@ -23,6 +23,8 @@ interface Clip {
   /** What the file is, as the portal tells of it; a clip that has none is a WebM, as an older portal's all are. */
   format?: { id: string; label: string; mimeType: string; playable: boolean };
   copy?: 'ready' | 'available';
+  /** Why the portal could not open the file when it made the list. */
+  unavailable?: 'unreachable' | 'too_large';
 }
 interface Job {
   id: string;
@@ -360,6 +362,27 @@ test('a clip that is not made shows its whole message in its tile, however long,
 });
 
 const AVI = { id: 'avi', label: 'AVI', mimeType: 'video/x-msvideo', playable: false };
+const WEBM_FORMAT = { id: 'webm', label: 'WebM', mimeType: 'video/webm', playable: true };
+
+test('a clip the portal could not open says why in its details, and keeps the format it has', async ({ page }) => {
+  const away = clip({ prompt: 'On a drive', format: WEBM_FORMAT, unavailable: 'unreachable', age: 1 });
+  const big = clip({ prompt: 'Grown too large', format: AVI, unavailable: 'too_large' });
+  await portal(page, { clips: [away, big] });
+  await page.goto('/media');
+  // Not "Unknown": the one that is a WebM is a tile of a clip, and the AVI is an AVI.
+  await expect(tile(page, 'Grown too large')).toContainText('AVI');
+  await expect(tile(page, 'On a drive')).not.toContainText('Unknown');
+  await tile(page, 'On a drive').click();
+  await viewer(page).getByRole('button', { name: 'Details' }).click();
+  const details = viewer(page).getByRole('region', { name: 'Details' });
+  await expect(details).toContainText('Its file or its folder is out of reach for the moment.');
+  await expect(details).toContainText('WebM');
+  await page.keyboard.press('Escape');
+  await expect(viewer(page)).toHaveCount(0);
+  await tile(page, 'Grown too large').click();
+  await viewer(page).getByRole('button', { name: 'Details' }).click();
+  await expect(viewer(page).getByRole('region', { name: 'Details' })).toContainText('It is over 100 MB, which the portal does not play or send.');
+});
 
 test('a clip a browser cannot play is a tile of its own kind that opens to be downloaded, with a short note, and is never asked for as a video or a poster', async ({ page }) => {
   const avi = clip({ prompt: 'An old format', fileName: 'video-20260101-120000-ab12.avi', format: AVI, age: 1 });
@@ -409,8 +432,9 @@ test('where ffmpeg is there a clip a browser cannot play offers a WebM copy to p
   await expect(open.getByRole('link', { name: 'Download the video' })).toHaveAttribute('href', `/api/videos/${avi.id}/file`);
   expect(p.state.copies).toEqual([avi.id]);
 
-  // A copy that was made before is played at once.
+  // A copy that was made before is played at once. The viewer is closed first: Escape goes one step back in history, and a reload that does not wait for it is cut short.
   await page.keyboard.press('Escape');
+  await expect(viewer(page)).toHaveCount(0);
   await page.reload();
   await tile(page, 'Convert me').click();
   await expect(viewer(page).locator('video')).toHaveAttribute('src', `/api/videos/${avi.id}/copy`);

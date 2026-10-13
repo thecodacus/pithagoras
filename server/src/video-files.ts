@@ -1,4 +1,5 @@
 import { closeSync, readSync } from "node:fs";
+import path from "node:path";
 import { FileError, openDownload } from "./workspace-files.js";
 
 /**
@@ -95,6 +96,9 @@ export function ebmlDocType(head: Buffer): string | undefined {
 /** A document type, as a person is shown it: printable characters and short. */
 const shownDocType = (doc: string): string => doc.replace(/[^\x20-\x7e]/g, "?").slice(0, 24);
 
+/** An EBML file that is none of the WebM kinds, shown with the document type it names. */
+const ebmlFormat = (doc?: string): VideoFormat => ({ id: "mkv", label: doc ? `EBML (${shownDocType(doc)})` : "EBML", mimeType: "video/x-matroska", playable: false });
+
 /**
  * What a file is by its first bytes, whatever it is called or says it is: a WebM is an EBML file whose document type,
  * read from its header, is `webm` or `matroska` (what stable-diffusion.cpp writes for the clips it makes); an MP4
@@ -105,7 +109,7 @@ const shownDocType = (doc: string): string => doc.replace(/[^\x20-\x7e]/g, "?").
 export function sniffVideo(head: Buffer): VideoFormat {
   const doc = ebmlDocType(head);
   if (doc !== undefined && WEBM_DOC_TYPES.includes(doc)) return FORMATS.webm;
-  if (head.length >= 4 && head.readUInt32BE(0) === EBML) return { id: "mkv", label: doc ? `EBML (${shownDocType(doc)})` : "EBML", mimeType: "video/x-matroska", playable: false };
+  if (head.length >= 4 && head.readUInt32BE(0) === EBML) return ebmlFormat(doc);
   if (head.length >= 12 && head.toString("latin1", 4, 8) === "ftyp") return head.toString("latin1", 8, 12) === "qt  " ? FORMATS.mov : FORMATS.mp4;
   if (head.length >= 12 && head.toString("latin1", 0, 4) === "RIFF") {
     const kind = head.toString("latin1", 8, 12);
@@ -115,6 +119,17 @@ export function sniffVideo(head: Buffer): VideoFormat {
   if (head.length >= 4 && head.toString("latin1", 0, 4) === "GIF8") return FORMATS.gif;
   if (head.length >= 4 && head.toString("latin1", 0, 4) === "OggS") return FORMATS.ogg;
   return FORMATS.bin;
+}
+
+/**
+ * What a file is called for, by its extension, which is how the tool names what it saves (see VideoExt): the best that is
+ * known of a clip whose bytes cannot be read. Only ever shown, never served by: whatever is sent is sent for what its
+ * bytes say. A name that says nothing is taken for a WebM, as the clips of the list were before their bytes were looked at.
+ */
+export function formatByName(name: string): VideoFormat {
+  const ext = path.extname(name).slice(1).toLowerCase();
+  if (ext === "mkv") return ebmlFormat();
+  return Object.hasOwn(FORMATS, ext) ? FORMATS[ext as keyof typeof FORMATS] : FORMATS.webm;
 }
 
 /**
@@ -145,6 +160,26 @@ export function openVideo(base: string, rel: unknown): { fd: number; size: numbe
   }
 }
 
+/** What the open file is, by its first bytes. */
+function formatAt(fd: number): VideoFormat {
+  const head = Buffer.alloc(VIDEO_HEAD);
+  const read = readSync(fd, head, 0, head.length, 0);
+  return sniffVideo(head.subarray(0, read));
+}
+
+/**
+ * What a file of any size is by its first bytes: for the list, which tells what a clip is that is over the size a clip
+ * may have (see openClip) and so is neither played nor sent. A link out of the folder is not followed here either.
+ */
+export function formatOf(base: string, rel: unknown): VideoFormat {
+  const opened = openDownload(base, rel);
+  try {
+    return formatAt(opened.fd);
+  } finally {
+    closeSync(opened.fd);
+  }
+}
+
 /**
  * A file of the gallery's, opened to be listed or sent, whatever it is: checked by its size and never through a link out of
  * the folder (see openDownload), and told what it is by its first bytes (see sniffVideo), which says whether it may be
@@ -154,9 +189,7 @@ export function openClip(base: string, rel: unknown): { fd: number; size: number
   const opened = openDownload(base, rel);
   try {
     if (opened.size > MAX_VIDEO_BYTES) throw new FileError("too_large", `The video is over ${MAX_VIDEO_BYTES / 1024 / 1024} MB; download it instead`);
-    const head = Buffer.alloc(VIDEO_HEAD);
-    const read = readSync(opened.fd, head, 0, head.length, 0);
-    const format = sniffVideo(head.subarray(0, read));
+    const format = formatAt(opened.fd);
     return { ...opened, mimeType: format.mimeType, format };
   } catch (e) {
     closeSync(opened.fd);

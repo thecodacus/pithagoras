@@ -38,6 +38,7 @@ function VideoDetails({ video }: { video: GalleryVideo }) {
     [t("How"), t(KIND_NAME[video.kind])],
     // What the file is, by its first bytes: a clip a browser does not play says so.
     ...(video.format ? [[t("Format"), video.format.playable ? video.format.label : t("{format}, not played here", { format: video.format.label })] as [string, string]] : []),
+    ...(video.unavailable ? [[t("Not available"), video.unavailable === "too_large" ? t("It is over 100 MB, which the portal does not play or send.") : t("Its file or its folder is out of reach for the moment.")] as [string, string]] : []),
     [
       t("Where"),
       video.chat ? t("In the chat “{chat}”", { chat: video.chat.title || t("a chat that is gone") }) : video.folder ? t("In the folder “{folder}”", { folder: folderName(video.folder) }) : t("Made here"),
