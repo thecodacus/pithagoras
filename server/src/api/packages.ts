@@ -6,7 +6,7 @@ import { packageRemoved } from "../db.js";
 import express, { type Router } from "express";
 import { searchCatalog } from "../catalog.js";
 import { oneAtATime } from "../one-at-a-time.js";
-import { syncExtensionServers } from "./extensions.js";
+import { followPackages } from "./extensions.js";
 
 const run = promisify(execFile);
 
@@ -69,7 +69,7 @@ export function packagesRouter(): Router {
     }
     try {
       const { stdout, stderr } = await pi(["install", spec]);
-      await syncExtensionServers();
+      await followPackages();
       res.json({ ok: true, output: (stdout + stderr).trim() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -84,7 +84,7 @@ export function packagesRouter(): Router {
     try {
       const { stdout, stderr } = await pi(["remove", spec]);
       await packageRemoved(spec);
-      await syncExtensionServers();
+      await followPackages();
       res.json({ ok: true, output: (stdout + stderr).trim() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -96,7 +96,7 @@ export function packagesRouter(): Router {
       // The packages only: `--all` updates pi as well, which it cannot do where it is the portal's own locked copy
       // (the image), and says so with an error after the packages were updated. pi comes with the portal's version.
       const { stdout, stderr } = await pi(["update", "--extensions"]);
-      await syncExtensionServers();
+      await followPackages();
       res.json({ ok: true, output: (stdout + stderr).trim() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -138,7 +138,7 @@ export function packagesRouter(): Router {
     try {
       await writePiSettingsText(content);
       // The file names the packages: one taken out of it, or switched in it, by hand.
-      await syncExtensionServers();
+      await followPackages();
       res.json({ ok: true, path: piSettingsPath(), note: "Applies to newly started sessions" });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

@@ -19,7 +19,7 @@ import { ImageGenerationError, imageEditingMultiple, imageEditingReady, imageGen
 import { VideoGenerationError, parseVideoGenerationPatch, saveVideoGeneration, videoGenerationReady, videoGenerationState } from "../video-generation.js";
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
-import { switchPackage, syncExtensionServers } from "./extensions.js";
+import { followPackages, switchPackage } from "./extensions.js";
 import { ADAPTER_SPEC, mcpAdapter, readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/understory-service.js";
 import { readModelsJson } from "../providers.js";
@@ -98,7 +98,7 @@ async function switchUnderstory(enabled: boolean, url?: string): Promise<void> {
     const adapter = adapterEntry();
     if (!adapter) await pi(["install", ADAPTER_SPEC]);
     else if (!adapter.enabled) await switchPackage(adapter.source, true);
-    await syncExtensionServers();
+    await followPackages();
     // Kept: whatever else somebody put in the entry by hand, except how it signs in, which is said anew.
     const { disabled: _off, auth: _a, bearerToken: _t, bearerTokenEnv: _e, ...had } = (config.mcpServers[UNDERSTORY] ?? {}) as Record<string, unknown>;
     // An address given is the one meant; without one, the portal's own Understory where it runs one.
@@ -240,7 +240,7 @@ export function featuresRouter(): Router {
         await packageRemoved(state.source);
       }
       // A package installed, removed or switched: its server half follows, where it has one.
-      if (enabled !== undefined) await syncExtensionServers();
+      if (enabled !== undefined) await followPackages();
       // The mode changes what the tool tells the model, which it reads when it is loaded.
       const { reloaded, waiting } = await sessions.reloadIdle();
       res.json({ subagent: subagentState(), reloaded, waiting });

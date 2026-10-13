@@ -242,6 +242,15 @@ export async function syncExtensionServers(): Promise<void> {
   await syncServerHalves((await halves()).servers);
 }
 
+/**
+ * The same, after something else changed which packages there are. That
+ * change was made, whatever becomes of this: where the packages cannot be
+ * listed just now it is said, and the server halves are as they were until
+ * the next change or start.
+ */
+export const followPackages = (): Promise<void> =>
+  syncExtensionServers().catch((e) => console.error("[extensions] could not bring the server halves in line with what is installed:", e));
+
 /** Where a page fetches a file of a package's web folder from. */
 const clientUrl = (half: ClientHalf, file: string) =>
   `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}?v=${half.rev}`;
@@ -363,7 +372,7 @@ export function extensionsRouter(): Router {
     try {
       const found = await switchPackage(spec, enabled);
       if (!found) return res.status(404).json({ error: "That package is not installed for this user" });
-      await syncExtensionServers();
+      await followPackages();
       const { reloaded, waiting } = await sessions.reloadIdle();
       res.json({ ok: true, enabled, reloaded, waiting });
     } catch (e) {
