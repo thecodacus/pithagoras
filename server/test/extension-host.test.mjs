@@ -36,7 +36,10 @@ const MODULE = `
   portal.router.post("/file", (req, res) => { let n = 0; req.on("data", (d) => (n += d.length)); req.on("end", () => res.json({ bytes: n })); });
   portal.router.get("/chats/:id", (req, res) => { const chat = portal.chats.get(req.params.id); chat ? res.json({ chat, folder: portal.chats.folder(chat.id) }) : res.status(404).json({ error: "No such chat" }); });
   portal.router.get("/boom", () => { throw new Error("its own failure"); });
+  portal.router.get("/files/:name", (req, res) => res.json({ name: req.params.name, query: req.query }));
   portal.chats.onOpen((chatId) => (chatId === "quiet" ? undefined : { type: "state", for: chatId }));
+  // One that cannot be written as JSON: left out, and nothing else is the worse for it.
+  portal.chats.onOpen((chatId) => (chatId === "a" ? { big: 10n } : undefined));
   portal.chats.on("started", (id) => seen.life.push("started " + id));
   portal.chats.on("stopped", (id) => seen.life.push("stopped " + id));
   portal.chats.on("deleted", (id) => seen.life.push("deleted " + id));
@@ -91,6 +94,18 @@ test("a server half's routes are under its package's name, written from its own 
   assert.equal(boom.status, 500);
   assert.equal((await boom.json()).error, "its own failure", "its failure is answered, and the portal goes on");
   assert.equal((await fetch(at("/api/x/@codacus/notes/hello"))).status, 200);
+});
+
+test("the rest of a path is read once, by the package's own routes: what was written as part of a name stays part of it", async () => {
+  const named = async (written) => (await (await fetch(at(`/api/x/@codacus/notes/files/${written}`))).json());
+  assert.deepEqual(await named("what%3F.md"), { name: "what?.md", query: {} });
+  assert.deepEqual(await named("a%23b"), { name: "a#b", query: {} });
+  assert.deepEqual(await named("100%25"), { name: "100%", query: {} });
+  assert.deepEqual(await named("a%252Fb"), { name: "a%2Fb", query: {} }, "not read a second time");
+  assert.deepEqual(await named("plain.md?line=7"), { name: "plain.md", query: { line: "7" } });
+  // The package's own name, written as an address in either part.
+  assert.equal((await fetch(at("/api/x/%40codacus/n%6Ftes/files/x"))).status, 200);
+  assert.equal((await fetch(at("/api/x/%40codacus%2Fnotes/files/x"))).status, 404, "a slash written as text is not the one between its two parts");
 });
 
 test("no body is read for a server half unless its route asks, so a route can take a file as it comes", async () => {
@@ -158,6 +173,12 @@ test("a page that opens a chat is told where things stand, then each thing a ser
     { extension: NAME, data: { type: "changed", n: 1 } },
     { extension: NAME, data: null },
   ]);
+  // What could not be written (the second thing it says first, and this) was left out: the stream went on, as above.
+  portal.chats.send("a", { cycle: (() => { const o = {}; o.self = o; return o; })() });
+  // A browser half that came into the page later asks for the same, as it would be said now.
+  assert.deepEqual(host.openingFor("a", NAME), [{ type: "state", for: "a" }]);
+  assert.deepEqual(host.openingFor("quiet", NAME), []);
+  assert.deepEqual(host.openingFor("a", "someone-else"), []);
   // Nothing to say first to this one: only what is sent.
   assert.deepEqual(await heard("quiet", 1, () => portal.chats.send("quiet", "hi")), [{ extension: NAME, data: "hi" }]);
 });
@@ -273,5 +294,37 @@ test("with the sandbox on, what a server half runs for a chat runs as the chat's
   } finally {
     delete process.env.PORTAL_OWN_SECRET;
     saveSandboxPolicy({ ...policy, enabled: false });
+  }
+});
+
+test("a server half that fails to stop, or never finishes stopping or starting, holds up nothing else", async () => {
+  host.setLimits(300, 300);
+  try {
+    const other = { name: "other", version: "1.0.0", file: path.join(pkg, "other.js"), rev: "1" };
+    writeFileSync(other.file, "export default function (portal) { portal.router.get('/ok', (_req, res) => res.json({ ok: true })); }");
+
+    // One whose stop rejects: said, and the rest of what was asked is still done.
+    await host.syncServerHalves([write("  return async () => { throw new Error('cannot stop'); };"), other]);
+    assert.equal((await fetch(at("/api/x/other/ok"))).status, 200);
+    await host.syncServerHalves([write("  return () => new Promise(() => {});"), other]);
+    assert.equal(host.isServing(NAME), true, "stopped, for all its stop said, and its next one started");
+
+    // One whose stop never finishes: given up on after a moment.
+    const began = Date.now();
+    await host.syncServerHalves([write("  await new Promise(() => {});"), other]);
+    assert.ok(Date.now() - began < 3000, "neither is waited for longer than it is given");
+    // And one that never finishes starting: not running, with why, and the other untouched.
+    assert.equal(host.isServing(NAME), false);
+    assert.match(host.serverFailure(NAME), /had not finished starting/);
+    assert.equal(host.isServing("other"), true);
+    assert.equal((await fetch(at("/api/x/other/ok"))).status, 200);
+
+    // What is asked next is done: nothing waits behind the one that hung.
+    await host.syncServerHalves([write("  // fine again")]);
+    assert.equal(host.isServing(NAME), true);
+    assert.equal(host.isServing("other"), false);
+    await host.serversSettled();
+  } finally {
+    host.setLimits(15_000, 5_000);
   }
 });

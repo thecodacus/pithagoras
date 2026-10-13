@@ -1277,6 +1277,8 @@ export const api = {
     changesExtensions(json<{ ok: true; output: string }>("/api/packages/update", { method: "POST" })),
   /** The installed extensions that bring an interface: see extensions/loader.ts. */
   extensionUi: () => json<{ extensions: ExtensionUi[] }>("/api/extension-ui"),
+  /** What an extension's server half would tell a page that opens the chat now: for a browser half that came into the page later. */
+  extensionOpening: (id: string, extension: string) => json<{ pushes: unknown[] }>(`/api/sessions/${id}/extension-ui?extension=${encodeURIComponent(extension)}`),
   /** What an extension's browser half says to its own half in a chat: see extensions/channel.ts. */
   tellExtension: (id: string, extension: string, data: unknown) =>
     json<{ ok: true }>(`/api/sessions/${id}/extension-ui`, { method: "POST", body: JSON.stringify({ extension, data }) }),

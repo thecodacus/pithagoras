@@ -392,6 +392,27 @@ export function Chat({
   // What an extension's panel is handed, the same each time it is drawn unless it changed: its components are
   // drawn again only for what is new (see register in extensions/slots.ts), and the chat is drawn with every token.
   const panelParts = useRef(new Map<string, { close: () => void; params: unknown; state: unknown; handle: PanelHandle }>());
+  // What a panel was opened with, what it shared, and what it asked before closing are the chat's it was in. In
+  // another chat it starts with none of it: put right while drawing, so that its first draw there has none either.
+  const [panelsOfChat, setPanelsOfChat] = useState(session.id);
+  if (panelsOfChat !== session.id) {
+    setPanelsOfChat(session.id);
+    setPanelParams({});
+    setPanelStates({});
+    setPanelsKept([]);
+    closeGuards.current.clear();
+    panelParts.current.clear();
+  }
+  // And an extension taken out of the page takes what its panels held with it: loaded again, they start anew.
+  useEffect(() => {
+    const there = (key: string) => panelEntries.some((entry) => entry.key === key);
+    const still = (was: Record<string, unknown>) => (Object.keys(was).every(there) ? was : Object.fromEntries(Object.entries(was).filter(([key]) => there(key))));
+    setPanelParams(still);
+    setPanelStates(still);
+    setPanelsKept((was) => (was.every(there) ? was : was.filter(there)));
+    for (const key of [...closeGuards.current.keys()]) if (!there(key)) closeGuards.current.delete(key);
+    for (const key of [...panelParts.current.keys()]) if (!there(key)) panelParts.current.delete(key);
+  }, [panelEntries]);
   const partsOf = (key: string) => {
     const params = panelParams[key], state = panelStates[key];
     const was = panelParts.current.get(key);
@@ -786,7 +807,8 @@ export function Chat({
    */
   const carryPanel = (kind: AsidePanel) => (e: React.PointerEvent) => {
     const el = body.current;
-    if (!el || e.button !== 0 || (e.target as Element).closest("button, a, input, [role=tab]")) return;
+    // Not from a control in it: an extension's head may hold any of these.
+    if (!el || e.button !== 0 || (e.target as Element).closest("button, a, input, select, textarea, [role=tab], [role=combobox], [role=option], [contenteditable]")) return;
     const holder = e.currentTarget.closest("aside") as HTMLElement;
     const place = placeOf(kind), afloat = place === "float";
     const area = el.getBoundingClientRect(), size = { w: el.clientWidth, h: el.clientHeight };

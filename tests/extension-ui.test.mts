@@ -9,9 +9,9 @@ import { chosenPalette, choosePalette, coloursOf, toTriplet, TOKENS } from '../w
 import { register, slotEntries } from '../web/src/extensions/slots.ts';
 import { hasCommand, registerCommand, runCommand } from '../web/src/extensions/commands.ts';
 import { addStrings, forgetStrings, translate } from '../web/src/extensions/strings.ts';
-import { extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from '../web/src/extensions/server-feed.ts';
+import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush, setChatOnScreen } from '../web/src/extensions/server-feed.ts';
 import { panels, panelsFor, setPanelController } from '../web/src/extensions/panels.ts';
-import { chatFeed, forgetChatFeed, onChatFeed, publishChat } from '../web/src/extensions/chat-feed.ts';
+import { chatFeed, forgetChatFeed, onChatFeed, publishChat, sameValue } from '../web/src/extensions/chat-feed.ts';
 import { addLocale, setLanguage } from '../web/src/i18n.ts';
 import { settlePanels } from '../web/src/use-work-panels.ts';
 import { placeWindows } from '../web/src/voice-windows.ts';
@@ -418,10 +418,19 @@ test('a theme is one an extension registered, chosen by its id and painted over 
     assert.deepEqual(Object.fromEntries(set), {});
     assert.equal(kept.has('pithagoras.palette'), false);
 
-    registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } });
+    const again = registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } });
     choose('dusk-pkg/dusk');
     themesSettled();
     assert.equal(chosenPalette()?.id, 'dusk-pkg/dusk', 'still there: it stays');
+    // Its extension is installed and could not be loaded this time: the person's choice is not undone for that.
+    again();
+    themesSettled(['dusk-pkg']);
+    assert.equal(chosenPalette()?.id, 'dusk-pkg/dusk');
+    assert.deepEqual(Object.fromEntries(set), { '--accent': '255 121 198' }, 'as it was painted');
+    themesSettled(['dusk']);
+    assert.equal(chosenPalette(), null, 'another package whose name only starts the same is not its own');
+    registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } });
+    choose('dusk-pkg/dusk');
     choose(null);
     assert.equal(chosenPalette(), null);
 
@@ -455,4 +464,68 @@ test('a package may name themes in its package.json and bring nothing else', () 
     assert.ok(coloursOf(theme.dark) && coloursOf(theme.light), theme.id);
     assert.deepEqual(Object.keys(theme.dark!).sort(), [...TOKENS].sort(), 'every colour of the portal\'s, in dark');
   }
+});
+
+const feedOf = (n: number) => ({ events: Array.from({ length: n }, (_, i) => ({ seq: i + 1, type: 'x', payload: {} })), items: [], running: false, loading: false });
+const quiet = async (work: () => void) => {
+  const said = console.error;
+  console.error = () => {};
+  try {
+    work();
+  } finally {
+    console.error = said;
+  }
+};
+
+test('an extension that fails on hearing a chat, or its server half, fails alone: the chat and the others go on', async () => {
+  const heard: string[] = [];
+  const offBad = onChatFeed('a', () => { throw new Error('its own failure'); });
+  const offGood = onChatFeed('a', (feed) => heard.push(`chat ${feed.events.length}`));
+  await quiet(() => publishChat('a', feedOf(2)));
+  assert.deepEqual(heard, ['chat 2'], 'said to the rest, and nothing thrown at the chat that said it');
+
+  onServerPush('fragile', () => { throw new Error('its own failure'); });
+  onServerPush('fragile', (chatId, data) => heard.push(`push ${chatId} ${data}`));
+  serverPush('a', 'fragile', 'waited');
+  await quiet(() => extensionHere('fragile'));
+  await quiet(() => serverPush('a', 'fragile', 'live'));
+  assert.deepEqual(heard.slice(1), ['push a waited', 'push a live'], 'what waited is handed over whole, and what comes after is heard');
+  offBad();
+  offGood();
+  extensionGone('fragile');
+  forgetChatFeed('a');
+});
+
+test('to stop listening twice, or after the chat was left and come back to, takes nothing from whoever listens now', () => {
+  const heard: string[] = [];
+  const first = onChatFeed('a', () => heard.push('first'));
+  first();
+  // The chat was left with nobody listening, and is listened to again: by another.
+  const second = onChatFeed('a', () => heard.push('second'));
+  first();
+  publishChat('a', feedOf(1));
+  assert.deepEqual(heard, ['second']);
+  second();
+  forgetChatFeed('a');
+  // The chat whose stream the page has open, for a browser half that comes later.
+  assert.equal(chatOnScreen(), undefined);
+  setChatOnScreen('a');
+  assert.equal(chatOnScreen(), 'a');
+  setChatOnScreen(undefined);
+});
+
+test('what a component picked is the same when it holds the same: a list or a plain object by what is in it, anything else only itself', () => {
+  const item = { id: 1 };
+  assert.equal(sameValue([item, 2], [item, 2]), true);
+  assert.equal(sameValue({ any: true, n: 2 }, { any: true, n: 2 }), true);
+  assert.equal(sameValue([item], [{ id: 1 }]), false, 'one level: what is in it is compared as it is');
+  assert.equal(sameValue([1, 2], [1, 2, 3]), false);
+  assert.equal(sameValue([1], { 0: 1 }), false);
+  assert.equal(sameValue(new Set([1]), new Set([2])), false, 'a Set holds what its keys do not show');
+  assert.equal(sameValue(new Map([[1, 1]]), new Map()), false);
+  assert.equal(sameValue(new Date(1), new Date(2)), false);
+  const set = new Set([1]);
+  assert.equal(sameValue(set, set), true);
+  assert.equal(sameValue(3, 3), true);
+  assert.equal(sameValue(null, {}), false);
 });

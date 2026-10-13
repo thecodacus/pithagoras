@@ -125,7 +125,7 @@ export function eventsRouter(): Router {
     // What the installed extensions' server halves tell what they drew on this
     // chat's page, on the same stream under a name of its own: where things
     // stand first, then each thing as it is said. See extension-host.ts.
-    const writePush = (message: unknown) => res.write(`event: extension\ndata: ${JSON.stringify(message)}\n\n`);
+    const writePush = (message: string) => res.write(`event: extension\ndata: ${message}\n\n`);
     pagePushes.on(session.id, writePush);
     for (const push of openingPushes(session.id)) writePush(push);
 

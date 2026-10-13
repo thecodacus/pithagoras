@@ -23,6 +23,14 @@ export default function (portal) {
     if (!kept.has(chatId)) kept.set(chatId, portal.files.inside(portal.chats.folder(chatId), `${FOLDER}/${chatId}.json`));
     return kept.get(chatId);
   };
+  // The chats there are as this starts: one deleted before it is next opened is known all the same.
+  for (const chat of portal.chats.list()) {
+    try {
+      fileOf(chat.id);
+    } catch {
+      // Its folder is gone: it keeps nothing there.
+    }
+  }
   const read = (chatId) => {
     try {
       const notes = JSON.parse(readFileSync(fileOf(chatId), "utf8"));

@@ -30,7 +30,7 @@ import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
 import { setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
-import { serverPush } from "./extensions/server-feed";
+import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { useSlot } from "./extensions/slots";
 
 // What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
@@ -339,6 +339,8 @@ function Shell({
     // Nothing to read from: the stream of a chat that is gone only fails, and was retried as an outage.
     if (!sessionId || missing === sessionId) return;
 
+    // The chat whose stream is open, for an extension that comes into the page later: see extensions/loader.ts.
+    setChatOnScreen(sessionId);
     let cancelled = false;
     let seq = 0;
     let failed = 0;
@@ -559,6 +561,7 @@ function Shell({
       clearTimeout(timer);
       esRef.current?.close();
       canvasConnection(sessionId, "down");
+      setChatOnScreen(undefined);
     };
   }, [sessionId, missing, refreshSessions]);
 

@@ -8,7 +8,7 @@ import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
 import { clientHalf, packageThemes, serverHalf, type ClientHalf, type PackageThemes, type ServerHalf } from "../extension-ui.js";
-import { serverFailure, syncServerHalves } from "../extension-host.js";
+import { isServing, serverFailure, serversSettled, syncServerHalves } from "../extension-host.js";
 
 const run = promisify(execFile);
 
@@ -214,16 +214,19 @@ async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[];
   const clients: ClientHalf[] = [];
   const servers: ServerHalf[] = [];
   const themed: PackageThemes[] = [];
+  // Two packages under one name: the first is the one, whole. Never one's page with the other's server.
+  const taken = new Set<string>();
   for (const pkg of await installedPackages(settings)) {
     if (!pkg.path || (pkg.scope && !/^user/i.test(pkg.scope))) continue;
     const entry = listed.find((e) => sourceOf(e) === pkg.spec);
     if (entry === undefined || isSwitchedOff(entry)) continue;
-    const client = clientHalf(pkg.path);
-    if (client && !clients.some((h) => h.name === client.name)) clients.push(client);
-    const server = serverHalf(pkg.path);
-    if (server && !servers.some((h) => h.name === server.name)) servers.push(server);
-    const themes = packageThemes(pkg.path);
-    if (themes && !themed.some((h) => h.name === themes.name)) themed.push(themes);
+    const client = clientHalf(pkg.path), server = serverHalf(pkg.path), themes = packageThemes(pkg.path);
+    const name = (client ?? server ?? themes)?.name;
+    if (!name || taken.has(name)) continue;
+    taken.add(name);
+    if (client) clients.push(client);
+    if (server) servers.push(server);
+    if (themes) themed.push(themes);
   }
   return { clients, servers, themed };
 }
@@ -248,6 +251,8 @@ export function extensionsRouter(): Router {
 
   router.get("/extension-ui", async (_req, res) => {
     try {
+      // What is being started or stopped is waited for: a page is told where a server half's routes are only once they are there.
+      await serversSettled();
       const { clients, servers, themed } = await halves();
       const names = [...new Set([...clients, ...servers, ...themed].map((half) => half.name))];
       res.json({
@@ -263,7 +268,7 @@ export function extensionsRouter(): Router {
             ...(client ? { entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
             // Where its server half's own routes are, when it has one that is running.
-            ...(server && !failure ? { server: `/api/x/${name.split("/").map(encodeURIComponent).join("/")}` } : {}),
+            ...(server && isServing(name) ? { server: `/api/x/${name.split("/").map(encodeURIComponent).join("/")}` } : {}),
             ...(failure ? { serverError: failure } : {}),
           };
         }),

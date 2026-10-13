@@ -26,10 +26,16 @@ const NOTHING: ChatFeed = { events: [], items: [], running: false, loading: true
 const feeds = new Map<string, ChatFeed>();
 const watchers = new Map<string, Set<() => void>>();
 
-/** What the chat on screen holds now. */
+/** What the chat on screen holds now. One that fails on hearing it fails alone: the chat that says it, and the rest that hear it, go on. */
 export function publishChat(chatId: string, feed: ChatFeed): void {
   feeds.set(chatId, feed);
-  for (const watcher of [...(watchers.get(chatId) ?? [])]) watcher();
+  for (const watcher of [...(watchers.get(chatId) ?? [])]) {
+    try {
+      watcher();
+    } catch (e) {
+      console.error("[extensions] hearing a chat change failed:", e);
+    }
+  }
 }
 
 /** The chat left the screen: nothing of it is kept. */
@@ -39,11 +45,14 @@ export function forgetChatFeed(chatId: string): void {
 
 export const chatFeed = (chatId: string): ChatFeed => feeds.get(chatId) ?? NOTHING;
 
-/** Whether two picks say the same: the same value, or lists or plain objects holding the same values. */
-function sameValue(a: unknown, b: unknown): boolean {
+/** A list, or an object written as one: what is told apart by what it holds. A Set, a Map or a Date holds what `Object.keys` does not see. */
+const plain = (value: object) => Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null;
+
+/** Whether two picks say the same: the same value, or lists or plain objects holding the same values. Anything else only when it is the same one. */
+export function sameValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (!plain(a) || !plain(b) || Array.isArray(a) !== Array.isArray(b)) return false;
   const ka = Object.keys(a), kb = Object.keys(b);
   return ka.length === kb.length && ka.every((k) => Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
@@ -54,7 +63,8 @@ function watchChat(chatId: string, watcher: () => void): () => void {
   set.add(watcher);
   return () => {
     set.delete(watcher);
-    if (!set.size) watchers.delete(chatId);
+    // Only if it is still the chat's: one emptied and since made anew is other watchers', not this one's to take away.
+    if (!set.size && watchers.get(chatId) === set) watchers.delete(chatId);
   };
 }
 

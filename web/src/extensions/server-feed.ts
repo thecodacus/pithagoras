@@ -24,8 +24,21 @@ export function serverPush(chatId: string, extension: string, data: unknown): vo
     waiting.set(extension, queue);
     return;
   }
-  for (const handler of [...(handlers.get(extension) ?? [])]) handler(chatId, data);
+  for (const handler of [...(handlers.get(extension) ?? [])]) {
+    try {
+      handler(chatId, data);
+    } catch (e) {
+      console.error(`[extensions] ${extension} failed on hearing from its server half:`, e);
+    }
+  }
 }
+
+let onScreen: string | undefined;
+/** The chat whose stream the page has open, or none: the one a browser half that comes later has missed the start of. */
+export function setChatOnScreen(chatId: string | undefined): void {
+  onScreen = chatId;
+}
+export const chatOnScreen = (): string | undefined => onScreen;
 
 /** Hear what an extension's server half says, for whichever chat. Returns the unsubscribe. */
 export function onServerPush(extension: string, handler: Handler): () => void {
@@ -34,7 +47,7 @@ export function onServerPush(extension: string, handler: Handler): () => void {
   set.add(handler);
   return () => {
     set.delete(handler);
-    if (!set.size) handlers.delete(extension);
+    if (!set.size && handlers.get(extension) === set) handlers.delete(extension);
   };
 }
 

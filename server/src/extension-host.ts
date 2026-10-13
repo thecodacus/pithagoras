@@ -12,6 +12,7 @@ import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
 import { baseDir, resolveInside } from "./workspace-files.js";
+import { watchStream } from "./login-streams.js";
 
 /**
  * An extension's server half: a module of the package's that the portal loads
@@ -128,23 +129,57 @@ interface Running {
 const running = new Map<string, Running>();
 /** Why a package's server half is not running, by the package's name. */
 const failures = new Map<string, string>();
-/** What server halves tell the pages open on a chat, by chat: `{ extension, data }`. Heard by the chat's event stream. */
+/** What server halves tell the pages open on a chat, by chat: `{ extension, data }` as it goes on the wire. Heard by the chat's event stream. */
 export const pagePushes = new EventEmitter();
 pagePushes.setMaxListeners(0);
 
 const chatOf = (row: SessionRow): Chat => ({ id: row.id, title: row.title, workspace: row.workspace, status: row.status });
 const say = (name: string, text: string) => console.log(`[extension ${name}] ${text}`);
-/** An extension's handler failing is the extension's: said, and nothing of the portal's stops for it. */
+/**
+ * An extension's handler failing is the extension's: said, and nothing of the
+ * portal's stops for it. What comes back never throws and never rejects: a
+ * handler that returned a promise is answered with one that settles either way.
+ */
 const guarded = (name: string, what: string, fn: () => unknown) => {
-  try {
-    const result = fn();
-    if (result instanceof Promise) result.catch((e) => console.error(`[extension ${name}] ${what} failed:`, e));
-    return result;
-  } catch (e) {
+  const failed = (e: unknown) => {
     console.error(`[extension ${name}] ${what} failed:`, e);
     return undefined;
+  };
+  try {
+    const result = fn();
+    return result instanceof Promise ? result.catch(failed) : result;
+  } catch (e) {
+    return failed(e);
   }
 };
+
+/** How long a server half may take to start, and to stop: one that hangs must not hold up every other, or the portal's own stop. */
+let START_MS = 15_000;
+let STOP_MS = 5_000;
+/** Other limits, for a test that cannot wait that long. */
+export function setLimits(start: number, stop: number): void {
+  START_MS = start;
+  STOP_MS = stop;
+}
+
+/** `work`, or a rejection once it has taken longer than `ms`. */
+function within<T>(ms: number, work: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`It had not finished ${what} after ${ms / 1000} seconds`)), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
+/** What a server half says to a page, as it goes on the wire, or nothing where it cannot be written as JSON. */
+function wire(name: string, data: unknown): string | undefined {
+  try {
+    return JSON.stringify({ extension: name, data: data ?? null });
+  } catch (e) {
+    console.error(`[extension ${name}] what it said to a page could not be sent:`, e);
+    return undefined;
+  }
+}
 
 /** How the host reaches what only the session manager can do, which it cannot import: the manager imports it. */
 let tellChat: (chatId: string, extension: string, data: unknown) => Promise<boolean> = async () => false;
@@ -204,7 +239,10 @@ function portalFor(ext: Running): ServerPortal {
       },
       list: () => listSessions().map(chatOf),
       folder,
-      send: (chatId, data) => void pagePushes.emit(chatId, { extension: name, data: data ?? null }),
+      send: (chatId, data) => {
+        const text = wire(name, data);
+        if (text) pagePushes.emit(chatId, text);
+      },
       onOpen: (handler) => void ext.opens.push(handler),
       on: (event, handler) => void ext.life.on(event, handler),
       onEvent: (handler) => void ext.events.push(handler),
@@ -241,7 +279,7 @@ function portalFor(ext: Running): ServerPortal {
 
 async function stop(ext: Running): Promise<void> {
   running.delete(ext.half.name);
-  for (const fn of ext.stops.reverse()) await guarded(ext.half.name, "stopping", fn);
+  for (const fn of ext.stops.reverse()) await guarded(ext.half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
   ext.life.removeAllListeners();
 }
 
@@ -249,15 +287,20 @@ async function start(half: ServerHalf): Promise<void> {
   const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map() };
   try {
     // By its revision: the same file changed is another module, and the one already loaded is not served again.
-    const module: any = await import(`${pathToFileURL(half.file).href}?v=${half.rev}`);
-    if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
-    const stopper = await module.default(portalFor(ext));
+    const stopper = await within(
+      START_MS,
+      import(`${pathToFileURL(half.file).href}?v=${half.rev}`).then((module: any) => {
+        if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
+        return module.default(portalFor(ext));
+      }),
+      "starting",
+    );
     if (typeof stopper === "function") ext.stops.push(stopper);
     running.set(half.name, ext);
     failures.delete(half.name);
     say(half.name, "server half started");
   } catch (e) {
-    for (const fn of ext.stops.reverse()) await guarded(half.name, "stopping", fn);
+    for (const fn of ext.stops.reverse()) await guarded(half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
     failures.set(half.name, (e as Error)?.message || String(e));
     console.error(`[extension ${half.name}] its server half could not be started:`, e);
   }
@@ -280,6 +323,12 @@ export function syncServerHalves(halves: ServerHalf[]): Promise<void> {
   return (queue = queue.then(run, run));
 }
 
+/** What was last asked for is done: every half that should run is running, or has said why not. Never rejects. */
+export const serversSettled = (): Promise<void> => queue.catch(() => {});
+
+/** Whether a package's server half is running now. */
+export const isServing = (name: string): boolean => running.has(name);
+
 /** Every server half stopped, as the portal stops. */
 export function stopServerHalves(): Promise<void> {
   return syncServerHalves([]);
@@ -288,63 +337,83 @@ export function stopServerHalves(): Promise<void> {
 /** Why a package's server half is not running, if it is not. */
 export const serverFailure = (name: string): string | undefined => failures.get(name);
 
-/** The extension a path under /api/x belongs to, and the rest of the path: a package's name may have a slash in it. */
-function owner(pathname: string): { ext: Running; rest: string } | undefined {
+/**
+ * The extension a path under /api/x belongs to, and the rest of the path. A
+ * package's name is one or two parts of the path (`@scope/name`), each read as
+ * a browser wrote it. The rest is handed on as it came, not read here: the
+ * package's routes read it, once.
+ */
+function owner(path: string): { ext: Running; rest: string } | undefined {
+  const parts = path.split("/").slice(1);
   for (const ext of running.values()) {
-    const root = `/${ext.half.name}`;
-    if (pathname === root || pathname.startsWith(`${root}/`)) return { ext, rest: pathname.slice(root.length) || "/" };
+    const name = ext.half.name.split("/");
+    if (parts.length < name.length) continue;
+    try {
+      if (!name.every((part, i) => decodeURIComponent(parts[i]) === part)) continue;
+    } catch {
+      continue;
+    }
+    return { ext, rest: `/${parts.slice(name.length).join("/")}` };
   }
   return undefined;
 }
 
 /** Mounted at /api/x, after the login: hands a request to the routes of the package its path names. */
 export const extensionRoutes: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
-  let pathname: string;
-  try {
-    pathname = decodeURIComponent(req.path);
-  } catch {
-    return next();
-  }
-  const found = owner(pathname);
-  if (!found) return next();
   const was = req.url;
+  const at = was.indexOf("?");
+  const found = owner(at === -1 ? was : was.slice(0, at));
+  if (!found) return next();
+  // A route may hold its answer open, as a stream: ended with the login it was asked under, like the portal's own.
+  res.once("close", watchStream(() => res.destroy()));
   // The package's routes are written from its own root, whatever it is called.
-  req.url = found.rest + was.slice(req.path.length);
+  req.url = found.rest + (at === -1 ? "" : was.slice(at));
   found.ext.router(req, res, (error?: unknown) => {
     req.url = was;
     next(error);
   });
 };
 
+/** Whether an upgrade is asked of some extension's routes: checked for the login before it is said whether there is one to take it. */
+export const isExtensionUrl = (url: string | undefined): url is string => !!url?.startsWith("/api/x/");
+
 /** The upgrade handler of the package a URL under /api/x names, with the URL as its routes see it. */
 export function extensionUpgrade(url: string | undefined): Upgrade | undefined {
-  if (!url?.startsWith("/api/x/")) return undefined;
-  let pathname: string;
-  const [rawPath, query = ""] = url.split("?");
-  try {
-    pathname = decodeURIComponent(rawPath.slice("/api/x".length));
-  } catch {
-    return undefined;
-  }
-  const found = owner(pathname);
+  if (!isExtensionUrl(url)) return undefined;
+  const at = url.indexOf("?");
+  const found = owner((at === -1 ? url : url.slice(0, at)).slice("/api/x".length));
   const handler = found?.ext.upgrade;
   if (!found || !handler) return undefined;
   return (req, socket, head) => {
-    req.url = found.rest + (query ? `?${query}` : "");
+    req.url = found.rest + (at === -1 ? "" : url.slice(at));
     guarded(found.ext.half.name, "an upgrade", () => handler(req, socket, head));
   };
 }
 
-/** What each server half tells a page that opens a chat. */
-export function openingPushes(chatId: string): { extension: string; data: unknown }[] {
-  const out: { extension: string; data: unknown }[] = [];
+/** What each server half tells a page that opens a chat, each as it goes on the wire. */
+export function openingPushes(chatId: string): string[] {
+  const out: string[] = [];
   for (const ext of running.values()) {
     for (const handler of ext.opens) {
       const data = guarded(ext.half.name, "what a page is told first", () => handler(chatId));
-      if (data !== undefined && !(data instanceof Promise)) out.push({ extension: ext.half.name, data });
+      const text = data !== undefined && !(data instanceof Promise) ? wire(ext.half.name, data) : undefined;
+      if (text) out.push(text);
     }
   }
   return out;
+}
+
+/**
+ * What one package's server half tells a page that opens a chat, as it would
+ * say it now: for a browser half that came into the page after the chat's
+ * stream had opened, and so was not there to be told.
+ */
+export function openingFor(chatId: string, name: string): unknown[] {
+  const ext = running.get(name);
+  if (!ext) return [];
+  return ext.opens
+    .map((handler) => guarded(name, "what a page is told first", () => handler(chatId)))
+    .filter((data) => data !== undefined && !(data instanceof Promise) && wire(name, data) !== undefined);
 }
 
 /** A chat's pi started or stopped, or the chat was deleted. */

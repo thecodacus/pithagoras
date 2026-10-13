@@ -92,7 +92,7 @@ import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
 import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter, syncExtensionServers } from "./api/extensions.js";
-import { extensionRoutes, stopServerHalves } from "./extension-host.js";
+import { extensionRoutes, openingFor, stopServerHalves } from "./extension-host.js";
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
@@ -1444,6 +1444,16 @@ app.post("/api/sessions/:id/subagents/:agent/stop", (req, res) => {
     return res.status(409).json({ error: "The subagent cannot be reached: it is not running any more, or the chat is not running here" });
   }
   res.json({ ok: true });
+});
+
+// What an extension's server half tells a page that opens this chat, asked for by a browser half that came into the
+// page after the chat's stream had opened: see extension-host.ts.
+app.get("/api/sessions/:id/extension-ui", (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Not found" });
+  const extension = typeof req.query.extension === "string" ? req.query.extension : "";
+  if (!extension) return res.status(400).json({ error: "Which extension it is for is missing" });
+  res.json({ pushes: openingFor(session.id, extension) });
 });
 
 // What an extension's browser half says to its own half in this chat: see extension-ui.ts.

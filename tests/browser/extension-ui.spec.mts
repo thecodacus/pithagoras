@@ -17,7 +17,13 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
     { id: 'b', title: 'Second chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null },
   ];
   const model = { id: 'model-a', name: 'Model A', provider: 'llama-swap' };
-  const state = { installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false };
+  const state = {
+    installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false,
+    /** What the Notes extension's server half would tell a page opening a chat now. */
+    opening: [] as unknown[],
+    /** Themes the Notes package names beside its module. */
+    notesThemes: undefined as unknown[] | undefined,
+  };
   // The example that is only a theme, as its package.json names it.
   const dusk = JSON.parse(readFileSync(new URL('../../extensions/theme-dusk/package.json', import.meta.url), 'utf8'));
   /** What the browser half said to its extension, by chat. */
@@ -32,7 +38,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
           ...(state.themed ? [{ name: dusk.name, version: dusk.version, themes: dusk.pithagoras.themes }] : []),
           // A second package with themes of its own, two of them, one under the id the first uses.
           ...(state.themed ? [{ name: 'more-themes', version: '1.0.0', themes: [{ id: 'dusk', name: 'Noon', light: { accent: '#0055aa' } }, { id: 'midnight', name: 'Midnight', dark: { canvas: '#05070d' } }] }] : []),
-          ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}` }] : []),
+          ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}`, ...(state.notesThemes ? { themes: state.notesThemes } : {}) }] : []),
           ...(probe ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
         ],
       };
@@ -46,6 +52,8 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
     if (p === address(NAME, 'client.css')) { await route.fulfill({ contentType: 'text/css', body: web('client.css') }); return DONE; }
     if (p === '/api/sessions') return { sessions, executor: 'host' };
     const told = /^\/api\/sessions\/(\w+)\/extension-ui$/.exec(p);
+    // Asked by a browser half that came into the page after the chat's stream had opened.
+    if (told && method === 'GET') return { pushes: state.opening };
     if (told && method === 'POST') { said.push({ chat: told[1], ...json() }); return { ok: true }; }
     if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [model] }, named: { provider: null, model: null } };
@@ -79,7 +87,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
     await page.waitForFunction((chat) => (window as any).streams?.some((s: any) => !s.closed && s.url.includes(`/api/sessions/${chat}/events`)), chat);
     await page.evaluate((chat) => (window as any).streams.find((s: any) => !s.closed && s.url.includes(`/api/sessions/${chat}/events`)).emit('caught-up', {}), chat);
   };
-  return { said, hears, changed, pushed, says: said2, caughtUp };
+  return { said, hears, changed, pushed, says: said2, caughtUp, state };
 }
 
 /**
@@ -185,10 +193,20 @@ test('an extension\'s control in the header acts on the chat it is in, and opens
   // In another chat it is that chat's: drawn anew, asking that chat's extension.
   await hears('a', { type: 'notes', notes: [{ id: 1, text: 'Only in the first chat', by: 'you' }] });
   await expect(panel(page)).toContainText('Only in the first chat');
+  // Something of this chat's in the panel: a tab chosen, a note half written (which it would ask about before closing).
+  const tabs = page.locator('.chat-aside-head').getByRole('tablist', { name: 'Notes' });
+  await tabs.getByRole('tab', { name: 'You' }).click();
+  await panel(page).getByRole('textbox', { name: 'New note' }).fill('Only for the first chat');
   await page.getByRole('complementary', { name: 'Sidebar' }).getByText('Second chat', { exact: true }).click();
   await expect(page).toHaveURL(/\/s\/b$/);
   await expect(panel(page)).toContainText('Loading…');
   await expect.poll(() => said.at(-1)).toEqual({ chat: 'b', extension: NAME, data: { type: 'ready' } });
+  // None of it came along: the tab, the half-written note, or the question.
+  await expect(tabs.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
+  await expect(panel(page).getByRole('textbox', { name: 'New note' })).toHaveValue('');
+  await panel(page).getByRole('button', { name: 'Close Notes' }).click();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
 });
 
 test('an extension\'s page is in the sidebar, at an address of its own, and can go to the portal\'s pages', async ({ page }) => {
@@ -214,6 +232,11 @@ test('an extension removed, or changed, is taken out of the page and loaded agai
   const { changed } = await portal(page);
   await page.goto('/s/a');
   const toggle = header(page).getByRole('button', { name: 'Notes', exact: true });
+  await expect(toggle).toHaveAttribute('title', 'Notes');
+  // Changed while the chat is open: its new module was not there when the chat's stream said where things
+  // stand, so it asks, and is told as its server half would say it now.
+  await changed({ revision: 2, opening: [{ type: 'count', count: 3 }] });
+  await expect(toggle).toHaveAttribute('title', 'Notes (3)');
   await toggle.click();
   await expect(panel(page)).toBeVisible();
 
@@ -226,7 +249,7 @@ test('an extension removed, or changed, is taken out of the page and loaded agai
   await expect(page.getByRole('alert')).toHaveText("This page's extension is not installed, or is switched off.");
 
   // Installed again, under another revision: its module is fetched anew.
-  await changed({ installed: true, revision: 2 });
+  await changed({ installed: true, revision: 3 });
   await expect(page.getByRole('heading', { name: 'Notes' })).toBeVisible();
   await expect(sidebar(page).getByRole('button', { name: 'Notes' })).toHaveCount(1);
 });
@@ -236,7 +259,9 @@ test('an extension that fails to load, or to draw, fails alone', async ({ page }
     portal.slots.register("nav.page", { id: "fine", title: "Registered first", component: () => null });
     portal.slots.register("no.such.slot", { id: "x", component: () => null });
   }`;
-  await portal(page, broken);
+  const first = await portal(page, broken);
+  first.state.notesThemes = [{ id: 'own', name: 'Its own theme', dark: { accent: '#00ff00' } }];
+  await page.addInitScript(() => localStorage.setItem('pithagoras.theme', 'dark'));
   await page.goto(`/x/${NAME}/fine`);
   const failed = page.getByRole('alert');
   await expect(failed).toContainText("This page's extension could not be loaded.");
@@ -244,6 +269,20 @@ test('an extension that fails to load, or to draw, fails alone', async ({ page }
   // What it registered before it failed is gone with it, and the portal is as it was.
   await expect(sidebar(page).getByRole('button', { name: 'Registered first' })).toHaveCount(0);
   await expect(sidebar(page).getByRole('button', { name: 'Sessions' })).toBeVisible();
+  // The themes its package names need no module: still there to choose, and the one chosen stays chosen
+  // for as long as the package is installed, however often its module fails.
+  await page.goto('/settings/browser');
+  const colours = page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' });
+  await colours.click();
+  await page.getByRole('option', { name: /Its own theme/ }).click();
+  const accent = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
+  await expect.poll(accent).toBe('0 255 0');
+  await page.reload();
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' })).toHaveText(/Its own theme/);
+  expect(await accent()).toBe('0 255 0');
+  await page.evaluate(() => localStorage.removeItem('pithagoras.palette'));
+  await page.goto(`/x/${NAME}/fine`);
+  await expect(page.getByRole('alert')).toContainText("This page's extension could not be loaded.");
 
   const { changed } = await portal(page, `export default function (portal) {
     portal.slots.register("nav.page", { id: "fine", title: "Draws badly", component: () => { throw new Error("drew badly"); } });
@@ -397,6 +436,8 @@ test('a window an extension brought to voice mode opens from its button, is plac
   // The terminal's place is the side: the extension's window moves to the middle, as Files would.
   await page.getByRole('button', { name: 'Show terminal' }).click();
   await expect(brought).toHaveClass(/as-main/);
+  // Counted with the portal's own: two windows open are laid out as two, not each as the only one.
+  await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels', '2');
   await page.getByTestId('probe-window').getByRole('button', { name: 'Done' }).click();
   await expect(brought).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Show Probe' })).toBeVisible();

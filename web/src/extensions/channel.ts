@@ -15,7 +15,13 @@ const at = (chatId: string, extension: string) => `${chatId}\n${extension}`;
 
 /** Something an extension said to its browser half in a chat. */
 export function extensionMessage(chatId: string, extension: string, data: unknown): void {
-  for (const handler of [...(handlers.get(at(chatId, extension)) ?? [])]) handler(data);
+  for (const handler of [...(handlers.get(at(chatId, extension)) ?? [])]) {
+    try {
+      handler(data);
+    } catch (e) {
+      console.error(`[extensions] ${extension} failed on hearing from its extension:`, e);
+    }
+  }
 }
 
 /** An extension's channel in a chat: the same one each time, so that what is drawn with it is not drawn again for it. */
@@ -31,7 +37,7 @@ export function channelFor(chatId: string, extension: string): Channel {
         set.add(handler);
         return () => {
           set.delete(handler);
-          if (!set.size) handlers.delete(key);
+          if (!set.size && handlers.get(key) === set) handlers.delete(key);
         };
       },
     };

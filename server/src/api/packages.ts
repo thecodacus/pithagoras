@@ -137,6 +137,8 @@ export function packagesRouter(): Router {
     }
     try {
       await writePiSettingsText(content);
+      // The file names the packages: one taken out of it, or switched in it, by hand.
+      await syncExtensionServers();
       res.json({ ok: true, path: piSettingsPath(), note: "Applies to newly started sessions" });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });

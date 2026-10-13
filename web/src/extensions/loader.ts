@@ -6,7 +6,7 @@ import { onChatFeed, useChatFeed, type ChatFeed } from "./chat-feed";
 import { hasCommand, registerCommand, runCommand } from "./commands";
 import { ui, type Ui } from "./kit";
 import { panels, type PanelController } from "./panels";
-import { extensionGone, extensionHere, onlyWaitFor, onServerPush } from "./server-feed";
+import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from "./server-feed";
 import { register, type Entry, type SlotName } from "./slots";
 import { addStrings, forgetStrings, translate } from "./strings";
 import { choose, registerTheme, themes, themesSettled, type ThemeGiven } from "./themes";
@@ -126,21 +126,57 @@ function useThemeNow(): { mode: "light" | "dark"; theme: string | null } {
 /** What of an extension the page holds: by these it is known whether what is installed is what is loaded. */
 const stamp = (ext: ExtensionUi) => JSON.stringify([ext.entry ?? null, ext.server ?? null, ext.themes ?? null]);
 
+/** How long an extension's module may take to be fetched and called: one that hangs must not keep the others, or the page, waiting. */
+const LOAD_MS = 15_000;
+
+function within<T>(ms: number, work: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`It had not finished ${what} after ${ms / 1000} seconds`)), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
 async function activate(ext: ExtensionUi): Promise<void> {
+  // What its module put into the page, to take out again; and its themes, which need no module and are kept whatever becomes of it.
   const undo: (() => void)[] = [];
-  const leave = () => undo.reverse().forEach(quietly);
+  const themesOff: (() => void)[] = [];
+  let gone = false;
+  /**
+   * Something the module registered: undone when the extension goes, and
+   * forgotten once it has undone it itself, so that a component that listens
+   * and stops many times leaves nothing behind. Asked for after the extension
+   * has gone (a module still at work when it was given up on), it is undone at once.
+   */
+  const kept = (off: () => void): (() => void) => {
+    if (gone) return quietly(off), () => {};
+    const once = () => {
+      const at = undo.indexOf(once);
+      if (at === -1) return;
+      undo.splice(at, 1);
+      off();
+    };
+    undo.push(once);
+    return once;
+  };
+  const leaveModule = () => {
+    gone = true;
+    for (const fn of [...undo].reverse()) quietly(fn);
+    undo.length = 0;
+  };
+  const leave = () => {
+    leaveModule();
+    themesOff.forEach(quietly);
+  };
   const entry = ext.entry;
-  try {
-    // The themes its package.json names need no module: a package may be nothing but themes.
-    for (const theme of ext.themes ?? []) undo.push(registerTheme(ext.name, theme));
-    if (!entry) return void loaded.set(ext.name, { stamp: stamp(ext), leave });
+  const load = async (entry: string) => {
     if (ext.style) {
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = ext.style;
       link.dataset.extension = ext.name;
       document.head.append(link);
-      undo.push(() => link.remove());
+      kept(() => link.remove());
     }
     const module = await import(/* @vite-ignore */ entry);
     if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
@@ -148,13 +184,7 @@ async function activate(ext: ExtensionUi): Promise<void> {
       version: 1,
       extension: ext.name,
       React,
-      slots: {
-        register: (slot, entry) => {
-          const off = register(ext.name, slot, entry);
-          undo.push(off);
-          return off;
-        },
-      },
+      slots: { register: (slot, entry) => kept(register(ext.name, slot, entry)) },
       navigate: (path) => go(path),
       ui,
       api: {
@@ -167,57 +197,58 @@ async function activate(ext: ExtensionUi): Promise<void> {
       },
       t: (text, vars) => translate(ext.name, text, vars),
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
-      commands: {
-        register: (name, run) => {
-          const off = registerCommand(name, run);
-          undo.push(off);
-          return off;
-        },
-        run: runCommand,
-        has: hasCommand,
-      },
+      commands: { register: (name, run) => kept(registerCommand(name, run)), run: runCommand, has: hasCommand },
       panels,
-      chats: {
-        use: useChatFeed,
-        on: (chatId, handler) => {
-          const off = onChatFeed(chatId, handler);
-          undo.push(off);
-          return off;
-        },
-      },
-      server: {
-        on: (handler) => {
-          const off = onServerPush(ext.name, handler);
-          undo.push(off);
-          return off;
-        },
-      },
+      chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)) },
+      server: { on: (handler) => kept(onServerPush(ext.name, handler)) },
       theme: {
-        register: (theme) => {
-          const off = registerTheme(ext.name, theme);
-          undo.push(off);
-          return off;
-        },
+        register: (theme) => kept(registerTheme(ext.name, theme)),
         list: () => themes().map((theme) => ({ id: theme.id, name: theme.name, extension: theme.extension })),
         current: () => chosenPalette()?.id ?? null,
         set: choose,
         use: useThemeNow,
       },
     };
-    undo.push(() => {
+    kept(() => {
       extensionGone(ext.name);
       forgetStrings(ext.name);
     });
     const left = await module.default(portal);
-    if (typeof left === "function") undo.push(left);
+    if (typeof left === "function") kept(left);
+  };
+  try {
+    // The themes its package.json names need no module: a package may be nothing but themes.
+    for (const theme of ext.themes ?? []) themesOff.push(registerTheme(ext.name, theme));
+    if (entry) await within(LOAD_MS, load(entry), "loading");
     loaded.set(ext.name, { stamp: stamp(ext), leave });
+    if (!entry) return;
     // What its server half said before it was here is handed over now.
     extensionHere(ext.name);
+    if (ext.server) await catchUp(ext.name);
   } catch (e) {
-    // What it managed to register before it failed is taken out: half an extension is not shown.
-    leave();
+    // What its module managed to register before it failed is taken out: half an extension is not shown.
+    leaveModule();
     failures = { ...failures, [ext.name]: (e as Error)?.message || String(e) };
     console.error(`[extensions] ${ext.name} could not be loaded:`, e);
+    // Held as failed, under a stamp nothing has: its themes are still there to choose, and it is tried again the next time what is installed is gone through.
+    loaded.set(ext.name, { stamp: "", leave });
+  }
+}
+
+/**
+ * A module that came into the page after the chat's stream had opened was not
+ * there to be told where things stand: it is told now, as its server half
+ * would say it now. Not on the page's first load, when what the stream said
+ * waited for it.
+ */
+async function catchUp(name: string): Promise<void> {
+  const chatId = chatOnScreen();
+  if (!settled || !chatId) return;
+  try {
+    const { pushes } = await api.extensionOpening(chatId, name);
+    for (const data of pushes) serverPush(chatId, name, data);
+  } catch (e) {
+    console.error(`[extensions] ${name} could not be told where its server half stands:`, e);
   }
 }
 
@@ -226,6 +257,7 @@ async function sync(): Promise<void> {
     const { extensions } = await api.extensionUi();
     // Gone, or its module changed: the address of a module carries its revision.
     // Or its server half came or went, or its themes changed: the module is told where its routes are as it is called.
+    // Or it failed last time: it is tried again.
     for (const [name, was] of [...loaded]) {
       if (extensions.some((ext) => ext.name === name && stamp(ext) === was.stamp)) continue;
       was.leave();
@@ -235,8 +267,9 @@ async function sync(): Promise<void> {
     serverFailures = Object.fromEntries(extensions.filter((ext) => ext.serverError).map((ext) => [ext.name, ext.serverError!]));
     onlyWaitFor(extensions.filter((ext) => ext.entry).map((ext) => ext.name));
     for (const ext of extensions) if (!loaded.has(ext.name)) await activate(ext);
-    // Only now is it known which themes there are: one chosen that is gone gives way.
-    themesSettled();
+    // Only now is it known which themes there are: one chosen that is gone gives way. Not one whose
+    // extension is installed and failed to load just now: that is not the person's choice undone.
+    themesSettled(Object.keys(failures));
   } catch (e) {
     // The list could not be read: what is loaded stays, and the next change asks again.
     console.error("[extensions] could not read which extensions have an interface:", e);

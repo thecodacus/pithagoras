@@ -30,7 +30,7 @@ import { forgetBrowserSession } from "./browser/tools.js";
 import { BACKGROUND_SUPPORTED, listJobs, startedWhen, type BackgroundJob } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
 import { forgetCanvases } from "./canvases.js";
-import { chatEvent, chatLife, extensionHolds, setChatBridge } from "./extension-host.js";
+import { chatEvent, chatLife, extensionHolds, serversSettled, setChatBridge } from "./extension-host.js";
 import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor } from "./executors/index.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
@@ -1074,6 +1074,9 @@ class SessionManager extends EventEmitter {
    * extensions.
    */
   async tellExtension(sessionId: string, extension: string, data: unknown): Promise<boolean> {
+    // Asked before pi is started: where it runs in a container there is nobody to tell, and a container
+    // started only to find that out would be left running.
+    if (EXECUTOR_KIND !== "host") return false;
     const client = await this.ensureClient(sessionId);
     return client.tellExtension?.(extension, data) ?? false;
   }
@@ -1121,6 +1124,8 @@ class SessionManager extends EventEmitter {
   }
 
   private async startClient(sessionId: string): Promise<PiClient> {
+    // What the installed extensions' server halves add to a chat's pi is added as it loads: they are started first.
+    await serversSettled();
     // The pi that was let go still has its extensions winding down, on the same
     // conversation file: the next one starts after them.
     await this.releasing.get(sessionId);
@@ -1500,6 +1505,8 @@ class SessionManager extends EventEmitter {
       this.commandsInHand.has(sessionId) ||
       this.calls.has(sessionId) ||
       this.backgroundWork(sessionId) ||
+      // An extension's server half asked for this chat's pi to be kept while work of its own goes on.
+      extensionHolds(sessionId) ||
       client.isIdle?.() === false ||
       (client.dialogsOpen?.() ?? 0) > 0
     );
@@ -2556,7 +2563,7 @@ class SessionManager extends EventEmitter {
 
   /** Whether a subagent is working in the background here: its chat looks idle, and stopping it would end the subagent. */
   backgroundWork(sessionId: string): boolean {
-    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0 || extensionHolds(sessionId);
+    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0;
   }
 
   /** Whether anything at all is using the model: a turn running, or a message waiting for one. */
@@ -2847,7 +2854,7 @@ class SessionManager extends EventEmitter {
       [...this.live.entries()].map(async ([sessionId, { client }]) => {
         // A subagent in the background would be stopped by the reload: its
         // chat is idle, and still working.
-        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId) || this.backgroundWork(sessionId)) {
+        if (this.isBusy(sessionId) || this.compacting.has(sessionId) || this.editing.has(sessionId) || this.backgroundWork(sessionId) || extensionHolds(sessionId)) {
           waiting++;
           return false;
         }

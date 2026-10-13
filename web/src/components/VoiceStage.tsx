@@ -4,7 +4,7 @@ import { useWorkPanels } from "../use-work-panels";
 import { FilesPanel } from "./FilesPanel";
 import { keepFileActivity, latestFileActivity, type FileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { Item } from "../transcript";
 import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
@@ -59,11 +59,15 @@ const editing = (target: EventTarget | null) => !!(target as Element | null)?.cl
  */
 function BroughtWindow({ entry, main, onClose, ...props }: ChatProps & { entry: Registered<"voice.window">; main: boolean; onClose: () => void }) {
   const section = useRef<HTMLElement>(null);
+  // The same function each time it is drawn: what is in the window is drawn again only for what is new in what it is handed.
+  const latest = useRef(onClose);
+  latest.current = onClose;
+  const close = useCallback(() => latest.current(), []);
   return (
     <section ref={section} className={`voice-files-window voice-extension-window ${main ? "as-main" : "as-side"} is-open`} aria-label={entry.title} data-extension={entry.extension}>
       <header><span>{entry.icon ? <entry.icon /> : <LuPuzzle />}{entry.title}</span><div><button type="button" aria-label={t("Minimize {panel}", { panel: entry.title })} title={t("Minimize")} onClick={onClose}><LuMinus /></button></div></header>
       <ErrorBoundary resetKey={`${entry.key}:${props.chat.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
-        <entry.component key={props.chat.id} {...props} close={onClose} />
+        <entry.component key={props.chat.id} {...props} close={close} />
       </ErrorBoundary>
       <ResizeHandles target={section} />
     </section>
@@ -428,7 +432,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     e.preventDefault(); e.stopPropagation(); setDropping(false);
     add.current([...e.dataTransfer.files]);
   };
-  const panels = Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen);
+  const panels = Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen) + brought.length;
   // Where the orb is, said once for the stage's styles and for the windows
   // being resized (see Orb). In its dock under a maximized browser, or when
   // the windows sized by hand leave no gap wide enough; in the gap when they

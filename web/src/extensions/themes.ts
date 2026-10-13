@@ -88,9 +88,11 @@ export function choose(id: string | null): void {
 /**
  * The installed extensions have been gone through: the one chosen is still
  * there, or its extension was removed or switched off and the portal's own
- * colours are back.
+ * colours are back. `failed` are the extensions that are installed and could
+ * not be loaded this time: a theme of one of those is kept as it was painted.
  */
-export function themesSettled(): void {
+export function themesSettled(failed: readonly string[] = []): void {
   const chosen = chosenPalette();
-  if (chosen && !held.some((t) => t.id === chosen.id)) choosePalette(null);
+  if (!chosen || held.some((t) => t.id === chosen.id) || failed.some((name) => chosen.id.startsWith(`${name}/`))) return;
+  choosePalette(null);
 }

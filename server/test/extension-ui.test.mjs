@@ -42,6 +42,8 @@ const project = pkg("project", "from-a-folder", { ...WEB, server: "./server.js" 
 const headless = pkg("headless", "server-only", { server: "./lib/server.js" }, { "lib/server.js": SERVER });
 // Nothing but themes: no code at all.
 const themed = pkg("themed", "only-themes", { themes: [{ id: "dusk", name: "Dusk", dark: { accent: "#ff79c6" } }] }, {});
+// A second package under a name another has: the first is the one, whole.
+const twin = pkg("twin", "@codacus/notes", { server: "./server.js", themes: [{ id: "twin", name: "Twin", dark: { accent: "#000000" } }] }, { "server.js": "export default function (portal) { portal.router.get('/hello', (_req, res) => res.json({ from: 'the twin' })); }" });
 const broken = pkg("broken", "breaks", { ...WEB, server: "./server.js" }, { ...files("broken"), "server.js": "export default function () { throw new Error('no licence'); }" });
 
 writeFileSync(
@@ -62,6 +64,8 @@ User packages:
     ${broken}
   npm:only-themes
     ${themed}
+  npm:twin
+    ${twin}
 Project packages:
   npm:from-a-folder
     ${project}
@@ -75,7 +79,7 @@ mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 writeFileSync(
   path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"),
   JSON.stringify({
-    packages: ["npm:@codacus/notes", { source: "npm:switched-off", extensions: [], skills: [], prompts: [], themes: [] }, "npm:no-interface", "npm:server-only", "npm:breaks", "npm:only-themes"],
+    packages: ["npm:@codacus/notes", { source: "npm:switched-off", extensions: [], skills: [], prompts: [], themes: [] }, "npm:no-interface", "npm:server-only", "npm:breaks", "npm:only-themes", "npm:twin"],
   }),
 );
 
@@ -139,14 +143,17 @@ test("nothing else of a package is served, and nothing of a package that has no 
 });
 
 test("the server halves that run are those of the same packages, each said with where its routes are or why it is not running", async () => {
+  // Before any is started a page is told of no routes: there are none yet.
   const before = (await (await fetch(at("/api/extension-ui"))).json()).extensions;
-  assert.deepEqual(before.map((e) => e.server).filter(Boolean).sort(), ["/api/x/%40codacus/notes", "/api/x/breaks", "/api/x/server-only"], "where each will be, before any is started");
+  assert.deepEqual(before.map((e) => e.server).filter(Boolean), []);
   assert.equal((await fetch(at("/api/x/@codacus/notes/hello"))).status, 404);
 
   await syncExtensionServers();
   const byName = Object.fromEntries((await (await fetch(at("/api/extension-ui"))).json()).extensions.map((e) => [e.name, e]));
   assert.equal(byName["@codacus/notes"].server, "/api/x/%40codacus/notes");
   assert.deepEqual(await (await fetch(at(byName["@codacus/notes"].server + "/hello"))).json(), { from: "@codacus/notes" });
+  // Of two packages under one name the first is the one: its page is not given the other's server, or its themes.
+  assert.equal(byName["@codacus/notes"].themes, undefined);
   // A server half alone is listed without a module for the page.
   assert.deepEqual({ entry: byName["server-only"].entry, server: byName["server-only"].server }, { entry: undefined, server: "/api/x/server-only" });
   assert.deepEqual(await (await fetch(at("/api/x/server-only/hello"))).json(), { from: "server-only" });

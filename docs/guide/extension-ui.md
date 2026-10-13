@@ -84,7 +84,8 @@ While you work on it:
 | You changed | To see it |
 | --- | --- |
 | The browser half | Reload the page |
-| The server half | Switch the package off and on in Settings → Extensions |
+| The server half's module | Switch the package off and on in Settings → Extensions |
+| Another file the server half imports | Restart the portal |
 | The pi extension | `/reload` in the chat |
 
 ## The package
@@ -397,7 +398,8 @@ portal.slots.register("chat.background", { id: "commands", component: ({ channel
 opened on such a chat reaches its extension after a moment. What an extension
 sends on its own clock does not count as use of the chat. `channel.send`
 rejects where the chat's agent does not run in the portal's process, which is
-every executor but `EXECUTOR=host`. For anything that must work there too, use
+every executor but `EXECUTOR=host`; no agent is started there to find that
+out. For anything that must work there too, use
 the server half.
 
 ## The server half
@@ -415,6 +417,13 @@ again when the package is installed, removed, updated or switched. It runs
 with the portal's rights, as the package's pi extension does. It is an ES
 module (`"type": "module"` in `package.json`, or a `.mjs` file).
 
+It has fifteen seconds to start and five to stop; one that takes longer is
+given up on, with the reason beside the package in Settings → Extensions, and
+nothing else waits for it. The module itself is read again each time it is
+started. What it imports from its own package is read once for as long as the
+portal runs, as Node reads modules: after an update that changes those files,
+restart the portal.
+
 | `portal.` | |
 | --- | --- |
 | `router` | An Express router: the package's routes, at `/api/x/<package>/…`, behind the portal's login |
@@ -427,7 +436,7 @@ module (`"type": "module"` in `package.json`, or a `.mjs` file).
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
 | `chats.tell(chatId, data)` | To the package's own pi extension in a chat (`pithagoras:v1:ui:receive`) |
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
-| `chats.hold(chatId)` | Keeps the chat's pi from being let go while work goes on; returns what lets it go |
+| `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
@@ -449,10 +458,14 @@ portal.router.post("/chats/:id/upload", (req, res) => req.pipe(createWriteStream
 Routes are written from the package's own root. From the browser half,
 `portal.api.url("/chats/a/files")` is their address and `portal.api.json` asks
 as the portal's own requests do: JSON back, an `ApiError` with what was said
-for one refused, and a login that has gone told to the page. A route can
-stream as well: write `text/event-stream`, or take an upgrade with
+for one refused, and a login that has gone told to the page. The rest of a
+path reaches your routes as it was written, to be read once: a file called
+`what?.md` asked for as `what%3F.md` is `req.params.name === "what?.md"`.
+
+A route can stream as well: write `text/event-stream`, or take an upgrade with
 `portal.http.upgrade((req, socket, head) => …)`, which the portal has already
-checked for the login and for the page it comes from.
+checked for the login and for the page it comes from. An answer held open is
+ended when the portal's password changes, as the portal's own streams are.
 
 ### Where it keeps things
 
@@ -491,7 +504,11 @@ where things stand, then each change. Listen for it as your module is called,
 as above, and keep what you hear in the module: the page's stream opens before
 the extensions are loaded, and what came for yours meanwhile is handed over, in
 order, once it has been called. A component that only starts listening when it
-is drawn has missed what came before.
+is drawn has missed what came before. A module that comes into the page while
+a chat is already open (the package was just installed, switched on or
+updated) is told what `onOpen` says for that chat then. What is said must be
+JSON: something that cannot be written as it is left out, with a line in the
+portal's log.
 
 ### Tools that share the server half's state
 
@@ -657,6 +674,8 @@ package that is installed in the portal and switched on. Installing, removing, u
 switching one takes effect in the open page and in the server, without a
 reload or a restart.
 
+Of two installed packages that go by one name, the first is the one, whole.
+
 A package that a chat's folder brings (`.pi/` in a project) never has either
 half loaded. The agent can write that folder, and what it put there would run
 in the page of everyone who opens the portal, or in the portal itself.
@@ -670,7 +689,10 @@ it is one more reason to install packages you trust.
 
 A half that fails to load is left out, with the reason beside the package in
 Settings → Extensions, and for a browser half on its page's address and in the
-browser's console. A component that fails to draw takes down its own panel or
+browser's console. A browser half has fifteen seconds to be fetched and
+called, and the others do not wait for one that takes longer. It is tried
+again the next time a package changes, and the themes its `package.json` names
+are there to choose all the while. A component that fails to draw takes down its own panel or
 page, and a server half's handler that throws is answered as an error; the
 rest of the portal goes on.
 

@@ -122,11 +122,16 @@ export default function (portal) {
       panel.keep(writing);
       panel.guardClose(writing ? () => ui.confirm({ title: t("Discard the note you were writing?"), message: t("It has not been pinned."), confirmLabel: t("Discard"), danger: true }) : null);
     }, [writing]);
+    // Kept in the box until it has been taken: a note that could not be sent is not lost, and says why.
+    const [failed, setFailed] = useState("");
     const pin = (event) => {
       event.preventDefault();
       if (!writing) return;
-      channel.send({ type: "add", text }).catch(() => {});
-      setText("");
+      setFailed("");
+      channel.send({ type: "add", text }).then(
+        () => setText((now) => (now === text ? "" : now)),
+        (e) => setFailed(e.message),
+      );
     };
     if (error) return h("p", { className: "pn-empty", role: "alert" }, error);
     const whose = panel?.state ?? "all";
@@ -139,6 +144,7 @@ export default function (portal) {
         h("input", { value: text, onChange: (event) => setText(event.target.value), placeholder: t("Pin a note…"), "aria-label": t("New note") }),
         h("button", { type: "submit", disabled: !writing }, t("Pin")),
       ),
+      failed && h("p", { className: "pn-empty", role: "alert" }, failed),
       h(NotesList, { notes: notes && (whose === "all" ? notes : notes.filter((note) => note.by === whose)), channel }),
     );
   }

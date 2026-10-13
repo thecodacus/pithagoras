@@ -3,7 +3,7 @@ import https from "node:https";
 import type { Duplex } from "node:stream";
 import type { Express } from "express";
 import { isAuthedUpgrade, requireAuth } from "./auth.js";
-import { extensionUpgrade } from "./extension-host.js";
+import { extensionUpgrade, isExtensionUrl } from "./extension-host.js";
 import { watchStream } from "./login-streams.js";
 import { config } from "./extensions/browser-service.js";
 import { viewerConnected, viewerDisconnected } from "./extensions/browser-frames.js";
@@ -135,9 +135,13 @@ export function attachBrowserUpgrade(server: http.Server): void {
       socket.once("close", watchStream(() => socket.destroy()));
       return true;
     };
-    // An extension's server half may take upgrades under its own routes: checked the same way, then its to answer.
-    const extension = extensionUpgrade(req.url);
-    if (extension) return void (allowed() && extension(req, socket, head));
+    // An extension's server half may take upgrades under its own routes: checked the same way, then its to
+    // answer. The login is asked first: without it, nothing is said of which extensions there are.
+    if (isExtensionUrl(req.url)) {
+      if (!allowed()) return;
+      const extension = extensionUpgrade(req.url);
+      return extension ? extension(req, socket, head) : refuse(socket, 404, "Not Found");
+    }
     if (!isBrowserUrl(req.url)) return refuse(socket, 404, "Not Found");
     if (!allowed()) return;
     const proxied = https.request({
