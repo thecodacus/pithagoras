@@ -225,8 +225,10 @@ this page, its own browser, no profile, no allowlist.
 
 The portal gives the agent two rules for driving a Playwright browser (take a screenshot
 before reading the page's text, and leave out `filename` so a screenshot comes back as an
-image). They are in a chat's instructions only while such a server is configured and the
-built-in tools are not connected; with neither, nothing about a browser is added.
+image). They are in a chat's instructions only while the built-in tools are not connected
+and a Playwright MCP server is attached to this browser: one whose `--cdp-endpoint` is its
+address, or one called `browser`. A server that launches a Chromium of its own gets none,
+and with no server at all nothing about a browser is added.
 
 ## Who may drive it
 
