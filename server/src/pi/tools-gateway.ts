@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { fail, say } from "./tool-result.js";
 import { piDependency } from "./package.js";
 import { GATEWAY_TOOL } from "./tools-gateway-names.js";
+import { oneOf } from "./tool-schema.js";
 
 /**
  * One tool for all the tools a conversation has as lazy.
@@ -237,7 +238,7 @@ export class ToolsGateway {
 
   private describe(name: string): ReturnType<typeof say> {
     const tool = this.find(name);
-    return say(`${tool.name}\n\n${tool.description || "(no description)"}\n\nParameters (JSON schema):\n${JSON.stringify(tool.parameters ?? {}, null, 2)}`);
+    return say(`${tool.name}\n\n${tool.description || "(no description)"}\n\nParameters (JSON schema):\n${JSON.stringify(tool.parameters ?? {})}`);
   }
 
   private call(id: string, name: string, rawArgs: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: unknown) {
@@ -339,26 +340,20 @@ export class ToolsGateway {
       name: GATEWAY_TOOL,
       label: "Tools",
       description:
-        "Reach the tools that are not in the list you were given. They are kept out of it so that it stays short, " +
-        "and they are all here. action \"search\" finds them (query: words from a name or from what it does; " +
-        "no query lists them all), \"describe\" gives the description and parameters of one (name), and " +
-        "\"call\" runs one (name, and args: an object of its arguments). Describe a tool before the first call of it.",
-      promptSnippet: `${GATEWAY_TOOL} — search, describe and call the tools that are kept out of this list`,
+        "Reach the tools not in your list. action search: find them by words (no query lists all); describe: one tool's description and parameters (name); " +
+        "call: run it (name, args). Describe a tool before its first call.",
+      promptSnippet: "search, describe and call the tools kept out of this list",
       promptGuidelines: [
-        `${lazyHint(this.sets)} A tool it finds is described for its parameters and then called through it.`,
+        lazyHint(this.sets),
         // The lazy tools' own rules, which their extensions meant for the prompt: see lazyGuidelines.
         ...this.rules,
       ],
       parameters: Type.Object({
-        action: Type.Union([Type.Literal("search"), Type.Literal("describe"), Type.Literal("call")], {
-          description: "search, describe or call",
-        }),
-        query: Type.Optional(Type.String({ description: "search: words from a tool's name or from what it does" })),
-        name: Type.Optional(Type.String({ description: "describe and call: the tool's name, as search lists it" })),
+        action: oneOf(["search", "describe", "call"]),
+        query: Type.Optional(Type.String()),
+        name: Type.Optional(Type.String()),
         args: Type.Optional(
-          Type.Union([Type.Object({}, { additionalProperties: true }), Type.String()], {
-            description: "call: the tool's arguments as an object, or as the JSON text of one, as describe lists them",
-          })
+          Type.Union([Type.Object({}, { additionalProperties: true }), Type.String()], { description: "The tool's arguments: an object, or its JSON text" })
         ),
       }),
       execute: async (id: string, p: any, signal?: AbortSignal, onUpdate?: unknown, ctx?: unknown) => {

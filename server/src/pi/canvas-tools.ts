@@ -2,6 +2,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { listCanvases,focusCanvas,readCanvas,markCanvasRead,createCanvas,deleteCanvas,beginCanvasWrite,saveCanvasPrefix,finishCanvasWrite } from '../canvases.js';
 import { GATEWAY_TOOL, calledThrough } from './tools-gateway-names.js';
+import { oneOf } from './tool-schema.js';
 
 /** Decode only complete JSON escape sequences; an unfinished escape stays pending. */
 function stringPrefix(raw: string,start: number): {value:string;end:number;complete:boolean} {
@@ -225,13 +226,13 @@ export class CanvasTools {
   interrupt(){for(const call of this.writes.keys())this.finish(call,true);this.streams.clear();this.errors.clear();}
   extension=(pi:ExtensionAPI)=>{
     const register=(name:string,description:string,parameters:any,execute:(id:string,p:any)=>any)=>pi.registerTool({name,label:name.replaceAll('_',' '),description,parameters,execute:async(id:string,p:any)=>{const result=execute(id,p);return {content:[{type:'text',text:JSON.stringify(result)}],details:result}}});
-    register('canvas_list','List this session’s temporary and stored document canvases. Read a canvas before editing to get its revision.',Type.Object({}),()=>listCanvases(this.session).map(({content,active_call,...row})=>({...row,characters:content.length})));
-    register('canvas_create','Create an empty temporary document canvas visible in this session. It is kept in memory until the user chooses Store in the UI. Then use canvas_write to write its content live.',Type.Object({title:Type.String()}),(_id,p)=>{const row=createCanvas(this.session,p.title);return markCanvasRead(this.session,row.id)});
-    register('canvas_read','Read a document canvas and its current revision, including partial writes retained after interruption. Use the exact canvas ID returned by canvas_list or canvas_create, not its title.',Type.Object({canvas_id:Type.String()}),(_id,p)=>{const row=markCanvasRead(this.session,p.canvas_id);focusCanvas(this.session,row.id);return row});
-    register('canvas_write','Write or edit a document live. Arguments MUST be ordered canvas_id, revision, operation, content (last). Use the revision from create/read. replace rewrites the document; append adds text. Decoded content is saved as it streams, even if interrupted. Partial text survives interruption. A read is required only for an unread canvas or after a human edit; otherwise use the latest revision from your tool result. Markdown is supported, including pictures from the chat\'s folder: ![caption](relative/path.png).',Type.Object({canvas_id:Type.String(),revision:Type.Integer(),operation:Type.Union([Type.Literal('replace'),Type.Literal('append')]),content:Type.String()}),(id,p)=>{
+    register('canvas_list','List this chat’s canvases, temporary and stored.',Type.Object({}),()=>listCanvases(this.session).map(({content,active_call,...row})=>({...row,characters:content.length})));
+    register('canvas_create','Open an empty document canvas beside the chat, to fill with canvas_write. It is temporary until the person stores it.',Type.Object({title:Type.String()}),(_id,p)=>{const row=createCanvas(this.session,p.title);return markCanvasRead(this.session,row.id)});
+    register('canvas_read','Read a canvas and its revision, with any text kept from an interrupted write. canvas_id is the id from canvas_list or canvas_create, not the title.',Type.Object({canvas_id:Type.String()}),(_id,p)=>{const row=markCanvasRead(this.session,p.canvas_id);focusCanvas(this.session,row.id);return row});
+    register('canvas_write','Write a canvas live: text is saved as it streams, so an interrupted write keeps what came. Arguments in this order, content last: canvas_id, revision, operation, content. revision: from your last canvas result; read first only for an unread canvas or after the person edited it. operation: replace the document or append to it. Markdown, with pictures from the chat\'s folder: ![caption](relative/path.png).',Type.Object({canvas_id:Type.String(),revision:Type.Integer(),operation:oneOf(['replace','append']),content:Type.String()}),(id,p)=>{
       try {this.apply(id,p);const row=readCanvas(this.session,p.canvas_id);this.finish(id,false);return {id:row.id,revision:row.revision,characters:row.content.length,saved:row.persisted,persisted:row.persisted};}
       catch(e){this.finish(id,true);throw e;}
     });
-    register('canvas_delete','Delete a canvas from this session when requested. Read it first for the current revision.',Type.Object({canvas_id:Type.String(),revision:Type.Integer()}),(_id,p)=>{deleteCanvas(this.session,p.canvas_id,p.revision);return {deleted:true}});
+    register('canvas_delete','Delete a canvas, only when the person asks. revision: the current one.',Type.Object({canvas_id:Type.String(),revision:Type.Integer()}),(_id,p)=>{deleteCanvas(this.session,p.canvas_id,p.revision);return {deleted:true}});
   };
 }
