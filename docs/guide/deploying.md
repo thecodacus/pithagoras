@@ -222,8 +222,9 @@ Bindings** tab).
 
 In the realm, create a client: *OpenID Connect*, **Client authentication** on,
 **Standard flow** on, the redirect URI above under **Valid redirect URIs**, and the
-portal's address under **Valid post logout redirect URIs**. Copy the secret from
-**Credentials**. The issuer is `https://keycloak.example.com/realms/<realm>`. Every
+portal's address with a `/` at the end (`https://portal.example.com/`) under
+**Valid post logout redirect URIs**, since Keycloak compares it as written. Copy the
+secret from **Credentials**. The issuer is `https://keycloak.example.com/realms/<realm>`. Every
 user of the realm can sign in, so use a realm that holds your people only.
 
 ## HTTPS

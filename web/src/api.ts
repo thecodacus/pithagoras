@@ -1836,6 +1836,10 @@ export interface BrowserStatus {
   version: string | null;
   pages: { title: string; url: string }[];
   uiPort: string;
+  /** Does that port answer other machines? The page links to it only then. */
+  uiExposed: boolean;
+  /** A container made before the port was kept to one address: it answers every machine until it is installed again. */
+  uiOutdated: boolean;
   allowlist: string;
   /** Whether the browser tools glide a cursor to what they act on. */
   cursor: boolean;

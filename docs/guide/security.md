@@ -151,6 +151,11 @@ behind the portal's login like every other route: without it they answer 401, an
 websocket opened from another site is refused. The portal does not hand its own
 login cookie, or the visitor's `Authorization` header, on to the browser.
 
+The browser's own ports (`3010` and `3011`) are not the way in: they listen on the
+loopback address only, so that the one password in front of them is not all that
+stands between a signed-in browser and the network. See
+[the browser's own port](/guide/browser#the-browser-s-own-port).
+
 ## Signing in through a provider
 
 With [single sign-on](/guide/deploying#single-sign-on) set up, the provider
