@@ -177,6 +177,67 @@ test('a document\'s title is its first heading as the page draws it, the same in
   for (const [name, title] of Object.entries(listed)) assert.equal(docs.read(folder.id, name).body.title, title, name);
 });
 
+test('what the page does not draw as a heading is no title, and what it draws as one is', () => {
+  const site = folderWith('docs-blocks-', {
+    // A code block that opens on a list item's line is a code block all the same.
+    'documents/list-fence.md': 'Steps:\n\n1. ```sh\n   # install the tools first\n   npm ci\n   ```\n\n# Setup steps\n',
+    'documents/quote-fence.md': '> ```\n> # in a quoted code block\n> ```\n\n# After the quote\n',
+    // A heading in a quote is drawn as one.
+    'documents/quote.md': '> # Quoted heading\n\n# Later\n',
+    // A code block left open in a quote or a list item ends with it.
+    'documents/quote-open.md': '> ```\n> code\n\n# After the open quote\n',
+    'documents/item-open.md': '- ```\n  code\n\n# After the open item\n',
+    // An HTML comment, and a block of HTML, are not drawn as text at all.
+    'documents/comment.md': '<!--\n# TODO: replace this template text\n-->\n\n# Meeting notes\n',
+    'documents/comment-one-line.md': '<!-- # not this -->\n# Meeting notes\n',
+    'documents/html.md': '<div align="center">\n\n# Centered title\n\n</div>\n',
+    'documents/html-block.md': '<div>\n# not a heading in the block\n</div>\n\n# After the block\n',
+    'documents/script.md': '<script>\n\n# in a script\n\n</script>\n\n# After the script\n',
+    // A byte order mark is not text.
+    'documents/bom.md': '﻿# Release plan\n',
+    // Inline code with backticks is no fence.
+    'documents/inline-fence.md': '``` not a fence ```\n\n# Title after inline code\n',
+    // Marks of links, pictures and footnotes are not drawn.
+    'documents/marks.md': '# The [release plan][plan], [![CI](https://example.com/ci.svg)](https://example.com/ci) and <https://example.com> [^1]\n\n[plan]: ./plan.md\n[^1]: A note.\n',
+  });
+  const docs = server({ a: site });
+  const [folder] = docs.folders();
+  const listed = Object.fromEntries(folder.documents.map((d: any) => [d.name, d.title]));
+  assert.deepEqual(listed, {
+    'list-fence.md': 'Setup steps',
+    'quote-fence.md': 'After the quote',
+    'quote.md': 'Quoted heading',
+    'quote-open.md': 'After the open quote',
+    'item-open.md': 'After the open item',
+    'comment.md': 'Meeting notes',
+    'comment-one-line.md': 'Meeting notes',
+    'html.md': 'Centered title',
+    'html-block.md': 'After the block',
+    'script.md': 'After the script',
+    'bom.md': 'Release plan',
+    'inline-fence.md': 'Title after inline code',
+    'marks.md': 'The release plan, CI and https://example.com',
+  });
+  for (const [name, title] of Object.entries(listed)) assert.equal(docs.read(folder.id, name).body.title, title, name);
+});
+
+test('documents made to be slow to title do not hold the portal while they are listed', () => {
+  const site = folderWith('docs-slow-', { 'documents/.keep': '' });
+  // Each is what a backtracking rule takes longest over: a heading with a long run of blanks, a long run of marks.
+  for (let i = 0; i < 300; i++) {
+    writeFileSync(path.join(site, 'documents', `blanks-${i}.md`), `# a${' '.repeat(4090)}b`);
+    writeFileSync(path.join(site, 'documents', `marks-${i}.md`), `# ${'**a '.repeat(1000)}`);
+    writeFileSync(path.join(site, 'documents', `paragraph-${i}.md`), `${'_a '.repeat(1300)}\n===\n`);
+  }
+  const docs = server({ a: site });
+  const started = performance.now();
+  const [folder] = docs.folders();
+  const took = performance.now() - started;
+  assert.equal(folder.documents.length, 900);
+  // Listing them took over ten seconds before; an ordinary folder of this size takes a few dozen milliseconds.
+  assert.ok(took < 2000, `listing took ${Math.round(took)} ms`);
+});
+
 test('a documents folder that is a link is not one: what it leads to is neither listed nor read', () => {
   const site = folderWith('docs-linked-', { 'src/code.md': '# Code' });
   symlinkSync('src', path.join(site, 'documents'));
@@ -221,21 +282,49 @@ test('every text the Documents page shows has a German one, and no German one is
   assert.deepEqual([...german!].filter((text) => !shown.has(text)), [], 'German for nothing shown');
 });
 
-/** A package folder that depends on `a` and `b` to run and on `c` to be built, with an npm that writes what it is told to. */
+/** `version` of `name` in the package folder `dir`, as npm leaves it there. */
+function installed(dir: string, where: string, version: string) {
+  mkdirSync(path.join(dir, where), { recursive: true });
+  writeFileSync(path.join(dir, where, 'package.json'), JSON.stringify({ version }));
+}
+
+/**
+ * A package folder that depends on `a` (which brings `d`) and `b` to run and on `c` to be built, as its lock
+ * file says, with an npm that does what it is told to.
+ */
 function packageNeeding(npmSays: string) {
   const dir = scratch('docs-deps-');
-  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'needs', dependencies: { a: '1.0.0', b: '1.0.0' }, devDependencies: { c: '1.0.0' } }));
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'needs', dependencies: { a: '^1.0.0', b: '^1.0.0' }, devDependencies: { c: '1.0.0' } }));
+  writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify({
+    name: 'needs', lockfileVersion: 3, packages: {
+      '': { name: 'needs' },
+      'node_modules/a': { version: '1.2.0' },
+      'node_modules/a/node_modules/d': { version: '2.0.0' },
+      'node_modules/b': { version: '1.0.0' },
+      'node_modules/c': { version: '1.0.0', dev: true },
+      // Only where it fits: left out by npm elsewhere.
+      'node_modules/e': { version: '1.0.0', optional: true },
+    },
+  }));
   const npm = path.join(dir, 'fake-npm');
   writeFileSync(npm, `#!/bin/sh\necho "$@" >> "${dir}/asked"\n${npmSays}\n`);
   chmodSync(npm, 0o755);
   return { dir, npm, asked: () => readFileSync(path.join(dir, 'asked'), 'utf8').trim().split('\n') };
 }
 
+/** What a fake npm does for `npm ci --omit=dev`: what the lock names to run, at its versions. */
+const INSTALLS = [['node_modules/a', '1.2.0'], ['node_modules/a/node_modules/d', '2.0.0'], ['node_modules/b', '1.0.0']]
+  .map(([where, version]) => `mkdir -p ${where} && echo '{"version":"${version}"}' > ${where}/package.json`).join(' && ');
+
+/** The events of a process that has ended can come after the promise for it: what they log is in by then. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
 test('the Documents extension installs what it needs to run when it is missing, once, and says so in the log', async () => {
-  const { dir, npm, asked } = packageNeeding('mkdir -p node_modules/a node_modules/b && echo "{}" > node_modules/a/package.json && echo "{}" > node_modules/b/package.json');
-  mkdirSync(path.join(dir, 'node_modules', 'a'), { recursive: true });
-  writeFileSync(path.join(dir, 'node_modules', 'a', 'package.json'), '{}');
+  const { dir, npm, asked } = packageNeeding(INSTALLS);
+  installed(dir, 'node_modules/a', '1.2.0');
+  installed(dir, 'node_modules/a/node_modules/d', '2.0.0');
   assert.deepEqual(missingDependencies(dir), ['b'], 'what it needs to be built is not asked for');
+  assert.deepEqual(missingDependencies(dir, { dev: true }), ['b', 'c'], 'unless it is to be built');
   const log: string[] = [];
   // Asked twice while it installs: one install.
   const [first, second] = await Promise.all([ensureDependencies((line: string) => log.push(line), { dir, npm }), ensureDependencies((line: string) => log.push(line), { dir, npm })]);
@@ -243,6 +332,7 @@ test('the Documents extension installs what it needs to run when it is missing, 
   assert.equal(second, true);
   assert.deepEqual(asked(), ['ci --omit=dev --ignore-scripts --no-audit --no-fund']);
   assert.deepEqual(missingDependencies(dir), []);
+  await settle();
   assert.equal(log.length, 2);
   assert.match(log[0], /^Installing its dependencies \(b\) with npm$/);
   assert.match(log[1], /^Installed its dependencies in \d+ s$/);
@@ -252,14 +342,43 @@ test('the Documents extension installs what it needs to run when it is missing, 
   assert.equal(log.length, 2);
 });
 
-test('an install of the Documents extension\'s dependencies that fails is said in the log, and tried again on the next start', async () => {
+test('a dependency at another version than the lock names is installed again, one it brings along as well', async () => {
+  const { dir, npm, asked } = packageNeeding(INSTALLS);
+  // What an older lock installed: a later commit moved `a` on, and `a` brings another `d`.
+  installed(dir, 'node_modules/a', '1.0.0');
+  installed(dir, 'node_modules/a/node_modules/d', '1.0.0');
+  installed(dir, 'node_modules/b', '1.0.0');
+  assert.deepEqual(missingDependencies(dir), ['a', 'd']);
+  const log: string[] = [];
+  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), true);
+  assert.equal(asked().length, 1);
+  assert.match(log[0], /^Installing its dependencies \(a, d\) with npm$/);
+  assert.deepEqual(missingDependencies(dir), []);
+  // An optional package that is there is checked like the rest.
+  installed(dir, 'node_modules/e', '0.1.0');
+  assert.deepEqual(missingDependencies(dir), ['e']);
+});
+
+test('without a lock file, what the package names is what is checked', () => {
+  const { dir } = packageNeeding('');
+  rmSync(path.join(dir, 'package-lock.json'));
+  installed(dir, 'node_modules/a', '0.0.1');
+  assert.deepEqual(missingDependencies(dir), ['b']);
+  assert.deepEqual(missingDependencies(dir, { dev: true }), ['b', 'c']);
+});
+
+test('an install of the Documents extension\'s dependencies that fails is said in the log once, and tried again on the next start', async () => {
   const { dir, npm, asked } = packageNeeding('echo "npm error network unreachable" >&2; exit 1');
   const log: string[] = [];
   assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), false);
-  assert.match(log.at(-1)!, /^Could not install its dependencies: npm exited with 1: npm error network unreachable$/);
+  await settle();
+  assert.deepEqual(log.slice(1), ['Could not install its dependencies: npm exited with 1: npm error network unreachable']);
   assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), false);
   assert.equal(asked().length, 2);
-  // An npm that cannot be started at all is said as well.
+  // An npm that cannot be started at all is said as well, once: not again as the end of a process that never ran.
+  log.length = 0;
   assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm: path.join(dir, 'no-such-npm') }), false);
-  assert.match(log.at(-1)!, /^Could not install its dependencies: spawn .*no-such-npm ENOENT$/);
+  await settle();
+  assert.equal(log.length, 2, log.join('\n'));
+  assert.match(log[1], /^Could not install its dependencies: spawn .*no-such-npm ENOENT$/);
 });

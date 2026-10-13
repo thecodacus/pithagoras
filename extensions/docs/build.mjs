@@ -4,23 +4,23 @@
  * edited. The portal's own `npm run build` runs this, so a checkout and the
  * image build it the same way; the bundle is not kept in git.
  *
- * esbuild is the one the portal's web build already has (it comes with vite),
+ * esbuild is the one the repository's own packages already bring,
  * found in the repository's node_modules: nothing is added for it. The editor
  * itself is this package's own (devDependencies), installed here first when
- * it is not there yet.
+ * it is not there yet, or not at the version its lock file names.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { missingDependencies } from "./deps.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(HERE, "web", "editor.js");
 
-const meta = JSON.parse(readFileSync(path.join(HERE, "package.json"), "utf8"));
-const wanted = Object.keys({ ...meta.dependencies, ...meta.devDependencies });
-if (wanted.some((name) => !existsSync(path.join(HERE, "node_modules", name, "package.json")))) {
-  console.log("pithagoras-docs: installing its packages");
+// Missing, or not the versions the lock names (a later commit changed them): installed as the lock says.
+const missing = missingDependencies(HERE, { dev: true });
+if (missing.length) {
+  console.log(`pithagoras-docs: installing its packages (${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ", …" : ""})`);
   execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"], { cwd: HERE, stdio: "inherit" });
 }
 

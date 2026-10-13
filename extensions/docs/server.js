@@ -27,45 +27,139 @@ const HEAD_BYTES = 4096;
 const idOf = (folder) => createHash("sha256").update(folder).digest("hex").slice(0, 16);
 const isDocumentName = (name) => typeof name === "string" && name.toLowerCase().endsWith(".md") && !name.startsWith(".") && !/[/\\\0]/.test(name);
 
+/**
+ * How far a line, and a title, is looked at. A title is one line on the page,
+ * and the rules below are not all linear: bounding what they see keeps a
+ * crafted document from holding the portal's only thread while it is listed.
+ */
+const LINE_CHARS = 1024;
+const TITLE_CHARS = 256;
+
+/** The character references a title is likely to hold, and any by its number. */
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", middot: "·", mdash: "—", ndash: "–", hellip: "…", copy: "©", reg: "®", trade: "™", laquo: "«", raquo: "»", bull: "•" };
+function decode(text) {
+  return text.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z]{2,8}));/g, (whole, decimal, hex, name) => {
+    if (name) return ENTITIES[name] ?? whole;
+    const code = decimal ? Number(decimal) : parseInt(hex, 16);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+  });
+}
+
 /** A heading's text as the page shows it: what its inline Markdown draws, without the marks. */
 function plain(text) {
-  return text
+  const shown = text
+    .slice(0, LINE_CHARS)
     .replace(/`+([^`]*?)`+/g, "$1")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<((?:https?|ftp|mailto):[^\s<>]*)>/gi, "$1")
+    // A picture first, so that a picture inside a link (a badge) leaves the link to be taken off next.
+    .replace(/!\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])/g, "$1")
+    .replace(/\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])/g, "$1")
+    .replace(/\[\^[^\]]*\]/g, "")
     .replace(/<\/?[A-Za-z][^>]*>/g, "")
-    .replace(/(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1/g, "$2")
-    .replace(/(^|[^\w*])\*(?=\S)(.+?)(?<=\S)\*(?!\w)/g, "$1$2")
-    .replace(/(^|[^\w_])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, "$1$2")
-    .replace(/\\([!-/:-@[-`{-~])/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
+    // Emphasis spans a few words: bounded, so that a line of unclosed marks is not searched to its end from each one.
+    .replace(/(\*\*|__|~~)(?=\S)(.{1,64}?)(?<=\S)\1/g, "$2")
+    .replace(/(^|[^\w*])\*(?=\S)(.{1,64}?)(?<=\S)\*(?!\w)/g, "$1$2")
+    .replace(/(^|[^\w_])_(?=\S)(.{1,64}?)(?<=\S)_(?!\w)/g, "$1$2")
+    .replace(/\\([!-/:-@[-`{-~])/g, "$1");
+  return decode(shown).replace(/\s+/g, " ").trim().slice(0, TITLE_CHARS).trim();
+}
+
+/** How many spaces `line` starts with, a tab as one. */
+function leading(line) {
+  let at = 0;
+  while (at < line.length && (line[at] === " " || line[at] === "\t")) at++;
+  return at;
+}
+
+/** A `#` heading's text: what follows the marks, without a closing run of `#`. Walked by hand, not by a backtracking pattern. */
+function atxText(rest) {
+  let end = rest.length;
+  while (end > 0 && (rest[end - 1] === " " || rest[end - 1] === "\t")) end--;
+  let hashes = end;
+  while (hashes > 0 && rest[hashes - 1] === "#") hashes--;
+  if (hashes < end && (hashes === 0 || rest[hashes - 1] === " " || rest[hashes - 1] === "\t")) end = hashes;
+  return rest.slice(leading(rest), end);
+}
+
+/** Does `line` close the code block `fence` opened: its character, at least as many, and nothing after them. */
+function closes(fence, line) {
+  let at = leading(line);
+  if (at > fence.indent + 3) return false;
+  const start = at;
+  while (at < line.length && line[at] === fence.char) at++;
+  return at - start >= fence.length && !line.slice(at).trim();
+}
+
+/**
+ * A line without the quotes and list items it stands in: what is in them is
+ * a block of its own (a heading, a code block). `column` is where that starts.
+ */
+function unwrap(line) {
+  let at = Math.min(leading(line), 3);
+  let inside = false;
+  for (;;) {
+    if (line[at] === ">") {
+      at += line[at + 1] === " " ? 2 : 1;
+    } else {
+      const marker = /^(?:[*+-]|\d{1,9}[.)])(?=[ \t]|$)/.exec(line.slice(at, at + 11));
+      if (!marker) break;
+      at += marker[0].length;
+      at += Math.min(leading(line.slice(at)), 4) || 0;
+    }
+    inside = true;
+  }
+  return { content: line.slice(at), column: at, inside };
+}
+
+/** The block-level HTML tags that start an HTML block even in the middle of a paragraph (CommonMark's sixth kind). */
+const BLOCK_TAGS = new Set("address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section summary table tbody td tfoot th thead title tr track ul".split(" "));
+
+/**
+ * Where an HTML block that starts on `text` ends, as CommonMark has it: the
+ * text that closes it ("" for the next blank line), or nothing when `text`
+ * starts no HTML block. `inParagraph`: only some kinds can interrupt one.
+ */
+function htmlBlock(text, inParagraph) {
+  if (text[0] !== "<") return null;
+  const raw = /^<(script|pre|style|textarea)(?:[\s>]|$)/i.exec(text);
+  if (raw) return `</${raw[1].toLowerCase()}>`;
+  if (text.startsWith("<!--")) return "-->";
+  if (text.startsWith("<?")) return "?>";
+  if (text.startsWith("<![CDATA[")) return "]]>";
+  if (/^<![A-Za-z]/.test(text)) return ">";
+  const tag = /^<\/?([A-Za-z][A-Za-z0-9-]*)(?=[\s/>]|$)/.exec(text);
+  if (tag && BLOCK_TAGS.has(tag[1].toLowerCase())) return "";
+  // Any other tag, alone on its line, starts one too, but not inside a paragraph.
+  if (!inParagraph && /^<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>[ \t]*$/.test(text)) return "";
+  return null;
 }
 
 /**
  * The first heading of a Markdown text, as plain text, or nothing: a `#` line,
  * or a paragraph underlined with `=` or `-`, as CommonMark (and so the page)
- * has them. A line in a code block is code, whatever it looks like.
+ * has them. What is in a code block, an HTML block or a comment is not drawn
+ * as a heading, whatever it looks like.
  */
 function headingOf(text) {
   let fence = null;
+  let html = null;
   let paragraph = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/\r$/, "");
+  for (const raw of text.replace(/^﻿/, "").split("\n")) {
+    const line = raw.replace(/\r$/, "").slice(0, LINE_CHARS);
     if (fence) {
-      // A closing fence is the opening's character, at least as many, and nothing after them.
-      if (fence.test(line)) fence = null;
+      // A code block in a quote or a list item ends with its fence, or with the quote or the item.
+      const left = fence.quoted ? !/^ {0,3}>/.test(line) : fence.inside && line.trim() !== "" && leading(line) < fence.indent;
+      if (!left) {
+        if (closes(fence, line) || closes(fence, unwrap(line).content)) fence = null;
+        continue;
+      }
+      fence = null;
+    }
+    if (html !== null) {
+      if (html === "" ? !line.trim() : line.toLowerCase().includes(html)) html = null;
       continue;
     }
-    const opening = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (opening) {
-      fence = new RegExp(`^ {0,3}${opening[1][0]}{${opening[1].length},}[ \\t]*$`);
-      paragraph = [];
-      continue;
-    }
-    const atx = /^ {0,3}#{1,6}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(line);
-    if (atx) {
-      const title = plain(atx[1] ?? "");
-      if (title) return title;
+    if (!line.trim()) {
       paragraph = [];
       continue;
     }
@@ -73,14 +167,40 @@ function headingOf(text) {
     if (paragraph.length && /^ {0,3}(=+|-+)[ \t]*$/.test(line)) {
       const title = plain(paragraph.join(" "));
       if (title) return title;
-    }
-    // What cannot be underlined into a heading: a blank line, a quote, a list item, a rule, a table, and code or HTML that starts a block.
-    const block = !paragraph.length && (/^ {4}/.test(line) || /^ {0,3}</.test(line));
-    if (block || !line.trim() || /^ {0,3}(>|[*+-](\s|$)|\d{1,9}[.)](\s|$)|\|)/.test(line) || /^ {0,3}([*_-])([ \t]*\1){2,}[ \t]*$/.test(line)) {
       paragraph = [];
       continue;
     }
-    paragraph.push(line.trim());
+    // A rule, and code indented as a block of its own.
+    if (/^ {0,3}([*_-])([ \t]*\1){2,}[ \t]*$/.test(line) || (!paragraph.length && leading(line) >= 4)) {
+      paragraph = [];
+      continue;
+    }
+    const { content, column, inside } = unwrap(line);
+    const opening = /^(`{3,}|~{3,})/.exec(content);
+    // A run of backticks with another backtick after it is code in the line, not a block.
+    if (opening && !(opening[1][0] === "`" && content.slice(opening[1].length).includes("`"))) {
+      fence = { char: opening[1][0], length: opening[1].length, indent: column, inside, quoted: /^ {0,3}>/.test(line) };
+      paragraph = [];
+      continue;
+    }
+    const atx = /^#{1,6}(?=[ \t]|$)/.exec(content);
+    if (atx) {
+      const title = plain(atxText(content.slice(atx[0].length)));
+      if (title) return title;
+      paragraph = [];
+      continue;
+    }
+    const ends = htmlBlock(content, paragraph.length > 0 && !inside);
+    if (ends !== null) {
+      // One that closes on the line it opens on is that line only.
+      const after = content.slice(1).toLowerCase();
+      if (ends !== "" && after.includes(ends)) html = null;
+      else html = ends;
+      paragraph = [];
+      continue;
+    }
+    // A line in a quote or a list item starts a paragraph of its own there, which a line of dashes below does not underline.
+    paragraph = inside ? [] : [...paragraph, content.trim()];
   }
   return "";
 }

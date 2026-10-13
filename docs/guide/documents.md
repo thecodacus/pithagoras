@@ -14,11 +14,16 @@ install it under **Comes with Pithagoras**. Like any extension, you can switch
 it off or remove it under **Installed** ([Extensions](/guide/extensions)).
 
 The extension has npm packages of its own. The image comes with them, and
-`npm run build` builds its editor along with the portal. When the portal
-starts from a folder that does not have the packages yet (a checkout run by
-systemd, for example), the extension installs them with npm in the
-background. The portal's log says when the install starts and when it ends,
-or why it failed. A failed install is tried again at the next start.
+`npm run build` builds its editor along with the portal. The build installs
+the packages it needs first if they are missing, or if they are not the
+versions the extension's lock file names.
+
+A checkout that was not built since its last change (one run by systemd, for
+example) may not have the packages the extension needs to run, or have other
+versions of them. When the portal starts, the extension then installs them
+with npm in the background. The portal's log says when the
+install starts and when it ends, or why it failed. A failed install is tried
+again at the next start.
 
 ## What a document is
 
@@ -48,10 +53,15 @@ The page leaves out:
 
 The page has one section for each folder that has documents. Several chats can
 work in one folder, and that folder is shown once. A document is listed by its
-title: its first heading (a `#` line, or a line underlined with `=` or `-`) in
-its first 4 KB, without the Markdown marks in it. A document with no heading
-there is listed by its file name. The list also shows when the document last
-changed.
+title. The title is its first heading in its first 4 KB: a `#` line, or a line
+underlined with `=` or `-`, also inside a quote or a list. A heading-like line
+in a code block, in an HTML comment or in a block of HTML is not a heading.
+
+The title is shown as plain text. Links and pictures are shown by their text,
+emphasis, code and HTML tags lose their marks, and footnote marks are left
+out. A title longer than 256 characters is cut. A document with no heading in
+its first 4 KB is listed by its file name. The list also shows when the
+document last changed.
 
 Click a document to read it. The page draws its text, headings, lists,
 tables, quotes, links and code. Two things are not drawn yet:
