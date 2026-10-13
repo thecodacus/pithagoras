@@ -43,13 +43,11 @@ export function showVideoTool(folder: string) {
       name: SHOW_VIDEO_TOOL,
       label: "show video",
       description:
-        "Show the user a video clip on their screen, in the chat, with a player. " +
-        "The file must be a WebM or MP4 in the chat's folder (a path relative to it, or absolute inside it); save or copy a clip there first. " +
-        "A clip you make with generate_video is shown already, so do not call this on it. Give a short title. " +
-        "Say in words what the clip shows; do not describe it in detail unless asked.",
+        "Show the person a clip with a player: WebM or MP4 in the chat's folder (save or copy it there first). " +
+        "Clips from generate_video are shown already. Give a short title; say briefly what it shows.",
       parameters: Type.Object({
-        path: Type.String({ description: "The clip, relative to the chat's folder or absolute inside it." }),
-        title: Type.Optional(Type.String({ description: "A few words shown above the clip." })),
+        path: Type.String({ description: "The clip, relative to the chat's folder or absolute inside it" }),
+        title: Type.Optional(Type.String({ description: "A few words shown above it" })),
       }),
       execute: async (_id: string, p: { path: string; title?: string }) => {
         const rel = videoIn(folder, p.path);

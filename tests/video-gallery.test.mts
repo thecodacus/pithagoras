@@ -690,9 +690,9 @@ test("the tool's description does not promise that a model which cannot use a la
   // stable-diffusion.cpp reports end_image for every video model it runs, and some models never read it, so the check on the
   // capabilities cannot tell the agent more than "asked for": it must not report a clip as ending on the picture.
   gen.saveVideoGeneration({ baseUrl: "https://video.example.com", enabled: true });
-  const description: string = load(chat("tool-description")).registered[0].description;
-  assert.match(description, /whether the clip really ends on it depends on the model/);
-  assert.match(description, /some ignore it without saying so/);
+  const tool = load(chat("tool-description")).registered[0];
+  const description: string = tool.description + JSON.stringify(tool.parameters);
+  assert.match(tool.parameters.properties.lastFrame.description, /a model may ignore it silently, so tell the person you asked for it, not that the clip ends on it/);
   assert.doesNotMatch(description, /only some video models take one/);
   assert.doesNotMatch(description, /where the model does not/);
 });

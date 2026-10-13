@@ -83,21 +83,23 @@ export class GenerateVideoTool {
       name: GENERATE_VIDEO_TOOL,
       label: "generate video",
       description:
-        "Make a short video clip from a description with the video model the person has set up, and show it to them. " +
-        "The clip is saved in the chat's folder: a WebM or MP4 plays on their screen as show_video's does, so do not call show_video on it; any other format is kept as a file that cannot be played in the chat and is in the gallery to download. " +
-        "Describe what it should show: the subject, what moves and how, the camera, the style, the setting. " +
-        "To start from a picture — the picture is the first frame, and the description says what happens next — give its path in the chat's folder. " +
-        "To end on a picture as well — the picture is the last frame — give its path as lastFrame. It is sent only to a server that says it takes one (the call fails with the reason where it does not), but whether the clip really ends on it depends on the model, and some ignore it without saying so: do not tell the person the clip ends on their picture, only that you asked for it. " +
-        "A picture the person only attached to a message is not a file in the folder: ask them to put it there. " +
-        "It can take many minutes and costs the person something, so make one clip, and another only when asked. " +
-        "Give a short title. Say in words what you made; do not describe it in detail unless asked.",
+        "Make a short clip from a description with the person's video model and show it. " +
+        "Saved in the chat's folder: WebM or MP4 plays in the chat (no show_video needed); other formats can only be downloaded from the gallery. " +
+        "Describe subject, motion, camera, style, setting. A picture only attached to a message is not in the folder: ask the person to put it there. " +
+        "Takes minutes and costs the person: one clip unless asked for more. Give a short title; say briefly what you made.",
       parameters: Type.Object({
-        prompt: Type.String({ description: "What the clip should show, and what moves." }),
-        title: Type.Optional(Type.String({ description: "A few words shown above the clip." })),
-        size: Type.Optional(Type.String({ description: 'Width and height in pixels, such as "832x480". Leave it out for the usual size.' })),
-        seconds: Type.Optional(Type.Number({ description: "How long the clip should be, in seconds. Leave it out for the usual length; a longer clip takes much longer." })),
-        path: Type.Optional(Type.String({ description: "A picture in the chat's folder to use as the first frame: relative to it or absolute inside it. Leave it out to make the clip from the description alone." })),
-        lastFrame: Type.Optional(Type.String({ description: "A picture in the chat's folder for the clip to end on, given as path is. Leave it out for a clip that is free to end where it likes." })),
+        prompt: Type.String({ description: "What it shows and what moves" }),
+        title: Type.Optional(Type.String({ description: "A few words shown above it" })),
+        size: Type.Optional(Type.String({ description: "WIDTHxHEIGHT, e.g. 832x480; omit for the default" })),
+        seconds: Type.Optional(Type.Number({ description: "Length; omit for the default. Longer takes much longer" })),
+        path: Type.Optional(Type.String({ description: "Picture for the first frame, relative to the chat's folder or absolute inside it; the prompt says what happens next" })),
+        lastFrame: Type.Optional(
+          Type.String({
+            description:
+              "Picture for the last frame, as path. Sent only to a server that takes one (else the call fails, saying why); " +
+              "a model may ignore it silently, so tell the person you asked for it, not that the clip ends on it",
+          }),
+        ),
       }),
       execute: async (_id: string, p: { prompt: string; title?: string; size?: string; seconds?: number; path?: string; lastFrame?: string }, signal?: AbortSignal) => {
         // Read now, not when the tool was loaded: an address, a model or a key changed since is in force.
