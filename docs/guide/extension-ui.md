@@ -746,4 +746,6 @@ extension:
 
 Install it from Settings → Extensions by its path (in the image,
 `/app/extensions/notes`). `extensions/theme-dusk` beside it is an extension
-that is only a theme.
+that is only a theme. `extensions/docs` is a larger one that is still being
+built: a page in the sidebar, fed by its server half's routes
+([Documents](/guide/documents)).
