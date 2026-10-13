@@ -597,6 +597,25 @@ test("OIDC only hides and refuses the password and ends what it signed in; the s
   assert.match(again.out, /nothing to switch back on/);
 });
 
+test("a save that leaves OIDC only out keeps it as it is, and only an explicit off switches the password login back on", async () => {
+  let saved = await saveSso(base, await signIn(), ssoSettings(portalPort), { only: true });
+  assert.equal(saved.body.only, true);
+  const bySso = await signIn();
+  try {
+    // What a script does to rename the button: it sends the settings back and does not mention `only`.
+    saved = await saveSso(base, saved.cookie, ssoSettings(portalPort, { name: "Renamed" }));
+    assert.equal(saved.res.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.only, true);
+    assert.equal((await getSso(saved.cookie).then((r) => r.json())).only, true);
+    assert.equal((await passwordLogin(base)).status, 403, "the password login stays off");
+    assert.equal((await api(bySso)).status, 200, "nothing about the sign-in changed, so the logins hold");
+  } finally {
+    saved = await saveSso(base, saved.cookie, ssoSettings(portalPort), { only: false });
+  }
+  assert.equal(saved.body.only, false);
+  assert.equal((await passwordLogin(base)).status, 200);
+});
+
 test("saving counts wrong passwords like the sign-in does, and settings refused after the right one not at all", async () => {
   let admin = await signIn();
   // Trial and error with the settings: the password is right each time.

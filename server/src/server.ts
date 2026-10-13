@@ -238,6 +238,7 @@ app.get("/api/auth/sso", requireAuth, (_req, res) => {
  * password, like changing it does: whoever saves chooses the provider that signs people in. The provider is read
  * before anything is kept, so settings it does not answer to are refused with its reason. A change to the
  * provider, or to whether the password may sign in, ends every other login; this browser is signed in again under it.
+ * Leaving `only` out keeps whether the password may sign in as it is.
  */
 app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   if (authMode() !== "password") return res.status(409).json({ error: "Single sign-on needs the portal's own password to be set." });
@@ -267,7 +268,8 @@ app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   }
   let config;
   try {
-    config = parseOidcConfig(input, only === true);
+    // A save that leaves `only` out keeps it as it is: a script that renames the button must not switch the password login back on.
+    config = parseOidcConfig(input, only === undefined ? kept?.only === true : only);
   } catch (e) {
     if (e instanceof OidcConfigError) return res.status(400).json({ error: e.message });
     throw e;
