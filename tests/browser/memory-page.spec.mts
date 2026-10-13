@@ -171,35 +171,135 @@ test('the log lists the changes newest first, and its links open the notes', asy
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
 });
 
+/** Two frames drawn after now. */
+const frames = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
+/** The page quiet, so that nothing moves under a measure: all it asked for is here, the fonts are in, and a frame is drawn. */
+const settled = async (page: Page) => {
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(() => document.fonts.ready);
+  await frames(page);
+};
+/** What the graph's canvas shows, as a picture to compare with another. */
+const picture = async (page: Page) => (await frames(page), page.locator('.memory-sky canvas').evaluate((c: HTMLCanvasElement) => c.toDataURL()));
+
+/**
+ * Where the notes are on the graph's canvas, found in the picture itself: the
+ * white-hot middle of each star, in page pixels. Their links are fainter than
+ * that, and so is every star's glow.
+ */
+const stars = (page: Page) =>
+  page.locator('.memory-sky canvas').evaluate((c: HTMLCanvasElement) => {
+    const { width, height } = c;
+    const data = c.getContext('2d')!.getImageData(0, 0, width, height).data;
+    const box = c.getBoundingClientRect();
+    const k = box.width / width;
+    const hot = (x: number, y: number) => {
+      const i = (y * width + x) * 4;
+      return data[i] > 170 && data[i + 1] > 170 && data[i + 2] > 170;
+    };
+    const seen = new Set<number>();
+    const found: { x: number; y: number }[] = [];
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        if (!hot(x, y) || seen.has(y * width + x)) continue;
+        // The bright pixels that touch this one are the same star.
+        const stack = [[x, y]];
+        let [sx, sy, n] = [0, 0, 0];
+        seen.add(y * width + x);
+        while (stack.length) {
+          const [px, py] = stack.pop()!;
+          sx += px;
+          sy += py;
+          n++;
+          for (let dy = -2; dy <= 2; dy++)
+            for (let dx = -2; dx <= 2; dx++) {
+              const [qx, qy] = [px + dx, py + dy];
+              if (qx < 0 || qy < 0 || qx >= width || qy >= height || seen.has(qy * width + qx) || !hot(qx, qy)) continue;
+              seen.add(qy * width + qx);
+              stack.push([qx, qy]);
+            }
+        }
+        found.push({ x: box.left + (sx / n) * k, y: box.top + (sy / n) * k });
+      }
+    return found;
+  });
+
+/** How much light there is at a point of the canvas, in page pixels: the sum of the colours of the brightest pixel within `r` of it. */
+const lightAt = (page: Page, x: number, y: number, r = 2) =>
+  page.locator('.memory-sky canvas').evaluate(
+    (c: HTMLCanvasElement, [x, y, r]) => {
+      const box = c.getBoundingClientRect();
+      const k = c.width / box.width;
+      const [px, py, pr] = [Math.round((x - box.left) * k), Math.round((y - box.top) * k), Math.ceil(r * k)];
+      const data = c.getContext('2d')!.getImageData(px - pr, py - pr, 2 * pr + 1, 2 * pr + 1).data;
+      let best = 0;
+      for (let i = 0; i < data.length; i += 4) best = Math.max(best, data[i] + data[i + 1] + data[i + 2]);
+      return best;
+    },
+    [x, y, r],
+  );
+/** The light at distance `r` from a point, averaged round it: how a star's glow falls off. */
+const ringLight = (page: Page, x: number, y: number, r: number) =>
+  page.locator('.memory-sky canvas').evaluate(
+    (c: HTMLCanvasElement, [x, y, r]) => {
+      const box = c.getBoundingClientRect();
+      const k = c.width / box.width;
+      const [cx, cy] = [(x - box.left) * k, (y - box.top) * k];
+      let sum = 0;
+      const n = 48;
+      for (let a = 0; a < n; a++) {
+        const d = c.getContext('2d')!.getImageData(Math.round(cx + r * k * Math.cos((a / n) * 2 * Math.PI)), Math.round(cy + r * k * Math.sin((a / n) * 2 * Math.PI)), 1, 1).data;
+        sum += d[0] + d[1] + d[2];
+      }
+      return sum / n;
+    },
+    [x, y, r],
+  );
+
 test('the graph draws the notes and their links, says what the colours are, and a note opens from it', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
   await page.goto('/memory?view=graph');
   // A group and not a picture: its notes are buttons that Tab reaches, which a picture would make presentational.
   const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await expect(graph).toBeVisible();
   await expect(page.getByRole('img', { name: /3 notes, 1 link/ })).toHaveCount(0);
-  await expect(graph.locator('line')).toHaveCount(1);
-  // A small memory glows and moves: a halo behind each note, a gradient orb, links with a current.
-  await expect(graph.locator('.mg-rich')).toHaveCount(1);
-  await expect(graph.locator('circle.mg-halo')).toHaveCount(3);
-  await expect(graph.locator('circle.mg-orb').first()).toHaveAttribute('fill', /url\(#mg-orb-/);
-  expect(await graph.locator('line').evaluate((el) => getComputedStyle(el).animationName)).toBe('mg-flow');
+  // The 3D view's picture seen straight on: the same canvas, in the look that was kept or the first.
+  await expect(graph).toHaveAttribute('data-flat', 'true');
+  await expect(graph).toHaveAttribute('data-look', 'stellar');
+  await expect(graph.locator('canvas')).toBeVisible();
+  await settled(page);
+  const found = await stars(page);
+  expect(found).toHaveLength(3);
+  // The one link is a faint line between two of the three, and no other pair has one.
+  const faint = async (a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const [mx, my] = [(a.x + b.x) / 2, (a.y + b.y) / 2];
+    // Beside the middle of the pair, where no line is, is the backdrop.
+    const along = Math.hypot(b.x - a.x, b.y - a.y);
+    const side = await lightAt(page, mx - ((b.y - a.y) / along) * 14, my + ((b.x - a.x) / along) * 14, 1);
+    return (await lightAt(page, mx, my, 1)) - side;
+  };
+  const lines = (await Promise.all([faint(found[0], found[1]), faint(found[0], found[2]), faint(found[1], found[2])])).filter((d) => d > 60);
+  expect(lines).toHaveLength(1);
+  // See-through: dimmer than the stars it joins.
+  expect(lines[0]).toBeLessThan(await lightAt(page, found[0].x, found[0].y, 2));
   const legend = page.getByRole('list', { name: 'What the colours are' });
   await expect(legend).toContainText('Deployment Process');
   await expect(legend).toContainText('orphan (unlinked)');
   await page.getByText('Query paths').click();
   await expect(page.getByText('9.7k→2k tok')).toBeVisible();
-  const before = (await graph.getAttribute('viewBox'))!;
-  // The view glides there, and ends exactly where it was sent.
+  const before = await picture(page);
   await page.getByRole('button', { name: 'Zoom in' }).click();
-  await expect(graph).not.toHaveAttribute('viewBox', before);
+  expect(await picture(page)).not.toBe(before);
   await page.getByRole('button', { name: 'Show all of it' }).click();
-  await expect(graph).toHaveAttribute('viewBox', before);
-  await graph.getByRole('button', { name: 'The owner' }).click();
+  expect(await picture(page)).toBe(before);
+  // Opened from the keyboard, through its button.
+  await graph.getByRole('button', { name: 'The owner' }).focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
 });
 
-test('a graph of a long memory opens without freezing the page, and panning it is not drawing every note again', async ({ page }) => {
+test('a graph of a long memory opens without freezing the page, and panning it stays smooth', async ({ page }) => {
   await portal(page, { notes: 1500 });
   await page.addInitScript(() => {
     (window as any).longest = 0;
@@ -212,255 +312,23 @@ test('a graph of a long memory opens without freezing the page, and panning it i
   await expect(graph).toBeVisible({ timeout: 30_000 });
   // The layout of 1,500 notes was several seconds in one piece; it is a fraction of one.
   expect(await page.evaluate(() => (window as any).longest)).toBeLessThan(1500);
-  // A graph this long is drawn plainly: no halos and no animation per note.
-  await expect(graph.locator('.mg-rich')).toHaveCount(0);
-  await expect(graph.locator('circle.mg-halo')).toHaveCount(0);
-
-  const box = (await graph.boundingBox())!;
-  const from = { x: box.x + box.width - 5, y: box.y + box.height - 5 };
-  const sweep = async () => {
-    const started = Date.now();
-    await page.mouse.move(from.x - 100, from.y - 100, { steps: 60 });
-    await page.mouse.move(from.x, from.y);
-    return Date.now() - started;
-  };
-  // The same moves with the button up, which move nothing, are what the mouse itself costs.
-  await page.mouse.move(from.x, from.y);
-  const idle = await sweep();
-  await page.mouse.down();
-  const panning = await sweep();
-  await page.mouse.up();
-  // Drawing 1,500 notes again for each of those moves was two seconds more.
-  expect(panning - idle).toBeLessThan(900);
-});
-
-/** The boxes of the labels the flat graph shows, on the screen: the layer of all of them, not the copies drawn over a note in focus. */
-const labelBoxes = (page: Page) =>
-  page.locator('.memory-graph > svg').evaluate((svg) =>
-    [...svg.querySelectorAll('text')].filter((el) => !el.closest('.mg-focus, .mg-found-layer')).map((el) => {
-      const r = el.getBoundingClientRect();
-      return { text: el.textContent ?? '', x0: r.left, y0: r.top, x1: r.right, y1: r.bottom };
-    }),
-  );
-const overlapping = (boxes: { text: string; x0: number; y0: number; x1: number; y1: number }[]) => {
-  const found: string[] = [];
-  for (let i = 0; i < boxes.length; i++)
-    for (let j = i + 1; j < boxes.length; j++) {
-      const a = boxes[i];
-      const b = boxes[j];
-      // Half a pixel either way is rounding, not two labels on each other.
-      if (a.x0 < b.x1 - 0.5 && b.x0 < a.x1 - 0.5 && a.y0 < b.y1 - 0.5 && b.y0 < a.y1 - 0.5) found.push(`${a.text} / ${b.text}`);
-    }
-  return found;
-};
-
-for (const [width, height] of [[1280, 800], [390, 800]]) {
-  test(`labels in the flat graph never lie on each other, with many notes and long names, ${width} wide`, async ({ page }) => {
-    await page.setViewportSize({ width, height });
-    await portal(page, { notes: 140, longNames: true });
-    await page.goto('/memory?view=graph');
-    const graph = page.getByRole('group', { name: /140 notes/ });
-    await expect(graph).toBeVisible();
-    // A phone has room for only a few names of so many at once; zooming in shows more.
-    await expect.poll(async () => (await labelBoxes(page)).length).toBeGreaterThan(width < 600 ? 2 : 5);
-    // Placed again for the scale the view settles at.
-    await page.waitForTimeout(400);
-    let boxes = await labelBoxes(page);
-    expect(overlapping(boxes)).toEqual([]);
-    // Cut short, the whole title is in the card.
-    expect(boxes.every((b) => b.text.length <= 30)).toBe(true);
-    // Zoomed in, more of them have room, and still none lies on another.
-    const box = (await graph.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -100);
-    await page.waitForTimeout(500);
-    const closer = await labelBoxes(page);
-    expect(overlapping(closer)).toEqual([]);
-    expect(closer.length).toBeGreaterThan(boxes.length);
-    boxes = closer;
-    // Nor does the legend or the line under the graph: they are beside it, not on it.
-    const svgBox = (await graph.boundingBox())!;
-    for (const strip of [page.getByRole('list', { name: 'What the colours are' }), page.getByText('— drag to move')]) {
-      if (!(await strip.isVisible())) continue;
-      const s = (await strip.boundingBox())!;
-      expect(s.y + s.height <= svgBox.y + 0.5 || s.y >= svgBox.y + svgBox.height - 0.5).toBe(true);
-    }
-  });
-}
-
-test('pointing at a note lights it and the notes it links with, and a card says what it is', async ({ page }) => {
-  await portal(page);
-  await page.goto('/memory?view=graph');
-  const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
-  await expect(graph.locator('.mg-focus')).toHaveCount(0);
-  await graph.getByRole('button', { name: 'Branch Deployment on Test Host' }).hover();
-  await expect(graph).toHaveClass(/mg-dim/);
-  // The note and the one it links with, and the link between them, drawn again over the rest.
-  await expect(graph.locator('.mg-focus .mg-lit')).toHaveCount(2);
-  await expect(graph.locator('.mg-focus line.mg-hot')).toHaveCount(1);
-  await expect(page.getByText('The test host deploys branches using deploy-branch.sh.')).toBeVisible();
-  await expect(page.getByText('Click to open', { exact: true })).toBeVisible();
-  await page.mouse.move(5, 5);
-  await expect(graph.locator('.mg-focus')).toHaveCount(0);
-  await expect(page.getByText('Click to open', { exact: true })).toHaveCount(0);
-  // Tab reaches a note the same way.
-  await graph.getByRole('button', { name: 'The owner' }).focus();
-  await expect(graph.locator('.mg-focus .mg-lit')).toHaveCount(2);
-});
-
-test('the note last opened is ringed and in the middle when the graph is back, until the background is clicked', async ({ page }) => {
-  await portal(page);
-  await page.goto('/memory?view=graph');
-  const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
-  const fit = (await graph.getAttribute('viewBox'))!;
-  await graph.getByRole('button', { name: 'The owner' }).click();
-  await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
-  await page.goBack();
-  await expect(graph.locator('circle.mg-selected')).toHaveCount(1);
-  await expect(graph).toHaveClass(/mg-dim/);
-  // Glided to it: the middle of the view is the note.
-  await expect(graph).not.toHaveAttribute('viewBox', fit);
-  await expect.poll(async () => {
-    const [x, y, w, h] = (await graph.getAttribute('viewBox'))!.split(' ').map(Number);
-    const ring = graph.locator('circle.mg-selected');
-    const cx = Number(await ring.getAttribute('cx'));
-    const cy = Number(await ring.getAttribute('cy'));
-    return Math.round(Math.hypot(x + w / 2 - cx, y + h / 2 - cy));
-  }).toBe(0);
-  const box = (await graph.boundingBox())!;
-  await page.mouse.click(box.x + 8, box.y + 8);
-  await expect(graph.locator('circle.mg-selected')).toHaveCount(0);
-  await expect(graph).not.toHaveClass(/mg-dim/);
-});
-
-test('the type switches filter both views, and what the search found is lit in both', async ({ page }) => {
-  await portal(page);
-  await page.goto('/memory?view=graph');
-  const legend = page.getByRole('list', { name: 'What the colours are' });
-  await legend.getByRole('button', { name: 'Person' }).click();
-  await expect(legend.getByRole('button', { name: 'Person' })).toHaveAttribute('aria-pressed', 'false');
-  let graph = page.getByRole('group', { name: /2 notes, 0 links/ });
-  await expect(graph.getByRole('button', { name: 'The owner' })).toHaveCount(0);
-  await expect(page.getByText('(1 hidden)')).toBeVisible();
-
-  await page.getByRole('button', { name: '3D' }).click();
-  graph = page.getByRole('group', { name: /2 notes, 0 links/ });
+  // Every note is on the canvas, and in the list a screen reader and Tab reach.
   await expect(graph.locator('canvas')).toBeVisible();
-  await expect(graph.getByRole('button', { name: 'Branch Deployment on Test Host' })).toHaveCount(1);
-  await expect(graph.getByRole('button', { name: 'The owner' })).toHaveCount(0);
-  // The same switches, out of the way of the picture.
-  await page.getByLabel('Which notes are shown').click();
-  await page.getByRole('list', { name: 'What the colours are' }).getByRole('button', { name: 'Person' }).click();
-  graph = page.getByRole('group', { name: /3 notes, 1 link/ });
-  await expect(graph.getByRole('button', { name: 'The owner' })).toHaveCount(1);
+  await expect(graph.locator('ul button')).toHaveCount(1500);
 
-  await page.getByLabel('Search the memory').fill('deploy');
-  await expect(graph.getByRole('button', { name: 'Branch Deployment on Test Host' })).toHaveAccessibleDescription('Matches the search');
-  await expect(graph.getByRole('button', { name: 'The owner' })).not.toHaveAccessibleDescription('Matches the search');
-  await page.getByRole('button', { name: '2D' }).click();
-  await expect(page.getByText('1 note matches “deploy”')).toBeVisible();
-  await expect(page.locator('.memory-graph circle.mg-found')).toHaveCount(1);
-});
-
-/** The 3D looks by the names the menu gives them. */
-const LOOK_NAMES: Record<string, string> = { stellar: 'Constellation', galaxy: 'Galaxy', brain: 'Brain', fireflies: 'Fireflies', helix: 'Double helix' };
-/** Picks a 3D look from the toolbar's menu, as a person does. */
-async function chooseLook(page: Page, theme: string) {
-  await page.getByRole('combobox', { name: 'Look of the 3D view' }).click();
-  await page.getByRole('listbox', { name: 'Look of the 3D view' }).getByRole('option', { name: LOOK_NAMES[theme], exact: true }).click();
-  await expect(page.locator('.memory-sky')).toHaveAttribute('data-theme-3d', theme);
-}
-
-test("the 3D toolbar's look, colour and filter are the portal's own controls", async ({ page }) => {
-  await portal(page);
-  await page.goto('/memory?view=graph');
-  await page.getByRole('button', { name: '3D' }).click();
-  // The look: the portal's dropdown, not the system's.
-  const look = page.getByRole('combobox', { name: 'Look of the 3D view' });
-  await expect(look).toHaveClass(/ui-select/);
-  await look.click();
-  const list = page.getByRole('listbox', { name: 'Look of the 3D view' });
-  await expect(list.getByRole('option')).toHaveText(['Constellation', 'Galaxy', 'Brain', 'Fireflies', 'Double helix']);
-  await expect(list.getByRole('option', { name: 'Constellation' })).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('Enter');
-  await expect(look).toHaveText('Brain');
-  // The colour: a button like the dropdown beside it, with a popover of the portal's own.
-  const colour = page.getByRole('button', { name: "Colour of the brain's outline" });
-  await expect(colour).toHaveClass(/ui-select/);
-  await colour.click();
-  await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" })).toHaveCount(0);
-  // The filter: a button like the others, with a popover that shuts on Escape and on a press outside it.
-  const filter = page.getByRole('button', { name: 'Which notes are shown' });
-  await expect(filter).toHaveClass(/ui-select/);
-  await filter.click();
-  await expect(filter).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.getByRole('list', { name: 'What the colours are' })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('list', { name: 'What the colours are' })).toHaveCount(0);
-  await expect(filter).toBeFocused();
-  await filter.click();
-  await page.mouse.click(10, 400);
-  await expect(page.getByRole('list', { name: 'What the colours are' })).toHaveCount(0);
-});
-
-test('notes in the flat graph are small stars that stay the same size on the screen as it zooms, as the labels do', async ({ page }) => {
-  await portal(page, { notes: 140, longNames: true });
-  await page.goto('/memory?view=graph');
-  const graph = page.getByRole('group', { name: /140 notes/ });
-  await expect(graph).toBeVisible();
-  const sizes = () =>
-    graph.evaluate((svg) => {
-      const notes = [...svg.querySelectorAll(':scope > .mg-base [data-note]')];
-      const orbs = notes.map((n) => n.querySelector('circle.mg-orb')!.getBoundingClientRect().width);
-      // A star, not a blob: fine spikes reaching well past a small bright core.
-      const stars = notes.map((n) => (n.querySelector('path.mg-spark') as SVGGraphicsElement | null)?.getBBox());
-      // Measured without the twinkle, which turns and swells each star a little.
-      const vb = (svg as SVGSVGElement).viewBox.baseVal;
-      const px = Math.min(svg.clientWidth / vb.width, svg.clientHeight / vb.height);
-      const spikes = stars.map((b) => (b ? b.width * px : 0));
-      const labels = [...svg.querySelectorAll(':scope > g.mg-labels text')].map((t) => t.getBoundingClientRect().height);
-      return { orb: Math.max(...orbs), star: Math.max(...spikes), stars: stars.filter(Boolean).length, all: notes.length, label: labels.length ? Math.max(...labels) : 0 };
-    });
-  await page.waitForTimeout(400);
-  const before = await sizes();
-  // A small core, a few pixels across, inside spikes about three times as wide: still smaller than a label is long.
-  expect(before.stars).toBe(before.all);
-  expect(before.orb).toBeLessThanOrEqual(8);
-  expect(before.star).toBeGreaterThan(before.orb * 2);
-  expect(before.star).toBeLessThanOrEqual(20);
+  // Taking hold of the picture and moving it, and rolling the wheel over it: none of that freezes the page, whatever the frames cost.
   const box = (await graph.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.evaluate(() => ((window as any).longest = 0));
+  await page.mouse.move(box.x + box.width - 5, box.y + box.height - 5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 105, box.y + box.height - 105, { steps: 60 });
+  await page.mouse.up();
   for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -100);
-  await page.waitForTimeout(500);
-  const closer = await sizes();
-  // Zoomed in more than twice, they keep their size, give or take the step the scale settles on.
-  expect(closer.orb / before.orb).toBeGreaterThan(0.75);
-  expect(closer.orb / before.orb).toBeLessThan(1.35);
-  expect(closer.star / before.star).toBeGreaterThan(0.75);
-  expect(closer.star / before.star).toBeLessThan(1.35);
-  expect(closer.label / before.label).toBeGreaterThan(0.75);
-  expect(closer.label / before.label).toBeLessThan(1.35);
+  await frames(page);
+  expect(await page.evaluate(() => (window as any).longest)).toBeLessThan(1500);
 });
 
-/** Text a canvas was asked to write, counted from before the page starts. */
-const countCanvasText = (page: Page) =>
-  page.addInitScript(() => {
-    (window as any).written = 0;
-    for (const name of ['fillText', 'strokeText'] as const) {
-      const was = CanvasRenderingContext2D.prototype[name];
-      CanvasRenderingContext2D.prototype[name] = function (this: CanvasRenderingContext2D, ...args: any[]) {
-        (window as any).written++;
-        return (was as any).apply(this, args);
-      } as any;
-    }
-  });
-/** Two frames drawn after now. */
-const frames = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
-/** Text a person could see in the 3D view: anything more than a pixel on a side (the keyboard's buttons are one pixel). */
+/** What a person could read over the graph: anything more than a pixel on a side (the keyboard's buttons are one pixel). */
 const visibleText = (page: Page) =>
   page.locator('.memory-sky').evaluate((root) => {
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -481,33 +349,245 @@ const visibleText = (page: Page) =>
     }
     return seen;
   });
+/** Text a canvas was asked to write, counted from before the page starts. */
+const countCanvasText = (page: Page) =>
+  page.addInitScript(() => {
+    (window as any).written = 0;
+    for (const name of ['fillText', 'strokeText'] as const) {
+      const was = CanvasRenderingContext2D.prototype[name];
+      CanvasRenderingContext2D.prototype[name] = function (this: CanvasRenderingContext2D, ...args: any[]) {
+        (window as any).written++;
+        return (was as any).apply(this, args);
+      } as any;
+    }
+  });
 
-test('the 3D view and its look are kept in this browser, and nothing is written on it in any of its looks', async ({ page }) => {
+test('in 2D a note is a glowing point and its name shows only while it is pointed at, as in 3D', async ({ page }) => {
+  await countCanvasText(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
+  await expect(graph).toHaveAttribute('data-flat', 'true');
+  await settled(page);
+  // No name anywhere, drawn or written, until a note is pointed at.
+  expect(await visibleText(page)).toEqual([]);
+  const found = await stars(page);
+  expect(found).toHaveLength(3);
+  // A glow, not a dot: the light falls off smoothly from the star's middle, well above the dark backdrop at its edge, and out.
+  const [middle, near, mid, edge, far] = await Promise.all([0, 2, 4, 6, 20].map((r) => ringLight(page, found[0].x, found[0].y, r)));
+  expect(middle).toBeGreaterThan(near);
+  expect(near).toBeGreaterThan(mid);
+  expect(mid).toBeGreaterThan(edge);
+  expect(edge).toBeGreaterThan(far + 10);
+  // Pointing at each in turn: a card with the name, type, links and description, and nothing else written.
+  const named: Record<string, { x: number; y: number }> = {};
+  for (const star of found) {
+    await page.mouse.move(star.x, star.y);
+    await expect.poll(() => visibleText(page)).not.toEqual([]);
+    const text = await visibleText(page);
+    named[text[0]] = star;
+    expect(text.length).toBeGreaterThanOrEqual(2);
+  }
+  expect(Object.keys(named).sort()).toEqual(['A loose note', 'Branch Deployment on Test Host', 'The owner']);
+  expect(await page.evaluate(() => (window as any).written)).toBe(0);
+  // The notes it links with light up, and the rest steps back.
+  const loose = named['A loose note'];
+  const owner = named['The owner'];
+  await page.mouse.move(named['Branch Deployment on Test Host'].x, named['Branch Deployment on Test Host'].y);
+  await expect(page.getByText('The test host deploys branches using deploy-branch.sh.')).toBeVisible();
+  await expect.poll(() => lightAt(page, loose.x, loose.y, 2)).toBeLessThan(400);
+  expect(await lightAt(page, owner.x, owner.y, 2)).toBeGreaterThan(600);
+  // Pointing away puts it all back; Tab reaches a note the same way.
+  await page.mouse.move(5, 5);
+  await expect.poll(() => visibleText(page)).toEqual([]);
+  await expect.poll(() => lightAt(page, loose.x, loose.y, 2)).toBeGreaterThan(600);
+  await graph.getByRole('button', { name: 'The owner' }).focus();
+  await expect.poll(() => visibleText(page)).toContain('The owner');
+  expect(await page.evaluate(() => (window as any).written)).toBe(0);
+});
+
+test('the note last opened is lit and in the middle when the graph is back, until the background is clicked', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
+  await expect(graph).toBeVisible();
+  await settled(page);
+  await graph.getByRole('button', { name: 'The owner' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('article', { name: 'The owner' })).toBeVisible();
+  await page.goBack();
+  await expect(graph).toBeVisible();
+  // Gone to it: the note is the star in the middle of the picture, with the ring round it, and the one nothing links with is dimmed.
+  const box = (await graph.locator('canvas').boundingBox())!;
+  const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await expect.poll(async () => (await stars(page)).filter((s) => Math.hypot(s.x - middle.x, s.y - middle.y) < 3).length).toBeGreaterThanOrEqual(2);
+  const ringed = await picture(page);
+  await page.mouse.click(box.x + 8, box.y + 8);
+  // Let go, the ring and the dimming are gone.
+  await expect.poll(() => picture(page)).not.toBe(ringed);
+});
+
+test('the type switches filter both views, and what the search found is marked in both', async ({ page }) => {
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  const legend = page.getByRole('list', { name: 'What the colours are' });
+  await legend.getByRole('button', { name: 'Person' }).click();
+  await expect(legend.getByRole('button', { name: 'Person' })).toHaveAttribute('aria-pressed', 'false');
+  let graph = page.getByRole('group', { name: /2 notes, 0 links/ });
+  await expect(graph.locator('canvas')).toBeVisible();
+  await expect(graph.getByRole('button', { name: 'The owner' })).toHaveCount(0);
+  await expect(page.getByText('(1 hidden)')).toBeVisible();
+
+  await page.getByRole('button', { name: '3D' }).click();
+  graph = page.getByRole('group', { name: /2 notes, 0 links/ });
+  await expect(graph.locator('canvas')).toBeVisible();
+  await expect(graph.getByRole('button', { name: 'Branch Deployment on Test Host' })).toHaveCount(1);
+  await expect(graph.getByRole('button', { name: 'The owner' })).toHaveCount(0);
+  // The same switches, out of the way of the picture.
+  await page.getByLabel('Which notes are shown').click();
+  await page.getByRole('list', { name: 'What the colours are' }).getByRole('button', { name: 'Person' }).click();
+  graph = page.getByRole('group', { name: /3 notes, 1 link/ });
+  await expect(graph.getByRole('button', { name: 'The owner' })).toHaveCount(1);
+
+  await page.getByLabel('Search the memory').fill('deploy');
+  await expect(graph.getByRole('button', { name: 'Branch Deployment on Test Host' })).toHaveAccessibleDescription('Matches the search');
+  await expect(graph.getByRole('button', { name: 'The owner' })).not.toHaveAccessibleDescription('Matches the search');
+  await page.getByRole('button', { name: '2D' }).click();
+  await expect(page.getByText('1 note matches “deploy”')).toBeVisible();
+  graph = page.getByRole('group', { name: /3 notes, 1 link/ });
+  await expect(graph).toHaveAttribute('data-flat', 'true');
+  await expect(graph.getByRole('button', { name: 'Branch Deployment on Test Host' })).toHaveAccessibleDescription('Matches the search');
+  await expect(graph.getByRole('button', { name: 'The owner' })).not.toHaveAccessibleDescription('Matches the search');
+});
+
+/** The looks by the names the menu gives them. */
+const LOOK_NAMES: Record<string, string> = { stellar: 'Constellation', galaxy: 'Galaxy', brain: 'Brain', fireflies: 'Fireflies', helix: 'Double helix' };
+/** Picks a look from the toolbar's menu, as a person does. */
+async function chooseLook(page: Page, theme: string) {
+  await page.getByRole('combobox', { name: 'Look of the graph' }).click();
+  await page.getByRole('listbox', { name: 'Look of the graph' }).getByRole('option', { name: LOOK_NAMES[theme], exact: true }).click();
+  await expect(page.locator('.memory-sky')).toHaveAttribute('data-look', theme);
+}
+
+for (const mode of ['2D', '3D']) {
+  test(`the ${mode} toolbar's look, colour and switches are the portal's own controls`, async ({ page }) => {
+    await portal(page);
+    await page.goto('/memory?view=graph');
+    await page.getByRole('button', { name: mode, exact: true }).click();
+    // The look: the portal's dropdown, not the system's, the same in both views.
+    const look = page.getByRole('combobox', { name: 'Look of the graph' });
+    await expect(look).toHaveClass(/ui-select/);
+    await look.click();
+    const list = page.getByRole('listbox', { name: 'Look of the graph' });
+    await expect(list.getByRole('option')).toHaveText(['Constellation', 'Galaxy', 'Brain', 'Fireflies', 'Double helix']);
+    await expect(list.getByRole('option', { name: 'Constellation' })).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(look).toHaveText('Brain');
+    await expect(page.locator('.memory-sky')).toHaveAttribute('data-look', 'brain');
+    // The colour: a button like the dropdown beside it, with a popover of the portal's own.
+    const colour = page.getByRole('button', { name: "Colour of the brain's outline" });
+    await expect(colour).toHaveClass(/ui-select/);
+    await colour.click();
+    await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" })).toHaveCount(0);
+    const switches = page.getByRole('list', { name: 'What the colours are' });
+    if (mode === '2D') {
+      // The type switches stand in a strip above the picture.
+      await expect(switches).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Which notes are shown' })).toHaveCount(0);
+      return;
+    }
+    // In 3D they are a button like the others, with a popover that shuts on Escape and on a press outside it.
+    const filter = page.getByRole('button', { name: 'Which notes are shown' });
+    await expect(filter).toHaveClass(/ui-select/);
+    await filter.click();
+    await expect(filter).toHaveAttribute('aria-expanded', 'true');
+    await expect(switches).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(switches).toHaveCount(0);
+    await expect(filter).toBeFocused();
+    await filter.click();
+    await page.mouse.click(10, 400);
+    await expect(switches).toHaveCount(0);
+  });
+}
+
+for (const [width, height] of [[1280, 800], [390, 800]]) {
+  test(`with many notes and long names the card says the whole title, inside the graph and off its own star, ${width} wide`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await portal(page, { notes: 140, longNames: true });
+    await page.goto('/memory?view=graph');
+    const graph = page.getByRole('group', { name: /140 notes/ });
+    await expect(graph).toBeVisible();
+    await settled(page);
+    const box = (await graph.boundingBox())!;
+    const found = await stars(page);
+    expect(found.length).toBeGreaterThan(100);
+    // Nothing is written on it, whatever the number of notes.
+    expect(await visibleText(page)).toEqual([]);
+    // Pointed at, in the middle and at the edges of the picture, a card is the one thing written.
+    const edges = [found.reduce((a, b) => (a.x < b.x ? a : b)), found.reduce((a, b) => (a.x > b.x ? a : b)), found.reduce((a, b) => (a.y < b.y ? a : b)), found.reduce((a, b) => (a.y > b.y ? a : b)), found[Math.floor(found.length / 2)]];
+    for (const star of edges) {
+      await page.mouse.move(star.x, star.y);
+      const card = page.locator('.memory-sky .pointer-events-none.absolute');
+      await expect(card).toContainText(/How the release of branch \d+ goes out to the test host/);
+      // Put where its star is by the next frame.
+      await frames(page);
+      const c = (await card.boundingBox())!;
+      expect(c.x).toBeGreaterThanOrEqual(box.x - 0.5);
+      expect(c.x + c.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+      expect(c.y).toBeGreaterThanOrEqual(box.y - 0.5);
+      expect(c.y + c.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+      // Not over the star it names.
+      expect(star.y < c.y - 2 || star.y > c.y + c.height + 2 || star.x < c.x - 2 || star.x > c.x + c.width + 2).toBe(true);
+    }
+    await page.mouse.move(box.x + 2, box.y + 2);
+    await expect.poll(() => visibleText(page)).toEqual([]);
+  });
+}
+
+test('the view and its look are kept in this browser, and nothing is written on the graph in either view, in any of its looks', async ({ page }) => {
   await countCanvasText(page);
   await portal(page);
   await page.goto('/memory?view=graph');
   await expect(page.getByRole('button', { name: '2D' })).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: '3D' }).click();
   const sky = page.locator('.memory-sky');
   await expect(sky.locator('canvas')).toBeVisible();
-  // No legend, no line of counts, no labels: only the picture and its zoom buttons.
+  await expect(sky).toHaveAttribute('data-flat', 'true');
+  await expect(page.getByRole('combobox', { name: 'Look of the graph' })).toHaveText('Constellation');
+  /** Every look in turn, and not a word on it. */
+  const quiet = async () => {
+    for (const theme of ['stellar', 'galaxy', 'brain', 'fireflies', 'helix']) {
+      await chooseLook(page, theme);
+      await frames(page);
+      expect(await visibleText(page)).toEqual([]);
+      expect(await page.evaluate(() => (window as any).written)).toBe(0);
+    }
+  };
+  await quiet();
+  await chooseLook(page, 'fireflies');
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Look of the graph' })).toHaveText('Fireflies');
+  await page.getByRole('button', { name: '3D' }).click();
+  await expect(sky.locator('canvas')).toBeVisible();
+  await expect(sky).not.toHaveAttribute('data-flat', /./);
+  // No strip of switches, no line of counts, no labels: only the picture and its zoom buttons.
   await expect(page.getByRole('list', { name: 'What the colours are' })).toBeHidden();
   await expect(page.getByText('— drag to move')).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole('button', { name: '3D' })).toHaveAttribute('aria-pressed', 'true');
   await expect(sky.locator('canvas')).toBeVisible();
-  const look = page.getByRole('combobox', { name: 'Look of the 3D view' });
-  await expect(look).toHaveText('Constellation');
-  for (const theme of ['stellar', 'galaxy', 'brain', 'fireflies', 'helix']) {
-    await chooseLook(page, theme);
-    await expect(sky).toHaveAttribute('data-theme-3d', theme);
-    await frames(page);
-    expect(await visibleText(page)).toEqual([]);
-    expect(await page.evaluate(() => (window as any).written)).toBe(0);
-  }
+  // The look chosen in the other view is the look of this one.
+  await expect(page.getByRole('combobox', { name: 'Look of the graph' })).toHaveText('Fireflies');
+  await quiet();
   await chooseLook(page, 'fireflies');
   await page.reload();
-  await expect(page.getByRole('combobox', { name: 'Look of the 3D view' })).toHaveText('Fireflies');
   // A note's name only while it is reached: Tab to its star, and a small card says it; Enter opens it.
   const owner = sky.getByRole('button', { name: 'The owner' });
   await owner.focus();
@@ -521,10 +601,11 @@ test('the 3D view and its look are kept in this browser, and nothing is written 
   await page.getByRole('button', { name: 'Graph', exact: true }).click();
   await page.getByRole('button', { name: '2D' }).click();
   await page.reload();
-  await expect(page.getByRole('group', { name: /3 notes/ }).locator('line')).toHaveCount(1);
+  await expect(sky).toHaveAttribute('data-flat', 'true');
+  await expect(page.getByText('— drag to move')).toBeVisible();
 });
 
-/** Each 3D look's secret, and the gesture that sets it off. */
+/** Each look's secret, and the gesture that sets it off in 3D. */
 const secrets: [string, string, (page: Page) => Promise<void>][] = [
   // A double-click on the empty sky, in its corner.
   ['stellar', 'meteor-shower', async (page) => {
@@ -593,25 +674,41 @@ for (const [theme, egg, gesture] of secrets) {
   });
 }
 
-test('with less motion asked for, the 3D looks hold still and play no secrets', async ({ page }) => {
+test("the constellation's secret plays in 2D too, and writes nothing while it plays", async ({ page }) => {
+  await countCanvasText(page);
+  await portal(page, { notes: 40 });
+  await page.goto('/memory?view=graph');
+  const sky = page.locator('.memory-sky');
+  await expect(sky).toHaveAttribute('data-flat', 'true');
+  await frames(page);
+  await secrets[0][2](page);
+  await expect(sky).toHaveAttribute('data-easter-egg', 'meteor-shower');
+  expect(await visibleText(page)).toEqual([]);
+  await expect(sky).not.toHaveAttribute('data-easter-egg', /./, { timeout: 15_000 });
+  expect(await page.evaluate(() => (window as any).written)).toBe(0);
+});
+
+test('with less motion asked for, the looks hold still in both views and play no secrets', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page);
   await page.goto('/memory?view=graph');
-  await page.getByRole('button', { name: '3D' }).click();
   const canvas = page.locator('.memory-sky canvas');
-  for (const theme of ['stellar', 'galaxy', 'brain', 'fireflies', 'helix']) {
-    await chooseLook(page, theme);
+  for (const mode of ['2D', '3D']) {
+    await page.getByRole('button', { name: mode, exact: true }).click();
+    for (const theme of ['stellar', 'galaxy', 'brain', 'fireflies', 'helix']) {
+      await chooseLook(page, theme);
+      await frames(page);
+      const first = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL());
+      await page.waitForTimeout(300);
+      await frames(page);
+      expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(first);
+    }
+    const b = (await canvas.boundingBox())!;
+    await chooseLook(page, 'stellar');
+    await page.mouse.dblclick(b.x + 12, b.y + 12);
     await frames(page);
-    const first = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL());
-    await page.waitForTimeout(300);
-    await frames(page);
-    expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(first);
+    await expect(page.locator('.memory-sky')).not.toHaveAttribute('data-easter-egg', /./);
   }
-  const b = (await canvas.boundingBox())!;
-  await chooseLook(page, 'stellar');
-  await page.mouse.dblclick(b.x + 12, b.y + 12);
-  await frames(page);
-  await expect(page.locator('.memory-sky')).not.toHaveAttribute('data-easter-egg', /./);
 });
 
 /** How many pixels of the canvas are mostly green, the colour the test gives the brain. */
@@ -623,46 +720,48 @@ const greenPixels = (page: Page) =>
     return n;
   });
 
-test("the brain's outline is drawn in the colour chosen for it, and the colour is kept", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await portal(page);
-  await page.goto('/memory?view=graph');
-  await page.getByRole('button', { name: '3D' }).click();
-  await expect(page.getByRole('button', { name: "Colour of the brain's outline" })).toHaveCount(0);
-  await chooseLook(page, 'brain');
-  await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
-  const picker = page.getByRole('dialog', { name: "Colour of the brain's outline" });
-  await expect(picker.getByLabel('Hex code')).toHaveValue('#ff5fc8');
-  await expect(picker.getByRole('button', { name: '#ff5fc8' })).toHaveAttribute('aria-pressed', 'true');
-  await frames(page);
-  expect(await greenPixels(page)).toBe(0);
-  await picker.getByLabel('Hex code').fill('#00ff00');
-  await frames(page);
-  expect(await greenPixels(page)).toBeGreaterThan(200);
-  // A code that is not one yet changes nothing.
-  await picker.getByLabel('Hex code').fill('#00ff');
-  await expect(picker.getByLabel('Hex code')).toHaveAttribute('aria-invalid', 'true');
-  await frames(page);
-  expect(await greenPixels(page)).toBeGreaterThan(200);
-  // A swatch is one click.
-  await picker.getByRole('button', { name: '#22d3ee' }).click();
-  await expect(picker.getByLabel('Hex code')).toHaveValue('#22d3ee');
-  await picker.getByLabel('Hex code').fill('#00ff00');
-  await page.reload();
-  await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
-  await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" }).getByLabel('Hex code')).toHaveValue('#00ff00');
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.memory-sky canvas')).toBeVisible();
-  await frames(page);
-  expect(await greenPixels(page)).toBeGreaterThan(200);
-});
+for (const mode of ['2D', '3D']) {
+  test(`the brain's outline is drawn in the colour chosen for it, and the colour is kept, in ${mode}`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await portal(page);
+    await page.goto('/memory?view=graph');
+    await page.getByRole('button', { name: mode, exact: true }).click();
+    await expect(page.getByRole('button', { name: "Colour of the brain's outline" })).toHaveCount(0);
+    await chooseLook(page, 'brain');
+    await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
+    const picker = page.getByRole('dialog', { name: "Colour of the brain's outline" });
+    await expect(picker.getByLabel('Hex code')).toHaveValue('#ff5fc8');
+    await expect(picker.getByRole('button', { name: '#ff5fc8' })).toHaveAttribute('aria-pressed', 'true');
+    await frames(page);
+    expect(await greenPixels(page)).toBe(0);
+    await picker.getByLabel('Hex code').fill('#00ff00');
+    await frames(page);
+    expect(await greenPixels(page)).toBeGreaterThan(200);
+    // A code that is not one yet changes nothing.
+    await picker.getByLabel('Hex code').fill('#00ff');
+    await expect(picker.getByLabel('Hex code')).toHaveAttribute('aria-invalid', 'true');
+    await frames(page);
+    expect(await greenPixels(page)).toBeGreaterThan(200);
+    // A swatch is one click.
+    await picker.getByRole('button', { name: '#22d3ee' }).click();
+    await expect(picker.getByLabel('Hex code')).toHaveValue('#22d3ee');
+    await picker.getByLabel('Hex code').fill('#00ff00');
+    await page.reload();
+    await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
+    await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" }).getByLabel('Hex code')).toHaveValue('#00ff00');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.memory-sky canvas')).toBeVisible();
+    await frames(page);
+    expect(await greenPixels(page)).toBeGreaterThan(200);
+  });
+}
 
-for (const [width, height] of [[1280, 800], [390, 800]]) {
-  test(`the brain's colour popover stays inside the window, ${width} wide`, async ({ page }) => {
+for (const [width, height, mode] of [[1280, 800, '2D'], [390, 800, '2D'], [1280, 800, '3D'], [390, 800, '3D']] as const) {
+  test(`the brain's colour popover stays inside the window, ${mode} ${width} wide`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await portal(page);
     await page.goto('/memory?view=graph');
-    await page.getByRole('button', { name: '3D' }).click();
+    await page.getByRole('button', { name: mode, exact: true }).click();
     await chooseLook(page, 'brain');
     await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
     const picker = page.getByRole('dialog', { name: "Colour of the brain's outline" });
@@ -689,24 +788,92 @@ test('in 3D a drag turns the view, the wheel zooms, and Show all of it sets it b
   await page.getByRole('button', { name: '3D' }).click();
   const canvas = page.locator('.memory-sky canvas');
   await expect(canvas).toBeVisible();
-  const picture = async () => (await frames(page), canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL()));
-  const first = await picture();
-  expect(await picture()).toBe(first);
+  const first = await picture(page);
+  expect(await picture(page)).toBe(first);
   const box = (await canvas.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 40, { steps: 8 });
   await page.mouse.up();
-  const turned = await picture();
+  const turned = await picture(page);
   expect(turned).not.toBe(first);
   await page.getByRole('button', { name: 'Show all of it' }).click();
-  expect(await picture()).toBe(first);
+  expect(await picture(page)).toBe(first);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, -300);
-  expect(await picture()).not.toBe(first);
+  expect(await picture(page)).not.toBe(first);
   await page.getByRole('button', { name: 'Show all of it' }).click();
   await page.getByRole('button', { name: 'Zoom in' }).click();
-  expect(await picture()).not.toBe(first);
+  expect(await picture(page)).not.toBe(first);
+});
+
+test('in 2D a drag moves the view without turning it, the wheel zooms toward the pointer, and Show all of it sets it back', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await portal(page, { notes: 12 });
+  await page.goto('/memory?view=graph');
+  const canvas = page.locator('.memory-sky canvas');
+  await expect(canvas).toBeVisible();
+  await settled(page);
+  const first = await stars(page);
+  expect(first).toHaveLength(12);
+  const box = (await canvas.boundingBox())!;
+  // The background taken hold of and moved: every star goes where the pointer went, and none of them moves against another.
+  await page.mouse.move(box.x + 20, box.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 20 + 70, box.y + 20 + 40, { steps: 8 });
+  await page.mouse.up();
+  await frames(page);
+  const moved = await stars(page);
+  expect(moved).toHaveLength(12);
+  for (const star of first) expect(moved.some((m) => Math.hypot(m.x - (star.x + 70), m.y - (star.y + 40)) < 1.5)).toBe(true);
+  // The wheel over a star: it stays where it is, and the rest go out from it, each by the same factor.
+  const middle = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const under = moved.reduce((a, b) => (Math.hypot(a.x - middle.x, a.y - middle.y) < Math.hypot(b.x - middle.x, b.y - middle.y) ? a : b));
+  await page.mouse.move(under.x, under.y);
+  for (let i = 0; i < 2; i++) await page.mouse.wheel(0, -100);
+  // Pointed at, a star and its neighbours light and the rest dim: so look at them with the pointer out of the way.
+  const stay = { x: under.x, y: under.y };
+  await page.mouse.move(box.x + 3, box.y + 3);
+  await frames(page);
+  const zoomed = await stars(page);
+  expect(zoomed.some((z) => Math.hypot(z.x - stay.x, z.y - stay.y) < 1.5)).toBe(true);
+  expect(zoomed.length).toBeGreaterThan(4);
+  const goesOut = (before: { x: number; y: number }[], after: { x: number; y: number }[], from: { x: number; y: number }, factor: number) =>
+    after.every((a) => before.some((b) => Math.hypot(from.x + (a.x - from.x) / factor - b.x, from.y + (a.y - from.y) / factor - b.y) < 1.5));
+  expect(goesOut(moved, zoomed, stay, 1.12 ** 2)).toBe(true);
+  await page.getByRole('button', { name: 'Show all of it' }).click();
+  await frames(page);
+  const back = await stars(page);
+  for (const star of first) expect(back.some((b) => Math.hypot(b.x - star.x, b.y - star.y) < 0.5)).toBe(true);
+  // The buttons zoom about the middle of the view.
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await frames(page);
+  const closer = await stars(page);
+  expect(closer.length).toBeGreaterThan(3);
+  expect(goesOut(back, closer, middle, 1.3)).toBe(true);
+});
+
+test('the constellation turns by itself in 3D and holds still in 2D', async ({ page }) => {
+  await portal(page, { notes: 20 });
+  await page.goto('/memory?view=graph');
+  await expect(page.locator('.memory-sky canvas')).toBeVisible();
+  // The strip over the picture is complete, so that it does not move under it.
+  await expect(page.getByText('Query paths')).toBeVisible();
+  /** What part of the stars seen a moment later are where a star was before, in the canvas's own pixels (a twinkling star may be too dim to see in one of the two). */
+  const stayed = async () => {
+    await frames(page);
+    const canvas = page.locator('.memory-sky canvas');
+    const [first, from] = [await stars(page), (await canvas.boundingBox())!];
+    await page.waitForTimeout(1500);
+    const [later, to] = [await stars(page), (await canvas.boundingBox())!];
+    expect(first.length).toBeGreaterThan(10);
+    expect(later.length).toBeGreaterThan(10);
+    return later.filter((b) => first.some((a) => Math.hypot(a.x - from.x - (b.x - to.x), a.y - from.y - (b.y - to.y)) < 1.5)).length / later.length;
+  };
+  expect(await stayed()).toBeGreaterThan(0.6);
+  await page.getByRole('button', { name: '3D' }).click();
+  await expect(page.locator('.memory-sky')).not.toHaveAttribute('data-flat', /./);
+  expect(await stayed()).toBeLessThan(0.3);
 });
 
 test('a browser whose storage cannot be used still draws the graph, and switches it', async ({ page }) => {
@@ -715,7 +882,7 @@ test('a browser whose storage cannot be used still draws the graph, and switches
   });
   await portal(page);
   await page.goto('/memory?view=graph');
-  await expect(page.getByRole('group', { name: /3 notes/ }).locator('line')).toHaveCount(1);
+  await expect(page.getByRole('group', { name: /3 notes/ }).locator('canvas')).toBeVisible();
   await page.getByRole('button', { name: '3D' }).click();
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
 });

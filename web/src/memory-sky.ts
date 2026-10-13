@@ -7,9 +7,10 @@
  * The layout is the flat one's (memory-graph.ts) with a third axis: the same
  * pushes and pulls, started on a sphere, so the same memory lands the same way
  * each time. Then it is centred and scaled to a radius of about one, which is
- * what the camera and the themes are made for.
+ * what the camera and the themes are made for. The 2D view is this same sky
+ * seen straight on: the flat layout, in the plane, scaled the same way.
  */
-import { roundsFor } from "./memory-graph";
+import { layoutKept, roundsFor } from "./memory-graph";
 
 export interface Point3 {
   path: string;
@@ -125,6 +126,11 @@ export function layout3dKept(paths: string[], edges: { source: string; target: s
   return placed;
 }
 
+/** `layout`, in the plane of the 2D view, scaled as the 3D layout is, and remembered as `layoutKept` is. */
+export function layoutFlat(paths: string[], edges: { source: string; target: string }[]): Point3[] {
+  return normalised(layoutKept(paths, edges).map((p) => ({ path: p.path, x: p.x, y: p.y, z: 0 })));
+}
+
 /** Where the camera looks from: turned by `yaw` and `pitch` around the point it looks at, `zoom` times as close. */
 export interface Camera {
   yaw: number;
@@ -150,6 +156,42 @@ export interface Projected {
   scale: number;
 }
 
+/** Pixels from the middle of the screen to a unit of the layout, at the depth the camera turns around. */
+const unitOf = (cam: Camera, width: number, height: number) => Math.min(width, height) * 0.4 * cam.zoom;
+
+/** Which way the screen's right and down are in space, for a camera turned by `yaw` and `pitch`. */
+function screenAxes(cam: Camera): { right: [number, number, number]; down: [number, number, number] } {
+  const cy = Math.cos(cam.yaw);
+  const sy = Math.sin(cam.yaw);
+  const cp = Math.cos(cam.pitch);
+  const sp = Math.sin(cam.pitch);
+  return { right: [cy, 0, sy], down: [sp * sy, cp, -sp * cy] };
+}
+
+/** `cam` with what it looks at moved by `(ex, ey)` screen pixels' worth of the plane through it, along the screen's own axes. */
+const looksAt = (cam: Camera, ex: number, ey: number, width: number, height: number): Camera => {
+  const { right, down } = screenAxes(cam);
+  const unit = unitOf(cam, width, height);
+  return { ...cam, tx: cam.tx + (right[0] * ex + down[0] * ey) / unit, ty: cam.ty + (right[1] * ex + down[1] * ey) / unit, tz: cam.tz + (right[2] * ex + down[2] * ey) / unit };
+};
+
+/** The camera after a drag of `dx`, `dy` pixels that takes hold of the plane it looks at and moves it with the pointer, as the 2D view's drag does. */
+export const panned = (cam: Camera, dx: number, dy: number, width: number, height: number): Camera => looksAt(cam, -dx, -dy, width, height);
+
+/**
+ * The camera `factor` times as close, with the point of the plane it looks at
+ * that is under (`x`, `y`) staying under it: a wheel over the 2D view zooms
+ * toward the pointer. `least` and `most` bound the zoom, and the camera is
+ * left as it was where they stop it.
+ */
+export function zoomedAt(cam: Camera, factor: number, x: number, y: number, width: number, height: number, least = 0.35, most = 8): Camera {
+  const zoom = Math.max(least, Math.min(most, cam.zoom * factor));
+  if (zoom === cam.zoom) return cam;
+  // The point under the pointer, in units from the one looked at, before and after: the camera moves by the difference.
+  const k = unitOf(cam, width, height) / unitOf({ ...cam, zoom }, width, height);
+  return { ...looksAt(cam, (x - width / 2) * (1 - k), (y - height / 2) * (1 - k), width, height), zoom };
+}
+
 /** Where a point in space is on a screen `width` by `height`, seen by `cam`. */
 export function project(p: { x: number; y: number; z: number }, cam: Camera, width: number, height: number): Projected {
   const x = p.x - cam.tx;
@@ -165,7 +207,7 @@ export function project(p: { x: number; y: number; z: number }, cam: Camera, wid
   const z2 = y * sp + z1 * cp;
   // Never at or behind the camera: a point that close is drawn as if just in front of it.
   const scale = DISTANCE / Math.max(0.2, DISTANCE + z2);
-  const unit = Math.min(width, height) * 0.4 * cam.zoom;
+  const unit = unitOf(cam, width, height);
   return { x: width / 2 + x1 * unit * scale, y: height / 2 + y2 * unit * scale, depth: z2, scale };
 }
 

@@ -11,6 +11,11 @@
  * Nothing here writes text: the names of notes are the card's, in React.
  * Somebody who asks for less motion gets each world standing still (`still`):
  * no drift, no time, and no secrets, which are all motion.
+ *
+ * The same worlds are drawn flat, for the 2D view (`Scene.flat`): the camera
+ * stands where the look's `flat` puts it, looking straight at the world, and
+ * only the picture's own motion is left: the camera never turns by itself, and
+ * a drag moves the view instead of the world.
  */
 import { brainOutline, galaxyStars, GALAXY_TURN, heart, helixAt, helixOrder, intoBrain, lobeOf, ringsFrom, seeded, WINDING, type Camera, type GalaxyStar, type Point3, type Projected, type SkyTheme } from "../memory-sky";
 
@@ -67,8 +72,10 @@ export interface Scene {
   lit: Set<number> | null;
   /** How strongly each note is drawn: dimmed outside what is in focus, or what the search found. */
   dim: Float32Array;
-  /** The flat-free layout, about a unit across. */
+  /** The layout, about a unit across: in all three directions, or with every `z` 0 in the flat view. */
   base: Point3[];
+  /** The flat view: the camera looks straight at the world and is not turned, by itself or by a drag. */
+  flat: boolean;
   rig: Rig;
   grabbing: boolean;
   outline: Rgb;
@@ -91,6 +98,8 @@ export interface Egg {
 export interface Look<W extends { egg: Egg | null } = { egg: Egg | null }> {
   /** Where the camera rests, and goes back to with "Show all of it". */
   rest: Camera;
+  /** The same for the flat view: straight at the world, from the side that shows the most of it. */
+  flat: Camera;
   init(): W;
   step(s: Scene, w: W): void;
   draw(s: Scene, w: W): void;
@@ -204,13 +213,14 @@ interface StellarWorld {
 
 const stellar: Look<StellarWorld> = {
   rest: { yaw: 0.55, pitch: -0.32, zoom: 1, tx: 0, ty: 0, tz: 0 },
+  flat: { yaw: 0, pitch: 0, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, spin: { yaw: 0, pitch: 0 }, chosen: null, meteors: [] }),
   core: (s, i) => 1.7 + Math.min(s.notes[i].links, 12) * 0.3,
   step(s, w) {
     for (let i = 0; i < s.notes.length; i++) put(s, i, s.base[i].x, s.base[i].y, s.base[i].z);
     const cam = s.rig.cam;
     if (!s.still) {
-      if (!s.grabbing && s.tip === null) cam.yaw += s.dt * 0.05;
+      if (!s.grabbing && s.tip === null && !s.flat) cam.yaw += s.dt * 0.05;
       cam.yaw += w.spin.yaw * s.dt;
       cam.pitch = clampPitch(cam.pitch + w.spin.pitch * s.dt);
       w.spin.yaw *= Math.exp(-s.dt * 2.5);
@@ -377,6 +387,8 @@ const lane = (() => {
 
 const galaxy: Look<GalaxyWorld> = {
   rest: { yaw: 0.3, pitch: -0.62, zoom: 1, tx: 0, ty: 0, tz: 0 },
+  // From above, the disc is a circle and its arms are spirals.
+  flat: { yaw: 0, pitch: -Math.PI / 2, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", centre: -1, belt: -1, ring: new Int32Array(0), stars: [], from: null, movedAt: 0, spin: 0 }),
   core: (s, i, w) => (i === w.centre ? 4.5 : 1.6 + Math.min(s.notes[i].links, 12) * 0.28),
   step(s, w) {
@@ -412,7 +424,7 @@ const galaxy: Look<GalaxyWorld> = {
       else put(s, i, x, y, z);
     }
     const cam = s.rig.cam;
-    if (!s.still && !s.grabbing && !s.rig.aim) {
+    if (!s.still && !s.grabbing && !s.rig.aim && !s.flat) {
       // The slant the galaxy is seen at draws the view back to it, like a spring.
       cam.pitch += (galaxy.rest.pitch - cam.pitch) * (1 - Math.exp(-s.dt * 1.2));
       cam.yaw += w.spin * s.dt;
@@ -531,9 +543,11 @@ const BRAIN = brainOutline();
 
 const brain: Look<BrainWorld> = {
   rest: { yaw: 0.55, pitch: -0.3, zoom: 1.05, tx: 0, ty: 0, tz: 0 },
+  // From the side, front to the left: the outline a brain is drawn by.
+  flat: { yaw: Math.PI / 2, pitch: 0, zoom: 1.05, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", home: new Float64Array(0), pulses: [], next: 0, fired: 0, flash: new Float64Array(0) }),
   core: (s, i) => 1 + Math.min(s.notes[i].links, 12) * 0.13,
-  view: (s, w) => ({ ...s.rig.cam, yaw: s.rig.cam.yaw + (s.still ? 0 : 0.55 * Math.sin(s.time * 0.13)) }),
+  view: (s, w) => ({ ...s.rig.cam, yaw: s.rig.cam.yaw + (s.still || s.flat ? 0 : 0.55 * Math.sin(s.time * 0.13)) }),
   step(s, w) {
     const key = `${s.version}`;
     if (key !== w.key) {
@@ -686,9 +700,10 @@ const MEADOW = specks(53, 48);
 
 const fireflies: Look<FireflyWorld> = {
   rest: { yaw: 0.3, pitch: -0.12, zoom: 1, tx: 0, ty: 0, tz: 0 },
+  flat: { yaw: 0, pitch: 0, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", chosen: null, now: new Float64Array(0), wind: [0, 0, 0], bob: 0 }),
   core: (s, i) => 1.5 + Math.min(s.notes[i].links, 12) * 0.2,
-  view: (s) => ({ ...s.rig.cam, pitch: s.rig.cam.pitch + (s.still ? 0 : 0.05 * Math.sin(s.time * 0.31)) }),
+  view: (s) => ({ ...s.rig.cam, pitch: s.rig.cam.pitch + (s.still || s.flat ? 0 : 0.05 * Math.sin(s.time * 0.31)) }),
   step(s, w) {
     const n = s.notes.length;
     const first = w.key !== `${s.version}`;
@@ -742,7 +757,7 @@ const fireflies: Look<FireflyWorld> = {
     });
     if (!s.still) {
       w.wind = w.wind.map((v) => v * Math.exp(-s.dt * 1.4)) as [number, number, number];
-      if (!s.grabbing && s.tip === null) cam.yaw += s.dt * 0.025;
+      if (!s.grabbing && s.tip === null && !s.flat) cam.yaw += s.dt * 0.025;
     }
     if (w.egg && s.time > w.egg.until) w.egg = null;
   },
@@ -858,6 +873,7 @@ const helixShape = (count: number) => {
 
 const helix: Look<HelixWorld> = {
   rest: { yaw: 0, pitch: -0.12, zoom: 1, tx: 0, ty: 0, tz: 0 },
+  flat: { yaw: 0, pitch: 0, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", order: [], slot: new Int32Array(0), spin: 0, speed: SPEED, scroll: 0, chosen: null, aimSpin: null, aimScroll: null }),
   core: (s, i) => 2 + Math.min(s.notes[i].links, 12) * 0.25,
   step(s, w) {

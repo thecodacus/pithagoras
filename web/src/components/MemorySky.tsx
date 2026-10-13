@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { LuLocateFixed, LuMinus, LuPlus } from "react-icons/lu";
 import { reducedMotion } from "../motion";
-import { layout3dKept, pick, project, Shake, turnAround, type Camera, type Projected, type SkyTheme } from "../memory-sky";
+import { layout3dKept, layoutFlat, panned, pick, project, Shake, turnAround, zoomedAt, type Camera, type Projected, type SkyTheme } from "../memory-sky";
 import { t, tp } from "../i18n";
 import { LOOKS, rgbOf, type Gesture, type GraphNote, type Scene } from "./sky-looks";
 
 export type { GraphNote } from "./sky-looks";
 
-/** What a note says of itself when it is pointed at: in both views, the only place the 3D one writes anything. */
-export function NoteCard({ note, colour, hint }: { note: GraphNote; colour: string; hint?: string }) {
+/** What a note says of itself when it is pointed at: in both views, the only place either writes anything. */
+export function NoteCard({ note, colour }: { note: GraphNote; colour: string }) {
   return (
     <div className="w-max max-w-[16rem] rounded-lg border border-line bg-surface/95 px-3 py-2 text-left shadow-lg backdrop-blur">
       <p className="text-xs font-medium text-fg">{note.title || note.path}</p>
@@ -18,7 +18,6 @@ export function NoteCard({ note, colour, hint }: { note: GraphNote; colour: stri
         <span className="shrink-0 text-fg-faint">{note.links === 0 ? t("orphan (unlinked)") : tp(note.links, "{n} link", "{n} links")}</span>
       </p>
       {note.description && <p className="mt-1 line-clamp-3 text-[11px] text-fg-subtle">{note.description}</p>}
-      {hint && <p className="mt-1 text-[10px] text-fg-faint">{hint}</p>}
     </div>
   );
 }
@@ -28,12 +27,16 @@ const clampZoom = (z: number) => Math.max(0.35, Math.min(8, z));
 const HOLD_MS = 1400;
 
 /**
- * The graph in space, on a canvas, in one of the looks of sky-looks.ts: each
- * places the notes, moves and answers a drag in its own way, and has a secret.
- * The wheel or a pinch zooms, and the buttons zoom and set the camera back, in
- * all of them. Nothing is written on it: a note says its name in a small card
- * while it is pointed at or reached with Tab, through buttons only a screen
- * reader and the keyboard see.
+ * The graph on a canvas, in one of the looks of sky-looks.ts: each places the
+ * notes, moves and answers a drag in its own way, and has a secret. The wheel
+ * or a pinch zooms, and the buttons zoom and set the camera back, in all of
+ * them. Nothing is written on it: a note says its name in a small card while it
+ * is pointed at or reached with Tab, through buttons only a screen reader and
+ * the keyboard see.
+ *
+ * Drawn in space (the 3D view), or `flat` (the 2D view): the same looks, the
+ * same glow and links, seen straight on. Nothing turns then; a drag moves the
+ * view, and the wheel zooms toward the pointer.
  *
  * The camera, the look's world and where every note is live in refs and are
  * drawn on every frame; React draws only the card and the buttons. The secret
@@ -48,6 +51,7 @@ export function MemorySky({
   selected,
   theme,
   outline,
+  flat = false,
   label,
   onOpen,
   onSelect,
@@ -62,11 +66,13 @@ export function MemorySky({
   theme: SkyTheme;
   /** The brain's outline colour. */
   outline: string;
+  /** Seen straight on, for the 2D view. The view is made again when this changes, from where the look rests. */
+  flat?: boolean;
   label: string;
   onOpen: (path: string) => void;
   onSelect: (path: string | null) => void;
 }) {
-  const placed = useMemo(() => layout3dKept(notes.map((n) => n.path), edges), [notes, edges]);
+  const placed = useMemo(() => (flat ? layoutFlat : layout3dKept)(notes.map((n) => n.path), edges), [notes, edges, flat]);
   const index = useMemo(() => new Map(notes.map((n, i) => [n.path, i])), [notes]);
   const links = useMemo(
     () => edges.map((e) => [index.get(e.source), index.get(e.target)] as const).filter((l): l is readonly [number, number] => l[0] !== undefined && l[1] !== undefined && l[0] !== l[1]),
@@ -92,12 +98,14 @@ export function MemorySky({
   const canvas = useRef<HTMLCanvasElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const look = LOOKS[theme];
-  const rig = useRef({ cam: { ...look.rest } as Camera, aim: null as Camera | null });
+  /** Where a look's camera rests: in space, or straight on. */
+  const restOf = (l: (typeof LOOKS)[SkyTheme]): Camera => ({ ...(flat ? l.flat : l.rest) });
+  const rig = useRef({ cam: restOf(look), aim: null as Camera | null });
   const world = useRef<{ theme: SkyTheme; w: any }>({ theme, w: look.init() });
   if (world.current.theme !== theme) {
     // Another look is another world, seen from where it rests.
     world.current = { theme, w: look.init() };
-    rig.current = { cam: { ...look.rest }, aim: null };
+    rig.current = { cam: restOf(look), aim: null };
   }
   const scene = useRef<Scene | null>(null);
   const dirty = useRef(true);
@@ -211,6 +219,7 @@ export function MemorySky({
         lit,
         dim,
         base: placed,
+        flat,
         rig: r,
         grabbing: !!grab.current?.moved || pinch.current !== null,
         outline: rgbOf(outline),
@@ -248,7 +257,7 @@ export function MemorySky({
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [placed, links, near, colours, types, notes, index, still]);
+  }, [placed, links, near, colours, types, notes, index, still, flat]);
 
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const holding = useRef(0);
@@ -296,7 +305,10 @@ export function MemorySky({
     if (pinch.current !== null && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (d / pinch.current));
+      if (flat) {
+        const r = canvas.current!.getBoundingClientRect();
+        rig.current.cam = zoomedAt(rig.current.cam, d / pinch.current, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top, r.width, r.height);
+      } else rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (d / pinch.current));
       pinch.current = d;
       dirty.current = true;
       return;
@@ -328,7 +340,10 @@ export function MemorySky({
       g.y = e.clientY;
       g.trail.push({ x: e.clientX, y: e.clientY, at: performance.now() });
       if (g.trail.length > 12) g.trail.shift();
-      if (s) lookNow.drag(s, world.current.w, dx, dy);
+      if (flat) {
+        const r = canvas.current!.getBoundingClientRect();
+        rig.current.cam = panned(rig.current.cam, dx, dy, r.width, r.height);
+      } else if (s) lookNow.drag(s, world.current.w, dx, dy);
       dirty.current = true;
       if (hover !== null) setHover(null);
       return;
@@ -345,6 +360,8 @@ export function MemorySky({
     grab.current = null;
     if (!g || g.id !== e.pointerId || g.held || e.type === "pointercancel") return;
     if (g.moved) {
+      // The flat view stops where it is let go.
+      if (flat) return;
       // How fast it was going when let go, over the last tenth of a second.
       const now = performance.now();
       const recent = g.trail.filter((p) => now - p.at < 100);
@@ -369,7 +386,11 @@ export function MemorySky({
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       rig.current.aim = null;
-      rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (e.deltaY > 0 ? 1 / 1.12 : 1.12));
+      const factor = e.deltaY > 0 ? 1 / 1.12 : 1.12;
+      if (flat) {
+        const r = c.getBoundingClientRect();
+        rig.current.cam = zoomedAt(rig.current.cam, factor, e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+      } else rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * factor);
       dirty.current = true;
     };
     c.addEventListener("wheel", wheel, { passive: false });
@@ -377,12 +398,12 @@ export function MemorySky({
       c.removeEventListener("wheel", wheel);
       clearTimeout(holding.current);
     };
-  }, []);
+  }, [flat]);
   const zoomBy = (f: number) => go({ ...(rig.current.aim ?? rig.current.cam), zoom: clampZoom((rig.current.aim ?? rig.current.cam).zoom * f) });
 
   const tipNote = tip === null ? undefined : notes[index.get(tip) ?? -1];
   return (
-    <div ref={wrap} role="group" aria-label={label} data-theme-3d={theme} className={`memory-sky sky-${theme} relative min-h-0 flex-1 overflow-hidden`}>
+    <div ref={wrap} role="group" aria-label={label} data-look={theme} data-flat={flat || undefined} className={`memory-sky sky-${theme} relative min-h-0 flex-1 overflow-hidden`}>
       <canvas
         ref={canvas}
         aria-hidden="true"
@@ -428,7 +449,7 @@ export function MemorySky({
           type="button"
           onClick={() => {
             LOOKS[theme].reset?.(world.current.w);
-            go({ ...LOOKS[theme].rest });
+            go(restOf(LOOKS[theme]));
           }}
           aria-label={t("Show all of it")}
           className="p-2 hover:bg-white/10 hover:text-white"

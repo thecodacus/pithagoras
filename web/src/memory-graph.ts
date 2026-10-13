@@ -107,24 +107,6 @@ export function layoutKept(paths: string[], edges: { source: string; target: str
   return placed;
 }
 
-/**
- * The box around the placed notes, with room for their labels — and never
- * smaller than `least`, so a memory of three notes is not drawn so close that
- * its labels fill the page.
- */
-export function bounds(placed: Placed[], pad = 60, least = { width: 720, height: 480 }): { x: number; y: number; width: number; height: number } {
-  if (!placed.length) return { x: -least.width / 2, y: -least.height / 2, ...least };
-  const xs = placed.map((p) => p.x);
-  const ys = placed.map((p) => p.y);
-  const minX = Math.min(...xs) - pad;
-  const minY = Math.min(...ys) - pad;
-  const width = Math.max(...xs) + pad - minX;
-  const height = Math.max(...ys) + pad - minY;
-  const w = Math.max(width, least.width);
-  const h = Math.max(height, least.height);
-  return { x: minX - (w - width) / 2, y: minY - (h - height) / 2, width: w, height: h };
-}
-
 const COLOURS = ["#0ea5e9", "#8b5cf6", "#10b981", "#f59e0b", "#ec4899", "#f97316", "#6366f1", "#84cc16", "#d946ef", "#14b8a6"];
 const NONE = "#94a3b8";
 
@@ -145,100 +127,6 @@ export function colours(types: Iterable<string | undefined>): (type: string | un
   };
 }
 
-/** Who each note is linked with, either way round. */
-export function neighbours(edges: { source: string; target: string }[]): Map<string, Set<string>> {
-  const near = new Map<string, Set<string>>();
-  const add = (a: string, b: string) => {
-    let set = near.get(a);
-    if (!set) near.set(a, (set = new Set()));
-    set.add(b);
-  };
-  for (const e of edges) {
-    if (e.source === e.target) continue;
-    add(e.source, e.target);
-    add(e.target, e.source);
-  }
-  return near;
-}
-
-/** A box in the drawing's own units. */
-export interface Box {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
-
-/** A label to be placed beside its note, of the size it is drawn at. */
-export interface LabelAsk {
-  path: string;
-  x: number;
-  y: number;
-  /** How far the note reaches from its middle, its ring included. */
-  r: number;
-  width: number;
-  height: number;
-  /** Placed over other notes when nothing else is free, rather than not at all: the one that is chosen. */
-  must?: boolean;
-}
-
-export interface Label {
-  path: string;
-  /** Where the text is anchored, at the middle of its height. */
-  x: number;
-  y: number;
-  anchor: "start" | "middle" | "end";
-  box: Box;
-}
-
-const overlaps = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-
-/**
- * Labels that never cover each other: each, in the order asked (the most
- * important first), goes below its note, else above, right or left of it,
- * wherever neither another label nor another note is; one with no room
- * anywhere is left out, and its note says its name when it is pointed at.
- * Given `within`, a label also stays inside it: the box the whole graph is
- * shown in, so that none is cut off at its edge. The boxes are looked up in a
- * grid, so thousands of notes cost little.
- */
-export function placeLabels(asks: LabelAsk[], gap: number, within?: Box): Label[] {
-  const cell = Math.max(1, ...asks.map((a) => a.height)) * 4;
-  const grid = new Map<string, { box: Box; owner: string | null }[]>();
-  const cells = (b: Box, visit: (key: string) => boolean | void) => {
-    for (let i = Math.floor(b.x0 / cell); i <= Math.floor(b.x1 / cell); i++)
-      for (let j = Math.floor(b.y0 / cell); j <= Math.floor(b.y1 / cell); j++) if (visit(`${i},${j}`)) return true;
-    return false;
-  };
-  const put = (box: Box, owner: string | null) =>
-    cells(box, (key) => {
-      const list = grid.get(key);
-      if (list) list.push({ box, owner });
-      else grid.set(key, [{ box, owner }]);
-    });
-  // `owner` is the note a circle belongs to, or null for a label: a label may touch its own note, never another's or another label.
-  const blocked = (box: Box, self: string, notes: boolean) =>
-    cells(box, (key) => (grid.get(key) ?? []).some((o) => (o.owner === null || (notes && o.owner !== self)) && overlaps(o.box, box)));
-  for (const a of asks) put({ x0: a.x - a.r, y0: a.y - a.r, x1: a.x + a.r, y1: a.y + a.r }, a.path);
-
-  const placed: Label[] = [];
-  for (const a of asks) {
-    const half = a.height / 2;
-    const candidates: Label[] = [
-      { path: a.path, x: a.x, y: a.y + a.r + gap + half, anchor: "middle", box: { x0: a.x - a.width / 2, y0: a.y + a.r + gap, x1: a.x + a.width / 2, y1: a.y + a.r + gap + a.height } },
-      { path: a.path, x: a.x, y: a.y - a.r - gap - half, anchor: "middle", box: { x0: a.x - a.width / 2, y0: a.y - a.r - gap - a.height, x1: a.x + a.width / 2, y1: a.y - a.r - gap } },
-      { path: a.path, x: a.x + a.r + gap, y: a.y, anchor: "start", box: { x0: a.x + a.r + gap, y0: a.y - half, x1: a.x + a.r + gap + a.width, y1: a.y + half } },
-      { path: a.path, x: a.x - a.r - gap, y: a.y, anchor: "end", box: { x0: a.x - a.r - gap - a.width, y0: a.y - half, x1: a.x - a.r - gap, y1: a.y + half } },
-    ];
-    const inside = (c: Label) => !within || (c.box.x0 >= within.x0 && c.box.x1 <= within.x1 && c.box.y0 >= within.y0 && c.box.y1 <= within.y1);
-    const chosen = candidates.find((c) => inside(c) && !blocked(c.box, a.path, true)) ?? (a.must ? candidates.find((c) => !blocked(c.box, a.path, false)) : undefined);
-    if (!chosen) continue;
-    placed.push(chosen);
-    put(chosen.box, null);
-  }
-  return placed;
-}
-
-/** How the graph is drawn: flat, to read, or in space. */
+/** How the graph is drawn: flat (straight on) or in space. */
 export type GraphMode = "2d" | "3d";
 export const graphModeFrom = (stored: string | null): GraphMode => (stored === "3d" ? "3d" : "2d");

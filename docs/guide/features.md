@@ -547,9 +547,9 @@ as Understory's own:
   bundle is well-formed (*conformant*, or how many issues — which lists them);
 - beside it, the open note — its type, tags, when it last changed, its text,
   and links to other notes that open them there — or the **Log** of changes,
-  newest first, or the **Graph**: every note as a point coloured by its type,
-  its links as lines, unlinked notes ringed in red, the paths Understory's own
-  queries took, and zoom, drag and click to open.
+  newest first, or the **Graph**: every note as a glowing point coloured by its
+  type, its links as see-through lines, seen straight on or in space, the paths
+  Understory's own queries took, and zoom, drag and click to open.
 
 What is open is in the address (`/memory?note=…`, `?view=log`,
 `?view=graph`), so it can be linked to. Understory's chat is not there.
