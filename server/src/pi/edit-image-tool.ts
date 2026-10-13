@@ -45,36 +45,33 @@ export const EDIT_IMAGE_VOICE_LINE =
 
 /**
  * Said in both shapes: a picture attached to a message reaches the model as what it sees (see prompt-images.ts), not as a file of the
- * folder, so there is no path for it, and an agent that is not told guesses one or edits another picture in its place.
+ * folder, so there is no path for it, and an agent that is not told guesses one or edits another picture.
  */
 const ATTACHED =
-  "A picture the person attached to a message is not a file in the chat's folder, so it cannot be given here: if the one to use was only attached, say so, " +
-  "and ask them to put it in the chat's folder (the Files panel) or to change it on the Media page. Do not guess a path or edit another picture instead. ";
+  "A picture only attached to a message is not in the folder and cannot be used: ask the person to put it in the chat's folder (Files panel) or edit it on the Media page; " +
+  "never guess a path or edit another picture. ";
 
 /** What the model is told about the pictures of an edit when the endpoint takes one, and when it takes several. */
 const ONE_PICTURE =
-  "Change a picture in the chat's folder as told, with the image model the person has set up for editing, and show the result to them. " +
-  "The picture is a PNG, JPEG, GIF or WebP in the chat's folder (a path relative to it, or absolute inside it). " +
-  "It stays as it is: the result is a new picture in the chat's generated-images folder, named after it, and appears on their screen as show_image's does, " +
-  "so do not call show_image on it. Say what should change; what is not mentioned should stay as it is. " +
-  "It can also be the reference for a new picture: say what the new one should show. " +
+  "Change a picture in the chat's folder with the person's image editing model, or make a new one from it as reference, and show the result. " +
+  "The picture: PNG, JPEG, GIF or WebP. It stays as is; the result is a new file named after it, shown as by show_image (no show_image needed). " +
+  "Say what should change; the rest stays. " +
   // Said, not left out: with no word of it an agent given several pictures would use one and go on as if it had used them all.
-  "The editing endpoint is set up to take ONE picture per edit, so there is only one to give. If the person wants several pictures combined or used together as references, " +
-  "do not make the edit with one of them as if it were all: say that this endpoint takes one picture per edit, and that several can be switched on under Settings → Agent → Media (Several pictures per edit) if the endpoint takes them. " +
+  "This endpoint takes ONE picture per edit: if the person wants several combined, do not edit with one of them; say so, " +
+  "and that Settings → Agent → Media (Several pictures per edit) allows several if the endpoint takes them. " +
   ATTACHED;
 const SEVERAL_PICTURES =
-  "Change pictures in the chat's folder as told, or make a new picture from them as references, with the image model the person has set up for editing, and show the result to them. " +
-  `Give one to ${MAX_EDIT_PICTURES} pictures, each a PNG, JPEG, GIF or WebP in the chat's folder (a path relative to it, or absolute inside it), ` +
-  `together at most ${MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB; a picture over the size limit set for edits, or too heavy, is scaled down to fit (its ratio kept) and the result says so, and one that cannot be made to fit is refused, and the error names it. ` +
-  "They are sent in the order of the list, and the model knows them by nothing but their place in it, so refer to them in the prompt by place (\"the first picture\", \"the second picture\") " +
-  "and say what each is for: the one to change, a style to follow, a person or an object to take over. Name only those that matter: if one is refused, none is sent. " +
-  "They stay as they are: the result is one new picture in the chat's generated-images folder, named after the first, and appears on their screen as show_image's does, " +
-  "so do not call show_image on it. What the prompt does not mention should stay as it is. " +
+  "Change pictures in the chat's folder, or make a new one from them as references, with the person's image editing model, and show the result. " +
+  `1 to ${MAX_EDIT_PICTURES} pictures, PNG, JPEG, GIF or WebP, together at most ${MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB. ` +
+  "One that cannot be scaled to fit is refused by name, and then none is sent. " +
+  'The model knows them only by their place in the list: in the prompt say "the first picture", "the second picture" and what each is for ' +
+  "(to change, a style, a person or object to take over); give only those that matter. " +
+  "They stay as they are; the result is one new file named after the first, shown as by show_image (no show_image needed). " +
+  "What the prompt does not mention stays. " +
   ATTACHED;
 const BEFORE_YOU_CALL =
-  "It can take a minute and costs the person something, so make one edit, and another only when asked. " +
-  "Give a short title. Say in words what you made or changed; do not describe it in detail unless asked. " +
-  "A picture over the limits for an edit is scaled down to fit before it is sent, and the result says so: tell the person when that happened, as the new picture is smaller than the original.";
+  "Slow and costs the person: one edit unless asked for more. Give a short title; say briefly what changed. " +
+  "A picture over the limits is scaled down first and the result says so: tell the person, as the result is smaller.";
 
 /** How much of the original's name a result keeps. */
 const MAX_STEM_BYTES = 200;
@@ -132,12 +129,8 @@ export class EditImageTool {
     // The shape is settled now, as the tool's being there is: a change of it reloads the chats (see the features API).
     const several = imageEditingMultiple(loaded);
     const common = {
-      prompt: Type.String({
-        description: several
-          ? "What should change, or what the new picture should show. Refer to the pictures by their place in the list."
-          : "What should change in it.",
-      }),
-      title: Type.Optional(Type.String({ description: "A few words shown above the picture." })),
+      prompt: Type.String({ description: several ? "What should change or what the new picture shows, naming the pictures by place" : "What should change" }),
+      title: Type.Optional(Type.String({ description: "A few words shown above it" })),
     };
     pi.registerTool({
       name: EDIT_IMAGE_TOOL,
@@ -149,11 +142,11 @@ export class EditImageTool {
               paths: Type.Array(Type.String(), {
                 minItems: 1,
                 maxItems: MAX_EDIT_PICTURES,
-                description: "The pictures, in the order the prompt refers to them: relative to the chat's folder or absolute inside it.",
+                description: "In the order the prompt refers to them, relative to the chat's folder or absolute inside it",
               }),
               ...common,
             }
-          : { path: Type.String({ description: "The picture to change, relative to the chat's folder or absolute inside it." }), ...common },
+          : { path: Type.String({ description: "The picture, relative to the chat's folder or absolute inside it" }), ...common },
       ),
       execute: async (_id: string, p: { path?: string; paths?: string[]; prompt: string; title?: string }, signal?: AbortSignal) => {
         // Read now, not when the tool was loaded: an address, a model or a key changed since is in force.

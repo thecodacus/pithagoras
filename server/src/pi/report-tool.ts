@@ -65,12 +65,11 @@ export function reportTool(routineSlug: string | null) {
       name: "report",
       label: "Report back",
       description:
-        "Send a message to the human who set this routine up, through the channel it reports to. " +
-        "Use it for something worth their attention: what you found, what you changed, a decision " +
-        "you need. It is one-way — you will not get a reply, so do not ask questions.",
-      promptSnippet: "report — tell the human something worth knowing about this run",
+        "Message the person who set up this routine, through its report channel: what you found or changed, or a decision you need. " +
+        "One-way: no reply comes, so ask nothing.",
+      promptSnippet: "tell the person something worth knowing about this run",
       parameters: Type.Object({
-        message: Type.String({ description: "What to say. Written for someone who was not here." }),
+        message: Type.String({ description: "For someone who was not here" }),
       }),
       async execute(_id: string, p: any) {
         const to = reportToFor(routineSlug);

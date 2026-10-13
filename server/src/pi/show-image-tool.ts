@@ -44,13 +44,11 @@ export function showImageTool(folder: string) {
       name: "show_image",
       label: "show image",
       description:
-        "Show the user a picture on their screen: a chart or diagram you made, a screenshot, a photo. " +
-        "The file must be a PNG, JPEG, GIF or WebP in the chat's folder (a path relative to it, or absolute inside it); " +
-        "save or copy a picture there first. In voice mode this is the only way the user sees a picture. " +
-        "Give a short title. Say in words what the picture shows; do not describe it in detail unless asked.",
+        "Show the person a picture: PNG, JPEG, GIF or WebP in the chat's folder (save or copy it there first). " +
+        "In voice mode the only way they see one. Give a short title; say briefly what it shows.",
       parameters: Type.Object({
-        path: Type.String({ description: "The picture, relative to the chat's folder or absolute inside it." }),
-        title: Type.Optional(Type.String({ description: "A few words shown above the picture." })),
+        path: Type.String({ description: "The picture, relative to the chat's folder or absolute inside it" }),
+        title: Type.Optional(Type.String({ description: "A few words shown above it" })),
       }),
       execute: async (_id: string, p: { path: string; title?: string }) => {
         const rel = pictureIn(folder, p.path);

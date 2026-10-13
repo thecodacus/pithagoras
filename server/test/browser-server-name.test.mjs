@@ -49,3 +49,9 @@ test("one that is called browser still counts, as it always has", () => {
   writeFileSync(mcp, JSON.stringify({ mcpServers: { browser: {} } }));
   assert.deepEqual(browserServers(), ["browser"]);
 });
+
+test("an entry that is not an object is no browser, and does not stop the others from being found", () => {
+  writeFileSync(mcp, JSON.stringify({ mcpServers: { old: null, odd: 3, chrome: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79", "--cdp-endpoint", CDP] } } }));
+  assert.deepEqual(browserServers(), ["chrome"]);
+  assert.equal(findConnection(), "chrome");
+});

@@ -154,9 +154,9 @@ const GRACE_MS = () => Number(process.env.PI_SUBAGENT_GRACE_MS) || 5000;
 
 const DESCRIPTIONS: Record<Mode, string> = {
   interrupt:
-    "Hand a self-contained task to a separate agent with its own context, and get its final answer back. Use for research or investigation that would otherwise fill this conversation. The person can watch it and give it instructions while it works.",
+    "Hand a self-contained task to a separate agent with its own context and get its final answer back. For research that would fill this chat. The person can watch and steer it.",
   background:
-    "Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once, you can go on working, and its final answer arrives later as a message. Use for research or investigation that would otherwise fill this conversation. The person can watch it and give it instructions while it works.",
+    "Hand a self-contained task to a separate agent with its own context. It runs in the background: this call returns at once and its final answer arrives later as a message. For research that would fill this chat. The person can watch and steer it.",
 };
 
 /**
@@ -293,8 +293,8 @@ export default function (pi: any) {
     label: "Subagent",
     description: DESCRIPTIONS[mode],
     parameters: Type.Object({
-      task: Type.String({ description: "The whole task, with everything the subagent needs to know — it sees nothing of this conversation" }),
-      label: Type.Optional(Type.String({ description: "A short name for it, e.g. 'Research: vector DBs'" })),
+      task: Type.String({ description: "The whole task with all it needs: it sees nothing of this chat" }),
+      label: Type.Optional(Type.String({ description: "Short name, e.g. Research: vector DBs" })),
     }),
 
     async execute(toolCallId: string, params: { task: string; label?: string }, signal: AbortSignal | undefined, onUpdate: any, ctx: any) {

@@ -16,7 +16,7 @@ import {
 import { api, type Agent, type BrokenChannelPackage, type Channel, type ChannelKind } from "../api";
 import { Select } from "./Select";
 import { QrCode } from "./QrCode";
-import { LoadFailed, Switch, SwitchTrack, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { LoadFailed, Switch, SwitchTrack, btnCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { pollWhileVisible } from "../poll";
@@ -163,7 +163,7 @@ export function ChannelsPanel({ onError }: { onError: (e: string) => void }) {
             </p>
           </div>
         ) : (
-          <ul className="mt-2 space-y-1.5">
+          <ul className={`mt-2 ${gridCls}`}>
             {channels.map((ch) => (
               <ChannelRow
                 key={ch.id}

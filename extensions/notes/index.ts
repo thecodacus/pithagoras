@@ -89,9 +89,8 @@ export default function (pi: any) {
   pi.registerTool({
     name: "note",
     label: "Note",
-    description:
-      "Pin a short note to this chat, where the person keeps it beside the conversation: a decision, a result, something to come back to. A sentence or two, not a document.",
-    parameters: Type.Object({ text: Type.String({ description: "The note" }) }),
+    description: "Pin a short note (a sentence or two) to this chat for the person: a decision, a result, something to come back to.",
+    parameters: Type.Object({ text: Type.String() }),
     async execute(_toolCallId: string, params: { text: string }) {
       if (!params.text.trim()) throw new Error("A note needs some text");
       const note = add(params.text, "agent");

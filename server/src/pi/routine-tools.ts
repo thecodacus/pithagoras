@@ -75,12 +75,7 @@ function place(raw: unknown): { workspace: string | null } | { error: string } {
   return "error" in where ? { error: `Cannot run in "${raw}": ${where.error}` } : where;
 }
 
-const WORKSPACE_PARAM = Type.Optional(
-  Type.String({
-    description:
-      "Where its runs happen: a project's name or path under the workspace root, or 'home' for Home — the agent's own directory, which is the default.",
-  }),
-);
+const WORKSPACE_PARAM = Type.Optional(Type.String({ description: "Project name or path to run in, or home (the default: the agent's own folder)" }));
 
 /**
  * Where a routine created from a conversation should report.
@@ -117,10 +112,8 @@ export function routineTools(sessionId?: string) {
     pi.registerTool({
       name: "routines_list",
       label: "List routines",
-      description:
-        "List the scheduled routines: what each does, when it next runs, and how the last run went.",
-      promptSnippet:
-        "routines_list — see the scheduled work that already exists",
+      description: "List the routines: what each does, its next run, how the last went.",
+      promptSnippet: "see the scheduled work that already exists",
       parameters: Type.Object({}),
       async execute() {
         const all = rows();
@@ -133,34 +126,15 @@ export function routineTools(sessionId?: string) {
       name: "routine_create",
       label: "Create routine",
       description:
-        "Schedule work to happen later, either repeatedly on a cron schedule or once at a given time. " +
-        "The instructions are what you will be asked to do when it fires, so write them as a standing " +
-        "instruction to yourself — nobody is there to answer a question.",
-      promptSnippet:
-        "routine_create — schedule work for later, once or repeatedly",
+        "Schedule work for later: give schedule to repeat, or runAt for once, not both. " +
+        "instructions are what you will be told when it fires, with nobody to ask: a standing order to yourself.",
+      promptSnippet: "schedule work for later, once or repeatedly",
       parameters: Type.Object({
-        name: Type.String({
-          description: "Short human name, e.g. 'Morning summary'",
-        }),
-        instructions: Type.String({ description: "What to do when it fires" }),
-        schedule: Type.Optional(
-          Type.String({
-            description:
-              "Five-field cron or an @shorthand, e.g. '0 9 * * 1-5' or '@daily'",
-          }),
-        ),
-        runAt: Type.Optional(
-          Type.String({
-            description:
-              "ISO 8601 instant for a one-off, e.g. '2026-08-01T09:00:00Z'",
-          }),
-        ),
-        freshSession: Type.Optional(
-          Type.Boolean({
-            description:
-              "Start each run with no memory of the last one. Defaults to false.",
-          }),
-        ),
+        name: Type.String({ description: "Short name, e.g. Morning summary" }),
+        instructions: Type.String(),
+        schedule: Type.Optional(Type.String({ description: "5-field cron or @shorthand, e.g. 0 9 * * 1-5 or @daily" })),
+        runAt: Type.Optional(Type.String({ description: "ISO 8601 time, e.g. 2026-08-01T09:00:00Z" })),
+        freshSession: Type.Optional(Type.Boolean({ description: "Each run starts without memory of the last; default false" })),
         workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
@@ -195,29 +169,14 @@ export function routineTools(sessionId?: string) {
     pi.registerTool({
       name: "routine_update",
       label: "Update routine",
-      description:
-        "Change an existing routine: its schedule, its instructions, its name, or whether it is enabled. " +
-        "Only the fields you pass are changed.",
+      description: "Change a routine; only the fields given change.",
       parameters: Type.Object({
-        routine: Type.String({
-          description: "Name or slug of the routine to change",
-        }),
+        routine: Type.String({ description: "Name or slug" }),
         name: Type.Optional(Type.String()),
         instructions: Type.Optional(Type.String()),
-        schedule: Type.Optional(
-          Type.String({ description: "Cron. Clears any one-off time." }),
-        ),
-        runAt: Type.Optional(
-          Type.String({
-            description: "ISO instant. Clears any cron schedule.",
-          }),
-        ),
-        enabled: Type.Optional(
-          Type.Boolean({
-            description:
-              "False stops it running while keeping it. This is how you cancel one.",
-          }),
-        ),
+        schedule: Type.Optional(Type.String({ description: "Cron; clears runAt" })),
+        runAt: Type.Optional(Type.String({ description: "ISO time; clears schedule" })),
+        enabled: Type.Optional(Type.Boolean({ description: "false pauses it and keeps it: how to cancel one" })),
         workspace: WORKSPACE_PARAM,
       }),
       async execute(_id: string, p: any) {
@@ -271,13 +230,9 @@ export function routineTools(sessionId?: string) {
     pi.registerTool({
       name: "routine_run",
       label: "Run routine now",
-      description:
-        "Run a routine immediately without waiting for its schedule. Useful for checking that a routine " +
-        "you just created does what was intended.",
+      description: "Run a routine now, e.g. to test one you just made.",
       parameters: Type.Object({
-        routine: Type.String({
-          description: "Name or slug of the routine to run",
-        }),
+        routine: Type.String({ description: "Name or slug" }),
       }),
       async execute(_id: string, p: any) {
         const row = byName(p.routine ?? "");

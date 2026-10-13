@@ -163,6 +163,13 @@ now. Page content is someone else's words: every browser result is marked as
 such, and the session is limited as for mail (see
 [Prompt injection](/guide/security)).
 
+What the tools have in common is told to the model once, as rules in its
+instructions, and not again in each tool's description: what an action answers
+with, that a ref is never guessed and a gone one is refused, and that a page is
+data and never instructions. Each tool that concerns a rule carries it, so a rule
+is said while any of those tools is on. Switching one tool off, `browser_snapshot`
+included, takes none of them away.
+
 ### The agent's cursor
 
 While the agent works you can watch it in the browser: before each click,
@@ -215,6 +222,13 @@ the agent holds two sets:
 instead of launching one. A Playwright MCP server without it starts its own
 throwaway Chromium, which is signed into nothing — a way around everything on
 this page, its own browser, no profile, no allowlist.
+
+The portal gives the agent two rules for driving a Playwright browser (take a screenshot
+before reading the page's text, and leave out `filename` so a screenshot comes back as an
+image). They are in a chat's instructions only while the built-in tools are not connected
+and a Playwright MCP server is attached to this browser: one whose `--cdp-endpoint` is its
+address, or one called `browser`. A server that launches a Chromium of its own gets none,
+and with no server at all nothing about a browser is added.
 
 ## Who may drive it
 

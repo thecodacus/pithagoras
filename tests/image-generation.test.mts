@@ -1336,8 +1336,8 @@ test("an endpoint that takes one picture gets a tool with one path, and one that
   const one = loadEdit(folder).registered[0];
   assert.deepEqual(Object.keys(one.parameters.properties).sort(), ["path", "prompt", "title"], "off: the tool is as it was");
   assert.deepEqual(one.parameters.required.sort(), ["path", "prompt"]);
-  assert.doesNotMatch(one.description, /order of the list|\bpaths\b/);
-  assert.match(one.description, /reference for a new picture/, "one picture can be the reference for a new one");
+  assert.doesNotMatch(one.description, /place in the list|\bpaths\b/);
+  assert.match(one.description, /make a new one from it as reference/, "one picture can be the reference for a new one");
 
   gen.saveImageGeneration({ editMultiple: true });
   const many = loadEdit(folder).registered[0];
@@ -1348,9 +1348,9 @@ test("an endpoint that takes one picture gets a tool with one path, and one that
   assert.equal(many.parameters.properties.paths.items.type, "string");
   assert.equal(many.parameters.properties.paths.minItems, 1);
   assert.equal(many.parameters.properties.paths.maxItems, editing.MAX_EDIT_PICTURES);
-  assert.match(many.description, /order of the list/, "the model is told how it says which is which");
-  assert.match(many.description, /by place/);
-  assert.match(many.description, /if one is refused, none is sent/);
+  assert.match(many.description, /only by their place in the list/, "the model is told how it says which is which");
+  assert.match(many.description, /"the first picture", "the second picture"/);
+  assert.match(many.description, /refused by name, and then none is sent/);
   assert.ok(!JSON.stringify(many).includes("sk-"));
 
   // Several with editing off is no tool at all.
@@ -1364,20 +1364,22 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   const folder = chatWith();
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
   const one = loadEdit(folder).registered[0];
-  assert.match(one.description, /set up to take ONE picture per edit/, "the limit is said, not left out");
-  assert.match(one.description, /do not make the edit with one of them as if it were all/, "no picture is dropped without a word");
+  assert.match(one.description, /takes ONE picture per edit/, "the limit is said, not left out");
+  assert.match(one.description, /do not edit with one of them; say so/, "no picture is dropped without a word");
   assert.match(one.description, /Settings → Agent → Media \(Several pictures per edit\)/, "and where several are switched on");
-  assert.match(one.description, /reference for a new picture/, "one reference picture is still what it can be given");
-  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Media page/;
+  assert.match(one.description, /make a new one from it as reference/, "one reference picture is still what it can be given");
+  const attached = /only attached to a message is not in the folder and cannot be used[^]*Files panel[^]*Media page[^]*never guess a path/;
   assert.match(one.description, attached, "a picture only attached to a message has no path: the agent says so rather than guess one");
 
   // With several taken, the same sentence is not there, and the limits are: the count and the weight.
   gen.saveImageGeneration({ editMultiple: true });
   const many = loadEdit(folder).registered[0];
-  assert.doesNotMatch(many.description, /ONE picture|as if it were all/);
-  assert.match(many.description, new RegExp(`one to ${editing.MAX_EDIT_PICTURES} pictures`));
+  assert.doesNotMatch(many.description, /ONE picture|do not edit with one of them/);
+  assert.match(many.description, new RegExp(`1 to ${editing.MAX_EDIT_PICTURES} pictures`));
   assert.match(many.description, new RegExp(`at most ${editing.MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB`));
-  assert.match(many.description, /size limit set for edits, or too heavy, is scaled down to fit.*one that cannot be made to fit is refused, and the error names it/);
+  assert.match(many.description, /cannot be scaled to fit is refused by name, and then none is sent/);
+  // The scaling is said once, for both shapes, with what the model is to do about it.
+  for (const description of [one.description, many.description]) assert.match(description, /over the limits is scaled down first and the result says so: tell the person/);
   assert.match(many.description, attached, "and the same for a list: attached pictures cannot be named in it");
   reset();
 });

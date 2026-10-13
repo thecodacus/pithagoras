@@ -4,7 +4,7 @@ import { api, type CatalogPackage } from "../api";
 import { ago, compactCount, webLink } from "../package-names";
 import { confirmDialog } from "./ConfirmDialog";
 import { load, peek } from "../settings-cache";
-import { inputCls } from "./SettingsUi";
+import { gridCls, inputCls } from "./SettingsUi";
 import { formatNumber, t } from "../i18n";
 import { SkeletonGroup } from "./Skeleton";
 
@@ -80,7 +80,7 @@ export function PackageCatalog({
   };
 
   const shown = found ? (more ? found : found.slice(0, limit)) : [];
-  const rows = wide ? "grid gap-2 xl:grid-cols-2 min-[2200px]:grid-cols-3" : "space-y-1.5";
+  const rows = wide ? gridCls : "space-y-1.5";
 
   return (
     <div>

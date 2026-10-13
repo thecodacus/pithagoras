@@ -10,7 +10,7 @@ import {
   LuTriangleAlert,
 } from "react-icons/lu";
 import { api, type Person, type Role, type ToolRule } from "../api";
-import { LoadFailed, Segments, inputCls, primaryCls } from "./SettingsUi";
+import { LoadFailed, Segments, gridCls, inputCls, primaryCls } from "./SettingsUi";
 import { labelOf, msg, t, tp, tx } from "../i18n";
 import { useFlash } from "../use-flash";
 import { confirmDialog } from "./ConfirmDialog";
@@ -136,9 +136,9 @@ export function PeoplePanel({ onError }: { onError: (e: string) => void }) {
           {t("Nobody yet. People appear here the first time they message a channel.")}
         </p>
       ) : (
-        <ul className="space-y-1">
+        <ul className={gridCls}>
           {people.map((p) => (
-            <li key={p.key}>
+            <li key={p.key} className="min-w-0">
               <button
                 onClick={() => setOpenKey(p.key)}
                 className="flex w-full items-center gap-2.5 rounded-xl border border-line bg-raised/40 px-3 py-2 text-left transition hover:bg-fg/5"

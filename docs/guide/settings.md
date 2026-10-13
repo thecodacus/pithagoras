@@ -14,9 +14,10 @@ German. Navigation runs down the left edge, in four groups:
 Plus a page for every extension that exposes configuration.
 
 The dialog takes the room the screen has: nearly all of a laptop's, and three
-quarters of the width of a wider one. Pages that are lists (Extensions, Logs,
-Advanced) use all of it; a page that is a form stops at a width that is still
-easy to read across.
+quarters of the width of a wider one. Every page uses that width. Lists
+(providers, skills, MCP servers, channels, people, extensions) stand two
+abreast, three on a very wide screen, and there a form's sections stand in two
+columns so that no field runs the whole width.
 
 There is no Session tab. Model, effort and context all live on the pills under
 the composer, and a second copy here would be two places to keep in sync.

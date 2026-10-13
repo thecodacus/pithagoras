@@ -318,7 +318,7 @@ extension does not quietly bring back something you turned off.
 
 A tool that is switched on costs the model its schema, description and rules in **every** request,
 whether or not the conversation ever uses it. For a large set such as the [browser](/guide/browser)'s
-eleven tools that is a few thousand tokens in each chat. A tool that is **lazy** costs none of that until
+eleven tools that is more than a thousand tokens in each chat. A tool that is **lazy** costs none of that until
 it is needed: it is not in the model's list, and the model finds it through a single tool, `tools`.
 
 **Nothing is lazy by default,** but for an MCP server's tools, which are lazy by the adapter's default (see

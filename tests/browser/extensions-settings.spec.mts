@@ -134,6 +134,23 @@ const beside = (page: Page, a: number, b: number) =>
     return Math.abs(second.y - first.y) < 1 && second.x >= first.x + first.width;
   });
 
+test('a list of another page stands two abreast where there is room, as the packages do', async ({ page }) => {
+  const person = (key: string, name: string) => ({ key, name, role: 'colleague', notes: '', first_seen: '', last_seen: null, announced_at: null, renamed: 0 });
+  await mockPortal(page, ({ path }) => {
+    if (path === '/api/people') return { people: [person('tg:a', 'Asha'), person('tg:b', 'Ben'), person('tg:c', 'Chen')] };
+    if (path === '/api/tool-rules') return { rules: [] };
+    return undefined;
+  }, { settings: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/settings/people');
+  const row = (name: string) => page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: new RegExp(name) });
+  await expect(row('Chen')).toBeVisible();
+  await expect.poll(async () => Math.abs((await box(page, row('Ben'))).y - (await box(page, row('Asha'))).y)).toBeLessThan(1);
+  expect((await box(page, row('Chen'))).y).toBeGreaterThan((await box(page, row('Asha'))).y);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await box(page, row('Ben'))).y).toBeGreaterThan((await box(page, row('Asha'))).y);
+});
+
 test('Settings takes the room a screen has: nearly all of a laptop, most of a wide one, and a phone as before', async ({ page }) => {
   await portal(page, [web, notes, dusk]);
   const dialog = page.getByRole('dialog', { name: 'Settings' });
@@ -156,10 +173,19 @@ test('Settings takes the room a screen has: nearly all of a laptop, most of a wi
   // And for three.
   await beside(page, 1, 2).toBe(true);
 
-  // A form does not run the width of it: a field across a wide screen is harder to read than one that stops.
+  // Every page takes the width, not only this one: on a screen this wide a form's sections stand two abreast.
   await page.goto('/settings/general');
   await expect(dialog.getByLabel('Default model')).toBeVisible();
-  expect((await box(page, dialog.locator('.settings-page'))).width).toBeLessThanOrEqual(1024);
+  const whole = (await box(page, dialog.locator('.settings-page'))).width;
+  expect(whole).toBeGreaterThan(1500);
+  const section = (name: string) => dialog.locator(`[data-setting="${name}"]`);
+  await expect.poll(async () => Math.abs((await box(page, section('Context'))).y - (await box(page, section('For new chats'))).y)).toBeLessThan(1);
+  expect((await box(page, section('Context'))).x).toBeGreaterThan((await box(page, section('For new chats'))).x + 600);
+
+  // On a laptop the same page is one column, the width of the dialog's page.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(async () => (await box(page, section('Context'))).y).toBeGreaterThan((await box(page, section('For new chats'))).y + 50);
+  expect((await box(page, section('For new chats'))).width).toBeGreaterThan(1050);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/settings/extensions');

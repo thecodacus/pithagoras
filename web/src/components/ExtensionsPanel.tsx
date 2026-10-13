@@ -11,7 +11,7 @@ import { tabKeys } from "../tab-keys";
 import { msg, t, tp } from "../i18n";
 import { confirmDialog } from "./ConfirmDialog";
 import { PackageCatalog } from "./PackageCatalog";
-import { Empty, LoadFailed, Section, Switch, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { Empty, LoadFailed, Section, Switch, btnCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
 import { SkeletonGroup } from "./Skeleton";
 
 /**
@@ -92,8 +92,6 @@ function Card({ kinds, name, title, version, description, off, action, children,
   );
 }
 
-/** Side by side where the dialog has room: two on a laptop, three on a screen wide enough that the dialog is (see Modal). */
-export const gridCls = "grid gap-2 xl:grid-cols-2 min-[2200px]:grid-cols-3";
 
 export function ExtensionsPanel({
   extensions,

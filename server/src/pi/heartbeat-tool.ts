@@ -21,15 +21,12 @@ export function heartbeatTool(agentId: string, sessionId: string) {
     pi.registerTool({
       name: NOTE_TOOL,
       label: "Leave a note",
-      description:
-        "Leave a note in your Activity for the person you work for: one thing you noticed that deserves " +
-        "their attention, what it is and why it matters. One note per thing. Set urgent only when it " +
-        "cannot wait until they next look — that also messages them.",
-      promptSnippet: `${NOTE_TOOL} — tell the person you work for about something you noticed`,
+      description: "Leave a note in your Activity for the person you work for: one thing worth their attention, one note per thing.",
+      promptSnippet: "tell the person you work for about something you noticed",
       parameters: Type.Object({
-        title: Type.String({ description: "One line: what you noticed." }),
-        detail: Type.String({ description: "What it is, why it matters, and where to look. Written for someone who was not here." }),
-        urgent: Type.Optional(Type.Boolean({ description: "Also message them now. Only for what cannot wait." })),
+        title: Type.String({ description: "One line: what you noticed" }),
+        detail: Type.String({ description: "What, why it matters, where to look; for someone who was not here" }),
+        urgent: Type.Optional(Type.Boolean({ description: "Also message them now; only for what cannot wait" })),
       }),
       async execute(_id: string, p: any) {
         const title = String(p.title ?? "").trim();
