@@ -338,8 +338,12 @@ const changesExtensions = <T>(request: Promise<T>): Promise<T> =>
 export interface ExtensionUi {
   name: string;
   version?: string;
-  entry: string;
+  /** Absent for a package that has only a server half. */
+  entry?: string;
   style?: string;
+  /** Where its server half's own routes are, when it has one running; why not, when it has one that is not. */
+  server?: string;
+  serverError?: string;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { StatusIndicator } from "./ChatActivity";
 import { TranscriptRow, type RowActions } from "./TranscriptRow";
 import { useStableActions } from "../use-stable-actions";
+import { useStable } from "../use-stable";
 import { splitContext } from "../context-blocks";
 import { workingText } from "./StatusDot";
 import { VoiceTerminal } from "./VoiceTerminal";
@@ -19,7 +20,7 @@ import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, Suspense, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
 import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
@@ -49,8 +50,10 @@ import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands"
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, SPLIT, SPLIT_LEAST, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
 import { labelOf, msg, t } from "../i18n";
-import { useSlot, type Panels } from "../extensions/slots";
+import { useSlot, type ChatProps, type PanelHandle, type Panels, type Registered } from "../extensions/slots";
 import { channelFor } from "../extensions/channel";
+import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
+import { setPanelController, type PanelController } from "../extensions/panels";
 import { tabKeys } from "../tab-keys";
 import { STEP, arrowSteps } from "../resize-keys";
 
@@ -345,14 +348,30 @@ export function Chat({
   // The panels the installed extensions brought, and their controls for the header: see extensions/slots.ts.
   const panelEntries = useSlot("chat.panel");
   const headerActions = useSlot("chat.header.action");
+  const backgrounds = useSlot("chat.background");
+  const overlays = useSlot("chat.overlay");
+  const aboveComposer = useSlot("chat.composer.above");
   const [extensionsOpen, setExtensionsOpen] = useState<readonly string[]>([]);
+  // What each was last opened with, what its body and its head share, and which are not to be closed to make room.
+  const [panelParams, setPanelParams] = useState<Record<string, unknown>>({});
+  const [panelStates, setPanelStates] = useState<Record<string, unknown>>({});
+  const [panelsKept, setPanelsKept] = useState<readonly string[]>([]);
+  /** What each asks before it is closed by hand. */
+  const closeGuards = useRef(new Map<string, () => boolean | Promise<boolean>>());
   // Only what is still there: an extension taken out takes its panels with it.
   const extensionPanels = extensionsOpen.filter((key) => panelEntries.some((entry) => entry.key === key));
   const shownKey = extensionPanels.join("\n");
-  const showExtensionPanel = useCallback((key: string, show: boolean) => {
+  const showExtensionPanel = useCallback((key: string, show: boolean, params?: unknown) => {
     setExtensionsOpen((open) => (show ? (open.includes(key) ? open : [...open, key]) : open.filter((k) => k !== key)));
+    if (show) return void setPanelParams((was) => (Object.is(was[key], params) ? was : { ...was, [key]: params }));
+    // Closed, it keeps nothing: what it shared, what it asked before closing and what it was opened with go with it.
+    const without = (was: Record<string, unknown>) => (key in was ? Object.fromEntries(Object.entries(was).filter(([k]) => k !== key)) : was);
+    setPanelParams(without);
+    setPanelStates(without);
+    setPanelsKept((was) => (was.includes(key) ? was.filter((k) => k !== key) : was));
+    closeGuards.current.delete(key);
   }, []);
-  /** An extension's own panels, for its controls in the header: the same object until one opens or closes. */
+  /** An extension's own panels: the same object until one of them opens or closes. */
   const panelsOf = useMemo(() => {
     const shown = shownKey ? shownKey.split("\n") : [];
     const made = new Map<string, Panels>();
@@ -361,7 +380,7 @@ export function Chat({
       if (!panels) {
         panels = {
           isOpen: (id) => shown.includes(`${extension}/${id}`),
-          open: (id) => showExtensionPanel(`${extension}/${id}`, true),
+          open: (id, params) => showExtensionPanel(`${extension}/${id}`, true, params),
           close: (id) => showExtensionPanel(`${extension}/${id}`, false),
         };
         made.set(extension, panels);
@@ -370,13 +389,35 @@ export function Chat({
     };
   }, [shownKey, showExtensionPanel]);
   const chat = useMemo(() => ({ id: session.id, title: session.title, workspace: session.workspace }), [session.id, session.title, session.workspace]);
-  // What closes each extension's panel, the same function each time it is drawn: it is handed to the extension's component.
-  const closers = useRef(new Map<string, () => void>());
-  const closerOf = (key: string) => {
-    let close = closers.current.get(key);
-    if (!close) closers.current.set(key, (close = () => showExtensionPanel(key, false)));
-    return close;
+  // What an extension's panel is handed, the same each time it is drawn unless it changed: its components are
+  // drawn again only for what is new (see register in extensions/slots.ts), and the chat is drawn with every token.
+  const panelParts = useRef(new Map<string, { close: () => void; params: unknown; state: unknown; handle: PanelHandle }>());
+  const partsOf = (key: string) => {
+    const params = panelParams[key], state = panelStates[key];
+    const was = panelParts.current.get(key);
+    if (was && Object.is(was.params, params) && Object.is(was.state, state)) return was;
+    const now = {
+      close: was?.close ?? (() => showExtensionPanel(key, false)),
+      params,
+      state,
+      handle: {
+        params,
+        state,
+        setState: (next: unknown) => setPanelStates((all) => (Object.is(all[key], next) ? all : { ...all, [key]: next })),
+        keep: (keep: boolean) => setPanelsKept((all) => (keep === all.includes(key) ? all : keep ? [...all, key] : all.filter((k) => k !== key))),
+        guardClose: (guard: (() => boolean | Promise<boolean>) | null) => void (guard ? closeGuards.current.set(key, guard) : closeGuards.current.delete(key)),
+      },
+    };
+    panelParts.current.set(key, now);
+    return now;
   };
+  /** Closed by hand: its button, or the one in its head. It stays if what it asks first is answered no. */
+  const closeExtensionPanel = async (key: string) => {
+    const guard = closeGuards.current.get(key);
+    if (guard && !(await guard())) return;
+    showExtensionPanel(key, false);
+  };
+  const toggleExtensionPanel = useStable((key: string, open: boolean) => (open ? void closeExtensionPanel(key) : showExtensionPanel(key, true)));
   useWorkPanels(
     {
       browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen,
@@ -386,7 +427,8 @@ export function Chat({
     // A third panel closes another one instead, while Files has an edit in it.
     // An edit not saved outweighs keeping Git in view: with both kept nothing
     // could go, and the fallback closed Files — edit and all — unasked.
-    filesDirty ? ["files"] : gitHeld ? ["git"] : [],
+    // One an extension says holds something that would be lost stays as well.
+    [...(filesDirty ? (["files"] as const) : gitHeld ? (["git"] as const) : []), ...panelsKept.map((key) => `x:${key}` as const)],
   );
   const closeFiles = async () => {
     if (
@@ -1543,7 +1585,7 @@ export function Chat({
     git: () => setGit(false),
     terminal: () => setTerminal(false),
   };
-  const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : showExtensionPanel(kind.slice(2), false));
+  const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : void closeExtensionPanel(kind.slice(2)));
   /** The entry an extension's panel is drawn from. */
   const entryOf = (kind: AsidePanel) => (isOwn(kind) ? undefined : panelEntries.find((entry) => entry.key === kind.slice(2)));
   /** What a panel is called: in its header, and on its close button. */
@@ -1553,6 +1595,11 @@ export function Chat({
     return { label: title, close: t("Close {panel}", { panel: title }) };
   };
 
+  /** What an extension's panel and the parts in its head are handed. */
+  const panelProps = (entry: Registered<"chat.panel">) => {
+    const parts = partsOf(entry.key);
+    return { chat, channel: channelFor(session.id, entry.extension), panels: panelsOf(entry.extension), close: parts.close, panel: parts.handle };
+  };
   /** What an extension's panel shows: its entry's component, made anew for each chat, which failing to draw takes down alone. */
   const extensionBody = (kind: AsidePanel) => {
     const entry = entryOf(kind);
@@ -1561,11 +1608,61 @@ export function Chat({
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface" data-extension={entry.extension}>
         <ErrorBoundary resetKey={`${entry.key}:${session.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
-          <Body key={session.id} chat={chat} channel={channelFor(session.id, entry.extension)} close={closerOf(entry.key)} />
+          <Body key={session.id} {...panelProps(entry)} />
         </ErrorBoundary>
       </div>
     );
   };
+  /** What an extension draws in its panel's head: in place of the title, or before the close button. One that fails to draw is left out. */
+  const extensionHead = (kind: AsidePanel, part: "header" | "actions") => {
+    const entry = entryOf(kind);
+    const Part = entry?.[part];
+    if (!entry || !Part) return null;
+    return (
+      <ErrorBoundary resetKey={`${entry.key}:${part}:${session.id}`} fallback={() => null}>
+        <Part key={session.id} {...panelProps(entry)} />
+      </ErrorBoundary>
+    );
+  };
+  /** The parts of the installed extensions that are drawn in the chat itself, each alone in what it does when it fails. */
+  const extensionParts = (entries: readonly Registered<"chat.header.action" | "chat.background" | "chat.overlay" | "chat.composer.above">[]) =>
+    entries.map((entry) => (
+      <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null}>
+        <entry.component key={session.id} chat={chat} channel={channelFor(session.id, entry.extension)} panels={panelsOf(entry.extension)} />
+      </ErrorBoundary>
+    ));
+
+  // The panels by name, for anything in the page: see extensions/panels.ts. Read as they are when asked.
+  const panelControl = useRef<PanelController>({ isOpen: () => false, open: () => {}, close: () => {} });
+  panelControl.current = {
+    isOpen: (key) =>
+      key === "files" ? files : key === "git" ? git : key === "terminal" ? terminal : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(key),
+    open: (key, params) => {
+      const given = (params ?? {}) as { path?: unknown; callId?: unknown; id?: unknown };
+      if (key === "files") {
+        setFiles(true);
+        if (typeof given.path === "string") setFileAsked({ path: given.path, seq: Date.now() });
+      } else if (key === "git") setGit(true);
+      else if (key === "terminal") typeof given.callId === "string" ? showInTerminal(given.callId) : setTerminal(true);
+      else if (key === "browser") setWatching(true);
+      else if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
+      else if (key === "canvas") setCanvasOpen(true);
+      else if (panelEntries.some((entry) => entry.key === key)) showExtensionPanel(key, true, params);
+      else throw new Error(`There is no panel called "${key}"`);
+    },
+    close: (key) => {
+      if (key === "canvas") setCanvasOpen(false);
+      else if (key in closeOwn) closeOwn[key as OwnPanel]();
+      else showExtensionPanel(key, false);
+    },
+  };
+  useEffect(() => {
+    setPanelController({ isOpen: (key) => panelControl.current.isOpen(key), open: (key, params) => panelControl.current.open(key, params), close: (key) => panelControl.current.close(key) });
+    return () => setPanelController(undefined);
+  }, []);
+  // The chat as it is now, for what the extensions drew: see extensions/chat-feed.ts.
+  useEffect(() => publishChat(session.id, { events, items, running, loading: loading === true }), [session.id, events, items, running, loading]);
+  useEffect(() => () => forgetChatFeed(session.id), [session.id]);
 
   /** What is in a panel: its header, which carries it, and what it shows. */
   const panelContent = (kind: AsidePanel) => (
@@ -1602,9 +1699,10 @@ export function Chat({
             ))}
           </div>
         ) : (
-          <span className="text-[11px] text-fg-subtle">{panelName(kind).label}</span>
+          extensionHead(kind, "header") ?? <span className="text-[11px] text-fg-subtle">{panelName(kind).label}</span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
+          {extensionHead(kind, "actions")}
           {kind === "browser" && (
             <button
               // The browser's own box is what goes fullscreen, not the place
@@ -1818,11 +1916,7 @@ export function Chat({
             </span>
           )}
           {/* The installed extensions' own controls. One that fails to draw is left out, and the header stays. */}
-          {headerActions.map((entry) => (
-            <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null}>
-              <entry.component key={session.id} chat={chat} channel={channelFor(session.id, entry.extension)} panels={panelsOf(entry.extension)} />
-            </ErrorBoundary>
-          ))}
+          {extensionParts(headerActions)}
           {agents.length > 0 && (
             <PanelToggle
               open={agentsOpen}
@@ -1871,14 +1965,12 @@ export function Chat({
           <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label={t("Session canvases")} title={t("Session canvases")}>
             <LuFileText />
           </PanelToggle>
-          {panelEntries.map((entry) => {
-            const open = extensionPanels.includes(entry.key);
-            return (
-              <PanelToggle key={entry.key} open={open} onClick={() => showExtensionPanel(entry.key, !open)} label={entry.title} title={open ? t("Hide {panel}", { panel: entry.title }) : entry.title}>
-                {entry.icon ? <entry.icon /> : <LuPuzzle />}
-              </PanelToggle>
-            );
-          })}
+          {panelEntries.map((entry) => (
+            // Its button is its own to say about (hidden, live): one whose say fails is left out, and the header stays.
+            <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null}>
+              <ExtensionToggle key={session.id} entry={entry} chat={chat} channel={channelFor(session.id, entry.extension)} panels={panelsOf(entry.extension)} open={extensionPanels.includes(entry.key)} onToggle={toggleExtensionPanel} />
+            </ErrorBoundary>
+          ))}
         </div>
         </div>
       </header>
@@ -1954,6 +2046,7 @@ export function Chat({
               seqs={seq === undefined ? undefined : versions[seq]}
               switching={switching !== null}
               sessionId={session.id}
+              chat={chat}
               folder={session.workspace}
               mermaid={mermaid}
               mermaidOptions={mermaidOptions}
@@ -2080,6 +2173,8 @@ export function Chat({
         >
           <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
         </button>
+        {/* What the installed extensions say above the message box. */}
+        {extensionParts(aboveComposer)}
         <RunningTray
           agents={agents}
           jobs={background.jobs}
@@ -2283,6 +2378,9 @@ export function Chat({
       {asidePanels.map((kind) => createPortal(panelContent(kind), boxes.box(kind), kind))}
       {/* Where a panel's box waits while it goes from one place to another (see panelBoxes). */}
       <div ref={park} hidden />
+      {/* What the installed extensions put over the chat, each placed by itself, and what of them only listens. */}
+      {extensionParts(overlays)}
+      {extensionParts(backgrounds)}
       {/* Shown while a panel is carried (see carryPanel). */}
       {beside && asidePanels.length > 0 && (
         <div ref={zones} aria-hidden="true" className="dock-zones" hidden>
@@ -2327,6 +2425,22 @@ function TranscriptSkeleton() {
 }
 
 /** One of the buttons in the chat's header that opens a panel beside it. */
+/**
+ * The header's button for a panel an extension brought. A part of its own, so
+ * that what the extension says of its button (`useButton`, a hook) is asked
+ * when something of it changes, not each time the chat is drawn.
+ */
+const ExtensionToggle = memo(function ExtensionToggle({ entry, open, onToggle, ...props }: ChatProps & { entry: Registered<"chat.panel">; open: boolean; onToggle: (key: string, open: boolean) => void }) {
+  const button = entry.useButton?.(props) ?? {};
+  // Hidden, there is no way to it from the header; open, there has to be a way to close it.
+  if (button.hidden && !open) return null;
+  return (
+    <PanelToggle open={open} onClick={() => onToggle(entry.key, open)} label={entry.title} title={open ? t("Hide {panel}", { panel: entry.title }) : button.title ?? entry.title} live={button.live && !open}>
+      {entry.icon ? <entry.icon /> : <LuPuzzle />}
+    </PanelToggle>
+  );
+});
+
 function PanelToggle({
   open,
   onClick,

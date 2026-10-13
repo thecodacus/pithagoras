@@ -30,6 +30,7 @@ import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
 import { setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
+import { serverPush } from "./extensions/server-feed";
 import { useSlot } from "./extensions/slots";
 
 // What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
@@ -402,6 +403,11 @@ function Shell({
         setEvents(resetLiveEvents);
       });
       es.addEventListener("canvas", (m) => canvasMessage(sessionId, JSON.parse((m as MessageEvent).data)));
+      // What the installed extensions' server halves tell what they drew on this chat: see extensions/server-feed.ts.
+      es.addEventListener("extension", (m) => {
+        const { extension, data } = JSON.parse((m as MessageEvent).data) as { extension: string; data: unknown };
+        serverPush(sessionId, extension, data);
+      });
       // Until it has caught up, what arrives is history being replayed. It is
       // gathered and applied in one go: drawing the conversation once per event
       // is what made a long one open at the top, build downwards over seconds and

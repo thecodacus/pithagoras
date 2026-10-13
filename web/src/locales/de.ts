@@ -741,6 +741,8 @@ const de: Locale = {
     "pi's own settings file, where installed extensions keep their configuration.": "pis eigene Einstellungsdatei, in der installierte Erweiterungen ihre Konfiguration ablegen.",
     "Save file": "Datei speichern",
     "Its interface could not be loaded: {reason}": "Die Oberfläche konnte nicht geladen werden: {reason}",
+    "Its server half could not be started: {reason}": "Der Serverteil konnte nicht gestartet werden: {reason}",
+    "Configure": "Konfigurieren",
     // components/ConfirmDialog.tsx
     "OK": "OK",
     // components/ContextPill.tsx
@@ -2202,6 +2204,9 @@ const de: Locale = {
     "Heard whenever you speak.": "Zu hören, sobald du sprichst.",
     "Sound effects": "Soundeffekte",
     // components/VoiceStage.tsx
+    "Show {panel}": "{panel} anzeigen",
+    "Minimize {panel}": "{panel} minimieren",
+    "Minimize": "Minimieren",
     "The browser viewer is unavailable.": "Die Browseransicht ist nicht verfügbar.",
     "Could not connect to the browser viewer.": "Verbindung zur Browseransicht fehlgeschlagen.",
     "Tap to continue voice mode": "Tippen, um den Sprachmodus fortzusetzen",

@@ -12,6 +12,11 @@ import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
 import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
 import { MIN, clearOfDock, dockBox, dockSize, freeStrip, placeWindows, type Orb } from "../voice-windows";
+import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
+import { LuPuzzle } from "react-icons/lu";
+import { useSlot, type ChatProps, type Registered } from "../extensions/slots";
+import { channelFor } from "../extensions/channel";
+import { panelsFor } from "../extensions/panels";
 import { ResizeHandles, WINDOWS, areaFor, clearSize, openWindows, workspaceOf } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
@@ -46,6 +51,24 @@ const watchWide = (changed: () => void) => {
 
 /** Where focus is typing, so Space and a paste belong to that and not to voice mode. */
 const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+
+/**
+ * A window an extension brought to voice mode: placed and sized as Files, the
+ * pictures and the conversation are, with what the extension draws in it. It
+ * is there only while open; one that fails to draw says so in its window.
+ */
+function BroughtWindow({ entry, main, onClose, ...props }: ChatProps & { entry: Registered<"voice.window">; main: boolean; onClose: () => void }) {
+  const section = useRef<HTMLElement>(null);
+  return (
+    <section ref={section} className={`voice-files-window voice-extension-window ${main ? "as-main" : "as-side"} is-open`} aria-label={entry.title} data-extension={entry.extension}>
+      <header><span>{entry.icon ? <entry.icon /> : <LuPuzzle />}{entry.title}</span><div><button type="button" aria-label={t("Minimize {panel}", { panel: entry.title })} title={t("Minimize")} onClick={onClose}><LuMinus /></button></div></header>
+      <ErrorBoundary resetKey={`${entry.key}:${props.chat.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
+        <entry.component key={props.chat.id} {...props} close={onClose} />
+      </ErrorBoundary>
+      <ResizeHandles target={section} />
+    </section>
+  );
+}
 
 export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue,
   waitingForTap, items, errorsAfter, running, onStop, attachments, onAddPictures, onRemovePicture, canRepeat, onRepeat, rate, onRate, steer, onSteer, ptt, onPtt, holding, onHold }: {
@@ -103,7 +126,15 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const settingsToggle = useRef<HTMLButtonElement>(null);
   const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
-  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown, pictures: picturesShown, conversation }, panel => {
+  // The windows the installed extensions brought (the `voice.window` slot), by their entry's key: those still there.
+  const windowEntries = useSlot("voice.window");
+  const [broughtOpen, setBroughtOpen] = useState<readonly string[]>([]);
+  const brought = windowEntries.filter((entry) => broughtOpen.includes(entry.key));
+  const broughtShown = Object.fromEntries(brought.map((entry) => [`x:${entry.key}`, true])) as Record<`x:${string}`, boolean>;
+  const closeBrought = (key: string) => setBroughtOpen((open) => open.filter((k) => k !== key));
+  const chat = useMemo(() => ({ id: sessionId, title, workspace: folder }), [sessionId, title, folder]);
+  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown, pictures: picturesShown, conversation, ...broughtShown }, panel => {
+    if (panel.startsWith("x:")) closeBrought(panel.slice(2)); else
     if (panel === "browser") setShown(false); else if (panel === "terminal") setTerminalShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else if (panel === "conversation") setConversation(false); else onCanvasMinimize();
   });
   // What the agent reads or changes in the chat's folder. Files opens on it as
@@ -119,7 +150,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // and Files and pictures wherever is left (see voice-windows.ts). The stage's
   // classes say whether there is a window in the middle and one at the side,
   // for where the orb goes; which window is open is the window's own `is-open`.
-  const place = placeWindows({ browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown, conversation });
+  const place = placeWindows({ browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown });
   const filesMain = place.main === "files", picturesMain = place.main === "pictures", conversationMain = place.main === "conversation";
   const browsing = !!place.main;
   const sideWindow = !!place.side;
@@ -332,6 +363,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     arranged.current = arrangement;
     const canvas = stage.current && workspaceOf(stage.current)?.querySelector<HTMLElement>(".canvas-panel");
     for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current, canvas ?? null]) clearSize(el);
+    for (const el of stage.current?.querySelectorAll<HTMLElement>(".voice-extension-window") ?? []) clearSize(el);
   }, [arrangement]);
   // What the orb's place was measured for. Anything else — a window opened or
   // closed, the browser maximized — has no sizes set by hand yet, so the orb
@@ -421,6 +453,11 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`${t("Show pictures")}${hint("voice.pictures")}`} aria-label={t("Show pictures")}><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`${t("Show browser")}${hint("voice.browser")}`} aria-label={t("Show browser")}><LuGlobe /></button>}
         {!terminalShown && <button type="button" aria-label={t("Show terminal")} title={`${t("Show terminal")}${hint("voice.terminal")}`} onClick={openTerminal}><LuTerminal /></button>}
+        {windowEntries.filter((entry) => !broughtOpen.includes(entry.key)).map((entry) => (
+          <button key={entry.key} type="button" aria-label={t("Show {panel}", { panel: entry.title })} title={entry.title} onClick={() => { setBroughtOpen((open) => [...open, entry.key]); onCue("focus"); }}>
+            {entry.icon ? <entry.icon /> : <LuPuzzle />}
+          </button>
+        ))}
         <button ref={settingsToggle} type="button" data-voice-settings-toggle onClick={() => setSettings(v => !v)} title={`${t("Voice settings")}${hint("voice.settings")}`} aria-label={t("Voice settings")} aria-expanded={settings}><LuSlidersHorizontal /></button>
       </div>
       {settings && <VoiceSettings anchor={settingsToggle} sounds={sounds} onSounds={onSounds} rate={rate} onRate={onRate} steer={steer} onSteer={onSteer} ptt={ptt} onPtt={onPtt} onClose={() => setSettings(false)} />}
@@ -464,6 +501,10 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
       <ResizeHandles target={conversationWindow} />
     </section>
+    {brought.map((entry) => (
+      <BroughtWindow key={entry.key} entry={entry} main={place.main === `x:${entry.key}`} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)}
+        onClose={() => { closeBrought(entry.key); end.current?.focus({ preventScroll: true }); }} />
+    ))}
     <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} />
     <div className="voice-presence">
       {/* With push-to-talk on, the orb can be held as well as the microphone button: it is the big target on a phone. */}

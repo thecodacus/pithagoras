@@ -71,7 +71,9 @@ import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
+import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { useExtensions } from "../extensions/loader";
+import { useSlot } from "../extensions/slots";
 import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
 
@@ -172,7 +174,10 @@ export const ConfigModal = memo(function ConfigModal({
   const section = nav.kind === "tab" ? nav.id : nav.spec;
   useEffect(() => setError(null), [section]);
 
-  const configurable = exts.value ? extensions.filter((e) => e.settings.length > 0) : railSnapshot().map((e) => ({ ...e, settings: [] as ExtensionInfo["settings"], placeholder: true }));
+  // A package has a page here when the portal found settings it reads, or when it brought a page of its own.
+  const settingsPages = useSlot("settings.page");
+  const hasPage = (e: ExtensionInfo) => e.settings.length > 0 || settingsPages.some((page) => page.extension === e.name);
+  const configurable = exts.value ? extensions.filter(hasPage) : railSnapshot().map((e) => ({ ...e, settings: [] as ExtensionInfo["settings"], placeholder: true }));
   useEffect(() => {
     if (!exts.value) return;
     // Only a head start for next time.
@@ -1114,8 +1119,9 @@ function ExtensionsPanel({
 }) {
   const [spec, setSpec] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  // Why a package's interface is not in the page, where it brings one: see extensions/loader.ts.
-  const { failures } = useExtensions();
+  // Why a package's interface is not in the page, or its server half not running, where it brings one: see extensions/loader.ts.
+  const { failures, serverFailures } = useExtensions();
+  const ownPages = useSlot("settings.page");
   // The same, readable by a second Enter that comes before the draw.
   const busyRef = useRef(false);
   /** What the last switch did to the conversations that were open. */
@@ -1304,15 +1310,20 @@ function ExtensionsPanel({
                     {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}
                   </p>
                 )}
+                {serverFailures[ext.name] && (
+                  <p role="alert" className="mt-1 break-words text-xs text-warn">
+                    {t("Its server half could not be started: {reason}", { reason: serverFailures[ext.name] })}
+                  </p>
+                )}
 
                 <div className="mt-1.5 flex items-center gap-3">
                   <span className="truncate font-mono text-[10px] text-fg-faint">{ext.spec}</span>
-                  {ext.settings.length > 0 && (
+                  {(ext.settings.length > 0 || ownPages.some((page) => page.extension === ext.name)) && (
                     <button
                       onClick={() => onConfigure(ext.spec)}
                       className="ml-auto shrink-0 text-[11px] text-accent hover:text-accent"
                     >
-                      {t("Configure ({n})", { n: ext.settings.length })} ›
+                      {ext.settings.length > 0 ? t("Configure ({n})", { n: ext.settings.length }) : t("Configure")} ›
                     </button>
                   )}
                 </div>
@@ -1359,6 +1370,7 @@ function ExtensionPanel({
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [savedKey, setSavedKey] = useState<string | null>(null);
+  const settingsPages = useSlot("settings.page");
 
   /** A stored value as the field shows it. */
   const shown = (s: ExtensionInfo["settings"][number]) => (s.value == null ? "" : typeof s.value === "object" ? JSON.stringify(s.value) : String(s.value));
@@ -1420,6 +1432,15 @@ function ExtensionPanel({
         )}
       </div>
 
+      {/* The package's own page, where it brought one, above what the portal found for it. One that fails to draw says so, and the fields stay. */}
+      {settingsPages.filter((page) => page.extension === ext.name).map((page) => (
+        <div key={page.key} className="mb-5" data-extension={page.extension}>
+          <ErrorBoundary resetKey={page.key} fallback={(error) => <PartFailed error={error} />}>
+            <page.component />
+          </ErrorBoundary>
+        </div>
+      ))}
+      {ext.settings.length > 0 && (
       <Section title={t("Settings")} hint={t("Saved into pi's settings.json. An extension reads them when a chat starts.")}>
         <div className="stagger-in space-y-2">
           {ext.settings.map((s) => {
@@ -1476,13 +1497,16 @@ function ExtensionPanel({
           })}
         </div>
       </Section>
+      )}
 
+      {ext.settings.length > 0 && (
       <div className="flex items-start gap-2 rounded-xl border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn/90">
         <LuTriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <p>
           {t("pi publishes no schema for extension settings, so these keys are recovered by reading the package's source. A key built dynamically at runtime won't appear here — use Advanced to edit settings.json directly.")}
         </p>
       </div>
+      )}
     </>
   );
 }

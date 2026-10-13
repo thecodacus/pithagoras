@@ -7,6 +7,8 @@ import { sentPictureId, shownPictureId } from "../chat-pictures";
 import { splitContext } from "../context-blocks";
 import { msg, t, tp, useLanguage } from "../i18n";
 import { isPictureCall } from "../picture-call";
+import { ToolView } from "../extensions/ToolView";
+import type { Chat } from "../extensions/slots";
 import { isVideoCall } from "../video-call";
 import { isEnter, isEscape } from "../shortcuts";
 import type { Item, SentImage } from "../transcript";
@@ -129,6 +131,7 @@ export const TranscriptRow = memo(function TranscriptRow({
   switching,
   sessionId,
   folder,
+  chat,
   mermaid,
   mermaidOptions,
   agent,
@@ -149,6 +152,8 @@ export const TranscriptRow = memo(function TranscriptRow({
   /** A switch of version is on its way, for some message. */
   switching: boolean;
   sessionId: string;
+  /** The chat the row is in, for what an extension draws in it. */
+  chat?: Chat;
   folder: string;
   mermaid: DiagramPlugin | null;
   mermaidOptions: MarkdownProps["mermaid"];
@@ -410,7 +415,10 @@ export const TranscriptRow = memo(function TranscriptRow({
     }
     return (
       <div data-key={item.id} className={`tool-row${enter}`}>
-      <ToolCall item={item} onOpenTerminal={act.showInTerminal} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
+      {/* The card for it, or what an extension draws for its own tool: see extensions/ToolView.tsx. */}
+      <ToolView item={item} chat={chat}>
+        <ToolCall item={item} onOpenTerminal={act.showInTerminal} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
+      </ToolView>
       {item.flagged && <FlaggedNotice flag={item.flagged} act={act} />}
       {item.picture && (
         // In the middle of the column, with as much room above as below. Contained, never cropped: a wide or tall picture is smaller here, and whole in the viewer.
