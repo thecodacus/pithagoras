@@ -248,9 +248,10 @@ export function viaProgressProxy<T extends { provider?: string; baseUrl?: string
 function sourceLabel(info: any): string {
   const path = typeof info?.path === "string" ? info.path : "";
 
-  // pi writes its own as <builtin:read> and the portal's inline ones as
-  // <inline:canvases>. The second is worth naming; the first is the agent.
-  const marker = /^<(builtin|inline):([^>]+)>$/.exec(path);
+  // pi writes its own as builtin:read (<builtin:read> before pi 1.1) and the
+  // portal's inline ones as <inline:canvases>. The second is worth naming; the
+  // first is the agent.
+  const marker = /^(?:<(builtin|inline):([^>]+)>|(builtin):.+)$/.exec(path);
   if (marker) return marker[1] === "inline" ? marker[2] : "built in";
 
   const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path);
