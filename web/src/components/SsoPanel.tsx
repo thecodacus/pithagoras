@@ -144,6 +144,11 @@ export function SsoPanel() {
   };
 
   const area = `${codeAreaCls} min-h-[4.5rem]`;
+  const kept = state.settings;
+  // The kept secret is only ever used for the provider and client it was given for: for another, it is typed again.
+  const otherClient = Boolean(kept?.hasSecret) && (form.issuer.trim() !== kept?.issuer || form.clientId.trim() !== kept?.clientId);
+  // Saved settings that name nobody: the button is on the login page, and lets nobody in.
+  const nobody = Boolean(kept) && !kept?.allowedEmails.length && !kept?.allowedGroups.length && !kept?.allowedSubjects.length;
   return (
     <form onSubmit={save}>
       <Section
@@ -160,7 +165,9 @@ export function SsoPanel() {
           <Field
             label={t("Client secret")}
             hint={state.settings?.hasSecret && !removeSecret
-              ? t("A secret is kept. Leave this empty to keep it.")
+              ? otherClient
+                ? t("The issuer or the client ID changed: type the client secret again, or remove it for a public client.")
+                : t("A secret is kept. Leave this empty to keep it.")
               : t("Leave it empty for a public client: the portal uses PKCE either way.")}
           >
             <input type="password" autoComplete="off" {...text("clientSecret")} disabled={removeSecret} className={inputCls} />
@@ -188,6 +195,11 @@ export function SsoPanel() {
         hint={t("Nobody gets in just because the provider knows them: only who is named here. With all three empty, nobody does.")}
       >
         <div className="max-w-xl space-y-3">
+          {nobody && (
+            <p role="note" className="text-xs text-warn">
+              {t("Nobody is named here yet, so the provider's sign-in lets nobody in.")}
+            </p>
+          )}
           <Field label={t("Emails")} hint={t("One a line. Only counts when the provider says the email is verified.")}>
             <textarea {...text("allowedEmails")} spellCheck={false} className={area} />
           </Field>

@@ -240,6 +240,8 @@ app.get("/api/auth/sso", requireAuth, (_req, res) => {
 app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   if (authMode() !== "password") return res.status(409).json({ error: "Single sign-on needs the portal's own password to be set." });
   if (!(await checkPassword(req.body?.current))) return res.status(403).json({ error: "The current password is wrong." });
+  // Only a wrong password counts towards the throttle: settings refused after it are no guess at it.
+  res.locals.passwordRight = true;
   const { settings, only } = req.body ?? {};
   if (settings === null) {
     removeSso();
@@ -250,8 +252,13 @@ app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   if (only !== undefined && typeof only !== "boolean") return res.status(400).json({ error: "OIDC only must be on or off." });
   const kept = ssoConfig();
   const input = settings && typeof settings === "object" ? { ...settings } : settings;
-  // The secret kept is used again when none is typed, but only for the same provider and client: it is not sent to another.
-  if (input && typeof input === "object" && input.clientSecret === undefined && kept?.clientSecret && input.issuer === kept.issuer && input.clientId === kept.clientId) {
+  // The secret kept is used again when none is typed, but only for the same provider and client: it is never sent to
+  // another. For another one, a secret left out is not taken as "none" either, which would quietly make the client
+  // a public one that the provider then refuses: it is to be typed again, or taken away on purpose (null).
+  if (input && typeof input === "object" && input.clientSecret === undefined && kept?.clientSecret) {
+    if (input.issuer !== kept.issuer || input.clientId !== kept.clientId) {
+      return res.status(400).json({ error: "The issuer or the client ID changed, so the kept client secret is not used for it. Type the client secret again, or remove it for a public client." });
+    }
     input.clientSecret = kept.clientSecret;
   }
   let config;
@@ -1777,6 +1784,13 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
     console.log(`  sso:      ${sso.issuer}${sso.only ? " (the only way in: the password login is off)" : ""}`);
     // Read now, so that a provider that does not answer is in the log before anyone presses the button.
     providerFor(sso).catch((e) => console.error(`[auth] single sign-on cannot reach ${sso.issuer}: ${(e as Error).message}. Sign-ins through it fail until it can.`));
+    if (!allowsAnyone(sso)) {
+      console.warn(
+        "\n  WARNING: single sign-on is set up, but nobody is named under Who may sign in (emails, groups and\n" +
+          "  subjects are all empty), so the provider's sign-in lets nobody in. Name the people or groups who may\n" +
+          "  use this portal under Settings → Single sign-on.\n"
+      );
+    }
   }
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.

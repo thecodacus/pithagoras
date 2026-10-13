@@ -71,6 +71,8 @@ test('kept settings are shown without the secret, saved again without one, and a
   await expect(dialog.getByLabel('Client secret')).toHaveValue('');
   await expect(dialog.getByLabel('Emails')).toHaveValue('you@example.test');
   await expect(dialog.getByText('A secret is kept. Leave this empty to keep it.')).toBeVisible();
+  // Somebody is named, so there is no note that nobody is.
+  await expect(dialog.getByRole('note')).toHaveCount(0);
 
   await dialog.getByLabel('Current password').fill('not it');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
@@ -87,6 +89,20 @@ test('kept settings are shown without the secret, saved again without one, and a
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('status')).toHaveText('Saved.');
   expect(saves[2].settings.clientSecret).toBeNull();
+});
+
+test('the hint about the kept secret changes once the issuer or client is another, and settings that name nobody say so', async ({ page }) => {
+  await portal(page, { kept: { ...KEPT, allowedEmails: [], allowedGroups: [] } });
+  await page.goto('/settings/sso');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('note')).toHaveText("Nobody is named here yet, so the provider's sign-in lets nobody in.");
+  await expect(dialog.getByText('A secret is kept. Leave this empty to keep it.')).toBeVisible();
+  await dialog.getByLabel('Issuer URL').fill('https://id.example.test/realms/other');
+  await expect(dialog.getByText('The issuer or the client ID changed: type the client secret again, or remove it for a public client.')).toBeVisible();
+  await dialog.getByLabel('Issuer URL').fill(KEPT.issuer);
+  await expect(dialog.getByText('A secret is kept. Leave this empty to keep it.')).toBeVisible();
+  await dialog.getByLabel('Client ID').fill('another');
+  await expect(dialog.getByText(/The issuer or the client ID changed/)).toBeVisible();
 });
 
 test('what the server refuses is said in its words, and taking single sign-on out asks first', async ({ page }) => {

@@ -146,12 +146,15 @@ itself in `/.well-known/openid-configuration` (a trailing `/` counts; `https` on
 plain `http` only for a provider on the same machine), the **client ID** and
 **secret**, the **redirect URL**, and who may sign in. The scopes default to
 `openid email profile`, the button to "SSO". The client secret is never shown again
-once saved; leaving the field empty keeps it (for the same issuer and client only).
+once saved; leaving the field empty keeps it. That holds for the same issuer and
+client only: with another one the kept secret is not sent, and saving asks you to
+type the secret again, or to remove it for a public client.
 
 **Who may sign in** is an allow-list, never everyone the provider knows: their
 email (only when the provider says it is verified, `email_verified`), one of their
 groups (from the `groups` claim, or the one you name), or their subject ID (`sub`).
-With all three empty, nobody gets in. When the ID token leaves out a claim a list
+With all three empty, nobody gets in, and the portal says so in its log at start
+and on the settings page. When the ID token leaves out a claim a list
 needs, the portal asks the provider's userinfo endpoint, unless the token lets the
 account in already.
 

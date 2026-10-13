@@ -1064,6 +1064,8 @@ const de: Locale = {
     "Client ID": "Client-ID",
     "Client secret": "Client-Secret",
     "A secret is kept. Leave this empty to keep it.": "Ein Secret ist gespeichert. Lass das Feld leer, um es zu behalten.",
+    "The issuer or the client ID changed: type the client secret again, or remove it for a public client.": "Issuer oder Client-ID haben sich geändert: Gib das Client-Secret noch einmal ein, oder entferne es für einen öffentlichen Client.",
+    "Nobody is named here yet, so the provider's sign-in lets nobody in.": "Hier ist noch niemand genannt, darum lässt die Anmeldung über den Anbieter niemanden herein.",
     "Leave it empty for a public client: the portal uses PKCE either way.": "Lass es für einen öffentlichen Client leer: Das Portal verwendet PKCE so oder so.",
     "Remove the kept secret (a public client)": "Gespeichertes Secret entfernen (öffentlicher Client)",
     "Redirect URL": "Weiterleitungs-URL",

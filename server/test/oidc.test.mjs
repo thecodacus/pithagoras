@@ -6,7 +6,7 @@ import net from "node:net";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { ENTRY, freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
 /**
  * Signing in through an OpenID Connect provider, against a fake one in this
@@ -44,9 +44,11 @@ const idp = http.createServer(async (req, res) => {
   for await (const chunk of req) body += chunk;
   const send = (status, value, type = "application/json") => { res.writeHead(status, { "content-type": type }); res.end(typeof value === "string" ? value : JSON.stringify(value)); };
   if (url.pathname === "/.well-known/openid-configuration") {
+    // The same provider under a second name, as one that was given a new host name is.
+    const at = (req.headers.host ?? "").startsWith("localhost:") ? `http://localhost:${idpPort}` : issuer;
     return send(200, {
-      issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, jwks_uri: `${issuer}/jwks`,
-      userinfo_endpoint: `${issuer}/userinfo`, end_session_endpoint: `${issuer}/logout`,
+      issuer: at, authorization_endpoint: `${at}/authorize`, token_endpoint: `${at}/token`, jwks_uri: `${at}/jwks`,
+      userinfo_endpoint: `${at}/userinfo`, end_session_endpoint: `${at}/logout`,
       response_types_supported: ["code"], code_challenge_methods_supported: ["S256"],
       id_token_signing_alg_values_supported: ["RS256", "ES256"], token_endpoint_auth_methods_supported: ["client_secret_basic"],
       ...provider.meta,
@@ -481,9 +483,17 @@ test("the settings page is never sent the client secret, and saving asks for the
   assert.equal(saved.body.settings.hasSecret, true);
   admin = saved.cookie;
   await signIn();
-  // But never for another provider or client: it would be sent to them.
-  saved = await saveSso(base, admin, { ...withoutSecret, clientId: "another-client" });
-  assert.equal(saved.res.status, 200);
+  // But never for another provider or client: it would be sent to them. Nor is it taken as "none", which would make
+  // the client a public one the provider refuses: the save says to type it again, or to take it away on purpose.
+  const otherIssuer = `http://localhost:${idpPort}`;
+  for (const other of [{ clientId: "another-client" }, { issuer: otherIssuer }]) {
+    const refusedSave = await saveSso(base, admin, { ...withoutSecret, ...other });
+    assert.equal(refusedSave.res.status, 400, JSON.stringify(other));
+    assert.match(refusedSave.body.error, /Type the client secret again, or remove it/);
+  }
+  assert.equal((await (await getSso(admin)).json()).settings.issuer, issuer, "nothing was kept");
+  saved = await saveSso(base, admin, { ...withoutSecret, issuer: otherIssuer, clientSecret: null });
+  assert.equal(saved.res.status, 200, JSON.stringify(saved.body));
   assert.equal(saved.body.settings.hasSecret, false);
   saved = await saveSso(base, saved.cookie, ssoSettings(portalPort));
   assert.equal(saved.body.settings.hasSecret, true);
@@ -597,6 +607,23 @@ test("OIDC only hides and refuses the password and ends what it signed in; the s
   assert.match(again.out, /nothing to switch back on/);
 });
 
+test("saving counts wrong passwords like the sign-in does, and settings refused after the right one not at all", async () => {
+  let admin = await signIn();
+  // Trial and error with the settings: the password is right each time.
+  for (let i = 0; i < 12; i++) {
+    const { res } = await saveSso(base, admin, ssoSettings(portalPort, { redirectUrl: `http://127.0.0.1:${portalPort}/elsewhere` }));
+    assert.equal(res.status, 400, `try ${i + 1}`);
+  }
+  const good = await saveSso(base, admin, ssoSettings(portalPort));
+  assert.equal(good.res.status, 200, JSON.stringify(good.body));
+  admin = good.cookie;
+  // Guesses at the password are another thing: the eleventh is not even looked at, nor is the right one after it.
+  let last;
+  for (let i = 0; i < 11; i++) last = await saveSso(base, admin, ssoSettings(portalPort), { current: `guess ${i}` });
+  assert.equal(last.res.status, 429);
+  assert.equal((await saveSso(base, admin, ssoSettings(portalPort))).res.status, 429);
+});
+
 // The last of the shared portal's tests: it leaves this address locked out.
 test("failed answers are throttled like wrong passwords", async () => {
   let last;
@@ -644,4 +671,25 @@ test("without the portal's password single sign-on does not apply: not on the se
   } finally {
     open.child.kill();
   }
+});
+
+test("settings that name nobody are said at start: the button is offered, and lets nobody in", async () => {
+  const p = await ssoPortal("pithagoras-oidc-nobody-", { allowedEmails: [], allowedGroups: [], allowedSubjects: [] });
+  p.child.kill();
+  await new Promise((r) => p.child.once("exit", r));
+  // Started again on the same data, long enough to say what it has.
+  const again = await new Promise((resolve) => {
+    const child = spawn(process.execPath, [ENTRY], { env: serverEnv(p.home, 0, portalEnv), stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    const take = (d) => {
+      out += d;
+      if (/lets nobody in/.test(out)) child.kill();
+    };
+    child.stdout.on("data", take);
+    child.stderr.on("data", take);
+    const timer = setTimeout(() => child.kill(), 20_000);
+    child.on("close", () => { clearTimeout(timer); resolve(out); });
+  });
+  assert.match(again, /sso: +http:\/\/127\.0\.0\.1/);
+  assert.match(again, /nobody is named under Who may sign in .* lets nobody in/s);
 });

@@ -185,9 +185,11 @@ it; how to set up the provider's side, and what each field means, is in
 - **Provider**: the issuer URL, the client ID and secret, the redirect URL (filled
   in from the address the page is open at), the scopes and the name on the login
   page's button. The secret is never shown again once saved: an empty field keeps
-  it, and **Remove the kept secret** is for a public client.
+  it for the same issuer and client, another one asks for it again, and **Remove the
+  kept secret** is for a public client.
 - **Who may sign in**: emails, groups and subjects, one a line. Only who is named
-  gets in, and an email only when the provider says it is verified.
+  gets in, and an email only when the provider says it is verified. Saved settings
+  that name nobody say so here.
 - **End the session at the provider too**: signing out of the portal goes on to the
   provider's sign-out page.
 - **OIDC only**: the password form is hidden and the password login refused. If the
@@ -199,7 +201,7 @@ anything is kept: settings it does not answer to are refused with its reason. A
 change to the provider, to who may sign in or to **OIDC only** signs out every other
 browser; this one stays signed in. **Take out single sign-on** removes the button
 and the settings, after asking. Wrong passwords here are counted like those of
-**Password**.
+**Password**; settings refused after the right password are not.
 
 ## Add-ons
 
