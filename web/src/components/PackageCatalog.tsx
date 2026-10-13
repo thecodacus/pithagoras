@@ -20,6 +20,7 @@ export function PackageCatalog({
   onError,
   limit = 8,
   searchable = true,
+  wide = false,
 }: {
   topic?: "provider";
   /** npm names already installed. */
@@ -28,6 +29,8 @@ export function PackageCatalog({
   onError: (e: string) => void;
   limit?: number;
   searchable?: boolean;
+  /** Side by side where there is room for two, for a page that has it. */
+  wide?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [asked, setAsked] = useState("");
@@ -77,11 +80,12 @@ export function PackageCatalog({
   };
 
   const shown = found ? (more ? found : found.slice(0, limit)) : [];
+  const rows = wide ? "grid gap-2 xl:grid-cols-2 min-[2200px]:grid-cols-3" : "space-y-1.5";
 
   return (
     <div>
       {searchable && (
-        <div className="relative">
+        <div className={`relative ${wide ? "max-w-3xl" : ""}`}>
           <LuSearch className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-faint" />
           <input
             value={query}
@@ -99,7 +103,7 @@ export function PackageCatalog({
           <button type="button" onClick={() => fetchList(asked)} className="text-accent hover:underline">{t("Try again")}</button>
         </div>
       ) : !found ? (
-        <SkeletonGroup className="mt-2 space-y-1.5" label={t("Loading packages")}>
+        <SkeletonGroup className={`mt-2 ${rows}`} label={t("Loading packages")}>
           {[0, 1, 2].map((i) => <div key={i} className="skeleton h-16 w-full" />)}
         </SkeletonGroup>
       ) : found.length === 0 ? (
@@ -107,14 +111,16 @@ export function PackageCatalog({
           {asked ? t("Nothing published matches “{query}”.", { query: asked }) : t("Nothing published matches.")}
         </p>
       ) : (
-        <ul key={asked} className="stagger-in mt-2 space-y-1.5">
+        <ul key={asked} className={`stagger-in mt-2 ${rows}`}>
           {shown.map((p) => {
             const has = installed.has(p.name) || done.has(p.name);
             const link = webLink(p.homepage) ?? webLink(p.npm);
             return (
-              <li key={p.name} className="rounded-xl border border-line bg-raised/40 px-3 py-2.5 transition hover:border-fg/15">
-                <div className="flex items-start gap-2.5">
-                  <LuPackage className="mt-0.5 h-4 w-4 shrink-0 text-fg-subtle" />
+              <li key={p.name} className="min-w-0 rounded-xl border border-line bg-raised/40 p-3 transition hover:border-fg/15">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-fg/5 text-fg-muted">
+                    <LuPackage aria-hidden className="h-[18px] w-[18px]" />
+                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
                       <p className="truncate text-sm text-fg">{p.name}</p>

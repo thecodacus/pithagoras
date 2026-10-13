@@ -13,6 +13,11 @@ German. Navigation runs down the left edge, in four groups:
 
 Plus a page for every extension that exposes configuration.
 
+The dialog takes the room the screen has: nearly all of a laptop's, and three
+quarters of the width of a wider one. Pages that are lists (Extensions, Logs,
+Advanced) use all of it; a page that is a form stops at a width that is still
+easy to read across.
+
 There is no Session tab. Model, effort and context all live on the pills under
 the composer, and a second copy here would be two places to keep in sync.
 

@@ -4,7 +4,6 @@ import {
   LuBlocks,
   LuBrain,
   LuCheck,
-  LuDownload,
   LuScrollText,
   LuExternalLink,
   LuEye,
@@ -27,7 +26,6 @@ import {
   LuServer,
   LuSlidersHorizontal,
   LuSun,
-  LuTrash2,
   LuTriangleAlert,
   LuUsers,
 } from "react-icons/lu";
@@ -41,7 +39,6 @@ import { SsoPanel } from "./SsoPanel";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { formatTokens } from "../transcript";
-import { displayName } from "../tool-groups";
 import { useAsksBeforeDeleting } from "../confirm-prefs";
 import { useAnimations } from "../motion";
 import { useNotifyState } from "../notify";
@@ -58,9 +55,8 @@ import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { EffortPicker, Empty, ErrorBanner, Field, LoadFailed, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
-import { confirmDialog } from "./ConfirmDialog";
-import { PackageCatalog } from "./PackageCatalog";
-import { packageName, webLink } from "../package-names";
+import { ExtensionsPanel } from "./ExtensionsPanel";
+import { webLink } from "../package-names";
 import { prefetchSettings, refreshFailed, useCached } from "../settings-cache";
 import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
@@ -73,10 +69,16 @@ import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
-import { useExtensions } from "../extensions/loader";
 import { useSlot } from "../extensions/slots";
 import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
+
+/**
+ * The pages that take all the width the dialog has: a grid of packages, lines
+ * of a log, a file to edit. The others are forms, and a field or a sentence
+ * across a wide screen is harder to read than one that stops.
+ */
+const FULL_WIDTH = new Set<Tab>(["extensions", "logs", "advanced"]);
 
 /** Either a fixed tab or one extension's own configuration page. */
 type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string };
@@ -292,7 +294,7 @@ export const ConfigModal = memo(function ConfigModal({
     >
       {error && <ErrorBanner ref={banner} className="mb-4" onClose={() => setError(null)}>{error}</ErrorBanner>}
 
-      <div key={section} ref={page} className="settings-page">
+      <div key={section} ref={page} className={`settings-page ${nav.kind === "tab" && FULL_WIDTH.has(nav.id) ? "" : "max-w-5xl"}`}>
       {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
@@ -312,6 +314,7 @@ export const ConfigModal = memo(function ConfigModal({
           extensions={extensions}
           loading={loadingExts}
           failed={exts.value ? null : exts.failed}
+          reveal={target}
           onRetry={exts.reload}
           onError={setError}
           onRefresh={loadExtensions}
@@ -1114,272 +1117,6 @@ function GeneralPanel({ onError, onProviders }: { onError: (e: string) => void; 
       </Section>
 
       <ReportDefault onError={onError} />
-    </>
-  );
-}
-
-// --- extensions ---
-
-const SOURCES = [
-  { label: "npm", placeholder: "npm:@scope/package", hint: msg("Install from npm") },
-  { label: "git", placeholder: "git:github.com/user/repo@v1", hint: msg("Install from a git repository") },
-  { label: "url", placeholder: "https://github.com/user/repo", hint: msg("Install from a URL") },
-  { label: "path", placeholder: "/absolute/path/to/package", hint: msg("Install from a folder on the server") },
-];
-
-function ExtensionsPanel({
-  extensions,
-  loading,
-  failed,
-  onRetry,
-  onError,
-  onRefresh,
-  onConfigure,
-}: {
-  extensions: ExtensionInfo[];
-  loading: boolean;
-  /** Why the list could not be read, when it has not been: "Nothing installed" would be a claim. */
-  failed: Error | null;
-  onRetry: () => unknown;
-  onError: (e: string) => void;
-  onRefresh: () => Promise<ExtensionInfo[]>;
-  onConfigure: (spec: string) => void;
-}) {
-  const [spec, setSpec] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  // Why a package's interface is not in the page, or its server half not running, where it brings one: see extensions/loader.ts.
-  const { failures, serverFailures } = useExtensions();
-  const ownPages = useSlot("settings.page");
-  // The same, readable by a second Enter that comes before the draw.
-  const busyRef = useRef(false);
-  /** What the last switch did to the conversations that were open. */
-  const [note, setNote] = useState<(() => string) | null>(null);
-  // The names given in Settings → Tools. A package is one thing and should be
-  // called the same thing wherever it appears; the spec underneath is what it
-  // is installed and removed by, and that does not change.
-  const [names, setNames] = useState<Record<string, string>>({});
-  useEffect(() => {
-    api
-      .toolNames()
-      .then((r) => setNames(r.names))
-      .catch(() => setNames({}));
-  }, []);
-
-  const act = async (label: string, fn: () => Promise<unknown>) => {
-    // Enter in the name field gets here without the disabled button's say: a second install into the same folder collides with the first.
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(label);
-    setNote(null);
-    try {
-      await fn();
-      await onRefresh();
-      setSpec("");
-    } catch (e) {
-      onError((e as Error).message);
-    } finally {
-      busyRef.current = false;
-      setBusy(null);
-    }
-  };
-
-  const switchPackage = (ext: ExtensionInfo) =>
-    act(ext.spec, async () => {
-      const on = !ext.enabled;
-      const r = await api.setExtensionEnabled(ext.spec, on);
-      const name = displayName(ext.name, names);
-      const parts = [() => (on ? t("{name} is on.", { name }) : t("{name} is off.", { name }))];
-      if (r.reloaded) parts.push(() => tp(r.reloaded, "{n} open conversation reloaded.", "{n} open conversations reloaded."));
-      if (r.waiting)
-        parts.push(() =>
-          tp(r.waiting, "{n} still working — it keeps it as it was until /reload, or its next start.", "{n} still working — they keep it as it was until /reload, or their next start."),
-        );
-      setNote(() => () => parts.map((part) => part()).join(" "));
-    });
-
-  const installed = useMemo(() => new Set(extensions.flatMap((e) => [e.name, packageName(e.spec)])), [extensions]);
-
-  return (
-    <>
-      <Section
-        title={t("Find packages")}
-        hint={t("Published for pi on npm: tools, skills, providers and themes. The most used first.")}
-      >
-        <PackageCatalog installed={installed} onInstalled={() => void onRefresh()} onError={onError} limit={6} />
-      </Section>
-
-      <Section
-        title={t("Install by name")}
-        hint={t("From npm, git, a URL or a folder on the server. They persist across restarts.")}
-      >
-        <div className="flex gap-2">
-          <input
-            value={spec}
-            onChange={(e) => setSpec(e.target.value)}
-            onKeyDown={(e) =>
-              isEnter(e) &&
-              spec.trim() &&
-              act("install", () => api.installPackage(spec.trim()))
-            }
-            placeholder="npm:@scope/package"
-            aria-label={t("Install by name")}
-            className={`${inputCls} font-mono text-xs`}
-          />
-          <button
-            disabled={!spec.trim() || busy !== null}
-            onClick={() => act("install", () => api.installPackage(spec.trim()))}
-            className={primaryCls}
-          >
-            <LuDownload className="h-4 w-4" />
-            {busy === "install" ? t("Installing…") : t("Install")}
-          </button>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1">
-          {SOURCES.map((s) => (
-            <button
-              key={s.label}
-              onClick={() => setSpec(s.placeholder)}
-              title={t(s.hint)}
-              className="rounded-lg bg-fg/5 px-2 py-0.5 font-mono text-[11px] text-fg-muted transition hover:bg-fg/10 hover:text-fg"
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      </Section>
-
-      <Section title={`${t("Installed")}${extensions.length ? ` (${extensions.length})` : ""}`}>
-        {loading ? (
-          <p className="text-sm text-fg-subtle">{t("Reading installed packages…")}</p>
-        ) : failed ? (
-          <LoadFailed error={failed} onRetry={onRetry} />
-        ) : extensions.length === 0 ? (
-          <Empty>
-            {t("Nothing installed yet.")}
-            <p className="mt-1 text-xs text-fg-faint">
-              {t("Installed commands show up in the chat box when you type “/”.")}
-            </p>
-          </Empty>
-        ) : (
-          <ul className="space-y-1.5">
-            {extensions.map((ext) => (
-              <li
-                key={ext.spec}
-                className="rounded-xl border border-line bg-raised/40 px-3 py-2.5"
-              >
-                <div className="flex items-center gap-2">
-                  <LuPuzzle className="h-4 w-4 shrink-0 text-fg-subtle" />
-                  <p
-                    title={ext.name}
-                    className={`truncate text-sm ${ext.enabled === false ? "text-fg-subtle line-through decoration-fg-faint" : "text-fg"}`}
-                  >
-                    {displayName(ext.name, names)}
-                  </p>
-                  {ext.enabled === false && (
-                    <span className="shrink-0 rounded bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">{t("off")}</span>
-                  )}
-                  {ext.filtered && (
-                    <span
-                      title={t("Some of what it brings is switched off in settings.json. Switching it off and on again keeps that.")}
-                      className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle"
-                    >
-                      {t("filtered")}
-                    </span>
-                  )}
-                  {ext.version && (
-                    <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 font-mono text-[10px] text-fg-subtle">
-                      v{ext.version}
-                    </span>
-                  )}
-                  {ext.scope && (
-                    <span className="shrink-0 rounded bg-fg/5 px-1.5 py-0.5 text-[10px] text-fg-subtle">
-                      {ext.scope}
-                    </span>
-                  )}
-                  {ext.enabled !== undefined && (
-                    <Switch
-                      on={ext.enabled}
-                      onChange={() => switchPackage(ext)}
-                      label={ext.enabled ? t("Switch off {name}", { name: displayName(ext.name, names) }) : t("Switch on {name}", { name: displayName(ext.name, names) })}
-                      title={
-                        ext.enabled
-                          ? t("On — click to switch it off without uninstalling it")
-                          : t("Off — its commands, skills and tools are not loaded. Click to switch it on")
-                      }
-                      disabled={busy !== null}
-                      className="ml-auto"
-                    />
-                  )}
-                  <button
-                    disabled={busy !== null}
-                    onClick={async () => {
-                      // Its commands, tools and skills go from every chat, and the switch beside it is easy to miss for this one.
-                      const name = displayName(ext.name, names);
-                      if (!(await confirmDialog({ title: t("Remove {name}?", { name }), message: t("It is uninstalled: its commands, tools and skills are gone from every chat."), confirmLabel: t("Remove"), danger: true, deletes: true }))) return;
-                      await act(ext.spec, () => api.removePackage(ext.spec));
-                    }}
-                    title={t("Remove")}
-                    aria-label={t("Remove {name}", { name: displayName(ext.name, names) })}
-                    className={`${ext.enabled === undefined ? "ml-auto " : ""}shrink-0 rounded-lg p-1.5 text-fg-subtle transition hover:bg-danger/10 hover:text-danger disabled:opacity-40`}
-                  >
-                    {busy === ext.spec ? (
-                      <LuRefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <LuTrash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </div>
-
-                {ext.description && (
-                  <p className="mt-1 line-clamp-2 text-xs text-fg-subtle">{ext.description}</p>
-                )}
-                {failures[ext.name] && (
-                  <p role="alert" className="mt-1 break-words text-xs text-warn">
-                    {t("Its interface could not be loaded: {reason}", { reason: failures[ext.name] })}
-                  </p>
-                )}
-                {serverFailures[ext.name] && (
-                  <p role="alert" className="mt-1 break-words text-xs text-warn">
-                    {t("Its server half could not be started: {reason}", { reason: serverFailures[ext.name] })}
-                  </p>
-                )}
-
-                <div className="mt-1.5 flex items-center gap-3">
-                  <span className="truncate font-mono text-[10px] text-fg-faint">{ext.spec}</span>
-                  {(ext.settings.length > 0 || ownPages.some((page) => page.extension === ext.name)) && (
-                    <button
-                      onClick={() => onConfigure(ext.spec)}
-                      className="ml-auto shrink-0 text-[11px] text-accent hover:text-accent"
-                    >
-                      {ext.settings.length > 0 ? t("Configure ({n})", { n: ext.settings.length }) : t("Configure")} ›
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {note && (
-          <p role="status" className="mt-2 text-xs text-fg-muted">
-            {note()}
-          </p>
-        )}
-
-        <div className="mt-2.5 flex items-center gap-2">
-          <button
-            disabled={busy !== null}
-            onClick={() => act("update", () => api.updatePackages())}
-            className={btnCls}
-          >
-            <LuDownload className="h-4 w-4" />
-            {busy === "update" ? t("Updating…") : t("Update all")}
-          </button>
-          <button onClick={() => onRefresh()} className={btnCls}>
-            <LuRefreshCw className="h-4 w-4" /> {t("Refresh")}
-          </button>
-        </div>
-      </Section>
     </>
   );
 }

@@ -24,6 +24,7 @@ async function portal(page: Page, answers: Record<string, unknown>) {
 test('Enter twice in the package field is one install', async ({ page }) => {
   const { posts, release } = await portal(page, { '/api/extensions': { settingsPath: '/a/settings.json', extensions: [] } });
   await page.goto('/settings/extensions');
+  await page.getByRole('tab', { name: 'Discover' }).click();
   const field = page.getByPlaceholder('npm:@scope/package');
   await field.fill('npm:pi-thing');
   await field.press('Enter');
