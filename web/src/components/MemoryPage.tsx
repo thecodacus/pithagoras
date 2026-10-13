@@ -42,6 +42,8 @@ import { colourFrom, SKY_THEMES, skyThemeFrom, type SkyTheme } from "../memory-s
 import { reducedMotion } from "../motion";
 import { local } from "../safe-storage";
 import { MemorySky, NoteCard } from "./MemorySky";
+import { Select } from "./Select";
+import { useDismiss } from "../use-dismiss";
 import { applyChunk, eventReader, history, textOf, toolName, usedTools, type ChatMessage, type ToolPart, type Turn } from "../memory-chat";
 import { NOTE_LINK, linkNotes } from "../memory-links";
 import { forgetNoteDraft, forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
@@ -1323,8 +1325,14 @@ function useMeasure(): (text: string) => number {
   }, []);
 }
 
-/** The radius a note is drawn at, from how linked it is. */
-const radiusOf = (links: number) => 6 + Math.min(links, 10) * 0.8;
+/**
+ * The radius a note is drawn at, in screen pixels, from how linked it is: small,
+ * and the same at every zoom, as the labels are. Times the view's scale it is
+ * in the drawing's units.
+ */
+export const notePx = (links: number) => 3.5 + Math.min(links, 10) * 0.35;
+/** How far round a note a pointer still reaches it, in screen pixels: a small dot is still easy to hit. */
+const REACH_PX = 9;
 
 type ViewBox = { x: number; y: number; width: number; height: number };
 
@@ -1385,15 +1393,11 @@ function GraphView({
     else next.add(key);
     onHide(next);
   };
-  // The filter's menu shuts when something else is clicked, as a menu does.
-  const filter = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const shut = (e: PointerEvent) => {
-      if (filter.current?.open && !filter.current.contains(e.target as Node)) filter.current.open = false;
-    };
-    document.addEventListener("pointerdown", shut);
-    return () => document.removeEventListener("pointerdown", shut);
-  }, []);
+  // The 3D view's filter menu, a popover as the composer's are: shut by a press outside it or Escape.
+  const [filtering, setFiltering] = useState(false);
+  const filterButton = useRef<HTMLButtonElement>(null);
+  const filterMenu = useRef<HTMLDivElement>(null);
+  useDismiss(filtering, [filterMenu, filterButton], () => setFiltering(false), filterButton);
   const label = graph ? t("The memory's notes and their links: {notes}, {links}", { notes: tp(shown.size, "{n} note", "{n} notes"), links: tp(shownEdges.length, "{n} link", "{n} links") }) : "";
 
   /** The types as switches: what the colours are, and which of them are shown. */
@@ -1434,24 +1438,46 @@ function GraphView({
     <>
       <Bar title={t("Graph")} onBack={onBack}>
         {mode === "3d" && legend && (
-          <details ref={filter} className="relative">
-            <summary aria-label={t("Which notes are shown")} title={t("Which notes are shown")} className={`flex h-7 cursor-pointer list-none items-center rounded px-1.5 transition before:hidden hover:bg-fg/5 hover:text-fg ${hidden.size ? "text-accent" : "text-fg-subtle"}`}>
+          <div className="relative">
+            <button
+              ref={filterButton}
+              type="button"
+              onClick={() => setFiltering(!filtering)}
+              aria-label={t("Which notes are shown")}
+              title={t("Which notes are shown")}
+              aria-expanded={filtering}
+              className={`ui-select ui-select-sm ${filtering ? "is-open" : ""} ${hidden.size ? "text-accent" : ""}`}
+            >
               <LuFilter className="h-3.5 w-3.5" />
-            </summary>
-            <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-line bg-surface p-2 shadow-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto">{legend}</div>
-          </details>
+              <LuChevronDown className="ui-select-chevron" aria-hidden />
+            </button>
+            {filtering && (
+              <div ref={filterMenu} className="float-in absolute right-0 top-full z-20 mt-1.5 w-64 rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto">
+                <p className="mb-2 text-xs text-fg-muted">{t("Which notes are shown")}</p>
+                {legend}
+              </div>
+            )}
+          </div>
         )}
         {mode === "3d" && (
-          <select value={theme} onChange={(e) => setTheme(skyThemeFrom(e.target.value))} aria-label={t("Look of the 3D view")} className="h-7 rounded-md border border-line bg-surface px-1.5 text-xs text-fg">
-            {SKY_THEMES.map((s) => (
-              <option key={s} value={s}>
-                {s === "stellar" ? t("Constellation") : s === "solar" ? t("Solar system") : s === "brain" ? t("Brain") : s === "fireflies" ? t("Fireflies") : t("Double helix")}
-              </option>
-            ))}
-          </select>
+          <Select
+            size="sm"
+            aria-label={t("Look of the 3D view")}
+            value={theme}
+            onChange={setTheme}
+            options={SKY_THEMES.map((s) => ({
+              value: s,
+              label: s === "stellar" ? t("Constellation") : s === "solar" ? t("Solar system") : s === "brain" ? t("Brain") : s === "fireflies" ? t("Fireflies") : t("Double helix"),
+            }))}
+          />
         )}
         {mode === "3d" && theme === "brain" && (
-          <input type="color" value={outline} onChange={(e) => setOutline(e.target.value)} aria-label={t("Colour of the brain's outline")} title={t("Colour of the brain's outline")} className="h-7 w-8 shrink-0 cursor-pointer rounded-md border border-line bg-surface p-0.5" />
+          // The browser's colour picker behind a control that looks like the select beside it.
+          <label title={t("Colour of the brain's outline")} className="ui-select ui-select-sm relative cursor-pointer">
+            <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: outline, boxShadow: `0 0 8px ${outline}` }} />
+            <LuChevronDown className="ui-select-chevron" aria-hidden />
+            <input type="color" value={outline} onChange={(e) => setOutline(e.target.value)} aria-label={t("Colour of the brain's outline")} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+          </label>
         )}
         <div role="group" aria-label={t("How the graph is drawn")} className="flex shrink-0 overflow-hidden rounded-md border border-line text-xs">
           {(["2d", "3d"] as const).map((m) => (
@@ -1615,19 +1641,24 @@ function FlatGraph({
     glideTo({ x: p.x - width / 2, y: p.y - height / 2, width, height });
   }, [fit]);
 
-  // Labels are placed for the scale the view settles at: a zoom that is still moving keeps the last ones, which scale with it and so still do not meet.
-  const [scale, setScale] = useState(1);
+  // Labels and notes are sized for the scale the view settles at: a zoom that is still moving keeps the last ones, which scale with it and so still do not meet.
+  const [scale, setScale] = useState(0);
   useEffect(() => {
     if (!size.width) return;
-    const timer = setTimeout(() => {
+    const settle = () => {
       const s = unitsPerPx(glide.current.to ?? box);
       setScale(1.25 ** Math.round(Math.log(s) / Math.log(1.25)));
-    }, 150);
+    };
+    // The first is at once, so that nothing is drawn at a size it does not keep.
+    if (!scale) return settle();
+    const timer = setTimeout(settle, 150);
     return () => clearTimeout(timer);
   }, [box, size]);
+  /** A note's radius in the drawing's units, at the scale the view settled at. */
+  const radiusOf = (links: number) => notePx(links) * (scale || 1);
 
   const labels = useMemo(() => {
-    const k = scale;
+    const k = scale || 1;
     const order = graph.nodes
       .filter((n) => shown.has(n.path))
       .map((n) => ({ n, rank: n.path === selected ? 0 : found?.has(n.path) ? 1 : 2 }))
@@ -1635,7 +1666,7 @@ function FlatGraph({
     const asks: LabelAsk[] = order.map(({ n, rank }) => {
       const p = where.get(n.path)!;
       const text = labelOf(n.title || n.path);
-      return { path: n.path, x: p.x, y: p.y, r: radiusOf(n.links) + (n.links === 0 ? 5.5 : 1), width: (measure(text) + 4) * k, height: LABEL_PX * 1.5 * k, must: rank === 0 };
+      return { path: n.path, x: p.x, y: p.y, r: radiusOf(n.links) + (n.links === 0 ? 4.5 : 1) * k, width: (measure(text) + 4) * k, height: LABEL_PX * 1.5 * k, must: rank === 0 };
     });
     return new Map(placeLabels(asks, 2 * k, { x0: fit.x, y0: fit.y, x1: fit.x + fit.width, y1: fit.y + fit.height }).map((l) => [l.path, l]));
   }, [graph, shown, selected, found, where, scale, measure, fit]);
@@ -1678,7 +1709,7 @@ function FlatGraph({
             const a = where.get(e.source);
             const b = where.get(e.target);
             if (!a || !b || !shown.has(e.source) || !shown.has(e.target)) return null;
-            return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colourOf(typeOf.get(e.source))} className="mg-edge" strokeWidth={1.4} strokeLinecap="round" />;
+            return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colourOf(typeOf.get(e.source))} className="mg-edge" strokeWidth={1.2} strokeLinecap="round" vectorEffect="non-scaling-stroke" />;
           })}
           {graph.nodes.map((n, i) => {
             if (!shown.has(n.path)) return null;
@@ -1702,15 +1733,16 @@ function FlatGraph({
                 className="mg-note cursor-pointer outline-none [&:focus-visible_.mg-orb]:stroke-accent"
                 style={rich ? { animationDelay: `${(i % 12) * 60}ms` } : undefined}
               >
-                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" className="mg-orphan stroke-danger" strokeWidth={1.5} />}
-                <circle cx={p.x} cy={p.y} r={r} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} stroke="transparent" strokeWidth={3} className="mg-orb" />
+                <circle cx={p.x} cy={p.y} r={Math.max(r, REACH_PX * (scale || 1))} fill="transparent" className="mg-reach" />
+                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 3 * (scale || 1)} fill="none" className="mg-orphan stroke-danger" strokeWidth={1.3} vectorEffect="non-scaling-stroke" />}
+                <circle cx={p.x} cy={p.y} r={r} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} stroke="transparent" strokeWidth={3} vectorEffect="non-scaling-stroke" className="mg-orb" />
               </g>
             );
           })}
         </g>
       </>
     ),
-    [graph, where, colourOf, onOpen, hues, rich, typeOf, shown],
+    [graph, where, colourOf, onOpen, hues, rich, typeOf, shown, scale],
   );
 
   /** A label as drawn: the same in the layer of all of them and in the one of the notes in focus, so that the two lie exactly on each other. */
@@ -1725,7 +1757,7 @@ function FlatGraph({
   };
   const named = useMemo(
     () => (
-      <g className="mg-labels" fontSize={LABEL_PX * scale} strokeWidth={3 * scale} aria-hidden="true">
+      <g className="mg-labels" fontSize={LABEL_PX * (scale || 1)} strokeWidth={3 * (scale || 1)} aria-hidden="true">
         {[...labels.keys()].map(text)}
       </g>
     ),
@@ -1794,7 +1826,7 @@ function FlatGraph({
     const x = (p.x - (box.x + box.width / 2)) / s + size.width / 2;
     const y = (p.y - (box.y + box.height / 2)) / s + size.height / 2;
     if (x < 0 || y < 0 || x > size.width || y > size.height) return null;
-    const r = radiusOf(nodeOf.get(path!)!.links) / s;
+    const r = notePx(nodeOf.get(path!)!.links) * ((scale || 1) / s);
     return { path: path!, x: Math.max(8, Math.min(size.width - 8, x)), y, r, below: y < 120 };
   })();
 
@@ -1833,12 +1865,12 @@ function FlatGraph({
               return (
                 <g key={path}>
                   <circle cx={p.x} cy={p.y} r={radiusOf(n.links)} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} />
-                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links) + 5} fill="none" className="mg-found stroke-accent" strokeWidth={2} />
+                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links) + 3.5 * (scale || 1)} fill="none" className="mg-found stroke-accent" strokeWidth={1.8} vectorEffect="non-scaling-stroke" />
                 </g>
               );
             })}
             {[...found].filter((p) => labels.has(p)).length > 0 && (
-              <g className="mg-labels" fontSize={LABEL_PX * scale} strokeWidth={3 * scale}>
+              <g className="mg-labels" fontSize={LABEL_PX * (scale || 1)} strokeWidth={3 * (scale || 1)}>
                 {[...found].filter((p) => labels.has(p)).map(text)}
               </g>
             )}
@@ -1850,7 +1882,7 @@ function FlatGraph({
             {lines.map((e, i) => {
               const a = where.get(e.source)!;
               const b = where.get(e.target)!;
-              return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colourOf(typeOf.get(focus))} strokeWidth={2.2} strokeLinecap="round" className="mg-hot" />;
+              return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colourOf(typeOf.get(focus))} strokeWidth={2} strokeLinecap="round" vectorEffect="non-scaling-stroke" className="mg-hot" />;
             })}
             {[...lit].map((path) => {
               const p = where.get(path)!;
@@ -1863,13 +1895,13 @@ function FlatGraph({
                 </g>
               );
             })}
-            <g className="mg-labels" fontSize={LABEL_PX * scale} strokeWidth={3 * scale}>
+            <g className="mg-labels" fontSize={LABEL_PX * (scale || 1)} strokeWidth={3 * (scale || 1)}>
               {[...lit].filter((p) => labels.has(p)).map(text)}
             </g>
           </g>
         )}
         {selected && shown.has(selected) && where.get(selected) && (
-          <circle aria-hidden="true" cx={where.get(selected)!.x} cy={where.get(selected)!.y} r={radiusOf(nodeOf.get(selected)?.links ?? 0) + 7} fill="none" strokeWidth={2} className="mg-selected pointer-events-none stroke-accent" />
+          <circle aria-hidden="true" cx={where.get(selected)!.x} cy={where.get(selected)!.y} r={radiusOf(nodeOf.get(selected)?.links ?? 0) + 5 * (scale || 1)} fill="none" strokeWidth={1.8} vectorEffect="non-scaling-stroke" className="mg-selected pointer-events-none stroke-accent" />
         )}
       </svg>
 

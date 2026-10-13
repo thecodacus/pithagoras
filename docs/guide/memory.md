@@ -21,7 +21,8 @@ and links that open other notes here.
 the switch is in the graph's toolbar, and this browser remembers the choice.
 Both show the same notes, filters and search.
 
-- **2D** is the one to read. Every note is a glowing orb coloured by its type,
+- **2D** is the one to read. Every note is a small glowing dot coloured by its type, the same size
+  on the screen at every zoom, as its name is;
   its links are lines with a slow current along them, and notes nothing links
   to are ringed in red. A note's name is written beside it wherever there is
   room: names never lie on each other or on another note, so in a crowded part

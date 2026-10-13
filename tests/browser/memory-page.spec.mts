@@ -261,7 +261,8 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
     await page.goto('/memory?view=graph');
     const graph = page.getByRole('group', { name: /140 notes/ });
     await expect(graph).toBeVisible();
-    await expect.poll(async () => (await labelBoxes(page)).length).toBeGreaterThan(5);
+    // A phone has room for only a few names of so many at once; zooming in shows more.
+    await expect.poll(async () => (await labelBoxes(page)).length).toBeGreaterThan(width < 600 ? 2 : 5);
     // Placed again for the scale the view settles at.
     await page.waitForTimeout(400);
     let boxes = await labelBoxes(page);
@@ -275,7 +276,7 @@ for (const [width, height] of [[1280, 800], [390, 800]]) {
     await page.waitForTimeout(500);
     const closer = await labelBoxes(page);
     expect(overlapping(closer)).toEqual([]);
-    expect(closer.length).toBeGreaterThan(0);
+    expect(closer.length).toBeGreaterThan(boxes.length);
     boxes = closer;
     // Nor does the legend or the line under the graph: they are beside it, not on it.
     const svgBox = (await graph.boundingBox())!;
@@ -361,6 +362,75 @@ test('the type switches filter both views, and what the search found is lit in b
   await expect(page.locator('.memory-graph circle.mg-found')).toHaveCount(1);
 });
 
+/** The 3D looks by the names the menu gives them. */
+const LOOK_NAMES: Record<string, string> = { stellar: 'Constellation', solar: 'Solar system', brain: 'Brain', fireflies: 'Fireflies', helix: 'Double helix' };
+/** Picks a 3D look from the toolbar's menu, as a person does. */
+async function chooseLook(page: Page, theme: string) {
+  await page.getByRole('combobox', { name: 'Look of the 3D view' }).click();
+  await page.getByRole('listbox', { name: 'Look of the 3D view' }).getByRole('option', { name: LOOK_NAMES[theme], exact: true }).click();
+  await expect(page.locator('.memory-sky')).toHaveAttribute('data-theme-3d', theme);
+}
+
+test("the 3D toolbar's look, colour and filter are the portal's own controls", async ({ page }) => {
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  await page.getByRole('button', { name: '3D' }).click();
+  // The look: the portal's dropdown, not the system's.
+  const look = page.getByRole('combobox', { name: 'Look of the 3D view' });
+  await expect(look).toHaveClass(/ui-select/);
+  await look.click();
+  const list = page.getByRole('listbox', { name: 'Look of the 3D view' });
+  await expect(list.getByRole('option')).toHaveText(['Constellation', 'Solar system', 'Brain', 'Fireflies', 'Double helix']);
+  await expect(list.getByRole('option', { name: 'Constellation' })).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(look).toHaveText('Brain');
+  // The colour: drawn like the dropdown beside it.
+  const colour = page.getByLabel("Colour of the brain's outline");
+  await expect(page.locator('label.ui-select').filter({ has: colour })).toBeVisible();
+  // The filter: a button like the others, with a popover that shuts on Escape and on a press outside it.
+  const filter = page.getByRole('button', { name: 'Which notes are shown' });
+  await expect(filter).toHaveClass(/ui-select/);
+  await filter.click();
+  await expect(filter).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('list', { name: 'What the colours are' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('list', { name: 'What the colours are' })).toHaveCount(0);
+  await expect(filter).toBeFocused();
+  await filter.click();
+  await page.mouse.click(10, 400);
+  await expect(page.getByRole('list', { name: 'What the colours are' })).toHaveCount(0);
+});
+
+test('notes in the flat graph are small dots that stay the same size on the screen as it zooms, as the labels do', async ({ page }) => {
+  await portal(page, { notes: 140, longNames: true });
+  await page.goto('/memory?view=graph');
+  const graph = page.getByRole('group', { name: /140 notes/ });
+  await expect(graph).toBeVisible();
+  const sizes = () =>
+    graph.evaluate((svg) => {
+      const orbs = [...svg.querySelectorAll(':scope > .mg-base circle.mg-orb')].map((c) => c.getBoundingClientRect().width);
+      const labels = [...svg.querySelectorAll(':scope > g.mg-labels text')].map((t) => t.getBoundingClientRect().height);
+      return { orb: Math.max(...orbs), label: labels.length ? Math.max(...labels) : 0 };
+    });
+  await page.waitForTimeout(400);
+  const before = await sizes();
+  // At most 7 pixels across the largest of them, smaller than a label is tall.
+  expect(before.orb).toBeLessThanOrEqual(15);
+  expect(before.orb).toBeLessThan(before.label * 1.2);
+  const box = (await graph.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(500);
+  const closer = await sizes();
+  // Zoomed in more than twice, they keep their size, give or take the step the scale settles on.
+  expect(closer.orb / before.orb).toBeGreaterThan(0.75);
+  expect(closer.orb / before.orb).toBeLessThan(1.35);
+  expect(closer.label / before.label).toBeGreaterThan(0.75);
+  expect(closer.label / before.label).toBeLessThan(1.35);
+});
+
 /** Text a canvas was asked to write, counted from before the page starts. */
 const countCanvasText = (page: Page) =>
   page.addInitScript(() => {
@@ -411,18 +481,18 @@ test('the 3D view and its look are kept in this browser, and nothing is written 
   await page.reload();
   await expect(page.getByRole('button', { name: '3D' })).toHaveAttribute('aria-pressed', 'true');
   await expect(sky.locator('canvas')).toBeVisible();
-  const look = page.getByLabel('Look of the 3D view');
-  await expect(look).toHaveValue('stellar');
+  const look = page.getByRole('combobox', { name: 'Look of the 3D view' });
+  await expect(look).toHaveText('Constellation');
   for (const theme of ['stellar', 'solar', 'brain', 'fireflies', 'helix']) {
-    await look.selectOption(theme);
+    await chooseLook(page, theme);
     await expect(sky).toHaveAttribute('data-theme-3d', theme);
     await frames(page);
     expect(await visibleText(page)).toEqual([]);
     expect(await page.evaluate(() => (window as any).written)).toBe(0);
   }
-  await look.selectOption('fireflies');
+  await chooseLook(page, 'fireflies');
   await page.reload();
-  await expect(page.getByLabel('Look of the 3D view')).toHaveValue('fireflies');
+  await expect(page.getByRole('combobox', { name: 'Look of the 3D view' })).toHaveText('Fireflies');
   // A note's name only while it is reached: Tab to its star, and a small card says it; Enter opens it.
   const owner = sky.getByRole('button', { name: 'The owner' });
   await owner.focus();
@@ -488,7 +558,7 @@ for (const [theme, egg, gesture] of secrets) {
     await portal(page, { notes: 40 });
     await page.goto('/memory?view=graph');
     await page.getByRole('button', { name: '3D' }).click();
-    await page.getByLabel('Look of the 3D view').selectOption(theme);
+    await chooseLook(page, theme);
     const sky = page.locator('.memory-sky');
     await expect(sky.locator('canvas')).toBeVisible();
     await frames(page);
@@ -515,7 +585,7 @@ test('with less motion asked for, the 3D looks hold still and play no secrets', 
   await page.getByRole('button', { name: '3D' }).click();
   const canvas = page.locator('.memory-sky canvas');
   for (const theme of ['stellar', 'solar', 'brain', 'fireflies', 'helix']) {
-    await page.getByLabel('Look of the 3D view').selectOption(theme);
+    await chooseLook(page, theme);
     await frames(page);
     const first = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL());
     await page.waitForTimeout(300);
@@ -523,7 +593,7 @@ test('with less motion asked for, the 3D looks hold still and play no secrets', 
     expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(first);
   }
   const b = (await canvas.boundingBox())!;
-  await page.getByLabel('Look of the 3D view').selectOption('stellar');
+  await chooseLook(page, 'stellar');
   await page.mouse.dblclick(b.x + 12, b.y + 12);
   await frames(page);
   await expect(page.locator('.memory-sky')).not.toHaveAttribute('data-easter-egg', /./);
@@ -544,7 +614,7 @@ test("the brain's outline is drawn in the colour chosen for it, and the colour i
   await page.goto('/memory?view=graph');
   await page.getByRole('button', { name: '3D' }).click();
   await expect(page.getByLabel("Colour of the brain's outline")).toHaveCount(0);
-  await page.getByLabel('Look of the 3D view').selectOption('brain');
+  await chooseLook(page, 'brain');
   const colour = page.getByLabel("Colour of the brain's outline");
   await expect(colour).toHaveValue('#ff5fc8');
   await frames(page);
