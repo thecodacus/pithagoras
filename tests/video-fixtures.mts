@@ -33,7 +33,7 @@ export type Job = { status: string; queue_position?: number; result?: unknown; e
  * A fake stable-diffusion.cpp server (its native /sdcpp/v1 API). `jobs` is what each question of how a job is doing
  * is answered with, in order, the last one for good; `capabilities` is its answer to what it can do.
  */
-export async function fakeSd(options: { jobs?: Job[]; capabilities?: unknown; submit?: { status: number; body: unknown }; poll?: (n: number, res: ServerResponse) => boolean } = {}): Promise<FakeSd> {
+export async function fakeSd(options: { jobs?: Job[]; capabilities?: unknown; capabilitiesStatus?: number; submit?: { status: number; body: unknown }; poll?: (n: number, res: ServerResponse) => boolean } = {}): Promise<FakeSd> {
   const seen: Seen[] = [];
   // Each job is asked about in its own turn: the first is job_1, the next job_2.
   let made = 0;
@@ -50,6 +50,7 @@ export async function fakeSd(options: { jobs?: Job[]; capabilities?: unknown; su
       const json = (status: number, answer: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(answer));
       const path = new URL(req.url!, "http://x").pathname;
       if (req.method === "GET" && path.endsWith("/sdcpp/v1/capabilities")) {
+        if (options.capabilitiesStatus) return json(options.capabilitiesStatus, { error: "unavailable" });
         return options.capabilities === undefined ? json(404, { error: "not found" }) : json(200, options.capabilities);
       }
       if (req.method === "POST" && path.endsWith("/sdcpp/v1/vid_gen")) {

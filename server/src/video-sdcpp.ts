@@ -158,11 +158,15 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
    * Whether the server is one that makes clips, the frame rate it makes them at without being told, and the format to ask for:
    * a WebM, which every browser plays, where it makes one, else the first it says it makes, which is kept as the file it is.
    * Whether the server takes a last frame is what its features say (`end_image`), and only `true` says it.
-   * Nothing is assumed of one that does not answer.
+   * Nothing is assumed of one that does not answer. With a last frame, a server that cannot be reached, or answers an error, is said so
+   * (it is not "did not say"): the person or the agent would drop the picture on that advice, and get a clip that does not end on it.
    */
   const capabilities = async (base: URL): Promise<Capabilities | undefined> => {
     try {
       const { status, json } = await call(route(base, "capabilities"), "GET");
+      if (status !== 200 && status !== 404 && request.lastFrame) {
+        throw fail(`The video endpoint answered ${status} when asked what it can do, so it is not known whether it takes a last frame: try again when it answers`);
+      }
       if (status !== 200 || !json || typeof json !== "object") return undefined;
       if (Array.isArray(json.supported_modes) && !json.supported_modes.includes("vid_gen")) {
         throw fail("This stable-diffusion.cpp server has no video model loaded, so it cannot make a clip: start it with a video model");
@@ -173,7 +177,8 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
       return { fps: Number.isInteger(fps) && fps > 0 ? fps : undefined, ...(asked ? { format: asked } : {}), endImage: json.features_by_mode?.vid_gen?.end_image === true };
     } catch (e) {
       if (e instanceof VideoGenerationError || signal.aborted) throw e;
-      // Not answering is for the request itself to say, with the reason.
+      // Not answering is for the request itself to say, with the reason; with a last frame it is said here, as the request would not be sent.
+      if (request.lastFrame) throw failed(e);
       return undefined;
     }
   };

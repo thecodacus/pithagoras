@@ -109,6 +109,26 @@ test("a last frame goes as end_image, with the first, alone, and never to a serv
   }
 });
 
+test("a last frame asked of a server that cannot be reached, or answers an error, is told as that, not as a server that did not say", async () => {
+  const both = { prompt: "x", firstFrame: { bytes: PNG, mimeType: "image/png" }, lastFrame: { bytes: PNG, mimeType: "image/png" } };
+  const down = await fakeSd();
+  const closed = down.origin;
+  await new Promise((r) => down.server.close(r));
+  await assert.rejects(gen.generateVideo(config(closed), both, FAST), (e: Error) => e instanceof gen.VideoGenerationError && /Could not reach the video endpoint at .*ECONNREFUSED/.test(e.message) && !/did not say|without one/.test(e.message));
+  // Without a last frame the request itself says it, as before.
+  await assert.rejects(gen.generateVideo(config(closed), { prompt: "x" }, FAST), /Could not reach the video endpoint/);
+
+  for (const status of [500, 502, 503]) {
+    const sd = await fakeSd({ capabilitiesStatus: status });
+    try {
+      await assert.rejects(gen.generateVideo(config(sd.origin), both, FAST), (e: Error) => e instanceof gen.VideoGenerationError && e.message.includes(`answered ${status}`) && !/did not say|without one/.test(e.message), String(status));
+      assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen").length, 0, `${status}: nothing was sent`);
+    } finally {
+      sd.server.close();
+    }
+  }
+});
+
 test("a strength is sent as strength when it is set, 0 included, and not when it is not", async () => {
   const sd = await fakeSd();
   try {
