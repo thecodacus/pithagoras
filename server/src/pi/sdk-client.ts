@@ -44,6 +44,7 @@ import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVo
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE } from "../features.js";
+import { browserServers } from "../api/mcp.js";
 
 /** A message on its way into pi: see SdkPiClient.prompt(). */
 interface Handoff {
@@ -166,8 +167,9 @@ function framing(): string[] {
   // under an open chat (Understory switched on takes MEMORY.md away), so it is
   // asked for each time the prompt is built — see ownFiles.
   // The portal's own browser tools carry their rules as promptGuidelines, which pi
-  // includes only while they are active; these are for a Playwright MCP someone attached by hand.
-  const lines: string[] = portalBrowserOn() ? [] : [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE];
+  // includes only while they are active; these are for a Playwright MCP someone attached by hand,
+  // so they are said only where there is such a server.
+  const lines: string[] = !portalBrowserOn() && browserServers().length ? [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE] : [];
   // The bracketed-ref trap that used to need a line here is handled in the
   // guard now, which normalises the argument for every session whether it
   // reads this or not. Nothing to say, so nothing spent saying it.
