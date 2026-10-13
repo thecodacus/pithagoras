@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { chmodSync, linkSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import { ensureDependencies, missingDependencies } from '../extensions/docs/deps.js';
@@ -119,6 +121,76 @@ test('a document is read by its folder\'s id and its name, and nothing else is',
   assert.equal(docs.read('0123456789abcdef', 'plan.md').status, 404);
   assert.equal(docs.read(realpathSync(site), 'plan.md').status, 404);
   assert.equal(server({ b: outside }).read(folder.id, 'plan.md').status, 404, 'the chat that worked there is gone');
+});
+
+test('a pipe named like a document is no document, and asking for one does not hold the portal', () => {
+  const site = folderWith('docs-pipe-', { 'documents/plan.md': '# Plan' });
+  execFileSync('mkfifo', [path.join(site, 'documents', 'pipe.md')]);
+  // Asked in a process of its own: a server half that waits for the pipe's writer waits for good, and so would this test.
+  const asking = `
+    import docsServer from ${JSON.stringify(new URL('../extensions/docs/server.js', import.meta.url).href)};
+    import { resolveInside } from ${JSON.stringify(new URL('../server/src/workspace-files.ts', import.meta.url).href)};
+    import { realpathSync } from 'node:fs';
+    const routes = new Map();
+    docsServer({
+      log: () => {},
+      router: { get: (route, handler) => routes.set(route, handler) },
+      files: { inside: resolveInside },
+      chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
+    }, { dependencies: async () => true });
+    const ask = (route, params) => { const answer = {}; const res = { status: (code) => ((answer.status = code), res), json: (body) => (answer.body = body) }; routes.get(route)({ params }, res); return answer; };
+    const [folder] = ask('/folders', {}).body.folders;
+    const read = ask('/folders/:folder/documents/:name', { folder: folder.id, name: 'pipe.md' });
+    console.log(JSON.stringify({ listed: folder.documents.map((d) => d.name), status: read.status }));
+  `;
+  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', asking], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, SITE: site } });
+  assert.equal(child.signal, null, 'held by the pipe until it was killed');
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), { listed: ['plan.md'], status: 404 });
+});
+
+test('a document\'s title is its first heading as the page draws it, the same in the list and when it is read', () => {
+  const site = folderWith('docs-titles-', {
+    // A heading underlined is a heading.
+    'documents/setext.md': 'The plan\n========\n\nShip it.\n\n## Details\n',
+    'documents/setext-two.md': 'Some notes\nover two lines\n---\n\n# Later\n',
+    // A list item or a rule over a line of dashes is not one.
+    'documents/list.md': '- an item\n---\n\n# After the list\n',
+    // A closing fence has no info string: a line like ```js inside a block is still code.
+    'documents/fence.md': '````md\n```js\n# not a heading\n````\n\n# Real heading\n',
+    // Its inline Markdown is drawn, so it is not part of the title.
+    'documents/inline.md': '# The **plan** for `v2`, with [a link](https://example.com) and _care_\n',
+    // Far down: neither the list nor the document has a title other than its name.
+    'documents/late.md': `${'Text before the heading. '.repeat(200)}\n\n# Late heading\n`,
+  });
+  const docs = server({ a: site });
+  const [folder] = docs.folders();
+  const listed = Object.fromEntries(folder.documents.map((d: any) => [d.name, d.title]));
+  assert.deepEqual(listed, {
+    'setext.md': 'The plan',
+    'setext-two.md': 'Some notes over two lines',
+    'list.md': 'After the list',
+    'fence.md': 'Real heading',
+    'inline.md': 'The plan for v2, with a link and care',
+    'late.md': 'late',
+  });
+  for (const [name, title] of Object.entries(listed)) assert.equal(docs.read(folder.id, name).body.title, title, name);
+});
+
+test('a documents folder that is a link is not one: what it leads to is neither listed nor read', () => {
+  const site = folderWith('docs-linked-', { 'src/code.md': '# Code' });
+  symlinkSync('src', path.join(site, 'documents'));
+  const docs = server({ a: site });
+  assert.deepEqual(docs.folders(), []);
+  // Asked for all the same, by the id the page would know the folder by.
+  const id = createHash('sha256').update(realpathSync(site)).digest('hex').slice(0, 16);
+  assert.equal(docs.read(id, 'code.md').status, 404);
+  // The same folder with a real documents folder: listed and read by that id.
+  rmSync(path.join(site, 'documents'));
+  mkdirSync(path.join(site, 'documents'));
+  writeFileSync(path.join(site, 'documents', 'code.md'), '# Code');
+  assert.equal(docs.folders()[0].id, id);
+  assert.equal(docs.read(id, 'code.md').status, 200);
 });
 
 test('every text the Documents page shows has a German one, and no German one is left over', () => {

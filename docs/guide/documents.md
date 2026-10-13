@@ -40,15 +40,24 @@ The page leaves out:
 - names that start with a dot
 - files in folders below `documents`
 - links, and files that have a second name elsewhere (hard links)
+- everything in a `documents` that is itself a link to another folder
 - files bigger than 1 MB
+- anything that is not a plain file, such as a pipe
 
 ## The page
 
 The page has one section for each folder that has documents. Several chats can
 work in one folder, and that folder is shown once. A document is listed by its
-title, which is its first heading, or its file name when it has no heading.
-The list also shows when the document last changed.
+title: its first heading (a `#` line, or a line underlined with `=` or `-`) in
+its first 4 KB, without the Markdown marks in it. A document with no heading
+there is listed by its file name. The list also shows when the document last
+changed.
 
-Click a document to read it. It is drawn the way the portal draws Markdown in
-a conversation. The page only shows documents: to change one, edit it in Files
-or ask the agent. **All documents** goes back to the list.
+Click a document to read it. The page draws its text, headings, lists,
+tables, quotes, links and code. Two things are not drawn yet:
+
+- a `mermaid` diagram shows as its code
+- a picture by a path in the chat's folder (`![](images/a.png)`) is not shown
+
+The page only shows documents: to change one, edit it in Files or ask the
+agent. **All documents** goes back to the list.

@@ -12,7 +12,7 @@
  * folder is only one that a chat works in, as the portal lists them now.
  */
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, openSync, readdirSync, readSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
 
@@ -27,24 +27,66 @@ const HEAD_BYTES = 4096;
 const idOf = (folder) => createHash("sha256").update(folder).digest("hex").slice(0, 16);
 const isDocumentName = (name) => typeof name === "string" && name.toLowerCase().endsWith(".md") && !name.startsWith(".") && !/[/\\\0]/.test(name);
 
-/** The first heading of a Markdown text, or nothing. A `#` line in a code block is a comment, not a heading. */
+/** A heading's text as the page shows it: what its inline Markdown draws, without the marks. */
+function plain(text) {
+  return text
+    .replace(/`+([^`]*?)`+/g, "$1")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<\/?[A-Za-z][^>]*>/g, "")
+    .replace(/(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1/g, "$2")
+    .replace(/(^|[^\w*])\*(?=\S)(.+?)(?<=\S)\*(?!\w)/g, "$1$2")
+    .replace(/(^|[^\w_])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, "$1$2")
+    .replace(/\\([!-/:-@[-`{-~])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * The first heading of a Markdown text, as plain text, or nothing: a `#` line,
+ * or a paragraph underlined with `=` or `-`, as CommonMark (and so the page)
+ * has them. A line in a code block is code, whatever it looks like.
+ */
 function headingOf(text) {
   let fence = null;
-  for (const line of text.split("\n")) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+  let paragraph = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
     if (fence) {
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+      // A closing fence is the opening's character, at least as many, and nothing after them.
+      if (fence.test(line)) fence = null;
       continue;
     }
-    if (marker) {
-      fence = marker[1];
+    const opening = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (opening) {
+      fence = new RegExp(`^ {0,3}${opening[1][0]}{${opening[1].length},}[ \\t]*$`);
+      paragraph = [];
       continue;
     }
-    const heading = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line.replace(/\r$/, ""));
-    if (heading) return heading[1].trim();
+    const atx = /^ {0,3}#{1,6}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    if (atx) {
+      const title = plain(atx[1] ?? "");
+      if (title) return title;
+      paragraph = [];
+      continue;
+    }
+    // Underlined: the paragraph above is the heading.
+    if (paragraph.length && /^ {0,3}(=+|-+)[ \t]*$/.test(line)) {
+      const title = plain(paragraph.join(" "));
+      if (title) return title;
+    }
+    // What cannot be underlined into a heading: a blank line, a quote, a list item, a rule, a table, and code or HTML that starts a block.
+    const block = !paragraph.length && (/^ {4}/.test(line) || /^ {0,3}</.test(line));
+    if (block || !line.trim() || /^ {0,3}(>|[*+-](\s|$)|\d{1,9}[.)](\s|$)|\|)/.test(line) || /^ {0,3}([*_-])([ \t]*\1){2,}[ \t]*$/.test(line)) {
+      paragraph = [];
+      continue;
+    }
+    paragraph.push(line.trim());
   }
   return "";
 }
+
+/** A document's title: its first heading near its top (the first HEAD_BYTES), or else its name. Listed and read alike. */
+const titleOf = (bytes, name) => headingOf(bytes.subarray(0, HEAD_BYTES).toString("utf8")) || name.replace(/\.md$/i, "");
 
 export default function (portal, { dependencies = ensureDependencies } = {}) {
   // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
@@ -69,10 +111,17 @@ export default function (portal, { dependencies = ensureDependencies } = {}) {
     return found;
   }
 
-  /** A folder's `documents` folder, checked to be inside it, or nothing when it has none. */
+  /**
+   * A folder's `documents` folder, or nothing when it has none. Only a folder
+   * of that name itself: a link called `documents` leads to another folder of
+   * the project, which is not the documents' to be listed (or, later, written).
+   */
   function documentsDir(folder) {
     try {
-      return portal.files.inside(folder, DOCUMENTS);
+      const dir = portal.files.inside(folder, DOCUMENTS);
+      // `inside` follows links: one that was followed comes back under another path.
+      if (dir !== path.join(folder, DOCUMENTS)) return null;
+      return lstatSync(dir).isDirectory() ? dir : null;
     } catch {
       return null;
     }
@@ -96,7 +145,9 @@ export default function (portal, { dependencies = ensureDependencies } = {}) {
     if (path.dirname(file) !== dir || path.basename(file) !== name) return null;
     let fd;
     try {
-      fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+      // Not waiting at the open: a pipe left under a document's name would hold the portal's only thread until
+      // something wrote to it. It is opened at once, and refused below for not being a file.
+      fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     } catch {
       return null;
     }
@@ -116,7 +167,7 @@ export default function (portal, { dependencies = ensureDependencies } = {}) {
       if (got === 0) break;
       at += got;
     }
-    return buffer.subarray(0, at).toString("utf8");
+    return buffer.subarray(0, at);
   }
 
   /** The documents in a folder, by title. */
@@ -138,7 +189,7 @@ export default function (portal, { dependencies = ensureDependencies } = {}) {
       const opened = open(dir, name);
       if (!opened) continue;
       try {
-        const title = headingOf(read(opened.fd, Math.min(HEAD_BYTES, opened.stat.size))) || name.replace(/\.md$/i, "");
+        const title = titleOf(read(opened.fd, Math.min(HEAD_BYTES, opened.stat.size)), name);
         documents.push({ name, title, size: opened.stat.size, modified: opened.stat.mtime.toISOString() });
       } finally {
         closeSync(opened.fd);
@@ -163,8 +214,8 @@ export default function (portal, { dependencies = ensureDependencies } = {}) {
     const opened = dir && open(dir, req.params.name);
     if (!opened) return res.status(404).json({ error: "There is no such document" });
     try {
-      const markdown = read(opened.fd, opened.stat.size);
-      res.json({ name: req.params.name, title: headingOf(markdown) || req.params.name.replace(/\.md$/i, ""), markdown, modified: opened.stat.mtime.toISOString() });
+      const bytes = read(opened.fd, opened.stat.size);
+      res.json({ name: req.params.name, title: titleOf(bytes, req.params.name), markdown: bytes.toString("utf8"), modified: opened.stat.mtime.toISOString() });
     } finally {
       closeSync(opened.fd);
     }
