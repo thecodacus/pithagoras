@@ -34,10 +34,11 @@ import {
   type MemoryTrace,
   type MemoryValidation,
 } from "../api";
-import { colours, graphModeFrom, type GraphMode } from "../memory-graph";
+import { colours } from "../memory-graph";
 import { colourFrom, SKY_THEMES, skyThemeFrom, type SkyTheme } from "../memory-sky";
 import { local } from "../safe-storage";
 import { MemorySky } from "./MemorySky";
+import { notesOf, stepsOf, type TraceStep } from "../memory-trace";
 import { Select } from "./Select";
 import { ColourPicker } from "./ColourPicker";
 import { useDismiss } from "../use-dismiss";
@@ -355,7 +356,7 @@ export function MemoryPage() {
           ) : view === "log" ? (
             <LogView key={round} writable={writable} onOpen={openNote} onBack={close} onCleared={refresh} />
           ) : view === "graph" ? (
-            <GraphView key={round} onOpen={openNote} onBack={close} selected={chosen} onSelect={setChosen} hidden={hiddenTypes} onHide={setHiddenTypes} found={found} asked={asked} />
+            <GraphView key={round} onOpen={openNote} onBack={close} selected={chosen} onSelect={setChosen} hidden={hiddenTypes} onHide={setHiddenTypes} found={found} />
           ) : view === "chat" && writable ? (
             <LibrarianView chat={librarian} onOpen={openNote} onBack={close} />
           ) : view === "issues" ? (
@@ -1298,9 +1299,90 @@ const ORPHANS = "\u0000orphans";
 /** What the graph's filter hides, by type ("" for notes without one) and `ORPHANS`. */
 export type Hidden = ReadonlySet<string>;
 
-const VIEW_KEY = "memoryGraph.view";
 const THEME_KEY = "memoryGraph.theme";
 const OUTLINE_KEY = "memoryGraph.outline";
+
+/**
+ * The routes Understory's own runs took, one button each: its question, the
+ * tokens it cost, and its steps drawn as a path, a note a step names marked with
+ * a glow in its type's colour. Pointing at one (or reaching it with Tab) lights
+ * its notes and the links between them in the graph; a click keeps it lit.
+ */
+function TracePaths({
+  traces,
+  steps,
+  types,
+  colourOf,
+  pinned,
+  onPoint,
+  onPin,
+}: {
+  traces: MemoryTrace[];
+  /** What each run's notation says, by the run's id, and which notes of the graph it names. */
+  steps: Map<string, TraceStep[]>;
+  /** The type of each note of the graph, by path. */
+  types: Map<string, string | undefined>;
+  colourOf: (type: string | undefined) => string;
+  pinned: string | null;
+  /** The run being pointed at, or null. */
+  onPoint: (id: string | null) => void;
+  onPin: (id: string | null) => void;
+}) {
+  return (
+    <ul aria-label={t("Query paths")} className="-mx-1 max-h-72 space-y-1 overflow-y-auto px-1 max-sm:max-h-[45vh]">
+      {traces.slice(0, 30).map((trace) => {
+        const path = steps.get(trace.id) ?? [];
+        const touched = notesOf(path);
+        const kept = pinned === trace.id;
+        const change = trace.kind === "mutation";
+        return (
+          <li key={trace.id}>
+            <button
+              type="button"
+              aria-pressed={kept}
+              title={trace.input}
+              onClick={() => onPin(kept ? null : trace.id)}
+              onPointerEnter={() => onPoint(trace.id)}
+              onPointerLeave={() => onPoint(null)}
+              onFocus={() => onPoint(trace.id)}
+              onBlur={() => onPoint(null)}
+              className={`block w-full min-w-0 rounded-lg border px-2.5 py-2 text-left transition ${kept ? "border-accent/50 bg-accent/10" : "border-transparent hover:bg-fg/5 focus-visible:bg-fg/5"}`}
+            >
+              <span className="flex items-start gap-2">
+                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full bg-current shadow-[0_0_8px_currentColor] ${change ? "text-warn" : "text-accent"}`} aria-hidden />
+                <span className="line-clamp-2 min-w-0 flex-1 break-words text-xs text-fg">{trace.input}</span>
+                <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                  {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
+                </span>
+              </span>
+              {path.length > 0 && (
+                <span className="mt-1.5 flex flex-wrap items-center gap-x-0.5 gap-y-1 pl-4">
+                  {path.map((step, k) => (
+                    <span key={k} className="inline-flex min-w-0 max-w-full items-center gap-0.5">
+                      {k > 0 && <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" aria-hidden />}
+                      {step.end ? (
+                        <span className={`text-[11px] ${step.end === "ok" ? "text-ok" : "text-danger"}`}>{step.text}</span>
+                      ) : (
+                        <span className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] ${step.notes.length ? "border-line bg-surface text-fg" : "border-line/60 text-fg-muted"}`}>
+                          {step.notes.map((note) => (
+                            <span key={note} className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: colourOf(types.get(note)), boxShadow: `0 0 6px ${colourOf(types.get(note))}` }} aria-hidden />
+                          ))}
+                          <span className="shrink-0 text-fg-faint">{step.verb}</span>
+                          {step.target && <span className="truncate font-mono">{step.target}</span>}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </span>
+              )}
+              {touched.length === 0 && <span className="mt-1 block pl-4 text-[10px] text-fg-faint">{t("No note of this path is in the graph")}</span>}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function GraphView({
   onOpen,
@@ -1310,18 +1392,16 @@ function GraphView({
   hidden,
   onHide,
   found,
-  asked,
 }: {
   onOpen: (path: string) => void;
   onBack: () => void;
-  /** The note last opened: lit in the graph, and what it is centred on. */
+  /** The note last opened: lit in the graph, and what its look flies to. */
   selected: string | null;
   onSelect: (path: string | null) => void;
   hidden: Hidden;
   onHide: (hidden: Hidden) => void;
   /** What the search found, or null while nothing is searched for. */
   found: ReadonlySet<string> | null;
-  asked: string;
 }) {
   const colourOf = useContext(Colours);
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
@@ -1332,11 +1412,9 @@ function GraphView({
     api.memoryTraces().then(setTraces, () => {});
   }, []);
 
-  // Flat or in space, the look, and the brain's colour: kept in this browser.
-  const [mode, setModeNow] = useState<GraphMode>(() => graphModeFrom(local.get(VIEW_KEY)));
+  // The look, and the brain's colour: kept in this browser.
   const [theme, setThemeNow] = useState<SkyTheme>(() => skyThemeFrom(local.get(THEME_KEY)));
   const [outline, setOutlineNow] = useState(() => colourFrom(local.get(OUTLINE_KEY)));
-  const setMode = (m: GraphMode) => (setModeNow(m), local.set(VIEW_KEY, m));
   const setTheme = (s: SkyTheme) => (setThemeNow(s), local.set(THEME_KEY, s));
   const setOutline = (c: string) => (setOutlineNow(colourFrom(c)), local.set(OUTLINE_KEY, colourFrom(c)));
 
@@ -1355,11 +1433,34 @@ function GraphView({
     else next.add(key);
     onHide(next);
   };
-  // The 3D view's filter menu, a popover as the composer's are: shut by a press outside it or Escape. The 2D view keeps the same switches in a strip above it.
+
+  // The filter and the query paths are popovers, as the composer's are: shut by a press outside them or Escape.
   const [filtering, setFiltering] = useState(false);
   const filterButton = useRef<HTMLButtonElement>(null);
   const filterMenu = useRef<HTMLDivElement>(null);
   useDismiss(filtering, [filterMenu, filterButton], () => setFiltering(false), filterButton);
+  const [tracing, setTracing] = useState(false);
+  const traceButton = useRef<HTMLButtonElement>(null);
+  const traceMenu = useRef<HTMLDivElement>(null);
+  useDismiss(tracing, [traceMenu, traceButton], () => setTracing(false), traceButton);
+
+  // The run pointed at, or else the one kept lit: its notes and the links between them are lit in the graph, the rest steps back. A path kept lit stays when the list is shut.
+  const [pointed, setPointed] = useState<string | null>(null);
+  const [kept, setKept] = useState<string | null>(null);
+  useEffect(() => {
+    if (!tracing) setPointed(null);
+  }, [tracing]);
+  const steps = useMemo(() => {
+    const paths = (graph?.nodes ?? []).map((n) => n.path);
+    return new Map(traces.map((trace) => [trace.id, stepsOf(trace.notation, paths)]));
+  }, [graph, traces]);
+  const typeOf = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.path, n.type])), [graph]);
+  const lit = pointed ?? kept;
+  const trail = useMemo(() => {
+    const path = lit ? steps.get(lit) : undefined;
+    return path ? new Set(notesOf(path)) : null;
+  }, [lit, steps]);
+
   const label = graph ? t("The memory's notes and their links: {notes}, {links}", { notes: tp(shown.size, "{n} note", "{n} notes"), links: tp(shownEdges.length, "{n} link", "{n} links") }) : "";
 
   /** The types as switches: what the colours are, and which of them are shown. */
@@ -1388,7 +1489,7 @@ function GraphView({
             title={hidden.has(ORPHANS) ? t("Show these notes") : t("Hide these notes")}
             className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${hidden.has(ORPHANS) ? "border-line text-fg-faint line-through" : "border-line bg-surface/80 text-fg-muted hover:text-fg"}`}
           >
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-danger" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-fg-muted" />
             {t("orphan (unlinked)")}
           </button>
         </li>
@@ -1399,7 +1500,7 @@ function GraphView({
   return (
     <>
       <Bar title={t("Graph")} onBack={onBack}>
-        {mode === "3d" && legend && (
+        {legend && (
           <div className="relative">
             <button
               ref={filterButton}
@@ -1421,9 +1522,32 @@ function GraphView({
             )}
           </div>
         )}
+        {traces.length > 0 && graph && (
+          <div className="relative">
+            <button
+              ref={traceButton}
+              type="button"
+              onClick={() => setTracing(!tracing)}
+              aria-label={t("Query paths")}
+              title={t("Query paths")}
+              aria-expanded={tracing}
+              className={`ui-select ui-select-sm ${tracing ? "is-open" : ""} ${kept ? "text-accent" : ""}`}
+            >
+              <LuWaypoints className="h-3.5 w-3.5" />
+              <span className="max-sm:hidden">{t("Query paths")}</span>
+              <LuChevronDown className="ui-select-chevron" aria-hidden />
+            </button>
+            {tracing && (
+              <div ref={traceMenu} className="float-in absolute right-0 top-full z-20 mt-1.5 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto max-sm:max-w-none">
+                <p className="mb-2 text-xs text-fg-muted">{t("Point at a path to light it in the graph; click to keep it lit")}</p>
+                <TracePaths traces={traces} steps={steps} types={typeOf} colourOf={colourOf} pinned={kept} onPoint={setPointed} onPin={setKept} />
+              </div>
+            )}
+          </div>
+        )}
         <Select
           size="sm"
-          aria-label={t("Look of the graph")}
+          aria-label={t("Look of the 3D view")}
           value={theme}
           onChange={setTheme}
           options={SKY_THEMES.map((s) => ({
@@ -1432,67 +1556,13 @@ function GraphView({
           }))}
         />
         {theme === "brain" && <ColourPicker value={outline} onChange={setOutline} label={t("Colour of the brain's outline")} />}
-        <div role="group" aria-label={t("How the graph is drawn")} className="flex shrink-0 overflow-hidden rounded-md border border-line text-xs">
-          {(["2d", "3d"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              aria-pressed={mode === m}
-              title={m === "2d" ? t("Flat: nothing turns") : t("In space: turn it with a drag")}
-              className={`h-7 px-2 transition ${mode === m ? "bg-accent/15 text-accent" : "text-fg-muted hover:bg-fg/5 hover:text-fg"}`}
-            >
-              {m === "2d" ? t("2D") : t("3D")}
-            </button>
-          ))}
-        </div>
       </Bar>
       {failed ? (
         <p role="alert" className="p-4 text-sm text-warn">{failed}</p>
       ) : !graph ? (
         <div className="skeleton m-4 h-64" role="status"><span className="sr-only">{t("Loading the graph")}</span></div>
-      ) : mode === "3d" ? (
-        <MemorySky notes={graph.nodes} edges={graph.edges} shown={shown} colourOf={colourOf} found={foundShown} selected={selected} theme={theme} outline={outline} label={label} onOpen={onOpen} onSelect={onSelect} />
       ) : (
-        <>
-          {(legend || traces.length > 0) && (
-            <div className="flex items-start gap-2 border-b border-line px-3 py-2">
-              <div className="max-h-20 min-w-0 flex-1 overflow-y-auto">{legend}</div>
-              {traces.length > 0 && (
-                <details className="relative shrink-0 text-[11px] max-md:hidden">
-                  <summary className="cursor-pointer rounded px-2 py-0.5 text-xs font-medium text-fg hover:bg-fg/5">{t("Query paths")}</summary>
-                  <ul className="absolute right-0 top-full z-20 mt-1 max-h-72 w-72 space-y-2 overflow-y-auto rounded-lg border border-line bg-surface p-3 shadow-lg">
-                    {traces.slice(0, 30).map((trace) => (
-                      <li key={trace.id} title={trace.input}>
-                        <p className="flex items-center gap-1.5 text-fg">
-                          <span className={`h-2 w-2 shrink-0 rounded-full ${trace.kind === "mutation" ? "bg-warn" : "bg-accent"}`} />
-                          <span className="truncate">{trace.input}</span>
-                        </p>
-                        <p className="mt-0.5 flex gap-2 font-mono text-[10px] text-fg-faint">
-                          <span className="min-w-0 flex-1 truncate">{trace.notation}</span>
-                          <span className="shrink-0">
-                            {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
-                          </span>
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </div>
-          )}
-          <MemorySky notes={graph.nodes} edges={graph.edges} shown={shown} colourOf={colourOf} found={foundShown} selected={selected} theme={theme} outline={outline} flat label={label} onOpen={onOpen} onSelect={onSelect} />
-          <p className="flex flex-wrap gap-x-2 border-t border-line px-3 py-1.5 text-[11px] text-fg-faint">
-            {foundShown && asked && (
-              <span className="text-accent">{tp(foundShown.size, "{n} note matches “{query}”", "{n} notes match “{query}”", { query: asked })}</span>
-            )}
-            <span>
-              {tp(shown.size, "{n} note", "{n} notes")} · {tp(shownEdges.length, "{n} link", "{n} links")}
-              {shown.size < graph.nodes.length && ` (${tp(graph.nodes.length - shown.size, "{n} hidden", "{n} hidden")})`}
-            </span>
-            <span className="max-sm:hidden">{t("— drag to move · scroll to zoom · click to open")}</span>
-          </p>
-        </>
+        <MemorySky notes={graph.nodes} edges={graph.edges} shown={shown} colourOf={colourOf} found={foundShown} trail={trail} selected={selected} theme={theme} outline={outline} label={label} onOpen={onOpen} onSelect={onSelect} />
       )}
     </>
   );

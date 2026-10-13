@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { LuLocateFixed, LuMinus, LuPlus } from "react-icons/lu";
 import { reducedMotion } from "../motion";
-import { layout3dKept, layoutFlat, panned, pick, project, Shake, turnAround, zoomedAt, type Camera, type Projected, type SkyTheme } from "../memory-sky";
+import { layout3dKept, pick, project, Shake, turnAround, type Camera, type Projected, type SkyTheme } from "../memory-sky";
 import { t, tp } from "../i18n";
 import { LOOKS, rgbOf, type Gesture, type GraphNote, type Scene } from "./sky-looks";
 
 export type { GraphNote } from "./sky-looks";
 
-/** What a note says of itself when it is pointed at: in both views, the only place either writes anything. */
-export function NoteCard({ note, colour }: { note: GraphNote; colour: string }) {
+/** What a note says of itself when it is pointed at: the only place the graph writes anything. */
+function NoteCard({ note, colour }: { note: GraphNote; colour: string }) {
   return (
     <div className="w-max max-w-[16rem] rounded-lg border border-line bg-surface/95 px-3 py-2 text-left shadow-lg backdrop-blur">
       <p className="text-xs font-medium text-fg">{note.title || note.path}</p>
@@ -27,16 +27,12 @@ const clampZoom = (z: number) => Math.max(0.35, Math.min(8, z));
 const HOLD_MS = 1400;
 
 /**
- * The graph on a canvas, in one of the looks of sky-looks.ts: each places the
- * notes, moves and answers a drag in its own way, and has a secret. The wheel
- * or a pinch zooms, and the buttons zoom and set the camera back, in all of
- * them. Nothing is written on it: a note says its name in a small card while it
- * is pointed at or reached with Tab, through buttons only a screen reader and
- * the keyboard see.
- *
- * Drawn in space (the 3D view), or `flat` (the 2D view): the same looks, the
- * same glow and links, seen straight on. Nothing turns then; a drag moves the
- * view, and the wheel zooms toward the pointer.
+ * The graph in space, on a canvas, in one of the looks of sky-looks.ts: each
+ * places the notes, moves and answers a drag in its own way, and has a secret.
+ * The wheel or a pinch zooms, and the buttons zoom and set the camera back, in
+ * all of them. Nothing is written on it: a note says its name in a small card
+ * while it is pointed at or reached with Tab, through buttons only a screen
+ * reader and the keyboard see.
  *
  * The camera, the look's world and where every note is live in refs and are
  * drawn on every frame; React draws only the card and the buttons. The secret
@@ -48,10 +44,10 @@ export function MemorySky({
   shown,
   colourOf,
   found,
+  trail,
   selected,
   theme,
   outline,
-  flat = false,
   label,
   onOpen,
   onSelect,
@@ -62,17 +58,17 @@ export function MemorySky({
   shown: Set<string>;
   colourOf: (type: string | undefined) => string;
   found: Set<string> | null;
+  /** The notes of the query path being traced, lit with the links between them, or null. */
+  trail: Set<string> | null;
   selected: string | null;
   theme: SkyTheme;
   /** The brain's outline colour. */
   outline: string;
-  /** Seen straight on, for the 2D view. The view is made again when this changes, from where the look rests. */
-  flat?: boolean;
   label: string;
   onOpen: (path: string) => void;
   onSelect: (path: string | null) => void;
 }) {
-  const placed = useMemo(() => (flat ? layoutFlat : layout3dKept)(notes.map((n) => n.path), edges), [notes, edges, flat]);
+  const placed = useMemo(() => layout3dKept(notes.map((n) => n.path), edges), [notes, edges]);
   const index = useMemo(() => new Map(notes.map((n, i) => [n.path, i])), [notes]);
   const links = useMemo(
     () => edges.map((e) => [index.get(e.source), index.get(e.target)] as const).filter((l): l is readonly [number, number] => l[0] !== undefined && l[1] !== undefined && l[0] !== l[1]),
@@ -90,6 +86,7 @@ export function MemorySky({
   const types = useMemo(() => [...new Set(notes.map((n) => n.type).filter((x): x is string => !!x))].sort(), [notes]);
   const isShown = useMemo(() => notes.map((n) => shown.has(n.path)), [notes, shown]);
   const foundAt = useMemo(() => (found ? new Set([...found].map((p) => index.get(p)).filter((i): i is number => i !== undefined)) : null), [found, index]);
+  const trailAt = useMemo(() => (trail ? new Set([...trail].map((p) => index.get(p)).filter((i): i is number => i !== undefined)) : null), [trail, index]);
   // Bumped when what is placed changes, for the look to place it again.
   const version = useRef(0);
   const placedVersion = useMemo(() => ++version.current, [placed, isShown, links]);
@@ -98,28 +95,28 @@ export function MemorySky({
   const canvas = useRef<HTMLCanvasElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const look = LOOKS[theme];
-  /** Where a look's camera rests: in space, or straight on. */
-  const restOf = (l: (typeof LOOKS)[SkyTheme]): Camera => ({ ...(flat ? l.flat : l.rest) });
-  const rig = useRef({ cam: restOf(look), aim: null as Camera | null });
+  const rig = useRef({ cam: { ...look.rest } as Camera, aim: null as Camera | null });
   const world = useRef<{ theme: SkyTheme; w: any }>({ theme, w: look.init() });
   if (world.current.theme !== theme) {
     // Another look is another world, seen from where it rests.
     world.current = { theme, w: look.init() };
-    rig.current = { cam: restOf(look), aim: null };
+    rig.current = { cam: { ...look.rest }, aim: null };
   }
   const scene = useRef<Scene | null>(null);
   const dirty = useRef(true);
   const [hover, setHover] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
-  const tip = hover ?? focused;
+  // A finger cannot point: the first tap on a note says what it is, as pointing does, and the next opens it.
+  const [touched, setTouched] = useState<string | null>(null);
+  const tip = hover ?? touched ?? focused;
 
   const still = reducedMotion();
   // What the frame loop reads, as of the last render.
-  const live = useRef({ isShown, foundAt, selected, theme, outline, tip, placedVersion });
-  live.current = { isShown, foundAt, selected, theme, outline, tip, placedVersion };
+  const live = useRef({ isShown, foundAt, trailAt, selected, theme, outline, tip, placedVersion });
+  live.current = { isShown, foundAt, trailAt, selected, theme, outline, tip, placedVersion };
   useEffect(() => {
     dirty.current = true;
-  }, [isShown, foundAt, selected, theme, outline, tip, placed]);
+  }, [isShown, foundAt, trailAt, selected, theme, outline, tip, placed]);
 
   /** The camera to `to`: glided there, or at once for somebody who asked for less motion. */
   const go = (to: Camera) => {
@@ -165,7 +162,7 @@ export function MemorySky({
       const dt = still ? 0 : Math.min(0.2, (now - last) / 1000);
       const time = still ? 0 : (now - started) / 1000;
       last = now;
-      const { isShown, foundAt, selected, theme, outline, tip, placedVersion } = live.current;
+      const { isShown, foundAt, trailAt, selected, theme, outline, tip, placedVersion } = live.current;
       const lookNow = LOOKS[theme];
       const r = rig.current;
       if (r.aim) {
@@ -195,8 +192,11 @@ export function MemorySky({
       const chosen = selected === null ? null : (index.get(selected) ?? null);
       const focus = tipAt ?? (chosen !== null && isShown[chosen] ? chosen : null);
       const lit = focus === null ? null : new Set([focus, ...near[focus].filter((j) => isShown[j])]);
+      // A path none of whose notes is shown lights nothing, and dims nothing.
+      const shownTrail = trailAt && new Set([...trailAt].filter((i) => isShown[i]));
+      const trail = shownTrail && shownTrail.size ? shownTrail : null;
       const dim = new Float32Array(n);
-      for (let i = 0; i < n; i++) dim[i] = lit ? (lit.has(i) ? 1 : 0.22) : foundAt ? (foundAt.has(i) ? 1 : 0.3) : 1;
+      for (let i = 0; i < n; i++) dim[i] = lit || trail ? (lit?.has(i) || trail?.has(i) ? 1 : 0.22) : foundAt ? (foundAt.has(i) ? 1 : 0.3) : 1;
       let view: Camera = r.cam;
       const s: Scene = {
         g,
@@ -217,9 +217,9 @@ export function MemorySky({
         tip: tipAt,
         focus,
         lit,
+        trail,
         dim,
         base: placed,
-        flat,
         rig: r,
         grabbing: !!grab.current?.moved || pinch.current !== null,
         outline: rgbOf(outline),
@@ -257,7 +257,7 @@ export function MemorySky({
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [placed, links, near, colours, types, notes, index, still, flat]);
+  }, [placed, links, near, colours, types, notes, index, still]);
 
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const holding = useRef(0);
@@ -305,10 +305,7 @@ export function MemorySky({
     if (pinch.current !== null && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (flat) {
-        const r = canvas.current!.getBoundingClientRect();
-        rig.current.cam = zoomedAt(rig.current.cam, d / pinch.current, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top, r.width, r.height);
-      } else rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (d / pinch.current));
+      rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (d / pinch.current));
       pinch.current = d;
       dirty.current = true;
       return;
@@ -340,10 +337,7 @@ export function MemorySky({
       g.y = e.clientY;
       g.trail.push({ x: e.clientX, y: e.clientY, at: performance.now() });
       if (g.trail.length > 12) g.trail.shift();
-      if (flat) {
-        const r = canvas.current!.getBoundingClientRect();
-        rig.current.cam = panned(rig.current.cam, dx, dy, r.width, r.height);
-      } else if (s) lookNow.drag(s, world.current.w, dx, dy);
+      if (s) lookNow.drag(s, world.current.w, dx, dy);
       dirty.current = true;
       if (hover !== null) setHover(null);
       return;
@@ -360,8 +354,6 @@ export function MemorySky({
     grab.current = null;
     if (!g || g.id !== e.pointerId || g.held || e.type === "pointercancel") return;
     if (g.moved) {
-      // The flat view stops where it is let go.
-      if (flat) return;
       // How fast it was going when let go, over the last tenth of a second.
       const now = performance.now();
       const recent = g.trail.filter((p) => now - p.at < 100);
@@ -373,6 +365,8 @@ export function MemorySky({
     }
     const p = at(e);
     const hit = under(p.x, p.y, e.pointerType === "touch");
+    if (hit && e.pointerType === "touch" && touched !== hit) return setTouched(hit);
+    setTouched(null);
     if (hit) onOpen(hit);
     else onSelect(null);
   };
@@ -386,11 +380,7 @@ export function MemorySky({
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       rig.current.aim = null;
-      const factor = e.deltaY > 0 ? 1 / 1.12 : 1.12;
-      if (flat) {
-        const r = c.getBoundingClientRect();
-        rig.current.cam = zoomedAt(rig.current.cam, factor, e.clientX - r.left, e.clientY - r.top, r.width, r.height);
-      } else rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * factor);
+      rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (e.deltaY > 0 ? 1 / 1.12 : 1.12));
       dirty.current = true;
     };
     c.addEventListener("wheel", wheel, { passive: false });
@@ -398,12 +388,12 @@ export function MemorySky({
       c.removeEventListener("wheel", wheel);
       clearTimeout(holding.current);
     };
-  }, [flat]);
+  }, []);
   const zoomBy = (f: number) => go({ ...(rig.current.aim ?? rig.current.cam), zoom: clampZoom((rig.current.aim ?? rig.current.cam).zoom * f) });
 
   const tipNote = tip === null ? undefined : notes[index.get(tip) ?? -1];
   return (
-    <div ref={wrap} role="group" aria-label={label} data-look={theme} data-flat={flat || undefined} className={`memory-sky sky-${theme} relative min-h-0 flex-1 overflow-hidden`}>
+    <div ref={wrap} role="group" aria-label={label} data-theme-3d={theme} className={`memory-sky sky-${theme} relative min-h-0 flex-1 overflow-hidden`}>
       <canvas
         ref={canvas}
         aria-hidden="true"
@@ -422,7 +412,7 @@ export function MemorySky({
               <button
                 type="button"
                 aria-current={selected === n.path ? "true" : undefined}
-                aria-description={found?.has(n.path) ? t("Matches the search") : undefined}
+                aria-description={found?.has(n.path) ? t("Matches the search") : trail?.has(n.path) ? t("On the path traced") : undefined}
                 onFocus={() => setFocused(n.path)}
                 onBlur={() => setFocused((f) => (f === n.path ? null : f))}
                 onClick={() => onOpen(n.path)}
@@ -449,7 +439,7 @@ export function MemorySky({
           type="button"
           onClick={() => {
             LOOKS[theme].reset?.(world.current.w);
-            go(restOf(LOOKS[theme]));
+            go({ ...LOOKS[theme].rest });
           }}
           aria-label={t("Show all of it")}
           className="p-2 hover:bg-white/10 hover:text-white"

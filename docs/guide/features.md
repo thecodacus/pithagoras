@@ -548,8 +548,9 @@ as Understory's own:
 - beside it, the open note — its type, tags, when it last changed, its text,
   and links to other notes that open them there — or the **Log** of changes,
   newest first, or the **Graph**: every note as a glowing point coloured by its
-  type, its links as see-through lines, seen straight on or in space, the paths
-  Understory's own queries took, and zoom, drag and click to open.
+  type in space, its links as see-through lines, in five looks, the paths
+  Understory's own runs took (lit in the graph when you point at one), and zoom,
+  drag and click to open.
 
 What is open is in the address (`/memory?note=…`, `?view=log`,
 `?view=graph`), so it can be linked to. Understory's chat is not there.

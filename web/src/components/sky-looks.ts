@@ -11,11 +11,6 @@
  * Nothing here writes text: the names of notes are the card's, in React.
  * Somebody who asks for less motion gets each world standing still (`still`):
  * no drift, no time, and no secrets, which are all motion.
- *
- * The same worlds are drawn flat, for the 2D view (`Scene.flat`): the camera
- * stands where the look's `flat` puts it, looking straight at the world, and
- * only the picture's own motion is left: the camera never turns by itself, and
- * a drag moves the view instead of the world.
  */
 import { brainOutline, galaxyStars, GALAXY_TURN, heart, helixAt, helixOrder, intoBrain, lobeOf, ringsFrom, seeded, WINDING, type Camera, type GalaxyStar, type Point3, type Projected, type SkyTheme } from "../memory-sky";
 
@@ -70,12 +65,12 @@ export interface Scene {
   /** The note in focus (`tip`, else the chosen one), and it with those it links with. */
   focus: number | null;
   lit: Set<number> | null;
-  /** How strongly each note is drawn: dimmed outside what is in focus, or what the search found. */
+  /** The notes of the query path being traced: lit with the links between them, as the note in focus is with its own. */
+  trail: Set<number> | null;
+  /** How strongly each note is drawn: dimmed outside what is in focus, on the path traced, or what the search found. */
   dim: Float32Array;
-  /** The layout, about a unit across: in all three directions, or with every `z` 0 in the flat view. */
+  /** The flat-free layout, about a unit across. */
   base: Point3[];
-  /** The flat view: the camera looks straight at the world and is not turned, by itself or by a drag. */
-  flat: boolean;
   rig: Rig;
   grabbing: boolean;
   outline: Rgb;
@@ -98,8 +93,6 @@ export interface Egg {
 export interface Look<W extends { egg: Egg | null } = { egg: Egg | null }> {
   /** Where the camera rests, and goes back to with "Show all of it". */
   rest: Camera;
-  /** The same for the flat view: straight at the world, from the side that shows the most of it. */
-  flat: Camera;
   init(): W;
   step(s: Scene, w: W): void;
   draw(s: Scene, w: W): void;
@@ -157,13 +150,16 @@ const backToFront = (s: Scene) => {
   for (let i = 0; i < s.notes.length; i++) if (s.shown[i]) order.push(i);
   return order.sort((a, b) => s.pts[b].depth - s.pts[a].depth);
 };
-/** The ring round the chosen note, and fainter ones round what the search found: the same in every look. */
+/** The ring round the chosen note, and fainter ones round what the search found and the path traced: the same in every look. */
 function marks<W extends { egg: Egg | null }>(s: Scene, look: Look<W>, w: W, colour: Rgb = WHITE) {
   const z = Math.sqrt(s.rig.cam.zoom);
   const at = (i: number, gap: number, alpha: number) => s.shown[i] && ring(s.g, s.pts[i].x, s.pts[i].y, look.core(s, i, w) * s.pts[i].scale * z * 2.4 + gap, colour, alpha);
   if (s.found) for (const i of s.found) at(i, 3, 0.45);
+  if (s.trail) for (const i of s.trail) at(i, 3, 0.45);
   if (s.selected !== null) at(s.selected, 6, s.still ? 0.85 : 0.6 + 0.3 * Math.sin(s.time * 2.4));
 }
+/** The note a link is lit in the colour of: the note in focus when the link touches it, the end of a link between two notes of the path traced, or null for a link that is not lit. */
+const litBy = (s: Scene, a: number, b: number): number | null => (s.focus !== null && (a === s.focus || b === s.focus) ? s.focus : s.trail?.has(a) && s.trail.has(b) ? a : null);
 /** Draws `points` (screen points) as one line, the segments between `from` and `to`. */
 function polyline(g: CanvasRenderingContext2D, points: Projected[]) {
   g.beginPath();
@@ -213,14 +209,13 @@ interface StellarWorld {
 
 const stellar: Look<StellarWorld> = {
   rest: { yaw: 0.55, pitch: -0.32, zoom: 1, tx: 0, ty: 0, tz: 0 },
-  flat: { yaw: 0, pitch: 0, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, spin: { yaw: 0, pitch: 0 }, chosen: null, meteors: [] }),
   core: (s, i) => 1.7 + Math.min(s.notes[i].links, 12) * 0.3,
   step(s, w) {
     for (let i = 0; i < s.notes.length; i++) put(s, i, s.base[i].x, s.base[i].y, s.base[i].z);
     const cam = s.rig.cam;
     if (!s.still) {
-      if (!s.grabbing && s.tip === null && !s.flat) cam.yaw += s.dt * 0.05;
+      if (!s.grabbing && s.tip === null) cam.yaw += s.dt * 0.05;
       cam.yaw += w.spin.yaw * s.dt;
       cam.pitch = clampPitch(cam.pitch + w.spin.pitch * s.dt);
       w.spin.yaw *= Math.exp(-s.dt * 2.5);
@@ -263,9 +258,10 @@ const stellar: Look<StellarWorld> = {
       if (!s.shown[a] || !s.shown[b]) continue;
       const pa = s.pts[a];
       const pb = s.pts[b];
-      const hot = s.focus !== null && (a === s.focus || b === s.focus);
+      const by = litBy(s, a, b);
+      const hot = by !== null;
       g.lineWidth = hot ? 1.4 : 0.7;
-      g.strokeStyle = hot ? rgba(mix(s.colours[s.focus!], WHITE, 0.25), 0.9) : rgba([175, 200, 255], 0.26 * clamp(1 - (pa.depth + pb.depth) / 4, 0.15, 1) * Math.min(s.dim[a], s.dim[b]));
+      g.strokeStyle = hot ? rgba(mix(s.colours[by!], WHITE, 0.25), 0.9) : rgba([175, 200, 255], 0.26 * clamp(1 - (pa.depth + pb.depth) / 4, 0.15, 1) * Math.min(s.dim[a], s.dim[b]));
       g.beginPath();
       g.moveTo(pa.x, pa.y);
       g.lineTo(pb.x, pb.y);
@@ -387,8 +383,6 @@ const lane = (() => {
 
 const galaxy: Look<GalaxyWorld> = {
   rest: { yaw: 0.3, pitch: -0.62, zoom: 1, tx: 0, ty: 0, tz: 0 },
-  // From above, the disc is a circle and its arms are spirals.
-  flat: { yaw: 0, pitch: -Math.PI / 2, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", centre: -1, belt: -1, ring: new Int32Array(0), stars: [], from: null, movedAt: 0, spin: 0 }),
   core: (s, i, w) => (i === w.centre ? 4.5 : 1.6 + Math.min(s.notes[i].links, 12) * 0.28),
   step(s, w) {
@@ -424,7 +418,7 @@ const galaxy: Look<GalaxyWorld> = {
       else put(s, i, x, y, z);
     }
     const cam = s.rig.cam;
-    if (!s.still && !s.grabbing && !s.rig.aim && !s.flat) {
+    if (!s.still && !s.grabbing && !s.rig.aim) {
       // The slant the galaxy is seen at draws the view back to it, like a spring.
       cam.pitch += (galaxy.rest.pitch - cam.pitch) * (1 - Math.exp(-s.dt * 1.2));
       cam.yaw += w.spin * s.dt;
@@ -477,8 +471,9 @@ const galaxy: Look<GalaxyWorld> = {
     }
     for (const [a, b] of s.links) {
       if (!s.shown[a] || !s.shown[b]) continue;
-      const hot = s.focus !== null && (a === s.focus || b === s.focus);
-      g.strokeStyle = hot ? rgba(mix(s.colours[s.focus!], WHITE, 0.3), 0.85) : rgba([190, 205, 255], 0.09 * Math.min(s.dim[a], s.dim[b]));
+      const by = litBy(s, a, b);
+      const hot = by !== null;
+      g.strokeStyle = hot ? rgba(mix(s.colours[by!], WHITE, 0.3), 0.85) : rgba([190, 205, 255], 0.09 * Math.min(s.dim[a], s.dim[b]));
       g.lineWidth = hot ? 1.2 : 0.6;
       g.beginPath();
       g.moveTo(s.pts[a].x, s.pts[a].y);
@@ -543,11 +538,9 @@ const BRAIN = brainOutline();
 
 const brain: Look<BrainWorld> = {
   rest: { yaw: 0.55, pitch: -0.3, zoom: 1.05, tx: 0, ty: 0, tz: 0 },
-  // From the side, front to the left: the outline a brain is drawn by.
-  flat: { yaw: Math.PI / 2, pitch: 0, zoom: 1.05, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", home: new Float64Array(0), pulses: [], next: 0, fired: 0, flash: new Float64Array(0) }),
   core: (s, i) => 1 + Math.min(s.notes[i].links, 12) * 0.13,
-  view: (s, w) => ({ ...s.rig.cam, yaw: s.rig.cam.yaw + (s.still || s.flat ? 0 : 0.55 * Math.sin(s.time * 0.13)) }),
+  view: (s, w) => ({ ...s.rig.cam, yaw: s.rig.cam.yaw + (s.still ? 0 : 0.55 * Math.sin(s.time * 0.13)) }),
   step(s, w) {
     const key = `${s.version}`;
     if (key !== w.key) {
@@ -611,9 +604,10 @@ const brain: Look<BrainWorld> = {
     };
     for (const [a, b] of s.links) {
       if (!s.shown[a] || !s.shown[b]) continue;
-      const hot = s.focus !== null && (a === s.focus || b === s.focus);
+      const by = litBy(s, a, b);
+      const hot = by !== null;
       const c = bend(a, b);
-      g.strokeStyle = hot ? rgba(mix(s.colours[s.focus!], WHITE, 0.3), 0.85) : rgba(axon, 0.17 * Math.min(s.dim[a], s.dim[b]));
+      g.strokeStyle = hot ? rgba(mix(s.colours[by!], WHITE, 0.3), 0.85) : rgba(axon, 0.17 * Math.min(s.dim[a], s.dim[b]));
       g.lineWidth = hot ? 1.2 : 0.6;
       g.beginPath();
       g.moveTo(s.pts[a].x, s.pts[a].y);
@@ -700,10 +694,9 @@ const MEADOW = specks(53, 48);
 
 const fireflies: Look<FireflyWorld> = {
   rest: { yaw: 0.3, pitch: -0.12, zoom: 1, tx: 0, ty: 0, tz: 0 },
-  flat: { yaw: 0, pitch: 0, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", chosen: null, now: new Float64Array(0), wind: [0, 0, 0], bob: 0 }),
   core: (s, i) => 1.5 + Math.min(s.notes[i].links, 12) * 0.2,
-  view: (s) => ({ ...s.rig.cam, pitch: s.rig.cam.pitch + (s.still || s.flat ? 0 : 0.05 * Math.sin(s.time * 0.31)) }),
+  view: (s) => ({ ...s.rig.cam, pitch: s.rig.cam.pitch + (s.still ? 0 : 0.05 * Math.sin(s.time * 0.31)) }),
   step(s, w) {
     const n = s.notes.length;
     const first = w.key !== `${s.version}`;
@@ -757,7 +750,7 @@ const fireflies: Look<FireflyWorld> = {
     });
     if (!s.still) {
       w.wind = w.wind.map((v) => v * Math.exp(-s.dt * 1.4)) as [number, number, number];
-      if (!s.grabbing && s.tip === null && !s.flat) cam.yaw += s.dt * 0.025;
+      if (!s.grabbing && s.tip === null) cam.yaw += s.dt * 0.025;
     }
     if (w.egg && s.time > w.egg.until) w.egg = null;
   },
@@ -800,7 +793,8 @@ const fireflies: Look<FireflyWorld> = {
     }
     for (const [a, b] of s.links) {
       if (!s.shown[a] || !s.shown[b]) continue;
-      const hot = s.focus !== null && (a === s.focus || b === s.focus);
+      const by = litBy(s, a, b);
+      const hot = by !== null;
       g.strokeStyle = hot ? rgba([255, 240, 160], 0.7) : rgba([200, 230, 160], 0.07 * Math.min(s.dim[a], s.dim[b]));
       g.lineWidth = hot ? 1 : 0.5;
       g.beginPath();
@@ -873,7 +867,6 @@ const helixShape = (count: number) => {
 
 const helix: Look<HelixWorld> = {
   rest: { yaw: 0, pitch: -0.12, zoom: 1, tx: 0, ty: 0, tz: 0 },
-  flat: { yaw: 0, pitch: 0, zoom: 1, tx: 0, ty: 0, tz: 0 },
   init: () => ({ egg: null, key: "", order: [], slot: new Int32Array(0), spin: 0, speed: SPEED, scroll: 0, chosen: null, aimSpin: null, aimScroll: null }),
   core: (s, i) => 2 + Math.min(s.notes[i].links, 12) * 0.25,
   step(s, w) {
@@ -980,8 +973,9 @@ const helix: Look<HelixWorld> = {
     }
     for (const [a, b] of s.links) {
       if (!s.shown[a] || !s.shown[b]) continue;
-      const hot = s.focus !== null && (a === s.focus || b === s.focus);
-      g.strokeStyle = hot ? rgba(mix(s.colours[s.focus!], WHITE, 0.3), 0.9) : rgba([230, 240, 255], 0.22 * Math.min(s.dim[a], s.dim[b]) * clamp(0.9 - (s.pts[a].depth + s.pts[b].depth) / 2, 0.2, 1));
+      const by = litBy(s, a, b);
+      const hot = by !== null;
+      g.strokeStyle = hot ? rgba(mix(s.colours[by!], WHITE, 0.3), 0.9) : rgba([230, 240, 255], 0.22 * Math.min(s.dim[a], s.dim[b]) * clamp(0.9 - (s.pts[a].depth + s.pts[b].depth) / 2, 0.2, 1));
       g.lineWidth = hot ? 1.6 : 0.9;
       g.beginPath();
       g.moveTo(s.pts[a].x, s.pts[a].y);

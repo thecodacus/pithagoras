@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BRAIN_COLOUR, brainOutline, colourFrom, heart, helixAt, helixOrder, intoBrain, layout3d, layout3dKept, layoutFlat, galaxyStars, GALAXY_TURN, LOBES, lobeOf, panned, pick, project, RESTING, ringsFrom, seeded, Shake, skyThemeFrom, turnAround, WINDING, zoomedAt } from "../web/src/memory-sky.ts";
+import { roundsFor } from "../web/src/memory-graph.ts";
+import { BRAIN_COLOUR, brainOutline, colourFrom, heart, helixAt, helixOrder, intoBrain, layout3d, layout3dKept, galaxyStars, GALAXY_TURN, LOBES, lobeOf, pick, project, RESTING, ringsFrom, seeded, Shake, skyThemeFrom, turnAround, WINDING } from "../web/src/memory-sky.ts";
 
 const chain = (n: number) => {
   const paths = Array.from({ length: n }, (_, i) => `/n${i}.md`);
@@ -31,54 +32,11 @@ test("a long memory is laid out in 3D at once, and the same one is not laid out 
   assert.equal(layout3dKept([...paths], edges), placed);
 });
 
-test("the flat layout is the 2D one in the plane, scaled as the 3D one is, and the same every time", () => {
-  const { paths, edges } = chain(12);
-  const one = layoutFlat(paths, edges);
-  assert.deepEqual(one, layoutFlat(paths, edges));
-  const at = Object.fromEntries(one.map((p) => [p.path, p]));
-  const d = (a: string, b: string) => Math.hypot(at[a].x - at[b].x, at[a].y - at[b].y);
-  assert.ok(d("/n0.md", "/n1.md") < d("/n0.md", "/n6.md"), "linked notes closer");
-  assert.ok(one.every((p) => p.z === 0 && Number.isFinite(p.x) && Number.isFinite(p.y)));
-  assert.ok(Math.max(...one.map((p) => Math.hypot(p.x, p.y))) < 2, "about a unit across");
-  assert.ok(Math.max(...one.map((p) => Math.abs(p.x))) > 0.1 && Math.max(...one.map((p) => Math.abs(p.y))) > 0.1, "spread in both directions");
-  assert.deepEqual(layoutFlat([], []), []);
-  assert.equal(layoutFlat(["/only.md"], []).length, 1);
-});
-
-test("a drag takes hold of the plane the camera looks at and moves it with the pointer, from whichever side it is seen", () => {
-  const straight = { yaw: 0, pitch: 0, zoom: 1.5, tx: 0.2, ty: -0.1, tz: 0 };
-  const at = { x: 0.3, y: 0.4, z: 0 };
-  // The point follows the pointer by exactly what it was dragged.
-  const before = project(at, straight, 800, 600);
-  const moved = project(at, panned(straight, 30, -12, 800, 600), 800, 600);
-  assert.ok(Math.abs(moved.x - before.x - 30) < 1e-9 && Math.abs(moved.y - before.y + 12) < 1e-9);
-  assert.equal(moved.scale, 1, "no perspective straight on");
-  // From above, as the galaxy is seen flat, the screen's down is the plane's z.
-  const above = { yaw: 0, pitch: -Math.PI / 2, zoom: 1, tx: 0, ty: 0, tz: 0 };
-  const from = project({ x: 0.1, y: 0, z: -0.2 }, above, 800, 600);
-  const over = project({ x: 0.1, y: 0, z: -0.2 }, panned(above, -20, 15, 800, 600), 800, 600);
-  assert.ok(Math.abs(over.x - from.x + 20) < 1e-9 && Math.abs(over.y - from.y - 15) < 1e-9);
-  assert.equal(panned(straight, 0, 0, 800, 600).tx, straight.tx);
-});
-
-test("a zoom toward the pointer keeps the point under it where it was, and stops at its bounds", () => {
-  const cam = { yaw: 0, pitch: 0, zoom: 1, tx: 0.1, ty: 0, tz: 0 };
-  for (const [x, y] of [[400, 300], [100, 80], [700, 550]]) {
-    // The point of the plane under the pointer, found by looking for the one that projects there.
-    const z = zoomedAt(cam, 1.12 ** 5, x, y, 800, 600);
-    assert.ok(z.zoom > 1.7);
-    const unit = 600 * 0.4;
-    const world = { x: cam.tx + (x - 400) / (unit * cam.zoom), y: cam.ty + (y - 300) / (unit * cam.zoom), z: 0 };
-    const after = project(world, z, 800, 600);
-    assert.ok(Math.abs(after.x - x) < 1e-6 && Math.abs(after.y - y) < 1e-6, `under the pointer at ${x},${y}`);
-  }
-  // Out again by the same factor, it is where it began.
-  const back = zoomedAt(zoomedAt(cam, 2, 120, 90, 800, 600), 0.5, 120, 90, 800, 600);
-  assert.ok(Math.abs(back.zoom - 1) < 1e-9 && Math.abs(back.tx - cam.tx) < 1e-9 && Math.abs(back.ty - cam.ty) < 1e-9);
-  assert.equal(zoomedAt(cam, 100, 10, 10, 800, 600).zoom, 8);
-  assert.equal(zoomedAt(cam, 0.001, 10, 10, 800, 600).zoom, 0.35);
-  const stopped = { ...cam, zoom: 8 };
-  assert.equal(zoomedAt(stopped, 2, 10, 10, 800, 600), stopped, "at the bound it stays as it was");
+test("a layout is run for the rounds its size gets, unless it is told how many", () => {
+  const { paths, edges } = chain(450);
+  const asked = layout3d(paths, edges);
+  assert.deepEqual(asked, layout3d(paths, edges, roundsFor(450)));
+  assert.notDeepEqual(asked, layout3d(paths, edges, 300));
 });
 
 test("the camera: what it looks at is in the middle, nearer is larger, and turning it a quarter brings the side to the front", () => {
