@@ -1,6 +1,6 @@
 import { readBody, sendRequest, without } from "./image-generation.js";
 import { decodeBase64 } from "./prompt-images.js";
-import { MAX_VIDEO_BYTES, VIDEO_HEAD, ebmlDocType, videoType } from "./video-files.js";
+import { MAX_VIDEO_BYTES, VIDEO_HEAD, sniffVideo } from "./video-files.js";
 import { VIDEO_TIMEOUT_SECONDS, framesFor } from "./video-settings.js";
 import { VideoGenerationError, type MadeVideo, type VideoBackend, type VideoGenerationConfig, type VideoRequest, type VideoRun } from "./video-types.js";
 
@@ -18,8 +18,9 @@ import { VideoGenerationError, type MadeVideo, type VideoBackend, type VideoGene
  *
  * What the portal asks for is a WebM, which every browser plays: the server
  * makes it only when it was built with WebM support, which it says in its
- * capabilities, and an AVI or an animated WebP, which it can make too, is not
- * something a page can play.
+ * capabilities. What it answers with is kept whatever it is (an AVI or an
+ * animated WebP, which it can make too, is a file the person can download); the
+ * page plays a WebM and an MP4 and offers the rest as a download.
  */
 
 /** Said of a clip's frame rate when the caller thinks in seconds and neither the request, the settings nor the server say one: what most video models are made for. */
@@ -56,7 +57,7 @@ function said(json: any): string {
 }
 
 /** The body of a request for a clip, in the native API's own names. */
-function bodyOf(config: VideoGenerationConfig, request: VideoRequest, serverFps: number | undefined): Record<string, unknown> {
+function bodyOf(config: VideoGenerationConfig, request: VideoRequest, serverFps: number | undefined, format: string): Record<string, unknown> {
   const size = request.size || config.size;
   const sides = /^(\d+)x(\d+)$/.exec(size);
   const model = request.model || config.model;
@@ -74,7 +75,7 @@ function bodyOf(config: VideoGenerationConfig, request: VideoRequest, serverFps:
     ...(request.seed !== undefined ? { seed: request.seed } : {}),
     ...(request.sampleSteps !== undefined ? { sample_params: { sample_steps: request.sampleSteps } } : {}),
     ...(request.firstFrame ? { init_image: `data:${request.firstFrame.mimeType};base64,${request.firstFrame.bytes.toString("base64")}` } : {}),
-    output_format: "webm",
+    output_format: format,
   };
 }
 
@@ -129,20 +130,22 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
     return fail(without(`Could not reach the video endpoint at ${root.origin} (${why})`, key));
   };
 
-  /** Whether the server is one that makes clips, and the frame rate it makes them at without being told: nothing is assumed of one that does not answer. */
-  const capabilities = async (base: URL): Promise<{ fps?: number } | undefined> => {
+  /**
+   * Whether the server is one that makes clips, the frame rate it makes them at without being told, and the format to ask for:
+   * a WebM, which every browser plays, where it makes one, else the first it says it makes, which is kept as the file it is.
+   * Nothing is assumed of one that does not answer.
+   */
+  const capabilities = async (base: URL): Promise<{ fps?: number; format?: string } | undefined> => {
     try {
       const { status, json } = await call(route(base, "capabilities"), "GET");
       if (status !== 200 || !json || typeof json !== "object") return undefined;
       if (Array.isArray(json.supported_modes) && !json.supported_modes.includes("vid_gen")) {
         throw fail("This stable-diffusion.cpp server has no video model loaded, so it cannot make a clip: start it with a video model");
       }
-      const formats = json.output_formats_by_mode?.vid_gen;
-      if (Array.isArray(formats) && !formats.includes("webm")) {
-        throw fail(`This stable-diffusion.cpp server cannot make a WebM, which is what a browser plays (it makes ${without(formats.join(", "), key).slice(0, 100) || "nothing"}): build it with WebM support`);
-      }
+      const formats: unknown[] = Array.isArray(json.output_formats_by_mode?.vid_gen) ? json.output_formats_by_mode.vid_gen : [];
+      const asked = formats.includes("webm") ? "webm" : formats.find((f): f is string => typeof f === "string" && /^[a-z0-9]{1,10}$/.test(f));
       const fps = json.defaults_by_mode?.vid_gen?.fps;
-      return { fps: Number.isInteger(fps) && fps > 0 ? fps : undefined };
+      return { fps: Number.isInteger(fps) && fps > 0 ? fps : undefined, ...(asked ? { format: asked } : {}) };
     } catch (e) {
       if (e instanceof VideoGenerationError || signal.aborted) throw e;
       // Not answering is for the request itself to say, with the reason.
@@ -153,7 +156,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
   try {
     // Asked of the server before anything is sent, so that a server that has no video model, or cannot make a WebM, is said so in plain words.
     const caps = await capabilities(root);
-    const submitted = await call(route(root, "vid_gen"), "POST", bodyOf(config, request, caps?.fps));
+    const submitted = await call(route(root, "vid_gen"), "POST", bodyOf(config, request, caps?.fps, caps?.format ?? "webm"));
     if (submitted.status !== 202 && submitted.status !== 200) {
       // In the server's words, with the key out first (it may repeat it) and then the cut: every answer of its that is shown is shown so.
       const why = without(said(submitted.json), key).replace(/\s+/g, " ").slice(0, 300);
@@ -183,7 +186,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
       } else {
         misses = 0;
         const state = text(job.json?.status);
-        if (state === "completed") return finished(job.json?.result, max, job.json, key);
+        if (state === "completed") return finished(job.json?.result, max);
         if (state === "failed") {
           const why = without(said({ error: job.json?.error }), key).replace(/\s+/g, " ").slice(0, 300);
           throw fail(`The video endpoint could not make the clip${why ? `: ${why}` : ""}`);
@@ -204,54 +207,19 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
   }
 }
 
-/** A value the server named, for a message: the key out first (it may repeat it, and a cut would leave a piece of it), printable characters only, and short; nothing is said of one that is not text or a number. */
-const named = (v: unknown, key: string, most = 40): string => {
-  const flat = without(typeof v === "string" || (typeof v === "number" && Number.isFinite(v)) ? String(v) : "", key).replace(/[^\x20-\x7e]/g, "?").trim();
-  return flat.length > most ? `${flat.slice(0, most - 1)}…` : flat;
-};
-
-/** The size a job says its clip has: "832x480" as it names it, or its width and height. */
-function resolutionOf(result: any, job: any, key: string): string {
-  for (const from of [result, job]) {
-    const given = from?.resolution;
-    if (given && typeof given === "object" && Number.isInteger(given.width) && Number.isInteger(given.height)) return `${given.width}x${given.height}`;
-    if (named(given, key)) return named(given, key);
-    if (Number.isInteger(from?.width) && Number.isInteger(from?.height)) return `${from.width}x${from.height}`;
-  }
-  return "";
-}
-
 /**
- * What the portal says of a finished job whose file is no WebM or MP4, so that it can be read without the server's log:
- * what the job calls the file (`output_format`, `mime_type`), what the file's first bytes are (and, for an EBML file,
- * the document type it says it is), and how many frames and what size the job says it made. What a field does not say
- * is said not to be given.
+ * The clip in a finished job's result, decoded. Whatever it is, it is kept: a finished clip is never failed by its
+ * format. Its first bytes say what kind of file it is (see sniffVideo), which names the file and tells the page
+ * whether a browser plays it; the size limit still holds, and so does the answer having a clip in it at all.
  */
-function notPlayable(result: any, job: any, head: Buffer, key: string): string {
-  const frames = result?.frame_count ?? job?.frame_count;
-  const bytes = [...head.subarray(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
-  // A file of the Matroska family that a browser does not play as a WebM: what it says it is, as the format has it.
-  const ebml = head.length >= 4 && head.readUInt32BE(0) === 0x1a45dfa3;
-  const doc = ebml ? ebmlDocType(head.subarray(0, VIDEO_HEAD)) : undefined;
-  const kind = !ebml ? "" : doc !== undefined ? ` (an EBML file of document type ${named(doc, key) || "none"})` : " (an EBML file with no readable document type)";
-  return [
-    "What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays.",
-    `It says output_format ${named(result?.output_format, key, 20) || "not given"}, mime_type ${named(result?.mime_type, key) || "not given"}; the file starts with ${bytes || "nothing"}${kind};`,
-    `frame_count ${named(frames, key) || "not given"}, resolution ${resolutionOf(result, job, key) || "not given"}.`,
-  ].join(" ");
-}
-
-/** The clip in a finished job's result: decoded, and by its first bytes a WebM or an MP4. `job` is the whole answer about the job, which may say more of it than its result. */
-function finished(result: any, max: number, job: any, key: string): MadeVideo {
+function finished(result: any, max: number): MadeVideo {
   const encoded = text(result?.b64_json);
   if (!encoded) throw fail("The video endpoint finished the clip, but with no video in its answer");
   const decoded = decodeBase64(encoded, max);
   if ("error" in decoded) throw fail(decoded.error === "invalid" ? "The clip the video endpoint sent is not base64" : `The clip is over ${max / 1024 / 1024} MB`);
-  const type = videoType(decoded.bytes.subarray(0, VIDEO_HEAD));
-  if (!type) throw fail(notPlayable(result, job, decoded.bytes, key));
   const frames = result?.frame_count;
   const fps = result?.fps;
-  return { bytes: decoded.bytes, ext: type.ext, ...(Number.isInteger(frames) && frames > 0 ? { frames } : {}), ...(Number.isInteger(fps) && fps > 0 ? { fps } : {}) };
+  return { bytes: decoded.bytes, ext: sniffVideo(decoded.bytes.subarray(0, VIDEO_HEAD)).id, ...(Number.isInteger(frames) && frames > 0 ? { frames } : {}), ...(Number.isInteger(fps) && fps > 0 ? { fps } : {}) };
 }
 
 /** Takes a job out of the server's queue when it is still in it. Best effort, with a short time of its own: the portal is done with the job either way. */

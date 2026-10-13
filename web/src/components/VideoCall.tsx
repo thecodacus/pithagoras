@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { LuChevronRight } from "react-icons/lu";
 import { api } from "../api";
 import { stripAnsi, type Item } from "../transcript";
 import { failureReason, videoCall } from "../video-call";
-import { t } from "../i18n";
+import { t, tx } from "../i18n";
 import { Collapse, ToolArgs } from "./ChatActivity";
 import { useNow } from "../use-now";
 import { ImagePreview, type PreviewState } from "./ImagePreview";
@@ -44,7 +45,27 @@ export function VideoCall({ item, sessionId }: { item: ToolItem; sessionId: stri
   );
   return (
     <div className="picture-call video-call">
-      {state === "done" && item.video ? (
+      {state === "done" && item.video?.notPlayable ? (
+        // Kept as the file it is, which a browser cannot play: said so, with where it can be had.
+        <figure className="video-call-player">
+          <p className="chat-video-gone">
+            {tx("Its format is {format}, which a browser cannot play here. It is saved, and in the {gallery}, where it can be downloaded.", {
+              format: item.video.notPlayable,
+              gallery: (
+                <Link to="/media" className="text-accent hover:underline">
+                  {t("Media gallery")}
+                </Link>
+              ),
+            })}
+          </p>
+          <figcaption className="image-preview-caption">
+            <span className="image-preview-title" title={title}>
+              {title}
+            </span>
+            {details}
+          </figcaption>
+        </figure>
+      ) : state === "done" && item.video ? (
         <figure className="video-call-player">
           <ChatVideo src={api.videoUrl(sessionId, item.video.path, item.videoSeq)} title={title ?? item.video.path} />
           <figcaption className="image-preview-caption">

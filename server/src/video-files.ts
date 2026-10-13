@@ -8,14 +8,36 @@ import { FileError, openDownload } from "./workspace-files.js";
  * to be played inline must really be one of the kinds a browser plays — WebM and
  * MP4 — by what its bytes say and not by its name, so that no page and no script
  * is ever served under this portal's origin from a file the agent wrote.
+ *
+ * That is a rule about what is played, not about what is kept: whatever an endpoint
+ * finishes a clip as is stored and listed, with the kind its bytes say it is (see
+ * sniffVideo), and a kind a browser does not play is served to be downloaded, never inline.
  */
 
 /** The most a clip may weigh, whether the portal takes it from an endpoint or lists and serves it. It is read whole into memory when an endpoint answers with it as base64, which is what the limit is for. */
 export const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
-export type VideoExt = "webm" | "mp4";
+/** What a stored clip's file is named with: its kind, as far as its bytes say; `bin` for a file they say nothing of. */
+export type VideoExt = "webm" | "mp4" | "mov" | "avi" | "webp" | "gif" | "mkv" | "ogg" | "bin";
 
-const MIME: Record<VideoExt, string> = { webm: "video/webm", mp4: "video/mp4" };
+/** What a file is, as the page is told: the kind, what it is called to a person, the type it is served as, and whether a browser plays it here. */
+export interface VideoFormat {
+  id: VideoExt;
+  label: string;
+  mimeType: string;
+  playable: boolean;
+}
+
+const FORMATS: Record<Exclude<VideoExt, "mkv">, VideoFormat> = {
+  webm: { id: "webm", label: "WebM", mimeType: "video/webm", playable: true },
+  mp4: { id: "mp4", label: "MP4", mimeType: "video/mp4", playable: true },
+  mov: { id: "mov", label: "QuickTime", mimeType: "video/quicktime", playable: false },
+  avi: { id: "avi", label: "AVI", mimeType: "video/x-msvideo", playable: false },
+  webp: { id: "webp", label: "WebP", mimeType: "image/webp", playable: false },
+  gif: { id: "gif", label: "GIF", mimeType: "image/gif", playable: false },
+  ogg: { id: "ogg", label: "Ogg", mimeType: "video/ogg", playable: false },
+  bin: { id: "bin", label: "Unknown", mimeType: "application/octet-stream", playable: false },
+};
 
 /** The first bytes a check of the kind reads. */
 export const VIDEO_HEAD = 64;
@@ -70,17 +92,38 @@ export function ebmlDocType(head: Buffer): string | undefined {
   return undefined;
 }
 
+/** A document type, as a person is shown it: printable characters and short. */
+const shownDocType = (doc: string): string => doc.replace(/[^\x20-\x7e]/g, "?").slice(0, 24);
+
 /**
- * What a clip is by its first bytes, or nothing when it is no WebM or MP4: a WebM begins with an EBML header whose
- * document type is `webm` or `matroska` (what stable-diffusion.cpp writes for the clips it makes), an MP4 with a
- * `ftyp` box. An EBML file of another document type is left out, and so is a QuickTime movie, which has the box
- * too, as a browser does not play it where it plays an MP4.
+ * What a file is by its first bytes, whatever it is called or says it is: a WebM is an EBML file whose document type,
+ * read from its header, is `webm` or `matroska` (what stable-diffusion.cpp writes for the clips it makes); an MP4
+ * has a `ftyp` box. Those two are what a browser plays here. Every other file is some other kind, or none:
+ * an EBML file of another document type, a QuickTime movie (which has the box too), an AVI, a WebP or a GIF, an
+ * Ogg file, and the rest, which is unknown and is served as bytes.
+ */
+export function sniffVideo(head: Buffer): VideoFormat {
+  const doc = ebmlDocType(head);
+  if (doc !== undefined && WEBM_DOC_TYPES.includes(doc)) return FORMATS.webm;
+  if (head.length >= 4 && head.readUInt32BE(0) === EBML) return { id: "mkv", label: doc ? `EBML (${shownDocType(doc)})` : "EBML", mimeType: "video/x-matroska", playable: false };
+  if (head.length >= 12 && head.toString("latin1", 4, 8) === "ftyp") return head.toString("latin1", 8, 12) === "qt  " ? FORMATS.mov : FORMATS.mp4;
+  if (head.length >= 12 && head.toString("latin1", 0, 4) === "RIFF") {
+    const kind = head.toString("latin1", 8, 12);
+    if (kind === "AVI ") return FORMATS.avi;
+    if (kind === "WEBP") return FORMATS.webp;
+  }
+  if (head.length >= 4 && head.toString("latin1", 0, 4) === "GIF8") return FORMATS.gif;
+  if (head.length >= 4 && head.toString("latin1", 0, 4) === "OggS") return FORMATS.ogg;
+  return FORMATS.bin;
+}
+
+/**
+ * What a clip is by its first bytes, or nothing when a browser does not play it here: only a WebM and an MP4
+ * are (see sniffVideo). What shows a clip in the page or in the chat goes by this.
  */
 export function videoType(head: Buffer): { ext: VideoExt; mimeType: string } | undefined {
-  const doc = ebmlDocType(head);
-  if (doc !== undefined && WEBM_DOC_TYPES.includes(doc)) return { ext: "webm", mimeType: MIME.webm };
-  if (head.length >= 12 && head.toString("latin1", 4, 8) === "ftyp" && head.toString("latin1", 8, 12) !== "qt  ") return { ext: "mp4", mimeType: MIME.mp4 };
-  return undefined;
+  const format = sniffVideo(head);
+  return format.playable ? { ext: format.id, mimeType: format.mimeType } : undefined;
 }
 
 /**
@@ -96,6 +139,25 @@ export function openVideo(base: string, rel: unknown): { fd: number; size: numbe
     const type = videoType(head.subarray(0, read));
     if (!type) throw new FileError("invalid", "That is not a WebM or MP4 video");
     return { ...opened, mimeType: type.mimeType };
+  } catch (e) {
+    closeSync(opened.fd);
+    throw e;
+  }
+}
+
+/**
+ * A file of the gallery's, opened to be listed or sent, whatever it is: checked by its size and never through a link out of
+ * the folder (see openDownload), and told what it is by its first bytes (see sniffVideo), which says whether it may be
+ * played inline or only downloaded. The descriptor is the caller's to close.
+ */
+export function openClip(base: string, rel: unknown): { fd: number; size: number; name: string; mimeType: string; format: VideoFormat } {
+  const opened = openDownload(base, rel);
+  try {
+    if (opened.size > MAX_VIDEO_BYTES) throw new FileError("too_large", `The video is over ${MAX_VIDEO_BYTES / 1024 / 1024} MB; download it instead`);
+    const head = Buffer.alloc(VIDEO_HEAD);
+    const read = readSync(opened.fd, head, 0, head.length, 0);
+    const format = sniffVideo(head.subarray(0, read));
+    return { ...opened, mimeType: format.mimeType, format };
   } catch (e) {
     closeSync(opened.fd);
     throw e;

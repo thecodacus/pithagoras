@@ -425,7 +425,7 @@ export const TranscriptRow = memo(function TranscriptRow({
           </PictureButton>
         </div>
       )}
-      {item.video && (
+      {item.video && !item.video.notPlayable && (
         // What show_video put in front of the person: the player, in the middle of the column as a picture is.
         <div className="chat-picture my-3 flex justify-center">
           <ChatVideo src={api.videoUrl(sessionId, item.video.path, item.videoSeq)} title={item.video.title ?? item.video.path} />

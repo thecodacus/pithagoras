@@ -179,6 +179,9 @@ export function MediaPage() {
         label: videoName(v),
         ...(v.prompt ? { caption: v.prompt } : {}),
         fileName: v.fileName,
+        // A clip a browser does not play is offered as a download there, with a WebM copy to play where there is one.
+        ...(v.format ? { format: { label: v.format.label, playable: v.format.playable } } : {}),
+        ...(v.copy ? { copy: { url: api.videoCopyUrl(v.id), state: v.copy } } : {}),
       })),
     [videos.list.items],
   );
@@ -763,6 +766,11 @@ export function MediaPage() {
           onClose={() => setOpened(null)}
           // Where it was opened from: its video in the gallery.
           anchor={(id) => document.querySelector<HTMLElement>(`[data-picture-id="${CSS.escape(id)}"]`)}
+          onCopy={async (id) => {
+            await api.makeVideoCopy(id);
+            // The list says it has one now.
+            videos.refreshTop();
+          }}
           actions={(vv) => {
             const video = videoById.get(vv.id);
             if (!video) return null;

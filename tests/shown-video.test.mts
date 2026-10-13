@@ -93,3 +93,14 @@ test("what went wrong with a clip is given whole, where a picture's is kept to a
   assert.equal(clipFailure(undefined), "");
   assert.equal(pictureFailure(message).length, 240, "the picture's card keeps a few lines");
 });
+
+test("a clip the portal's tool kept as a file a browser cannot play is said to be one, and an extension's tool of the name says nothing", () => {
+  const kept = { toolName: "generate_video", result: { details: { path: "generated-videos/video-1.avi", title: "Old", notPlayable: "AVI", [GENERATED_VIDEO_MARK]: true } } };
+  assert.deepEqual(shownVideo(kept), { path: "generated-videos/video-1.avi", title: "Old", notPlayable: "AVI" });
+  assert.equal(shownVideo({ ...kept, result: { details: { ...kept.result.details, notPlayable: "x".repeat(100) } } })?.notPlayable?.length, 40, "kept short");
+  // A clip that plays says nothing of the kind, and show_video's does not either.
+  assert.deepEqual(shownVideo({ toolName: "generate_video", result: { details: { path: "g/a.webm", [GENERATED_VIDEO_MARK]: true } } }), { path: "g/a.webm" });
+  assert.equal(shownVideo({ toolName: "show_video", result: { details: { path: "a.avi", notPlayable: "AVI" } } })?.notPlayable, undefined);
+  // Without the mark it is an extension's tool, which is not taken for the portal's.
+  assert.equal(shownVideo({ toolName: "generate_video", result: { details: { path: "a.avi", notPlayable: "AVI" } } }), undefined);
+});

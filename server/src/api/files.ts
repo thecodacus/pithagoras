@@ -82,13 +82,15 @@ export function sendPicture(req: Request, res: Response, opened: ReturnType<type
  * Sends a clip that was opened by openVideo, as sendPicture sends a picture and under the same policy, and with
  * what a player needs: it asks for the part of the file it is about to show (`Range`), and is answered with just
  * that, so that a clip of tens of megabytes starts at once and can be moved around in. The descriptor is
- * closed with the response, or at once if the response is already gone.
+ * closed with the response, or at once if the response is already gone. With `download` (a file name) the file is sent
+ * to be saved and never shown: for a clip a browser does not play, whatever it is.
  */
-export function sendVideo(req: Request, res: Response, opened: ReturnType<typeof openVideo>, cache: string): void {
+export function sendVideo(req: Request, res: Response, opened: ReturnType<typeof openVideo>, cache: string, download?: string): void {
   const { fd, size, mimeType } = opened;
   if (res.destroyed) return void closeSync(fd);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+  if (download !== undefined) res.setHeader("Content-Disposition", `attachment; filename="${download.replace(/[^\x20-\x7e]|["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(download)}`);
   res.setHeader("Cache-Control", cache);
   res.setHeader("Accept-Ranges", "bytes");
   const modified = fstatSync(fd).mtime;

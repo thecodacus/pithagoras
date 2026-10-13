@@ -2521,6 +2521,15 @@ const de: Locale = {
     // voice.ts
     "Code is shown in the transcript.": "Der Code steht im Chatverlauf.",
     // Video generation (components/VideoParts.tsx, VideoMaker.tsx, VideoViewer.tsx, VideoCall.tsx, VideoFramePicker.tsx, FeatureAddons.tsx)
+    "Its format is {format}, which a browser cannot play here. It is saved, and in the {gallery}, where it can be downloaded.": "Das Format ist {format}, das ein Browser hier nicht abspielen kann. Es ist gespeichert und in der {gallery}, wo man es herunterladen kann.",
+    "Media gallery": "Mediengalerie",
+    "{format}, not played here": "{format}, wird hier nicht abgespielt",
+    "A browser cannot play it here": "Ein Browser kann es hier nicht abspielen",
+    "Its format is {format}, which a browser cannot play here.": "Das Format ist {format}, das ein Browser hier nicht abspielen kann.",
+    "Download it": "Herunterladen",
+    "Making a WebM copy…": "WebM-Kopie wird erstellt …",
+    "Make a WebM copy to play": "WebM-Kopie zum Abspielen erstellen",
+    "A WebM copy plays here; the original {format} file is kept, and Download gives it.": "Hier läuft eine WebM-Kopie; die {format}-Originaldatei bleibt erhalten, und „Herunterladen“ liefert sie.",
     "Videos": "Videos",
     "Video model": "Videomodell",
     "Making videos, on the Media page and for the agent.": "Videos erstellen, auf der Medien-Seite und für den Agenten.",

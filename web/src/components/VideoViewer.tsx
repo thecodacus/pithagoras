@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { LuChevronLeft, LuChevronRight, LuDownload, LuExternalLink, LuX } from "react-icons/lu";
+import { LuChevronLeft, LuChevronRight, LuDownload, LuExternalLink, LuFileVideo, LuLoader, LuX } from "react-icons/lu";
 import { isEscape } from "../shortcuts";
 import { useLeaveRef } from "../motion";
 import { useBackToClose } from "../use-back-to-close";
@@ -23,6 +23,10 @@ export interface ViewerVideo {
   caption?: string;
   /** What Download names the file, when the address does not say. */
   fileName?: string;
+  /** Where the file is not a WebM or an MP4, which a browser plays: what it is in words. It is then offered as a download, and not played. */
+  format?: { label: string; playable: boolean };
+  /** For a clip that is not played as it is: its playable WebM copy, where it is, and whether it is made (`ready`) or can be made on request (`available`). */
+  copy?: { url: string; state: "ready" | "available" };
 }
 
 /** What can take the keyboard: the viewer's own buttons, and what a page puts in `actions`. */
@@ -48,6 +52,7 @@ export function VideoViewer({
   onClose,
   anchor,
   actions,
+  onCopy,
 }: {
   videos: ViewerVideo[];
   /** The `id` of the clip to open on. */
@@ -57,6 +62,8 @@ export function VideoViewer({
   anchor?: (id: string) => HTMLElement | null | undefined;
   /** More buttons beside Close, for the clip shown: a page that can delete one puts that here. */
   actions?: (video: ViewerVideo) => ReactNode;
+  /** Makes the playable copy of a clip, and resolves when it is made; rejects with what to tell. */
+  onCopy?: (id: string) => Promise<void>;
 }) {
   const [shownId, setShownId] = useState(startId);
   const found = videos.findIndex((v) => v.id === shownId);
@@ -70,6 +77,10 @@ export function VideoViewer({
   const dialog = useRef<HTMLDivElement>(null);
   const leaving = useLeaveRef<HTMLDivElement>("dialog");
   const [failed, setFailed] = useState<string | null>(null);
+  // The playable copies made while this is open, and the one being made now, or the reason one could not be.
+  const [made, setMade] = useState<ReadonlySet<string>>(new Set());
+  const [copying, setCopying] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<{ id: string; why: string } | null>(null);
 
   const step = (by: 1 | -1) => {
     const to = stepped(index, videos.length, by);
@@ -156,6 +167,22 @@ export function VideoViewer({
   const many = videos.length > 1;
   const closeOnBlank = (e: ReactMouseEvent) => e.target === e.currentTarget && onClose();
   const broken = failed === id;
+  // A clip a browser does not play is offered as a download, with its playable copy to play where there is one.
+  const offered = !!video.format && !video.format.playable;
+  const copy = offered && video.copy && (video.copy.state === "ready" || made.has(id)) ? video.copy.url : undefined;
+  const makeCopy = async () => {
+    if (!onCopy) return;
+    setCopying(id);
+    setCopyError(null);
+    try {
+      await onCopy(id);
+      setMade((cur) => new Set(cur).add(id));
+    } catch (e) {
+      setCopyError({ id, why: (e as Error).message });
+    } finally {
+      setCopying(null);
+    }
+  };
 
   return createPortal(
     <div ref={leaving} className="ui-backdrop video-viewer fixed inset-0 z-[55] bg-canvas/95 backdrop-blur-md">
@@ -164,9 +191,11 @@ export function VideoViewer({
           {many && <span aria-hidden className="px-2 text-xs tabular-nums text-fg-muted">{index + 1} / {videos.length}</span>}
           <div className="flex-1" onClick={closeOnBlank} />
           {actions?.(video)}
-          <a href={video.src} target="_blank" rel="noreferrer" className={iconButton} aria-label={t("Open in a new tab")} title={t("Open in a new tab")}>
-            <LuExternalLink aria-hidden className="h-[18px] w-[18px]" />
-          </a>
+          {!offered && (
+            <a href={video.src} target="_blank" rel="noreferrer" className={iconButton} aria-label={t("Open in a new tab")} title={t("Open in a new tab")}>
+              <LuExternalLink aria-hidden className="h-[18px] w-[18px]" />
+            </a>
+          )}
           <a href={video.src} download={video.fileName ?? ""} className={iconButton} aria-label={t("Download the video")} title={t("Download the video")}>
             <LuDownload aria-hidden className="h-[18px] w-[18px]" />
           </a>
@@ -177,14 +206,36 @@ export function VideoViewer({
 
         <div className="relative min-h-0 flex-1" onClick={closeOnBlank}>
           <div className="absolute inset-0 grid place-items-center px-2 sm:px-14" onClick={closeOnBlank}>
-            {broken ? (
+            {offered && !copy ? (
+              <div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
+                <LuFileVideo aria-hidden className="h-10 w-10 text-fg-subtle" />
+                <p className="text-sm text-fg">{t("Its format is {format}, which a browser cannot play here.", { format: video.format!.label })}</p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <a href={video.src} download={video.fileName ?? ""} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-black transition hover:opacity-90">
+                    <LuDownload aria-hidden className="h-4 w-4" />
+                    {t("Download it")}
+                  </a>
+                  {video.copy?.state === "available" && onCopy && (
+                    <button type="button" onClick={() => void makeCopy()} disabled={copying !== null} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-sm text-fg-muted transition hover:bg-fg/10 hover:text-fg disabled:opacity-50">
+                      {copying === id && <LuLoader aria-hidden className="h-4 w-4 animate-spin" />}
+                      {copying === id ? t("Making a WebM copy…") : t("Make a WebM copy to play")}
+                    </button>
+                  )}
+                </div>
+                {copyError?.id === id && (
+                  <p role="alert" className="text-xs text-danger">
+                    {copyError.why}
+                  </p>
+                )}
+              </div>
+            ) : broken ? (
               <p className="px-6 text-center text-sm text-fg-muted">{t("The video could not be loaded.")}</p>
             ) : (
               <video
-                key={id}
+                key={`${id}${copy ? ":copy" : ""}`}
                 data-video=""
-                src={video.src}
-                poster={video.poster}
+                src={copy ?? video.src}
+                poster={copy ? undefined : video.poster}
                 aria-label={video.label}
                 controls
                 autoPlay
@@ -210,6 +261,7 @@ export function VideoViewer({
         <footer onClick={closeOnBlank} className="flex shrink-0 items-center gap-3 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1">
           <p className="min-w-0 flex-1 text-sm text-fg-muted" onClick={closeOnBlank}>
             {video.caption && <span className="line-clamp-2">{video.caption}</span>}
+            {copy && <span className="block text-xs text-fg-subtle">{t("A WebM copy plays here; the original {format} file is kept, and Download gives it.", { format: video.format!.label })}</span>}
           </p>
           {/* Said aloud when the clip changes: the arrows move nothing a screen reader is on. */}
           <span className="sr-only" aria-live="polite">

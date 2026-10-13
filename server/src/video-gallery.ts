@@ -4,7 +4,8 @@ import { DATA_DIR } from "./data-dir.js";
 import { getDb } from "./db.js";
 import { ChatGone, chatFolder, folderLabel, folderOf, foundFolder, knownFolders, locateRow, newId, realFolderOf, type MediaOrigin } from "./media-folders.js";
 import { isWithinText, realPath } from "./within.js";
-import { openVideo, type VideoExt } from "./video-files.js";
+import { VIDEO_HEAD, openClip, sniffVideo, type VideoExt, type VideoFormat } from "./video-files.js";
+import { copyState, openCopy, removeCopies } from "./video-copies.js";
 import { openPoster, posterAvailable, removePosters } from "./video-posters.js";
 import { FileError, baseDir, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
 
@@ -22,7 +23,9 @@ import { FileError, baseDir, removeEntry, resolveInside, saveNewFile } from "./w
  * made (see recordChatVideo). Those that were never recorded are found by looking in
  * exactly those folders (see scanFolders), and in them only `generated-videos`.
  * A file is only ever opened and served through the checks a clip gets: a path
- * inside the folder, no link followed out of it, and what the bytes say it is.
+ * inside the folder, no link followed out of it, and what the bytes say it is. Every
+ * file is listed, whatever it is (see sniffVideo): a WebM and an MP4 are played, and the
+ * rest is a file that can be downloaded, with a WebM copy to play when ffmpeg is there.
  *
  * What goes from the list when a file does: a clip whose file is gone is dropped the
  * next time the page looks. The clips of a chat stay when the chat goes, as clips of
@@ -70,8 +73,12 @@ export interface GalleryVideo {
   bytes: number;
   /** What a download is called. */
   fileName: string;
-  /** The portal can make a poster picture of it (see video-posters.ts), which the tiles show until the clip is played. */
+  /** The portal can make a poster picture of it (see video-posters.ts), which the tiles show until the clip is played. Only for a clip a browser plays. */
   poster: boolean;
+  /** What the file is by its first bytes, and whether a browser plays it here: only a WebM and an MP4 are, and the rest is offered as a download. */
+  format: VideoFormat;
+  /** For a clip that is not played as it is: a playable WebM copy of it is `ready`, or ffmpeg is there to make one on request (`available`). */
+  copy?: "ready" | "available";
 }
 
 interface Row {
@@ -130,7 +137,31 @@ function downloadName(row: Row): string {
   return `video-${stamp}-${row.id.slice(0, 4)}${path.extname(row.path)}`;
 }
 
-function shown(row: ListedRow): GalleryVideo {
+/** What a clip's file is and what it is when listed: the kind its first bytes say, and the size and time the copy of it is named for. A file that cannot be reached is told as nothing known. */
+interface Looked {
+  format: VideoFormat;
+  size?: number;
+  modifiedMs?: number;
+}
+
+const UNKNOWN: VideoFormat = sniffVideo(Buffer.alloc(0));
+
+function look(row: Row, folders: Map<string, string | FileError>): Looked {
+  try {
+    const at = locate(row, folders);
+    const opened = openClip(at.base, at.rel);
+    try {
+      return { format: opened.format, size: opened.size, modifiedMs: fstatSync(opened.fd).mtimeMs };
+    } finally {
+      closeSync(opened.fd);
+    }
+  } catch {
+    return { format: UNKNOWN };
+  }
+}
+
+function shown(row: ListedRow, looked: Looked): GalleryVideo {
+  const copy = looked.size !== undefined && looked.modifiedMs !== undefined ? copyState(row.id, looked.size, looked.modifiedMs, looked.format.playable) : undefined;
   return {
     id: row.id,
     origin: row.origin,
@@ -142,8 +173,16 @@ function shown(row: ListedRow): GalleryVideo {
     createdAt: row.created_at,
     bytes: row.bytes,
     fileName: downloadName(row),
-    poster: posterAvailable(),
+    poster: looked.format.playable && posterAvailable(),
+    format: looked.format,
+    ...(copy ? { copy } : {}),
   };
+}
+
+/** Rows as the page is told of them, each with what its file is: a few bytes are read of each. */
+function shownAll(rows: ListedRow[]): GalleryVideo[] {
+  const folders = new Map<string, string | FileError>();
+  return rows.map((row) => shown(row, look(row, folders)));
 }
 
 const SELECT = "SELECT videos.*, sessions.title AS chat_title FROM videos LEFT JOIN sessions ON sessions.id = videos.session_id";
@@ -217,7 +256,8 @@ export function addPageVideo(video: { bytes: Buffer; ext: VideoExt; kind: VideoK
     created_at: Date.now(),
   };
   insert(row);
-  return shown({ ...row, chat_title: null });
+  const format = sniffVideo(video.bytes.subarray(0, VIDEO_HEAD));
+  return shown({ ...row, chat_title: null }, { format, size: video.bytes.length, modifiedMs: Date.now() });
 }
 
 /**
@@ -305,8 +345,10 @@ function kindByName(name: string): VideoKind {
 
 /**
  * Whether the file `name` of the `generated-videos` folder of `real` is a clip to list, and then its size and
- * time. It is opened as serving one opens it, so that nothing is listed that could not be played. A file that
- * is no clip is not opened again until it changes.
+ * time. It is opened as serving one opens it. What its first bytes say is some kind of clip is listed, played or
+ * downloaded as what it is; a file they say nothing of is listed only when it is named as the tool names what it
+ * makes (it is then a clip the endpoint sent that nobody could tell the kind of), and not otherwise: the folder may
+ * hold other things. A file that is not listed is not opened again until it changes.
  */
 function clipAt(real: string, name: string): { size: number; mtimeMs: number } | undefined {
   const rel = `${GENERATED_VIDEOS_DIR}/${name}`;
@@ -316,8 +358,12 @@ function clipAt(real: string, name: string): { size: number; mtimeMs: number } |
     const stamp = `${size}:${mtimeMs}`;
     if (refused.get(file) === stamp) return undefined;
     try {
-      const opened = openVideo(real, rel);
+      const opened = openClip(real, rel);
       try {
+        if (opened.format.id === "bin" && kindByName(name) !== "generated") {
+          refused.set(file, stamp);
+          return undefined;
+        }
         return { size: opened.size, mtimeMs: fstatSync(opened.fd).mtimeMs };
       } finally {
         closeSync(opened.fd);
@@ -334,8 +380,8 @@ function clipAt(real: string, name: string): { size: number; mtimeMs: number } |
 /**
  * Lists the clips that lie in the folders the tool writes into and were never recorded, as scanFolders of the
  * pictures does: only `generated-videos` of the folders the portal knows (see knownFolders) is looked in, only
- * plain files, and what is listed is what its bytes show to be a WebM or an MP4 not over the size a clip may
- * have. A file that is listed already, or was found not to be a clip, is not opened again until it changes.
+ * plain files, and what is listed is what its bytes show to be some kind of clip (see clipAt), not over the size a
+ * clip may have. A file that is listed already, or was found not to be a clip, is not opened again until it changes.
  * What is found is a clip of its folder, as which chat made it cannot be told. Returns how many were added.
  */
 export function scanFolders(): number {
@@ -407,6 +453,7 @@ function forget(ids: string[]): void {
     for (const id of ids) remove.run(id);
   })();
   removePosters(ids);
+  removeCopies(ids);
 }
 
 /**
@@ -488,7 +535,7 @@ export function listVideos(query: ListQuery = {}): { videos: GalleryVideo[]; nex
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return {
-    videos: page.map(shown),
+    videos: shownAll(page),
     next: rows.length > limit && last ? `${last.created_at}:${last.id}` : null,
     total: counted.n,
     pageBytes: pageVideoBytes(),
@@ -497,14 +544,15 @@ export function listVideos(query: ListQuery = {}): { videos: GalleryVideo[]; nex
 
 /** Some clips by their ids, as far as they are in the list. */
 export function videosById(ids: string[]): GalleryVideo[] {
-  return ids.map(rowOf).filter((row): row is ListedRow => !!row).map(shown);
+  return shownAll(ids.map(rowOf).filter((row): row is ListedRow => !!row));
 }
 
 /**
- * A clip opened to be sent: the descriptor, its size and its type, from the same check a clip in a chat gets. A
- * file that is gone, or that has become something that is no clip, is not served, and is taken from the list.
+ * A clip opened to be sent: the descriptor, its size and the type its bytes say, from the same checks a clip in a
+ * chat gets. Whether it is played or only downloaded is for the caller, by its format. A file that is gone is not
+ * served, and is taken from the list.
  */
-export function openListedVideo(id: string): { fd: number; size: number; name: string; mimeType: string; origin: VideoOrigin } {
+export function openListedVideo(id: string): { fd: number; size: number; name: string; mimeType: string; format: VideoFormat; origin: VideoOrigin; fileName: string } {
   const row = rowOf(id);
   if (!row) throw new FileError("missing", "There is no such video");
   let at: { base: string; rel: string };
@@ -516,7 +564,7 @@ export function openListedVideo(id: string): { fd: number; size: number; name: s
     throw e;
   }
   try {
-    return { ...openVideo(at.base, at.rel), origin: row.origin };
+    return { ...openClip(at.base, at.rel), origin: row.origin, fileName: downloadName(row) };
   } catch (e) {
     if (e instanceof FileError && e.code === "missing") forget([id]);
     throw e;
@@ -530,6 +578,11 @@ export function openListedVideo(id: string): { fd: number; size: number; name: s
  */
 export async function openListedPoster(id: string): Promise<(Awaited<ReturnType<typeof openPoster>> & { origin: VideoOrigin }) | undefined> {
   const whole = openListedVideo(id);
+  // A clip a browser does not play has no poster: it is shown as what it is.
+  if (!whole.format.playable) {
+    closeSync(whole.fd);
+    return undefined;
+  }
   const poster = await openPoster(whole, id, () => !!rowOf(id));
   return poster ? { ...poster, origin: whole.origin } : undefined;
 }
@@ -557,4 +610,19 @@ export async function deleteVideo(id: string): Promise<void> {
     if (!missing(e)) throw e;
   }
   forget([id]);
+}
+
+/**
+ * The WebM copy of a clip a browser does not play, opened to be played; made first, when `make` says so and ffmpeg is
+ * there, and kept (see video-copies.ts). Nothing when there is none: the clip plays as it is, or there is no ffmpeg, or it
+ * could not make one of this clip. The original is not touched.
+ */
+export async function openListedCopy(id: string, make: boolean): Promise<(Awaited<ReturnType<typeof openCopy>> & { origin: VideoOrigin }) | undefined> {
+  const whole = openListedVideo(id);
+  if (whole.format.playable) {
+    closeSync(whole.fd);
+    return undefined;
+  }
+  const copy = await openCopy(whole, id, () => !!rowOf(id), make);
+  return copy ? { ...copy, origin: whole.origin } : undefined;
 }

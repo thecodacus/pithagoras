@@ -36,7 +36,7 @@ type Opened = { fd: number; size: number; name: string; mimeType: string };
 export const postersDir = (): string => path.join(path.resolve(DATA_DIR), "video-posters");
 
 /** What is run to take a frame out of a clip. */
-const tool = (): string => process.env.FFMPEG_PATH?.trim() || "ffmpeg";
+export const tool = (): string => process.env.FFMPEG_PATH?.trim() || "ffmpeg";
 
 /** Whether ffmpeg runs, asked now and then and not for every clip: a tool that is installed while the portal runs is found within a minute. */
 let probed: { at: number; tool: string; ok: boolean } | undefined;
@@ -113,7 +113,7 @@ const readAt = promisify(read);
  * not given to a stream that would close it: the descriptor is the caller's. It stops when ffmpeg does, which
  * does not read the rest once it has its frame.
  */
-async function feed(fd: number, size: number, into: NodeJS.WritableStream & { destroyed?: boolean }): Promise<void> {
+export async function feed(fd: number, size: number, into: NodeJS.WritableStream & { destroyed?: boolean }): Promise<void> {
   const chunk = Buffer.alloc(64 * 1024);
   for (let at = 0; at < size && !into.destroyed; ) {
     // A file that cannot be read is the clip's failure, and ends the call.

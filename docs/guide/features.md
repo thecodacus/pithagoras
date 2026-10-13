@@ -443,7 +443,7 @@ one has it after it is idle and reloaded (`/reload`). The tools belong to the in
 most 600. It is the picture tool's twin and keeps its rules: the video is written to a `generated-videos` folder inside the chat's folder under a name the
 portal makes (`video-20261001-101500-a1b2c3.webm`), never one the agent or the endpoint chose, and never over an existing
 file; nothing is written until the endpoint has answered with a real video, and a failure — nothing configured, the
-server's error, an answer that is no video, the time limit — is an error result the agent sees and can pass on. `path` is a
+server's error, an answer with no clip in it, the time limit — is an error result the agent sees and can pass on. `path` is a
 picture in the chat's folder, which is the first frame of the video; it is read and checked as `edit_image` checks a picture,
 and a picture outside the folder is refused. A picture only attached to a message is not in the folder, and the tool's
 description says so. The call waits for the video and stopping the chat stops the wait.
@@ -460,9 +460,10 @@ always costs minutes of its model.
 
 ### What is accepted from the video endpoint
 
-- **A real video.** What the server sends must be a WebM or an MP4 by its first bytes, whatever it is called or served as. A WebM is
-  an EBML file whose document type, read from its header, is `webm` or `matroska` (stable-diffusion.cpp writes its WebM clips
-  with `matroska`). An AVI, an animated WebP, an HTML page, an EBML file of another type — anything else — is refused and not kept.
+- **Nothing is refused for its format.** A finished clip is kept whatever it is (see [Clips a browser cannot play](/guide/media#clips-a-browser-cannot-play)):
+  by its first bytes, whatever it is called or served as, a WebM (an EBML file whose document type is `webm` or `matroska`, which is
+  what stable-diffusion.cpp writes) or an MP4 plays, and any other file — an AVI, an animated WebP, a GIF, an EBML file of another
+  type, a file of no known kind — is stored as it is, listed as what it is and offered as a download, never shown.
 - **A size and a time.** At most 100 MB per video, and the [time limit](#the-video-endpoint) in all. The video comes in one answer,
   as base64, so a long video is held in memory a few times over while it is decoded: the limit keeps that within reason.
 - **No other place.** The portal asks the address you gave, and no address the server's answers name: the job is asked about by

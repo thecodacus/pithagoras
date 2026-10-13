@@ -27,6 +27,8 @@ export { shownPicture, type ShownPicture } from "../../server/src/generated-pict
 export interface ShownVideo {
   path: string;
   title?: string;
+  /** For a clip a browser cannot play, which generate_video kept as it is: what the file is, in words. It is not played in the chat. */
+  notPlayable?: string;
 }
 
 /**
@@ -40,7 +42,11 @@ export function shownVideo(payload: any): ShownVideo | undefined {
   const details = payload?.result?.details;
   if (name === "generate_video" ? details?.[GENERATED_VIDEO_MARK] !== true : name !== "show_video") return undefined;
   if (typeof details?.path !== "string" || !details.path) return undefined;
-  return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
+  return {
+    path: details.path,
+    ...(typeof details.title === "string" && details.title ? { title: details.title } : {}),
+    ...(name === "generate_video" && typeof details.notPlayable === "string" && details.notPlayable ? { notPlayable: details.notPlayable.slice(0, 40) } : {}),
+  };
 }
 
 /**

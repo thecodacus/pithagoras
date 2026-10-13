@@ -77,6 +77,27 @@ test('a clip that was not made says so in its frame, with the endpoint\'s words'
   await expect(cut).toContainText('Interrupted before the video arrived');
 });
 
+test('a clip that was made but that a browser cannot play is saved, said so with its format, and points to the gallery; no player is drawn for it', async ({ page }) => {
+  await page.goto('/tests/videos.html');
+  await page.evaluate(() => {
+    (window as any).emit('tool_execution_start', { toolCallId: 'avi', toolName: 'generate_video', portalVideo: true, args: { prompt: 'An old format of a lighthouse', title: 'Old format' } });
+    (window as any).emit('tool_execution_end', {
+      toolCallId: 'avi',
+      toolName: 'generate_video',
+      result: { content: [{ type: 'text', text: 'Generated and saved: generated-videos/video-1.avi.' }], details: { path: 'generated-videos/video-1.avi', title: 'Old format', notPlayable: 'AVI', portalVideo: true } },
+    });
+  });
+  const card = page.locator('.video-call-player', { hasText: 'Old format' });
+  await expect(card).toContainText('Its format is AVI, which a browser cannot play here.');
+  await expect(card.getByRole('link', { name: 'Media gallery' })).toHaveAttribute('href', '/media');
+  await expect(card.locator('video')).toHaveCount(0);
+  // The call is still under Details.
+  await card.getByRole('button', { name: 'Details' }).click();
+  await expect(call(page, card).locator('.chat-tool-body')).toContainText('generate_video');
+  // Nothing asked the chat's folder for it as a clip.
+  expect(asked).not.toContain('generated-videos/video-1.avi');
+});
+
 test('a clip that was not made shows its whole message in its frame, which is not cut at a few lines or a few characters', async ({ page }) => {
   await page.goto('/tests/videos.html');
   const message = 'What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays. It says output_format avi, mime_type video/x-msvideo; the file starts with 52 49 46 46 10 20 30 40; frame_count 49, resolution 832x480, and then a good deal more that the server said about how it came to that.';

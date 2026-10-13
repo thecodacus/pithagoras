@@ -20,6 +20,9 @@ interface Clip {
   bytes: number;
   fileName: string;
   poster: boolean;
+  /** What the file is, as the portal tells of it; a clip that has none is a WebM, as an older portal's all are. */
+  format?: { id: string; label: string; mimeType: string; playable: boolean };
+  copy?: 'ready' | 'available';
 }
 interface Job {
   id: string;
@@ -81,7 +84,7 @@ const feature = (over: Record<string, unknown> = {}) => {
 async function portal(page: Page, { clips = [] as Clip[], videos = feature(), flagOn = true, jobs = [] as Job[], failList = false, pictureList = [] as Pic[], noPoster = [] as string[] } = {}) {
   const list = [...clips];
   const state = {
-    jobs: [...jobs], generated: [] as any[], deleted: [] as string[][], stopped: [] as string[], listed: [] as string[], files: [] as string[], posters: [] as string[], thumbs: [] as string[], limit: 4,
+    jobs: [...jobs], generated: [] as any[], deleted: [] as string[][], stopped: [] as string[], listed: [] as string[], files: [] as string[], posters: [] as string[], thumbs: [] as string[], copies: [] as string[], limit: 4,
   };
   const sorted = () => [...list].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
@@ -131,6 +134,19 @@ async function portal(page: Page, { clips = [] as Clip[], videos = feature(), fl
     }
     if (/^\/api\/videos\/[0-9a-f]{12}\/file$/.test(p)) {
       state.files.push(p.split('/')[3]);
+      await route.fulfill({ body: WEBM, contentType: 'video/webm' });
+      return DONE;
+    }
+    // The playable copy of a clip a browser does not play: made on request, and then sent to be played.
+    if (/^\/api\/videos\/[0-9a-f]{12}\/copy$/.test(p)) {
+      const id = p.split('/')[3];
+      const target = list.find((x) => x.id === id);
+      if (method === 'POST') {
+        state.copies.push(id);
+        if (target) target.copy = 'ready';
+        return { ok: true };
+      }
+      if (target?.copy !== 'ready') return reply(404, { error: 'This video has no playable copy', code: 'missing' });
       await route.fulfill({ body: WEBM, contentType: 'video/webm' });
       return DONE;
     }
@@ -341,6 +357,64 @@ test('a clip that is not made shows its whole message in its tile, however long,
   const text = (await reason.boundingBox())!;
   expect(text.y + text.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
   expect(text.height).toBeGreaterThan(60);
+});
+
+const AVI = { id: 'avi', label: 'AVI', mimeType: 'video/x-msvideo', playable: false };
+
+test('a clip a browser cannot play is a tile of its own kind that opens to be downloaded, with a short note, and is never asked for as a video or a poster', async ({ page }) => {
+  const avi = clip({ prompt: 'An old format', fileName: 'video-20260101-120000-ab12.avi', format: AVI, age: 1 });
+  const plays = clip({ prompt: 'Plays', poster: true, format: { id: 'webm', label: 'WebM', mimeType: 'video/webm', playable: true } });
+  const p = await portal(page, { clips: [avi, plays] });
+  await page.goto('/media');
+  const typed = tile(page, 'An old format');
+  await expect(typed).toBeVisible();
+  await expect(typed).toContainText('AVI');
+  await expect(typed).toContainText('A browser cannot play it here');
+  // The one that plays is a poster, as before.
+  await expect(tile(page, 'Plays')).toBeVisible();
+  expect(p.state.posters).toEqual([plays.id]);
+  expect(p.state.files).not.toContain(avi.id);
+
+  await typed.click();
+  const open = viewer(page);
+  await expect(open).toBeVisible();
+  await expect(open.locator('video')).toHaveCount(0);
+  await expect(open).toContainText('Its format is AVI, which a browser cannot play here.');
+  const download = open.getByRole('link', { name: 'Download it' });
+  await expect(download).toHaveAttribute('href', `/api/videos/${avi.id}/file`);
+  await expect(download).toHaveAttribute('download', 'video-20260101-120000-ab12.avi');
+  // Nothing to open in a tab: it would be saved, not shown.
+  await expect(open.getByRole('link', { name: 'Open in a new tab' })).toHaveCount(0);
+  // No ffmpeg: no copy is offered.
+  await expect(open.getByRole('button', { name: 'Make a WebM copy to play' })).toHaveCount(0);
+  await open.getByRole('button', { name: 'Details' }).click();
+  await expect(open.getByRole('region', { name: 'Details' })).toContainText('AVI, not played here');
+  expect(p.state.files).not.toContain(avi.id);
+});
+
+test('where ffmpeg is there a clip a browser cannot play offers a WebM copy to play, made on request, and the original is still downloaded', async ({ page }) => {
+  const avi = clip({ prompt: 'Convert me', fileName: 'video-20260101-120000-cd34.avi', format: AVI, copy: 'available' });
+  const p = await portal(page, { clips: [avi] });
+  await page.goto('/media');
+  await tile(page, 'Convert me').click();
+  const open = viewer(page);
+  const make = open.getByRole('button', { name: 'Make a WebM copy to play' });
+  await expect(make).toBeVisible();
+  expect(p.state.copies).toEqual([]);
+  await make.click();
+  // The copy plays where the file was offered; the original is still there to be had.
+  const player = open.locator('video');
+  await expect(player).toHaveAttribute('src', `/api/videos/${avi.id}/copy`);
+  await expect(open).toContainText('A WebM copy plays here; the original AVI file is kept, and Download gives it.');
+  await expect(open.getByRole('link', { name: 'Download the video' })).toHaveAttribute('href', `/api/videos/${avi.id}/file`);
+  expect(p.state.copies).toEqual([avi.id]);
+
+  // A copy that was made before is played at once.
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await tile(page, 'Convert me').click();
+  await expect(viewer(page).locator('video')).toHaveAttribute('src', `/api/videos/${avi.id}/copy`);
+  expect(p.state.copies).toEqual([avi.id]);
 });
 
 test('a clip with a poster shows it, and one without shows its first frame from the clip itself', async ({ page }) => {

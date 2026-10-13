@@ -82,6 +82,8 @@ const put = (folder: string, name: string, bytes: Buffer = WEBM) => {
   writeFileSync(file, bytes);
   return file;
 };
+/** A clip as a server may finish one that a browser does not play: an AVI, which is a RIFF file with the AVI tag. */
+const AVI = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0x24, 0, 0, 0]), Buffer.from("AVI LIST"), Buffer.alloc(40)]);
 /** A clip of a different content, as a file: the bytes of the real one with a tail that tells two apart. */
 const clip = (tag: string) => Buffer.concat([WEBM, Buffer.from(tag)]);
 
@@ -230,19 +232,58 @@ test("a clip that is not made says why in the endpoint's words, and Dismiss clea
   }
 });
 
-test("a clip the server finished as something a browser cannot play says what was sent on the job, whole", async () => {
-  const sd = await fakeSd({ jobs: [completed({ output_format: "avi", mime_type: "video/x-msvideo", frame_count: 33, width: 832, height: 480, b64_json: Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("AVI LIST"), Buffer.alloc(40)]).toString("base64") })] });
+test("a clip the server finishes as an AVI is kept, listed as an AVI that a browser does not play, and downloadable, and the job is done", async () => {
+  const sd = await fakeSd({ jobs: [completed({ output_format: "avi", mime_type: "video/x-msvideo", frame_count: 33, b64_json: AVI.toString("base64") })] });
   await clearJobs();
   try {
     setup(sd.origin);
     await call("POST", "/videos/generate", { prompt: "an avi" });
     const [job] = await settled();
-    assert.equal(job.state, "failed");
-    assert.equal(
-      job.error,
-      "What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays. It says output_format avi, mime_type video/x-msvideo; the file starts with 52 49 46 46 00 00 00 00; frame_count 33, resolution 832x480.",
-    );
-    assert.equal((await call("DELETE", `/videos/jobs/${job.id}`)).status, 200);
+    assert.equal(job.state, "done", job.error);
+    assert.equal(job.error, undefined);
+    const made = (await call("GET", `/videos?ids=${job.videoId}`)).body.videos[0];
+    assert.deepEqual(made.format, { id: "avi", label: "AVI", mimeType: "video/x-msvideo", playable: false });
+    assert.equal(made.poster, false, "a clip that is not played has no poster");
+    assert.match(made.fileName, /^video-\d{8}-\d{6}-[0-9a-f]{4}\.avi$/, "named for what it is");
+    assert.equal(made.params.madeFrames, 33);
+    // It is a file on the disk, in the page's own folder, whole.
+    assert.deepEqual(readFileSync(path.join(temp, "videos", `${made.id}.avi`)), AVI);
+    // Sent to be saved, as the type its bytes say, and never shown.
+    const file = await call("GET", `/videos/${made.id}/file`);
+    assert.equal(file.status, 200);
+    assert.equal(file.headers.get("content-type"), "video/x-msvideo");
+    assert.match(file.headers.get("content-disposition") ?? "", new RegExp(`^attachment; filename="${made.fileName}"; filename\\*=UTF-8''${made.fileName}$`));
+    assert.equal(file.headers.get("x-content-type-options"), "nosniff");
+    assert.match(file.headers.get("content-security-policy") ?? "", /sandbox/);
+    assert.deepEqual(file.bytes, AVI);
+    assert.equal((await call("GET", `/videos/${made.id}/poster`)).status, 404);
+    assert.equal((await listed("?limit=100")).videos.find((v: any) => v.id === made.id)?.format.playable, false);
+    await call("DELETE", `/videos/jobs/${job.id}`);
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("a clip of a kind nobody knows is kept as bytes, listed as unknown, and only ever offered to be saved", async () => {
+  const odd = Buffer.from("<html><script>alert(1)</script></html>");
+  const sd = await fakeSd({ jobs: [completed({ output_format: "webm", mime_type: "video/webm", b64_json: odd.toString("base64") })] });
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    await call("POST", "/videos/generate", { prompt: "something else" });
+    const [job] = await settled();
+    assert.equal(job.state, "done", job.error);
+    const made = (await call("GET", `/videos?ids=${job.videoId}`)).body.videos[0];
+    // What the server calls it is not what it is: the bytes say nothing, so it is unknown, and it is kept under a name that says so.
+    assert.deepEqual(made.format, { id: "bin", label: "Unknown", mimeType: "application/octet-stream", playable: false });
+    assert.deepEqual(readFileSync(path.join(temp, "videos", `${made.id}.bin`)), odd);
+    const file = await call("GET", `/videos/${made.id}/file`);
+    assert.equal(file.status, 200);
+    assert.equal(file.headers.get("content-type"), "application/octet-stream");
+    assert.match(file.headers.get("content-disposition") ?? "", /^attachment;/);
+    assert.equal(file.headers.get("x-content-type-options"), "nosniff");
+    assert.deepEqual(file.bytes, odd);
+    await call("DELETE", `/videos/jobs/${job.id}`);
   } finally {
     sd.server.close();
   }
@@ -404,27 +445,38 @@ test("a clip is deleted with its file, singly or several at once, and what could
 
 test("a clip of a stable-diffusion.cpp server, whose document type is matroska, is listed, and served as the WebM it is", async () => {
   const made = gallery.addPageVideo({ bytes: MATROSKA, ext: "webm", kind: "generated", prompt: "from sd.cpp", params: {} });
+  assert.deepEqual(made.format, { id: "webm", label: "WebM", mimeType: "video/webm", playable: true });
   const served = await call("GET", `/videos/${made.id}/file`);
   assert.equal(served.status, 200);
   assert.equal(served.headers.get("content-type"), "video/webm");
+  assert.equal(served.headers.get("content-disposition"), null, "it plays, it is not a download");
   assert.deepEqual(served.bytes, MATROSKA);
   assert.ok((await listed("?limit=100")).videos.some((v: any) => v.id === made.id));
-  // An EBML file of another type is not, whatever the name says.
-  const other = gallery.addPageVideo({ bytes: clip("o"), ext: "webm", kind: "generated", prompt: "other", params: {} });
-  writeFileSync(path.join(temp, "videos", `${other.id}.webm`), Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x86, 0x42, 0x82, 0x83]), Buffer.from("foo"), Buffer.alloc(40)]));
-  assert.equal((await call("GET", `/videos/${other.id}/file`)).status, 400);
+  // An EBML file of another document type is kept as what it is, and offered to be saved: it is no clip a browser plays.
+  const other = gallery.addPageVideo({ bytes: Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x86, 0x42, 0x82, 0x83]), Buffer.from("foo"), Buffer.alloc(40)]), ext: "mkv", kind: "generated", prompt: "other", params: {} });
+  assert.equal(other.format.playable, false);
+  assert.equal(other.format.label, "EBML (foo)");
+  const sent = await call("GET", `/videos/${other.id}/file`);
+  assert.equal(sent.status, 200);
+  assert.equal(sent.headers.get("content-type"), "video/x-matroska");
+  assert.match(sent.headers.get("content-disposition") ?? "", /^attachment;/);
 });
 
-test("a file that has stopped being a clip is not served, and a file that is gone leaves the list", async () => {
+test("a file that has stopped being a clip is never shown, only offered to be saved, and a file that is gone leaves the list", async () => {
   const kept = gallery.addPageVideo({ bytes: clip("k"), ext: "webm", kind: "generated", prompt: "keep", params: {} });
   const swapped = gallery.addPageVideo({ bytes: clip("s"), ext: "webm", kind: "generated", prompt: "swapped", params: {} });
   const lost = gallery.addPageVideo({ bytes: clip("l"), ext: "webm", kind: "generated", prompt: "lost", params: {} });
   const dir = path.join(temp, "videos");
   writeFileSync(path.join(dir, `${swapped.id}.webm`), '<html><script>alert(1)</script></html>');
   rmSync(path.join(dir, `${lost.id}.webm`));
-  const refused = await call("GET", `/videos/${swapped.id}/file`);
-  assert.equal(refused.status, 400);
-  assert.match(refused.body.error, /not a WebM or MP4/);
+  // A page is a file like any other: sent as bytes to be saved, under a policy that would stop it running anything, never as the page it is.
+  const sent = await call("GET", `/videos/${swapped.id}/file`);
+  assert.equal(sent.status, 200);
+  assert.equal(sent.headers.get("content-type"), "application/octet-stream");
+  assert.match(sent.headers.get("content-disposition") ?? "", /^attachment;/);
+  assert.equal(sent.headers.get("x-content-type-options"), "nosniff");
+  assert.match(sent.headers.get("content-security-policy") ?? "", /sandbox/);
+  assert.equal((await listed("?limit=100")).videos.find((v: any) => v.id === swapped.id)?.format.playable, false);
   assert.equal((await call("GET", `/videos/${lost.id}/file`)).status, 404);
   assert.equal((await call("GET", `/videos/${kept.id}/file`)).status, 200);
   const ids = (await listed("?limit=100")).videos.map((v: any) => v.id);
@@ -474,6 +526,29 @@ test("while video generation is off, or has no address, neither tool is there at
   const taken = new GenerateVideoTool(folder, () => [{ path: "/some/ext.ts", tools: new Map([["generate_video", { definition: { name: "generate_video" } }]]) }]);
   taken.extension({ registerTool: () => {} });
   assert.equal(taken.registered(), false);
+});
+
+test("the tool keeps a clip a browser cannot play, says so to the agent, lists it in the gallery as the file it is, and shows no player", async () => {
+  const folder = chat("tool-avi", "The AVI chat");
+  const sd = await fakeSd({ jobs: [completed({ output_format: "avi", b64_json: AVI.toString("base64") })] });
+  try {
+    setup(sd.origin);
+    const { run } = load(folder, "tool-avi");
+    const result = await run({ prompt: "an avi", title: "Old format" });
+    assert.match(result.details.path, new RegExp(`^${GENERATED_VIDEOS_DIR}/video-\\d{8}-\\d{6}-[0-9a-f]{6}\\.avi$`));
+    assert.deepEqual(result.details, { path: result.details.path, title: "Old format", notPlayable: "AVI", [GENERATED_VIDEO_MARK]: true });
+    assert.match(result.content[0].text, /^Generated and saved: .*\.avi\. Its format is AVI, which a browser cannot play in the chat\. It is kept as it is and listed in the Media gallery, where the person can download it\./);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), AVI, "kept whole");
+    const [video] = (await listed("?origin=chat&limit=100")).videos.filter((v: any) => v.chat?.id === "tool-avi");
+    assert.deepEqual([video.format.id, video.format.playable, video.prompt], ["avi", false, "an avi"]);
+    // The chat's own player route does not play it; the gallery's file route gives it to be saved.
+    assert.equal((await fetch(`${at}/sessions/tool-avi/video?path=${encodeURIComponent(result.details.path)}`)).status, 400);
+    const file = await call("GET", `/videos/${video.id}/file`);
+    assert.match(file.headers.get("content-disposition") ?? "", /^attachment;/);
+    assert.deepEqual(file.bytes, AVI);
+  } finally {
+    sd.server.close();
+  }
 });
 
 test("the tool makes a clip in the chat's folder, answers as show_image does, and lists it in the gallery", async () => {
@@ -648,14 +723,17 @@ test("every clip in the folders the tool writes into is listed, recorded or not,
   put(alpha, "clip.mp4", MP4);
   put(alpha, "no extension", clip("w"));
   put(alpha, "disguised.txt", clip("d"));
-  // What is not: no clip by its bytes, an empty file, a hidden one, a picture, a QuickTime movie.
+  // What is not: nothing its bytes say is a kind of clip and no name of the tool's, an empty file, a hidden one, a picture, one too large.
   put(alpha, "notes.txt", Buffer.from("hello"));
   put(alpha, "fake.webm", Buffer.from("<html><script>alert(1)</script></html>"));
   put(alpha, "empty.webm", Buffer.alloc(0));
   put(alpha, ".half-written.upload", clip("half"));
   truncateSync(put(alpha, "huge.webm", clip("huge")), MAX_VIDEO_BYTES + 1);
   put(alpha, "pic.png", PNG);
+  // What is, though a browser does not play it: a QuickTime movie, an AVI, and a file the tool named that no bytes say a kind of.
   put(alpha, "movie.mov", Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(40)]));
+  put(alpha, "video-20260103-130001-aaaaaa.avi", AVI);
+  put(alpha, "video-20260103-130000-def456.bin", Buffer.from("something else"));
   symlinkSync(path.join(outside, "secret.webm"), path.join(alpha, GENERATED_VIDEOS_DIR, "linked.webm"));
   symlinkSync(path.join(alpha, GENERATED_VIDEOS_DIR, "clip.mp4"), path.join(alpha, GENERATED_VIDEOS_DIR, "alias.mp4"));
   symlinkSync(path.join(outside, "videos"), path.join(gamma, GENERATED_VIDEOS_DIR));
@@ -666,10 +744,22 @@ test("every clip in the folders the tool writes into is listed, recorded or not,
 
   const found = (await listed("?origin=folder&limit=100")).videos;
   const names = found.map((v: any) => v.fileName).sort();
-  assert.deepEqual(names, ["clip.mp4", "disguised.txt", "no extension", "video-20260102-120000-abc123.webm"]);
+  assert.deepEqual(names, ["clip.mp4", "disguised.txt", "movie.mov", "no extension", "video-20260102-120000-abc123.webm", "video-20260103-130000-def456.bin", "video-20260103-130001-aaaaaa.avi"]);
+  const byName = (name: string) => found.find((v: any) => v.fileName === name);
+  assert.deepEqual([byName("movie.mov").format.label, byName("movie.mov").format.playable], ["QuickTime", false]);
+  assert.deepEqual([byName("video-20260103-130001-aaaaaa.avi").format.id, byName("video-20260103-130001-aaaaaa.avi").format.playable], ["avi", false]);
+  assert.deepEqual([byName("video-20260103-130000-def456.bin").format.id, byName("video-20260103-130000-def456.bin").kind], ["bin", "generated"]);
   assert.ok(found.every((v: any) => v.origin === "folder" && v.chat === null && v.folder.name === "alpha" && v.prompt === ""));
-  assert.deepEqual(found.map((v: any) => [v.fileName, v.kind]).sort(), [["clip.mp4", "unknown"], ["disguised.txt", "unknown"], ["no extension", "unknown"], ["video-20260102-120000-abc123.webm", "generated"]]);
-  // They play, whatever they are called.
+  assert.deepEqual(found.map((v: any) => [v.fileName, v.kind]).sort(), [
+    ["clip.mp4", "unknown"],
+    ["disguised.txt", "unknown"],
+    ["movie.mov", "unknown"],
+    ["no extension", "unknown"],
+    ["video-20260102-120000-abc123.webm", "generated"],
+    ["video-20260103-130000-def456.bin", "generated"],
+    ["video-20260103-130001-aaaaaa.avi", "generated"],
+  ]);
+  // The ones a browser plays play, whatever they are called.
   const one = found.find((v: any) => v.fileName === "clip.mp4");
   const played = await call("GET", `/videos/${one.id}/file`);
   assert.deepEqual([played.status, played.headers.get("content-type")], [200, "video/mp4"]);
@@ -991,4 +1081,122 @@ test("the schema keeps a clip's place once, in the folder of the chat or in the 
   assert.throws(() => insert("b2b2b2b2b2b2", null, "/some/folder", "generated-videos/x.webm"), /UNIQUE/);
   d.prepare("DELETE FROM videos WHERE id IN ('a1a1a1a1a1a1', 'b1b1b1b1b1b1')").run();
   assert.ok(jobsModule.listJobs);
+});
+
+// --- the playable copies ---
+
+/** A stand-in for ffmpeg that converts: it says it is there, records how it was run, and writes a WebM to the file it is given last. */
+function convertingFfmpeg(dir: string, { fail = false } = {}) {
+  mkdirSync(dir, { recursive: true });
+  const log = path.join(dir, "args.log");
+  const webm = path.join(dir, "out.webm");
+  writeFileSync(webm, WEBM);
+  const script = path.join(dir, "ffmpeg");
+  writeFileSync(
+    script,
+    `#!/bin/sh\nif [ "$1" = "-version" ]; then echo fake; exit 0; fi\necho "$@" >> ${JSON.stringify(log)}\ncat > /dev/null\n` +
+      (fail ? `echo "Invalid data found when processing input" >&2\nexit 1\n` : `for last; do :; done\ncat ${JSON.stringify(webm)} > "$last"\n`),
+  );
+  chmodSync(script, 0o755);
+  return { script, log };
+}
+const copyFiles = () => (existsSync(path.join(temp, "video-copies")) ? readdirSync(path.join(temp, "video-copies")) : []);
+
+test("without ffmpeg a clip a browser cannot play has no playable copy to offer or to make, and is downloadable as it is", async () => {
+  process.env.FFMPEG_PATH = path.join(temp, "no-such-ffmpeg");
+  posters.forgetPosterProbe();
+  try {
+    const avi = gallery.addPageVideo({ bytes: AVI, ext: "avi", kind: "generated", prompt: "an avi", params: {} });
+    assert.equal(avi.copy, undefined);
+    assert.equal((await listed(`?ids=${avi.id}`)).videos[0].copy, undefined);
+    const made = await call("POST", `/videos/${avi.id}/copy`);
+    assert.equal(made.status, 409);
+    assert.match(made.body.error, /ffmpeg is not installed.*original can be downloaded/);
+    assert.equal((await call("GET", `/videos/${avi.id}/copy`)).status, 404);
+    assert.deepEqual(copyFiles(), []);
+    const file = await call("GET", `/videos/${avi.id}/file`);
+    assert.equal(file.status, 200);
+    assert.deepEqual(file.bytes, AVI);
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+  }
+});
+
+test("with ffmpeg a playable WebM copy of a clip a browser cannot play is made on request, kept, and sent to be played; the original is always kept", async () => {
+  const tool = convertingFfmpeg(path.join(temp, "converting-ffmpeg"));
+  process.env.FFMPEG_PATH = tool.script;
+  posters.forgetPosterProbe();
+  try {
+    const avi = gallery.addPageVideo({ bytes: AVI, ext: "avi", kind: "generated", prompt: "an avi", params: {} });
+    // Offered, not made: nothing is converted until someone asks.
+    assert.equal(avi.copy, "available");
+    assert.equal((await listed(`?ids=${avi.id}`)).videos[0].copy, "available");
+    assert.equal((await call("GET", `/videos/${avi.id}/copy`)).status, 404);
+    assert.deepEqual(copyFiles(), []);
+    assert.equal(existsSync(tool.log), false, "ffmpeg was not run for a clip nobody asked a copy of");
+
+    const made = await call("POST", `/videos/${avi.id}/copy`);
+    assert.equal(made.status, 200);
+    assert.deepEqual(made.body, { ok: true });
+    // Run on the clip from its standard input, and allowed to open nothing else.
+    const args = readFileSync(tool.log, "utf8");
+    assert.match(args, /-protocol_whitelist pipe -i pipe:0 /);
+    assert.match(args, /-f webm -y .*video-copies/);
+    assert.equal(copyFiles().length, 1);
+    assert.match(copyFiles()[0], new RegExp(`^${avi.id}-[0-9a-f]+-[0-9a-f]+\\.webm$`));
+
+    const listedNow = (await listed(`?ids=${avi.id}`)).videos[0];
+    assert.equal(listedNow.copy, "ready");
+    assert.equal(listedNow.format.playable, false, "the clip is still the AVI it is");
+    const copy = await call("GET", `/videos/${avi.id}/copy`);
+    assert.equal(copy.status, 200);
+    assert.equal(copy.headers.get("content-type"), "video/webm");
+    assert.equal(copy.headers.get("content-disposition"), null, "to be played");
+    assert.deepEqual(copy.bytes, WEBM);
+    // Asked for again, it is not made again.
+    const runs = readFileSync(tool.log, "utf8").trim().split("\n").length;
+    assert.equal((await call("POST", `/videos/${avi.id}/copy`)).status, 200);
+    assert.equal(readFileSync(tool.log, "utf8").trim().split("\n").length, runs);
+    // The original is kept, whole, and still downloadable.
+    const original = await call("GET", `/videos/${avi.id}/file`);
+    assert.deepEqual(original.bytes, AVI);
+    assert.match(original.headers.get("content-disposition") ?? "", /^attachment;/);
+    assert.deepEqual(readFileSync(path.join(temp, "videos", `${avi.id}.avi`)), AVI);
+
+    // A clip that plays has no use for one.
+    const plays = gallery.addPageVideo({ bytes: clip("plays"), ext: "webm", kind: "generated", prompt: "plays", params: {} });
+    assert.equal(plays.copy, undefined);
+    assert.equal((await call("POST", `/videos/${plays.id}/copy`)).status, 400);
+    assert.equal((await call("GET", `/videos/${plays.id}/copy`)).status, 404);
+    assert.equal((await call("POST", "/videos/aaaaaaaaaaaa/copy")).status, 404);
+
+    // The copy goes with the clip.
+    assert.equal((await call("DELETE", `/videos/${avi.id}`)).status, 200);
+    assert.deepEqual(copyFiles(), []);
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+    rmSync(path.join(temp, "video-copies"), { recursive: true, force: true });
+  }
+});
+
+test("a copy that ffmpeg cannot make says so, and leaves the original and no file behind", async () => {
+  const tool = convertingFfmpeg(path.join(temp, "failing-ffmpeg"), { fail: true });
+  process.env.FFMPEG_PATH = tool.script;
+  posters.forgetPosterProbe();
+  try {
+    const odd = gallery.addPageVideo({ bytes: Buffer.from("not a video at all"), ext: "bin", kind: "generated", prompt: "odd", params: {} });
+    assert.equal(odd.copy, "available");
+    const made = await call("POST", `/videos/${odd.id}/copy`);
+    assert.equal(made.status, 502);
+    assert.match(made.body.error, /could not be made.*original can be downloaded/);
+    assert.deepEqual(copyFiles(), []);
+    assert.deepEqual((await call("GET", `/videos/${odd.id}/file`)).bytes, Buffer.from("not a video at all"));
+    assert.equal((await listed(`?ids=${odd.id}`)).videos[0].copy, "available", "it can be asked for again");
+  } finally {
+    delete process.env.FFMPEG_PATH;
+    posters.forgetPosterProbe();
+    rmSync(path.join(temp, "video-copies"), { recursive: true, force: true });
+  }
 });

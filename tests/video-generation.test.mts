@@ -7,7 +7,7 @@ inProcessHome("pitha-videos-");
 
 const gen = await import("../server/src/video-generation.ts");
 const { sdcppRoot } = await import("../server/src/video-sdcpp.ts");
-const { ebmlDocType, videoType } = await import("../server/src/video-files.ts");
+const { ebmlDocType, sniffVideo, videoType } = await import("../server/src/video-files.ts");
 const { VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS, forClip, framesFor, parseVideoSettings, parseVideoSize } = await import("../server/src/video-settings.ts");
 const { parseRange } = await import("../server/src/http-range.ts");
 
@@ -96,17 +96,25 @@ test("a length in seconds is frames at the frame rate: the request's, the settin
   }
 });
 
-test("a server with no video model, or that cannot make a WebM, is told so before anything is sent", async () => {
+test("a server with no video model is told so before anything is sent; one that cannot make a WebM is asked for the format it makes, and its clip is kept", async () => {
   const noVideo = await fakeSd({ capabilities: { supported_modes: ["img_gen"] } });
-  const noWebm = await fakeSd({ capabilities: { supported_modes: ["vid_gen"], output_formats_by_mode: { vid_gen: ["avi", "webp"] } } });
+  const AVI = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("AVI LIST"), Buffer.alloc(40)]);
+  const noWebm = await fakeSd({ capabilities: { supported_modes: ["vid_gen"], output_formats_by_mode: { vid_gen: ["avi", "webp"] } }, jobs: [completed({ output_format: "avi", b64_json: AVI.toString("base64") })] });
+  const webmToo = await fakeSd({ capabilities: { supported_modes: ["vid_gen"], output_formats_by_mode: { vid_gen: ["avi", "webm"] } } });
   try {
     await assert.rejects(gen.generateVideo(config(noVideo.origin), { prompt: "x" }, FAST), /has no video model loaded/);
     assert.equal(noVideo.to("POST", "/sdcpp/v1/vid_gen").length, 0);
-    await assert.rejects(gen.generateVideo(config(noWebm.origin), { prompt: "x" }, FAST), /cannot make a WebM.*avi, webp.*WebM support/);
-    assert.equal(noWebm.to("POST", "/sdcpp/v1/vid_gen").length, 0);
+    const made = await gen.generateVideo(config(noWebm.origin), { prompt: "x" }, FAST);
+    assert.equal(noWebm.to("POST", "/sdcpp/v1/vid_gen")[0].body.output_format, "avi", "the first it makes");
+    assert.equal(made.ext, "avi");
+    assert.deepEqual(made.bytes, AVI);
+    // A WebM, where the server makes one, is what is asked for.
+    await gen.generateVideo(config(webmToo.origin), { prompt: "x" }, FAST);
+    assert.equal(webmToo.to("POST", "/sdcpp/v1/vid_gen")[0].body.output_format, "webm");
   } finally {
     noVideo.server.close();
     noWebm.server.close();
+    webmToo.server.close();
   }
 });
 
@@ -122,7 +130,6 @@ test("what the server refuses, fails or loses is told in its words, and no key i
     { name: "a state it does not have", options: { jobs: [{ status: "dancing" }] }, message: /state the portal does not know: dancing/ },
     { name: "a finished job with no clip", options: { jobs: [{ status: "completed", result: { output_format: "webm" } }] }, message: /no video in its answer/ },
     { name: "a clip that is not base64", options: { jobs: [completed({ b64_json: "not base64!" })] }, message: /not base64/ },
-    { name: "an AVI", options: { jobs: [completed({ output_format: "avi", b64_json: Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("AVI LIST"), Buffer.alloc(40)]).toString("base64") })] }, message: /not a WebM or MP4 video, which is what a browser plays\. It says output_format avi, mime_type video\/webm; the file starts with 52 49 46 46 00 00 00 00; frame_count 33, resolution not given\./ },
   ];
   for (const { name, options, message } of cases) {
     const sd = await fakeSd(options);
@@ -137,54 +144,54 @@ test("what the server refuses, fails or loses is told in its words, and no key i
   }
 });
 
-test("a finished job whose file is no WebM or MP4 says what was sent: the format and type it names, the first bytes, the frames and the size", async () => {
-  const avi = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0x10, 0x20, 0x30, 0x40]), Buffer.from("AVI LIST"), Buffer.alloc(40)]);
-  const cases: { name: string; job: Record<string, unknown>; says: string }[] = [
-    {
-      name: "a size in the result",
-      job: completed({ output_format: "avi", mime_type: "video/x-msvideo", frame_count: 49, width: 832, height: 480, b64_json: avi.toString("base64") }),
-      says: "It says output_format avi, mime_type video/x-msvideo; the file starts with 52 49 46 46 10 20 30 40; frame_count 49, resolution 832x480.",
-    },
-    {
-      name: "a size and a frame count on the job itself",
-      job: { ...completed({ output_format: "gif", mime_type: undefined, frame_count: undefined, b64_json: Buffer.from("GIF89a-and-more-bytes").toString("base64") }), frame_count: 17, resolution: "640x360" },
-      says: "It says output_format gif, mime_type not given; the file starts with 47 49 46 38 39 61 2d 61; frame_count 17, resolution 640x360.",
-    },
-    {
-      name: "a file of the EBML family that is not one a browser plays",
-      job: completed({ output_format: "webm", mime_type: "video/webm", b64_json: ebml("foo").toString("base64") }),
-      says: "It says output_format webm, mime_type video/webm; the file starts with 1a 45 df a3 86 42 82 83 (an EBML file of document type foo); frame_count 33, resolution not given.",
-    },
-    {
-      name: "an EBML header that says no type",
-      job: completed({ b64_json: Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x83, 0x42, 0x86, 0x81, 0x01]), Buffer.alloc(30)]).toString("base64") }),
-      says: "the file starts with 1a 45 df a3 83 42 86 81 (an EBML file with no readable document type);",
-    },
-    {
-      name: "nothing but the bytes",
-      job: { status: "completed", result: { b64_json: Buffer.from([0, 1, 2]).toString("base64") } },
-      says: "It says output_format not given, mime_type not given; the file starts with 00 01 02; frame_count not given, resolution not given.",
-    },
-    {
-      name: "values that are not plain text",
-      job: completed({ output_format: `a\u0000b${KEY}`, mime_type: "x".repeat(200), b64_json: avi.toString("base64") }),
-      says: "output_format a?b[key], mime_type " + "x".repeat(39) + "…;",
-    },
+test("a finished clip is never failed by its format: whatever it is is kept, as the kind its first bytes say, whatever the server calls it", async () => {
+  const riff = (tag: string) => Buffer.concat([Buffer.from("RIFF"), Buffer.from([0x24, 0, 0, 0]), Buffer.from(tag), Buffer.alloc(40)]);
+  const cases: { name: string; bytes: Buffer; ext: string; says?: string }[] = [
+    { name: "an AVI", bytes: riff("AVI LIST"), ext: "avi" },
+    { name: "an animated WebP", bytes: riff("WEBPVP8X"), ext: "webp" },
+    { name: "a GIF", bytes: Buffer.concat([Buffer.from("GIF89a"), Buffer.alloc(30)]), ext: "gif" },
+    { name: "an Ogg file", bytes: Buffer.concat([Buffer.from("OggS"), Buffer.alloc(30)]), ext: "ogg" },
+    { name: "a QuickTime movie", bytes: Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(40)]), ext: "mov" },
+    { name: "an EBML file of another document type", bytes: ebml("foo"), ext: "mkv" },
+    { name: "a file that is nothing it knows", bytes: Buffer.from("<html><script>alert(1)</script></html>"), ext: "bin" },
+    { name: "a few bytes", bytes: Buffer.from([1, 2, 3]), ext: "bin" },
+    { name: "a Matroska file, as stable-diffusion.cpp writes a WebM", bytes: MATROSKA, ext: "webm" },
+    { name: "an MP4", bytes: MP4, ext: "mp4" },
   ];
-  for (const { name, job, says } of cases) {
-    const sd = await fakeSd({ jobs: [job] });
+  for (const { name, bytes, ext } of cases) {
+    // Whatever the server calls it.
+    const sd = await fakeSd({ jobs: [completed({ output_format: "webm", mime_type: "video/webm", b64_json: bytes.toString("base64") })] });
     try {
-      const failed = await gen.generateVideo(config(sd.origin), { prompt: "x" }, FAST).then(() => undefined, (e) => e as Error);
-      assert.ok(failed instanceof gen.VideoGenerationError, name);
-      assert.match(failed.message, /^What the video endpoint sent is not a WebM or MP4 video, which is what a browser plays\. /, name);
-      assert.ok(failed.message.includes(says), `${name}: ${failed.message}`);
-      assert.ok(!failed.message.includes(KEY), `${name} gave the key back`);
-      // Short enough to read in a frame, and whole: the message is not cut.
-      assert.ok(failed.message.length < 320, `${name}: ${failed.message.length} characters`);
-      assert.ok(failed.message.endsWith("."), name);
+      const made = await gen.generateVideo(config(sd.origin), { prompt: "x" }, FAST);
+      assert.equal(made.ext, ext, name);
+      assert.deepEqual(made.bytes, bytes, `${name}: kept whole`);
+      assert.equal(made.frames, 33, name);
     } finally {
       sd.server.close();
     }
+  }
+});
+
+test("a finished clip is still failed by what is wrong with the answer, and not by what the clip is: no clip, not base64, over the limit", async () => {
+  const none = await fakeSd({ jobs: [{ status: "completed", result: { output_format: "webm" } }] });
+  const bad = await fakeSd({ jobs: [completed({ b64_json: "not base64!" })] });
+  const small = await fakeSd();
+  try {
+    await assert.rejects(gen.generateVideo(config(none.origin), { prompt: "x" }, FAST), /no video in its answer/);
+    await assert.rejects(gen.generateVideo(config(bad.origin), { prompt: "x" }, FAST), /not base64/);
+    await assert.rejects(gen.generateVideo(config(small.origin), { prompt: "x" }, { ...FAST, maxBytes: WEBM.length - 1 }), /The clip is over/);
+    // And an AVI is over the limit as a WebM is.
+    const avi = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("AVI LIST"), Buffer.alloc(400)]);
+    const big = await fakeSd({ jobs: [completed({ b64_json: avi.toString("base64") })] });
+    try {
+      await assert.rejects(gen.generateVideo(config(big.origin), { prompt: "x" }, { ...FAST, maxBytes: 100 }), /The clip is over/);
+    } finally {
+      big.server.close();
+    }
+  } finally {
+    none.server.close();
+    bad.server.close();
+    small.server.close();
   }
 });
 
@@ -317,6 +324,28 @@ test("the clip of a stable-diffusion.cpp server, with its document type matroska
   } finally {
     sd.server.close();
   }
+});
+
+test("what a file is is told by its first bytes, with its real type, and only a WebM and an MP4 are played", () => {
+  const riff = (tag: string) => Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from(tag), Buffer.alloc(20)]);
+  const is = (head: Buffer) => {
+    const f = sniffVideo(head);
+    return [f.id, f.label, f.mimeType, f.playable];
+  };
+  assert.deepEqual(is(WEBM.subarray(0, 64)), ["webm", "WebM", "video/webm", true]);
+  assert.deepEqual(is(MATROSKA.subarray(0, 64)), ["webm", "WebM", "video/webm", true]);
+  assert.deepEqual(is(MP4.subarray(0, 64)), ["mp4", "MP4", "video/mp4", true]);
+  assert.deepEqual(is(Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(20)])), ["mov", "QuickTime", "video/quicktime", false]);
+  assert.deepEqual(is(riff("AVI LIST")), ["avi", "AVI", "video/x-msvideo", false]);
+  assert.deepEqual(is(riff("WEBPVP8X")), ["webp", "WebP", "image/webp", false]);
+  assert.deepEqual(is(Buffer.from("GIF89a-anything")), ["gif", "GIF", "image/gif", false]);
+  assert.deepEqual(is(Buffer.from("OggS-anything")), ["ogg", "Ogg", "video/ogg", false]);
+  assert.deepEqual(is(ebml("foo")), ["mkv", "EBML (foo)", "video/x-matroska", false], "the document type is what it says");
+  assert.deepEqual(is(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x80])), ["mkv", "EBML", "video/x-matroska", false], "an EBML header that names none");
+  assert.deepEqual(is(Buffer.from("<html>")), ["bin", "Unknown", "application/octet-stream", false]);
+  assert.deepEqual(is(Buffer.alloc(0)), ["bin", "Unknown", "application/octet-stream", false]);
+  // A document type is shown as text a person can read, and short.
+  assert.equal(sniffVideo(ebml("a\u0000b" + "x".repeat(40))).label.length <= "EBML ()".length + 24, true);
 });
 
 test("the container of a clip is told by its bytes: WebM and MP4, nothing a name or a server can claim", () => {

@@ -1,9 +1,11 @@
+import { closeSync } from "node:fs";
 import express, { type Router } from "express";
 import {
   DEFAULT_PAGE,
   MAX_PAGE,
   deleteVideo,
   listVideos,
+  openListedCopy,
   openListedPoster,
   openListedVideo,
   videosById,
@@ -131,7 +133,10 @@ export function videosRouter(): Router {
     }
   });
 
-  /** A clip, as the file it is: whole or, where a player asks, a part of it. */
+  /**
+   * A clip, as the file it is: whole or, where a player asks, a part of it. A WebM and an MP4 are sent to be played;
+   * any other file is sent to be saved (`Content-Disposition: attachment`), as the type its bytes say, and never shown.
+   */
   router.get("/videos/:id/file", (req, res) => {
     let opened: ReturnType<typeof openListedVideo>;
     try {
@@ -140,7 +145,38 @@ export function videosRouter(): Router {
       return fail(res, e);
     }
     // One of the page's own never changes under its id; one in a chat's folder is that folder's, and the browser asks.
+    sendVideo(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache", opened.format.playable ? undefined : opened.fileName);
+  });
+
+  /** The playable copy of a clip a browser does not play, where one was made. */
+  router.get("/videos/:id/copy", async (req, res) => {
+    let opened: Awaited<ReturnType<typeof openListedCopy>>;
+    try {
+      opened = await openListedCopy(req.params.id, false);
+    } catch (e) {
+      return fail(res, e);
+    }
+    if (!opened) return res.status(404).json({ error: "This video has no playable copy", code: "missing" });
     sendVideo(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache");
+  });
+
+  /**
+   * Makes the playable copy of a clip a browser does not play, when ffmpeg is there, and says when it is made: the
+   * original is kept as it is. It can take a while for a long clip, and answers when it is done.
+   */
+  router.post("/videos/:id/copy", async (req, res) => {
+    try {
+      const clip = videosById([req.params.id])[0];
+      if (!clip) return res.status(404).json({ error: "There is no such video", code: "missing" });
+      if (clip.format.playable) return res.status(400).json({ error: "This video plays as it is: it has no use for a copy" });
+      if (!clip.copy) return res.status(409).json({ error: "ffmpeg is not installed, so no playable copy can be made. The original can be downloaded" });
+      const made = await openListedCopy(req.params.id, true);
+      if (!made) return res.status(502).json({ error: "A playable copy could not be made of this video. The original can be downloaded" });
+      closeSync(made.fd);
+      res.json({ ok: true });
+    } catch (e) {
+      fail(res, e);
+    }
   });
 
   /**

@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { LuFolder, LuInfo, LuMessageSquare, LuRepeat, LuTrash2 } from "react-icons/lu";
+import { LuFileVideo, LuFolder, LuInfo, LuMessageSquare, LuRepeat, LuTrash2 } from "react-icons/lu";
 import { api, type GalleryVideo, type VideoJob, type VideoKind } from "../api";
 import { clipSeconds, secondsLabel, videoName, type Tile } from "../videos-gallery";
 import { folderName } from "../media-gallery";
@@ -36,6 +36,8 @@ function VideoDetails({ video }: { video: GalleryVideo }) {
   const rows: [string, string][] = [
     [t("Made"), formatDateTime(video.createdAt)],
     [t("How"), t(KIND_NAME[video.kind])],
+    // What the file is, by its first bytes: a clip a browser does not play says so.
+    ...(video.format ? [[t("Format"), video.format.playable ? video.format.label : t("{format}, not played here", { format: video.format.label })] as [string, string]] : []),
     [
       t("Where"),
       video.chat ? t("In the chat “{chat}”", { chat: video.chat.title || t("a chat that is gone") }) : video.folder ? t("In the folder “{folder}”", { folder: folderName(video.folder) }) : t("Made here"),
@@ -139,6 +141,9 @@ export function VideoViewerActions({
   );
 }
 
+/** Whether a browser plays the clip here: a WebM and an MP4 do, and a server that says nothing of its files is taken to have clips that do. */
+export const playsHere = (video: GalleryVideo): boolean => video.format?.playable !== false;
+
 /** What a job's state is to the preview. */
 const previewState = (job: VideoJob | undefined): PreviewState => (!job ? "done" : job.state === "running" ? "making" : job.state === "failed" ? "failed" : "done");
 
@@ -173,28 +178,38 @@ export const VideoTile = memo(function VideoTile({
   const here = state === "done" && id;
   const name = video ? videoName(video) : job?.prompt || "";
   const seconds = video ? clipSeconds(video.params) : undefined;
+  // A file a browser does not play is shown as what it is, and opened to be downloaded.
+  const kept = here && video && !playsHere(video);
   return (
     <div className={`gallery-tile${selected ? " is-selected" : ""}`}>
-      <ImagePreview
-        kind="video"
-        state={state}
-        src={here && video?.poster ? api.videoPosterUrl(id) : undefined}
-        video={here ? api.videoFileUrl(id) : undefined}
-        ratio={1}
-        title={video?.prompt || job?.prompt || video?.fileName}
-        reason={job?.error}
-        detail={making && job ? stageText(job) : undefined}
-        elapsed={making && job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : undefined}
-        pictureId={here ? id : undefined}
-        onOpen={onOpen}
-        actions={
-          job && state !== "done" ? (
-            <button type="button" className="gallery-tile-action" onClick={() => onDismiss(job.id)}>
-              {making ? t("Stop") : t("Dismiss")}
-            </button>
-          ) : undefined
-        }
-      />
+      {kept ? (
+        <button type="button" className="gallery-type-tile" data-picture-id={id} aria-haspopup="dialog" aria-label={name} title={video.prompt || video.fileName} onClick={() => onOpen(id)}>
+          <LuFileVideo aria-hidden />
+          <b>{video.format.label}</b>
+          <small>{t("A browser cannot play it here")}</small>
+        </button>
+      ) : (
+        <ImagePreview
+          kind="video"
+          state={state}
+          src={here && video?.poster ? api.videoPosterUrl(id) : undefined}
+          video={here ? api.videoFileUrl(id) : undefined}
+          ratio={1}
+          title={video?.prompt || job?.prompt || video?.fileName}
+          reason={job?.error}
+          detail={making && job ? stageText(job) : undefined}
+          elapsed={making && job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : undefined}
+          pictureId={here ? id : undefined}
+          onOpen={onOpen}
+          actions={
+            job && state !== "done" ? (
+              <button type="button" className="gallery-tile-action" onClick={() => onDismiss(job.id)}>
+                {making ? t("Stop") : t("Dismiss")}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
       {here && selectable && (
         // The box has a place of its own that a thumb can find, and a name that says which clip it is for.
         <label className="gallery-check-hit">

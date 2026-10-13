@@ -813,6 +813,10 @@ export const api = {
   videoFileUrl: (id: string) => `/api/videos/${id}/file`,
   /** The poster picture of a clip, for the clips the gallery says can have one (`GalleryVideo.poster`). */
   videoPosterUrl: (id: string) => `/api/videos/${id}/poster`,
+  /** The playable copy of a clip a browser does not play, once it is made. */
+  videoCopyUrl: (id: string) => `/api/videos/${id}/copy`,
+  /** Makes it, when ffmpeg is there: answers when it is done, which takes a while for a long clip. */
+  makeVideoCopy: (id: string) => json<{ ok: true }>(`/api/videos/${id}/copy`, { method: "POST" }),
   /** Each as asked, files and all: what could not be deleted is said for each. */
   deleteVideos: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/videos/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   /** A page of the gallery, newest first; `before` is the `next` of the page before. */
@@ -1685,8 +1689,21 @@ export interface GalleryVideo {
   createdAt: number;
   bytes: number;
   fileName: string;
-  /** The portal can make a poster picture of it (see `videoPosterUrl`). */
+  /** The portal can make a poster picture of it (see `videoPosterUrl`). Only for a clip a browser plays. */
   poster: boolean;
+  /** What the file is by its first bytes, and whether a browser plays it here: only a WebM and an MP4 are; any other is a file to download. */
+  format: VideoFormat;
+  /** For a clip that is not played as it is: a playable WebM copy of it is `ready`, or ffmpeg is there to make one on request (`available`). */
+  copy?: "ready" | "available";
+}
+
+export interface VideoFormat {
+  /** The kind, as a file extension: webm, mp4, mov, avi, webp, gif, mkv, ogg, or bin for one that is not known. */
+  id: string;
+  /** What a person is told it is: "AVI", "WebP", "EBML (foo)", "Unknown". */
+  label: string;
+  mimeType: string;
+  playable: boolean;
 }
 
 export interface VideoPage {

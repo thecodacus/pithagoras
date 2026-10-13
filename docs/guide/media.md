@@ -389,6 +389,27 @@ shows its first frame, with a mark that it plays.
 - **Playback in parts.** Videos are served in the parts a player asks for (HTTP range requests), so
   a video of tens of megabytes starts at once and the slider can be moved without fetching it all.
 
+### Clips a browser cannot play
+
+**Nothing an endpoint sends is refused or dropped.** A finished clip is stored as a file in the media folder whatever its
+container is: a WebM, an MP4, an AVI, an animated WebP, a GIF, an Ogg or QuickTime file, an EBML (Matroska) file of any document
+type, or a file nobody can tell the kind of. Its first bytes say what it is, never its name or what the server calls
+it, and the file is named for that (`.webm`, `.avi`, `.bin` for an unknown one).
+
+- **A WebM and an MP4 play.** A WebM is an EBML file whose document type is `webm` or `matroska`, which is how
+  stable-diffusion.cpp writes the clips it makes.
+- **Any other format is a tile of its own kind**, with its real type in words (**AVI**, **WebP**, **EBML (foo)**,
+  **Unknown**) and a short note that a browser cannot play it here. A click opens it to be **downloaded**; **Details** says
+  the format. It is sent to be saved and never shown, as the type its bytes say (`application/octet-stream` for an unknown
+  file), with a content security policy that would stop it running anything. It has no poster.
+- **A playable copy, where ffmpeg is there.** For a clip a browser cannot play, the viewer offers **Make a WebM copy to
+  play** when the portal has an `ffmpeg` (the one that makes the posters). The copy is made on request, never
+  by itself, kept beside the gallery in `video-copies`, and plays in the viewer; the original is always kept and **Download**
+  still gives it. Without ffmpeg there is no such button, and the original is there to download.
+- **The agent's clips.** `generate_video` keeps such a clip in the chat's folder too, and tells the agent that a browser
+  cannot play it in the chat; the chat says so in a short line, with the format and a link to the gallery, and draws no
+  player. `show_video` still plays only a WebM or an MP4.
+
 ### What the viewer adds
 
 Beside its own buttons, the viewer of a picture has these:
@@ -521,10 +542,13 @@ This is the rule for pictures, applied to videos, by the same code:
 - The agent's videos are listed from the moment its tool saves them, with what they were asked for.
   **Videos that nobody listed are found as well:** the portal looks in `generated-videos` of every
   agent's home, of every project and of every folder a chat works in, and lists each file there whose
-  first bytes say it is a **WebM** or an **MP4** (a WebM is an EBML file whose document type, read from
-  its header, is `webm` or `matroska`, which is what stable-diffusion.cpp writes; an EBML file of another type, and a
-  QuickTime movie, which a browser does not play, are left out), of at most **100 MB**, whatever it is called. A link is never followed, a file that is no
-  video is left out, and nothing else in those folders is looked at.
+  first bytes say it is some kind of clip, of at most **100 MB**, whatever it is called: a **WebM** (an EBML file
+  whose document type, read from its header, is `webm` or `matroska`, which is what stable-diffusion.cpp writes) or an
+  **MP4**, which play, and an AVI, a QuickTime movie, a WebP, a GIF, an Ogg or an EBML file of another type, which are
+  listed as what they are and offered as downloads (see [Clips a browser cannot play](#clips-a-browser-cannot-play)).
+  A file the bytes say nothing of is listed only if it is named as the tool names what it makes
+  (`video-20261001-101500-a1b2c3.bin`): the folder may hold other things. A link is never followed, and nothing else in
+  those folders is looked at.
 - A video that was found is *from the folder*: which chat made it cannot be told, and what it was
   asked for was not kept. It is one entry with a video the agent recorded, never two. It has no
   description, so a tile carries its file name instead, and there is no **Run again** for it.
@@ -561,18 +585,17 @@ unless you set another). See
 
 The same as the agent's tool, because it is the same code: the address, model, size, frames, frame
 rate and key are read when a video is made; the key goes to that address and nowhere else and **never
-reaches the page**; and what comes back must be a WebM or an MP4 by its first bytes and at most 100 MB,
-within the time limit. See [Opt-in features](/guide/features#video-generation). A clip that is none of those is
-refused with what was sent, so that it can be read in the frame without the server's log: the `output_format` and
-`mime_type` the job names, the file's first 8 bytes in hex, and its `frame_count` and resolution. A failed video's
-message is shown whole in its frame.
+reaches the page**; and what comes back is kept **whatever it is**: a finished clip is never failed by its format. It
+must be a clip at all (an answer with no video in it fails), valid base64, at most 100 MB, and within the time limit.
+See [Opt-in features](/guide/features#video-generation). A job that fails says why, and its message is shown whole in
+its frame.
 
 For a stable-diffusion.cpp server the portal uses its **native job API** (`/sdcpp/v1`), because a
 video takes far longer than a request should be held open:
 
 1. `GET /sdcpp/v1/capabilities`, before anything is sent, so that a server with no video model
-   loaded, or one built without WebM support, is told so in plain words. A server that does not answer it
-   is asked anyway.
+   loaded is told so in plain words. A server that does not answer it is asked anyway. The portal asks for a WebM; a
+   server that says it cannot make one is asked for the first format it does make, and what it makes is kept.
 2. `POST /sdcpp/v1/vid_gen` with `{ prompt, model?, negative_prompt?, width?, height?, video_frames?, fps?,
    seed?, sample_params?: { sample_steps }, init_image?, output_format: "webm" }`. A field that was not
    set is left out. `init_image` is the first frame as a `data:` URL.
@@ -586,7 +609,7 @@ video takes far longer than a request should be held open:
 The address is the server's own, such as `http://localhost:1234`, or `http://host:port/upstream/<model>` through
 llama-swap; the address of the image endpoint of the same stable-diffusion.cpp server, with its `/v1`, works too (the
 `/v1` is taken off). A `/v1` endpoint of another kind of server does not work. The server must have been **started with a video model** and **built
-with WebM support**: an AVI or an animated WebP, which it can make too, is not something a browser plays.
+with WebM support** if you want clips that play: an AVI or an animated WebP, which it can make too, is kept as the file it is.
 Other request and answer shapes are not translated; there is no other backend yet. Not supported: a last
 frame, control frames, LoRA and the other fields of the native API; they are not in the form.
 

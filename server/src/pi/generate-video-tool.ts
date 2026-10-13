@@ -5,6 +5,7 @@ import { pictureIn } from "./show-image-tool.js";
 import { takenByAnother } from "./generate-image-tool.js";
 import { videoIn } from "./show-video-tool.js";
 import { GENERATED_VIDEOS_DIR, recordChatVideo } from "../video-gallery.js";
+import { sniffVideo } from "../video-files.js";
 import { GENERATE_VIDEO_SOURCE, GENERATE_VIDEO_TOOL, generateVideo, videoGenerationConfig, videoGenerationReady } from "../video-generation.js";
 import { MAX_VIDEO_PROMPT, parseVideoSize } from "../video-settings.js";
 import { FileError, MAX_PICTURE_BYTES, baseDir, makeFolder, readPicture, saveNewFile } from "../workspace-files.js";
@@ -19,7 +20,9 @@ import { FileError, MAX_PICTURE_BYTES, baseDir, makeFolder, readPicture, saveNew
  * page plays it under the tool line in the chat. The clip is written into a folder
  * of its own inside the chat's, under a name made here, never one the agent or
  * the endpoint chose, and nothing is written until the endpoint has answered with
- * a real clip: a failed call leaves no file and no folder behind. It is also listed
+ * a clip: a failed call leaves no file and no folder behind. A clip is kept whatever
+ * its format: a WebM or an MP4 plays in the chat, and any other file is saved as it is,
+ * said to be one a browser cannot play, to be downloaded from the gallery. It is also listed
  * in the Media page's gallery, with what it was asked for (see video-gallery.ts).
  *
  * A clip takes minutes, in the endpoint's queue and on its model; the call waits for
@@ -37,7 +40,7 @@ export const GENERATE_VIDEO_VOICE_LINE =
 const fileName = (ext: string): string =>
   `video-${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-")}-${randomBytes(3).toString("hex")}.${ext}`;
 
-/** Writes the clip into the chat's folder, under a name made here, and returns where, from it. */
+/** Writes the clip into the chat's folder, under a name made here, and returns where, from it. A clip a browser plays is checked as the page will fetch it; any other is only kept. */
 export function saveGeneratedVideo(folder: string, bytes: Buffer, ext: string, name = fileName(ext)): string {
   const base = baseDir(folder);
   try {
@@ -46,8 +49,8 @@ export function saveGeneratedVideo(folder: string, bytes: Buffer, ext: string, n
     if (!(e instanceof FileError && e.code === "exists")) throw e;
   }
   const rel = saveNewFile(base, GENERATED_VIDEOS_DIR, name, bytes);
-  // Checked as the page will fetch it, so a call that succeeds is one that plays.
-  return videoIn(folder, rel);
+  // Checked as the page will fetch it, so that a clip that is said to play does.
+  return sniffVideo(bytes.subarray(0, 64)).playable ? videoIn(folder, rel) : rel;
 }
 
 /** The longest clip the tool asks for, in seconds: far more than any model makes, so that a typo is refused and a long clip is not. */
@@ -81,7 +84,7 @@ export class GenerateVideoTool {
       label: "generate video",
       description:
         "Make a short video clip from a description with the video model the person has set up, and show it to them. " +
-        "The clip is a WebM or MP4 saved in the chat's folder and plays on their screen as show_video's does, so do not call show_video on it. " +
+        "The clip is saved in the chat's folder: a WebM or MP4 plays on their screen as show_video's does, so do not call show_video on it; any other format is kept as a file that cannot be played in the chat and is in the gallery to download. " +
         "Describe what it should show: the subject, what moves and how, the camera, the style, the setting. " +
         "To start from a picture — the picture is the first frame, and the description says what happens next — give its path in the chat's folder. " +
         "A picture the person only attached to a message is not a file in the folder: ask them to put it there. " +
@@ -150,7 +153,12 @@ export class GenerateVideoTool {
           });
         }
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
-        const details = { path: rel, ...(title ? { title } : {}), [GENERATED_VIDEO_MARK]: true };
+        const format = sniffVideo(made.bytes.subarray(0, 64));
+        const details = { path: rel, ...(title ? { title } : {}), ...(format.playable ? {} : { notPlayable: format.label }), [GENERATED_VIDEO_MARK]: true };
+        if (!format.playable) {
+          const text = `Generated and saved: ${rel}. Its format is ${format.id === "bin" ? "one the portal does not know" : format.label}, which a browser cannot play in the chat. It is kept as it is and listed in the Media gallery, where the person can download it. Tell them so.`;
+          return { content: [{ type: "text", text }], details };
+        }
         return { content: [{ type: "text", text: `Generated and shown to the user: ${rel}` }], details };
       },
     });

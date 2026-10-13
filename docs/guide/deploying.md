@@ -181,6 +181,7 @@ Inside `/data`:
 | `/data/images` | The pictures the [Media page](/guide/media) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |
 | `/data/videos` | The videos the [Media page](/guide/media) made itself, kept until you delete them. What the agent makes is in the chat's folder, under `generated-videos` |
 | `/data/video-posters` | The small first-frame pictures the portal makes of videos when there is an `ffmpeg` (see [Media](/guide/media#the-gallery)); they can be deleted at any time and are made again |
+| `/data/video-copies` | The playable WebM copies the portal makes, on request and with an `ffmpeg`, of clips a browser cannot play (see [Media](/guide/media#clips-a-browser-cannot-play)); the originals are in `videos`, and a copy can be deleted at any time |
 | `/data/bin` | CLIs you add yourself — on `PATH`, survives rebuilds |
 
 `HOME` deliberately points at the volume. Otherwise every image rebuild would
