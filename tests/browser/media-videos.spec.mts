@@ -637,7 +637,7 @@ test('a clip ends on a picture of the gallery too: chosen in a dialog of its own
   await expect(dialog).toHaveCount(0);
   await expect(maker(page)).toContainText('Last frame');
   await expect(maker(page)).toContainText('A harbour');
-  await expect(maker(page)).toContainText('Only some video models take a last frame.');
+  await expect(maker(page)).toContainText('Whether the clip really ends on it depends on the model: some ignore it without saying so.');
   await expect(maker(page)).not.toContainText('First frame');
   await expect(page.getByRole('button', { name: 'End on a picture' })).toHaveCount(0);
 

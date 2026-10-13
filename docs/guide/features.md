@@ -445,7 +445,7 @@ portal makes (`video-20261001-101500-a1b2c3.webm`), never one the agent or the e
 file; nothing is written until the endpoint has answered with a real video, and a failure — nothing configured, the
 server's error, an answer with no clip in it, the time limit — is an error result the agent sees and can pass on. `path` is a
 picture in the chat's folder, which is the first frame of the video; it is read and checked as `edit_image` checks a picture,
-and a picture outside the folder is refused. `lastFrame` is a picture to end the video on, read and checked in the same way; it goes only to a server whose video model says it takes one, and the call fails with the reason where it does not. A picture only attached to a message is not in the folder, and the tool's
+and a picture outside the folder is refused. `lastFrame` is a picture to end the video on, read and checked in the same way; it goes only to a server that says it takes one, and the call fails with the reason where it does not. Whether the clip really ends on it depends on the model, which some ignore without saying so, and the tool's description tells the agent so, so that it reports the picture as asked for and not as reached. A picture only attached to a message is not in the folder, and the tool's
 description says so. The call waits for the video and stopping the chat stops the wait.
 
 Its answer is the video's path and a title, with the mark only the portal's tool sets (`portalVideo`), and the chat plays the

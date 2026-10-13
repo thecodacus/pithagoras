@@ -686,6 +686,17 @@ test("the tool starts from a picture of the chat's folder, and only from one", a
   }
 });
 
+test("the tool's description does not promise that a model which cannot use a last frame refuses it", () => {
+  // stable-diffusion.cpp reports end_image for every video model it runs, and some models never read it, so the check on the
+  // capabilities cannot tell the agent more than "asked for": it must not report a clip as ending on the picture.
+  gen.saveVideoGeneration({ baseUrl: "https://video.example.com", enabled: true });
+  const description: string = load(chat("tool-description")).registered[0].description;
+  assert.match(description, /whether the clip really ends on it depends on the model/);
+  assert.match(description, /some ignore it without saying so/);
+  assert.doesNotMatch(description, /only some video models take one/);
+  assert.doesNotMatch(description, /where the model does not/);
+});
+
 test("the tool ends on a picture of the chat's folder, and only on one, and only where the server's model takes one", async () => {
   const folder = chat("tool-last");
   const sd = await fakeSd({ capabilities: TAKES_END_IMAGE });

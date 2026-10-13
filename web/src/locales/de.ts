@@ -2647,7 +2647,7 @@ const de: Locale = {
     "Remove the first frame": "Den ersten Frame entfernen",
     "End on a picture": "Mit einem Bild enden",
     "Remove the last frame": "Den letzten Frame entfernen",
-    "Only some video models take a last frame. Where the server's does not, the video is not made and the reason is shown.": "Nur manche Videomodelle nehmen einen letzten Frame. Wo das Modell des Servers keinen nimmt, wird das Video nicht erstellt, und der Grund wird angezeigt.",
+    "The last frame goes only to a server that says it takes one. Whether the clip really ends on it depends on the model: some ignore it without saying so.": "Der letzte Frame geht nur an einen Server, der sagt, dass er einen nimmt. Ob der Clip wirklich darauf endet, hängt vom Modell ab: Manche ignorieren ihn, ohne es zu sagen.",
     "Without one, the video is made from the description alone.": "Ohne eines wird das Video allein aus der Beschreibung erstellt.",
     "The frames are a whole number from {min} to {max}.": "Die Frames sind eine ganze Zahl von {min} bis {max}.",
     "The frame rate is a whole number from {min} to {max}.": "Die Bildrate ist eine ganze Zahl von {min} bis {max}.",

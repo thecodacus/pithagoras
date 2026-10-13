@@ -150,7 +150,7 @@ export interface GenerateVideoJob extends VideoSettings {
   count: number;
   /** The first frame, by its id in the Images gallery: the clips are made from this picture. */
   firstFrame?: string;
-  /** The last frame, by its id in the Images gallery: the clips end on this picture, on a server whose video model takes one. */
+  /** The last frame, by its id in the Images gallery: the clips are asked to end on this picture, on a server that says it takes one. */
   lastFrame?: string;
 }
 

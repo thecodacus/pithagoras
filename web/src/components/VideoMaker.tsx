@@ -216,7 +216,7 @@ export function VideoMaker({
         {frame("first", firstFrame, onFirstFrame)}
         {frame("last", lastFrame, onLastFrame)}
         {!firstFrame && !lastFrame && <span className="text-[11px] text-fg-faint">{t("Without one, the video is made from the description alone.")}</span>}
-        {lastFrame && <span className="basis-full text-[11px] text-fg-faint">{t("Only some video models take a last frame. Where the server's does not, the video is not made and the reason is shown.")}</span>}
+        {lastFrame && <span className="basis-full text-[11px] text-fg-faint">{t("The last frame goes only to a server that says it takes one. Whether the clip really ends on it depends on the model: some ignore it without saying so.")}</span>}
       </div>
 
       <div className="mt-3">

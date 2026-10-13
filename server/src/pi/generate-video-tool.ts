@@ -87,7 +87,7 @@ export class GenerateVideoTool {
         "The clip is saved in the chat's folder: a WebM or MP4 plays on their screen as show_video's does, so do not call show_video on it; any other format is kept as a file that cannot be played in the chat and is in the gallery to download. " +
         "Describe what it should show: the subject, what moves and how, the camera, the style, the setting. " +
         "To start from a picture — the picture is the first frame, and the description says what happens next — give its path in the chat's folder. " +
-        "To end on a picture as well — the picture is the last frame — give its path as lastFrame; only some video models take one, and the call fails with the server's reason where the model does not. " +
+        "To end on a picture as well — the picture is the last frame — give its path as lastFrame. It is sent only to a server that says it takes one (the call fails with the reason where it does not), but whether the clip really ends on it depends on the model, and some ignore it without saying so: do not tell the person the clip ends on their picture, only that you asked for it. " +
         "A picture the person only attached to a message is not a file in the folder: ask them to put it there. " +
         "It can take many minutes and costs the person something, so make one clip, and another only when asked. " +
         "Give a short title. Say in words what you made; do not describe it in detail unless asked.",

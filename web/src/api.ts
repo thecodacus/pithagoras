@@ -1825,7 +1825,7 @@ export interface VideoRequest {
   strength?: number;
   /** The picture of the gallery to start from. */
   firstFrame?: string;
-  /** The picture of the gallery to end on, for a server whose video model takes one. */
+  /** The picture of the gallery to end on, for a server that says it takes one. */
   lastFrame?: string;
   count?: number;
 }

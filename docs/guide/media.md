@@ -284,13 +284,14 @@ what happens next. The picture is sent as `init_image`; the server brings it to 
 itself. **Remove** (the **×** beside it) makes the next video from the description alone again.
 
 **End on a picture**, beside it, chooses the **last frame** in the same way: the video then ends on that
-picture. It is optional, with or without a first frame, and is sent as `end_image`. **Only some video models take
-one**, and the portal sends it only to a server that says so: stable-diffusion.cpp lists `end_image` under
-`features_by_mode.vid_gen` in its capabilities. For a server that does not list it (or does not answer the
-question) the video is not made, and its frame says so in plain words; the picture is never dropped
-silently, because a video that ends somewhere else than you asked is not the video you wanted. A video made
-with a last frame shows it in its Details, and **Run again** needs the pictures to be in the gallery
-still.
+picture. It is optional, with or without a first frame, and is sent as `end_image`. The portal sends it only to a
+server that says it takes one: stable-diffusion.cpp lists `end_image` under `features_by_mode.vid_gen` in its
+capabilities. For a server that does not list it (or does not answer the question) the video is not made, and its
+frame says so in plain words; the picture is never dropped by the portal, because a video that ends somewhere else
+than you asked is not the video you wanted. **That is all the check can promise.** The server reports `end_image` for
+every video model it runs, and **only some models use it**: one that does not (a text-to-video model, say) makes the
+clip without the last frame and says nothing, so look at the end of the clip. A video made with a last frame shows
+it in its Details, and **Run again** needs the pictures to be in the gallery still.
 
 In the [viewer](/guide/sessions#looking-at-a-picture) of a picture, **Make a video from it** (while video
 generation is on) opens the form for videos with that picture as the first frame.
@@ -653,7 +654,9 @@ conversation, only in the chat, and that it takes minutes, so that it makes one 
   is `WIDTHxHEIGHT`, within the limits of the form. `seconds` is how long it should play: the portal makes
   frames of it at the frame rate set for the add-on, else the server's own, else 16. `path` is a picture
   in the chat's folder to use as the first frame, and `lastFrame` one to end on, in the same way (it goes only to a
-  server whose video model takes one, and the call fails with the reason where it does not); a picture only attached to
+  server that says it takes one, and the call fails with the reason where it does not; whether the clip really ends
+  on it depends on the model, and the agent is told that some ignore it, so it does not report more than it asked
+  for); a picture only attached to
   a message is not a file in the folder, and the agent is told to ask for it to be put there. The video is saved in a `generated-videos`
   folder inside the chat's folder, under a name the portal makes
   (`video-20261001-101500-a1b2c3.webm`), never one the agent or the endpoint chose, and never over an
