@@ -50,6 +50,7 @@ import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
 import { PicturesPanel } from "./PicturesPanel";
 import { PortalExtensions } from "./PortalExtensions";
+import { UpdateSection } from "./UpdateSection";
 import { Modal, useUnsavedDraft } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
 import { SandboxSettings } from "./SandboxSettings";
@@ -748,8 +749,17 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
   );
 }
 
-/** Where this portal keeps what it keeps, set when it was deployed. */
+/** Where this portal keeps what it keeps, set when it was deployed; and updating it. */
 function AboutPanel({ onError }: { onError: (e: string) => void }) {
+  return (
+    <>
+      <AboutDeployment onError={onError} />
+      <UpdateSection />
+    </>
+  );
+}
+
+function AboutDeployment({ onError }: { onError: (e: string) => void }) {
   // What Defaults reads too, fetched ahead: drawn at once from what is kept.
   const { value: meta, failed, reload } = useCached("settings", api.settings, { onError: refreshFailed("settings", onError) });
   if (!meta && failed) return <LoadFailed error={failed} onRetry={reload} />;

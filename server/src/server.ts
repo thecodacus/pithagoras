@@ -112,6 +112,8 @@ import { trustFlagged } from "./pi/guard.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { logsRouter } from "./api/logs.js";
+import { startUpdateChecks, updateRouter } from "./api/update.js";
+import { requestedExit } from "./restart.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -1698,6 +1700,7 @@ app.use("/api", peopleRouter());
 app.use("/api", browserRouter());
 app.use("/api", sandboxRouter(sessions));
 app.use("/api", logsRouter());
+app.use("/api", updateRouter());
 app.use("/api", voiceRouter());
 app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());
@@ -1797,6 +1800,8 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
+  // Looks at origin/main for new commits, now and every six hours: only where there is a checkout to update.
+  startUpdateChecks();
   // Agents with a heartbeat look around on their own, when nothing else is using the model.
   heartbeat.start();
 
@@ -1871,14 +1876,14 @@ function shutdown(signal: string): Promise<void> {
 async function stop(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
   // However long the rest takes, and no longer than docker waits before it kills.
-  setTimeout(() => process.exit(0), 10_000).unref();
+  setTimeout(() => process.exit(requestedExit()), 10_000).unref();
   routineSupervisor.stop();
   // Alongside the rest: their shells are given a moment to wind down.
   const shells = endAllTerminals();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
   await shells;
-  server.close(() => process.exit(0));
+  server.close(() => process.exit(requestedExit()));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds
   // of the timer above.

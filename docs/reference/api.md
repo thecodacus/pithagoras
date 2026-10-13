@@ -292,6 +292,16 @@ The session routes answer 409 until Voice is enabled in Settings → Add-ons. Se
 | `POST /api/sessions/:id/canvases/:cid/restore` | `{ revision }` — put back the text from before a write that was cut off (`restorable` in the canvas). 409 when `revision` is stale, a write is going on, or there is no earlier text |
 | `DELETE /api/sessions/:id/canvases/:cid` | Delete |
 
+## Updating the portal
+
+Settings → About → Update. Whoever is signed in may use it. A portal that does not run from a git checkout, or that runs from its source files under a file watcher, answers 404 `unavailable` to the last two.
+
+| | |
+| --- | --- |
+| `GET /api/update` | `{ kind, boot, branch, current, notice, checkedAt, rebuild, run }` from the portal's memory, the remote is not asked. `kind` is `git`, `container` (a container cannot rebuild itself), `dev` (source files under a watcher) or `none`; only `git` has the rest. `notice` is `{ count, target, since }` while `origin/main` has commits the checkout lacks. `rebuild` is true when `server/dist/.built-from` names another commit than the one checked out, and the build is still the one it was written for (a build made by hand is not). `boot` changes with each start of the portal. `run` is the update going on or the last one that failed: `{ state: "running" \| "restarting" \| "failed", steps, from, to, startedAt, failed? }`, with `failed` being `{ step, message, output, oldFilesBack }` (`oldFilesBack`: the old node_modules and builds are in place, as they were or put back; false once they have been thrown away for the new build, which is how a failed restart ends, or where putting them back failed) |
+| `POST /api/update/check` | Fetches `origin/main` and answers `{ branch, current, target, behind, ahead, changed, rebuild, problem, running }`. `problem` is `{ code, message }` with `code` `fetch`, `detached`, `dirty`, `diverged` or `restart` (a systemd service not set to start again), or `null`. `running` is the number of chats and runs the restart would stop. Changes nothing |
+| `POST /api/update` | `{ expect }` — required: the commit that was shown. Without it, or with anything but a commit id, 400 `invalid`, and nothing starts. Starts the update: 202 `{ run }`. Refused with 409 and a `code`: `busy` (one is running), `moved` (`origin/main` is not `expect` any more), `current` (nothing to update to, and the build is of the commit checked out), or the `problem` of a check |
+
 ## Portal settings
 
 | | |
