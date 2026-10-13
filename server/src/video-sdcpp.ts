@@ -32,7 +32,7 @@ const MAX_MISSES = 3;
 /** What is read of an answer that is not a finished clip. */
 const SMALL_ANSWER = 1024 * 1024;
 
-/** What the server says of itself that a request depends on: the frame rate it makes clips at, the format to ask for, and whether its video model takes a last frame. */
+/** What the server says of itself that a request depends on: the frame rate it makes clips at, the format to ask for, and whether it takes a last frame. */
 interface Capabilities {
   fps?: number;
   format?: string;
@@ -75,7 +75,7 @@ function bodyOf(config: VideoGenerationConfig, request: VideoRequest, caps: Capa
   if (request.lastFrame && !caps?.endImage) {
     throw fail(
       caps
-        ? "This stable-diffusion.cpp server does not take a last frame with its video model (its capabilities do not list end_image for video): make the clip without one, or use a model and a server that do"
+        ? "This stable-diffusion.cpp server does not take a last frame (its capabilities do not list end_image for video): make the clip without one, or use a stable-diffusion.cpp build that reports it"
         : "The video endpoint did not say whether it takes a last frame (it gave no capabilities listing end_image for video), so none is sent: make the clip without one, or use a stable-diffusion.cpp server that reports it",
     );
   }
@@ -157,7 +157,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
   /**
    * Whether the server is one that makes clips, the frame rate it makes them at without being told, and the format to ask for:
    * a WebM, which every browser plays, where it makes one, else the first it says it makes, which is kept as the file it is.
-   * Whether its video model takes a last frame is what its features say (`end_image`), and only `true` says it.
+   * Whether the server takes a last frame is what its features say (`end_image`), and only `true` says it.
    * Nothing is assumed of one that does not answer.
    */
   const capabilities = async (base: URL): Promise<Capabilities | undefined> => {

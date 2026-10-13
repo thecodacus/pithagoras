@@ -85,10 +85,10 @@ test("a last frame goes as end_image, with the first, alone, and never to a serv
   }
 
   const refused: [string, unknown, RegExp][] = [
-    ["it lists end_image as false", { supported_modes: ["vid_gen"], features_by_mode: { vid_gen: { init_image: true, end_image: false } } }, /does not take a last frame/],
-    ["it lists features and not this one", { supported_modes: ["vid_gen"], features_by_mode: { vid_gen: { init_image: true } } }, /does not take a last frame/],
-    ["it lists one for pictures only", { supported_modes: ["vid_gen"], features_by_mode: { img_gen: { end_image: true } } }, /does not take a last frame/],
-    ["it says nothing of features", { supported_modes: ["vid_gen"] }, /does not take a last frame/],
+    ["it lists end_image as false", { supported_modes: ["vid_gen"], features_by_mode: { vid_gen: { init_image: true, end_image: false } } }, /server does not take a last frame \(its capabilities do not list end_image for video\): make the clip without one, or use a stable-diffusion\.cpp build that reports it$/],
+    ["it lists features and not this one", { supported_modes: ["vid_gen"], features_by_mode: { vid_gen: { init_image: true } } }, /server does not take a last frame \(its capabilities do not list end_image for video\): make the clip without one, or use a stable-diffusion\.cpp build that reports it$/],
+    ["it lists one for pictures only", { supported_modes: ["vid_gen"], features_by_mode: { img_gen: { end_image: true } } }, /server does not take a last frame \(its capabilities do not list end_image for video\): make the clip without one, or use a stable-diffusion\.cpp build that reports it$/],
+    ["it says nothing of features", { supported_modes: ["vid_gen"] }, /server does not take a last frame \(its capabilities do not list end_image for video\): make the clip without one, or use a stable-diffusion\.cpp build that reports it$/],
     ["it does not answer", undefined, /did not say whether it takes a last frame/],
   ];
   for (const [name, capabilities, why] of refused) {
