@@ -987,8 +987,8 @@ test('Query paths lists the runs of Understory with the path each took, what it 
   await expect(noted.row).toContainText('?→? tok');
   // A change and a question differ by colour, and a path is its steps, in order, each note one of them names marked with a glow.
   const [change, query, nothing, gone] = [await changed.open(), await queried.open(), await noted.open(), await goneOne.open()];
-  await expect(change.locator('span.bg-current').first()).toHaveClass(/text-warn/);
-  await expect(query.locator('span.bg-current').first()).toHaveClass(/text-accent/);
+  await expect(change.locator('[data-run-dot]')).toHaveClass(/text-warn/);
+  await expect(query.locator('[data-run-dot]')).toHaveClass(/text-accent/);
   await expect(query).toContainText(/search\s*"test host" \(2\)\s*read\s*branches\.md\s*read\s*owner\.md\s*✓/);
   // The two reads have a glow each, and the search that found both has none: it only found them. The change has one, for the note it wrote.
   await expect(query.locator('span[style*="box-shadow"]')).toHaveCount(2);
@@ -1079,11 +1079,15 @@ test('pointing at a path lights its notes and the links between them in the grap
   await expect(page.getByRole('button', { name: 'Query paths' })).not.toHaveClass(/text-accent/);
 });
 
-test('a path that touched no note of the graph lights nothing and dims nothing', async ({ page }) => {
+test('a run that lights nothing says why on its shut row, pointed at or kept lit, and lights nothing and dims nothing', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await portal(page, {
-    traces: [{ id: 't3', kind: 'query', input: 'What was asked of the librarian?', startedAt: '2026-09-28T09:25:00Z', notation: 'browse layout → read gone.md → ✓' }],
-    runs: { t3: [step('list_directory'), step('read_concept', ['/gone.md'])] },
+    traces: [
+      { id: 't3', kind: 'query', input: 'What was asked of the librarian?', startedAt: '2026-09-28T09:25:00Z', notation: 'browse layout → read gone.md → ✓' },
+      { id: 't4', kind: 'query', input: 'What did it find in the layout?', startedAt: '2026-09-28T09:26:00Z', notation: 'browse layout → ✓' },
+      TRACES[1],
+    ],
+    runs: { ...RUNS, t3: [step('list_directory'), step('read_concept', ['/gone.md'])], t4: [step('list_directory')] },
   });
   await page.goto('/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
@@ -1092,16 +1096,35 @@ test('a path that touched no note of the graph lights nothing and dims nothing',
   expect(found).toHaveLength(3);
   const before = await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)));
   const list = await openPaths(page);
-  const run = aRun(list, /What was asked/);
-  await run.open();
-  await run.pin.hover();
-  await expect(list).toContainText('No note of this path is in the graph');
-  await frames(page);
-  expect(await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)))).toEqual(before);
+  const [gone, bare, lights] = [aRun(list, /What was asked of the librarian/), aRun(list, /What did it find in the layout/), aRun(list, /Who runs the test host/)];
+  // Shut, as they begin: the reason is on the row, in its tooltip and its description, and its dot is hollow; a run that lights notes has none of these.
+  for (const [one, why] of [[gone, 'No note of this path is in the graph'], [bare, 'This run touched no note']] as const) {
+    await expect(one.toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(one.pin).toHaveAttribute('title', new RegExp(`\n${why}$`));
+    await expect(one.pin).toHaveAccessibleDescription(why);
+    await expect(one.row.locator('[data-run-dot]')).toHaveAttribute('data-run-dot', 'dark');
+    expect(await one.row.locator('[data-run-dot]').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    // Pointed at and kept lit, it still lights nothing and dims nothing, and stays shut.
+    await one.pin.hover();
+    await frames(page);
+    expect(await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)))).toEqual(before);
+    await one.pin.click();
+    await page.mouse.move(5, 5);
+    await frames(page);
+    expect(await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)))).toEqual(before);
+    await expect(one.pin).toHaveAttribute('aria-pressed', 'true');
+    await expect(one.toggle).toHaveAttribute('aria-expanded', 'false');
+    await one.pin.click();
+  }
+  await expect(lights.pin).toHaveAttribute('title', 'Who runs the test host?');
+  await expect(lights.row.locator('[data-run-dot]')).toHaveAttribute('data-run-dot', 'lit');
+  // Opened, the same words are under its steps.
+  await gone.open();
+  await expect(gone.row.locator('p')).toHaveText('No note of this path is in the graph');
 });
 
-test('on a phone the list of paths is short and scrolls, and nothing in it makes the page scroll sideways', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 800 });
+for (const width of [390, 1280]) test(`the list of paths is at most half the window tall and scrolls, and nothing in it makes the page scroll sideways, ${width} wide`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 800 });
   const many = Array.from({ length: 40 }, (_, i) => ({
     id: `t${i}`,
     kind: i % 3 ? 'query' : 'mutation',
@@ -1119,14 +1142,14 @@ test('on a phone the list of paths is short and scrolls, and nothing in it makes
   const popover = page.locator('div.float-in-down').filter({ has: list });
   const box = (await popover.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  expect(box.x + box.width).toBeLessThanOrEqual(width);
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(800);
   const sizes = await list.evaluate((el) => ({ scroll: el.scrollHeight, shown: el.clientHeight, across: el.scrollWidth, wide: el.clientWidth }));
   expect(sizes.scroll).toBeGreaterThan(sizes.shown * 2);
   expect(sizes.shown).toBeLessThanOrEqual(800 * 0.5 + 1);
   expect(sizes.across).toBeLessThanOrEqual(sizes.wide + 1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   // The last of them can be got to, and tapped.
   const last = list.getByRole('listitem').last().locator('button[aria-pressed]');
   await last.scrollIntoViewIfNeeded();
@@ -1137,7 +1160,7 @@ test('on a phone the list of paths is short and scrolls, and nothing in it makes
   await list.getByRole('listitem').last().locator('button[aria-expanded]').click();
   await expect(list.getByRole('listitem').last()).toContainText('the-notes-about');
   expect(await list.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
 });
 
 /**
@@ -1362,8 +1385,8 @@ test('the end of a run is told as Understory ends it, and a run is a change by w
   await expect(partial.locator('span.bg-current').last()).toHaveClass(/text-warn/);
   await expect(failed.locator('span.bg-current').last()).toHaveClass(/text-danger/);
   // The librarian that wrote a note changed the memory, though it is a chat; a change that wrote nothing did not.
-  await expect(chat.locator('span.bg-current').first()).toHaveClass(/text-warn/);
-  await expect(failedChange.locator('span.bg-current').first()).toHaveClass(/text-accent/);
+  await expect(chat.locator('[data-run-dot]')).toHaveClass(/text-warn/);
+  await expect(failedChange.locator('[data-run-dot]')).toHaveClass(/text-accent/);
 });
 
 test('a run whose steps have not come says nothing of its notes, and lights none; one whose steps cannot come is told by its words alone', async ({ page }) => {
@@ -1386,7 +1409,7 @@ test('a run whose steps have not come says nothing of its notes, and lights none
     await expect(graph.getByRole('button', { name: 'The owner' })).not.toHaveAccessibleDescription('On the path traced');
   }
   // A change asked for is still told by its asking, until its steps say otherwise.
-  await expect(change.row.locator('span.bg-current').first()).toHaveClass(/text-warn/);
+  await expect(change.row.locator('[data-run-dot]')).toHaveClass(/text-warn/);
 });
 
 for (const [width, height] of [[1280, 800], [390, 800]]) {

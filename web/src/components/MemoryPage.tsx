@@ -1304,10 +1304,13 @@ const THEME_KEY = "memoryGraph.theme";
 const OUTLINE_KEY = "memoryGraph.outline";
 
 /**
- * The routes Understory's own runs took, one button each: its question, the
- * tokens it cost, and its steps drawn as a path, a note a step names marked with
- * a glow in its type's colour. Pointing at one (or reaching it with Tab) lights
- * its notes and the links between them in the graph; a click keeps it lit.
+ * The routes Understory's own runs took, a row each: a button that keeps the run
+ * lit (its question, the tokens it cost, and a dot that is warm when it changed
+ * the memory) and a toggle that opens its steps below, drawn as a path, a note a
+ * step names marked with a glow in its type's colour. Pointing at a run (or
+ * reaching it with Tab) lights its notes and the links between them in the
+ * graph, shut or open; a click on its button keeps it lit. A run that lights
+ * nothing says why in the button's tooltip and description, and has a hollow dot.
  */
 function TracePaths({
   traces,
@@ -1346,6 +1349,8 @@ function TracePaths({
         const kept = pinned === trace.id;
         const open = opened.has(trace.id);
         const change = path?.changed ?? trace.kind === "mutation";
+        // Why a run that is known to light nothing does: said on its row too, shut, where pointing at it would otherwise seem to do nothing.
+        const nothing = path?.known && path.notes.length === 0 ? (path.touched === 0 ? t("This run touched no note") : t("No note of this path is in the graph")) : undefined;
         const id = `${base}-${trace.id}`;
         return (
           <li
@@ -1360,11 +1365,16 @@ function TracePaths({
               <button
                 type="button"
                 aria-pressed={kept}
-                title={trace.input}
+                aria-description={nothing}
+                title={nothing ? `${trace.input}\n${nothing}` : trace.input}
                 onClick={() => onPin(kept ? null : trace.id)}
                 className={`flex min-w-0 flex-1 gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-fg/5 focus-visible:bg-fg/5 ${open ? "items-start" : "items-center"}`}
               >
-                <span className={`h-2 w-2 shrink-0 rounded-full bg-current shadow-[0_0_8px_currentColor] ${open ? "mt-1.5" : ""} ${change ? "text-warn" : "text-accent"}`} aria-hidden />
+                <span
+                  data-run-dot={nothing ? "dark" : "lit"}
+                  className={`h-2 w-2 shrink-0 rounded-full ${nothing ? "border-[1.5px] border-current" : "bg-current shadow-[0_0_8px_currentColor]"} ${open ? "mt-1.5" : ""} ${change ? "text-warn" : "text-accent"}`}
+                  aria-hidden
+                />
                 <span id={`${id}-question`} className={`min-w-0 flex-1 text-sm text-fg ${open ? "line-clamp-3 break-words" : "truncate"}`}>{trace.input}</span>
                 <span className="shrink-0 font-mono text-sm text-fg-muted">
                   {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
@@ -1408,9 +1418,7 @@ function TracePaths({
                   </div>
                 )}
                 {/* Said only once the run's own steps are known: before, there is nothing yet to say of its notes. */}
-                {path?.known && path.notes.length === 0 && (
-                  <p className="mt-1 text-sm text-fg-faint">{path.touched === 0 ? t("This run touched no note") : t("No note of this path is in the graph")}</p>
-                )}
+                {nothing && <p className="mt-1 text-sm text-fg-faint">{nothing}</p>}
               </div>
             )}
           </li>

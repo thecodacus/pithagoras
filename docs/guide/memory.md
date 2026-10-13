@@ -85,9 +85,11 @@ with the mouse or Tab) and the notes it touched light up in the graph, with the
 links between them, while the rest steps back; click it to keep it lit after you
 shut the list, and click it again to let it go. A run that touched no note says
 so, and one whose notes are not in the graph (they were deleted since) says that;
-neither lights anything. The list is at most half the window tall, which fits
-ten shut runs, and has a scroll bar of its own when there are more or some are
-open, also on a phone.
+neither lights anything. Such a run has a hollow dot and says why in the tooltip
+of its line, shut or open, and under its steps when it is open. The list is at
+most half the window tall, which fits ten shut runs in a window about 720 pixels
+tall or more (fewer in a shorter one), and has a scroll bar of its own when
+there are more or some are open, also on a phone.
 
 The filter button in the graph's toolbar holds the colours as switches: a type
 switched off hides its notes, and so does *orphan*. What the search down the
