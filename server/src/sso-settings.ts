@@ -3,7 +3,7 @@ import { keptForm, parseOidcConfig, type OidcConfig } from "./oidc.js";
 import { SSO_KEY, SSO_ONLY_KEY } from "./sso-keys.js";
 
 /**
- * Settings → Single sign-on, as the portal keeps it: in its own settings, like the password, and read from
+ * Single sign-on (Settings → Authentication), as the portal keeps it: in its own settings, like the password, and read from
  * there on every request, so that the command which switches the password login back on (sso-only-off)
  * takes effect in a running portal.
  */

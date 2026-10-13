@@ -42,7 +42,7 @@ const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "Con
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
 // Legacy routes ("session", "global") still resolve — old links stay valid.
-const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general" };
+const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general", password: "authentication", sso: "authentication" };
 
 export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).

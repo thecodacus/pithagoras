@@ -4,7 +4,7 @@ import { MIN_PASSWORD_LENGTH, passwordMistake } from "../password";
 import { t } from "../i18n";
 import { Empty, Field, LoadFailed, Section, inputCls, primaryCls } from "./SettingsUi";
 
-/** Settings → Password: changing the one password that signs in to the portal. */
+/** Settings → Authentication, its password: changing the one password that signs in to the portal. */
 export function PasswordPanel() {
   const [required, setRequired] = useState<boolean | null>(null);
   const [failed, setFailed] = useState<Error | null>(null);
@@ -26,7 +26,7 @@ export function PasswordPanel() {
   if (!required) {
     return (
       <Empty>
-        {t("This portal runs without a login, because PORTAL_ALLOW_NO_PASSWORD is set: whatever sits in front of it signs people in, so there is no password to change here.")}
+        {t("This portal runs without a login, because PORTAL_ALLOW_NO_PASSWORD is set: whatever sits in front of it signs people in, so there is no password to change and no single sign-on to set up here.")}
       </Empty>
     );
   }

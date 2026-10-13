@@ -31,7 +31,7 @@ import {
  * takes effect in a running portal. Until one is chosen, the portal is in
  * setup: it answers nothing but the page that asks for one.
  *
- * A sign-in through an OpenID Connect provider (Settings → Single sign-on,
+ * A sign-in through an OpenID Connect provider (Settings → Authentication,
  * oidc-login.ts) ends in the same cookie, and needs the password to be set: the
  * cookie is signed with its hash, and the provider's settings are added to the key.
  */
@@ -102,7 +102,7 @@ async function moveEnvPassword(): Promise<void> {
   if (held || getSetting(PASSWORD_HELD_KEY)) {
     if (held && (await passwordMatches(env, held))) return;
     console.warn(
-      "\n  PORTAL_PASSWORD is ignored: the portal keeps its password in its database now (Settings → Password).\n" +
+      "\n  PORTAL_PASSWORD is ignored: the portal keeps its password in its database now (Settings → Authentication).\n" +
         "  Remove the variable from your environment.\n"
     );
     return;
@@ -119,7 +119,7 @@ async function moveEnvPassword(): Promise<void> {
   putSetting(LEGACY_STAMP, "");
   console.log(
     "\n  PORTAL_PASSWORD was moved into the portal's database. The password is kept there from now on, and the\n" +
-      "  variable is ignored: change the password under Settings → Password, and remove the variable.\n"
+      "  variable is ignored: change the password under Settings → Authentication, and remove the variable.\n"
   );
 }
 await moveEnvPassword();

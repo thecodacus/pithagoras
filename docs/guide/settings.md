@@ -9,7 +9,7 @@ German. Navigation runs down the left edge, in four groups:
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
 | **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
-| **Portal** | **This browser**, **Password**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
+| **Portal** | **This browser**, **Authentication**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
 
 Plus a page for every extension that exposes configuration.
 
@@ -129,7 +129,7 @@ a hidden page keeps checking every fifteen seconds.
 
 Appears when the portal has a password. It signs out this browser only, and the
 login it held stops working anywhere a copy of its cookie was taken. With
-**End the session at the provider too** under [Single sign-on](#single-sign-on),
+**End the session at the provider too** under [single sign-on](#single-sign-on),
 the browser goes on to the provider's sign-out page. A login that
 runs out — after thirty days, or when the portal restarts without
 `PORTAL_SECRET` — brings the password screen back rather than failing every
@@ -137,7 +137,7 @@ request with *Unauthorized*.
 
 A password that is shorter than 8 characters, which an older portal took from
 `PORTAL_PASSWORD` and which is kept because it was already in use, is said here
-too, with where to change it: **Password**.
+too, with where to change it: **Authentication**.
 
 ### Language
 
@@ -153,7 +153,19 @@ A language is one file in `web/src/locales/`, named by its language code
 file, and the tests list what it lacks. A page fetches only the file of the
 language it is in, so an English page does not carry the German text.
 
-## Password
+## Authentication
+
+How people sign in to the portal: the password, and single sign-on through an
+OpenID Connect provider beside it. Both are on this one page. The password's
+part is open; single sign-on is a section that opens and closes, closed at first,
+and says while it is closed whether it is off or which provider it uses (with
+"OIDC only" where the password login is switched off). A search for one of its
+settings opens it.
+
+With `PORTAL_ALLOW_NO_PASSWORD=1` there is no login, and so no password and no
+single sign-on; the page says so.
+
+### Password
 
 The one password that signs in to the portal, kept in its database as a salted
 scrypt hash and never in a file you have to protect. A portal that has none yet
@@ -171,12 +183,11 @@ passwords are counted on their own, apart from the sign-in's: after ten from one
 source in fifteen minutes the page is told to wait, and not even the right one is
 taken until the time is up.
 
-With `PORTAL_ALLOW_NO_PASSWORD=1` there is no login and so no password; the page
-says so. A lost password is not recovered here (you cannot get in to this page
+A lost password is not recovered here (you cannot get in to this page
 without it): it is removed with a command on the server, see
 [Deploying](/guide/deploying#a-lost-password).
 
-## Single sign-on
+### Single sign-on
 
 Signing in through an OpenID Connect provider, beside the password or instead of
 it; how to set up the provider's side, and what each field means, is in
@@ -201,7 +212,7 @@ anything is kept: settings it does not answer to are refused with its reason. A
 change to the provider, to who may sign in or to **OIDC only** signs out every other
 browser; this one stays signed in. **Take out single sign-on** removes the button
 and the settings, after asking. Wrong passwords here are counted like those of
-**Password**; settings refused after the right password are not.
+**Change password**; settings refused after the right password are not.
 
 ## Add-ons
 

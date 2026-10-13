@@ -225,7 +225,7 @@ app.post("/api/auth/logout", async (req, res) => {
 
 app.use(oidcRouter(loginAttempts));
 
-// Settings → Single sign-on. The client secret is never sent back: the page is told only whether there is one.
+// Single sign-on under Settings → Authentication. The client secret is never sent back: the page is told only whether there is one.
 app.get("/api/auth/sso", requireAuth, (_req, res) => {
   const config = ssoConfig();
   res.json({ mode: authMode(), callbackPath: CALLBACK_PATH, settings: config ? shownForm(config) : null, only: config?.only ?? false });
@@ -1790,7 +1790,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
       console.warn(
         "\n  WARNING: single sign-on is set up, but nobody is named under Who may sign in (emails, groups and\n" +
           "  subjects are all empty), so the provider's sign-in lets nobody in. Name the people or groups who may\n" +
-          "  use this portal under Settings → Single sign-on.\n"
+          "  use this portal under Settings → Authentication.\n"
       );
     }
   }

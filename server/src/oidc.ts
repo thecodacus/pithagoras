@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, type JWTPayload, type RemoteJWKSet } from "jose";
 
 /**
- * Signing in through an OpenID Connect provider: what Settings → Single sign-on
+ * Signing in through an OpenID Connect provider: what single sign-on under Settings → Authentication
  * keeps, and what the provider says about itself.
  *
  * Everything here fails closed. Settings that are not quite right, or a provider

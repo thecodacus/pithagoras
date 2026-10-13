@@ -15,7 +15,7 @@ import { ENTRY, freePort, serverEnv, startServer, testHome } from "./server-harn
  * provider, and comes back with a code the fake provider hands out for an ID
  * token the test made — so that every way an answer can be wrong is tried.
  * The portal is set up for it the way a person does it: signed in with the
- * password, under Settings → Single sign-on.
+ * password, under Settings → Authentication.
  */
 const { parseOidcConfig, safeReturnTo, admitted } = await import("../dist/oidc.js");
 
@@ -80,7 +80,7 @@ after(() => idp.close());
 
 // --- the portal ---
 
-/** What Settings → Single sign-on is saved with, for a portal on `portalPort`. */
+/** What single sign-on under Settings → Authentication is saved with, for a portal on `portalPort`. */
 const ssoSettings = (portalPort, extra = {}) => ({
   issuer, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET,
   redirectUrl: `http://127.0.0.1:${portalPort}/api/auth/oidc/callback`, name: "Example ID",

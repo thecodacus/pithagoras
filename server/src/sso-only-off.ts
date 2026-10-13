@@ -8,7 +8,7 @@ import { SSO_ONLY_KEY } from "./sso-keys.js";
 
 /**
  * `npm run sso-only-off`: for a portal whose sign-in provider is gone, or will not let anybody in, while the
- * password login is switched off (Settings → Single sign-on, "OIDC only"). It switches the password login back
+ * password login is switched off (Settings → Authentication, "OIDC only"). It switches the password login back
  * on after asking; the provider's settings and the password stay as they are, and a running portal takes it at once.
  *
  * It opens the database file itself and nothing else of the server, so that it can run beside a portal that is up.

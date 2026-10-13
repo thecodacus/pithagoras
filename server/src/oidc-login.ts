@@ -21,7 +21,7 @@ import { ssoConfig } from "./sso-settings.js";
  * cookie, the one the password gives, so nothing behind the login changes. The
  * provider's tokens are not kept, nor written anywhere.
  *
- * The settings are read on every request (Settings → Single sign-on, sso-settings.ts), and single sign-on
+ * The settings are read on every request (Settings → Authentication, sso-settings.ts), and single sign-on
  * applies only while the portal has a password: the login cookie is signed with its hash.
  */
 

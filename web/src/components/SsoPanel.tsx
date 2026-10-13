@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type SsoInput, type SsoState } from "../api";
 import { t } from "../i18n";
 import { confirmDialog } from "./ConfirmDialog";
-import { Empty, Field, LoadFailed, Section, SwitchRow, btnCls, codeAreaCls, inputCls, primaryCls } from "./SettingsUi";
+import { CollapsibleSection, Field, LoadFailed, Section, SwitchRow, btnCls, codeAreaCls, inputCls, primaryCls } from "./SettingsUi";
 
 /** A list as the page shows it: one entry a line. */
 const lines = (list: string[]) => list.join("\n");
@@ -51,8 +51,12 @@ const refusal = (err: unknown) =>
       ? err.message
       : t("Cannot reach the portal");
 
-/** Settings → Single sign-on: signing in through an OpenID Connect provider, beside the password or instead of it. */
+/**
+ * Settings → Authentication, its single sign-on: signing in through an OpenID Connect provider, beside the password
+ * or instead of it. A section that opens and closes, closed at first: most portals sign in with the password alone.
+ */
 export function SsoPanel() {
+  const [open, setOpen] = useState(false);
   const [state, setState] = useState<SsoState | null>(null);
   const [failed, setFailed] = useState<Error | null>(null);
   const [form, setForm] = useState<Form | null>(null);
@@ -69,14 +73,8 @@ export function SsoPanel() {
   useEffect(load, []);
 
   if (failed) return <LoadFailed error={failed} onRetry={load} />;
-  if (!state || !form) return null;
-  if (state.mode !== "password") {
-    return (
-      <Empty>
-        {t("This portal runs without a login, because PORTAL_ALLOW_NO_PASSWORD is set: whatever sits in front of it signs people in, so there is no single sign-on to set up here.")}
-      </Empty>
-    );
-  }
+  // Without a login there is nothing to set up; the password's part of the page says why.
+  if (!state || !form || state.mode !== "password") return null;
 
   const set = <K extends keyof Form>(key: K) => (value: Form[K]) => setForm({ ...form, [key]: value });
   const text = (key: Exclude<keyof Form, "endSession" | "only">) => ({
@@ -149,7 +147,10 @@ export function SsoPanel() {
   const otherClient = Boolean(kept?.hasSecret) && (form.issuer.trim() !== kept?.issuer || form.clientId.trim() !== kept?.clientId);
   // Saved settings that name nobody: the button is on the login page, and lets nobody in.
   const nobody = Boolean(kept) && !kept?.allowedEmails.length && !kept?.allowedGroups.length && !kept?.allowedSubjects.length;
+  // What it is, said while the section is closed: off, or the provider and whether it is the only way in.
+  const summary = kept ? (state.only ? `${kept.name} · ${t("OIDC only")}` : kept.name) : t("Off");
   return (
+    <CollapsibleSection title={t("Single sign-on")} hint={t("Signing in through an OpenID Connect provider")} summary={summary} open={open} onToggle={() => setOpen(!open)}>
     <form onSubmit={save}>
       <Section
         title={t("Provider")}
@@ -253,5 +254,6 @@ export function SsoPanel() {
         </div>
       </Section>
     </form>
+    </CollapsibleSection>
   );
 }

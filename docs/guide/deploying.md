@@ -77,7 +77,7 @@ you have, which is easy on Tailscale or a VPN and not on a public address. The
 log says it is waiting. This works the same in Docker and on a headless machine:
 open the address from any browser that can reach it.
 
-**Changing it.** **Settings → Password** takes the current password and the new
+**Changing it.** **Settings → Authentication** takes the current password and the new
 one twice; it signs out every other browser, and closes every chat view, terminal and
 browser stream that was open, in the one you changed it in as well (that page opens
 them again with its new login). See [Settings](/guide/settings#password).
@@ -118,7 +118,8 @@ variable out. The command says so when the variable is set where it runs.
 
 The portal can also sign you in through an OpenID Connect provider (Authentik,
 Keycloak, Entra ID, Google, Zitadel, Authelia and the like), beside the password or
-instead of it. It is set up in the browser, under **Settings → Single sign-on**,
+instead of it. It is set up in the browser, under **Settings → Authentication**
+(the **Single sign-on** section, closed until you open it),
 and kept in the portal's database like the password; there are no variables to
 set. The login page then has a **Sign in with …** button. What the provider lets in
 gets the same login cookie the password gives, so the API, the event streams and the

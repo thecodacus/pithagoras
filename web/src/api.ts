@@ -419,7 +419,7 @@ export interface SingleSignOn {
   only: boolean;
 }
 
-/** Settings → Single sign-on as the page is shown it: the client secret never, only whether there is one. */
+/** Settings → Authentication as the page is shown it: the client secret never, only whether there is one. */
 export interface SsoSettings {
   issuer: string;
   clientId: string;
@@ -518,10 +518,10 @@ export const api = {
   /** Every other browser is signed out by it; this one stays signed in. */
   changePassword: (current: string, password: string) =>
     json<{ ok: true }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, password }) }),
-  /** `endSession` is the provider's sign-out page, where Settings → Single sign-on asks for the session there to end too. */
+  /** `endSession` is the provider's sign-out page, where Settings → Authentication asks for the session there to end too. */
   logout: () => json<{ ok: true; endSession?: string }>("/api/auth/logout", { method: "POST" }),
   sso: () => json<SsoState>("/api/auth/sso"),
-  /** Saves Settings → Single sign-on, or with `settings: null` takes it out. Asks for the current password; this browser is signed in again under the change. */
+  /** Saves Settings → Authentication, or with `settings: null` takes it out. Asks for the current password; this browser is signed in again under the change. */
   saveSso: (current: string, settings: SsoInput | null, only: boolean) =>
     json<{ settings: SsoSettings | null; only: boolean; noEndSession?: true }>("/api/auth/sso", {
       method: "PUT",

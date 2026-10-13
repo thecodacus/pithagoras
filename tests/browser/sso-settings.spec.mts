@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
 
-/** Settings → Single sign-on over canned answers: what it is shown, and what it saves. */
+/** Settings → Authentication, its single sign-on, over canned answers: what it is shown, and what it saves. */
 async function portal(page: Page, { kept = null as any, only = false, mode = 'password', refuse = '' } = {}) {
   const saves: any[] = [];
   await mockPortal(page, ({ path: p, method, json }) => {
@@ -21,6 +21,14 @@ async function portal(page: Page, { kept = null as any, only = false, mode = 'pa
   return saves;
 }
 
+/** Settings → Authentication, with its single sign-on section opened (it is closed at first): the section, beside the password's. */
+async function openSso(page: Page) {
+  await page.goto('/settings/authentication');
+  const section = page.getByRole('dialog').getByRole('region', { name: 'Single sign-on' });
+  await section.getByRole('button', { name: /^Single sign-on/ }).click();
+  return section;
+}
+
 const KEPT = {
   issuer: 'https://id.example.test/realms/home', clientId: 'portal', hasSecret: true,
   redirectUrl: 'https://portal.example.test/api/auth/oidc/callback', scopes: 'openid email profile', name: 'Example ID',
@@ -29,8 +37,7 @@ const KEPT = {
 
 test('a first setup starts from this address, sends the lists one entry a line, and asks for the current password', async ({ page }) => {
   const saves = await portal(page);
-  await page.goto('/settings/sso');
-  const dialog = page.getByRole('dialog');
+  const dialog = await openSso(page);
   const redirect = dialog.getByLabel('Redirect URL');
   await expect(redirect).toHaveValue(new RegExp(`^${new URL(page.url()).origin.replace(/[.]/g, '\\.')}/api/auth/oidc/callback$`));
   await redirect.fill('https://portal.example.test/api/auth/oidc/callback');
@@ -65,8 +72,7 @@ test('a first setup starts from this address, sends the lists one entry a line, 
 
 test('kept settings are shown without the secret, saved again without one, and a refusal is said', async ({ page }) => {
   const saves = await portal(page, { kept: KEPT });
-  await page.goto('/settings/sso');
-  const dialog = page.getByRole('dialog');
+  const dialog = await openSso(page);
   await expect(dialog.getByLabel('Issuer URL')).toHaveValue(KEPT.issuer);
   await expect(dialog.getByLabel('Client secret')).toHaveValue('');
   await expect(dialog.getByLabel('Emails')).toHaveValue('you@example.test');
@@ -93,8 +99,7 @@ test('kept settings are shown without the secret, saved again without one, and a
 
 test('the hint about the kept secret changes once the issuer or client is another, and settings that name nobody say so', async ({ page }) => {
   await portal(page, { kept: { ...KEPT, allowedEmails: [], allowedGroups: [] } });
-  await page.goto('/settings/sso');
-  const dialog = page.getByRole('dialog');
+  const dialog = await openSso(page);
   await expect(dialog.getByRole('note')).toHaveText("Nobody is named here yet, so the provider's sign-in lets nobody in.");
   await expect(dialog.getByText('A secret is kept. Leave this empty to keep it.')).toBeVisible();
   await dialog.getByLabel('Issuer URL').fill('https://id.example.test/realms/other');
@@ -107,8 +112,7 @@ test('the hint about the kept secret changes once the issuer or client is anothe
 
 test('what the server refuses is said in its words, and taking single sign-on out asks first', async ({ page }) => {
   const saves = await portal(page, { kept: KEPT, refuse: 'The provider does not offer PKCE with S256' });
-  await page.goto('/settings/sso');
-  const dialog = page.getByRole('dialog');
+  const dialog = await openSso(page);
   await dialog.getByLabel('Current password').fill('the current one');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('alert')).toHaveText('The provider does not offer PKCE with S256');
@@ -122,8 +126,7 @@ test('what the server refuses is said in its words, and taking single sign-on ou
 
 test('taking single sign-on out sends no settings, and the form starts again empty', async ({ page }) => {
   const saves = await portal(page, { kept: KEPT, only: true });
-  await page.goto('/settings/sso');
-  const dialog = page.getByRole('dialog');
+  const dialog = await openSso(page);
   await expect(dialog.getByRole('switch', { name: 'OIDC only' })).toBeChecked();
   await dialog.getByLabel('Current password').fill('the current one');
   await dialog.getByRole('button', { name: 'Take out single sign-on' }).click();
@@ -134,9 +137,67 @@ test('taking single sign-on out sends no settings, and the form starts again emp
   await expect(dialog.getByRole('switch', { name: 'OIDC only' })).not.toBeChecked();
 });
 
-test('a portal with no login has nothing to set up', async ({ page }) => {
+test('a portal with no login has nothing to set up: no password, and no single sign-on section', async ({ page }) => {
   await portal(page, { mode: 'open' });
-  await page.goto('/settings/sso');
-  await expect(page.getByRole('dialog').getByText(/no single sign-on to set up here/)).toBeVisible();
-  await expect(page.getByRole('dialog').getByLabel('Issuer URL')).toHaveCount(0);
+  await page.goto('/settings/authentication');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText(/no password to change and no single sign-on to set up here/)).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /^Single sign-on/ })).toHaveCount(0);
+  await expect(dialog.getByLabel('Issuer URL')).toHaveCount(0);
+});
+
+test('the password and single sign-on share the Authentication tab: the password open, single sign-on closed and saying it is off', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/authentication');
+  const dialog = page.getByRole('dialog');
+  const rail = dialog.getByRole('navigation');
+  await expect(rail.getByRole('button', { name: 'Authentication' }).or(rail.getByRole('link', { name: 'Authentication' })).first()).toBeVisible();
+  await expect(rail.getByText('Password', { exact: true })).toHaveCount(0);
+  await expect(rail.getByText('Single sign-on', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel(/^New password/)).toBeVisible();
+  const sso = dialog.getByRole('button', { name: /^Single sign-on/ });
+  await expect(sso).toHaveAttribute('aria-expanded', 'false');
+  await expect(sso).toContainText('Off');
+  await expect(dialog.getByLabel('Issuer URL')).toBeHidden();
+  await sso.click();
+  await expect(sso).toHaveAttribute('aria-expanded', 'true');
+  await expect(dialog.getByLabel('Issuer URL')).toBeVisible();
+  await expect(sso).toContainText('Signing in through an OpenID Connect provider');
+});
+
+test('closed, single sign-on says which provider it uses and whether it is the only way in', async ({ page }) => {
+  await portal(page, { kept: KEPT, only: true });
+  await page.goto('/settings/authentication');
+  const sso = page.getByRole('dialog').getByRole('button', { name: /^Single sign-on/ });
+  await expect(sso).toContainText('Example ID · OIDC only');
+  await expect(sso).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('the old addresses of the two pages open the Authentication tab', async ({ page }) => {
+  await portal(page);
+  for (const old of ['/settings/password', '/settings/sso']) {
+    await page.goto(old);
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByLabel(/^New password/)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /^Single sign-on/ })).toBeVisible();
+  }
+});
+
+test('a search for single sign-on opens the tab and its closed section, and one for the password finds it there too', async ({ page }) => {
+  await portal(page);
+  await page.goto('/settings/general');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByLabel('Search settings').fill('oidc only');
+  await expect(dialog.getByRole('option').first()).toContainText('OIDC only');
+  await dialog.getByLabel('Search settings').press('Enter');
+  await expect(dialog.getByRole('button', { name: /^Single sign-on/ })).toHaveAttribute('aria-expanded', 'true');
+  await expect(dialog.getByRole('region', { name: 'Single sign-on' })).toBeInViewport();
+  await expect(dialog.getByRole('switch', { name: 'OIDC only' })).toBeVisible();
+
+  await dialog.getByLabel('Search settings').fill('keycloak');
+  await expect(dialog.getByRole('option').first()).toContainText('Single sign-on');
+  await dialog.getByLabel('Search settings').fill('passwort');
+  await expect(dialog.getByRole('option').first()).toContainText('Change password');
+  await dialog.getByLabel('Search settings').press('Enter');
+  await expect(dialog.getByLabel('Current password').first()).toBeVisible();
 });
