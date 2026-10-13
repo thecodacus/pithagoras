@@ -7,6 +7,7 @@ import { sentPictureId, shownPictureId } from "../chat-pictures";
 import { splitContext } from "../context-blocks";
 import { msg, t, tp, useLanguage } from "../i18n";
 import { isPictureCall } from "../picture-call";
+import { isVideoCall } from "../video-call";
 import { isEnter, isEscape } from "../shortcuts";
 import type { Item, SentImage } from "../transcript";
 import { assistantText } from "../voice";
@@ -15,6 +16,7 @@ import { PictureButton } from "./ChatPictures";
 import { CompactionMarker, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { Markdown, type MarkdownProps } from "./Markdown";
 import { PictureCall } from "./PictureCall";
+import { ChatVideo, VideoCall } from "./VideoCall";
 import { QuestionRecord } from "./QuestionCard";
 import { ReplyStatsLine } from "./ReplyStats";
 
@@ -398,6 +400,14 @@ export const TranscriptRow = memo(function TranscriptRow({
         </div>
       );
     }
+    // The portal's generate_video is the clip itself, in its player.
+    if (isVideoCall(item)) {
+      return (
+        <div data-key={item.id} className={`tool-row${enter}`}>
+          <VideoCall item={item} sessionId={sessionId} />
+        </div>
+      );
+    }
     return (
       <div data-key={item.id} className={`tool-row${enter}`}>
       <ToolCall item={item} onOpenTerminal={act.showInTerminal} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
@@ -413,6 +423,12 @@ export const TranscriptRow = memo(function TranscriptRow({
               className="max-h-80 max-w-full rounded-lg border border-line object-contain"
             />
           </PictureButton>
+        </div>
+      )}
+      {item.video && !item.video.notPlayable && (
+        // What show_video put in front of the person: the player, in the middle of the column as a picture is.
+        <div className="chat-picture my-3 flex justify-center">
+          <ChatVideo src={api.videoUrl(sessionId, item.video.path, item.videoSeq)} title={item.video.title ?? item.video.path} />
         </div>
       )}
       </div>

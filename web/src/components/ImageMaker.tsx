@@ -413,8 +413,8 @@ export function ImageMaker({
             <p className="mt-1 text-[11px] text-fg-faint sm:col-span-2">
               {tx("Using stable-diffusion.cpp? Switch on “Stable Diffusion extra settings” in {settings} for more options.", {
                 settings: (
-                  <Link to="/settings/images" className="text-accent hover:underline">
-                    {t("Settings → Agent → Images")}
+                  <Link to="/settings/media" className="text-accent hover:underline">
+                    {t("Settings → Agent → Media")}
                   </Link>
                 ),
               })}
@@ -493,8 +493,8 @@ export function ImageMaker({
       {editing && !changing && (
         <p className="text-sm text-fg-muted">
           {t("Image editing is switched off, or has no address.")}{" "}
-          <Link to="/settings/images" className="text-accent hover:underline">
-            {t("Set it up in Settings → Agent → Images")}
+          <Link to="/settings/media" className="text-accent hover:underline">
+            {t("Set it up in Settings → Agent → Media")}
           </Link>
         </p>
       )}
@@ -659,8 +659,8 @@ export function ImageMaker({
               {!multiple && (
                 <>
                   {" "}
-                  <Link to="/settings/images" className="text-accent hover:underline">
-                    {t("Set it up in Settings → Agent → Images")}
+                  <Link to="/settings/media" className="text-accent hover:underline">
+                    {t("Set it up in Settings → Agent → Media")}
                   </Link>
                 </>
               )}
@@ -672,8 +672,8 @@ export function ImageMaker({
       {!editing && !generating && (
         <p className="mb-3 text-sm text-fg-muted">
           {t("Image generation is switched off, or has no address.")}{" "}
-          <Link to="/settings/images" className="text-accent hover:underline">
-            {t("Set it up in Settings → Agent → Images")}
+          <Link to="/settings/media" className="text-accent hover:underline">
+            {t("Set it up in Settings → Agent → Media")}
           </Link>
           {changing && <span className="mt-1 block text-xs text-fg-subtle">{t("Pictures can still be changed: choose Edit above.")}</span>}
         </p>

@@ -1,13 +1,14 @@
 # Opt-in features
 
-Three capabilities ship with Pithagoras and are **off** until you switch them on
+Four capabilities ship with Pithagoras and are **off** until you switch them on
 in **Settings**: a **subagent tool** and **Understory** as the agent's memory
-under **Add-ons**, and **image generation and editing** under **Agent → Images**. A fresh
+under **Add-ons**, and **image generation and editing** and **video generation** under
+**Agent → Media**. A fresh
 install has none of them. (The Add-ons page also holds the Docker-based
 [Browser and Voice](/guide/add-ons).) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
-Settings → MCP. Switching one off removes it. Image generation and editing are
+Settings → MCP. Switching one off removes it. Image and video generation are
 the portal's own tools and keep their settings in the portal.
 
 The first two are reference implementations behind a seam the portal already
@@ -78,12 +79,13 @@ share pi's event bus with the tool.
 
 ## Image generation
 
-**Settings → Agent → Images.** The page for the image endpoint, and the switches for
-**Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**. It was a tab of
-Settings → Add-ons before; nothing stored changed with the move.
+**Settings → Agent → Media**, **Image model.** The image endpoint, and the switches for
+**Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**. The section opens and
+closes, with the first two switches always in view; the editing endpoint and the last two switches are groups in it
+(**Editing endpoint**, **More options**). It was a tab of Settings → Add-ons before; nothing stored changed with the move.
 
 The two switches, **Image generation** and **Image editing**, are the general switches of the
-feature: they decide whether it exists. Switched on, with an address, the [Images page](/guide/images)
+feature: they decide whether it exists. Switched on, with an address, the [Media page](/guide/media)
 can make or change pictures, and a chat's agent can have the tool for it: a `generate_image` tool, in
 which the agent describes a picture, an image model you set up makes it, and it appears in the
 chat — and in voice mode's picture window — just like one the agent showed with `show_image`.
@@ -95,11 +97,11 @@ link here.
 Whether a chat's agent actually has a tool is a different question, and is answered only in the
 **tool lists**: Settings → Agent → Tools for every conversation, a project's Tools, and the tools control
 of a chat (see [Tools](/guide/interface#tools)). The switches here do not decide it, and the
-Images page does not look at those lists: a tool switched off there leaves the page as it is, as
+Media page does not look at those lists: a tool switched off there leaves the page as it is, as
 a feature switched off here removes the tool from the lists.
 
 The same endpoint also makes pictures **without the agent**: while it is on and has
-an address the sidebar has an [Images](/guide/images) page, with a form to make and
+an address the sidebar has a [Media](/guide/media) page, with a form to make and
 change pictures and a gallery of everything made, here and in chats. The page is there
 as well where only [editing](#editing-a-picture) is set up.
 
@@ -114,9 +116,9 @@ in.
 | **API address** | The API's base, such as `https://images.example.com/v1`. The portal adds `/images/generations` unless the address already ends with it. No login, query or `#` in it: the key has its own field. |
 | **API key** | Sent as `Authorization: Bearer …` to this address, and nowhere else. Left empty for a server that needs none. A saved key is never shown again — the page is only told that one is set — so leave the field empty to keep it, or choose **Remove the saved key**. Giving the address of another server without a key drops the saved one: a key belongs to the server it was given for. (A key saved before any address belongs to the first one.) |
 | **Model** | Sent as `model`. Empty sends none, for a server that has only one. |
-| **Picture size** | Sent as `size`, such as `1024x1024`, each side a whole number from 64 to 8192 (or `auto`): the same sizes the [Images page](/guide/images) takes. Empty sends none. The agent can ask for another size in a call, within the same limits. A size saved before there were limits, outside them, counts as none. |
+| **Picture size** | Sent as `size`, such as `1024x1024`, each side a whole number from 64 to 8192 (or `auto`): the same sizes the [Media page](/guide/media) takes. Empty sends none. The agent can ask for another size in a call, within the same limits. A size saved before there were limits, outside them, counts as none. |
 | **Time limit** | How long the portal waits for one picture, in whole seconds: **300** (five minutes) unless you set another, from 30 to 3600. It is one limit for making and for [editing](#editing-a-picture), and counts the endpoint's answer and the picture's arrival together. A setup saved before there was a limit has the default. When it runs out, the error names the limit and this setting. A slow or local model, or an edit of several pictures, may need more. |
-| **Stable Diffusion extra settings** | A switch for the endpoint, for making and for editing, **off** by default. It says the endpoint is a **stable-diffusion.cpp** server, and lets the [Images page](/guide/images#stable-diffusion-settings) offer, under **Advanced**, and send, the settings only that server reads: a negative prompt, a seed, the sampler's steps and, for an edit, a strength and starting from noise. They go inside the prompt, in a `<sd_cpp_extra_args>` block, since the OpenAI image format has no fields for them. **Only stable-diffusion.cpp servers understand it:** any other endpoint takes the block as part of the description, so leave it off for those. Off, nothing of this kind is ever sent, however it came to be set. It is said of the endpoint, so it goes **off again when the generation address or the editing address moves to another server** (unless the same save switches it on), as **Several pictures per edit** does: the new server is not assumed to be stable-diffusion.cpp. Not for the agent's tools: they send none of these settings, on or off. Read at each request, so a change needs no reload. A setup saved without it has it off. While an address is typed and not saved, the switch waits for the save, as the other switches of the endpoint do. |
+| **Stable Diffusion extra settings** | A switch for the endpoint, for making and for editing, **off** by default. It says the endpoint is a **stable-diffusion.cpp** server, and lets the [Media page](/guide/media#stable-diffusion-settings) offer, under **Advanced**, and send, the settings only that server reads: a negative prompt, a seed, the sampler's steps and, for an edit, a strength and starting from noise. They go inside the prompt, in a `<sd_cpp_extra_args>` block, since the OpenAI image format has no fields for them. **Only stable-diffusion.cpp servers understand it:** any other endpoint takes the block as part of the description, so leave it off for those. Off, nothing of this kind is ever sent, however it came to be set. It is said of the endpoint, so it goes **off again when the generation address or the editing address moves to another server** (unless the same save switches it on), as **Several pictures per edit** does: the new server is not assumed to be stable-diffusion.cpp. Not for the agent's tools: they send none of these settings, on or off. Read at each request, so a change needs no reload. A setup saved without it has it off. While an address is typed and not saved, the switch waits for the save, as the other switches of the endpoint do. |
 
 The request is `{ model?, prompt, n: 1, size?, output_format?, output_compression? }`, the fields
 the OpenAI image format has, and a field the page was not given is left out. The answer's first picture is
@@ -150,8 +152,8 @@ no picture — is an error result the agent sees and can pass on, never a
 silent success.
 
 The tool is a tool like the others: it can be switched off for a chat, a project
-or everywhere in the tool menus and Settings → Tools, where it sits in one **Images**
-group with `show_image` and `edit_image`, and then the model does not
+or everywhere in the tool menus and Settings → Tools, where it sits in one **Media**
+group with `show_image` and `edit_image` (and the video tools), and then the model does not
 have it and the voice instructions say nothing of it either. Its name is
 `generate_image`, which an image extension you installed may use too. pi keeps
 the first tool of a name it loads, and the portal's loads last, so then the
@@ -204,8 +206,8 @@ On the same page, under the generation settings:
 | **Editing key** | Sent as `Authorization: Bearer …` to the editing address, and nowhere else. **Empty:** the key above goes along when edits go to the same server as generation (an empty address, or the same scheme, name and port), and no key goes to another server: a key belongs to the server it was given for. A saved key is never shown again, and a new address of another server without a key drops it, as for the key above. |
 | **Editing model** | Sent as `model`. Empty sends none. It is never the model above, which may be one that only makes pictures. |
 | **Maximum picture size** | The most pixels a picture sent to be edited may have, as `WIDTHxHEIGHT` such as `2048x2048`: the box it must fit, whichever way up it is (a `1024x2048` picture fits a `2048x1024` limit). Empty is no limit, as an empty size sends none. It applies to the picture, to each of [several pictures](#several-pictures) and to a mask, and is what an endpoint with a limit on its input needs; an edit comes out about as large as the picture it is made from. A picture beyond it is scaled down to fit: see below. Read at each call, so a change needs no restart. A setup saved before there was one has none. |
-| **Image editing** | The switch of the feature, as **Image generation** is for making pictures: on the Images page, and for the `edit_image` tool being there at all (which chats get it is set in the tool lists). It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
-| **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one, and the [Images page](/guide/images#changing-a-picture) takes up to eight (see [several pictures](#several-pictures)). **While it is off, an edit uses exactly one picture** — if the agent or the Images page seems to use only one of several, this switch is the first thing to check — and both say so (below). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
+| **Image editing** | The switch of the feature, as **Image generation** is for making pictures: on the Media page, and for the `edit_image` tool being there at all (which chats get it is set in the tool lists). It needs an address, its own or generation's; like generation's it is decided when a chat loads, so a change reloads the idle open chats. |
+| **Several pictures per edit** | Off by default. Switch it on only if the editing endpoint takes more than one picture in a request. Then `edit_image` is given a list of pictures instead of one, and the [Media page](/guide/media#changing-a-picture) takes up to eight (see [several pictures](#several-pictures)). **While it is off, an edit uses exactly one picture** — if the agent or the Media page seems to use only one of several, this switch is the first thing to check — and both say so (below). It is said of this endpoint: when edits move to another server (a new editing address, or a new generation address while editing has none of its own), it goes off again until you say the new one takes them. The tool's shape is decided when a chat loads, so a change reloads the idle open chats. |
 
 The request is the OpenAI-style `images/edits` one: a `multipart/form-data` form
 with `image`, `prompt`, `n` (always 1), `model` when there is one, and `mask`
@@ -213,7 +215,7 @@ when a caller gives one. The picture is sent under a neutral name (`image.png`,
 with the type its bytes say), never under the name or the place it has in the
 chat's folder. With [several pictures](#several-pictures) switched on, a request
 of more than one picture has `image[]` once for each, in order (`image-1.png`,
-`image-2.jpg`, …); one picture is always sent as `image`, whatever the setting. The tool sends no `size`, and the Images page only one that was set in its form: what an edit comes out as is the endpoint's to
+`image-2.jpg`, …); one picture is always sent as `image`, whatever the setting. The tool sends no `size`, and the Media page only one that was set in its form: what an edit comes out as is the endpoint's to
 say, usually the picture's own, and the size set for generation need not be one
 an edit takes. The answer is read as a generation's is — the first picture from
 `data[0].b64_json` or `data[0].url`, with the same rules for where an address may
@@ -261,7 +263,7 @@ What was decided for it:
   kept beside the chat, not in its folder, so `edit_image` has no path for them.
   The tool's description says so: the agent tells you and asks you to put the
   picture in the chat's folder (the Files panel), or to change it on the
-  [Images page](/guide/images#changing-a-picture), rather than guess a path or
+  [Media page](/guide/media#changing-a-picture), rather than guess a path or
   edit another picture. Taking attached pictures straight into an edit is not
   built.
 - **A picture beyond the maximum size is scaled down to fit.** With a
@@ -277,7 +279,7 @@ What was decided for it:
   the endpoint says if the two differ. `edit_image` says in its
   answer what it did ("The image was scaled down from 4000x500 pixels (3 MB) to
   2048x256 pixels (180 KB) to fit what an edit takes."), so the agent can tell you the
-  result is smaller; the result is not scaled back up. The Images page shows the
+  result is smaller; the result is not scaled back up. The Media page shows the
   same sentence as a warning above the form when a change it made had to scale or
   compress a picture, until you close it or ask for the next one. A picture whose size
   cannot be read is still refused, since it cannot be shown to be within the
@@ -289,13 +291,13 @@ What was decided for it:
   with the area to change cleared, which an agent has no good way to make
   and which endpoints treat differently. The endpoint support in the portal
   does send one — checked as a picture by its bytes and size, sent as `mask` — and the
-  [Images page](/guide/images#changing-a-picture) paints one with a brush; whether
+  [Media page](/guide/media#changing-a-picture) paints one with a brush; whether
   its size matches the picture's is for the endpoint to say.
 
 The same rules as for generation apply to who may use it: the primary user's
 conversations only, unless a [tool rule](/people/rules) allows it, and each edit
 can cost money at a hosted endpoint. The tool is a tool like the others and can
-be switched off in the tool menus and Settings → Tools, in the same **Images** group; an extension's tool of
+be switched off in the tool menus and Settings → Tools, in the same **Media** group; an extension's tool of
 the name `edit_image` is the one pi keeps, as for `generate_image`.
 
 | | |
@@ -317,7 +319,7 @@ pictures combined or used as references, to say so and to point you to this swit
 make the edit with one of them as if it were all. A call that gives a list anyway (a chat that
 was loaded with several taken, a model that sends one) is refused before anything is sent, with
 the count and the name of the switch: `The editing endpoint is not set up to take several
-pictures, so none was sent (3 were given). …`. On the [Images page](/guide/images#changing-a-picture)
+pictures, so none was sent (3 were given). …`. On the [Media page](/guide/media#changing-a-picture)
 the form works with one picture, says that this endpoint takes one, and links to this setting.
 
 Switched on, the tool is `edit_image(paths, prompt, title?)` instead: `paths` is a
@@ -346,11 +348,11 @@ What was decided for it:
   it), at most 25 MB, sent under a neutral name, and never changed. The key stays
   in the portal and goes to the editing address only; the result is read, limited
   and written as for one picture.
-- **On the Images page, too.** The page's form sends the same request for the same pictures: up
+- **On the Media page, too.** The page's form sends the same request for the same pictures: up
   to eight, in the order of the row, `image[]` once for each, with the same count, weight and
   [maximum size](#editing-a-picture) scaling per picture, and the same refusal for an endpoint that
   takes one. It adds ways to put the pictures in: several files at once, a drop, a paste, and
-  ticking pictures of the gallery (see [Changing a picture](/guide/images#changing-a-picture)).
+  ticking pictures of the gallery (see [Changing a picture](/guide/media#changing-a-picture)).
 - **A count and a weight.** At most **8 pictures**, and **50 MB together** (25 MB each):
   all of them are held in memory and go up within the time limit of the request. More
   pictures are refused with the numbers. Pictures that weigh more are made lighter, never
@@ -387,6 +389,85 @@ What was decided for it:
 - **The setting is read at each call.** A list is refused when the endpoint is no
   longer said to take it, and a path still does where the tool was loaded with a
   list. Only the tool's shape is decided when a chat loads.
+
+## Video generation
+
+**Settings → Agent → Media**, **Video model.** The video endpoint and the switch for **Video generation**. It is
+built on the same pattern as [image generation](#image-generation), and takes the same trouble not to assume
+one server or model: the address, the model and the key are yours.
+
+Switched on, with an address, the [Media page](/guide/media) can make videos, and a chat's agent can have two
+tools: `generate_video`, in which the agent describes a video (or gives a picture as its first frame), a video
+model you set up makes it, and it plays in the chat; and `show_video`, which plays a video that is in the chat's
+folder. Switched off, or without an address, there are no such tools at all, and the page says in its form
+that it is not set up, with a link here. Whether a chat's agent actually has them is answered only in the
+**tool lists** (Settings → Agent → Tools, a project's Tools, the tools control of a chat), where they sit in the
+**Media** group, with the picture tools. The switch here does not decide it, and the Media page does not
+look at those lists.
+
+While it is on and has an address the sidebar has a [Media](/guide/media) page, with a form to make videos and a
+gallery of everything made, here and in chats, together with the pictures.
+
+### The video endpoint
+
+There is no single standard for video generation yet, so how a video is asked for belongs to a **backend**, and
+the jobs, the gallery, the page and the tool know nothing of it. There is one backend for now:
+**stable-diffusion.cpp's server**, spoken to through its native job API. Nothing about one model is built in; the
+server is started with the video model you choose.
+
+| Field | Meaning |
+| --- | --- |
+| **API address** | The server's own address, such as `http://localhost:1234`, or `http://host:port/upstream/<model>` through llama-swap. The portal adds `/sdcpp/v1/…` to it; the address of the same server's image endpoint, ending in `/v1`, works as well. Only a stable-diffusion.cpp server works: an OpenAI-style `/v1` endpoint of another kind, or another video server, does not. No login, query or `#` in it: the key has its own field. |
+| **API key** | Sent as `Authorization: Bearer …` to this address, and nowhere else, for a server behind a gateway that needs one. Left empty for a server that needs none. A saved key is never shown again — the page is only told that one is set — so leave the field empty to keep it, or choose **Remove the saved key**. Giving the address of another server without a key drops the saved one: a key belongs to the server it was given for. |
+| **Model** | Sent as `model`. stable-diffusion.cpp's server runs the one model it was started with and ignores it; a gateway in front of it may choose a model by it. Empty sends none. |
+| **Video size** | Sent as `width` and `height`, such as `832x480`, each side a whole number from 64 to 4096. Empty sends none (the server's own). The agent can ask for another size in a call. |
+| **Frames** and **Frame rate** | How many frames a video has and how fast they play, used where a request does not say: whole numbers from 1 to 1000 and from 1 to 120. Empty is the server's own. A length in seconds, which the agent's tool takes, is worked out from the frame rate here, else the server's own, else 16. A server may round a count to one its model takes, and the video's details say how many it made. |
+| **Time limit** | How long the portal waits for one video, in whole seconds, from the request to the file, the wait in the server's queue included: **1800** (half an hour) unless you set another, from 30 to 14400. When it runs out, the error names the limit and this setting; a video the server has begun goes on there. A setup saved without one has the default. |
+| **Disk limit** | How many megabytes the videos made **on the Media page** may take together; empty is no limit. At the limit no new video is made on the page until some are deleted or the limit is raised. Nothing is ever deleted for it. The agent's videos are files in its chats' folders and are not counted. |
+| **Video generation** | The switch of the feature, as **Image generation** is for pictures: on the Media page, and for the tools being there at all. Needs an address. |
+
+A video is asked for as a job (`POST /sdcpp/v1/vid_gen` with `output_format: "webm"`), asked about until it is done
+(`GET /sdcpp/v1/jobs/{id}`), and taken out of the answer as base64; see [Media](/guide/media#what-it-takes-from-the-endpoint)
+for the fields and the steps. Before it sends anything the portal asks the server what it can do, so a server with
+**no video model loaded**, or **built without WebM support** (a browser plays neither of the other formats it can make), says so in
+plain words. Other request and answer shapes are not translated; an endpoint that speaks one needs a small adapter in front.
+
+The address, model, size, frames, frame rate, time limit and key are read at each call, so changing them needs no
+restart. Switching the tools on or off, though, is decided when a chat loads: a switch reloads the idle open chats, and a busy
+one has it after it is idle and reloaded (`/reload`). The tools belong to the in-process agent (`EXECUTOR=host`), as
+`show_image` does.
+
+### The agent's video tools
+
+`generate_video(prompt, title?, size?, seconds?, path?, lastFrame?)` makes one video, saves it and shows it. `seconds` is more than 0 and at
+most 600. It is the picture tool's twin and keeps its rules: the video is written to a `generated-videos` folder inside the chat's folder under a name the
+portal makes (`video-20261001-101500-a1b2c3.webm`), never one the agent or the endpoint chose, and never over an existing
+file; nothing is written until the endpoint has answered with a real video, and a failure — nothing configured, the
+server's error, an answer with no clip in it, the time limit — is an error result the agent sees and can pass on. `path` is a
+picture in the chat's folder, which is the first frame of the video; it is read and checked as `edit_image` checks a picture,
+and a picture outside the folder is refused. `lastFrame` is a picture to end the video on, read and checked in the same way; it goes only to a server that says it takes one, and the call fails with the reason where it does not. Whether the clip really ends on it depends on the model, which some ignore without saying so, and the tool's description tells the agent so, so that it reports the picture as asked for and not as reached. A picture only attached to a message is not in the folder, and the tool's
+description says so. The call waits for the video and stopping the chat stops the wait.
+
+Its answer is the video's path and a title, with the mark only the portal's tool sets (`portalVideo`), and the chat plays the
+video only with that mark: another extension's `generate_video`, which pi may keep in the portal's place, stays a plain tool
+card. `show_video(path, title?)` plays a WebM or an MP4 of the chat's folder by what its bytes say, and nothing else. Voice mode
+shows no videos: while the model has `generate_video`, the voice instructions say that a video is not shown in a spoken
+conversation, only in the chat, and tell it to make one only when asked.
+
+Only the primary user's conversations can have the agent make a video: like any tool that is not a plain read, it is refused in
+a conversation with a teammate unless a [tool rule](/people/rules) allows it. A video can cost money at a hosted endpoint, and
+always costs minutes of its model.
+
+### What is accepted from the video endpoint
+
+- **Nothing is refused for its format.** A finished clip is kept whatever it is (see [Clips a browser cannot play](/guide/media#clips-a-browser-cannot-play)):
+  by its first bytes, whatever it is called or served as, a WebM (an EBML file whose document type is `webm` or `matroska`, which is
+  what stable-diffusion.cpp writes) or an MP4 plays, and any other file — an AVI, an animated WebP, a GIF, an EBML file of another
+  type, a file of no known kind — is stored as it is, listed as what it is and offered as a download, never shown.
+- **A size and a time.** At most 100 MB per video, and the [time limit](#the-video-endpoint) in all. The video comes in one answer,
+  as base64, so a long video is held in memory a few times over while it is decoded: the limit keeps that within reason.
+- **No other place.** The portal asks the address you gave, and no address the server's answers name: the job is asked about by
+  the id the server gave, on the address you gave, and a redirect is refused.
 
 ## Memory: Understory
 

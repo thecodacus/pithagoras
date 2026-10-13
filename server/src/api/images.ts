@@ -20,8 +20,8 @@ import { MAX_PICTURE_BYTES } from "../workspace-files.js";
 import { fail, sendPicture } from "./files.js";
 
 /**
- * The Images page: making pictures with the image endpoint the person set up
- * in Settings → Agent → Images, without the agent, and the gallery of
+ * The Media page: making pictures with the image endpoint the person set up
+ * in Settings → Agent → Media, without the agent, and the gallery of
  * what was made — here and in chats.
  *
  * The page asks the portal and the portal asks the endpoint, with the same

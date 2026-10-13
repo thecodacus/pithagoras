@@ -16,6 +16,7 @@
     "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
+    "jose": "^6.2.12",
     "nanoid": "^5.0.9",
     "playwright-core": "1.63.0",
     "sharp": "0.35.5",

@@ -9,7 +9,7 @@ import { pictureIn } from "./show-image-tool.js";
 
 /**
  * Making a picture from a description, with the image model the person set up
- * in Settings → Agent → Images, and putting it in front of them.
+ * in Settings → Agent → Media, and putting it in front of them.
  *
  * What it returns is what show_image returns — the picture's path in the chat's
  * folder, and a title, with a mark that it is this tool's (see generated-picture.ts)
@@ -17,7 +17,7 @@ import { pictureIn } from "./show-image-tool.js";
  * a thumbnail under the tool line in the chat, the picture window in voice
  * mode. The picture is written into a folder of its own inside the chat's, which
  * is where /sessions/:id/picture serves from, under a name made here, never
- * one the agent or the endpoint chose. It is also listed in the Images page's
+ * one the agent or the endpoint chose. It is also listed in the Media page's
  * gallery, with what it was asked for (see image-gallery.ts).
  */
 

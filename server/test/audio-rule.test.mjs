@@ -537,6 +537,42 @@ test("image generation: the voice line is said only while the model has the tool
   }
 });
 
+test("video generation: the voice line is said only while the model has the tool, and says the clip is for the chat", async () => {
+  const { saveVideoGeneration } = await import("../dist/video-generation.js");
+  const { GENERATE_VIDEO_VOICE_LINE } = await import("../dist/pi/generate-video-tool.js");
+  saveInstructions(undefined);
+  saveVideoGeneration({ baseUrl: "http://127.0.0.1:9", enabled: true });
+  const state = (prompt) => ({ tool: offered.at(-1).includes("generate_video"), line: prompt.includes(GENERATE_VIDEO_VOICE_LINE) });
+  try {
+    assert.match(GENERATE_VIDEO_VOICE_LINE, /not shown in a spoken conversation, only in the chat/);
+    // Opened with it switched off (the chat's menu, a project's default, Settings → Tools): not offered, not spoken of.
+    const client = await open(undefined, { sessionId: "video-generation-switched-off", toolsOff: ["generate_video"] });
+    try {
+      assert.deepEqual(state(await say(client, "Spoken, tool off", true)), { tool: false, line: false });
+      // Switched on in the chat's menu: both come at the next message, a typed one.
+      await client.setToolsOff([]);
+      assert.deepEqual(state(await say(client, "Typed, tool on")), { tool: true, line: true });
+      // And off again.
+      await client.setToolsOff(["generate_video"]);
+      assert.deepEqual(state(await say(client, "Typed, tool off again")), { tool: false, line: false });
+      // show_video is another tool: switching it off changes nothing about the line of the tool that makes a clip.
+      await client.setToolsOff(["show_video"]);
+      assert.deepEqual(state(await say(client, "Typed, another tool off")), { tool: true, line: true });
+    } finally {
+      client.dispose();
+    }
+  } finally {
+    saveVideoGeneration({ enabled: false });
+  }
+  // Off, or with no address, there is no tool and no line.
+  const bare = await open(undefined, { sessionId: "video-generation-off" });
+  try {
+    assert.deepEqual(state(await say(bare, "Spoken, add-on off", true)), { tool: false, line: false });
+  } finally {
+    bare.dispose();
+  }
+});
+
 test("image generation: where an extension has a tool of the same name, pi keeps that one and the voice line says nothing of the portal's", async () => {
   const { saveImageGeneration } = await import("../dist/image-generation.js");
   const { GENERATE_IMAGE_VOICE_LINE } = await import("../dist/pi/generate-image-tool.js");

@@ -424,6 +424,42 @@ export interface VoiceConfig {
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; choice?: VoiceChoice; /** The saved settings point at the managed service, whether or not its container is there. */ connected?: boolean; }
 /** The GPUs the voice container can use, as nvidia-smi reports them, and the combination that fits the one it would take. */
 export interface VoiceHardware { gpus: { index: number; uuid?: string; name: string; totalMiB: number | null; freeMiB: number | null }[]; source: string; error: string; /** False while nothing could be asked yet, so that no GPU is not yet the same as none. */ checked: boolean; /** The check found there is no GPU: what is suggested is speech recognition alone, on the CPU. */ cpuOnly: boolean; /** Cards the host lists that Docker cannot hand to a container: for voice there are none. */ unusable?: string[]; /** What recognition on the CPU has to run on. */ host: Host; selected: number | null; /** The UUID of the GPU chosen on the page, empty where none is, or the one chosen is no longer there. */ chosen: string; reserveMiB: number; suggestion: VoiceChoice; }
+/** Who is signed in, and how one signs in. */
+export interface AuthStatus {
+  authRequired: boolean;
+  authed: boolean;
+  setup?: boolean;
+  shortPassword?: boolean;
+  oidc?: SingleSignOn;
+}
+
+/** The provider the login page offers, and whether it is the only way in. */
+export interface SingleSignOn {
+  name: string;
+  only: boolean;
+}
+
+/** Settings → Authentication as the page is shown it: the client secret never, only whether there is one. */
+export interface SsoSettings {
+  issuer: string;
+  clientId: string;
+  hasSecret: boolean;
+  redirectUrl: string;
+  scopes: string;
+  name: string;
+  endSession: boolean;
+}
+
+/** What the page saves: a secret left out keeps the one there is, for the same provider and client. */
+export type SsoInput = Omit<SsoSettings, "hasSecret"> & { clientSecret?: string | null };
+
+export interface SsoState {
+  mode: "password" | "setup" | "open";
+  callbackPath: string;
+  settings: SsoSettings | null;
+  only: boolean;
+}
+
 export const api = {
   listFiles: (sessionId: string, dir: string) =>
     json<{ path: string; entries: FileEntry[]; truncated: boolean }>(
@@ -488,10 +524,25 @@ export const api = {
   setVoiceGpu: (gpu: string) => json<{ selected: string; restarting: boolean }>('/api/voice/gpu', { method: 'PUT', body: JSON.stringify({ gpu }) }),
   voice: () => json<VoiceConfig>("/api/voice"),
   setVoice: (value: VoiceConfig) => json<VoiceConfig>("/api/voice", { method: "PUT", body: JSON.stringify(value) }),
-  authStatus: () => json<{ authRequired: boolean; authed: boolean; shortPassword?: boolean }>("/api/auth/status"),
+  /** `setup`: no password has been chosen yet, so the page asks for one. `oidc`: a single sign-on provider is offered too. */
+  authStatus: () => json<AuthStatus>("/api/auth/status"),
   login: (password: string) =>
     json<{ ok: true }>("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) }),
-  logout: () => json<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+  /** Chooses the first password of a portal that has none, and signs in with it. */
+  setupPassword: (password: string) =>
+    json<{ ok: true }>("/api/auth/setup", { method: "POST", body: JSON.stringify({ password }) }),
+  /** Every other browser is signed out by it; this one stays signed in. */
+  changePassword: (current: string, password: string) =>
+    json<{ ok: true }>("/api/auth/password", { method: "POST", body: JSON.stringify({ current, password }) }),
+  /** `endSession` is the provider's sign-out page, where Settings → Authentication asks for the session there to end too. */
+  logout: () => json<{ ok: true; endSession?: string }>("/api/auth/logout", { method: "POST" }),
+  sso: () => json<SsoState>("/api/auth/sso"),
+  /** Saves Settings → Authentication, or with `settings: null` takes it out. Asks for the current password; this browser is signed in again under the change. */
+  saveSso: (current: string, settings: SsoInput | null, only: boolean) =>
+    json<{ settings: SsoSettings | null; only: boolean; noEndSession?: true }>("/api/auth/sso", {
+      method: "PUT",
+      body: JSON.stringify({ current, settings, only }),
+    }),
   workspaces: () => json<{ root: string; workspaces: Workspace[] }>("/api/workspaces"),
   sessions: () => json<{ sessions: Session[]; executor: string }>("/api/sessions"),
   /** Without a workspace the chat starts in the home of the agent New is set to. */
@@ -580,6 +631,9 @@ export const api = {
     }),
   /** A picture sent with a message, as the transcript shows it. */
   imageUrl: (id: string, name: string) => `/api/sessions/${id}/images/${encodeURIComponent(name)}`,
+  /** A clip in the chat's folder, by its path there, as pictureUrl is for a picture: the player asks for the parts it needs. */
+  videoUrl: (id: string, path: string, version?: string | number) =>
+    `/api/sessions/${id}/video?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /**
    * A picture in the chat's folder, by its path there. `version` is anything
    * that changes when the file does — the agent rewrites pictures in place.
@@ -755,11 +809,13 @@ export const api = {
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
   /** Image generation alone: nothing of Understory or Docker asked for. */
   imagesFeature: () => json<{ images: ImagesFeature }>("/api/features/images"),
+  /** Video generation alone, as images are. */
+  videosFeature: () => json<{ videos: VideosFeature }>("/api/features/videos"),
   /**
    * Only whether each is on — cheap, for the sidebar and the chat's menus.
-   * `images`: image generation is on and has an address, which is when the Images page is in the sidebar.
+   * `images`: image generation is on and has an address, which is when the Media page is in the sidebar; `videos` is the same for videos.
    */
-  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean } }>("/api/features/flags"),
+  featureFlags: () => json<{ subagent: { enabled: boolean }; understory: { enabled: boolean }; images?: { enabled: boolean }; videos?: { enabled: boolean } }>("/api/features/flags"),
   /** What a chat's subagents run on: its own choice (null follows `default`). */
   subagentModel: (id: string) => json<{ model: string | null; default: string }>(`/api/sessions/${id}/subagent-model`),
   setSubagentModel: (id: string, model: string | null) =>
@@ -804,6 +860,36 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+  /** `changed`: the agent got or lost its video tools, which chats have from their next load. */
+  setVideosFeature: (patch: VideosFeaturePatch) =>
+    json<{ videos: VideosFeature; changed: boolean; reloaded: number; waiting: number }>("/api/features/videos", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  /** A page of the clips, newest first; `before` is the `next` of the page before. */
+  videoPage: (query: { origin?: VideoOrigin; kind?: VideoKind; before?: string; limit?: number; again?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    for (const [name, value] of Object.entries(query)) if (value !== undefined && value !== false) params.set(name, value === true ? "1" : String(value));
+    return json<VideoPage>(`/api/videos${params.size ? `?${params}` : ""}`);
+  },
+  /** Some clips by their ids, as far as they are there. */
+  galleryVideos: (ids: string[]) => json<{ videos: GalleryVideo[] }>(`/api/videos?ids=${ids.join(",")}`),
+  /** What is being made, and what was, with the most that run at once. */
+  videoJobs: () => json<{ jobs: VideoJob[]; limit: number }>("/api/videos/jobs"),
+  /** Stops a clip that is being made, or clears one that is done. */
+  stopVideoJob: (id: string) => json<{ ok: true }>(`/api/videos/jobs/${id}`, { method: "DELETE" }),
+  /** One job for each clip; answers at once. */
+  makeVideos: (request: VideoRequest) => json<{ jobs: VideoJob[] }>("/api/videos/generate", { method: "POST", body: JSON.stringify(request) }),
+  /** The clip as the file it is, which a player asks for in parts. Its address never changes what it shows, unless it is in a chat's folder, which the browser then asks about. */
+  videoFileUrl: (id: string) => `/api/videos/${id}/file`,
+  /** The poster picture of a clip, for the clips the gallery says can have one (`GalleryVideo.poster`). */
+  videoPosterUrl: (id: string) => `/api/videos/${id}/poster`,
+  /** The playable copy of a clip a browser does not play, once it is made. */
+  videoCopyUrl: (id: string) => `/api/videos/${id}/copy`,
+  /** Makes it, when ffmpeg is there: answers when it is done, which takes a while for a long clip. */
+  makeVideoCopy: (id: string) => json<{ ok: true }>(`/api/videos/${id}/copy`, { method: "POST" }),
+  /** Each as asked, files and all: what could not be deleted is said for each. */
+  deleteVideos: (ids: string[]) => json<{ deleted: string[]; failed: { id: string; error: string }[] }>("/api/videos/delete", { method: "POST", body: JSON.stringify({ ids }) }),
   /** A page of the gallery, newest first; `before` is the `next` of the page before. */
   galleryPage: (query: { origin?: PictureOrigin; kind?: PictureKind; before?: string; limit?: number; again?: boolean } = {}) => {
     const params = new URLSearchParams();
@@ -873,6 +959,12 @@ export const api = {
     if (opts.limit) q.set("limit", String(opts.limit));
     return json<LogsResponse>(`/api/logs?${q}`);
   },
+  /** Where an update can be made, the commit checked out, and the update that is running; the remote is not asked. */
+  update: () => json<UpdateStatus>("/api/update"),
+  /** Asks the remote what is new, and says what an update would do and what stands in its way. */
+  checkUpdate: () => json<UpdateCheck>("/api/update/check", { method: "POST" }),
+  /** `expect` is the commit that was shown; a remote that has moved on since is refused. */
+  startUpdate: (expect: string) => json<{ run: UpdateRun }>("/api/update", { method: "POST", body: JSON.stringify({ expect }) }),
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
@@ -1402,7 +1494,7 @@ export interface ToolRule {
   created_at: string;
 }
 
-export type LogLevel = "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /** One line the server printed, for Settings → Logs. */
 export interface LogLine {
@@ -1415,10 +1507,74 @@ export interface LogLine {
 /** `boot` changes when the server starts again, and the ids with it. */
 export interface LogsResponse {
   boot: string;
+  /** What the server runs at: `debug` also keeps its debug lines. Absent from a server that has no such setting. */
+  level?: "info" | "debug";
+  /** What the server holds at most, as lines and as characters; the page holds no more than that either. */
+  keep?: number;
+  chars?: number;
   last: number;
   /** Lines after `since` were let go before they were read, so `lines` does not join what the page holds. */
   gap?: boolean;
   lines: LogLine[];
+}
+
+/** A commit, as Settings → About names it. */
+export interface UpdateCommit {
+  sha: string;
+  subject: string;
+  date: string;
+}
+
+export type UpdateStep = "fetch" | "merge" | "install" | "build" | "restart";
+
+export interface UpdateRun {
+  state: "running" | "restarting" | "failed";
+  steps: { id: UpdateStep; state: "pending" | "running" | "done" | "skipped" | "failed" }[];
+  from: UpdateCommit;
+  to: UpdateCommit;
+  startedAt: string;
+  /** English, from the server and from the program that failed. */
+  failed?: {
+    step: UpdateStep;
+    message: string;
+    output: string;
+    /** The old node_modules and builds are in place: nothing was put aside, or what was has been put back. */
+    oldFilesBack: boolean;
+  };
+}
+
+/** New commits on origin/main, which the portal found on one of its looks. */
+export interface UpdateNotice {
+  count: number;
+  target: UpdateCommit;
+  since: string;
+}
+
+/** `kind` is where an update can be made: from a git checkout; not from a container's image, nor from source files under a watcher; not at all. */
+export interface UpdateStatus {
+  kind: "git" | "container" | "dev" | "none";
+  /** Changes with each start of the portal. */
+  boot: string;
+  branch?: string | null;
+  current?: UpdateCommit;
+  notice?: UpdateNotice | null;
+  /** What is built is not of the commit that is checked out (a build failed): Update builds it again. */
+  rebuild?: boolean;
+  run?: UpdateRun | null;
+}
+
+export interface UpdateCheck {
+  branch: string | null;
+  current: UpdateCommit;
+  target: UpdateCommit | null;
+  behind: number;
+  ahead: number;
+  changed: number;
+  /** What is built is not of the commit that is checked out: Update builds again, with a merge or without. */
+  rebuild: boolean;
+  problem: { code: "fetch" | "detached" | "dirty" | "diverged" | "restart"; message: string } | null;
+  /** Chats and runs going now, which the restart stops. */
+  running: number;
 }
 
 /** One decision the guard made, for the audit view. */
@@ -1608,6 +1764,146 @@ export interface ImagesFeaturePatch {
   sdExtras?: boolean;
 }
 
+/** Video generation as the page is told it: never the key, only whether one is set. */
+export interface VideosFeature {
+  enabled: boolean;
+  /** How the endpoint is spoken to: one of `backends`. */
+  backend: string;
+  backends: { id: string; label: string }[];
+  /** The API's base, such as http://host:1234. */
+  baseUrl: string;
+  model: string;
+  /** "832x480" or empty for the endpoint's own. */
+  size: string;
+  /** How many frames a clip has, and how fast they play, when the form says nothing; none for the endpoint's own. */
+  frames: number | null;
+  fps: number | null;
+  keySet: boolean;
+  /** How long a clip may take in all, in whole seconds. */
+  timeoutSeconds: number;
+  /** The most the page's own clips may take of the disk, in megabytes: 0 is no limit. */
+  storageLimitMb: number;
+  /** Whether clips can be made: switched on, and with an address to ask. The portal says it, so that the page does not work it out again. */
+  ready: boolean;
+}
+
+/** What the page may change of it. A key left out keeps the saved one; "" takes it away. */
+export interface VideosFeaturePatch {
+  enabled?: boolean;
+  backend?: string;
+  baseUrl?: string;
+  model?: string;
+  size?: string;
+  frames?: number | null;
+  fps?: number | null;
+  apiKey?: string;
+  /** null takes a saved limit away: the default again. */
+  timeoutSeconds?: number | null;
+  /** null takes the limit away. */
+  storageLimitMb?: number | null;
+}
+
+/** Made on the page, made by the agent in a chat, or found in a folder the agent's tool writes into, with no chat to name. */
+export type VideoOrigin = "page" | "chat" | "folder";
+/** Made from a description, made from a picture as its first frame, or found with nothing to tell how it was made. */
+export type VideoKind = "generated" | "animated" | "unknown";
+
+/** A clip of the gallery, as the portal tells of it. */
+export interface GalleryVideo {
+  id: string;
+  origin: VideoOrigin;
+  /** The chat whose agent made it, for the agent's clips. */
+  chat: { id: string; title: string } | null;
+  /** The folder it was found in, for one that was found: Home, or the project's name or the way to the folder under the workspace root. */
+  folder: { name: string; home: boolean } | null;
+  kind: VideoKind;
+  prompt: string;
+  /** What it was asked for with, as far as that is known; `madeFrames` and `madeFps` are what the server says it made. */
+  params: {
+    model?: string;
+    size?: string;
+    frames?: number;
+    fps?: number;
+    seed?: number;
+    sampleSteps?: number;
+    negativePrompt?: string;
+    strength?: number;
+    madeFrames?: number;
+    madeFps?: number;
+    /** A clip made from a picture: the picture of the gallery, or its path in the chat's folder. */
+    firstFrame?: { picture?: string; path?: string };
+    /** A clip made to end on a picture: named as the first frame is. */
+    lastFrame?: { picture?: string; path?: string };
+  };
+  createdAt: number;
+  bytes: number;
+  fileName: string;
+  /** The portal can make a poster picture of it (see `videoPosterUrl`). Only for a clip a browser plays. */
+  poster: boolean;
+  /** What the file is by its first bytes, and whether a browser plays it here: only a WebM and an MP4 are; any other is a file to download. */
+  format: VideoFormat;
+  /** For a clip that is not played as it is: a playable WebM copy of it is `ready`, or ffmpeg is there to make one on request (`available`). */
+  copy?: "ready" | "available";
+  /** Why the file could not be opened when the list was made, when it could not: out of reach (its folder or the file), or over the size a clip may have. Its format is then what is known of it without opening it. */
+  unavailable?: "unreachable" | "too_large";
+}
+
+export interface VideoFormat {
+  /** The kind, as a file extension: webm, mp4, mov, avi, webp, gif, mkv, ogg, or bin for one that is not known. */
+  id: string;
+  /** What a person is told it is: "AVI", "WebP", "EBML (foo)", "Unknown". */
+  label: string;
+  mimeType: string;
+  playable: boolean;
+}
+
+export interface VideoPage {
+  videos: GalleryVideo[];
+  /** Where the next page starts, or null at the end. */
+  next: string | null;
+  /** How many there are with the filters, and how much of the disk the page's own take. */
+  total: number;
+  pageBytes: number;
+}
+
+/** A clip that is being made, was, or was not. */
+export interface VideoJob {
+  id: string;
+  kind: "generate" | "animate";
+  state: "running" | "done" | "failed";
+  /** While it runs, and the server says: waiting its turn there, or being made. */
+  stage?: "waiting" | "making";
+  /** Which place in the server's queue, while it waits. */
+  queuePosition?: number;
+  prompt: string;
+  size?: string;
+  /** A clip made from a picture: the picture's id in the gallery. */
+  from?: string;
+  startedAt: number;
+  finishedAt?: number;
+  videoId?: string;
+  error?: string;
+}
+
+/** What the page asks the portal to make, and only what is set. */
+export interface VideoRequest {
+  prompt: string;
+  model?: string;
+  /** `832x480`. */
+  size?: string;
+  frames?: number;
+  fps?: number;
+  seed?: number;
+  sampleSteps?: number;
+  negativePrompt?: string;
+  strength?: number;
+  /** The picture of the gallery to start from. */
+  firstFrame?: string;
+  /** The picture of the gallery to end on, for a server that says it takes one. */
+  lastFrame?: string;
+  count?: number;
+}
+
 /** The model that keeps Understory's memory, as the page is told it: never the key. */
 export type UnderstoryLlm =
   | { source: "auto" }
@@ -1745,6 +2041,10 @@ export interface BrowserStatus {
   version: string | null;
   pages: { title: string; url: string }[];
   uiPort: string;
+  /** Does that port answer other machines? The page links to it only then. */
+  uiExposed: boolean;
+  /** A container made before the port was kept to one address: it answers every machine until it is installed again. */
+  uiOutdated: boolean;
   allowlist: string;
   /** Whether the browser tools glide a cursor to what they act on. */
   cursor: boolean;

@@ -214,6 +214,7 @@ export function browserRouter(): Router {
       .prepare("SELECT slug, name FROM routines WHERE browser = 1")
       .all() as { slug: string; name: string }[];
 
+    const ui = await service.uiState();
     res.json({
       running: Boolean(version),
       // An unauthenticated browser holding live logins is the worst outcome
@@ -222,6 +223,10 @@ export function browserRouter(): Router {
       version,
       pages,
       uiPort: uiPort(),
+      // Whether that port answers other machines (the page links to it only then), and whether the container
+      // is one that made it so before this could be chosen.
+      uiExposed: ui.exposed,
+      uiOutdated: ui.outdated,
       allowlist: browserAllowlist().join("\n"),
       // Whether the tools glide a cursor to what they act on, for whoever watches.
       cursor: browserCursorOn(),

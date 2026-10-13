@@ -80,7 +80,11 @@ import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, requireAuth, signOut } from "./auth.js";
+import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
+import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
+import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } from "./oidc.js";
+import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
+import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -92,6 +96,8 @@ import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
 import { imagesRouter } from "./api/images.js";
 import { forgetPicturesIn } from "./image-gallery.js";
+import { videosRouter } from "./api/videos.js";
+import { forgetVideosIn } from "./video-gallery.js";
 import { memoryRouter } from "./api/memory.js";
 import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
@@ -108,6 +114,8 @@ import { trustFlagged } from "./pi/guard.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { logsRouter } from "./api/logs.js";
+import { startUpdateChecks, updateRouter } from "./api/update.js";
+import { requestedExit } from "./restart.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -153,7 +161,7 @@ const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BY
 // An upload is the file itself, streamed to disk by its route, whatever type
 // the browser gave it — a .json file must not be read as a request.
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
-// An edit on the Images page may carry a mask, a picture: its route reads its own, after the login too.
+// An edit on the Media page may carry a mask, a picture: its route reads its own, after the login too.
 const IMAGE_EDIT_ROUTE = "/api/images/edit";
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
@@ -167,22 +175,118 @@ app.use(cookieParser());
 
 app.get("/api/auth/status", (req, res) => {
   const authed = isAuthed(req);
-  // Said to a login only: to anyone else it would say which password to guess.
-  res.json({ authRequired: authEnabled, authed, ...(authed && keptShortPassword ? { shortPassword: true } : {}) });
+  const mode = authMode();
+  const sso = activeSso();
+  // `setup` says that no password has been chosen yet: the page asks for one instead of for the password.
+  // The warning about a short one is said to a login only: to anyone else it would say which password to guess.
+  res.json({
+    authRequired: mode !== "open",
+    authed,
+    ...(mode === "setup" ? { setup: true } : {}),
+    // What the login page offers besides the password: the provider's button, and whether it is the only way in.
+    ...(sso ? { oidc: { name: sso.name, only: sso.only } } : {}),
+    ...(authed && shortPassword() ? { shortPassword: true } : {}),
+  });
 });
 
-app.post("/api/auth/login", loginThrottle(), (req, res) => {
-  if (!authEnabled) return res.json({ ok: true });
-  if (!checkPassword(req.body?.password)) {
+// One count of attempts for the password and the provider: a sign-in through it that fails counts like a wrong password.
+const loginAttempts = loginThrottle();
+
+app.post("/api/auth/login", loginAttempts, async (req, res) => {
+  const mode = authMode();
+  if (mode === "open") return res.json({ ok: true });
+  if (mode === "setup") return res.status(409).json({ error: "No password has been chosen yet.", setup: true });
+  if (passwordRefused()) return res.status(403).json({ error: `The password login is switched off. Sign in with ${activeSso()?.name}.` });
+  if (!(await checkPassword(req.body?.password))) {
     return res.status(401).json({ error: "Wrong password" });
   }
   issueCookie(res);
   res.json({ ok: true });
 });
 
-app.post("/api/auth/logout", (req, res) => {
-  signOut(req, res);
+// The first password, chosen by whoever opens a portal that has none yet: signed in with it at once.
+app.post("/api/auth/setup", async (req, res) => {
+  const refused = await setUpPassword(req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
+  issueCookie(res);
   res.json({ ok: true });
+});
+
+// Throttled like the login, since it too takes a guess at the password. Every other login ends with the change,
+// and this browser is signed in again under the new one.
+app.post("/api/auth/password", requireAuth, loginThrottle(), async (req, res) => {
+  const refused = await changePassword(req.body?.current, req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
+  issueCookie(res);
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  signOut(req, res);
+  const endSession = await endSessionUrl();
+  res.json({ ok: true, ...(endSession ? { endSession } : {}) });
+});
+
+app.use(oidcRouter(loginAttempts));
+
+// Single sign-on under Settings → Authentication. The client secret is never sent back: the page is told only whether there is one.
+app.get("/api/auth/sso", requireAuth, (_req, res) => {
+  const config = ssoConfig();
+  res.json({ mode: authMode(), callbackPath: CALLBACK_PATH, settings: config ? shownForm(config) : null, only: config?.only ?? false });
+});
+
+/**
+ * Saves the provider's settings, or with `settings: null` takes single sign-on out. Asks for the current
+ * password, like changing it does: whoever saves chooses the provider that signs people in. The provider is read
+ * before anything is kept, so settings it does not answer to are refused with its reason. A change to the
+ * provider, or to whether the password may sign in, ends every other login; this browser is signed in again under it.
+ * Leaving `only` out keeps whether the password may sign in as it is.
+ */
+app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
+  if (authMode() !== "password") return res.status(409).json({ error: "Single sign-on needs the portal's own password to be set." });
+  if (!(await checkPassword(req.body?.current))) return res.status(403).json({ error: "The current password is wrong." });
+  // Only a wrong password counts towards the throttle: settings refused after it are no guess at it.
+  res.locals.passwordRight = true;
+  const { settings, only } = req.body ?? {};
+  if (settings === null) {
+    removeSso();
+    sweep();
+    issueCookie(res);
+    return res.json({ settings: null, only: false });
+  }
+  if (only !== undefined && typeof only !== "boolean") return res.status(400).json({ error: "OIDC only must be on or off." });
+  const kept = ssoConfig();
+  const input = settings && typeof settings === "object" ? { ...settings } : settings;
+  // The secret kept is used again when none is typed, but only for the same provider and client: it is never sent to
+  // another. For another one, a secret left out is not taken as "none" either, which would quietly make the client
+  // a public one that the provider then refuses: it is to be typed again, or taken away on purpose (null).
+  if (input && typeof input === "object" && input.clientSecret === undefined && kept?.clientSecret) {
+    // Compared as they are kept, trimmed: a space pasted along with them is not another provider.
+    const trimmed = (value: unknown) => (typeof value === "string" ? value.trim() : value);
+    if (trimmed(input.issuer) !== kept.issuer || trimmed(input.clientId) !== kept.clientId) {
+      return res.status(400).json({ error: "The issuer or the client ID changed, so the kept client secret is not used for it. Type the client secret again, or remove it for a public client." });
+    }
+    input.clientSecret = kept.clientSecret;
+  }
+  let config;
+  try {
+    // A save that leaves `only` out keeps it as it is: a script that renames the button must not switch the password login back on.
+    config = parseOidcConfig(input, only === undefined ? kept?.only === true : only);
+  } catch (e) {
+    if (e instanceof OidcConfigError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  let provider;
+  try {
+    provider = await discover(config);
+  } catch (e) {
+    return res.status(400).json({ error: (e as Error).message });
+  }
+  saveSso(config);
+  rememberProvider(provider);
+  sweep();
+  issueCookie(res);
+  res.json({ settings: shownForm(config), only: config.only, ...(config.endSession && !provider.endSessionEndpoint ? { noEndSession: true } : {}) });
 });
 
 // Understory's model server, in "the chat's" mode: its own token, not a portal login.
@@ -728,6 +832,7 @@ app.delete("/api/projects/:name", async (req, res) => {
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       forgetPicturesIn(project.path);
+      forgetVideosIn(project.path);
       clearProjectTools(project.name);
       clearProjectAgent(project.name);
       const switchedOff = switchOffRoutines([...routines, ...late]);
@@ -786,7 +891,10 @@ app.delete("/api/agents/:id", async (req, res) => {
       // The projects that worked with it are blank slates again.
       releaseProjectsOf(agent.id);
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
-      if (req.query.folder === "delete") forgetPicturesIn(agent.home);
+      if (req.query.folder === "delete") {
+        forgetPicturesIn(agent.home);
+        forgetVideosIn(agent.home);
+      }
       deleteNotesOf(agent.id);
       // With its folder they have nowhere left to run, and an agent made under the
       // same name must not take them over. Kept with the folder, they stay, switched off.
@@ -1592,6 +1700,7 @@ app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
 app.use("/api", imagesRouter());
+app.use("/api", videosRouter());
 app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", agentsRouter());
@@ -1614,6 +1723,7 @@ app.use("/api", peopleRouter());
 app.use("/api", browserRouter());
 app.use("/api", sandboxRouter(sessions));
 app.use("/api", logsRouter());
+app.use("/api", updateRouter());
 app.use("/api", voiceRouter());
 app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());
@@ -1684,7 +1794,7 @@ const tls =
     ? { cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }
     : null;
 
-const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
+const host = bindHost(authMode() !== "open", process.env.ALLOW_OPEN);
 // Before anything can start a run: a catch-up routine marked running in the same
 // moment would be taken for one the last server left.
 const cutOff = sessions.recoverOrphans();
@@ -1696,10 +1806,18 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
-  console.log(`  auth:     ${authEnabled ? "password" : "DISABLED"}`);
+  console.log(`  auth:     ${{ password: "password", setup: "waiting for a password to be chosen", open: "DISABLED" }[authMode()]}`);
+  const sso = activeSso();
+  if (sso) {
+    console.log(`  sso:      ${sso.issuer}${sso.only ? " (the only way in: the password login is off)" : ""}`);
+    // Read now, so that a provider that does not answer is in the log before anyone presses the button.
+    providerFor(sso).catch((e) => console.error(`[auth] single sign-on cannot reach ${sso.issuer}: ${(e as Error).message}. Sign-ins through it fail until it can.`));
+  }
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
+  // Looks at origin/main for new commits, now and every six hours: only where there is a checkout to update.
+  startUpdateChecks();
   // Agents with a heartbeat look around on their own, when nothing else is using the model.
   heartbeat.start();
 
@@ -1774,14 +1892,14 @@ function shutdown(signal: string): Promise<void> {
 async function stop(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
   // However long the rest takes, and no longer than docker waits before it kills.
-  setTimeout(() => process.exit(0), 10_000).unref();
+  setTimeout(() => process.exit(requestedExit()), 10_000).unref();
   routineSupervisor.stop();
   // Alongside the rest: their shells are given a moment to wind down.
   const shells = endAllTerminals();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
   await shells;
-  server.close(() => process.exit(0));
+  server.close(() => process.exit(requestedExit()));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds
   // of the timer above.

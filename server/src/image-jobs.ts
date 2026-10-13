@@ -13,7 +13,7 @@ import {
 import { forPicture, hasNative, type PictureSettings } from "./image-settings.js";
 
 /**
- * Making pictures for the Images page: a request becomes a job that runs on
+ * Making pictures for the Media page: a request becomes a job that runs on
  * the server, so that closing the page, or going to another, does not lose a
  * picture that is being paid for. The page asks which jobs there are, and shows
  * each as the picture being made until it is in the gallery.
@@ -135,7 +135,7 @@ function start(job: Omit<PictureJob, "id" | "state" | "startedAt">, make: (signa
 }
 
 /** What a request with a setting that only stable-diffusion.cpp reads is told while the switch for them is off: they are not sent, and not dropped without a word either. */
-const SD_OFF = "Stable Diffusion extra settings are switched off, so seed, steps, negative prompt, strength and starting from noise are not sent. Switch them on in Settings → Agent → Images, or leave them out";
+const SD_OFF = "Stable Diffusion extra settings are switched off, so seed, steps, negative prompt, strength and starting from noise are not sent. Switch them on in Settings → Agent → Media, or leave them out";
 
 /** Whether there is room for `count` more, or the refusal that says there is not. */
 function room(count: number): void {
@@ -187,7 +187,7 @@ const requestOf = ({ model, size, outputFormat, outputCompression, fromNoise, ne
  */
 export function startGenerations(request: GenerateJob): PictureJob[] {
   const config = imageGenerationConfig();
-  if (!imageGenerationReady(config)) throw new JobRefusal("Image generation is switched off, or has no address: set it up in Settings → Agent → Images", 409);
+  if (!imageGenerationReady(config)) throw new JobRefusal("Image generation is switched off, or has no address: set it up in Settings → Agent → Media", 409);
   if (!config.sdExtras && hasNative(request)) throw new JobRefusal(SD_OFF, 409);
   room(request.count);
   return Array.from({ length: request.count }, (_, i) => {
@@ -219,7 +219,7 @@ export interface EditJob extends PictureSettings {
  */
 export function startEdit(request: EditJob): PictureJob[] {
   const config = imageGenerationConfig();
-  if (!imageEditingReady(config)) throw new JobRefusal("Image editing is switched off, or has no address: set it up in Settings → Agent → Images", 409);
+  if (!imageEditingReady(config)) throw new JobRefusal("Image editing is switched off, or has no address: set it up in Settings → Agent → Media", 409);
   const target = imageEditingTarget(config);
   if (!target.sdExtras && hasNative(request)) throw new JobRefusal(SD_OFF, 409);
   room(request.count);

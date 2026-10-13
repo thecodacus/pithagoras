@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { isIPv4 } from "node:net";
 import { browserCdp } from "../api/mcp.js";
 import { getSetting, putSetting } from "../db.js";
 import { containerAction, containerState, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
@@ -19,6 +20,11 @@ export const IMAGE = "lscr.io/linuxserver/chromium:latest";
 export const CONTAINER = "pithagoras-browser";
 /** The name compose used, so an existing profile — and its logins — carries over. */
 export const VOLUME = process.env.BROWSER_VOLUME || "pithagoras_browser-profile";
+
+/** Where the browser's own web UI listens unless told otherwise: this machine. */
+const LOOPBACK = "127.0.0.1";
+/** The address a container was made to listen on, kept on it: Docker shows nothing of the web server's own configuration. */
+const BIND_LABEL = "pithagoras.browser-bind";
 
 export interface BrowserConfig {
   user: string;
@@ -53,6 +59,44 @@ export function saveConfig(patch: Partial<BrowserConfig>): BrowserConfig {
     if (typeof v === "string" && v) putSetting(map[k as keyof BrowserConfig], v);
   }
   return config();
+}
+
+const badBinds = new Set<string>();
+
+/**
+ * The address the browser's web UI (3010 and 3011) listens on, from `BROWSER_BIND`.
+ *
+ * This machine only, unless an IPv4 address says otherwise: the container shares the host's network, so what
+ * it listens on is the host's own interfaces, and the only thing in front of it is one password. `0.0.0.0` is
+ * every interface, as it was before this could be chosen. Anything else is refused to the safe answer rather
+ * than passed on, since it ends up in a shell script.
+ */
+export function uiBind(): string {
+  const wanted = process.env.BROWSER_BIND?.trim();
+  if (!wanted) return LOOPBACK;
+  if (isIPv4(wanted)) return wanted;
+  if (!badBinds.has(wanted)) {
+    badBinds.add(wanted);
+    console.warn(`[portal] BROWSER_BIND=${wanted} is not an IPv4 address, so the browser's UI stays on ${LOOPBACK}`);
+  }
+  return LOOPBACK;
+}
+
+const isLoopback = (address: string) => address.startsWith("127.");
+
+/**
+ * Can the browser's own web UI be reached from another machine, so that the page may link to it?
+ *
+ * `outdated` is a container made before its UI was held to an address: it listens on every interface whatever
+ * `BROWSER_BIND` says now, until it is removed and installed again. A browser the portal does not run is not
+ * one it knows the address of, so it keeps the link it always had.
+ */
+export async function uiState(): Promise<{ exposed: boolean; outdated: boolean }> {
+  if (process.env.BROWSER_EXTERNAL === "true" || !dockerAvailable()) return { exposed: true, outdated: false };
+  const found = await request<{ Config?: { Labels?: Record<string, string> } }>("GET", `/containers/${CONTAINER}/json`).catch(() => null);
+  if (found?.status !== 200) return { exposed: !isLoopback(uiBind()), outdated: false };
+  const bound = found.body?.Config?.Labels?.[BIND_LABEL];
+  return { exposed: !isLoopback(bound ?? "0.0.0.0"), outdated: bound === undefined };
 }
 
 /** Progress of a pull in flight, so a multi-gigabyte download is not silence. */
@@ -106,15 +150,46 @@ export async function status() {
 }
 
 /**
+ * Run before the image's own start, to keep its web server to one address.
+ *
+ * The image's nginx listens on every interface and has no setting for that, but it writes its configuration
+ * from /defaults/default.conf each time it starts, so that is rewritten first: the IPv6 listens go, and the
+ * IPv4 ones are given the address. The portal's own proxy reaches the server on 127.0.0.1, so any other address
+ * gets a second listen there. The container ends here, loudly, if that did not take (an image that changed its
+ * layout), rather than starting with the UI open to the network. `0.0.0.0` leaves the image as it is.
+ *
+ * That file lives in the container's writable layer, and a stopped container is started again as it is (Stop and
+ * Start, a reboot), so the image's own copy is kept beside it once and every start begins from that. An edit
+ * made on top of the last start's would put the address in twice and leave nginx with a config it refuses.
+ */
+const BIND_SCRIPT = String.raw`set -e
+f=/defaults/default.conf
+[ -e "$f.orig" ] || cp "$f" "$f.orig"
+cp "$f.orig" "$f"
+if [ "$PITHAGORAS_UI_BIND" != 0.0.0.0 ]; then
+  listens="s/listen \([0-9]\)/listen $PITHAGORAS_UI_BIND:\1/"
+  if [ "$PITHAGORAS_UI_BIND" != 127.0.0.1 ]; then
+    listens="/listen [0-9]/{h;s/listen /listen 127.0.0.1:/;x;s/listen /listen $PITHAGORAS_UI_BIND:/;G;}"
+  fi
+  sed -i -e '/listen \[::\]:/d' -e "$listens" "$f"
+  grep -qF "listen $PITHAGORAS_UI_BIND:" "$f" || { echo "pithagoras: the browser's UI could not be bound to $PITHAGORAS_UI_BIND" >&2; exit 1; }
+fi
+exec /init`;
+
+/**
  * The container, as validated by hand before any of this was automated.
  *
  * seccomp:unconfined is chromium's own sandbox needing room; the alternative is
  * --no-sandbox, which is worse. Host networking is what puts the debugging port
- * on the same loopback as the portal without publishing it anywhere.
+ * on the same loopback as the portal without publishing it anywhere; the web UI
+ * needs BIND_SCRIPT for that, since it listens on every interface by itself.
  */
 function spec(cfg: BrowserConfig) {
+  const bind = uiBind();
   return {
     Image: IMAGE,
+    Entrypoint: ["/bin/sh", "-c", BIND_SCRIPT],
+    Labels: { [BIND_LABEL]: bind },
     Env: [
       "PUID=0",
       "PGID=0",
@@ -123,6 +198,7 @@ function spec(cfg: BrowserConfig) {
       `PASSWORD=${cfg.password}`,
       `CUSTOM_PORT=${cfg.port}`,
       `CUSTOM_HTTPS_PORT=${cfg.httpsPort}`,
+      `PITHAGORAS_UI_BIND=${bind}`,
       "CHROME_CLI=--remote-debugging-port=9222",
       // The image restarts the app when it exits; without this, closing the
       // window leaves a healthy container with no browser in it.

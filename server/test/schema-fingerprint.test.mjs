@@ -17,7 +17,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 4, fingerprint: "62a0fbc7dc2058a35dd5e4d09f3fb04cf6661c4896e96f0ff92299e9056545af" };
+const PINNED = { version: 4, fingerprint: "efbdd8979a8d5394300b7204d1486827c1831b1a13d4956828900facc7aba461" };
 
 const home = inProcessHome("pithagoras-schema-");
 
@@ -197,7 +197,7 @@ function startToolsUpgrade(dataDir, port) {
 
 // fixtures/portal-v3.db was made by the code of v0.1.0 (SCHEMA_VERSION 3): a routine with its Browser switch on (news), one
 // with it off in a project (tidy), a project that switches bash off, and web_search off by default. Version 4 gives routines
-// tool switches of their own and agents a table of them (#81), and projects a table of the agent they work with (#127).
+// tool switches of their own and agents a table of them (#81), projects a table of the agent they work with (#127), and the Media page a table of clips (#79).
 test("a database of v0.1.0 is brought to the pinned schema, and each routine keeps the browser it had", async () => {
   const dir = path.join(home, "from-v3");
   mkdirSync(dir, { recursive: true });
@@ -213,6 +213,7 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
 
   const d = new Database(file, { readonly: true });
   assert.equal(schemaFingerprint(d), PINNED.fingerprint);
+  assert.equal(d.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0, "the Media page's table is there, and empty");
   d.close();
 
   const result = JSON.parse(/RESULT (.*)/.exec(run.output())[1]);

@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
+import { GENERATE_VIDEO_SOURCE, GENERATE_VIDEO_TOOL, SHOW_VIDEO_SOURCE, SHOW_VIDEO_TOOL, videoGenerationReady } from "./video-generation.js";
 import { PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
@@ -12,9 +13,11 @@ import { isWithinText } from "./within.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
 import { removeThumbs } from "./image-thumbs.js";
+import { removePosters } from "./video-posters.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
+import { debugLog } from "./logs.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -396,7 +399,7 @@ function schema(db: Database.Database): void {
       PRIMARY KEY (session_id, id)
     );
 
-    -- The pictures of the Images page: the ones it made itself, which are files
+    -- The pictures of the Media page: the ones it made itself, which are files
     -- in the portal's own images folder, the ones the agent made in a chat with
     -- generate_image or edit_image, which are files in that chat's folder and
     -- are listed here as they are made, and those found lying in a folder the
@@ -423,6 +426,27 @@ function schema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_images_created ON images(created_at DESC, id DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_images_chat_file ON images(session_id, path) WHERE session_id IS NOT NULL;
+
+    -- The clips of the Media page, as the pictures are listed above: the ones it
+    -- made itself, which are files in the portal's own videos folder, the ones the
+    -- agent made in a chat with generate_video, which are files in that chat's
+    -- folder, and those found lying in a folder the tool writes into that nobody
+    -- listed (see video-gallery.ts). A row names the file, never holds it.
+    CREATE TABLE IF NOT EXISTS videos (
+      id TEXT PRIMARY KEY,
+      origin TEXT NOT NULL,
+      session_id TEXT,
+      folder TEXT,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      params TEXT NOT NULL DEFAULT '{}',
+      bytes INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC, id DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_chat_file ON videos(session_id, path) WHERE session_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_folder_file ON videos(folder, path) WHERE folder IS NOT NULL;
 
     -- The voices saved in the settings, for speech to be told to sound like (see voice-presets.ts).
     CREATE TABLE IF NOT EXISTS voice_presets (
@@ -759,6 +783,11 @@ export function anySessionRunning(): boolean {
   return Boolean(getDb().prepare("SELECT 1 FROM sessions WHERE status = 'running' LIMIT 1").get());
 }
 
+/** How many sessions have a turn running: chats, routine runs and agents' own looks alike. */
+export function runningSessionCount(): number {
+  return (getDb().prepare("SELECT COUNT(*) AS n FROM sessions WHERE status = 'running'").get() as { n: number }).n;
+}
+
 /** The sessions agents look around in on their own: one per agent, see heartbeat.ts. */
 export function listHeartbeatSessions(): SessionRow[] {
   return getDb().prepare("SELECT * FROM sessions WHERE kind = 'heartbeat'").all() as SessionRow[];
@@ -864,6 +893,11 @@ function removeSession(id: string): void {
   const left = (d.prepare("SELECT id FROM images WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
   d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
   removeThumbs(left);
+  // The same for its clips (see video-gallery.ts).
+  if (real) d.prepare("UPDATE OR IGNORE videos SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
+  const leftClips = (d.prepare("SELECT id FROM videos WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
+  d.prepare("DELETE FROM videos WHERE session_id = ?").run(id);
+  removePosters(leftClips);
 }
 
 /**
@@ -1710,6 +1744,8 @@ export function recordAudit(entry: {
   db.prepare(
     `DELETE FROM audit WHERE id <= (SELECT MAX(id) FROM audit) - ?`
   ).run(AUDIT_KEEP);
+  // What was decided and for which tool, not on what: the subject and the reason can hold a command, a path or a URL.
+  debugLog("audit", entry.kind, { tool: entry.tool, session: entry.sessionId });
 }
 
 export const listAudit = (limit = 200): AuditRow[] =>
@@ -2485,14 +2521,17 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   // called image-generation.ts has the label the portal's factory has.
   const images = imageGenerationReady();
   const editing = imageEditingReady();
+  // The video tools, which exist while video generation is on: the same, for the same reasons.
+  const videos = videoGenerationReady();
   const known = [...view.known().values()];
   // Every MCP server's tools, from the adapter's cache, whether a chat has had them one by one or not: a server is a
   // group like any other, whole or tool by tool. A tool a chat reported is listed as it reported it.
   const seen = new Set(known.map((t) => t.name));
   const available = [...known, ...catalogue.filter((t) => !seen.has(t.name))].filter(toolAvailability(user, project));
-  return [...available, ...notYetSeen(available, images, editing)]
+  return [...available, ...notYetSeen(available, images, editing, videos)]
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
+    .filter((tool) => videos || !((tool.name === GENERATE_VIDEO_TOOL || tool.name === SHOW_VIDEO_TOOL) && tool.inline))
     .flatMap((known) => {
       const offer = offers(known);
       if (unlisted(offer)) return [];
@@ -2512,19 +2551,27 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
  * registers the tool after a reload without telling anyone. The tool is the portal's, so the lists know it
  * without waiting; a tool of the same name that a chat has reported, an extension's included while its package is on, is kept as it is.
  */
-function notYetSeen(available: KnownTool[], images: boolean, editing: boolean): KnownTool[] {
+function notYetSeen(available: KnownTool[], images: boolean, editing: boolean, videos: boolean): KnownTool[] {
   // Of the tools that can be loaded: an extension's of the same name in a package that is switched off is not, and the portal's is then the one chats have.
   const seen = new Set(available.map((tool) => tool.name));
   const wanted: [string, string, boolean][] = [
     [GENERATE_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, images],
     [EDIT_IMAGE_TOOL, EDIT_IMAGE_SOURCE, editing],
+    [GENERATE_VIDEO_TOOL, GENERATE_VIDEO_SOURCE, videos],
+    [SHOW_VIDEO_TOOL, SHOW_VIDEO_SOURCE, videos],
   ];
   return wanted.filter(([name, , ready]) => ready && !seen.has(name)).map(([name, source]) => ({ name, source, package: null, inline: true }));
 }
 
-/** What the portal files its own picture tools under, by name. Read when asked: image-generation.ts imports this module. */
+/** What the portal files its own picture and video tools under, by name. Read when asked: image-generation.ts and video-generation.ts import this module. */
 const pictureSource = (name: string): string | undefined =>
-  ({ show_image: SHOW_IMAGE_SOURCE, [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE, [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE } as Record<string, string>)[name];
+  ({
+    show_image: SHOW_IMAGE_SOURCE,
+    [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE,
+    [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE,
+    [GENERATE_VIDEO_TOOL]: GENERATE_VIDEO_SOURCE,
+    [SHOW_VIDEO_TOOL]: SHOW_VIDEO_SOURCE,
+  } as Record<string, string>)[name];
 
 /**
  * Whether the portal registered this tool itself, for the pages to group its picture tools apart from an extension's of the same name.

@@ -18,7 +18,7 @@ import { pictureIn } from "./show-image-tool.js";
 
 /**
  * Changing a picture that is in the chat's folder, with the image endpoint the
- * person set up in Settings → Agent → Images, and putting the result in front
+ * person set up in Settings → Agent → Media, and putting the result in front
  * of them. The same call makes a new picture from one or several pictures used
  * as references: the route has no other way to take pictures in, so there is no
  * second tool for it.
@@ -49,7 +49,7 @@ export const EDIT_IMAGE_VOICE_LINE =
  */
 const ATTACHED =
   "A picture the person attached to a message is not a file in the chat's folder, so it cannot be given here: if the one to use was only attached, say so, " +
-  "and ask them to put it in the chat's folder (the Files panel) or to change it on the Images page. Do not guess a path or edit another picture instead. ";
+  "and ask them to put it in the chat's folder (the Files panel) or to change it on the Media page. Do not guess a path or edit another picture instead. ";
 
 /** What the model is told about the pictures of an edit when the endpoint takes one, and when it takes several. */
 const ONE_PICTURE =
@@ -60,7 +60,7 @@ const ONE_PICTURE =
   "It can also be the reference for a new picture: say what the new one should show. " +
   // Said, not left out: with no word of it an agent given several pictures would use one and go on as if it had used them all.
   "The editing endpoint is set up to take ONE picture per edit, so there is only one to give. If the person wants several pictures combined or used together as references, " +
-  "do not make the edit with one of them as if it were all: say that this endpoint takes one picture per edit, and that several can be switched on under Settings → Agent → Images (Several pictures per edit) if the endpoint takes them. " +
+  "do not make the edit with one of them as if it were all: say that this endpoint takes one picture per edit, and that several can be switched on under Settings → Agent → Media (Several pictures per edit) if the endpoint takes them. " +
   ATTACHED;
 const SEVERAL_PICTURES =
   "Change pictures in the chat's folder as told, or make a new picture from them as references, with the image model the person has set up for editing, and show the result to them. " +
@@ -184,7 +184,7 @@ export class EditImageTool {
         const target = imageEditingTarget(config);
         const { bytes, ext, notes } = await editImage(target, { prompt, image: images.length > 1 ? images : images[0] }, { signal });
         const rel = saveGenerated(folder, bytes, ext, editedName(originals[0], ext));
-        // Listed in the Images page's gallery, tied to the pictures it was made from that are listed there.
+        // Listed in the Media page's gallery, tied to the pictures it was made from that are listed there.
         if (sessionId) recordChatPicture({ sessionId, path: rel, kind: "edited", prompt, from: originals, bytes: bytes.length, params: target.model ? { model: target.model } : {} });
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
         const details = { path: rel, ...(title ? { title } : {}), [GENERATED_PICTURE_MARK]: true };

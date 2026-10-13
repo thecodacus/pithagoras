@@ -65,7 +65,7 @@ interface RunOptions {
 }
 
 /** What every git here runs with: no colour, no pager, names as they are, nothing the repo's config would run just to look. */
-const GIT_CONFIG = [
+export const GIT_CONFIG = [
   "-c", "core.quotepath=false",
   "-c", "color.ui=false",
   "-c", "core.fsmonitor=false",

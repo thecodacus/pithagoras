@@ -16,6 +16,7 @@ import {
   understoryTokenOf,
 } from "../features.js";
 import { ImageGenerationError, imageEditingMultiple, imageEditingReady, imageGenerationReady, imageGenerationState, parseImageGenerationPatch, saveImageGeneration } from "../image-generation.js";
+import { VideoGenerationError, parseVideoGenerationPatch, saveVideoGeneration, videoGenerationReady, videoGenerationState } from "../video-generation.js";
 import { readPiSettings, updatePiSettings } from "../pi-settings.js";
 import { sessions } from "../session-manager.js";
 import { switchPackage } from "./extensions.js";
@@ -154,11 +155,11 @@ export function featuresRouter(): Router {
   /**
    * Only whether each is on: for the sidebar and every chat's menus, which
    * need no more. Reads two small files; nothing is asked of Understory or Docker.
-   * Images is on when it can make a picture: switched on, and with an address to ask.
+   * Images is on when it can make a picture: switched on, and with an address to ask; Videos when it can make a clip.
    */
   router.get("/features/flags", (_req, res) => {
     try {
-      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() }, images: { enabled: imageGenerationReady() || imageEditingReady() } });
+      res.json({ subagent: { enabled: subagentState().enabled }, understory: { enabled: understoryOn() }, images: { enabled: imageGenerationReady() || imageEditingReady() }, videos: { enabled: videoGenerationReady() } });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
@@ -177,6 +178,15 @@ export function featuresRouter(): Router {
   router.get("/features/images", (_req, res) => {
     try {
       res.json({ images: imageGenerationState() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /** Video generation alone, as the image endpoint: the key is never in it, only whether one is set. */
+  router.get("/features/videos", (_req, res) => {
+    try {
+      res.json({ videos: videoGenerationState() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }
@@ -255,6 +265,25 @@ export function featuresRouter(): Router {
       res.json({ images: imageGenerationState(), changed, reloaded, waiting });
     } catch (e) {
       res.status(e instanceof ImageGenerationError ? 400 : 500).json({ error: (e as Error).message });
+    }
+  });
+
+  /**
+   * The video endpoint and whether the agent has the tools for it. A tool is there only while it is on and
+   * has an address, and a chat decides that when it loads, so a change in that reloads the idle ones. The
+   * rest — address, model, size, key, time limit — is read at each call and needs no reload.
+   */
+  router.put("/features/videos", async (req, res) => {
+    const patch = parseVideoGenerationPatch(req.body);
+    if (typeof patch === "string") return res.status(400).json({ error: patch });
+    try {
+      const before = videoGenerationReady();
+      saveVideoGeneration(patch);
+      const changed = videoGenerationReady() !== before;
+      const { reloaded, waiting } = changed ? await sessions.reloadIdle() : { reloaded: 0, waiting: 0 };
+      res.json({ videos: videoGenerationState(), changed, reloaded, waiting });
+    } catch (e) {
+      res.status(e instanceof VideoGenerationError ? 400 : 500).json({ error: (e as Error).message });
     }
   });
 

@@ -3,6 +3,10 @@ import { showImageTool } from "./show-image-tool.js";
 import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
 import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE } from "../image-generation.js";
+import { GENERATE_VIDEO_VOICE_LINE, GenerateVideoTool } from "./generate-video-tool.js";
+import { showVideoTool } from "./show-video-tool.js";
+import { GENERATE_VIDEO_SOURCE, GENERATE_VIDEO_TOOL, SHOW_VIDEO_SOURCE } from "../video-generation.js";
+import { GENERATED_VIDEO_MARK } from "../generated-video.js";
 import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
@@ -249,9 +253,10 @@ export function viaProgressProxy<T extends { provider?: string; baseUrl?: string
 function sourceLabel(info: any): string {
   const path = typeof info?.path === "string" ? info.path : "";
 
-  // pi writes its own as <builtin:read> and the portal's inline ones as
-  // <inline:canvases>. The second is worth naming; the first is the agent.
-  const marker = /^<(builtin|inline):([^>]+)>$/.exec(path);
+  // pi writes its own as builtin:read (<builtin:read> before pi 1.1) and the
+  // portal's inline ones as <inline:canvases>. The second is worth naming; the
+  // first is the agent.
+  const marker = /^(?:<(builtin|inline):([^>]+)>|(builtin):.+)$/.exec(path);
   if (marker) return marker[1] === "inline" ? marker[2] : "built in";
 
   const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path);
@@ -438,10 +443,12 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // so only while it has — and it is the portal's, not an extension's of the same name that pi keeps.
     const imageTool = opts.sessionId ? new GenerateImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
     const editTool = opts.sessionId ? new EditImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
+    const videoTool = opts.sessionId ? new GenerateVideoTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
     const audioRule = new AudioRule(getVoiceInstructions, () =>
       [
         imageTool?.registered() && !switchedOff().has(GENERATE_IMAGE_TOOL) ? GENERATE_IMAGE_VOICE_LINE : "",
         editTool?.registered() && !switchedOff().has(EDIT_IMAGE_TOOL) ? EDIT_IMAGE_VOICE_LINE : "",
+        videoTool?.registered() && !switchedOff().has(GENERATE_VIDEO_TOOL) ? GENERATE_VIDEO_VOICE_LINE : "",
       ].filter(Boolean).join(" "),
       voiceSpeaks,
     );
@@ -478,6 +485,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (imageTool) factories.push({ name: GENERATE_IMAGE_SOURCE, factory: imageTool.extension });
       // The same for editing, with its own switch.
       if (editTool) factories.push({ name: EDIT_IMAGE_SOURCE, factory: editTool.extension });
+      // And for video: the tool that makes a clip, and the one that shows a clip that is in the folder. Both register nothing while the add-on is off or has no address.
+      if (videoTool) factories.push({ name: GENERATE_VIDEO_SOURCE, factory: videoTool.extension });
+      if (opts.sessionId) factories.push({ name: SHOW_VIDEO_SOURCE, factory: showVideoTool(opts.cwd) });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       if (opts.questions) factories.push({ name: ASK_QUESTION_SOURCE, factory: askQuestionTool(questionWaitMs) });
@@ -618,7 +628,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       client.noteQueue(event);
       // The start of a call of the portal's own picture tools says so: the page draws a picture for those from then on, and never for the tool of that name an extension may bring, which pi keeps instead. Only here is it known which of the two it is, and only the end of a call that made a picture would say so later.
       const own = event?.type === "tool_execution_start" && ((event.toolName === GENERATE_IMAGE_TOOL && imageTool?.registered()) || (event.toolName === EDIT_IMAGE_TOOL && editTool?.registered()));
-      client.forward(own ? { ...event, [GENERATED_PICTURE_MARK]: true } : event);
+      // The same for the portal's generate_video, with a mark of its own.
+      const ownVideo = event?.type === "tool_execution_start" && event.toolName === GENERATE_VIDEO_TOOL && videoTool?.registered();
+      client.forward(own ? { ...event, [GENERATED_PICTURE_MARK]: true } : ownVideo ? { ...event, [GENERATED_VIDEO_MARK]: true } : event);
     });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};

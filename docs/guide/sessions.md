@@ -59,7 +59,7 @@ can be a picture alone. The sent message shows them; click one to
 The model sees them, but they are not files of the chat's folder, so the agent's
 [`edit_image`](/guide/features#editing-a-picture) cannot change them: put a picture
 in the folder with the Files panel for that, or change it on the
-[Images page](/guide/images#changing-a-picture).
+[Media page](/guide/media#changing-a-picture).
 
 A photo straight off a phone is made smaller in the browser before it goes:
 2048 pixels on its longer side, as a JPEG. Models scale anything bigger down on
@@ -271,12 +271,35 @@ are made. In
 [voice mode](/guide/voice) the card of such a call carries the same preview as a
 small tile.
 
-Every picture the agent makes this way is also in the [Images](/guide/images) page's
+Every picture the agent makes this way is also in the [Media](/guide/media) page's
 gallery, from the moment it is saved, with the chat it is from, what it was asked for
 and how it was made. The page can open it, change it, make it again, and delete the
 file — which is the chat's, so that asks every time. What lies in these folders and was
 never listed, such as pictures made before the gallery existed, is found there too, as a
 picture of the folder.
+
+## Videos the agent makes
+
+With [video generation](/guide/features#video-generation) on, a `generate_video` call is not shown as a tool line
+either, but as the video from the moment it is asked for. A video takes minutes, so the wait is the main thing:
+
+- **While it is made**, a frame in the shape of the size the agent asked for (a square when nothing says) holds
+  the place, says "Making a video" and, after a few seconds, how long it has taken. Nothing in it pretends to know how far the
+  server is.
+- **When it is made**, the browser's own **player** takes the frame's place, with the title under it: play and pause, the slider, the
+  volume and full screen. It does not play by itself, and only the start of the file is fetched until you play it, which shows its first frame; the
+  rest comes in the parts the player asks for. The portal serves it from the chat's folder, by its path, and only what its bytes say is a WebM or an MP4.
+- **When it fails**, the frame says so quietly, with the reason in a line or two, and the whole of it under **Details**. A call that was
+  cut off, because the run was stopped or the portal restarted before the video came back, says it was interrupted.
+- **The call itself** — the tool's name and what the agent gave it: the prompt, the title, the size, the length, the first frame — is
+  under **Details**, below the player.
+- **A video the agent shows** with `show_video` is a player under its tool line, in the middle of the conversation as a picture is. One
+  whose file is gone from the folder says so.
+- **A tool of the same name** that another extension brings is the plain tool line it always was; only the portal's own calls
+  are drawn as videos.
+
+[Voice mode](/guide/voice) has no window for videos, and while the agent has `generate_video` its voice instructions say so: a video
+is for the chat, and is made only when asked. Every video the agent makes this way is also in the [Media](/guide/media) page's gallery, from the moment it is saved.
 
 ## Drafts and what is running
 
@@ -294,9 +317,9 @@ A status that names one of the chat's slash commands runs it when clicked.
 ## Sidebar and the sessions page
 
 The sidebar opens with New, then the places — Sessions, Projects, Agents,
-Routines and [Audit](#audit), with Browser, Memory and Images added while the
+Routines and [Audit](#audit), with Browser, Memory and Media added while the
 [browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
-holds the agent's memory and an [image endpoint](/guide/images) is set up — then **Pinned**, then **Recents**. The button at its
+holds the agent's memory, or an [image endpoint](/guide/media) or a video endpoint is set up — then **Pinned**, then **Recents**. The button at its
 top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with a search of its own.
 

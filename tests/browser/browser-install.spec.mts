@@ -20,7 +20,7 @@ async function portal(page: Page, start: { container?: string; mode?: string; ru
   await mockPortal(page, async ({ path: p, method }) => {
     if (p === '/api/browser' && method === 'GET') {
       return {
-        running: state.running, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
+        running: state.running, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
         install: { available: true, mode: state.mode, image: start.image ?? false, container: state.container, binary: '/usr/bin/chromium', pulling: state.pulling },
         config: { user: 'abc', hasPassword: start.hasPassword ?? true },
       };
