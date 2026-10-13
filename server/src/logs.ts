@@ -159,15 +159,19 @@ const SECRET_SHAPES: [RegExp, string][] = [
   // A header, whole: what follows it is the credential, whatever scheme it uses.
   [/\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*:[^\r\n]*/gi, `$1=${HIDDEN}`],
   [/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi, `$1 ${HIDDEN}`],
-  // user:password@host, and a token standing where the user would.
-  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]+@/gi, `$1${HIDDEN}@`],
+  // user:password@host, and a token standing where the user would. Up to the last @ before the path: a password
+  // may hold a raw @, and parsers split at the last one.
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]+@/gi, `$1${HIDDEN}@`],
   // token=…, "accessToken": "…", ?client_secret=…: any name that ends in one of these words, whatever comes before it
   [
     /((?:token|secret|password|passwd|pwd|api[_-]?key|apikey|auth|authorization|cookie|credentials?|signature|private[_-]?key)(?:[_.-][A-Za-z0-9]+)*)(["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s&;,]+)/gi,
     `$1$2${HIDDEN}`,
   ],
+  // The short names, which only count as a whole word (not monkey=, not api_key=, which the pattern above has had).
+  [/(?<![A-Za-z0-9_.-])(key|pass|sig)(["']?\s*=\s*|["']\s*:\s*)("[^"]*"|'[^']*'|[^\s&;,]+)/gi, `$1$2${HIDDEN}`],
   // Keys as their issuers print them, for one that turns up with nothing around it to give it away.
   [/\bsk-[A-Za-z0-9_-]{16,}/g, HIDDEN],
+  [/\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g, HIDDEN],
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,})/g, HIDDEN],
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, HIDDEN],
   [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, HIDDEN],

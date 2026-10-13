@@ -113,6 +113,13 @@ const SECRETS = [
   'client_secret=abcdef123456',
   'sk-ant-api03-abcdefghijklmnopqrstuvwx',
   'sk-proj-abcdefghijklmnopqrstuvwx',
+  'https://user:p@ss@host/path',
+  'http://bob:Winter@2026!@proxy:3128',
+  'https://api.example.com/v1?key=AbCdEf1234567890xyz',
+  'pass=hunter2hunter2',
+  'https://example.com/x?sig=abcdefghijklmnop1234&se=1',
+  ['sk','live','a'.repeat(30)].join('_'),
+  ['rk','live','a'.repeat(30)].join('_'),
   'ghp_abcdefghijklmnopqrstuvwxyz0123456789',
   'github_pat_11ABCDEFG0abcdefghijklmnopqrstuv',
   'glpat-abcdefghijklmnopqrstu',
@@ -124,7 +131,7 @@ const SECRETS = [
   '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmU\n-----END OPENSSH PRIVATE KEY-----',
 ];
 // What is left of each once scrubbed must not hold the part that makes it a secret.
-const GIVEAWAY = /abcdef123456|abcdefghijklmnop|dXNlcjpwYXNz|p4ssw0rd|s%3Aabcdef|b3BlbnNzaC1r|eyJhbGci|ghp_|github_pat_|glpat-|xoxb-|AKIA|AIza|hf_abc|sk-/;
+const GIVEAWAY = /abcdef123456|abcdefghijklmnop|dXNlcjpwYXNz|p4ssw0rd|s%3Aabcdef|b3BlbnNzaC1r|eyJhbGci|ghp_|github_pat_|glpat-|xoxb-|AKIA|AIza|hf_abc|sk-|p@ss|Winter|hunter2|AbCdEf|sk_live|rk_live|aaaaaaaaaa/;
 
 test('what looks like a secret is taken out of a debug line, in a field, in the message and in the scope', () => {
   for (const secret of SECRETS) {
@@ -143,6 +150,8 @@ test('what is not a secret is left alone, ids and counts and paths among it', ()
   assert.equal(scrubSecrets('workspace=/home/me/repos/app/src/index.ts'), 'workspace=/home/me/repos/app/src/index.ts');
   assert.equal(scrubSecrets('a basic setup that was not bearer-checked'), 'a basic setup that was not bearer-checked');
   assert.equal(scrubSecrets('author=bob tokens_used=5 max_tokens=100 authority=x'), 'author=bob tokens_used=5 max_tokens=100 authority=x');
+  assert.equal(scrubSecrets('monkey=1 passage=2 signal=3 keys=4 sort_key=5'), 'monkey=1 passage=2 signal=3 keys=4 sort_key=5');
+  assert.equal(scrubSecrets('https://example.com/a/b@c?q=1'), 'https://example.com/a/b@c?q=1');
 });
 
 test('a long text is scrubbed in a moment, however it is built', () => {

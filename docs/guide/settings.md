@@ -240,7 +240,10 @@ runs, counts as a debug line: below the `debug` level it prints nothing.
 number of lines (default 2000, from 100 to 50000) and the characters of text
 (default 2000000, from 200000 to 20000000). A value that is not a whole number
 leaves the default, one outside the range is brought to its nearest end, and
-the start says so in the list. The line under the title of the Logs tab says
+the start says so in the list. Debug lines count against the same limits as the
+others, and every tool call adds two of them: a long session at `debug` pushes
+older warnings and errors out sooner than at `info`, so raise
+`PITHAGORAS_LOG_LINES` when you turn `debug` on. The line under the title of the Logs tab says
 whether the debug level is on.
 
 ## About
