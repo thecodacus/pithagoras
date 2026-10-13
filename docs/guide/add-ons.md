@@ -152,7 +152,7 @@ the variable:
 | --- | --- | --- |
 | `BROWSER_USER` / `BROWSER_PASSWORD` | `agent` / — | Login for the browser web UI |
 | `BROWSER_PORT` / `BROWSER_HTTPS_PORT` | `3010` / `3011` | Its HTTP and HTTPS ports |
-| `BROWSER_BIND` | `127.0.0.1` | The IPv4 address those ports listen on. `0.0.0.0` opens them to every machine that can reach this one. Applies when the browser is installed, so remove and install it again after changing it |
+| `BROWSER_BIND` | `127.0.0.1` | The IPv4 address those ports listen on; the portal reaches them on `127.0.0.1` whatever it is. `0.0.0.0` opens them to every machine that can reach this one. The shipped Compose files and the Portainer stack pass it on from `.env`. Applies when the browser is installed, so remove and install it again after changing it |
 | `BROWSER_STREAM_PORT` | `8082` | The port the embedded live view reads frames from |
 | `BROWSER_HOST` | `127.0.0.1` | Where the portal reaches the browser |
 | `BROWSER_CDP_URL` | `http://127.0.0.1:9222` | The debugging endpoint the agent's browser tools use |

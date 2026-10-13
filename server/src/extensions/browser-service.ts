@@ -154,13 +154,24 @@ export async function status() {
  *
  * The image's nginx listens on every interface and has no setting for that, but it writes its configuration
  * from /defaults/default.conf each time it starts, so that is rewritten first: the IPv6 listens go, and the
- * IPv4 ones are given the address. The container ends here, loudly, if that did not take (an image that
- * changed its layout), rather than starting with the UI open to the network. `0.0.0.0` leaves the image as it is.
+ * IPv4 ones are given the address. The portal's own proxy reaches the server on 127.0.0.1, so any other address
+ * gets a second listen there. The container ends here, loudly, if that did not take (an image that changed its
+ * layout), rather than starting with the UI open to the network. `0.0.0.0` leaves the image as it is.
+ *
+ * That file lives in the container's writable layer, and a stopped container is started again as it is (Stop and
+ * Start, a reboot), so the image's own copy is kept beside it once and every start begins from that. An edit
+ * made on top of the last start's would put the address in twice and leave nginx with a config it refuses.
  */
 const BIND_SCRIPT = String.raw`set -e
 f=/defaults/default.conf
+[ -e "$f.orig" ] || cp "$f" "$f.orig"
+cp "$f.orig" "$f"
 if [ "$PITHAGORAS_UI_BIND" != 0.0.0.0 ]; then
-  sed -i -e '/listen \[::\]:/d' -e "s/listen \([0-9]\)/listen $PITHAGORAS_UI_BIND:\1/" "$f"
+  listens="s/listen \([0-9]\)/listen $PITHAGORAS_UI_BIND:\1/"
+  if [ "$PITHAGORAS_UI_BIND" != 127.0.0.1 ]; then
+    listens="/listen [0-9]/{h;s/listen /listen 127.0.0.1:/;x;s/listen /listen $PITHAGORAS_UI_BIND:/;G;}"
+  fi
+  sed -i -e '/listen \[::\]:/d' -e "$listens" "$f"
   grep -qF "listen $PITHAGORAS_UI_BIND:" "$f" || { echo "pithagoras: the browser's UI could not be bound to $PITHAGORAS_UI_BIND" >&2; exit 1; }
 fi
 exec /init`;

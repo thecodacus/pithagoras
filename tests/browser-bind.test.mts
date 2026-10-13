@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
@@ -87,8 +87,11 @@ server {
 }
 `;
 
-/** What the container's start does with the image's configuration, run on a copy of it: the script, then the image's own port step. */
-async function started(conf: string, bind: string) {
+/**
+ * What the container's start does with the image's configuration, run on a copy of it: the script, then the image's own port step.
+ * `starts` is how often the container is started on that one file, as a stopped container is: its files stay as they were left.
+ */
+async function started(conf: string, bind: string, starts = 1) {
   await browser.install();
   const script: string = created.Entrypoint[2];
   const folder = mkdtempSync(path.join(dir, 'conf-'));
@@ -96,10 +99,15 @@ async function started(conf: string, bind: string) {
   writeFileSync(file, conf);
   const here = script.replace('/defaults/default.conf', file).replace('exec /init', 'echo image-started');
   assert.notEqual(here, script, 'the script names the image\'s configuration and its start');
-  const run = spawnSync('/bin/sh', ['-c', here], { env: { PITHAGORAS_UI_BIND: bind, PATH: process.env.PATH }, encoding: 'utf8' });
-  // The image's own start, which writes the ports the portal was configured with (init-nginx).
-  const ports = readFileSync(file, 'utf8').replaceAll('3000', '3010').replaceAll('3001', '3011');
-  return { run, listens: ports.split('\n').filter((l) => l.includes('listen')).map((l) => l.trim()) };
+  const all: { run: SpawnSyncReturns<string>; listens: string[] }[] = [];
+  for (let i = 0; i < starts; i++) {
+    const run = spawnSync('/bin/sh', ['-c', here], { env: { PITHAGORAS_UI_BIND: bind, PATH: process.env.PATH }, encoding: 'utf8' });
+    // The image's own start, which writes the ports the portal was configured with (init-nginx). It reads /defaults/default.conf and
+    // writes the copy nginx uses, so the file itself is not changed by it.
+    const ports = readFileSync(file, 'utf8').replaceAll('3000', '3010').replaceAll('3001', '3011');
+    all.push({ run, listens: ports.split('\n').filter((l) => l.includes('listen')).map((l) => l.trim()) });
+  }
+  return { ...all[all.length - 1], all };
 }
 
 test('the start script gives the image\'s web server the loopback address and nothing on IPv6', async () => {
@@ -110,9 +118,34 @@ test('the start script gives the image\'s web server the loopback address and no
   assert.deepEqual(listens, ['listen 127.0.0.1:3010 default_server;', 'listen 127.0.0.1:3011 ssl;']);
 });
 
+test('a container stopped and started again listens as it did the first time', async () => {
+  // The container keeps its files when it is stopped, and the script runs again on every start: an edit made on top of the last
+  // one would give "listen 127.0.0.1:127.0.0.1:3000", which nginx refuses, with the container still showing as running.
+  for (const bind of ['127.0.0.1', '192.168.1.5']) {
+    reset();
+    const { all } = await started(IMAGE_CONF, bind, 3);
+    for (const { run } of all) assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(all[1].listens, all[0].listens, bind);
+    assert.deepEqual(all[2].listens, all[0].listens, bind);
+    assert.ok(all[2].listens.every((l) => /^listen (\d{1,3}\.){3}\d{1,3}:\d+ /.test(l)), `${bind}: ${all[2].listens.join(' | ')}`);
+  }
+});
+
+test('an address other than the loopback one is listened on beside it, because the portal\'s proxy connects to 127.0.0.1', async () => {
+  reset();
+  const { run, listens } = await started(IMAGE_CONF, '192.168.1.5');
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(listens, [
+    'listen 192.168.1.5:3010 default_server;',
+    'listen 127.0.0.1:3010 default_server;',
+    'listen 192.168.1.5:3011 ssl;',
+    'listen 127.0.0.1:3011 ssl;',
+  ]);
+});
+
 test('0.0.0.0 leaves the image as it is, and an image that changed is not started open', async () => {
   reset();
-  const open = await started(IMAGE_CONF, '0.0.0.0');
+  const open = await started(IMAGE_CONF, '0.0.0.0', 2);
   assert.equal(open.run.status, 0, open.run.stderr);
   assert.deepEqual(open.listens, ['listen 3010 default_server;', 'listen [::]:3010 default_server;', 'listen 3011 ssl;', 'listen [::]:3011 ssl;']);
 

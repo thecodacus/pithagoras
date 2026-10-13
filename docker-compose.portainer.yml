@@ -79,6 +79,11 @@ services:
       # something else. Left empty, the card with the most room is used.
       VOICE_GPU: ${VOICE_GPU:-}
       VOICE_VRAM_RESERVE_MIB: ${VOICE_VRAM_RESERVE_MIB:-}
+      # The address the Browser add-on's own web page (ports 3010 and 3011) listens on.
+      # Left empty it is 127.0.0.1, so the page is reached through the portal's
+      # /browser-ui; 0.0.0.0 opens it to every machine that can reach this one.
+      # Read when the browser is installed. See docs/guide/browser.md.
+      BROWSER_BIND: ${BROWSER_BIND:-}
       # How long, in ms, the portal waits on Understory's model before giving up and saying so —
       # see docs/reference/configuration.md. Left empty, its 30-minute defaults stand.
       UNDERSTORY_LLM_HEADERS_TIMEOUT_MS: ${UNDERSTORY_LLM_HEADERS_TIMEOUT_MS:-}

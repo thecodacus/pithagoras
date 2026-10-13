@@ -107,9 +107,12 @@ ssh -L 3011:127.0.0.1:3011 <host>
 If the portal is on plain HTTP it cannot embed the browser, and there is no direct
 link from its page either; give it a certificate as above, or open the port yourself
 by setting `BROWSER_BIND` on the portal (see [Docker add-ons](/guide/add-ons)) to
-`0.0.0.0`, or to the one address of this machine that you want it on. Then the page
-links to `https://<host>:3011` again. That is every machine that can reach the
-address, and your password only, so use a long one and a firewall.
+`0.0.0.0`, or to the one address of this machine that you want it on; the portal
+itself keeps reaching it on `127.0.0.1` either way. Then the page links to
+`https://<host>:3011` again. That is every machine that can reach the address, and
+your password only, so use a long one and a firewall. With the shipped Compose files
+or the Portainer stack, put `BROWSER_BIND=0.0.0.0` in `.env` (they pass it on to the
+portal), recreate the stack, and remove and install the browser again.
 
 A browser installed by an earlier version listens on every interface until it is
 removed and installed again (**Remove** keeps the profile and its logins); the

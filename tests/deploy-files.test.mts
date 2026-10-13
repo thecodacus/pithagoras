@@ -62,10 +62,10 @@ test('the upgrade guide warns a Portainer stack that sets PORTAL_DATA_DIR, which
   assert.match(read('docker-compose.portainer.yml'), /\$\{PORTAL_DATA_DIR:-pithagoras-data\}:\/data/);
 });
 
-test('what the docs tell a deployment to set reaches the container: the clock, the upgrade backup, an open listener, the TLS files', () => {
+test('what the docs tell a deployment to set reaches the container: the clock, the upgrade backup, an open listener, the TLS files, the browser address', () => {
   for (const file of COMPOSE) {
     const names = environmentOf(file);
-    for (const name of ['TZ', 'PORTAL_UPGRADE_BACKUP', 'ALLOW_OPEN', 'PORTAL_ALLOW_NO_PASSWORD', 'PORTAL_TLS_CERT', 'PORTAL_TLS_KEY', 'LLAMA_BASE_URL', 'LLAMA_DISK_CACHE_MODELS', 'OPENAI_API_KEY']) {
+    for (const name of ['TZ', 'PORTAL_UPGRADE_BACKUP', 'ALLOW_OPEN', 'PORTAL_ALLOW_NO_PASSWORD', 'PORTAL_TLS_CERT', 'PORTAL_TLS_KEY', 'LLAMA_BASE_URL', 'LLAMA_DISK_CACHE_MODELS', 'OPENAI_API_KEY', 'BROWSER_BIND']) {
       assert.ok(names.includes(name), `${file} passes ${name}`);
     }
     assert.match(read(file), /\$\{PORTAL_TLS_DIR:-\/dev\/null\}:\/certs:ro/, `${file} mounts the certificates`);
