@@ -67,6 +67,10 @@ export function parseGenerate(body: unknown): GenerateVideoJob | string {
     if (typeof b.firstFrame !== "string" || !IDS.test(b.firstFrame)) return "The first frame is a picture, named by its id in the gallery of the Media page";
     job.firstFrame = b.firstFrame;
   }
+  if (b.lastFrame !== undefined && b.lastFrame !== null) {
+    if (typeof b.lastFrame !== "string" || !IDS.test(b.lastFrame)) return "The last frame is a picture, named by its id in the gallery of the Media page";
+    job.lastFrame = b.lastFrame;
+  }
   return job;
 }
 

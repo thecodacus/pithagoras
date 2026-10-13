@@ -38,7 +38,7 @@ export const GENERATED_VIDEOS_DIR = "generated-videos";
 const WHAT = "video";
 
 export type VideoOrigin = MediaOrigin;
-/** Made from a description, made from a picture as its first frame, or found with nothing to tell how it was made. */
+/** Made from a description, made from a picture as its first frame or its last, or found with nothing to tell how it was made. */
 export type VideoKind = "generated" | "animated" | "unknown";
 
 /** What a clip was asked for with, as far as it is known. */
@@ -51,11 +51,14 @@ export interface VideoParams {
   seed?: number;
   sampleSteps?: number;
   negativePrompt?: string;
+  strength?: number;
   /** What the server says it made, when it said: the frames in the clip, and its frame rate. A clip's length is the first over the second. */
   madeFrames?: number;
   madeFps?: number;
   /** The first frame of a clip made from a picture: the picture of the Media page it was taken from, or its path in the chat's folder. */
   firstFrame?: { picture?: string; path?: string };
+  /** The last frame, where the clip was asked to end on a picture: named as the first frame is. */
+  lastFrame?: { picture?: string; path?: string };
 }
 
 /** A clip as the page is told of it. */
@@ -120,16 +123,24 @@ function readParams(text: string): VideoParams {
   if (whole(raw.seed)) params.seed = raw.seed;
   if (whole(raw.sampleSteps)) params.sampleSteps = raw.sampleSteps;
   if (typeof raw.negativePrompt === "string" && raw.negativePrompt) params.negativePrompt = raw.negativePrompt;
+  if (typeof raw.strength === "number" && Number.isFinite(raw.strength)) params.strength = raw.strength;
   if (whole(raw.madeFrames)) params.madeFrames = raw.madeFrames;
   if (whole(raw.madeFps)) params.madeFps = raw.madeFps;
-  const first = raw.firstFrame as Record<string, unknown> | undefined;
-  if (first && typeof first === "object") {
-    const frame: NonNullable<VideoParams["firstFrame"]> = {};
-    if (typeof first.picture === "string" && first.picture) frame.picture = first.picture;
-    if (typeof first.path === "string" && first.path) frame.path = first.path;
-    if (frame.picture || frame.path) params.firstFrame = frame;
-  }
+  const first = readFrame(raw.firstFrame);
+  if (first) params.firstFrame = first;
+  const last = readFrame(raw.lastFrame);
+  if (last) params.lastFrame = last;
   return params;
+}
+
+/** A first or last frame as a row holds it: the picture or the path it names, as far as they are text. */
+function readFrame(value: unknown): NonNullable<VideoParams["firstFrame"]> | undefined {
+  const raw = value as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== "object") return undefined;
+  const frame: NonNullable<VideoParams["firstFrame"]> = {};
+  if (typeof raw.picture === "string" && raw.picture) frame.picture = raw.picture;
+  if (typeof raw.path === "string" && raw.path) frame.path = raw.path;
+  return frame.picture || frame.path ? frame : undefined;
 }
 
 /** What a download of a clip is called: the file's own name for the agent's, one made from the time for the page's. */

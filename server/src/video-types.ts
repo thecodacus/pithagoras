@@ -39,6 +39,8 @@ export interface VideoRequest extends VideoSettings {
   prompt: string;
   /** The first frame of the clip, as the bytes of a picture and its type: an image-to-video request. Without it the clip is made from the description alone. */
   firstFrame?: { bytes: Buffer; mimeType: string };
+  /** The last frame of the clip, in the same form. Only a server that says its video model takes one is sent it; for any other the request fails, and the picture is never dropped. */
+  lastFrame?: { bytes: Buffer; mimeType: string };
   /** The length in seconds, for a caller that thinks in them (the agent's tool): worked out to frames at the frame rate, unless `frames` says. */
   seconds?: number;
 }

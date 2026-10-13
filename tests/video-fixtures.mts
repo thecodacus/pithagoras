@@ -17,6 +17,9 @@ export const MATROSKA = (() => {
 export const KEY = "sk-video-0123456789";
 export const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
 
+/** What a stable-diffusion.cpp server answers to `capabilities` when its video model takes a first and a last frame (`features_by_mode.vid_gen`). */
+export const TAKES_END_IMAGE = { supported_modes: ["vid_gen"], features_by_mode: { vid_gen: { init_image: true, end_image: true, cancel_queued: true } } };
+
 export interface Seen { method?: string; url?: string; auth?: string; body?: any; type?: string }
 export interface FakeSd {
   origin: string;

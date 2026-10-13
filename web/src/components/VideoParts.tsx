@@ -53,10 +53,13 @@ function VideoDetails({ video }: { video: GalleryVideo }) {
     ...(params.negativePrompt ? [[t("Negative prompt"), params.negativePrompt] as [string, string]] : []),
     ...(params.seed !== undefined ? [[t("Seed"), String(params.seed)] as [string, string]] : []),
     ...(params.sampleSteps !== undefined ? [[t("Steps"), String(params.sampleSteps)] as [string, string]] : []),
+    ...(params.strength !== undefined ? [[t("Strength"), String(params.strength)] as [string, string]] : []),
     ...(params.firstFrame?.path ? [[t("First frame"), params.firstFrame.path] as [string, string]] : []),
+    ...(params.lastFrame?.path ? [[t("Last frame"), params.lastFrame.path] as [string, string]] : []),
     [t("File"), `${video.fileName} · ${bytesLabel(video.bytes)}`],
   ];
   const [frameGone, setFrameGone] = useState(false);
+  const [lastGone, setLastGone] = useState(false);
   return (
     <div className="space-y-3 text-sm">
       {video.prompt && (
@@ -69,6 +72,12 @@ function VideoDetails({ video }: { video: GalleryVideo }) {
         <div>
           <p className="text-[11px] text-fg-subtle">{t("First frame")}</p>
           <img src={api.galleryThumbUrl(params.firstFrame.picture)} alt={t("The picture this video starts from")} onError={() => setFrameGone(true)} className="mt-1 h-20 rounded-lg border border-line object-cover" />
+        </div>
+      )}
+      {params.lastFrame?.picture && !lastGone && (
+        <div>
+          <p className="text-[11px] text-fg-subtle">{t("Last frame")}</p>
+          <img src={api.galleryThumbUrl(params.lastFrame.picture)} alt={t("The picture this video ends on")} onError={() => setLastGone(true)} className="mt-1 h-20 rounded-lg border border-line object-cover" />
         </div>
       )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
@@ -112,7 +121,8 @@ export function VideoViewerActions({
   const [details, setDetails] = useState(false);
   useEffect(() => onShown(video), [video.id, onShown]);
   // One found in a folder has no description to make again, and one the agent made from a picture of its folder has no picture of the gallery to start from.
-  const again = makes && video.prompt !== "" && (video.kind === "generated" || (video.kind === "animated" && !!video.params.firstFrame?.picture));
+  const { firstFrame: first, lastFrame: last } = video.params;
+  const again = makes && video.prompt !== "" && (video.kind === "generated" || (video.kind === "animated" && !!(first || last) && (!first || !!first.picture) && (!last || !!last.picture)));
   return (
     <>
       {/* Under the button on a wide screen; on a phone, over the clip, so that the buttons that close it are not under it. */}

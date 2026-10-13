@@ -1753,10 +1753,13 @@ export interface GalleryVideo {
     seed?: number;
     sampleSteps?: number;
     negativePrompt?: string;
+    strength?: number;
     madeFrames?: number;
     madeFps?: number;
     /** A clip made from a picture: the picture of the gallery, or its path in the chat's folder. */
     firstFrame?: { picture?: string; path?: string };
+    /** A clip made to end on a picture: named as the first frame is. */
+    lastFrame?: { picture?: string; path?: string };
   };
   createdAt: number;
   bytes: number;
@@ -1819,8 +1822,11 @@ export interface VideoRequest {
   seed?: number;
   sampleSteps?: number;
   negativePrompt?: string;
+  strength?: number;
   /** The picture of the gallery to start from. */
   firstFrame?: string;
+  /** The picture of the gallery to end on, for a server whose video model takes one. */
+  lastFrame?: string;
   count?: number;
 }
 

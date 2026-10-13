@@ -100,9 +100,12 @@ test("clips that jobs made and the list does not have are asked for, unless they
 test("the settings of the form are checked as the portal checks them, and what is empty is not sent", () => {
   assert.deepEqual(settingsBody(noFields()), { body: {} });
   assert.deepEqual(
-    settingsBody({ model: " m ", width: "832", height: "480", frames: "33", fps: "16", negativePrompt: " blurry ", seed: "-1", sampleSteps: "20" }),
+    settingsBody({ model: " m ", width: "832", height: "480", frames: "33", fps: "16", negativePrompt: " blurry ", seed: "-1", sampleSteps: "20", strength: "" }),
     { body: { model: "m", size: "832x480", frames: 33, fps: 16, negativePrompt: "blurry", seed: -1, sampleSteps: 20 } },
   );
+  // A strength is a number from 0 to 1, a comma a decimal point, 0 a strength; empty is none.
+  for (const [typed, sent] of [["0.4", 0.4], [" 0,75 ", 0.75], ["0", 0], ["1", 1], [".5", 0.5]] as const) assert.deepEqual(settingsBody({ ...noFields(), strength: typed }), { body: { strength: sent } }, typed);
+  assert.deepEqual(settingsBody({ ...noFields(), strength: "  " }), { body: {} });
   const bad = (over: object) => settingsBody({ ...noFields(), ...over });
   assert.deepEqual(bad({ width: "832" }), { field: "height", problem: "size-pair" });
   assert.deepEqual(bad({ height: "480" }), { field: "width", problem: "size-pair" });
@@ -115,12 +118,13 @@ test("the settings of the form are checked as the portal checks them, and what i
   assert.deepEqual(bad({ seed: "-2" }), { field: "seed", problem: "seed" });
   assert.deepEqual(bad({ seed: "1.5" }), { field: "seed", problem: "seed" });
   assert.deepEqual(bad({ sampleSteps: "0" }), { field: "sampleSteps", problem: "steps" });
+  for (const typed of ["1.1", "-0.1", "high", "0.5.5", "1e-1", "2"]) assert.deepEqual(bad({ strength: typed }), { field: "strength", problem: "strength" }, typed);
   assert.deepEqual(bad({ negativePrompt: "x".repeat(portalLimits.negativePrompt + 1) }), { field: "negativePrompt", problem: "negative-long" });
 });
 
 test("the form keeps its settings between visits, but not a seed, and survives what storage holds", () => {
-  const kept = readForm(JSON.stringify({ fields: { model: "m", width: "832", height: "480", frames: "33", fps: "16", seed: "7", sampleSteps: "20", negativePrompt: "blurry" }, count: 3, open: true }), 4);
-  assert.deepEqual(kept.fields, { model: "m", width: "832", height: "480", frames: "33", fps: "16", negativePrompt: "blurry", seed: "", sampleSteps: "20" });
+  const kept = readForm(JSON.stringify({ fields: { model: "m", width: "832", height: "480", frames: "33", fps: "16", seed: "7", sampleSteps: "20", strength: "0.4", negativePrompt: "blurry" }, count: 3, open: true }), 4);
+  assert.deepEqual(kept.fields, { model: "m", width: "832", height: "480", frames: "33", fps: "16", negativePrompt: "blurry", seed: "", sampleSteps: "20", strength: "0.4" });
   assert.deepEqual([kept.count, kept.open], [3, true]);
   assert.equal(readForm(JSON.stringify({ count: 9 }), 4).count, 4, "no more than may run at once");
   assert.equal(readForm(JSON.stringify({ count: 0 }), 4).count, 1);

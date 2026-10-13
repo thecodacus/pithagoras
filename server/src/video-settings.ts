@@ -5,7 +5,7 @@ import { LIMITS as PICTURE_LIMITS } from "./image-settings.js";
  * them, and what each may be.
  *
  * What a video model takes is its own: a size, how many frames and how fast they
- * play, a seed, the steps of the sampler, a negative prompt. They are fields of
+ * play, a seed, the steps of the sampler, a negative prompt, a strength. They are fields of
  * the request, sent to the endpoint the way its backend reads them (see
  * video-generation.ts); a field that is left out is not sent, and the server's
  * own default applies. The limits here are the page's as well — it imports them,
@@ -24,6 +24,8 @@ export const VIDEO_LIMITS = {
   steps: PICTURE_LIMITS.steps,
   seed: PICTURE_LIMITS.seed,
   negativePrompt: PICTURE_LIMITS.negativePrompt,
+  /** How strongly the pictures a clip starts or ends on hold it; what a model makes of it is its own. The same range as for a picture's change. */
+  strength: PICTURE_LIMITS.strength,
 } as const;
 
 /**
@@ -49,6 +51,8 @@ export interface VideoSettings {
   seed?: number;
   sampleSteps?: number;
   negativePrompt?: string;
+  /** Sent as `strength` when set, whether or not a picture goes with it. */
+  strength?: number;
 }
 
 const empty = (v: unknown): boolean => v === undefined || v === null || v === "";
@@ -110,6 +114,11 @@ export function parseVideoSettings(body: Record<string, unknown>, count = 1): Vi
     const steps = whole(body.sampleSteps, VIDEO_LIMITS.steps.min, VIDEO_LIMITS.steps.max, `The steps are a whole number from ${VIDEO_LIMITS.steps.min} to ${VIDEO_LIMITS.steps.max}`);
     if (typeof steps !== "number") return steps.error;
     settings.sampleSteps = steps;
+  }
+  if (!empty(body.strength)) {
+    const { min, max } = VIDEO_LIMITS.strength;
+    if (typeof body.strength !== "number" || !Number.isFinite(body.strength) || body.strength < min || body.strength > max) return `The strength is a number from ${min} to ${max}`;
+    settings.strength = body.strength;
   }
   return settings;
 }

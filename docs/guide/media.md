@@ -263,24 +263,34 @@ visit (the description and the seed are not kept).
 | **Frame rate** | `fps` | Frames per second, from 1 to 120. A video plays for its frames over its frame rate: under the fields the form says so for what it has, "33 frames at 16 frames per second play for about 2.1 s". |
 | **How many** | — | One to four. Each is a request of its own for one video, so a server that makes one at a time queues the rest. |
 
-**Advanced** adds three more:
+**Advanced** adds four more:
 
 | Field | Sent as | Meaning |
 | --- | --- | --- |
 | **Seed** | `seed` | A whole number, 0 or more, or -1 for a random one. With several videos each takes the next seed, so that they are not the same video. A seed is not kept for the next visit. |
 | **Steps** | `sample_params.sample_steps` | The sampler's steps, 1 to 100. |
+| **Strength** | `strength` | A number from 0 to 1 (a comma is a decimal point). How strongly the first and last frame hold the video; what a model does with it is its own. It is sent only when set, whether or not a picture goes with it, and empty leaves it to the server's own (0.75 for stable-diffusion.cpp). |
 | **Negative prompt** | `negative_prompt` | What the video should not show. Up to 4000 characters. |
 
 A setting that is wrong is said when you choose **Make the video**, with the field marked and
 the keyboard moved to it, and nothing is sent. A description is at most 4000 characters.
 
-#### Starting from a picture
+#### First and last frame
 
 **Start from a picture** above the settings chooses the **first frame** of the video: a
 picture from the gallery, in a dialog of its own, or one from this
 computer (it is put in the gallery, as a picture for an edit is). The description then says
 what happens next. The picture is sent as `init_image`; the server brings it to the video's size
 itself. **Remove** (the **×** beside it) makes the next video from the description alone again.
+
+**End on a picture**, beside it, chooses the **last frame** in the same way: the video then ends on that
+picture. It is optional, with or without a first frame, and is sent as `end_image`. **Only some video models take
+one**, and the portal sends it only to a server that says so: stable-diffusion.cpp lists `end_image` under
+`features_by_mode.vid_gen` in its capabilities. For a server that does not list it (or does not answer the
+question) the video is not made, and its frame says so in plain words; the picture is never dropped
+silently, because a video that ends somewhere else than you asked is not the video you wanted. A video made
+with a last frame shows it in its Details, and **Run again** needs the pictures to be in the gallery
+still.
 
 In the [viewer](/guide/sessions#looking-at-a-picture) of a picture, **Make a video from it** (while video
 generation is on) opens the form for videos with that picture as the first frame.
@@ -426,7 +436,7 @@ Beside its own buttons, the viewer of a picture has these:
 | **Details** | The full description, when and how it was made, the model, the size, the file format and compression, the Stable Diffusion settings it was made with, including **Start from: Noise only** for a change that started from noise (they are listed whether or not the switch is on now), the free fields an older version sent, how many pictures an edit was made from and whether it had a mask, the file's name and size, and for the agent's pictures the chat, with a link that opens it. For one that was found in a folder it says which folder, and that nothing is kept of what it was asked for. |
 | **Edit it** | Puts the picture in the form, in **Edit**, to be changed, in place of any that were there. Always offered: where editing is not set up it leads to the form, which says so. While the form is already in **Edit** this button is **Use in the edit** instead, which adds the picture to the ones there, or takes it out again, and leaves the viewer open. To work from several pictures, tick them in the gallery instead. |
 | **Run again** | A picture made from a description is made once more, with the model, size, file format and compression it was made with, and its Stable Diffusion settings while that switch is on: one click, one more picture. With a seed that is the same picture again, as the endpoint makes it. A change is shown in the form instead, with its pictures and its description, since its mask is not kept; that is what to check before it is made again. Not for a picture you put in yourself, or one that was found in a folder, which have no description. |
-| **Make a video from it** | Only while [video generation](/guide/features#video-generation) is on: opens the form for videos with this picture as the first frame of the video to be made (see [Starting from a picture](#starting-from-a-picture)). |
+| **Make a video from it** | Only while [video generation](/guide/features#video-generation) is on: opens the form for videos with this picture as the first frame of the video to be made (see [First and last frame](#first-and-last-frame)). |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |
 
@@ -434,7 +444,7 @@ and the viewer of a video these:
 
 | Button | Does |
 | --- | --- |
-| **Details** | The full description, when and how it was made, the model, the size, the frames and frame rate as asked and as the server made them, the length, the seed, the steps, the negative prompt, the first frame (a small copy of the picture, while it is in the gallery), the file's name and size, and for the agent's videos the chat, with a link that opens it. For one found in a folder it says which folder, and that nothing is kept of what it was asked for. |
+| **Details** | The full description, when and how it was made, the model, the size, the frames and frame rate as asked and as the server made them, the length, the seed, the steps, the strength, the negative prompt, the first and the last frame (a small copy of the picture, while it is in the gallery), the file's name and size, and for the agent's videos the chat, with a link that opens it. For one found in a folder it says which folder, and that nothing is kept of what it was asked for. |
 | **Run again** | A video made from a description is made once more, with the model, size, frames, frame rate and the other settings it was made with: one click, one more video (with a seed that is the same video again, as the server makes it). One made from a picture needs that picture to be in the gallery still, and says so when it is not. Not for one found in a folder, which has no description, and not for one the agent made from a picture of its own folder. |
 | **Delete** | See below. |
 | **Open in a new tab**, **Download** | The file itself. |
@@ -608,8 +618,10 @@ video takes far longer than a request should be held open:
    loaded is told so in plain words. A server that does not answer it is asked anyway. The portal asks for a WebM; a
    server that says it cannot make one is asked for the first format it does make, and what it makes is kept.
 2. `POST /sdcpp/v1/vid_gen` with `{ prompt, model?, negative_prompt?, width?, height?, video_frames?, fps?,
-   seed?, sample_params?: { sample_steps }, init_image?, output_format: "webm" }`. A field that was not
-   set is left out. `init_image` is the first frame as a `data:` URL.
+   seed?, sample_params?: { sample_steps }, strength?, init_image?, end_image?, output_format: "webm" }`. A field that was not
+   set is left out. `init_image` is the first frame and `end_image` the last, each as a `data:` URL;
+   `end_image` is sent only when the capabilities of step 1 list it under `features_by_mode.vid_gen`,
+   and a request with a last frame is refused, in words, when they do not.
 3. `GET /sdcpp/v1/jobs/{id}` until the job is `completed`, `failed` or `cancelled`: every second at first,
    then every three. A few failed questions in a row do not end the wait.
 4. The clip is `result.b64_json`, the whole file as base64; the frames and frame rate the server says it
@@ -621,8 +633,8 @@ The address is the server's own, such as `http://localhost:1234`, or `http://hos
 llama-swap; the address of the image endpoint of the same stable-diffusion.cpp server, with its `/v1`, works too (the
 `/v1` is taken off). A `/v1` endpoint of another kind of server does not work. The server must have been **started with a video model** and **built
 with WebM support** if you want clips that play: an AVI or an animated WebP, which it can make too, is kept as the file it is.
-Other request and answer shapes are not translated; there is no other backend yet. Not supported: a last
-frame, control frames, LoRA and the other fields of the native API; they are not in the form.
+Other request and answer shapes are not translated; there is no other backend yet. Not supported: control frames,
+reference videos and audio, LoRA and the other fields of the native API; they are not in the form.
 
 | | |
 | --- | --- |
@@ -637,11 +649,12 @@ With video generation on and an address set, a chat's agent can have two more to
 show videos: while the model has `generate_video`, the voice instructions tell it that a video is not shown in a spoken
 conversation, only in the chat, and that it takes minutes, so that it makes one only when asked and says it will be in the chat.
 
-- **`generate_video(prompt, title?, size?, seconds?, path?)`** makes one video and shows it. `size`
+- **`generate_video(prompt, title?, size?, seconds?, path?, lastFrame?)`** makes one video and shows it. `size`
   is `WIDTHxHEIGHT`, within the limits of the form. `seconds` is how long it should play: the portal makes
   frames of it at the frame rate set for the add-on, else the server's own, else 16. `path` is a picture
-  in the chat's folder to use as the first frame; a picture only attached to a message is not a file in
-  the folder, and the agent is told to ask for it to be put there. The video is saved in a `generated-videos`
+  in the chat's folder to use as the first frame, and `lastFrame` one to end on, in the same way (it goes only to a
+  server whose video model takes one, and the call fails with the reason where it does not); a picture only attached to
+  a message is not a file in the folder, and the agent is told to ask for it to be put there. The video is saved in a `generated-videos`
   folder inside the chat's folder, under a name the portal makes
   (`video-20261001-101500-a1b2c3.webm`), never one the agent or the endpoint chose, and never over an
   existing file; nothing is written until the endpoint has answered with a real video, so a failure leaves

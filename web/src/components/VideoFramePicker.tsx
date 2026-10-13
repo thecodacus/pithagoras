@@ -11,11 +11,11 @@ import { Empty, ErrorBanner, btnCls, ghostCls } from "./SettingsUi";
 const PAGE = 24;
 
 /**
- * The pictures to start a clip from: the pictures of the gallery, newest first, in a dialog, with a way to bring
+ * The pictures to start a clip from, or to end it on (`which` frame): the pictures of the gallery, newest first, in a dialog, with a way to bring
  * in one of the person's own. A click on a picture chooses it and closes the dialog. The pictures are the page's
  * small copies where the portal made them, as the gallery's tiles are.
  */
-export function VideoFramePicker({ onPick, onClose }: { onPick: (picture: GalleryPicture) => void; onClose: () => void }) {
+export function VideoFramePicker({ which, onPick, onClose }: { which: "first" | "last"; onPick: (picture: GalleryPicture) => void; onClose: () => void }) {
   const [pictures, setPictures] = useState<GalleryPicture[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,7 +74,12 @@ export function VideoFramePicker({ onPick, onClose }: { onPick: (picture: Galler
   };
 
   return (
-    <Modal title={t("Start from a picture")} subtitle={t("The picture is the first frame of the clip. Choose one from the gallery, or bring in your own.")} wide onClose={onClose}>
+    <Modal
+      title={which === "first" ? t("Start from a picture") : t("End on a picture")}
+      subtitle={which === "first" ? t("The picture is the first frame of the clip. Choose one from the gallery, or bring in your own.") : t("The picture is the last frame of the clip. Choose one from the gallery, or bring in your own.")}
+      wide
+      onClose={onClose}
+    >
       <div className="space-y-3 px-5 py-4">
         {error && <ErrorBanner onClose={() => setError(null)}>{error}</ErrorBanner>}
         <div>
@@ -113,7 +118,7 @@ export function VideoFramePicker({ onPick, onClose }: { onPick: (picture: Galler
                   type="button"
                   onClick={() => onPick(p)}
                   title={p.prompt || p.fileName}
-                  aria-label={t("Start from {name}", { name: p.prompt || p.fileName })}
+                  aria-label={which === "first" ? t("Start from {name}", { name: p.prompt || p.fileName }) : t("End on {name}", { name: p.prompt || p.fileName })}
                   className="block w-full overflow-hidden rounded-lg border border-line bg-raised transition hover:border-accent/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
                   <img src={p.thumb ? api.galleryThumbUrl(p.id) : api.galleryFileUrl(p.id)} alt="" loading="lazy" draggable={false} className="aspect-square w-full object-cover" />

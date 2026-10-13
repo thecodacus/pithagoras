@@ -124,7 +124,7 @@ async function portal(page: Page, { clips = [] as Clip[], videos = feature(), fl
       const sent = json();
       state.generated.push(sent);
       if (sent.prompt === 'refuse me') return reply(429, { error: '4 clips are being made already: wait for one to finish, or stop one' });
-      const made = Array.from({ length: sent.count ?? 1 }, () => job({ kind: sent.firstFrame ? 'animate' : 'generate', prompt: sent.prompt, ...(sent.size ? { size: sent.size } : {}), ...(sent.firstFrame ? { from: sent.firstFrame } : {}) }));
+      const made = Array.from({ length: sent.count ?? 1 }, () => job({ kind: sent.firstFrame || sent.lastFrame ? 'animate' : 'generate', prompt: sent.prompt, ...(sent.size ? { size: sent.size } : {}), ...(sent.firstFrame ? { from: sent.firstFrame } : {}) }));
       state.jobs.unshift(...made);
       return reply(202, { jobs: made });
     }
@@ -567,6 +567,35 @@ test('Run again makes a clip once more as it was asked for; one made from a pict
   await expect(viewer(page).getByRole('link', { name: 'Open the chat' })).toHaveAttribute('href', '/s/c1');
 });
 
+test('Run again of a clip that began and ended on pictures sends both, with its strength, and needs both in the gallery still', async ({ page }) => {
+  const first = pic({ prompt: 'Start frame' });
+  const last = pic({ prompt: 'End frame' });
+  const both = clip({ prompt: 'From one to the other', kind: 'animated', params: { strength: 0.4, firstFrame: { picture: first.id }, lastFrame: { picture: last.id } } });
+  const lostLast = clip({ prompt: 'End lost', kind: 'animated', age: 1, params: { firstFrame: { picture: first.id }, lastFrame: { picture: hex(999999) } } });
+  const inChat = clip({ prompt: 'From chat pictures', kind: 'animated', age: 2, origin: 'chat', chat: { id: 'c1', title: 'A chat' }, params: { firstFrame: { picture: first.id }, lastFrame: { path: 'end.png' } } });
+  const p = await portal(page, { clips: [both, lostLast, inChat], pictureList: [first, last] });
+  await page.goto('/media');
+
+  await tile(page, 'From one to the other').click();
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'From one to the other', strength: 0.4, firstFrame: first.id, lastFrame: last.id });
+
+  await tile(page, 'End lost').click();
+  await viewer(page).getByRole('button', { name: 'Run again' }).click();
+  await expect(page.getByRole('alert')).toContainText('The picture this was made from is not in the gallery any more.');
+  expect(p.state.generated.length).toBe(1);
+  await viewer(page).getByRole('button', { name: 'Close' }).click();
+
+  // A last frame that is a path in a chat's folder is not one the gallery has: nothing to run again, and the Details name it.
+  await tile(page, 'From chat pictures').click();
+  await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
+  await viewer(page).getByRole('button', { name: 'Details' }).click();
+  const details = viewer(page).getByRole('region', { name: 'Details' });
+  await expect(details).toContainText('Last frame');
+  await expect(details).toContainText('end.png');
+});
+
 test('a clip is made from a picture of the gallery: chosen in a dialog, shown as the first frame, and sent as its id', async ({ page }) => {
   const a = pic({ prompt: 'A lighthouse' });
   const b = pic({ prompt: 'A harbour' });
@@ -590,6 +619,63 @@ test('a clip is made from a picture of the gallery: chosen in a dialog, shown as
   await maker(page).getByRole('button', { name: 'Remove the first frame' }).click();
   await expect(maker(page)).not.toContainText('A harbour');
   await expect(page.getByPlaceholder('Describe the video: the subject, what moves, the camera')).toBeVisible();
+});
+
+test('a clip ends on a picture of the gallery too: chosen in a dialog of its own beside the first frame, shown as the last frame, and sent as its id', async ({ page }) => {
+  const a = pic({ prompt: 'A lighthouse' });
+  const b = pic({ prompt: 'A harbour' });
+  const p = await portal(page, { pictureList: [a, b] });
+  await page.goto('/media');
+  await describe(page).fill('The boats drift');
+  // Both buttons are there at once, and the last frame is optional.
+  await expect(page.getByRole('button', { name: 'Start from a picture' })).toBeVisible();
+  await page.getByRole('button', { name: 'End on a picture' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End on a picture' });
+  await expect(dialog).toContainText('The picture is the last frame of the clip.');
+  await expect(dialog.getByRole('list', { name: 'Pictures' }).getByRole('button')).toHaveCount(2);
+  await dialog.getByRole('button', { name: 'End on A harbour' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(maker(page)).toContainText('Last frame');
+  await expect(maker(page)).toContainText('A harbour');
+  await expect(maker(page)).toContainText('Only some video models take a last frame.');
+  await expect(maker(page)).not.toContainText('First frame');
+  await expect(page.getByRole('button', { name: 'End on a picture' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Start from a picture' }).click();
+  await page.getByRole('dialog', { name: 'Start from a picture' }).getByRole('button', { name: 'Start from A lighthouse' }).click();
+  await expect(maker(page)).toContainText('First frame');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'The boats drift', firstFrame: a.id, lastFrame: b.id, count: 1 });
+  expect(p.state.jobs[0].kind).toBe('animate');
+
+  // Taken away, the clip ends where the model likes again; the first frame stays.
+  await maker(page).getByRole('button', { name: 'Remove the last frame' }).click();
+  await expect(maker(page)).not.toContainText('Last frame');
+  await expect(maker(page)).toContainText('First frame');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(2);
+  expect(p.state.generated[1]).toEqual({ prompt: 'The boats drift', firstFrame: a.id, count: 1 });
+});
+
+test('a strength is a number from 0 to 1 under Advanced: sent as typed, 0 included, and said when it is wrong', async ({ page }) => {
+  const p = await portal(page);
+  await page.goto('/media');
+  await describe(page).fill('A fox');
+  await page.getByRole('button', { name: 'Advanced' }).click();
+  await page.getByLabel('Strength').fill('1.5');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect(maker(page).getByRole('alert')).toContainText('The strength is a number from 0 to 1, such as 0.75.');
+  await expect(page.getByLabel('Strength')).toHaveAttribute('aria-invalid', 'true');
+  expect(p.state.generated).toEqual([]);
+  await page.getByLabel('Strength').fill('0,4');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(1);
+  expect(p.state.generated[0]).toEqual({ prompt: 'A fox', strength: 0.4, count: 1 });
+  await page.getByLabel('Strength').fill('0');
+  await page.getByRole('button', { name: 'Make the video' }).click();
+  await expect.poll(() => p.state.generated.length).toBe(2);
+  expect(p.state.generated[1]).toEqual({ prompt: 'A fox', strength: 0, count: 1 });
 });
 
 test('a picture named in the address is the first frame, and the address is cleared of it', async ({ page }) => {

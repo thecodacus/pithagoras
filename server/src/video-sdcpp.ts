@@ -32,6 +32,13 @@ const MAX_MISSES = 3;
 /** What is read of an answer that is not a finished clip. */
 const SMALL_ANSWER = 1024 * 1024;
 
+/** What the server says of itself that a request depends on: the frame rate it makes clips at, the format to ask for, and whether its video model takes a last frame. */
+interface Capabilities {
+  fps?: number;
+  format?: string;
+  endImage: boolean;
+}
+
 const fail = (message: string): Error => new VideoGenerationError(message);
 
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -56,8 +63,23 @@ function said(json: any): string {
   return [error, message && message !== error ? message : ""].filter(Boolean).join(": ");
 }
 
-/** The body of a request for a clip, in the native API's own names. */
-function bodyOf(config: VideoGenerationConfig, request: VideoRequest, serverFps: number | undefined, format: string): Record<string, unknown> {
+/** A picture as the native API takes one: a data URL. */
+const dataUrl = (picture: { bytes: Buffer; mimeType: string }): string => `data:${picture.mimeType};base64,${picture.bytes.toString("base64")}`;
+
+/**
+ * The body of a request for a clip, in the native API's own names. A last frame goes as `end_image` and only when the
+ * server's capabilities report it for `vid_gen` (`endImage`): for any other it is refused here, in words, and never dropped,
+ * since a clip that ends on something else than the picture asked for is no clip the person wanted.
+ */
+function bodyOf(config: VideoGenerationConfig, request: VideoRequest, caps: Capabilities | undefined, format: string): Record<string, unknown> {
+  if (request.lastFrame && !caps?.endImage) {
+    throw fail(
+      caps
+        ? "This stable-diffusion.cpp server does not take a last frame with its video model (its capabilities do not list end_image for video): make the clip without one, or use a model and a server that do"
+        : "The video endpoint did not say whether it takes a last frame (it gave no capabilities listing end_image for video), so none is sent: make the clip without one, or use a stable-diffusion.cpp server that reports it",
+    );
+  }
+  const serverFps = caps?.fps;
   const size = request.size || config.size;
   const sides = /^(\d+)x(\d+)$/.exec(size);
   const model = request.model || config.model;
@@ -74,7 +96,9 @@ function bodyOf(config: VideoGenerationConfig, request: VideoRequest, serverFps:
     ...(fps !== undefined ? { fps } : {}),
     ...(request.seed !== undefined ? { seed: request.seed } : {}),
     ...(request.sampleSteps !== undefined ? { sample_params: { sample_steps: request.sampleSteps } } : {}),
-    ...(request.firstFrame ? { init_image: `data:${request.firstFrame.mimeType};base64,${request.firstFrame.bytes.toString("base64")}` } : {}),
+    ...(request.strength !== undefined ? { strength: request.strength } : {}),
+    ...(request.firstFrame ? { init_image: dataUrl(request.firstFrame) } : {}),
+    ...(request.lastFrame ? { end_image: dataUrl(request.lastFrame) } : {}),
     output_format: format,
   };
 }
@@ -133,9 +157,10 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
   /**
    * Whether the server is one that makes clips, the frame rate it makes them at without being told, and the format to ask for:
    * a WebM, which every browser plays, where it makes one, else the first it says it makes, which is kept as the file it is.
+   * Whether its video model takes a last frame is what its features say (`end_image`), and only `true` says it.
    * Nothing is assumed of one that does not answer.
    */
-  const capabilities = async (base: URL): Promise<{ fps?: number; format?: string } | undefined> => {
+  const capabilities = async (base: URL): Promise<Capabilities | undefined> => {
     try {
       const { status, json } = await call(route(base, "capabilities"), "GET");
       if (status !== 200 || !json || typeof json !== "object") return undefined;
@@ -145,7 +170,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
       const formats: unknown[] = Array.isArray(json.output_formats_by_mode?.vid_gen) ? json.output_formats_by_mode.vid_gen : [];
       const asked = formats.includes("webm") ? "webm" : formats.find((f): f is string => typeof f === "string" && /^[a-z0-9]{1,10}$/.test(f));
       const fps = json.defaults_by_mode?.vid_gen?.fps;
-      return { fps: Number.isInteger(fps) && fps > 0 ? fps : undefined, ...(asked ? { format: asked } : {}) };
+      return { fps: Number.isInteger(fps) && fps > 0 ? fps : undefined, ...(asked ? { format: asked } : {}), endImage: json.features_by_mode?.vid_gen?.end_image === true };
     } catch (e) {
       if (e instanceof VideoGenerationError || signal.aborted) throw e;
       // Not answering is for the request itself to say, with the reason.
@@ -156,7 +181,7 @@ async function generate(config: VideoGenerationConfig, request: VideoRequest, ru
   try {
     // Asked of the server before anything is sent, so that a server that has no video model, or cannot make a WebM, is said so in plain words.
     const caps = await capabilities(root);
-    const submitted = await call(route(root, "vid_gen"), "POST", bodyOf(config, request, caps?.fps, caps?.format ?? "webm"));
+    const submitted = await call(route(root, "vid_gen"), "POST", bodyOf(config, request, caps, caps?.format ?? "webm"));
     if (submitted.status !== 202 && submitted.status !== 200) {
       // In the server's words, with the key out first (it may repeat it) and then the cut: every answer of its that is shown is shown so.
       const why = without(said(submitted.json), key).replace(/\s+/g, " ").slice(0, 300);

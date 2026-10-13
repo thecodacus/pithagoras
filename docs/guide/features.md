@@ -439,13 +439,13 @@ one has it after it is idle and reloaded (`/reload`). The tools belong to the in
 
 ### The agent's video tools
 
-`generate_video(prompt, title?, size?, seconds?, path?)` makes one video, saves it and shows it. `seconds` is more than 0 and at
+`generate_video(prompt, title?, size?, seconds?, path?, lastFrame?)` makes one video, saves it and shows it. `seconds` is more than 0 and at
 most 600. It is the picture tool's twin and keeps its rules: the video is written to a `generated-videos` folder inside the chat's folder under a name the
 portal makes (`video-20261001-101500-a1b2c3.webm`), never one the agent or the endpoint chose, and never over an existing
 file; nothing is written until the endpoint has answered with a real video, and a failure — nothing configured, the
 server's error, an answer with no clip in it, the time limit — is an error result the agent sees and can pass on. `path` is a
 picture in the chat's folder, which is the first frame of the video; it is read and checked as `edit_image` checks a picture,
-and a picture outside the folder is refused. A picture only attached to a message is not in the folder, and the tool's
+and a picture outside the folder is refused. `lastFrame` is a picture to end the video on, read and checked in the same way; it goes only to a server whose video model says it takes one, and the call fails with the reason where it does not. A picture only attached to a message is not in the folder, and the tool's
 description says so. The call waits for the video and stopping the chat stops the wait.
 
 Its answer is the video's path and a title, with the mark only the portal's tool sets (`portalVideo`), and the chat plays the

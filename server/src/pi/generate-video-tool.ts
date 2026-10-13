@@ -87,6 +87,7 @@ export class GenerateVideoTool {
         "The clip is saved in the chat's folder: a WebM or MP4 plays on their screen as show_video's does, so do not call show_video on it; any other format is kept as a file that cannot be played in the chat and is in the gallery to download. " +
         "Describe what it should show: the subject, what moves and how, the camera, the style, the setting. " +
         "To start from a picture — the picture is the first frame, and the description says what happens next — give its path in the chat's folder. " +
+        "To end on a picture as well — the picture is the last frame — give its path as lastFrame; only some video models take one, and the call fails with the server's reason where the model does not. " +
         "A picture the person only attached to a message is not a file in the folder: ask them to put it there. " +
         "It can take many minutes and costs the person something, so make one clip, and another only when asked. " +
         "Give a short title. Say in words what you made; do not describe it in detail unless asked.",
@@ -96,8 +97,9 @@ export class GenerateVideoTool {
         size: Type.Optional(Type.String({ description: 'Width and height in pixels, such as "832x480". Leave it out for the usual size.' })),
         seconds: Type.Optional(Type.Number({ description: "How long the clip should be, in seconds. Leave it out for the usual length; a longer clip takes much longer." })),
         path: Type.Optional(Type.String({ description: "A picture in the chat's folder to use as the first frame: relative to it or absolute inside it. Leave it out to make the clip from the description alone." })),
+        lastFrame: Type.Optional(Type.String({ description: "A picture in the chat's folder for the clip to end on, given as path is. Leave it out for a clip that is free to end where it likes." })),
       }),
-      execute: async (_id: string, p: { prompt: string; title?: string; size?: string; seconds?: number; path?: string }, signal?: AbortSignal) => {
+      execute: async (_id: string, p: { prompt: string; title?: string; size?: string; seconds?: number; path?: string; lastFrame?: string }, signal?: AbortSignal) => {
         // Read now, not when the tool was loaded: an address, a model or a key changed since is in force.
         const config = videoGenerationConfig();
         if (!videoGenerationReady(config)) {
@@ -116,29 +118,31 @@ export class GenerateVideoTool {
           }
           seconds = p.seconds;
         }
-        let firstFrame: { bytes: Buffer; mimeType: string } | undefined;
-        let from: string | undefined;
-        if (p.path !== undefined && p.path !== null && String(p.path).trim()) {
+        // A picture of the chat's folder as a frame of the clip: its path in the folder, and its bytes.
+        const frame = (given: unknown, which: "first" | "last"): { from: string; picture: { bytes: Buffer; mimeType: string } } | undefined => {
+          if (given === undefined || given === null || !String(given).trim()) return undefined;
           try {
-            from = pictureIn(folder, String(p.path), "used as the first frame");
+            const from = pictureIn(folder, String(given), `used as the ${which} frame`);
             const read = readPicture(baseDir(folder), from);
-            firstFrame = { bytes: read.bytes, mimeType: read.mimeType };
+            return { from, picture: { bytes: read.bytes, mimeType: read.mimeType } };
           } catch (e) {
             // The Files panel's words for it ("download it instead") are no way forward here.
             if (e instanceof FileError && e.code === "too_large") {
-              throw new Error(`The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is too large for a first frame; say so to the person, or make a smaller copy of it first.`);
+              throw new Error(`The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is too large for a ${which} frame; say so to the person, or make a smaller copy of it first.`);
             }
             throw e;
           }
-        }
-        const made = await generateVideo(config, { prompt, ...(size ? { size } : {}), ...(seconds !== undefined ? { seconds } : {}), ...(firstFrame ? { firstFrame } : {}) }, { signal, timeoutMs: config.timeoutSeconds * 1000 });
+        };
+        const first = frame(p.path, "first");
+        const last = frame(p.lastFrame, "last");
+        const made = await generateVideo(config, { prompt, ...(size ? { size } : {}), ...(seconds !== undefined ? { seconds } : {}), ...(first ? { firstFrame: first.picture } : {}), ...(last ? { lastFrame: last.picture } : {}) }, { signal, timeoutMs: config.timeoutSeconds * 1000 });
         const rel = saveGeneratedVideo(folder, made.bytes, made.ext);
         if (sessionId) {
           const asked = size || config.size;
           recordChatVideo({
             sessionId,
             path: rel,
-            kind: from ? "animated" : "generated",
+            kind: first || last ? "animated" : "generated",
             prompt,
             bytes: made.bytes.length,
             params: {
@@ -148,7 +152,8 @@ export class GenerateVideoTool {
               ...(config.fps !== null ? { fps: config.fps } : {}),
               ...(made.frames !== undefined ? { madeFrames: made.frames } : {}),
               ...(made.fps !== undefined ? { madeFps: made.fps } : {}),
-              ...(from ? { firstFrame: { path: from } } : {}),
+              ...(first ? { firstFrame: { path: first.from } } : {}),
+              ...(last ? { lastFrame: { path: last.from } } : {}),
             },
           });
         }

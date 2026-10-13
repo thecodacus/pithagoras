@@ -28,7 +28,7 @@ const KEEP_FINISHED_MS = 60 * 60_000;
 
 export interface VideoJob {
   id: string;
-  /** Made from a description, or from a picture as its first frame. */
+  /** Made from a description, or from a picture as its first frame or its last. */
   kind: "generate" | "animate";
   state: "running" | "done" | "failed";
   /** While it runs, and the server says: waiting its turn there, or being made. */
@@ -150,11 +150,13 @@ export interface GenerateVideoJob extends VideoSettings {
   count: number;
   /** The first frame, by its id in the Images gallery: the clips are made from this picture. */
   firstFrame?: string;
+  /** The last frame, by its id in the Images gallery: the clips end on this picture, on a server whose video model takes one. */
+  lastFrame?: string;
 }
 
 /** What goes in the gallery of how a clip was asked for: the settings that were sent, and none that were not. */
 function paramsOf(settings: VideoSettings): VideoParams {
-  const { model, size, frames, fps, seed, sampleSteps, negativePrompt } = settings;
+  const { model, size, frames, fps, seed, sampleSteps, negativePrompt, strength } = settings;
   return {
     ...(model ? { model } : {}),
     ...(size ? { size } : {}),
@@ -163,7 +165,23 @@ function paramsOf(settings: VideoSettings): VideoParams {
     ...(negativePrompt ? { negativePrompt } : {}),
     ...(seed !== undefined ? { seed } : {}),
     ...(sampleSteps !== undefined ? { sampleSteps } : {}),
+    ...(strength !== undefined ? { strength } : {}),
   };
+}
+
+/** A picture of the gallery as the first or last frame of a clip, or the refusal that says why it cannot be one. */
+function frameOf(id: string, which: "first" | "last"): { bytes: Buffer; mimeType: string } {
+  try {
+    const { bytes } = readListed(id);
+    const mimeType = pictureType(bytes.subarray(0, 12));
+    if (!mimeType) throw new VideoJobRefusal(`The ${which} frame is not a PNG, JPEG, GIF or WebP picture`, 400);
+    return { bytes, mimeType };
+  } catch (e) {
+    if (e instanceof VideoJobRefusal) throw e;
+    // The Files panel's words for a picture that is too large ("download it instead") are no way forward here.
+    const why = e instanceof FileError && e.code === "too_large" ? `The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB: use a smaller one as the ${which} frame` : (e as Error).message;
+    throw new VideoJobRefusal(`The ${which} frame: ${why}`, 400);
+  }
 }
 
 /**
@@ -179,31 +197,20 @@ export function startVideos(request: GenerateVideoJob): VideoJob[] {
     throw new VideoJobRefusal(`The clips made on the Media page take ${Math.round(pageVideoBytes() / 1024 / 1024)} MB, which is the limit set in Settings → Agent → Media. Delete some clips, or raise the limit`, 409);
   }
   room(request.count);
-  let firstFrame: { bytes: Buffer; mimeType: string } | undefined;
-  if (request.firstFrame) {
-    try {
-      const { bytes } = readListed(request.firstFrame);
-      const mimeType = pictureType(bytes.subarray(0, 12));
-      if (!mimeType) throw new VideoJobRefusal("The first frame is not a PNG, JPEG, GIF or WebP picture", 400);
-      firstFrame = { bytes, mimeType };
-    } catch (e) {
-      if (e instanceof VideoJobRefusal) throw e;
-      // The Files panel's words for a picture that is too large ("download it instead") are no way forward here.
-      const why = e instanceof FileError && e.code === "too_large" ? `The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB: use a smaller one as the first frame` : (e as Error).message;
-      throw new VideoJobRefusal(`The first frame: ${why}`, 400);
-    }
-  }
-  const kind: VideoKind = firstFrame ? "animated" : "generated";
+  const firstFrame = request.firstFrame ? frameOf(request.firstFrame, "first") : undefined;
+  const lastFrame = request.lastFrame ? frameOf(request.lastFrame, "last") : undefined;
+  const kind: VideoKind = firstFrame || lastFrame ? "animated" : "generated";
   return Array.from({ length: request.count }, (_, i) => {
-    const { prompt, count: _count, firstFrame: _from, ...asked } = request;
+    const { prompt, count: _count, firstFrame: _from, lastFrame: _to, ...asked } = request;
     const settings = forClip(asked, i);
     // What is recorded is what was sent: the add-on's model, size, frames and frame rate are the defaults of a request that has none.
     const params: VideoParams = {
       ...paramsOf({ ...settings, model: settings.model || config.model, size: settings.size || config.size, frames: settings.frames ?? config.frames ?? undefined, fps: settings.fps ?? config.fps ?? undefined }),
       ...(request.firstFrame ? { firstFrame: { picture: request.firstFrame } } : {}),
+      ...(request.lastFrame ? { lastFrame: { picture: request.lastFrame } } : {}),
     };
-    return start({ kind: firstFrame ? "animate" : "generate", prompt, ...(params.size ? { size: params.size } : {}), ...(request.firstFrame ? { from: request.firstFrame } : {}) }, async (signal, progress) => {
-      const made = await generateVideo(config, { prompt, ...settings, ...(firstFrame ? { firstFrame } : {}) }, { signal, timeoutMs: config.timeoutSeconds * 1000, onProgress: progress });
+    return start({ kind: firstFrame || lastFrame ? "animate" : "generate", prompt, ...(params.size ? { size: params.size } : {}), ...(request.firstFrame ? { from: request.firstFrame } : {}) }, async (signal, progress) => {
+      const made = await generateVideo(config, { prompt, ...settings, ...(firstFrame ? { firstFrame } : {}), ...(lastFrame ? { lastFrame } : {}) }, { signal, timeoutMs: config.timeoutSeconds * 1000, onProgress: progress });
       const video = addPageVideo({
         bytes: made.bytes,
         ext: made.ext,

@@ -100,11 +100,12 @@ export function MediaPage() {
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => setPicked(new Set()), [filterKey]);
 
-  // What the forms are working on: for a picture, the words and the pictures to change; for a video, the words and the picture to start from.
+  // What the forms are working on: for a picture, the words and the pictures to change; for a video, the words and the pictures to start from and end on.
   const [prompt, setPrompt] = useState("");
   const [sources, setSources] = useState<GalleryPicture[]>([]);
   const [videoPrompt, setVideoPrompt] = useState("");
   const [firstFrame, setFirstFrame] = useState<GalleryPicture | null>(null);
+  const [lastFrame, setLastFrame] = useState<GalleryPicture | null>(null);
   // Making and changing pictures are set up apart: one can be on without the other, and the form has both, whichever is not set up saying so.
   const makes = !!images?.ready;
   const changes = !!images?.editReady;
@@ -454,16 +455,22 @@ export function MediaPage() {
     }
   };
 
-  /** The same again for a video: one made from a description is made once more, as it was asked for; one made from a picture needs that picture to be in the gallery still. */
+  /** The same again for a video: one made from a description is made once more, as it was asked for; one made from pictures needs those pictures to be in the gallery still. */
   const runAgainVideo = async (video: GalleryVideo) => {
     setError(null);
     try {
-      const { madeFrames: _frames, madeFps: _fps, firstFrame: first, ...settings } = video.params;
+      const { madeFrames: _frames, madeFps: _fps, firstFrame: first, lastFrame: last, ...settings } = video.params;
       if (video.kind === "animated") {
-        const picture = first?.picture ? (await api.galleryPictures([first.picture])).pictures[0] : undefined;
-        if (!picture) throw new Error(t("The picture this was made from is not in the gallery any more."));
+        const wanted = [...new Set([first?.picture, last?.picture].filter((id): id is string => !!id))];
+        const found = wanted.length ? (await api.galleryPictures(wanted)).pictures : [];
+        if (!wanted.length || found.length < wanted.length) throw new Error(t("The picture this was made from is not in the gallery any more."));
       }
-      const { jobs: made } = await api.makeVideos({ prompt: video.prompt, ...settings, ...(video.kind === "animated" && first?.picture ? { firstFrame: first.picture } : {}) });
+      const { jobs: made } = await api.makeVideos({
+        prompt: video.prompt,
+        ...settings,
+        ...(video.kind === "animated" && first?.picture ? { firstFrame: first.picture } : {}),
+        ...(video.kind === "animated" && last?.picture ? { lastFrame: last.picture } : {}),
+      });
       videos.started(made);
       setOpened(null);
       scroller.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -608,6 +615,8 @@ export function MediaPage() {
             promptRef={videoPromptRef}
             firstFrame={firstFrame}
             onFirstFrame={setFirstFrame}
+            lastFrame={lastFrame}
+            onLastFrame={setLastFrame}
             onStarted={(made) => {
               videos.started(made);
               reveal("videos", made);

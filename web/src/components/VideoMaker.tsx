@@ -26,6 +26,8 @@ const problemText = (problem: Problem): string => {
       return t("The seed is a whole number, 0 or more, or -1 for a random one.");
     case "steps":
       return t("The steps are a whole number from {min} to {max}.", VIDEO_LIMITS.steps);
+    case "strength":
+      return t("The strength is a number from 0 to 1, such as 0.75.");
     case "negative-long":
       return t("The negative prompt is over {max} characters.", { max: VIDEO_LIMITS.negativePrompt });
   }
@@ -33,14 +35,15 @@ const problemText = (problem: Problem): string => {
 
 /**
  * Where a clip is made. A description and a button, with the settings of the clip under it, and a first frame if
- * the clip is to start from a picture. Nothing is made here: the portal does it, as a job (it takes minutes, and
- * closing the page must not lose it), and this says that it was started (`onStarted`).
+ * the clip is to start from a picture, a last frame if it is to end on one. Nothing is made here: the portal does
+ * it, as a job (it takes minutes, and closing the page must not lose it), and this says that it was started
+ * (`onStarted`).
  *
  * The settings are fields of their own, empty where the add-on's or the server's own is meant (the add-on's model,
  * size, frames and frame rate are shown in them as what is used), and kept for the next visit, not the words. The
- * model, the size, how long the clip is and how many are in view; the seed, the steps and a negative prompt under
- * "Advanced". A clip made from a picture is asked for with the picture as its first frame: the gallery's
- * pictures are where it comes from.
+ * model, the size, how long the clip is and how many are in view; the seed, the steps, the strength and a negative
+ * prompt under "Advanced". A clip made from a picture is asked for with the picture as its first frame, and one that
+ * ends on a picture with it as its last: the gallery's pictures are where they come from.
  */
 export function VideoMaker({
   features,
@@ -51,6 +54,8 @@ export function VideoMaker({
   promptRef,
   firstFrame,
   onFirstFrame,
+  lastFrame,
+  onLastFrame,
   onStarted,
 }: {
   features: VideosFeature;
@@ -63,6 +68,9 @@ export function VideoMaker({
   /** The picture the clip starts from, if it does. */
   firstFrame: GalleryPicture | null;
   onFirstFrame: (picture: GalleryPicture | null) => void;
+  /** The picture the clip ends on, if it does. */
+  lastFrame: GalleryPicture | null;
+  onLastFrame: (picture: GalleryPicture | null) => void;
   onStarted: (jobs: VideoJob[]) => void;
 }) {
   const [form, setForm] = useState<FormMemory>(() => readForm(local.get(FORM_KEY), limit));
@@ -76,7 +84,8 @@ export function VideoMaker({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [choosing, setChoosing] = useState(false);
+  /** Which frame the dialog is choosing a picture for. */
+  const [choosing, setChoosing] = useState<"first" | "last" | null>(null);
 
   const fields = form.fields;
   const setField = (patch: Partial<Fields>) => {
@@ -95,14 +104,14 @@ export function VideoMaker({
     const settings = settingsBody(fields);
     if ("problem" in settings) {
       // The setting may be under "Advanced", which is opened to show it.
-      if (["seed", "sampleSteps", "negativePrompt"].includes(settings.field)) change({ open: true });
+      if (["seed", "sampleSteps", "strength", "negativePrompt"].includes(settings.field)) change({ open: true });
       setProblem({ field: settings.field, at: Date.now() });
       setError(problemText(settings.problem));
       return;
     }
     setBusy(true);
     try {
-      const { jobs } = await api.makeVideos({ prompt: said, ...settings.body, ...(firstFrame ? { firstFrame: firstFrame.id } : {}), count });
+      const { jobs } = await api.makeVideos({ prompt: said, ...settings.body, ...(firstFrame ? { firstFrame: firstFrame.id } : {}), ...(lastFrame ? { lastFrame: lastFrame.id } : {}), count });
       onStarted(jobs);
     } catch (e) {
       setError((e as Error).message);
@@ -116,7 +125,7 @@ export function VideoMaker({
   const empty = t("The endpoint's own");
   const numberCls = `${inputCls} mt-1 font-mono text-xs`;
   /** A setting that is a number, written as text: the form says what is wrong with it, in its own words, when the clip is asked for. */
-  const numberField = (name: "width" | "height" | "frames" | "fps" | "seed" | "sampleSteps", label: string, placeholder: string) => (
+  const numberField = (name: "width" | "height" | "frames" | "fps" | "seed" | "sampleSteps" | "strength", label: string, placeholder: string) => (
     <label className="text-xs text-fg-muted">
       {label}
       <input
@@ -124,7 +133,7 @@ export function VideoMaker({
         value={fields[name]}
         onChange={(e) => setField({ [name]: e.target.value })}
         placeholder={placeholder}
-        inputMode="numeric"
+        inputMode={name === "strength" ? "decimal" : "numeric"}
         spellCheck={false}
         autoComplete="off"
         aria-invalid={invalid(name) || undefined}
@@ -137,6 +146,37 @@ export function VideoMaker({
   const frames = Number(fields.frames.trim() || features.frames || NaN);
   const fps = Number(fields.fps.trim() || features.fps || NaN);
   const length = Number.isInteger(frames) && Number.isInteger(fps) && frames > 0 && fps > 0 ? frames / fps : undefined;
+
+  /** A frame of the clip: the picture chosen, with the ways to change or drop it, or the button that chooses one. */
+  const frame = (which: "first" | "last", picture: GalleryPicture | null, onPicture: (picture: GalleryPicture | null) => void) =>
+    picture ? (
+      <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas/40 p-1.5 pr-2">
+        <img src={picture.thumb ? api.galleryThumbUrl(picture.id) : api.galleryFileUrl(picture.id)} alt="" className="h-12 w-12 rounded-lg border border-line object-cover" />
+        <div className="min-w-0">
+          <p className="text-[11px] text-fg-subtle">{which === "first" ? t("First frame") : t("Last frame")}</p>
+          <p className="max-w-[14rem] truncate text-xs text-fg" title={sourceName(picture)}>
+            {sourceName(picture)}
+          </p>
+        </div>
+        <button type="button" onClick={() => setChoosing(which)} className={ghostCls}>
+          {t("Change")}
+        </button>
+        <button
+          type="button"
+          onClick={() => onPicture(null)}
+          aria-label={which === "first" ? t("Remove the first frame") : t("Remove the last frame")}
+          title={which === "first" ? t("Remove the first frame") : t("Remove the last frame")}
+          className="grid h-6 w-6 place-items-center rounded-full text-fg-muted hover:bg-fg/10 hover:text-danger"
+        >
+          <LuX aria-hidden className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    ) : (
+      <button type="button" onClick={() => setChoosing(which)} className={ghostCls}>
+        <LuImage aria-hidden className="h-3.5 w-3.5" />
+        {which === "first" ? t("Start from a picture") : t("End on a picture")}
+      </button>
+    );
 
   if (!features.ready) {
     return (
@@ -173,29 +213,10 @@ export function VideoMaker({
       </label>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        {firstFrame ? (
-          <div className="flex items-center gap-2 rounded-xl border border-line bg-canvas/40 p-1.5 pr-2">
-            <img src={firstFrame.thumb ? api.galleryThumbUrl(firstFrame.id) : api.galleryFileUrl(firstFrame.id)} alt="" className="h-12 w-12 rounded-lg border border-line object-cover" />
-            <div className="min-w-0">
-              <p className="text-[11px] text-fg-subtle">{t("First frame")}</p>
-              <p className="max-w-[14rem] truncate text-xs text-fg" title={sourceName(firstFrame)}>
-                {sourceName(firstFrame)}
-              </p>
-            </div>
-            <button type="button" onClick={() => setChoosing(true)} className={ghostCls}>
-              {t("Change")}
-            </button>
-            <button type="button" onClick={() => onFirstFrame(null)} aria-label={t("Remove the first frame")} title={t("Remove the first frame")} className="grid h-6 w-6 place-items-center rounded-full text-fg-muted hover:bg-fg/10 hover:text-danger">
-              <LuX aria-hidden className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ) : (
-          <button type="button" onClick={() => setChoosing(true)} className={ghostCls}>
-            <LuImage aria-hidden className="h-3.5 w-3.5" />
-            {t("Start from a picture")}
-          </button>
-        )}
-        {!firstFrame && <span className="text-[11px] text-fg-faint">{t("Without one, the video is made from the description alone.")}</span>}
+        {frame("first", firstFrame, onFirstFrame)}
+        {frame("last", lastFrame, onLastFrame)}
+        {!firstFrame && !lastFrame && <span className="text-[11px] text-fg-faint">{t("Without one, the video is made from the description alone.")}</span>}
+        {lastFrame && <span className="basis-full text-[11px] text-fg-faint">{t("Only some video models take a last frame. Where the server's does not, the video is not made and the reason is shown.")}</span>}
       </div>
 
       <div className="mt-3">
@@ -242,6 +263,8 @@ export function VideoMaker({
           <div className="mt-2 grid gap-2 rounded-xl border border-line bg-canvas/40 p-3 sm:grid-cols-2">
             {numberField("seed", t("Seed"), t("Random"))}
             {numberField("sampleSteps", t("Steps"), empty)}
+            {numberField("strength", t("Strength"), empty)}
+            <p className="text-[11px] text-fg-faint sm:col-span-2">{t("How strongly the first and last frame hold the clip. What a model does with it is its own; leave it empty for the server's own.")}</p>
             {count > 1 && <p className="text-[11px] text-fg-faint sm:col-span-2">{t("With a seed, each of the videos takes the next one, so that they are not all the same.")}</p>}
             <label className="block text-xs text-fg-muted sm:col-span-2">
               {t("Negative prompt")}
@@ -280,10 +303,11 @@ export function VideoMaker({
       )}
       {choosing && (
         <VideoFramePicker
-          onClose={() => setChoosing(false)}
+          which={choosing}
+          onClose={() => setChoosing(null)}
           onPick={(picture) => {
-            onFirstFrame(picture);
-            setChoosing(false);
+            (choosing === "first" ? onFirstFrame : onLastFrame)(picture);
+            setChoosing(null);
             promptRef.current?.focus();
           }}
         />

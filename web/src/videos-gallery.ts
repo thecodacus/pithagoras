@@ -123,12 +123,13 @@ export interface Fields {
   negativePrompt: string;
   seed: string;
   sampleSteps: string;
+  strength: string;
 }
 
 export type FieldName = keyof Fields;
 
 /** What is wrong with a setting, as a code that the form says in words. */
-export type Problem = "size-pair" | "size-range" | "frames" | "fps" | "seed" | "steps" | "negative-long";
+export type Problem = "size-pair" | "size-range" | "frames" | "fps" | "seed" | "steps" | "strength" | "negative-long";
 
 const WHOLE = /^[+-]?\d+$/;
 
@@ -140,8 +141,8 @@ function whole(text: string, min: number, max?: number): number | undefined {
 }
 
 /** The settings the form has, ready to send, or the first one that is wrong. What is empty is left out; a size is both sides or none. */
-export function settingsBody(fields: Fields): { body: Omit<VideoRequest, "prompt" | "count" | "firstFrame"> } | { field: FieldName; problem: Problem } {
-  const body: Omit<VideoRequest, "prompt" | "count" | "firstFrame"> = {};
+export function settingsBody(fields: Fields): { body: Omit<VideoRequest, "prompt" | "count" | "firstFrame" | "lastFrame"> } | { field: FieldName; problem: Problem } {
+  const body: Omit<VideoRequest, "prompt" | "count" | "firstFrame" | "lastFrame"> = {};
   const model = fields.model.trim();
   if (model) body.model = model;
 
@@ -185,6 +186,14 @@ export function settingsBody(fields: Fields): { body: Omit<VideoRequest, "prompt
     if (n === undefined) return { field: "sampleSteps", problem: "steps" };
     body.sampleSteps = n;
   }
+  const strength = fields.strength.trim();
+  if (strength) {
+    // A comma is a decimal point where the person writes one.
+    const text = strength.replace(",", ".");
+    const n = /^(\d+(\.\d+)?|\.\d+)$/.test(text) ? Number(text) : NaN;
+    if (!(n >= VIDEO_LIMITS.strength.min && n <= VIDEO_LIMITS.strength.max)) return { field: "strength", problem: "strength" };
+    body.strength = n;
+  }
   return { body };
 }
 
@@ -221,6 +230,7 @@ export function readForm(stored: string | null, most: number): FormMemory {
       negativePrompt: text(f.negativePrompt, VIDEO_LIMITS.negativePrompt),
       seed: "",
       sampleSteps: text(f.sampleSteps, 3),
+      strength: text(f.strength, 6),
     },
     count: Number.isInteger(count) && count >= 1 ? Math.min(count, Math.max(1, most)) : 1,
     open: raw.open === true,

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inProcessHome } from "./helpers.mts";
-import { KEY, MATROSKA, MP4, PNG, WEBM, completed, fakeSd, type FakeSd } from "./video-fixtures.mts";
+import { KEY, MATROSKA, MP4, PNG, TAKES_END_IMAGE, WEBM, completed, fakeSd, type FakeSd } from "./video-fixtures.mts";
 
 inProcessHome("pitha-videos-");
 
@@ -60,6 +60,64 @@ test("without a setting nothing is sent for it: the server's own applies, and th
     assert.deepEqual(sd.to("POST", "/sdcpp/v1/vid_gen")[0].body, { prompt: "plain", output_format: "webm" });
     await gen.generateVideo(config(sd.origin, { model: "m", size: "512x512", frames: 17, fps: 8 }), { prompt: "settings", size: "", model: "" }, FAST);
     assert.deepEqual(sd.to("POST", "/sdcpp/v1/vid_gen")[1].body, { prompt: "settings", model: "m", width: 512, height: 512, video_frames: 17, fps: 8, output_format: "webm" });
+  } finally {
+    sd.server.close();
+  }
+});
+
+test("a last frame goes as end_image, with the first, alone, and never to a server that does not say its model takes one", async () => {
+  const sd = await fakeSd({ capabilities: TAKES_END_IMAGE });
+  const jpeg = { bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), mimeType: "image/jpeg" };
+  try {
+    const body = async (request: Parameters<typeof gen.generateVideo>[1]) => {
+      await gen.generateVideo(config(sd.origin), request, FAST);
+      return sd.to("POST", "/sdcpp/v1/vid_gen").at(-1)!.body;
+    };
+    const png = `data:image/png;base64,${PNG.toString("base64")}`;
+    const jpg = `data:image/jpeg;base64,${jpeg.bytes.toString("base64")}`;
+    assert.deepEqual(await body({ prompt: "both", firstFrame: { bytes: PNG, mimeType: "image/png" }, lastFrame: jpeg }), { prompt: "both", init_image: png, end_image: jpg, output_format: "webm" });
+    assert.deepEqual(await body({ prompt: "last only", lastFrame: { bytes: PNG, mimeType: "image/png" } }), { prompt: "last only", end_image: png, output_format: "webm" });
+    // A server that takes one is not sent one nobody asked for.
+    assert.deepEqual(await body({ prompt: "first only", firstFrame: { bytes: PNG, mimeType: "image/png" } }), { prompt: "first only", init_image: png, output_format: "webm" });
+    assert.deepEqual(await body({ prompt: "none" }), { prompt: "none", output_format: "webm" });
+  } finally {
+    sd.server.close();
+  }
+
+  const refused: [string, unknown, RegExp][] = [
+    ["it lists end_image as false", { supported_modes: ["vid_gen"], features_by_mode: { vid_gen: { init_image: true, end_image: false } } }, /does not take a last frame/],
+    ["it lists features and not this one", { supported_modes: ["vid_gen"], features_by_mode: { vid_gen: { init_image: true } } }, /does not take a last frame/],
+    ["it lists one for pictures only", { supported_modes: ["vid_gen"], features_by_mode: { img_gen: { end_image: true } } }, /does not take a last frame/],
+    ["it says nothing of features", { supported_modes: ["vid_gen"] }, /does not take a last frame/],
+    ["it does not answer", undefined, /did not say whether it takes a last frame/],
+  ];
+  for (const [name, capabilities, why] of refused) {
+    const other = await fakeSd({ capabilities });
+    try {
+      await assert.rejects(
+        gen.generateVideo(config(other.origin), { prompt: "x", firstFrame: { bytes: PNG, mimeType: "image/png" }, lastFrame: { bytes: PNG, mimeType: "image/png" } }, FAST),
+        (e: Error) => why.test(e.message) && e instanceof gen.VideoGenerationError && !e.message.includes(KEY),
+        name,
+      );
+      assert.equal(other.to("POST", "/sdcpp/v1/vid_gen").length, 0, `${name}: nothing was sent, not even without the picture`);
+      // The same server makes the clip when no last frame is asked for.
+      await gen.generateVideo(config(other.origin), { prompt: "x", firstFrame: { bytes: PNG, mimeType: "image/png" } }, FAST);
+      assert.equal("end_image" in other.to("POST", "/sdcpp/v1/vid_gen")[0].body, false, name);
+    } finally {
+      other.server.close();
+    }
+  }
+});
+
+test("a strength is sent as strength when it is set, 0 included, and not when it is not", async () => {
+  const sd = await fakeSd();
+  try {
+    for (const strength of [0, 0.4, 1]) {
+      await gen.generateVideo(config(sd.origin), { prompt: "s", strength }, FAST);
+      assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen").at(-1)!.body.strength, strength);
+    }
+    await gen.generateVideo(config(sd.origin), { prompt: "none" }, FAST);
+    assert.equal("strength" in sd.to("POST", "/sdcpp/v1/vid_gen").at(-1)!.body, false);
   } finally {
     sd.server.close();
   }
@@ -372,8 +430,13 @@ test("the settings of a clip are checked, and what is empty is not sent", () => 
     { seed: -2 }, { seed: 1.5 }, { seed: Number.MAX_SAFE_INTEGER },
     { sampleSteps: 0 }, { sampleSteps: 101 },
     { negativePrompt: 5 }, { negativePrompt: "x".repeat(VIDEO_LIMITS.negativePrompt + 1) },
+    { strength: -0.1 }, { strength: 1.01 }, { strength: "0.5" }, { strength: Number.NaN }, { strength: Infinity },
     { model: "x".repeat(201) },
   ]) assert.equal(typeof parseVideoSettings(bad, 4), "string", JSON.stringify(bad));
+  assert.deepEqual(parseVideoSettings({ strength: 0 }), { strength: 0 }, "0 is a strength");
+  assert.deepEqual(parseVideoSettings({ strength: 1 }), { strength: 1 });
+  assert.deepEqual(parseVideoSettings({ strength: null }), {});
+  assert.deepEqual(parseVideoSettings({ strength: "" }), {});
   assert.equal(typeof parseVideoSize("832x480"), "string");
   assert.deepEqual(forClip({ seed: 5 }, 2), { seed: 7 }, "each clip takes the next seed");
   assert.deepEqual(forClip({ seed: -1 }, 2), { seed: -1 }, "a random seed stays random");

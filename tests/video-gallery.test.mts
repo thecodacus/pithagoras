@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import path from "node:path";
 import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
-import { KEY, MATROSKA, MP4, PNG, WEBM, completed, fakeSd } from "./video-fixtures.mts";
+import { KEY, MATROSKA, MP4, PNG, TAKES_END_IMAGE, WEBM, completed, fakeSd } from "./video-fixtures.mts";
 
 // The clips of the Media page: the gallery, its jobs, its API, the agent's tool and the posters.
 const temp = realpathSync(inProcessHome("pitha-vgallery-"));
@@ -314,6 +314,11 @@ test("a request that is wrong is refused with the reason, and makes nothing", as
     await refuse({ prompt: "x", firstFrame: "../etc/passwd" }, 400, /named by its id/);
     await refuse({ prompt: "x", firstFrame: 5 }, 400, /named by its id/);
     await refuse({ prompt: "x", firstFrame: "aaaaaaaaaaaa" }, 400, /The first frame: There is no such picture/);
+    await refuse({ prompt: "x", lastFrame: "../etc/passwd" }, 400, /The last frame is a picture, named by its id/);
+    await refuse({ prompt: "x", lastFrame: 5 }, 400, /The last frame is a picture, named by its id/);
+    await refuse({ prompt: "x", lastFrame: "aaaaaaaaaaaa" }, 400, /The last frame: There is no such picture/);
+    await refuse({ prompt: "x", strength: 1.5 }, 400, /strength is a number from 0 to 1/);
+    await refuse({ prompt: "x", strength: "high" }, 400, /strength is a number from 0 to 1/);
     assert.equal(sd.seen.length, 0, "nothing was asked of the endpoint");
     assert.deepEqual((await call("GET", "/videos/jobs")).body.jobs, []);
 
@@ -400,6 +405,61 @@ test("a clip can start from a picture of the gallery, which goes to the server a
     assert.deepEqual((await listed(`?ids=${video.id}`)).videos.map((v: any) => v.params.firstFrame), [{ picture: picture.id }]);
   } finally {
     sd.server.close();
+    await clearJobs();
+  }
+});
+
+test("a clip can end on a picture of the gallery, with a strength, and a server that does not take a last frame fails the job in words", async () => {
+  const sd = await fakeSd({ capabilities: TAKES_END_IMAGE });
+  const bare = await fakeSd();
+  await clearJobs();
+  try {
+    setup(sd.origin);
+    const first = images.addPagePicture({ bytes: PNG, ext: "png", kind: "uploaded", prompt: "start.png", params: {} });
+    const last = images.addPagePicture({ bytes: Buffer.concat([PNG, Buffer.from("end")]), ext: "png", kind: "uploaded", prompt: "end.png", params: {} });
+    const data = (bytes: Buffer) => `data:image/png;base64,${bytes.toString("base64")}`;
+
+    const both = await call("POST", "/videos/generate", { prompt: "from one to the other", firstFrame: first.id, lastFrame: last.id, strength: 0.4 });
+    assert.equal(both.status, 202);
+    assert.deepEqual([both.body.jobs[0].kind, both.body.jobs[0].from], ["animate", first.id]);
+    await settled();
+    const [sent] = sd.to("POST", "/sdcpp/v1/vid_gen");
+    assert.equal(sent.body.init_image, data(PNG));
+    assert.equal(sent.body.end_image, data(Buffer.concat([PNG, Buffer.from("end")])));
+    assert.equal(sent.body.strength, 0.4);
+    const [video] = (await listed("?kind=animated")).videos;
+    assert.equal(video.kind, "animated");
+    assert.deepEqual([video.params.firstFrame, video.params.lastFrame, video.params.strength], [{ picture: first.id }, { picture: last.id }, 0.4]);
+    // The pictures can be gone: the clip does not depend on them.
+    await images.deletePicture(last.id);
+    assert.deepEqual((await listed(`?ids=${video.id}`)).videos.map((v: any) => v.params.lastFrame), [{ picture: last.id }]);
+
+    // A last frame alone makes an animated clip too, and a request with no last frame sends none to a server that takes one.
+    const end = images.addPagePicture({ bytes: PNG, ext: "png", kind: "uploaded", prompt: "end.png", params: {} });
+    await clearJobs();
+    const alone = await call("POST", "/videos/generate", { prompt: "it ends here", lastFrame: end.id });
+    assert.equal(alone.status, 202);
+    assert.equal(alone.body.jobs[0].kind, "animate");
+    await settled();
+    const aloneBody = sd.to("POST", "/sdcpp/v1/vid_gen")[1].body;
+    assert.deepEqual([aloneBody.end_image, "init_image" in aloneBody], [data(PNG), false]);
+    await clearJobs();
+    await call("POST", "/videos/generate", { prompt: "no frames", strength: 0 });
+    await settled();
+    const plain = sd.to("POST", "/sdcpp/v1/vid_gen")[2].body;
+    assert.deepEqual([plain.strength, "end_image" in plain, "init_image" in plain], [0, false, false]);
+
+    // A server that does not say its model takes one: the job fails and says so, and nothing is made or sent.
+    setup(bare.origin);
+    await clearJobs();
+    assert.equal((await call("POST", "/videos/generate", { prompt: "x", lastFrame: end.id })).status, 202);
+    const [failed] = await settled();
+    assert.equal(failed.state, "failed");
+    assert.match(failed.error, /did not say whether it takes a last frame/);
+    assert.equal(bare.to("POST", "/sdcpp/v1/vid_gen").length, 0);
+  } finally {
+    sd.server.close();
+    bare.server.close();
     await clearJobs();
   }
 });
@@ -560,7 +620,7 @@ test("the tool makes a clip in the chat's folder, answers as show_image does, an
   try {
     setup(sd.origin, { model: "video-model", size: "640x384" });
     const { run, registered } = load(folder, "tool-chat");
-    assert.deepEqual(Object.keys(registered[0].parameters.properties).sort(), ["path", "prompt", "seconds", "size", "title"]);
+    assert.deepEqual(Object.keys(registered[0].parameters.properties).sort(), ["lastFrame", "path", "prompt", "seconds", "size", "title"]);
     assert.ok(!JSON.stringify(registered[0]).includes(KEY));
 
     const result = await run({ prompt: "  a fox in the snow  ", title: "Fox", size: "832x480", seconds: 2 });
@@ -623,6 +683,48 @@ test("the tool starts from a picture of the chat's folder, and only from one", a
     assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen").length, before, "nothing was sent for any of them");
   } finally {
     sd.server.close();
+  }
+});
+
+test("the tool ends on a picture of the chat's folder, and only on one, and only where the server's model takes one", async () => {
+  const folder = chat("tool-last");
+  const sd = await fakeSd({ capabilities: TAKES_END_IMAGE });
+  const bare = await fakeSd();
+  try {
+    setup(sd.origin);
+    writeFileSync(path.join(folder, "start.png"), PNG);
+    writeFileSync(path.join(folder, "end.png"), PNG);
+    writeFileSync(path.join(folder, "notes.txt"), "not a picture");
+    const outside = path.join(temp, "outside-last.png");
+    writeFileSync(outside, PNG);
+    const { run } = load(folder, "tool-last");
+
+    await run({ prompt: "it ends", path: "start.png", lastFrame: "./end.png" });
+    const png = `data:image/png;base64,${PNG.toString("base64")}`;
+    assert.deepEqual([sd.to("POST", "/sdcpp/v1/vid_gen")[0].body.init_image, sd.to("POST", "/sdcpp/v1/vid_gen")[0].body.end_image], [png, png]);
+    const [video] = (await listed("?limit=100")).videos.filter((v: any) => v.chat?.id === "tool-last");
+    assert.deepEqual([video.kind, video.params.firstFrame, video.params.lastFrame], ["animated", { path: "start.png" }, { path: "end.png" }]);
+    // The last frame alone.
+    await run({ prompt: "it ends alone", lastFrame: path.join(folder, "end.png") });
+    const alone = sd.to("POST", "/sdcpp/v1/vid_gen")[1].body;
+    assert.deepEqual([alone.end_image, "init_image" in alone], [png, false]);
+
+    const before = sd.to("POST", "/sdcpp/v1/vid_gen").length;
+    await assert.rejects(run({ prompt: "x", lastFrame: outside }), /Only a picture in the chat's folder can be used as the last frame/);
+    await assert.rejects(run({ prompt: "x", lastFrame: "../outside-last.png" }), /Only a picture in the chat's folder can be used as the last frame/);
+    await assert.rejects(run({ prompt: "x", lastFrame: "notes.txt" }), /not a PNG, JPEG, GIF or WebP picture/);
+    await assert.rejects(run({ prompt: "x", lastFrame: "missing.png" }), /no such file/i);
+    assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen").length, before, "nothing was sent for any of them");
+
+    // A server whose model does not take one: the call fails with the reason, and leaves no clip.
+    setup(bare.origin);
+    const clips = readdirSync(path.join(folder, GENERATED_VIDEOS_DIR)).length;
+    await assert.rejects(run({ prompt: "x", lastFrame: "end.png" }), /did not say whether it takes a last frame/);
+    assert.equal(bare.to("POST", "/sdcpp/v1/vid_gen").length, 0);
+    assert.equal(readdirSync(path.join(folder, GENERATED_VIDEOS_DIR)).length, clips);
+  } finally {
+    sd.server.close();
+    bare.server.close();
   }
 });
 
