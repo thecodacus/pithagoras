@@ -386,9 +386,13 @@ test("the 3D toolbar's look, colour and filter are the portal's own controls", a
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   await expect(look).toHaveText('Brain');
-  // The colour: drawn like the dropdown beside it.
-  const colour = page.getByLabel("Colour of the brain's outline");
-  await expect(page.locator('label.ui-select').filter({ has: colour })).toBeVisible();
+  // The colour: a button like the dropdown beside it, with a popover of the portal's own.
+  const colour = page.getByRole('button', { name: "Colour of the brain's outline" });
+  await expect(colour).toHaveClass(/ui-select/);
+  await colour.click();
+  await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" })).toHaveCount(0);
   // The filter: a button like the others, with a popover that shuts on Escape and on a press outside it.
   const filter = page.getByRole('button', { name: 'Which notes are shown' });
   await expect(filter).toHaveClass(/ui-select/);
@@ -624,21 +628,58 @@ test("the brain's outline is drawn in the colour chosen for it, and the colour i
   await portal(page);
   await page.goto('/memory?view=graph');
   await page.getByRole('button', { name: '3D' }).click();
-  await expect(page.getByLabel("Colour of the brain's outline")).toHaveCount(0);
+  await expect(page.getByRole('button', { name: "Colour of the brain's outline" })).toHaveCount(0);
   await chooseLook(page, 'brain');
-  const colour = page.getByLabel("Colour of the brain's outline");
-  await expect(colour).toHaveValue('#ff5fc8');
+  await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
+  const picker = page.getByRole('dialog', { name: "Colour of the brain's outline" });
+  await expect(picker.getByLabel('Hex code')).toHaveValue('#ff5fc8');
+  await expect(picker.getByRole('button', { name: '#ff5fc8' })).toHaveAttribute('aria-pressed', 'true');
   await frames(page);
   expect(await greenPixels(page)).toBe(0);
-  await colour.fill('#00ff00');
+  await picker.getByLabel('Hex code').fill('#00ff00');
   await frames(page);
   expect(await greenPixels(page)).toBeGreaterThan(200);
+  // A code that is not one yet changes nothing.
+  await picker.getByLabel('Hex code').fill('#00ff');
+  await expect(picker.getByLabel('Hex code')).toHaveAttribute('aria-invalid', 'true');
+  await frames(page);
+  expect(await greenPixels(page)).toBeGreaterThan(200);
+  // A swatch is one click.
+  await picker.getByRole('button', { name: '#22d3ee' }).click();
+  await expect(picker.getByLabel('Hex code')).toHaveValue('#22d3ee');
+  await picker.getByLabel('Hex code').fill('#00ff00');
   await page.reload();
-  await expect(page.getByLabel("Colour of the brain's outline")).toHaveValue('#00ff00');
+  await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
+  await expect(page.getByRole('dialog', { name: "Colour of the brain's outline" }).getByLabel('Hex code')).toHaveValue('#00ff00');
+  await page.keyboard.press('Escape');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   await frames(page);
   expect(await greenPixels(page)).toBeGreaterThan(200);
 });
+
+for (const [width, height] of [[1280, 800], [390, 800]]) {
+  test(`the brain's colour popover stays inside the window, ${width} wide`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await portal(page);
+    await page.goto('/memory?view=graph');
+    await page.getByRole('button', { name: '3D' }).click();
+    await chooseLook(page, 'brain');
+    await page.getByRole('button', { name: "Colour of the brain's outline" }).click();
+    const picker = page.getByRole('dialog', { name: "Colour of the brain's outline" });
+    await expect(picker).toBeVisible();
+    const box = (await picker.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(box.y + box.height).toBeLessThanOrEqual(height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    // Every swatch in it can be reached.
+    for (const swatch of await picker.getByRole('button').all()) {
+      const b = (await swatch.boundingBox())!;
+      expect(b.x >= 0 && b.x + b.width <= width).toBe(true);
+    }
+  });
+}
 
 test('in 3D a drag turns the view, the wheel zooms, and Show all of it sets it back', async ({ page }) => {
   // Without the drift, the same view is the same picture.

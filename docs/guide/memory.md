@@ -57,8 +57,8 @@ Both show the same notes, filters and search.
     by curving axons, inside the faint outline of a brain. It sways from side
     to side and turns heavily under a drag, without coasting. Neurons fire now
     and then; the chosen one keeps firing into the notes it links with. The
-    colour button next to the look sets the outline's colour (a neon pink to
-    begin with). *Secret:* press and hold on an empty spot, and a thought
+    colour button next to the look sets the outline's colour: a swatch, or
+    any hex code (a neon pink to begin with). *Secret:* press and hold on an empty spot, and a thought
     spreads from the nearest neuron through the links.
   - **Fireflies**: each note is a firefly over a meadow at dusk, wandering near
     where its links put it and blinking to its own rhythm. A drag turns the view

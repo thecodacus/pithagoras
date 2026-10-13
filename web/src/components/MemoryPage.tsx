@@ -43,6 +43,7 @@ import { reducedMotion } from "../motion";
 import { local } from "../safe-storage";
 import { MemorySky, NoteCard } from "./MemorySky";
 import { Select } from "./Select";
+import { ColourPicker } from "./ColourPicker";
 import { useDismiss } from "../use-dismiss";
 import { applyChunk, eventReader, history, textOf, toolName, usedTools, type ChatMessage, type ToolPart, type Turn } from "../memory-chat";
 import { NOTE_LINK, linkNotes } from "../memory-links";
@@ -1487,12 +1488,7 @@ function GraphView({
           />
         )}
         {mode === "3d" && theme === "brain" && (
-          // The browser's colour picker behind a control that looks like the select beside it.
-          <label title={t("Colour of the brain's outline")} className="ui-select ui-select-sm relative cursor-pointer">
-            <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: outline, boxShadow: `0 0 8px ${outline}` }} />
-            <LuChevronDown className="ui-select-chevron" aria-hidden />
-            <input type="color" value={outline} onChange={(e) => setOutline(e.target.value)} aria-label={t("Colour of the brain's outline")} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
-          </label>
+          <ColourPicker value={outline} onChange={setOutline} label={t("Colour of the brain's outline")} />
         )}
         <div role="group" aria-label={t("How the graph is drawn")} className="flex shrink-0 overflow-hidden rounded-md border border-line text-xs">
           {(["2d", "3d"] as const).map((m) => (

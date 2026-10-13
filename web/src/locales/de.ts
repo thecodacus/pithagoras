@@ -1267,6 +1267,8 @@ const de: Locale = {
     "{n} notes match “{query}”": { one: "{n} Notiz passt zu „{query}“", other: "{n} Notizen passen zu „{query}“" },
     "{n} hidden": { one: "{n} ausgeblendet", other: "{n} ausgeblendet" },
     "Click to open": "Klicken zum Öffnen",
+    // components/ColourPicker.tsx
+    "Hex code": "Hex-Code",
     // components/MemorySky.tsx
     "Matches the search": "Passt zur Suche",
     // components/Modal.tsx
