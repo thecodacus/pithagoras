@@ -1279,7 +1279,7 @@ async function withFfmpeg(script: string, body: () => Promise<void>) {
 /** What ffmpeg was run with, a line for each run. */
 const runsOf = (tool: { log: string }) => (existsSync(tool.log) ? readFileSync(tool.log, "utf8").trim().split("\n") : []);
 
-test("a copy is made within limits: the picture is scaled down, the output and the memory are capped, and ffmpeg is told so", async () => {
+test("a copy is made within limits: a large picture is scaled down, never up, the output and the memory are capped, and ffmpeg is told so", async () => {
   const tool = convertingFfmpeg(path.join(temp, "bounded-ffmpeg"), { size: "4096x4096" });
   await withFfmpeg(tool.script, async () => {
     const avi = aviClip("bounded");
@@ -1291,7 +1291,7 @@ test("a copy is made within limits: the picture is scaled down, the output and t
     assert.doesNotMatch(look, / -f webm /, "the look converts nothing");
     assert.match(conversion, / -f webm -y /);
     // Scaled down to fit, as 4:2:0 that every browser plays; the encoder looks few frames ahead, with few threads; the file stops at a byte over the size of a clip.
-    assert.match(conversion, /-vf scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p /);
+    assert.match(conversion, /-vf scale=w='min\(1280,iw\)':h='min\(1280,ih\)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p /);
     assert.match(conversion, / -threads 2 -lag-in-frames 5 -fs 104857601 /);
     // No block of memory beyond what one frame needs, in the look as in the conversion.
     for (const line of [look, conversion]) assert.match(line, /-max_alloc 536870912 /);
@@ -1402,7 +1402,7 @@ function realAvi(file: string, size: string): Buffer {
 const HAVE_VP9 = HAVE_FFMPEG && spawnSync("ffmpeg", ["-hide_banner", "-encoders"], { encoding: "utf8" }).stdout.includes("libvpx-vp9");
 const sizeOf = (file: string) => /Video: .*?, (\d+x\d+)[ ,]/.exec(spawnSync("ffmpeg", ["-hide_banner", "-i", file], { encoding: "utf8" }).stderr)?.[1];
 
-test("the ffmpeg that is installed refuses a clip of a huge picture and scales a large one down", { skip: HAVE_VP9 ? false : "ffmpeg with libvpx-vp9 is not installed here" }, async () => {
+test("the ffmpeg that is installed refuses a clip of a huge picture, scales a large one down and keeps a small one's size", { skip: HAVE_VP9 ? false : "ffmpeg with libvpx-vp9 is not installed here" }, async () => {
   posters.forgetPosterProbe();
   try {
     const dir = path.join(temp, "real-avi");
@@ -1422,6 +1422,14 @@ test("the ffmpeg that is installed refuses a clip of a huge picture and scales a
     const sent = await call("GET", `/videos/${wide.id}/copy`);
     assert.equal(sent.status, 200);
     assert.equal(sent.headers.get("content-type"), "video/webm");
+    // A smaller picture is not enlarged to fill the box: it keeps its size, an odd side rounded down to an even one.
+    for (const [size, kept] of [["320x240", "320x240"], ["481x321", "480x320"]]) {
+      const small = aviClip(`small ${size}`, realAvi(path.join(dir, `small-${size}.avi`), size));
+      assert.equal((await call("POST", `/videos/${small.id}/copy`)).status, 200, size);
+      const smallCopy = copyFiles().find((f) => f.startsWith(small.id));
+      assert.ok(smallCopy, `${size}: a copy was made`);
+      assert.equal(sizeOf(path.join(temp, "video-copies", smallCopy)), kept, size);
+    }
   } finally {
     rmSync(path.join(temp, "video-copies"), { recursive: true, force: true });
     posters.forgetPosterProbe();

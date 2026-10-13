@@ -18,7 +18,7 @@ import { baseDir } from "./workspace-files.js";
  *
  * What a clip declares of itself is not to be trusted: a few megabytes can declare frames of many gigabytes. So the
  * conversion is bounded whatever the clip says: ffmpeg is first asked how large its picture is, and a clip over
- * MAX_SIDE is refused before anything is converted; the copy is scaled down to fit COPY_SIDE; ffmpeg runs with one
+ * MAX_SIDE is refused before anything is converted; the copy is scaled down to fit COPY_SIDE (a smaller picture keeps its size); ffmpeg runs with one
  * thread to decode, two to encode and a short look-ahead, under a cap on its memory (where the platform has one) and on the
  * size of any one block it allocates; it stops at the size a clip may have, and at the time COPY_MS.
  */
@@ -29,7 +29,7 @@ const PROBE_MS = 20_000;
 const COPY_MS = 3 * 60_000;
 /** The largest picture, on either side, that a copy is made of. */
 const MAX_SIDE = 4096;
-/** A copy is scaled down to fit this on either side, which is what bounds what the encoder holds for each frame. */
+/** A copy is scaled down to fit this on either side (never up), which is what bounds what the encoder holds for each frame. */
 const COPY_SIDE = 1280;
 /** The address space ffmpeg may take, in kilobytes: a clip that asks for more fails in ffmpeg, not in the machine. */
 const MEMORY_KB = 4 * 1024 * 1024;
@@ -129,7 +129,8 @@ async function convert(fd: number, size: number, to: string): Promise<void> {
     throw new Error(why?.trim() || (looked.signal ? `ffmpeg ended with ${looked.signal}` : "ffmpeg found no picture in it"));
   }
   if (picture.width > MAX_SIDE || picture.height > MAX_SIDE) throw new Error(`the picture is ${picture.width} by ${picture.height}, and a copy is made of one up to ${MAX_SIDE} by ${MAX_SIDE}`);
-  const fit = `scale=w=${COPY_SIDE}:h=${COPY_SIDE}:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p`;
+  // A box of COPY_SIDE that is no larger than the picture, so that a small picture keeps its size: `decrease` alone would fill the box.
+  const fit = `scale=w='min(${COPY_SIDE},iw)':h='min(${COPY_SIDE},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p`;
   // Video only, in VP9, at a quality that is a copy to look at, not an archive. The output stops at one byte over the size a clip may have, which is then refused.
   const done = await run(["-v", "error", ...FROM_PIPE, "-an", "-vf", fit, "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "34", "-row-mt", "1", "-threads", "2", "-lag-in-frames", "5", "-fs", String(MAX_VIDEO_BYTES + 1), "-f", "webm", "-y", to], fd, size, COPY_MS, 2000);
   if (done.code !== 0) throw new Error(done.said.trim().split("\n").pop() || `ffmpeg ended with ${done.code ?? done.signal}`);

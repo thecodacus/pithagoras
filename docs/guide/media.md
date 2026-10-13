@@ -409,8 +409,8 @@ it, and the file is named for that (`.webm`, `.avi`, `.bin` for an unknown one).
 - **What a copy is bounded by.** A few megabytes of video can declare pictures of many gigabytes, so ffmpeg is first asked how
   large the picture is, and a clip over **4096 by 4096 pixels** (or one whose picture ffmpeg cannot name) is refused before
   anything is converted; the original is still there to download. The copy is scaled down to fit **1280 by 1280** pixels
-  and made in 4:2:0, which every browser plays. A conversion decodes with one thread and encodes with two, looks only five
-  frames ahead, may take at most **3 minutes** (a look at the picture, 20 seconds), stops at the **100 MB** a clip may have, and
+  (a smaller picture keeps its size, it is never enlarged) and made in 4:2:0, which every browser plays. A conversion
+  decodes with one thread and encodes with two, looks only five frames ahead, may take at most **3 minutes** (a look at the picture, 20 seconds), stops at the **100 MB** a clip may have, and
   is run with at most **4 GB** of address space and no single block of memory over **512 MB**. The cap on the address
   space is set where the portal runs on Linux or macOS; on Windows only the cap on one block of memory applies.
 - **The agent's clips.** `generate_video` keeps such a clip in the chat's folder too, and tells the agent that a browser
