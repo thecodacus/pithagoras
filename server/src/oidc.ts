@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, type JWTPayload, type RemoteJWKSet } from "jose";
+import { createRemoteJWKSet, type RemoteJWKSet } from "jose";
 
 /**
  * Signing in through an OpenID Connect provider: what single sign-on under Settings → Authentication
@@ -27,10 +27,6 @@ export interface OidcConfig {
   only: boolean;
   /** Signing out also sends the browser to the provider's end_session_endpoint. */
   endSession: boolean;
-  allowedEmails: Set<string>;
-  allowedGroups: Set<string>;
-  groupsClaim: string;
-  allowedSubjects: Set<string>;
 }
 
 /** The settings as they are kept, and as the Settings page sends them: plain values, the lists as lists. */
@@ -42,10 +38,6 @@ export interface SsoSettings {
   scopes: string;
   name: string;
   endSession: boolean;
-  allowedEmails: string[];
-  allowedGroups: string[];
-  groupsClaim: string;
-  allowedSubjects: string[];
 }
 
 export class OidcConfigError extends Error {}
@@ -67,22 +59,12 @@ function providerUrl(value: unknown, what: string, loopbackHttp: boolean): URL {
 }
 
 const MAX_TEXT = 2048;
-const MAX_ENTRIES = 1000;
 
 /** A text setting: trimmed, and an empty one is `fallback`. */
 function text(value: unknown, what: string, fallback = ""): string {
   if (value === undefined || value === null) return fallback;
   if (typeof value !== "string" || value.length > MAX_TEXT) throw new OidcConfigError(`${what} must be a text of at most ${MAX_TEXT} characters`);
   return value.trim() || fallback;
-}
-
-/** A list setting: each entry trimmed, empty ones left out. */
-function entries(value: unknown, what: string): string[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.length > MAX_ENTRIES || !value.every((v) => typeof v === "string" && v.length <= MAX_TEXT)) {
-    throw new OidcConfigError(`${what} must be a list of at most ${MAX_ENTRIES} entries`);
-  }
-  return [...new Set(value.map((v: string) => v.trim()).filter(Boolean))];
 }
 
 /** Reads settings as sent or as kept, into what the sign-in works with. Throws on a setting that cannot be right. */
@@ -126,10 +108,6 @@ export function parseOidcConfig(input: unknown, only: boolean): OidcConfig {
     name,
     only,
     endSession: raw.endSession === true,
-    allowedEmails: new Set(entries(raw.allowedEmails, "The allowed emails").map((e) => e.toLowerCase())),
-    allowedGroups: new Set(entries(raw.allowedGroups, "The allowed groups")),
-    groupsClaim: text(raw.groupsClaim, "The groups claim", "groups"),
-    allowedSubjects: new Set(entries(raw.allowedSubjects, "The allowed subjects")),
   };
 }
 
@@ -142,10 +120,6 @@ export const keptForm = (config: OidcConfig): SsoSettings => ({
   scopes: config.scopes,
   name: config.name,
   endSession: config.endSession,
-  allowedEmails: [...config.allowedEmails],
-  allowedGroups: [...config.allowedGroups],
-  groupsClaim: config.groupsClaim,
-  allowedSubjects: [...config.allowedSubjects],
 });
 
 /** What the Settings page is shown: everything but the secret, of which it learns only that there is one. */
@@ -154,21 +128,12 @@ export function shownForm(config: OidcConfig): Omit<SsoSettings, "clientSecret">
   return { ...rest, hasSecret: Boolean(clientSecret) };
 }
 
-/** Whether the allow-list lets anybody in: an empty one refuses everyone. */
-export const allowsAnyone = (config: OidcConfig) =>
-  config.allowedEmails.size + config.allowedGroups.size + config.allowedSubjects.size > 0;
-
 /**
  * What the cookies are signed with depends on this too, so that changing the
- * provider or who may sign in ends every login made before: somebody taken off
- * the list is not let in for another thirty days on the cookie they hold. So does
- * switching the password login off or on.
+ * provider ends every login made before. So does switching the password login
+ * off or on.
  */
-export const fingerprint = (config: OidcConfig) =>
-  JSON.stringify([
-    config.issuer, config.clientId, config.groupsClaim, config.only,
-    [...config.allowedEmails].sort(), [...config.allowedGroups].sort(), [...config.allowedSubjects].sort(),
-  ]);
+export const fingerprint = (config: OidcConfig) => JSON.stringify([config.issuer, config.clientId, config.only]);
 
 /** Signature algorithms an ID token may be signed with: the provider's keys only, never a shared secret or none. */
 const ASYMMETRIC = ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"];
@@ -177,7 +142,6 @@ export interface OidcProvider {
   config: OidcConfig;
   authorizationEndpoint: URL;
   tokenEndpoint: URL;
-  userinfoEndpoint?: URL;
   endSessionEndpoint?: URL;
   jwks: RemoteJWKSet;
   algorithms: string[];
@@ -221,7 +185,6 @@ export async function discover(config: OidcConfig, fetchImpl: typeof fetch = fet
   const authorizationEndpoint = endpoint("authorization_endpoint", true)!;
   const tokenEndpoint = endpoint("token_endpoint", true)!;
   const jwksUri = endpoint("jwks_uri", true)!;
-  const userinfoEndpoint = endpoint("userinfo_endpoint", false);
   const endSessionEndpoint = endpoint("end_session_endpoint", false);
 
   const responseTypes = strings(meta.response_types_supported);
@@ -256,7 +219,7 @@ export async function discover(config: OidcConfig, fetchImpl: typeof fetch = fet
   }
 
   return {
-    config, authorizationEndpoint, tokenEndpoint, userinfoEndpoint, endSessionEndpoint, jwks, algorithms, tokenAuth,
+    config, authorizationEndpoint, tokenEndpoint, endSessionEndpoint, jwks, algorithms, tokenAuth,
     issParameter: meta.authorization_response_iss_parameter_supported === true,
   };
 }
@@ -281,28 +244,4 @@ export function safeReturnTo(value: unknown): string {
   const lower = url.pathname.toLowerCase();
   if (url.origin !== base || url.pathname.startsWith("//") || lower === "/api" || lower.startsWith("/api/")) return "/";
   return url.pathname + url.search;
-}
-
-/** The claims the allow-list is read from. */
-export interface Identity {
-  sub: string;
-  email?: unknown;
-  email_verified?: unknown;
-  groups?: unknown;
-}
-
-/** What let this identity in, or null for nobody on the list. An email counts only once the provider has verified it. */
-export function admitted(identity: Identity, config: OidcConfig): string | null {
-  if (config.allowedSubjects.has(identity.sub)) return "subject";
-  if (typeof identity.email === "string" && identity.email_verified === true && config.allowedEmails.has(identity.email.toLowerCase())) return "email";
-  const groups = typeof identity.groups === "string" ? [identity.groups] : strings(identity.groups) ?? [];
-  if (groups.some((group) => config.allowedGroups.has(group))) return "group";
-  return null;
-}
-
-/** Whether the allow-list needs a claim this token does not carry, so that the userinfo endpoint is asked. */
-export function needsUserinfo(claims: JWTPayload, config: OidcConfig): boolean {
-  if (config.allowedSubjects.has(String(claims.sub))) return false;
-  return (config.allowedEmails.size > 0 && (claims.email === undefined || claims.email_verified === undefined)) ||
-    (config.allowedGroups.size > 0 && claims[config.groupsClaim] === undefined);
 }

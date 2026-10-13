@@ -124,7 +124,7 @@ and kept in the portal's database like the password; there are no variables to
 set. The login page then has a **Sign in with …** button. What the provider lets in
 gets the same login cookie the password gives, so the API, the event streams and the
 agent's browser work as they do with the password. It is still one login for one
-person: everyone the allow-list names signs in as the same user.
+person: everyone the provider signs in is the same user.
 
 Single sign-on needs the portal's password: it is set up after the password is
 chosen, saving its settings asks for the password, and the login cookie is signed
@@ -145,19 +145,19 @@ At the provider, make an OpenID Connect client for the authorization code flow:
 Then fill in the settings page: the **issuer URL** exactly as the provider names
 itself in `/.well-known/openid-configuration` (a trailing `/` counts; `https` only,
 plain `http` only for a provider on the same machine), the **client ID** and
-**secret**, the **redirect URL**, and who may sign in. The scopes default to
+**secret** and the **redirect URL**. The scopes default to
 `openid email profile`, the button to "SSO". The client secret is never shown again
 once saved; leaving the field empty keeps it. That holds for the same issuer and
 client only: with another one the kept secret is not sent, and saving asks you to
 type the secret again, or to remove it for a public client.
 
-**Who may sign in** is an allow-list, never everyone the provider knows: their
-email (only when the provider says it is verified, `email_verified`), one of their
-groups (from the `groups` claim, or the one you name), or their subject ID (`sub`).
-With all three empty, nobody gets in, and the portal says so in its log at start
-and on the settings page. When the ID token leaves out a claim a list
-needs, the portal asks the provider's userinfo endpoint, unless the token lets the
-account in already.
+**Who may sign in is decided at the provider**, not in the portal: the portal has
+no list of emails, groups or accounts. Every account the provider signs in, with an
+ID token that checks out (its signature, issuer, audience, nonce and expiry), gets
+in. Limit the client to your people at the provider (in Authentik with group or
+user bindings on the application, in Entra ID with *Assignment required*), and do
+not point the portal at a provider that signs in anybody, such as one with open
+registration.
 
 When the settings are saved, the portal reads the provider's discovery document and
 keys, and refuses settings it does not answer to, with the reason: a provider that
@@ -173,7 +173,7 @@ to that address, and you are signed in there, so open the portal at that address
 A login lasts 30 days, as with the password. When the provider's own session or
 token runs out, the portal's login does not end, and blocking an account at the
 provider does not end a login the account already has. Changing the issuer, the
-client ID, the allow-list or **OIDC only** ends every login, the provider's and the
+client ID or **OIDC only** ends every login, the provider's and the
 password's (the browser that saved it is signed in again), as changing the password does.
 
 ### OIDC only
@@ -182,7 +182,7 @@ password's (the browser that saved it is signed in again), as changing the passw
 login: the provider is the only way in. The password stays set, and saving the
 single sign-on settings still asks for it. Turning it on ends every login, so a
 password login somebody else holds stops working too. Sign in through the provider
-once before you turn it on; the page asks for at least one entry in the allow-list.
+once before you turn it on.
 
 If the provider stops letting you in, a server command switches the password login
 back on, after asking you to type `on`:
@@ -204,22 +204,17 @@ with `reset-password` (above), which leaves OIDC only as it is; run both.
 Under **Applications**, create an application with an **OAuth2/OpenID Provider**,
 client type *Confidential*, and the redirect URI above (mode *strict*). The issuer
 is shown on the provider's page, with a `/` at the end, such as
-`https://authentik.example.com/application/o/pithagoras/`. The `profile` scope
-carries the names of the user's groups in `groups`, so a group of yours under
-**Groups** is the shortest allow-list.
+`https://authentik.example.com/application/o/pithagoras/`. To limit who signs in,
+bind the application to a group or to users (its **Policy / Group / User
+Bindings** tab).
 
 ### Keycloak
 
 In the realm, create a client: *OpenID Connect*, **Client authentication** on,
 **Standard flow** on, the redirect URI above under **Valid redirect URIs**, and the
 portal's address under **Valid post logout redirect URIs**. Copy the secret from
-**Credentials**. The issuer is `https://keycloak.example.com/realms/<realm>`. An
-email counts only when **Email verified** is on for the user. For groups, add a
-**Group Membership** mapper named `groups` to the client's dedicated scope, with
-**Full group path** off.
-
-Entra ID does not send `email_verified`, so an email list lets nobody in there. Use
-subjects or groups (Entra gives the groups' object IDs).
+**Credentials**. The issuer is `https://keycloak.example.com/realms/<realm>`. Every
+user of the realm can sign in, so use a realm that holds your people only.
 
 ## HTTPS
 

@@ -156,8 +156,8 @@ export const shortPassword = (): boolean => authMode() === "password" && Boolean
 
 /**
  * What a login is signed under: the password's hash, so a new password refuses every old cookie, and with single
- * sign-on its provider and allow-list, so that a change to who may sign in does the same. Undefined while no
- * password is set. Without single sign-on it is the hash alone, as it was before there was any.
+ * sign-on its provider, so that a change to it does the same. Undefined while no password is set. Without single
+ * sign-on it is the hash alone, as it was before there was any.
  */
 const loginIdentity = (): string | undefined => {
   const hash = storedHash();

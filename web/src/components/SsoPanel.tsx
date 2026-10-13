@@ -2,12 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type SsoInput, type SsoState } from "../api";
 import { t } from "../i18n";
 import { confirmDialog } from "./ConfirmDialog";
-import { CollapsibleSection, Field, LoadFailed, Section, SwitchRow, btnCls, codeAreaCls, inputCls, primaryCls } from "./SettingsUi";
-
-/** A list as the page shows it: one entry a line. */
-const lines = (list: string[]) => list.join("\n");
-/** And back: emails and subjects may also be given with commas between them, a group's name may hold one. */
-const entries = (text: string, commas: boolean) => text.split(commas ? /[\n,]/ : /\n/).map((s) => s.trim()).filter(Boolean);
+import { CollapsibleSection, Field, LoadFailed, Section, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
 
 interface Form {
   issuer: string;
@@ -17,10 +12,6 @@ interface Form {
   scopes: string;
   name: string;
   endSession: boolean;
-  allowedEmails: string;
-  allowedGroups: string;
-  groupsClaim: string;
-  allowedSubjects: string;
   only: boolean;
 }
 
@@ -35,10 +26,6 @@ function formOf(state: SsoState): Form {
     scopes: s?.scopes ?? "",
     name: s?.name ?? "",
     endSession: s?.endSession ?? false,
-    allowedEmails: lines(s?.allowedEmails ?? []),
-    allowedGroups: lines(s?.allowedGroups ?? []),
-    groupsClaim: s?.groupsClaim ?? "",
-    allowedSubjects: lines(s?.allowedSubjects ?? []),
     only: state.only,
   };
 }
@@ -79,7 +66,7 @@ export function SsoPanel() {
   const set = <K extends keyof Form>(key: K) => (value: Form[K]) => setForm({ ...form, [key]: value });
   const text = (key: Exclude<keyof Form, "endSession" | "only">) => ({
     value: form[key],
-    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => set(key)(e.target.value),
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => set(key)(e.target.value),
   });
 
   const done = (next: SsoState, words: string) => {
@@ -104,10 +91,6 @@ export function SsoPanel() {
       scopes: form.scopes,
       name: form.name,
       endSession: form.endSession,
-      allowedEmails: entries(form.allowedEmails, true),
-      allowedGroups: entries(form.allowedGroups, false),
-      groupsClaim: form.groupsClaim,
-      allowedSubjects: entries(form.allowedSubjects, true),
     };
     try {
       const r = await api.saveSso(current, settings, form.only);
@@ -141,12 +124,9 @@ export function SsoPanel() {
     }
   };
 
-  const area = `${codeAreaCls} min-h-[4.5rem]`;
   const kept = state.settings;
   // The kept secret is only ever used for the provider and client it was given for: for another, it is typed again.
   const otherClient = Boolean(kept?.hasSecret) && (form.issuer.trim() !== kept?.issuer || form.clientId.trim() !== kept?.clientId);
-  // Saved settings that name nobody: the button is on the login page, and lets nobody in.
-  const nobody = Boolean(kept) && !kept?.allowedEmails.length && !kept?.allowedGroups.length && !kept?.allowedSubjects.length;
   // What it is, said while the section is closed: off, or the provider and whether it is the only way in.
   const summary = kept ? (state.only ? `${kept.name} · ${t("OIDC only")}` : kept.name) : t("Off");
   return (
@@ -191,31 +171,6 @@ export function SsoPanel() {
         </div>
       </Section>
 
-      <Section
-        title={t("Who may sign in")}
-        hint={t("Nobody gets in just because the provider knows them: only who is named here. With all three empty, nobody does.")}
-      >
-        <div className="max-w-xl space-y-3">
-          {nobody && (
-            <p role="note" className="text-xs text-warn">
-              {t("Nobody is named here yet, so the provider's sign-in lets nobody in.")}
-            </p>
-          )}
-          <Field label={t("Emails")} hint={t("One a line. Only counts when the provider says the email is verified.")}>
-            <textarea {...text("allowedEmails")} spellCheck={false} className={area} />
-          </Field>
-          <Field label={t("Groups")} hint={t("One a line, written as the provider sends them.")}>
-            <textarea {...text("allowedGroups")} spellCheck={false} className={area} />
-          </Field>
-          <Field label={t("Groups claim")}>
-            <input {...text("groupsClaim")} placeholder="groups" spellCheck={false} className={inputCls} />
-          </Field>
-          <Field label={t("Subjects")} hint={t("The provider's IDs for the accounts (sub), one a line.")}>
-            <textarea {...text("allowedSubjects")} spellCheck={false} className={area} />
-          </Field>
-        </div>
-      </Section>
-
       <Section title={t("Signing in and out")}>
         <div className="max-w-xl space-y-2">
           <SwitchRow
@@ -234,7 +189,7 @@ export function SsoPanel() {
         </div>
       </Section>
 
-      <Section title={t("Save")} hint={t("Saving asks for the portal's password. A change to the provider, to who may sign in or to OIDC only signs out every other browser.")}>
+      <Section title={t("Save")} hint={t("Saving asks for the portal's password. A change to the provider or to OIDC only signs out every other browser.")}>
         <div className="max-w-sm space-y-3">
           <Field label={t("Current password")}>
             <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputCls} />

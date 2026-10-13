@@ -197,10 +197,8 @@ it; how to set up the provider's side, and what each field means, is in
   in from the address the page is open at), the scopes and the name on the login
   page's button. The secret is never shown again once saved: an empty field keeps
   it for the same issuer and client, another one asks for it again, and **Remove the
-  kept secret** is for a public client.
-- **Who may sign in**: emails, groups and subjects, one a line. Only who is named
-  gets in, and an email only when the provider says it is verified. Saved settings
-  that name nobody say so here.
+  kept secret** is for a public client. There is no list of who may sign in: that is
+  decided at the provider, and every account it signs in gets in.
 - **End the session at the provider too**: signing out of the portal goes on to the
   provider's sign-out page.
 - **OIDC only**: the password form is hidden and the password login refused. If the
@@ -209,7 +207,7 @@ it; how to set up the provider's side, and what each field means, is in
 
 **Save** asks for the portal's current password, and the provider is read before
 anything is kept: settings it does not answer to are refused with its reason. A
-change to the provider, to who may sign in or to **OIDC only** signs out every other
+change to the provider or to **OIDC only** signs out every other
 browser; this one stays signed in. **Take out single sign-on** removes the button
 and the settings, after asking. Wrong passwords here are counted like those of
 **Change password**; settings refused after the right password are not.

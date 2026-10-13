@@ -82,7 +82,7 @@ import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } f
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
 import { authMode, changePassword, checkPassword, isAuthed, issueCookie, passwordRefused, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { activeSso, endSessionUrl, oidcRouter, providerFor, rememberProvider } from "./oidc-login.js";
-import { CALLBACK_PATH, OidcConfigError, allowsAnyone, discover, parseOidcConfig, shownForm } from "./oidc.js";
+import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } from "./oidc.js";
 import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
 import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
@@ -235,9 +235,9 @@ app.get("/api/auth/sso", requireAuth, (_req, res) => {
 
 /**
  * Saves the provider's settings, or with `settings: null` takes single sign-on out. Asks for the current
- * password, like changing it does: whoever saves names who else may sign in. The provider is read before
- * anything is kept, so settings it does not answer to are refused with its reason. A change to who may sign
- * in, or to whether the password may, ends every other login; this browser is signed in again under it.
+ * password, like changing it does: whoever saves chooses the provider that signs people in. The provider is read
+ * before anything is kept, so settings it does not answer to are refused with its reason. A change to the
+ * provider, or to whether the password may sign in, ends every other login; this browser is signed in again under it.
  */
 app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   if (authMode() !== "password") return res.status(409).json({ error: "Single sign-on needs the portal's own password to be set." });
@@ -271,9 +271,6 @@ app.put("/api/auth/sso", requireAuth, loginThrottle(), async (req, res) => {
   } catch (e) {
     if (e instanceof OidcConfigError) return res.status(400).json({ error: e.message });
     throw e;
-  }
-  if (config.only && !allowsAnyone(config)) {
-    return res.status(400).json({ error: "Name somebody who may sign in before the password login is switched off." });
   }
   let provider;
   try {
@@ -1789,13 +1786,6 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
     console.log(`  sso:      ${sso.issuer}${sso.only ? " (the only way in: the password login is off)" : ""}`);
     // Read now, so that a provider that does not answer is in the log before anyone presses the button.
     providerFor(sso).catch((e) => console.error(`[auth] single sign-on cannot reach ${sso.issuer}: ${(e as Error).message}. Sign-ins through it fail until it can.`));
-    if (!allowsAnyone(sso)) {
-      console.warn(
-        "\n  WARNING: single sign-on is set up, but nobody is named under Who may sign in (emails, groups and\n" +
-          "  subjects are all empty), so the provider's sign-in lets nobody in. Name the people or groups who may\n" +
-          "  use this portal under Settings → Authentication.\n"
-      );
-    }
   }
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.

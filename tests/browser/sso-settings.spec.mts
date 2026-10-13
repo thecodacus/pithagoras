@@ -32,10 +32,10 @@ async function openSso(page: Page) {
 const KEPT = {
   issuer: 'https://id.example.test/realms/home', clientId: 'portal', hasSecret: true,
   redirectUrl: 'https://portal.example.test/api/auth/oidc/callback', scopes: 'openid email profile', name: 'Example ID',
-  endSession: false, allowedEmails: ['you@example.test'], allowedGroups: ['Portal users'], groupsClaim: 'groups', allowedSubjects: [],
+  endSession: false,
 };
 
-test('a first setup starts from this address, sends the lists one entry a line, and asks for the current password', async ({ page }) => {
+test('a first setup starts from this address, sends what the provider needs and no list of who may sign in, and asks for the current password', async ({ page }) => {
   const saves = await portal(page);
   const dialog = await openSso(page);
   const redirect = dialog.getByLabel('Redirect URL');
@@ -44,8 +44,10 @@ test('a first setup starts from this address, sends the lists one entry a line, 
   await dialog.getByLabel('Issuer URL').fill('https://id.example.test/realms/home');
   await dialog.getByLabel('Client ID').fill('portal');
   await dialog.getByLabel('Client secret').fill('a client secret');
-  await dialog.getByLabel('Emails').fill('you@example.test\nother@example.test, third@example.test');
-  await dialog.getByLabel(/^Groups(?! claim)/).fill('Portal users, admins');
+  // Who may sign in is the provider's to say: the page has no list of its own.
+  await expect(dialog.getByText('Who may sign in')).toHaveCount(0);
+  await expect(dialog.getByLabel('Emails')).toHaveCount(0);
+  await expect(dialog.getByLabel('Subjects')).toHaveCount(0);
   const save = dialog.getByRole('button', { name: 'Save', exact: true });
   await expect(save).toBeDisabled();
   await dialog.getByRole('switch', { name: 'OIDC only' }).click();
@@ -60,9 +62,6 @@ test('a first setup starts from this address, sends the lists one entry a line, 
     settings: {
       issuer: 'https://id.example.test/realms/home', clientId: 'portal', clientSecret: 'a client secret',
       redirectUrl: 'https://portal.example.test/api/auth/oidc/callback', scopes: '', name: '', endSession: false,
-      allowedEmails: ['you@example.test', 'other@example.test', 'third@example.test'],
-      // A group's name may hold a comma: only lines part them.
-      allowedGroups: ['Portal users, admins'], groupsClaim: '', allowedSubjects: [],
     },
   });
   // The password field is cleared, and the secret is now one that is kept.
@@ -75,10 +74,7 @@ test('kept settings are shown without the secret, saved again without one, and a
   const dialog = await openSso(page);
   await expect(dialog.getByLabel('Issuer URL')).toHaveValue(KEPT.issuer);
   await expect(dialog.getByLabel('Client secret')).toHaveValue('');
-  await expect(dialog.getByLabel('Emails')).toHaveValue('you@example.test');
   await expect(dialog.getByText('A secret is kept. Leave this empty to keep it.')).toBeVisible();
-  // Somebody is named, so there is no note that nobody is.
-  await expect(dialog.getByRole('note')).toHaveCount(0);
 
   await dialog.getByLabel('Current password').fill('not it');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
@@ -97,10 +93,9 @@ test('kept settings are shown without the secret, saved again without one, and a
   expect(saves[2].settings.clientSecret).toBeNull();
 });
 
-test('the hint about the kept secret changes once the issuer or client is another, and settings that name nobody say so', async ({ page }) => {
-  await portal(page, { kept: { ...KEPT, allowedEmails: [], allowedGroups: [] } });
+test('the hint about the kept secret changes once the issuer or client is another', async ({ page }) => {
+  await portal(page, { kept: KEPT });
   const dialog = await openSso(page);
-  await expect(dialog.getByRole('note')).toHaveText("Nobody is named here yet, so the provider's sign-in lets nobody in.");
   await expect(dialog.getByText('A secret is kept. Leave this empty to keep it.')).toBeVisible();
   await dialog.getByLabel('Issuer URL').fill('https://id.example.test/realms/other');
   await expect(dialog.getByText('The issuer or the client ID changed: type the client secret again, or remove it for a public client.')).toBeVisible();

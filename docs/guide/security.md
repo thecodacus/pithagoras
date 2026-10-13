@@ -154,8 +154,10 @@ login cookie, or the visitor's `Authorization` header, on to the browser.
 ## Signing in through a provider
 
 With [single sign-on](/guide/deploying#single-sign-on) set up, the provider
-decides who someone is, and the portal's allow-list decides whether they may come
-in. The sign-in fails closed: anything that is not exactly right gives no login.
+decides who someone is, and whether they may come in: the portal keeps no list of
+its own, so every account the provider signs in gets a login, and limiting that
+to your people is done at the provider. The sign-in fails closed: anything that is
+not exactly right gives no login.
 
 - The authorization code flow, with PKCE (`S256`), `state` and `nonce`. What the
   answer must match is kept in a short-lived cookie for that browser, sealed so
@@ -178,15 +180,16 @@ in. The sign-in fails closed: anything that is not exactly right gives no login.
 
 What it does not do:
 
-- It does not tell people apart. Everyone on the allow-list is the same single
+- It does not tell people apart. Everyone the provider signs in is the same single
   user, with the same rights.
 - It does not follow the provider's session. A login lasts 30 days, as with the
-  password. To end the login of someone the provider no longer lets in, take them
-  off the allow-list (which ends every login made before) or change the password.
+  password. To end the login of someone the provider no longer lets in, change the
+  password (which ends every login made before); blocking the account at the
+  provider is not enough.
 - It does not replace the password. Unless **OIDC only** is on, the password login
   stays open beside it, and anyone who can reach the port can try passwords.
-- It is only as strong as the provider: whoever controls an account the allow-list
-  names, or the provider itself, can sign in.
+- It is only as strong as the provider: whoever controls an account the provider
+  signs in, or the provider itself, can sign in.
 
 ## People are a separate layer
 

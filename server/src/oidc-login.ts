@@ -3,7 +3,7 @@ import express, { type RequestHandler, type Response } from "express";
 import { errors as joseErrors, jwtVerify, type JWTPayload } from "jose";
 import { OIDC_STATE_COOKIE, authMode, derivedKey, issueCookie, secure } from "./auth.js";
 import {
-  CALLBACK_PATH, PROVIDER_TIMEOUT_MS, admitted, discover, needsUserinfo, safeReturnTo,
+  CALLBACK_PATH, PROVIDER_TIMEOUT_MS, discover, safeReturnTo,
   type OidcConfig, type OidcProvider,
 } from "./oidc.js";
 import { ssoConfig } from "./sso-settings.js";
@@ -16,10 +16,11 @@ import { ssoConfig } from "./sso-settings.js";
  * the answer must match, sealed so that only this portal can read or make one.
  * The answer is taken once: its state is remembered as used until it would have
  * run out, and the cookie is cleared whatever the outcome. The ID token is
- * checked against the provider's keys, issuer, audience, expiry and nonce, and
- * then the allow-list decides. What it lets in gets the portal's own login
- * cookie, the one the password gives, so nothing behind the login changes. The
- * provider's tokens are not kept, nor written anywhere.
+ * checked against the provider's keys, issuer, audience, expiry and nonce. Who
+ * may sign in is the provider's to decide: an account it signs in, with an ID
+ * token that checks out, gets the portal's own login cookie, the one the
+ * password gives, so nothing behind the login changes. The provider's tokens
+ * are not kept, nor written anywhere.
  *
  * The settings are read on every request (Settings → Authentication, sso-settings.ts), and single sign-on
  * applies only while the portal has a password: the login cookie is signed with its hash.
@@ -146,7 +147,7 @@ function refusalPage(res: Response, refusal: Refusal) {
 /** A short piece of what the provider said, for the page and the log: never more than it needs. */
 const said = (value: unknown) => (typeof value === "string" ? value.replace(/[^\x20-\x7e]/g, "").slice(0, 200) : "");
 
-async function redeem(provider: OidcProvider, code: string, verifier: string): Promise<{ idToken: string; accessToken?: string }> {
+async function redeem(provider: OidcProvider, code: string, verifier: string): Promise<string> {
   const { config } = provider;
   const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: config.redirectUrl.href, code_verifier: verifier });
   const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" };
@@ -170,8 +171,8 @@ async function redeem(provider: OidcProvider, code: string, verifier: string): P
     throw new Refusal(502, `The sign-in provider did not accept the sign-in${error ? ` (${error})` : ""}.`, `token endpoint: HTTP ${res.status} ${error} ${said(answer?.error_description)}`);
   }
   if (typeof answer.id_token !== "string") throw new Refusal(502, "The sign-in provider answered without an ID token.", "token endpoint: no id_token");
-  // The refresh token, where there is one, goes no further: the portal does not need it.
-  return { idToken: answer.id_token, ...(typeof answer.access_token === "string" ? { accessToken: answer.access_token } : {}) };
+  // The access and refresh tokens, where there are any, go no further: the portal does not need them.
+  return answer.id_token;
 }
 
 async function verifyIdToken(provider: OidcProvider, idToken: string, nonce: string): Promise<JWTPayload> {
@@ -198,42 +199,6 @@ async function verifyIdToken(provider: OidcProvider, idToken: string, nonce: str
     throw new Refusal(401, "The sign-in provider's answer could not be verified.", "ID token: azp is not this portal");
   }
   return claims;
-}
-
-/** What the allow-list reads of the claims. */
-const identityOf = (claims: JWTPayload, groupsClaim: string) =>
-  ({ sub: claims.sub!, email: claims.email, email_verified: claims.email_verified, groups: claims[groupsClaim] });
-
-/**
- * The claims the ID token left out, from the userinfo endpoint: only for the same subject, and only what the
- * allow-list reads. Not asked when the token lets the account in already, so that a userinfo endpoint that
- * fails does not turn away somebody the token names.
- */
-async function withUserinfo(provider: OidcProvider, claims: JWTPayload, accessToken: string | undefined): Promise<JWTPayload> {
-  if (!provider.userinfoEndpoint || !accessToken || !needsUserinfo(claims, provider.config)) return claims;
-  if (admitted(identityOf(claims, provider.config.groupsClaim), provider.config)) return claims;
-  let info: Record<string, unknown> | null = null;
-  try {
-    const res = await fetch(provider.userinfoEndpoint, {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
-    });
-    // A signed or encrypted answer (application/jwt) is not read: nothing here would check it.
-    if (res.ok && /^application\/json\b/i.test(res.headers.get("content-type") ?? "")) info = await res.json();
-  } catch {
-    info = null;
-  }
-  if (!info || typeof info !== "object" || info.sub !== claims.sub) {
-    throw new Refusal(502, "The sign-in provider did not say who signed in.", "userinfo: no answer for the same subject");
-  }
-  const groupsClaim = provider.config.groupsClaim;
-  const merged: JWTPayload = { ...claims };
-  // The email and whether it is verified go together, from the one place that says both.
-  if (claims.email === undefined || claims.email_verified === undefined) {
-    merged.email = info.email;
-    merged.email_verified = info.email_verified;
-  }
-  if (claims[groupsClaim] === undefined) merged[groupsClaim] = info[groupsClaim];
-  return merged;
 }
 
 export function oidcRouter(throttle: RequestHandler): express.Router {
@@ -308,13 +273,8 @@ export function oidcRouter(throttle: RequestHandler): express.Router {
       }
       if (typeof code !== "string" || !code) throw new Refusal(400, "The sign-in provider's answer has no code.", "no code");
 
-      const tokens = await redeem(provider, code, pending.verifier);
-      const claims = await withUserinfo(provider, await verifyIdToken(provider, tokens.idToken, pending.nonce), tokens.accessToken);
-      const by = admitted(identityOf(claims, config.groupsClaim), config);
-      if (!by) {
-        throw new Refusal(403, "The sign-in worked, but this account is not one that may use this portal.", `not on the allow-list: sub ${said(claims.sub)}${typeof claims.email === "string" ? `, email ${said(claims.email)}${claims.email_verified === true ? "" : " (not verified)"}` : ""}`);
-      }
-      console.log(`[auth] signed in through ${config.name} as ${said(claims.sub)}${typeof claims.email === "string" ? ` (${said(claims.email)})` : ""}, allowed by ${by}`);
+      const claims = await verifyIdToken(provider, await redeem(provider, code, pending.verifier), pending.nonce);
+      console.log(`[auth] signed in through ${config.name} as ${said(claims.sub)}${typeof claims.email === "string" ? ` (${said(claims.email)})` : ""}`);
       issueCookie(res);
       res.set("Cache-Control", "no-store").redirect(303, safeReturnTo(pending.returnTo));
     } catch (e) {

@@ -428,10 +428,6 @@ export interface SsoSettings {
   scopes: string;
   name: string;
   endSession: boolean;
-  allowedEmails: string[];
-  allowedGroups: string[];
-  groupsClaim: string;
-  allowedSubjects: string[];
 }
 
 /** What the page saves: a secret left out keeps the one there is, for the same provider and client. */

@@ -6,21 +6,24 @@ import net from "node:net";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { ENTRY, freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
+import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
 /**
  * Signing in through an OpenID Connect provider, against a fake one in this
  * process: its discovery document, its keys, its token and userinfo
- * endpoints. The test plays the browser — it follows the portal to the
+ * endpoints (the last is there to show that the portal does not ask it). The test plays the browser — it follows the portal to the
  * provider, and comes back with a code the fake provider hands out for an ID
  * token the test made — so that every way an answer can be wrong is tried.
+ * Who may sign in is the provider's to say: the portal keeps no list of its own,
+ * and lets in every account whose ID token checks out.
  * The portal is set up for it the way a person does it: signed in with the
  * password, under Settings → Authentication.
  */
-const { parseOidcConfig, safeReturnTo, admitted } = await import("../dist/oidc.js");
+const { parseOidcConfig, keptForm, safeReturnTo } = await import("../dist/oidc.js");
 
 const CLIENT_ID = "portal-client";
 const CLIENT_SECRET = "the-clients-own-secret-0123456789";
+const ACCESS_TOKEN = "the-access-token-0123456789";
 const PASSWORD = "correct horse battery";
 const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -34,7 +37,7 @@ const provider = {
   /** What a code is redeemed for, and what the token endpoint was asked. */
   codes: new Map(),
   tokenRequests: [],
-  userinfo: new Map(),
+  userinfoCalls: 0,
   meta: {},
   jwksFetches: 0,
 };
@@ -65,12 +68,9 @@ const idp = http.createServer(async (req, res) => {
     if (!grant || form.grant_type !== "authorization_code" || form.redirect_uri !== grant.redirectUri) return send(400, { error: "invalid_grant" });
     // PKCE: the verifier must be the one the challenge was made from.
     if (crypto.createHash("sha256").update(form.code_verifier ?? "").digest("base64url") !== grant.challenge) return send(400, { error: "invalid_grant", error_description: "PKCE" });
-    return send(200, { access_token: grant.accessToken, token_type: "Bearer", id_token: grant.idToken, refresh_token: "a-refresh-token-0123456789" });
+    return send(200, { access_token: ACCESS_TOKEN, token_type: "Bearer", id_token: grant.idToken, refresh_token: "a-refresh-token-0123456789" });
   }
-  if (url.pathname === "/userinfo") {
-    const info = provider.userinfo.get((req.headers.authorization ?? "").replace(/^Bearer /, ""));
-    return info ? send(200, info) : send(401, { error: "invalid_token" });
-  }
+  if (url.pathname === "/userinfo") { provider.userinfoCalls++; return send(401, { error: "invalid_token" }); }
   send(404, { error: "not here" });
 });
 const idpPort = await freePort();
@@ -84,7 +84,6 @@ after(() => idp.close());
 const ssoSettings = (portalPort, extra = {}) => ({
   issuer, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET,
   redirectUrl: `http://127.0.0.1:${portalPort}/api/auth/oidc/callback`, name: "Example ID",
-  allowedEmails: ["Allowed@Example.com"], allowedGroups: ["portal admins"], allowedSubjects: ["subject-on-the-list"],
   endSession: true, ...extra,
 });
 const portalEnv = { PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_SECRET: SECRET };
@@ -141,16 +140,16 @@ async function begin(returnTo, at = base) {
 const now = () => Math.floor(Date.now() / 1000);
 const claimsFor = (flow, extra = {}) => ({
   iss: issuer, aud: CLIENT_ID, sub: "some-user", nonce: flow.nonce, iat: now(), exp: now() + 300,
-  email: "allowed@example.com", email_verified: true, ...extra,
+  email: "someone@example.com", email_verified: true, ...extra,
 });
 const sign = (claims, { key = keyA.privateKey, kid = "key-a", alg = "RS256" } = {}) =>
   new SignJWT(claims).setProtectedHeader({ alg, kid, typ: "JWT" }).sign(key);
 
 let codes = 0;
 /** The browser coming back from the provider with a code for `idToken`. `query` and `cookie` change what it brings. */
-async function finish(flow, idToken, { query = {}, cookie = flow.cookie, accessToken, at = base } = {}) {
+async function finish(flow, idToken, { query = {}, cookie = flow.cookie, at = base } = {}) {
   const code = `code-${++codes}`;
-  provider.codes.set(code, { idToken, accessToken, challenge: flow.to.searchParams.get("code_challenge"), redirectUri: flow.to.searchParams.get("redirect_uri") });
+  provider.codes.set(code, { idToken, challenge: flow.to.searchParams.get("code_challenge"), redirectUri: flow.to.searchParams.get("redirect_uri") });
   const params = new URLSearchParams({ code, state: flow.state, ...query });
   for (const [k, v] of Object.entries(query)) if (v === undefined) params.delete(k);
   return fetch(`${at}/api/auth/oidc/callback?${params}`, { redirect: "manual", headers: cookie ? { Cookie: cookie } : {} });
@@ -184,7 +183,6 @@ test("the settings are read as the page sends them, and ones that cannot be righ
   assert.equal(config.redirectUrl.href, "https://portal.example.com/api/auth/oidc/callback");
   assert.equal(config.scopes, "openid email profile");
   assert.equal(config.name, "SSO");
-  assert.equal(config.groupsClaim, "groups");
   assert.equal(config.only, false);
   assert.equal(config.clientSecret, undefined, "a public client");
   assert.equal(parseOidcConfig(ok, true).only, true);
@@ -196,13 +194,14 @@ test("the settings are read as the page sends them, and ones that cannot be righ
   wrong({ redirectUrl: "" }, /redirect URL is required/);
   wrong({ redirectUrl: "https://portal.example.com/somewhere-else" }, /followed by \/api\/auth\/oidc\/callback/);
   wrong({ scopes: "email profile" }, /must include openid/);
-  wrong({ allowedEmails: "a@example.com" }, /must be a list/);
   wrong({ endSession: "yes" }, /on or off/);
   assert.throws(() => parseOidcConfig(null, false), /not an object/);
   // Plain http for a provider on this machine, to try it out.
   assert.equal(parseOidcConfig({ ...ok, issuer: "http://127.0.0.1:9000" }, false).issuer, "http://127.0.0.1:9000");
-  // Lists are trimmed, and emails compared in lower case.
-  assert.deepEqual([...parseOidcConfig({ ...ok, allowedEmails: [" A@Example.com ", "", "a@example.com"] }, false).allowedEmails], ["a@example.com"]);
+  // Settings kept by a portal that still had a list of who may sign in read as before, and are kept without it.
+  const old = { ...ok, allowedEmails: ["a@example.com"], allowedGroups: ["admins"], groupsClaim: "roles", allowedSubjects: ["x"] };
+  assert.deepEqual(keptForm(parseOidcConfig(old, false)), keptForm(config));
+  for (const key of ["allowedEmails", "allowedGroups", "groupsClaim", "allowedSubjects"]) assert.ok(!(key in keptForm(config)), key);
 });
 
 test("where a login goes on to is a page of the portal's own, never another origin or an API route", () => {
@@ -211,20 +210,6 @@ test("where a login goes on to is a page of the portal's own, never another orig
   for (const elsewhere of ["//evil.example/x", "/.//evil.example", "/a/..//evil.example/x", "/%2e//evil.example", "/./api/settings", "/API/settings", "/Api", "/\\evil.example", "https://evil.example/", "evil.example", "/\t/evil.example", "/api/settings", "/api", "", undefined, ["/x"], `/${"a".repeat(3000)}`]) {
     assert.equal(safeReturnTo(elsewhere), "/", JSON.stringify(elsewhere));
   }
-});
-
-test("the allow-list lets in what it names, and an email only once the provider has verified it", () => {
-  const config = parseOidcConfig({ ...ssoSettings(1), issuer: "https://id.example.com" }, false);
-  assert.equal(admitted({ sub: "subject-on-the-list" }, config), "subject");
-  assert.equal(admitted({ sub: "x", email: "ALLOWED@example.com", email_verified: true }, config), "email");
-  assert.equal(admitted({ sub: "x", email: "allowed@example.com", email_verified: false }, config), null);
-  assert.equal(admitted({ sub: "x", email: "allowed@example.com", email_verified: "true" }, config), null, "a string is not a verification");
-  assert.equal(admitted({ sub: "x", email: "allowed@example.com" }, config), null);
-  assert.equal(admitted({ sub: "x", groups: ["others", "portal admins"] }, config), "group");
-  assert.equal(admitted({ sub: "x", groups: "portal admins" }, config), "group");
-  assert.equal(admitted({ sub: "x", groups: ["Portal Admins"] }, config), null, "a group's name is compared as it is");
-  const nobody = parseOidcConfig({ ...ssoSettings(1), issuer: "https://id.example.com", allowedEmails: [], allowedGroups: [], allowedSubjects: [] }, false);
-  assert.equal(admitted({ sub: "subject-on-the-list", email: "allowed@example.com", email_verified: true, groups: ["portal admins"] }, nobody), null);
 });
 
 test("the login page is told about the provider, and the password still works beside it", async () => {
@@ -310,35 +295,23 @@ test("an unsigned token, alg none, one signed with the client secret and one sig
   await refused(await finish(flow, await sign(claimsFor(flow), { key: stranger.privateKey, kid: "unknown-key" })), 401);
 });
 
-test("an email the provider has not verified, or an account outside the allow-list, gets no login", async () => {
-  let flow = await begin();
-  await refused(await finish(flow, await sign(claimsFor(flow, { email_verified: false }))), 403, /not one that may use this portal/);
-  flow = await begin();
-  await refused(await finish(flow, await sign(claimsFor(flow, { email: "stranger@example.com" }))), 403);
-  // Allowed by its group, or by its subject, whatever its email.
-  assert.ok(await signIn({ email: "stranger@example.com", groups: ["portal admins"] }));
-  assert.ok(await signIn({ sub: "subject-on-the-list", email: undefined, email_verified: undefined }));
-});
-
-test("claims the ID token leaves out are asked of the userinfo endpoint, for the same subject only", async () => {
-  provider.userinfo.set("token-1", { sub: "some-user", email: "allowed@example.com", email_verified: true });
-  let flow = await begin();
-  let res = await finish(flow, await sign(claimsFor(flow, { email: undefined, email_verified: undefined })), { accessToken: "token-1" });
-  assert.equal(res.status, 303);
-  assert.ok(cookieNamed(res, AUTH));
-
-  provider.userinfo.set("token-2", { sub: "another-user", email: "allowed@example.com", email_verified: true });
-  flow = await begin();
-  res = await finish(flow, await sign(claimsFor(flow, { email: undefined, email_verified: undefined })), { accessToken: "token-2" });
-  await refused(res, 502);
-});
-
-test("an account the ID token lets in already is not turned away by a userinfo endpoint that fails", async () => {
-  // Groups are listed and the token has none, but its verified email is on the list: the userinfo endpoint is not asked.
-  const flow = await begin();
-  const res = await finish(flow, await sign(claimsFor(flow)), { accessToken: "a-token-the-userinfo-endpoint-refuses" });
-  assert.equal(res.status, 303, await res.clone().text());
-  assert.ok(cookieNamed(res, AUTH));
+test("any account the provider signs in gets a login: the portal keeps no list of who may, and asks for no more than the ID token", async () => {
+  const calls = provider.userinfoCalls;
+  // An email nobody has verified, none at all, groups and a subject the portal has never heard of, and a token carrying nothing but the required claims.
+  for (const extra of [
+    { email: "stranger@example.com", email_verified: false },
+    { email: "stranger@example.com", email_verified: undefined },
+    { email: undefined, email_verified: undefined },
+    { sub: "a-subject-nobody-named", groups: ["some group"] },
+    { sub: "another-account", email: undefined, email_verified: undefined, groups: undefined },
+  ]) {
+    const flow = await begin();
+    const claims = Object.fromEntries(Object.entries(claimsFor(flow, extra)).filter(([, v]) => v !== undefined));
+    const res = await finish(flow, await sign(claims));
+    assert.equal(res.status, 303, `${JSON.stringify(extra)}: ${await res.clone().text()}`);
+    assert.equal((await api(cookieNamed(res, AUTH).split(";")[0])).status, 200, JSON.stringify(extra));
+  }
+  assert.equal(provider.userinfoCalls, calls, "the userinfo endpoint is not asked for claims");
 });
 
 test("an answer is taken once: the same state again is refused, without asking the provider", async () => {
@@ -453,7 +426,7 @@ test("neither the client secret nor a token reaches the log", () => {
   assert.match(log, /sign-in through Example ID refused/);
   assert.ok(!log.includes(CLIENT_SECRET), "the client secret");
   assert.ok(!log.includes("a-refresh-token"), "the refresh token");
-  assert.ok(!log.includes("token-1"), "an access token");
+  assert.ok(!log.includes(ACCESS_TOKEN), "an access token");
   assert.ok(!/eyJ[A-Za-z0-9_-]{20,}\./.test(log), "an ID token");
 });
 
@@ -468,7 +441,8 @@ test("the settings page is never sent the client secret, and saving asks for the
   assert.equal(shown.settings.hasSecret, true);
   assert.equal(shown.settings.clientSecret, undefined);
   assert.ok(!JSON.stringify(shown).includes(CLIENT_SECRET));
-  assert.deepEqual(shown.settings.allowedEmails, ["allowed@example.com"]);
+  // No list of who may sign in, nor the claim it was read from.
+  assert.deepEqual(Object.keys(shown.settings).sort(), ["clientId", "endSession", "hasSecret", "issuer", "name", "redirectUrl", "scopes"]);
 
   for (const current of ["", "not the password"]) {
     const { res } = await saveSso(base, admin, ssoSettings(portalPort, { name: "Changed" }), { current });
@@ -526,20 +500,21 @@ test("settings that cannot be right, or a provider that does not answer to them,
   } finally {
     provider.meta = {};
   }
-  // The password login cannot be switched off with nobody who may sign in instead.
-  const { res } = await saveSso(base, admin, ssoSettings(portalPort, { allowedEmails: [], allowedGroups: [], allowedSubjects: [] }), { only: true });
-  assert.equal(res.status, 400);
   // The admin's login still holds: nothing changed.
   assert.equal((await api(admin)).status, 200);
 });
 
-test("a change to who may sign in ends every other login, and the one who saved it is signed in again; the button's name changes nothing", async () => {
+test("a change to the provider ends every other login, and the one who saved it is signed in again; the button's name changes nothing", async () => {
   const other = await signIn();
-  let admin = await signIn();
-  let saved = await saveSso(base, admin, ssoSettings(portalPort, { name: "Example ID" }));
+  const admin = await signIn();
+  let saved = await saveSso(base, admin, ssoSettings(portalPort, { name: "Another name" }));
+  assert.equal((await api(other)).status, 200, "another name for the button");
+  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort, { name: "Example ID" }));
   assert.equal((await api(other)).status, 200, "the same settings again");
-  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort, { allowedEmails: ["Allowed@Example.com", "someone-else@example.com"] }));
-  assert.equal((await api(other)).status, 401, "another list");
+  // The same provider under its second name: another issuer.
+  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort, { issuer: `http://localhost:${idpPort}` }));
+  assert.equal(saved.res.status, 200, JSON.stringify(saved.body));
+  assert.equal((await api(other)).status, 401, "another issuer");
   assert.equal((await api(admin)).status, 401, "the cookie it saved with too");
   assert.equal((await api(saved.cookie)).status, 200, "signed in again with the change");
   saved = await saveSso(base, saved.cookie, ssoSettings(portalPort));
@@ -678,25 +653,4 @@ test("without the portal's password single sign-on does not apply: not on the se
   } finally {
     open.child.kill();
   }
-});
-
-test("settings that name nobody are said at start: the button is offered, and lets nobody in", async () => {
-  const p = await ssoPortal("pithagoras-oidc-nobody-", { allowedEmails: [], allowedGroups: [], allowedSubjects: [] });
-  p.child.kill();
-  await new Promise((r) => p.child.once("exit", r));
-  // Started again on the same data, long enough to say what it has.
-  const again = await new Promise((resolve) => {
-    const child = spawn(process.execPath, [ENTRY], { env: serverEnv(p.home, 0, portalEnv), stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    const take = (d) => {
-      out += d;
-      if (/lets nobody in/.test(out)) child.kill();
-    };
-    child.stdout.on("data", take);
-    child.stderr.on("data", take);
-    const timer = setTimeout(() => child.kill(), 20_000);
-    child.on("close", () => { clearTimeout(timer); resolve(out); });
-  });
-  assert.match(again, /sso: +http:\/\/127\.0\.0\.1/);
-  assert.match(again, /nobody is named under Who may sign in .* lets nobody in/s);
 });
