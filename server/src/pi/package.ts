@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const NAME = "@earendil-works/pi-coding-agent";
 
@@ -40,5 +40,24 @@ export function piCli(): string | undefined {
     }
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * A package that pi depends on, as pi loads it: found the way node would find it from pi's own folder,
+ * so it is the copy pi itself runs, whether npm put it next to pi or inside it. Not a dependency of
+ * the portal's own, so it is not on the portal's resolution path.
+ */
+export async function piDependency(name: string): Promise<any> {
+  let dir = path.dirname(fileURLToPath(piEntry()));
+  for (;;) {
+    const manifest = path.join(dir, "node_modules", name, "package.json");
+    if (existsSync(manifest)) {
+      const pkg = JSON.parse(readFileSync(manifest, "utf8"));
+      const entry = pkg.exports?.["."]?.import ?? pkg.main;
+      return import(pathToFileURL(path.join(path.dirname(manifest), entry)).href);
+    }
+    if (path.dirname(dir) === dir) throw new Error(`${name} is not found from pi`);
+    dir = path.dirname(dir);
   }
 }

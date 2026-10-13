@@ -12,7 +12,7 @@ writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["np
 const mcpFile = (config) => writeFileSync(path.join(agent, "mcp.json"), JSON.stringify(config));
 const cacheFile = (servers) => writeFileSync(path.join(agent, "mcp-cache.json"), JSON.stringify({ version: 1, servers }));
 
-const { mcpCatalogue, mcpOffer } = await import("../dist/mcp-offer.js");
+const { mcpCatalogue, mcpDirect, mcpOffer } = await import("../dist/mcp-offer.js");
 const { switchedOffVia, guardExtension } = await import("../dist/pi/guard.js");
 const { createSession, rememberTools, setToolDefaultsOff, shownTools, withdrawnMcpTools } = await import("../dist/db.js");
 // Nothing off by default, not even code mode, which a new install has off: what is off here is the servers' doing.
@@ -191,4 +191,28 @@ test("a server's tools from the cache go with the adapter's package, whatever it
   writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:something-else"] }));
   assert.ok(!names(shownTools()).includes("jira_admin_delete"), "not installed: nothing would register them");
   writeFileSync(path.join(agent, "settings.json"), JSON.stringify({ packages: ["npm:pi-mcp-adapter@2.18.0"] }));
+});
+
+test("a server's tool is registered one by one only where its directTools or the adapter-wide one says so; else it is lazy, through mcp", () => {
+  const direct = (config) => mcpDirect(config, { servers: cache });
+  const jira = (entry, settings) => ({ mcpServers: { jira: { command: "j", ...entry }, "brave-search": { command: "b" } }, settings });
+  // The adapter's default, and a server that says no.
+  assert.equal(direct(jira({}))("jira_search"), false);
+  assert.equal(direct(jira({ directTools: false }))("jira_search"), false);
+  assert.equal(direct(jira({ directTools: [] }))("jira_search"), false);
+  assert.equal(direct(jira({ directTools: true }))("jira_search"), true);
+  assert.equal(direct(jira({ directTools: true }))("jira_read_project_list"), true, "resources too");
+  // A list names the tools the server has, by their own names: dots and all, and `read_<resource>` for a resource.
+  const some = direct(jira({ directTools: ["search", "admin.delete", "read_project_list"] }));
+  assert.deepEqual(["jira_search", "jira_create_issue", "jira_admin_delete", "jira_read_project_list"].map(some), [true, false, true, true]);
+  // The adapter-wide setting is for a server that says nothing, and a server's own word wins.
+  const wide = direct(jira({ directTools: false }, { directTools: true }));
+  assert.equal(wide("jira_search"), false);
+  assert.equal(wide("brave_search_web_search"), true);
+  assert.equal(direct(jira({}, { directTools: true }))("jira_search"), true);
+  // Not a server's tool, or a server whose names are not read here.
+  assert.equal(direct(jira({}))("bash"), undefined);
+  assert.equal(mcpDirect({ mcpServers: { jira: { command: "j", toolPrefix: "short", directTools: true } } }, { servers: cache })("jira_search"), undefined);
+  // Without a cache entry there is the registered name to go by.
+  assert.equal(mcpDirect(jira({ directTools: ["search"] }), null)("jira_search"), true);
 });

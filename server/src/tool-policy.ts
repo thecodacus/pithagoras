@@ -98,6 +98,35 @@ export function toolSource(name: string, source: string, servers: Iterable<strin
   return mcpServerOf(name, servers) ?? source;
 }
 
+/**
+ * The key of the set the portal's picture and video tools share, as the tool lists show them in one box.
+ * Brackets, as no package, file or MCP server is called: a set an extension's tool of the same
+ * name could be filed in by accident. The web app keys the same box the same way.
+ */
+export const MEDIA_SET = "<portal:media>";
+
+/** Showing a picture or a clip, making one, changing a picture: the tools that make up MEDIA_SET. */
+const MEDIA_TOOLS = ["show_image", "generate_image", "edit_image", "show_video", "generate_video"];
+
+/** What the web app calls the tools that say nothing about where they came from: pi's own among them. */
+export const BUILT_IN_SET = "built in";
+
+/**
+ * The names of pi's own tools. By name rather than by set: with the sandbox on, the portal's inline
+ * extension registers these again, and pi then files them under that extension's name, as it does
+ * any extension that brings a tool of one of these names.
+ */
+export const PI_BUILT_IN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+
+/**
+ * The tool set a tool belongs to: the box the tool lists show it in, which is also what
+ * can be made lazy. The portal's own picture and video tools are one set, whichever extension registered each.
+ */
+export function toolSetOf(tool: { name: string; source: string; inline?: boolean }, servers: Iterable<string>): string {
+  if (tool.inline && MEDIA_TOOLS.includes(tool.name)) return MEDIA_SET;
+  return toolSource(tool.name, tool.source, servers).trim() || BUILT_IN_SET;
+}
+
 export interface ToolExceptions {
   /** Off here, whatever the default says. */
   off: string[];
@@ -115,6 +144,12 @@ export function toolEnabled(
   if (exceptions.on.includes(name)) return true;
   return ![...defaultsOff].includes(name);
 }
+
+/**
+ * How a single tool is marked lazy in the list of marks, which holds tool sets as well. Brackets, as
+ * no package, file or MCP server is called, so a set cannot be taken for a tool.
+ */
+export const lazyToolEntry = (name: string): string => `<tool>${name}`;
 
 /**
  * The tools that are off by default for a project: the portal-wide default,

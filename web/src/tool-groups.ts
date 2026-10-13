@@ -34,14 +34,14 @@ const MEDIA_TOOLS = ["show_image", "generate_image", "edit_image", "show_video",
 const CODEMODE = "<portal:codemode>";
 
 /** The portal's code mode, not an extension's tool of that name. */
-const isCodemode = (tool: PortalTool): boolean => Boolean(tool.inline) && tool.name === "codemode";
+const isCodemode = (tool: Pick<PortalTool, "name" | "inline">): boolean => Boolean(tool.inline) && tool.name === "codemode";
 
 /**
  * What to file a tool under. The portal's own picture and video tools share one group, whichever way each was
  * registered; an extension's tool of the same name is not the portal's and stays in its own. Code mode is a
  * group of its own, called what it is rather than what registered it.
  */
-const sourceOf = (tool: PortalTool): string =>
+export const sourceOf = (tool: Pick<PortalTool, "name" | "source" | "inline">): string =>
   tool.inline && MEDIA_TOOLS.includes(tool.name) ? MEDIA : isCodemode(tool) ? CODEMODE : tool.source?.trim() || BUILT_IN;
 
 /** Where a group goes in the list: what is installed first, what the portal brings after it, what is built in last. */

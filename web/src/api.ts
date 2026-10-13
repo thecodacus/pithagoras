@@ -276,6 +276,12 @@ export interface PortalTool {
   inline?: true;
   /** An MCP server's tool listed from the adapter's cache: the server starts when one of its tools is first used. */
   cached?: true;
+  /** Not in the list the model is given one by one but found through the `tools` tool, or an MCP server's through `mcp`: on or off like any other. */
+  lazy?: true;
+  /** An MCP server's tool: the server, whose setting "Register tools directly" says whether the tool is lazy. */
+  mcp?: string;
+  /** Settings → Tools only: one of pi's own tools or the adapter's `mcp`, which cannot be made lazy. */
+  noLazy?: true;
 }
 
 /** A picture going with a message: a data: URL, which the box also shows it from. */
@@ -647,12 +653,17 @@ export const api = {
   /** Every tool the portal has seen, for setting a default without opening a chat. */
   toolDefaults: () =>
     json<{
-      tools: { name: string; source: string; defaultOn: boolean; inline?: true }[];
+      tools: { name: string; source: string; defaultOn: boolean; inline?: true; lazy?: true; mcp?: string; noLazy?: true }[];
       off: string[];
       names: Record<string, string>;
+      /** What is marked lazy: tool sets, and single tools as `<tool>name`. Opt-in; nothing is lazy until somebody marks it. */
+      lazy?: string[];
       /** How long ask_question waits for an answer; 0 is until it is answered. */
       questionWaitMinutes?: number;
     }>("/api/tools"),
+  /** Which tool sets and single tools (`<tool>name`) are lazy: not in the model's list one by one, found through the `tools` tool. */
+  setLazyToolSets: (lazy: string[]) =>
+    json<{ lazy: string[]; applied: number }>("/api/tools/lazy", { method: "PUT", body: JSON.stringify({ lazy }) }),
   /** How long the agent's ask_question waits for an answer, in minutes; 0 is until it is answered. */
   setQuestionWait: (waitMinutes: number) =>
     json<{ waitMinutes: number }>("/api/ask-question", { method: "PUT", body: JSON.stringify({ waitMinutes }) }),
@@ -701,6 +712,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ entry, from }),
     }),
+  /** An MCP server's setting "Register tools directly" on its own; off, the server's tools are lazy. */
+  setMcpDirect: (name: string, direct: boolean) =>
+    json<{ ok: true; direct: boolean }>(`/api/mcp/servers/${encodeURIComponent(name)}/direct`, { method: "PUT", body: JSON.stringify({ direct }) }),
   deleteMcpServer: (name: string) =>
     json<{ ok: true }>(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }),
   saveMcpSettings: (settings: Record<string, unknown>) =>

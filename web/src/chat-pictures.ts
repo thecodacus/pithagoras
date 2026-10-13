@@ -1,6 +1,7 @@
 import type { Item } from "./transcript";
 import { insideFolder } from "./file-activity";
 import { pictureCall } from "./picture-call";
+import { toolName } from "./tool-activity";
 import type { ViewerPicture } from "./image-viewer";
 import { t } from "./i18n";
 
@@ -36,7 +37,7 @@ export function chatPictures(items: Item[], folder: string, urls: PictureUrls): 
     } else if (item.kind === "tool" && item.picture) {
       const { path, title } = item.picture;
       const id = shownPictureId(item.id);
-      const changed = item.name === "edit_image" ? pictureCall(item.name, item.args, folder).original : undefined;
+      const changed = toolName(item.name, item.args) === "edit_image" ? pictureCall(item.name, item.args, folder).original : undefined;
       const from = changed && latestByPath.get(changed);
       list.push({
         id,

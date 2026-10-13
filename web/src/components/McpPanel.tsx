@@ -641,7 +641,7 @@ function ServerForm({
             checked={directTools}
             onChange={setDirectTools}
             label={t("Register tools directly")}
-            hint={t("Puts every tool in the system prompt instead of behind the proxy — 150–300 tokens each, so keep it to small servers")}
+            hint={t("Puts every tool in the system prompt instead of behind the proxy — 150–300 tokens each, so keep it to small servers. Off, the tools are lazy, as the lazy button of the server in Settings → Tools says.")}
           />
           <Toggle checked={debug} onChange={setDebug} label={t("Show server stderr")} />
           <Toggle

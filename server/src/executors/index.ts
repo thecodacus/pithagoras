@@ -38,6 +38,10 @@ export interface LaunchOptions {
   browserNow?: () => { allowed: boolean; allowlist: string[] };
   /** Tools this conversation has switched off, by name. */
   toolsOff?: string[];
+  /** The tools that are on and lazy: found through the `tools` tool, not offered one by one. */
+  toolsLazy?: string[];
+  /** What those tools are called as sets, for the hint to the model. */
+  lazySets?: string[];
   /** What its subagents run on, when it says: asked each time one starts. */
   subagentModel?: () => string | undefined;
   /** The agent whose heartbeat this session is, when it is one: gives it the note tool. */
@@ -100,6 +104,8 @@ export class HostExecutor implements Executor {
       enforceTaint: opts.enforceTaint,
       browserNow: opts.browserNow,
       toolsOff: opts.toolsOff,
+      toolsLazy: opts.toolsLazy,
+      lazySets: opts.lazySets,
       subagentModel: opts.subagentModel,
       heartbeatAgent: opts.heartbeatAgent,
       rememberChatModel: opts.rememberChatModel,

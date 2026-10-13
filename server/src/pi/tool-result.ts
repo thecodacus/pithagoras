@@ -2,9 +2,11 @@
  * How the portal's inline tools answer pi.
  *
  * pi builds what the model reads from `content`, and marks a result as an error
- * only when `execute` throws; anything else it is handed is taken as a success.
- * A tool that returns its own `{ output, isError }` therefore tells the model
- * nothing, and every failure looks like it worked.
+ * when `execute` throws or, as of pi 1.1, when the result itself says
+ * `isError: true`; anything else it is handed is taken as a success. A tool that
+ * returns its own `{ output, isError }` therefore tells the model nothing, and
+ * every failure looks like it worked. The portal's tools throw, which every pi
+ * takes for a failure.
  */
 
 /** A result: text the model reads. */

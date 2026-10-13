@@ -18,6 +18,7 @@ import { loadedAt, loadedPlaces, type LoadedAs, type LoadedPlace } from "./loade
 import { loadedByLinks } from "./loaded-links.js";
 // Only the names: a heartbeat's note is registered for heartbeats alone, and is how one says what it read.
 import { HEARTBEAT_ROLE, NOTE_TOOL } from "./heartbeat-names.js";
+import { GATEWAY_TOOL } from "./tools-gateway-names.js";
 import { runsAsPrimary } from "./runs-as-primary.js";
 
 /**
@@ -81,6 +82,10 @@ function untrustedResult(toolName: string, input: Record<string, unknown>): bool
  * switches one call at a time. Only such a tool: one the configuration leaves
  * out is off for pi too, and the adapter would not reach it anyway; a tool of
  * another extension whose name merely starts like a server's is no script's.
+ *
+ * The `tools` tool, which reaches a conversation's lazy tools, is another such way: `tools({ action:
+ * "call", name })` runs the tool of that name, so it is held to the switches the same, for any tool and
+ * not only a server's. A lazy tool is on, and so not in `off`; one that is off is refused, lazy or not.
  */
 export function switchedOffVia(
   toolName: string,
@@ -88,11 +93,20 @@ export function switchedOffVia(
   off: ReadonlySet<string>,
   given?: Pick<McpView, "servers" | "serverTool">,
 ): string | undefined {
-  if (!off.size || (toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) return undefined;
-  const mcp = given ?? mcpView();
+  if (!off.size || (toolName !== GATEWAY_TOOL && toolName !== "mcp" && toolName !== "mcp_script" && toolName !== "mcpScript")) {
+    return undefined;
+  }
   // The adapter takes a name with hyphens for underscores (findToolByName); dots as well, which it
   // writes as underscores, so a name it might take one day is not a way round.
   const same = (name: string) => name.replace(/[-.]/g, "_");
+  if (toolName === GATEWAY_TOOL) {
+    // Searching names nothing, and lists only what is lazy. Describing a tool is a way to it too: its
+    // parameters are what the model is not to learn of a tool it was told is off.
+    const asked = typeof input.name === "string" ? same(input.name.trim()) : "";
+    if ((input.action !== "call" && input.action !== "describe") || !asked) return undefined;
+    return [...off].find((name) => same(name) === asked);
+  }
+  const mcp = given ?? mcpView();
   if (toolName === "mcp") {
     const server = typeof input.server === "string" && input.server ? same(input.server) : undefined;
     for (const key of ["tool", "describe"]) {
@@ -297,6 +311,8 @@ const envelope = (id: string) => ({
  * Checked per call rather than fixed at launch with allowedToolNames, because a
  * group conversation changes sender between messages and a launch-time list
  * would freeze capability to whoever happened to speak first.
+ *
+ * The gateway to the lazy tools is read-only too, but not by its name: see gatewayNow.
  */
 const READ_ONLY = new Set(["read", "grep", "find", "ls", "ask_primary", NOTE_TOOL]);
 
@@ -342,6 +358,30 @@ function parseArgs(text: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The tool an `mcp` call reaches, and what it is given, as the rules read a call of that tool: the adapter's
+ * proxy is another way to a tool a server registers directly under its own name, so the rules about what a
+ * call does (the ones after untrusted content, and what is kept from somebody who is not the primary user)
+ * hold it as they hold the direct call. Its arguments are an object or the JSON text of one; text that is not
+ * JSON reaches nothing, as the adapter refuses it. Undefined for any other call, and for an `mcp` call that names no tool.
+ */
+function viaMcp(toolName: string, input: Record<string, unknown>): { toolName: string; input: Record<string, unknown> } | undefined {
+  if (toolName !== "mcp" || typeof input.tool !== "string" || !input.tool.trim()) return undefined;
+  const given =
+    typeof input.args === "string"
+      ? parseArgs(input.args)
+      : input.args && typeof input.args === "object" && !Array.isArray(input.args)
+        ? (input.args as Record<string, unknown>)
+        : undefined;
+  return { toolName: input.tool.trim(), input: given ?? {} };
+}
+
+/** The rule that refuses this call after untrusted content: the call's own, or that of the tool an `mcp` call reaches. */
+function taintRule(toolName: string, input: Record<string, unknown>): Rule | undefined {
+  const reached = viaMcp(toolName, input);
+  return RULES.find((rule) => rule.hit(toolName, input)) ?? (reached ? RULES.find((rule) => rule.hit(reached.toolName, reached.input)) : undefined);
 }
 
 /**
@@ -768,7 +808,8 @@ export function approvalCannotHelp(toolName: string, action: string, workspace: 
   // A read is never asked for: where it is allowed it needs no approval, and an approval does not open the rest.
   if (PATH_READERS.has(toolName)) return "it is a read, which needs no approval where it is allowed and is held to the folder of this conversation where it is not";
   const input = callOf(toolName, action);
-  const never = unrunnable(toolName, input, workspace);
+  const reached = viaMcp(toolName, input);
+  const never = unrunnable(toolName, input, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
   if (never) return never;
   // A conversation that has read something untrusted refuses a push, an upload, a subagent or a schedule after
   // an approval as it did before it, and an approval spent on one would be gone.
@@ -856,7 +897,7 @@ export function trustFlagged(portalSessionId: string, id: string): void {
  * untrusted, when it has and the rules are enforced there; otherwise undefined.
  */
 function taintRuleFor(portalSessionId: string, toolName: string, input: Record<string, unknown>): Rule | undefined {
-  return taints.get(portalSessionId)?.holds() ? RULES.find((rule) => rule.hit(toolName, input)) : undefined;
+  return taints.get(portalSessionId)?.holds() ? taintRule(toolName, input) : undefined;
 }
 
 /**
@@ -900,6 +941,13 @@ export function guardExtension(
   alsoReadable: string[] = [],
   /** What this conversation has switched off, read at each call: see switchedOffVia. */
   offNow: () => ReadonlySet<string> = () => new Set(),
+  /**
+   * Whether the tool called `tools` that pi runs is the portal's gateway to the lazy tools. The name is any
+   * extension's to use, and pi keeps the first tool of a name, so a tool of that name is the gateway only if it
+   * is that one: the guard trusts the gateway, which runs what it calls through the guard again, and not a tool
+   * that merely has its name. Read at each call, as an extension may be loaded later.
+   */
+  gatewayNow: () => boolean = () => false,
 ) {
   return (pi: any): void => {
     // Per session, not global: a taint belongs to the conversation that read the
@@ -1007,6 +1055,10 @@ export function guardExtension(
           sessionId: portalSessionId,
         });
 
+      // Held to what the gateway is only if it is the gateway: see gatewayNow.
+      const gateway = event.toolName === GATEWAY_TOOL && gatewayNow();
+      const readOnly = READ_ONLY.has(event.toolName) || gateway;
+
       // Before anything that could allow it: a tool switched off is off for
       // everybody, and no rule or approval switches it back on.
       // A call a script makes is one the model did not, and pi lets a script call a tool that is not declared
@@ -1019,17 +1071,20 @@ export function guardExtension(
             "Say that it is switched off rather than looking for another way to it.",
         };
       }
-      const offTool = switchedOffVia(event.toolName, event.input ?? {}, offNow());
+      const offTool = event.toolName === GATEWAY_TOOL && !gateway ? undefined : switchedOffVia(event.toolName, event.input ?? {}, offNow());
       if (offTool) {
         note("refused", `Switched off in this conversation: ${offTool}`);
         return {
           block: true,
           reason:
-            event.toolName !== "mcp"
-              ? `Refused: "${offTool}" is switched off in this conversation, and an MCP script could reach it. ` +
-                "Call the MCP tools you need one at a time instead."
-              : `Refused: "${offTool}" is switched off in this conversation, and the mcp tool does not reach it ` +
-                "either. Say that it is switched off rather than looking for another way to it.",
+            event.toolName === GATEWAY_TOOL
+              ? `Refused: "${offTool}" is switched off in this conversation, and the ${GATEWAY_TOOL} tool does not reach it ` +
+                "either. Say that it is switched off rather than looking for another way to it."
+              : event.toolName !== "mcp"
+                ? `Refused: "${offTool}" is switched off in this conversation, and an MCP script could reach it. ` +
+                  "Call the MCP tools you need one at a time instead."
+                : `Refused: "${offTool}" is switched off in this conversation, and the mcp tool does not reach it ` +
+                  "either. Say that it is switched off rather than looking for another way to it.",
         };
       }
 
@@ -1077,7 +1132,7 @@ export function guardExtension(
       }
       // The rule that refuses this call because the conversation has read something untrusted, if any.
       // It refuses whatever allows the call, so a one-off approval is not spent on it first: see below.
-      const heldByTaint = isTainted() && enforceTaint ? RULES.find((r) => r.hit(event.toolName, event.input ?? {})) : undefined;
+      const heldByTaint = isTainted() && enforceTaint ? taintRule(event.toolName, event.input ?? {}) : undefined;
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -1096,9 +1151,13 @@ export function guardExtension(
       // one-off approval is not spent on a call that is refused after all.
       if (role !== "primary" && role !== HEARTBEAT_ROLE) {
         const reads = PATH_READERS.has(event.toolName);
+        // What a server's tool is given through `mcp` is held to what is kept from this role as it is when it is called directly.
+        const reached = viaMcp(event.toolName, event.input ?? {});
         const why = reads
           ? unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
-          : READ_ONLY.has(event.toolName) ? undefined : unrunnable(event.toolName, event.input ?? {}, workspace);
+          : readOnly
+            ? undefined
+            : unrunnable(event.toolName, event.input ?? {}, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
         if (why) {
           console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}, ${why}`);
           note("refused", `Not permitted for a ${role}: ${why}`);
@@ -1119,7 +1178,7 @@ export function guardExtension(
 
       if (
         role !== "primary" &&
-        !READ_ONLY.has(event.toolName) &&
+        !readOnly &&
         !allowedByRule(role, event.toolName, event.input ?? {}, key, workspace, note) &&
         // Not an approval that the taint refuses after all: it is refused below, with its own reason, and keeps its use.
         !heldByTaint &&
@@ -1149,7 +1208,7 @@ export function guardExtension(
       }
 
       if (!isTainted()) return undefined;
-      const rule = heldByTaint ?? RULES.find((r) => r.hit(event.toolName, event.input ?? {}));
+      const rule = heldByTaint ?? taintRule(event.toolName, event.input ?? {});
       if (!rule) return undefined;
 
       // Recorded even when it does not block: "this ran with the guard off" is

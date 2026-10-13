@@ -84,6 +84,8 @@ function matchesAny(patterns: unknown, candidates: string[]): boolean {
 interface CachedTool {
   bare: string;
   original: string;
+  /** What `directTools` names it by: the server's own name for a tool, `read_<resource>` for a resource. */
+  key: string;
   description?: string;
 }
 
@@ -97,16 +99,16 @@ interface CachedTool {
 function cachedTools(entry: { tools?: unknown; resources?: unknown } | undefined, definition: Record<string, unknown>): Map<string, CachedTool> | undefined {
   if (!entry || !Array.isArray(entry.tools)) return undefined;
   const out = new Map<string, CachedTool>();
-  const add = (bare: string, original: string, description: unknown) =>
-    out.set(bare, { bare, original, ...(typeof description === "string" && description.trim() ? { description: description.trim().slice(0, 300) } : {}) });
+  const add = (bare: string, original: string, key: string, description: unknown) =>
+    out.set(bare, { bare, original, key, ...(typeof description === "string" && description.trim() ? { description: description.trim().slice(0, 300) } : {}) });
   for (const tool of entry.tools) {
     const t = tool as { name?: unknown; description?: unknown } | null;
-    if (typeof t?.name === "string") add(sanitized(t.name), t.name, t.description);
+    if (typeof t?.name === "string") add(sanitized(t.name), t.name, t.name, t.description);
   }
   if (definition.exposeResources !== false && Array.isArray(entry.resources)) {
     for (const resource of entry.resources) {
       const r = resource as { name?: unknown; description?: unknown } | null;
-      if (typeof r?.name === "string") add(resourceTool(r.name), r.name, r.description);
+      if (typeof r?.name === "string") add(resourceTool(r.name), r.name, resourceTool(r.name), r.description);
     }
   }
   return out.size ? out : undefined;
@@ -156,6 +158,33 @@ export function mcpOffer(config: McpConfigLike, cache: McpCacheLike | null): (na
 
     const lifecycle = definition.lifecycle ?? "lazy";
     return listed && (lifecycle === "lazy" || lifecycle === "lazy-keep-alive") ? "cached" : "offered";
+  };
+}
+
+/**
+ * Whether the adapter registers this tool as a tool of its own, one by one, rather than leaving it to
+ * its `mcp` tool: undefined for a name no server claims, as for mcpOffer. That is the server's
+ * `directTools` (true, or a list that names the tool), or the adapter-wide `settings.directTools` where the
+ * server says nothing; `false` on the server turns the adapter-wide one off for it. The adapter's
+ * default is no: a tool is reached through `mcp`, which the portal calls lazy.
+ */
+export function mcpDirect(config: McpConfigLike, cache: McpCacheLike | null): (name: string) => boolean | undefined {
+  const servers = config.mcpServers ?? {};
+  const settings = config.settings ?? {};
+  const names = Object.keys(servers);
+  const tools = new Map<string, Map<string, CachedTool> | undefined>();
+  return (name) => {
+    const server = mcpServerOf(name, names);
+    if (server === undefined) return undefined;
+    const definition = servers[server] ?? {};
+    if (prefixOf(definition, settings) !== "server") return undefined;
+    const filter = definition.directTools !== undefined ? definition.directTools : settings.directTools;
+    if (filter === true) return true;
+    if (!Array.isArray(filter) || !filter.length) return false;
+    if (!tools.has(server)) tools.set(server, cachedTools(cache?.servers?.[server], definition));
+    const bare = name.slice(server.replace(/-/g, "_").length + 1);
+    // The list names a tool by the server's own name. Without a cache entry to tell it from, the registered one is all there is.
+    return filter.includes(tools.get(server)?.get(bare)?.key ?? bare);
   };
 }
 

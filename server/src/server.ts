@@ -60,6 +60,11 @@ import {
   shownStoredSettings,
   shownTools,
   toolDefaultsOff,
+  lazyAllowed,
+  lazyMarks,
+  lazyRefused,
+  lazyToolSets,
+  setLazyToolSets,
   toolGroupNames,
   updateSession,
 } from "./db.js";
@@ -675,6 +680,7 @@ app.put("/api/projects/:name/tools", async (req, res) => {
  */
 function layerTools(folder: string, below: string[], exceptions: { off: string[]; on: string[] }, unwatched = false) {
   const servers = mcpServerNames();
+  const lazy = lazyMarks();
   return {
     // A routine's runs have nobody to ask (see asksQuestions), so its page does not offer the tool.
     tools: shownTools(folder).filter((tool) => !(unwatched && tool.name === ASK_QUESTION_TOOL && tool.inline)).map((tool) => ({
@@ -682,6 +688,7 @@ function layerTools(folder: string, below: string[], exceptions: { off: string[]
       source: toolSource(tool.name, tool.source, servers),
       enabled: toolEnabled(tool.name, below, exceptions),
       defaultOn: !below.includes(tool.name),
+      ...lazy(tool),
     })),
     live: false,
     names: toolGroupNames(),
@@ -1297,14 +1304,23 @@ app.get("/api/tools", (_req, res) => {
   if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
   const off = new Set(toolDefaultsOff());
   const servers = mcpServerNames();
+  const lazy = lazyMarks();
   res.json({
-    tools: shownTools().map((tool) => ({
-      ...tool,
-      source: toolSource(tool.name, tool.source, servers),
-      defaultOn: !off.has(tool.name),
-    })),
+    tools: shownTools().map((tool) => {
+      const marks = lazy(tool);
+      return {
+        ...tool,
+        source: toolSource(tool.name, tool.source, servers),
+        defaultOn: !off.has(tool.name),
+        // Not offered one by one: found through the `tools` tool, or for an MCP server's tool through `mcp`, where `mcp` is the server whose setting says so.
+        ...marks,
+        // Neither marked nor set on a server: pi's own tools and the adapter's `mcp` tool, which the page offers no lazy mark for.
+        ...(lazyAllowed(tool, servers) || marks.mcp !== undefined ? {} : { noLazy: true as const }),
+      };
+    }),
     off: [...off].sort(),
     names: toolGroupNames(),
+    lazy: lazyToolSets(),
     questionWaitMinutes: questionWaitMinutes(),
   });
 });
@@ -1341,6 +1357,28 @@ app.put("/api/tools", async (req, res) => {
   const stored = setToolDefaultsOff(off);
   const applied = await sessions.applyToolDefaults();
   res.json({ off: stored, applied });
+});
+
+/**
+ * Which tools are lazy: tool sets, named as the boxes of the tools list name them, and single tools
+ * (`<tool>name`). A lazy tool is on like any other, but is not in the model's prompt: it finds it
+ * through the `tools` tool. The marks reach the running conversations too. An MCP server's tools are
+ * lazy by the server's own setting (`PUT /api/mcp/servers/:name/direct`) and pi's own cannot be lazy,
+ * and a mark that names them is refused.
+ */
+app.put("/api/tools/lazy", async (req, res) => {
+  if (EXECUTOR_KIND === "container") return res.status(400).json(toolsUnsupported);
+  const lazy = req.body?.lazy;
+  if (!isToolList(lazy)) return res.status(400).json({ error: "lazy must be a list of tool set names" });
+  // Only what is new is checked: a mark kept from before must not stand in the way of an unrelated change.
+  const before = lazyToolSets();
+  const refused = lazyRefused(lazy.filter((mark) => !before.includes(mark)));
+  if (refused.length) {
+    return res.status(400).json({ error: `Cannot be lazy: ${refused.join(", ")}. An MCP server's tools are lazy by the server's own setting (Register tools directly), and pi's built-in tools are always offered.`, code: "lazy-refused" });
+  }
+  const stored = setLazyToolSets(lazy);
+  const applied = await sessions.applyToolDefaults();
+  res.json({ lazy: stored, applied });
 });
 
 app.post("/api/sessions/:id/abort", async (req, res) => {
