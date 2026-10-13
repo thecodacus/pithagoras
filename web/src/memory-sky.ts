@@ -266,14 +266,163 @@ export function brainOutline(): Vec[][] {
       0.55,
     );
   }
-  for (const side of [-1, 1]) lines.push(Array.from({ length: 12 }, (_, i) => [side * (0.09 - i * 0.002), 0.3 + i * 0.05, 0.38 + i * 0.012] as Vec));
+  for (const side of [-1, 1]) lines.push(Array.from({ length: 8 }, (_, i) => [side * (0.09 - i * 0.002), 0.3 + i * 0.04, 0.38 + i * 0.012] as Vec));
   return lines;
 }
 
-/** How the 3D view looks; what it shows and how it turns is the same in each. */
-export const SKY_THEMES = ["stellar", "deepsea", "brain", "synthwave"] as const;
+/**
+ * The looks of the 3D view. Each is a world of its own — where the notes go,
+ * how it moves and answers a drag, what a chosen note does to it, and a
+ * secret — over the same notes, filters and search.
+ */
+export const SKY_THEMES = ["stellar", "solar", "brain", "fireflies", "helix"] as const;
 export type SkyTheme = (typeof SKY_THEMES)[number];
 export const skyThemeFrom = (stored: string | null): SkyTheme => (SKY_THEMES as readonly string[]).includes(stored ?? "") ? (stored as SkyTheme) : "stellar";
+
+/**
+ * How many links away from `centre` each note is, over the notes shown: 0 for
+ * the centre, -1 for one that is not shown, and one past the farthest ring for
+ * those no link leads to (the solar system's asteroid belt).
+ */
+export function ringsFrom(centre: number, near: number[][], shown: boolean[]): Int32Array {
+  const n = shown.length;
+  const ring = new Int32Array(n).fill(-2);
+  for (let i = 0; i < n; i++) if (!shown[i]) ring[i] = -1;
+  if (centre < 0 || centre >= n || !shown[centre]) {
+    for (let i = 0; i < n; i++) if (shown[i]) ring[i] = 1;
+    return ring;
+  }
+  ring[centre] = 0;
+  let wave = [centre];
+  let depth = 0;
+  while (wave.length) {
+    depth++;
+    const next: number[] = [];
+    for (const i of wave) for (const j of near[i] ?? []) if (ring[j] === -2) (ring[j] = depth), next.push(j);
+    wave = next;
+  }
+  const far = Math.max(1, ...Array.from(ring));
+  for (let i = 0; i < n; i++) if (ring[i] === -2) ring[i] = far + 1;
+  return ring;
+}
+
+export interface Orbit {
+  /** Which of the system's orbits, from 1 inside out; 0 for the sun. */
+  level: number;
+  radius: number;
+  phase: number;
+  /** Radians a second: the inner ones faster, as Kepler has it. */
+  speed: number;
+  /** How far its plane leans from the system's. */
+  tilt: number;
+}
+
+/** The most orbits a system has: rings further out share them, so that a long chain of links is not a hundred circles. */
+export const ORBITS = 7;
+
+/**
+ * An orbit for each note from its ring: up to `ORBITS` of them spaced out to
+ * a radius of about one, the notes of each spread around it, and the ring
+ * `belt` (the notes no link reaches) outermost, apart from the rest.
+ */
+export function solarOrbits(ring: Int32Array, belt = -1): Orbit[] {
+  const most = Math.max(1, ...Array.from(ring).filter((r) => r !== belt));
+  const levels = Math.min(most, ORBITS);
+  const levelOf = (r: number) => (r === belt ? levels + 1 : Math.ceil((r * levels) / most));
+  const counts = new Map<number, number>();
+  const seen = new Map<number, number>();
+  for (const r of ring) if (r > 0) counts.set(levelOf(r), (counts.get(levelOf(r)) ?? 0) + 1);
+  const outer = belt > 0 ? levels + 1 : levels;
+  return Array.from(ring, (r, i) => {
+    if (r <= 0) return { level: 0, radius: 0, phase: 0, speed: 0, tilt: 0 };
+    const level = levelOf(r);
+    const k = seen.get(level) ?? 0;
+    seen.set(level, k + 1);
+    const radius = 0.32 + (0.85 * (level - 1)) / Math.max(1, outer - 1) + ((k % 3) - 1) * 0.02;
+    return { level, radius, phase: (2 * Math.PI * k) / (counts.get(level) ?? 1) + level * 0.7, speed: 0.22 / radius ** 1.5, tilt: (((i * 7919) % 17) / 17 - 0.5) * 0.18 };
+  });
+}
+
+/** The order the notes go along the double helix: through their links from the most linked one, so that linked notes sit near each other. */
+export function helixOrder(near: number[][], shown: boolean[], links: number[]): number[] {
+  const order: number[] = [];
+  const done = new Set<number>();
+  const starts = shown.map((on, i) => (on ? i : -1)).filter((i) => i >= 0).sort((a, b) => links[b] - links[a] || a - b);
+  for (const start of starts) {
+    if (done.has(start)) continue;
+    const stack = [start];
+    while (stack.length) {
+      const i = stack.pop()!;
+      if (done.has(i)) continue;
+      done.add(i);
+      order.push(i);
+      for (const j of [...(near[i] ?? [])].sort((a, b) => links[a] - links[b] || b - a)) if (shown[j] && !done.has(j)) stack.push(j);
+    }
+  }
+  return order;
+}
+
+/** Where along the helix, and on which strand, the `k`th note goes: two strands, each turn `twist` round, `step` apart. */
+export function helixAt(k: number, count: number, step: number, twist: number, spin: number, radius: number): Vec {
+  const m = Math.floor(k / 2);
+  const angle = m * twist + (k % 2) * Math.PI + spin;
+  return [radius * Math.cos(angle), (m - (Math.ceil(count / 2) - 1) / 2) * step, radius * Math.sin(angle)];
+}
+
+/** The parts of the brain the types of notes live in: the lobes of each half, the cerebellum, the stem, in an order where every few apart are far apart. */
+export const LOBES: Vec[] = [
+  [-0.22, -0.3, -0.48],
+  [0.26, -0.36, 0.14],
+  [0, 0.34, 0.6],
+  [0.36, 0.06, -0.14],
+  [-0.2, -0.12, 0.6],
+  [0.22, -0.3, -0.48],
+  [-0.26, -0.36, 0.14],
+  [-0.36, 0.06, -0.14],
+  [0.2, -0.12, 0.6],
+];
+/** The lobe of a note's type: the memory's types spread over the lobes, and notes without one in the middle. */
+export const lobeOf = (type: string | undefined, types: string[]): Vec => {
+  if (!type) return [0, -0.05, 0];
+  const i = Math.max(0, types.indexOf(type));
+  return LOBES[types.length <= LOBES.length ? Math.floor((i * LOBES.length) / Math.max(1, types.length)) : i % LOBES.length];
+};
+
+/** A point of a heart, `t` from 0 to 1 round it, about one across. */
+export function heart(t: number): [number, number] {
+  const a = t * Math.PI * 2;
+  return [(16 * Math.sin(a) ** 3) / 17, -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)) / 17];
+}
+
+/** The angle from `a` to `b` seen from `c`, between -π and π: summed over a drag, how far it went round `c`. */
+export function turnAround(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }): number {
+  let d = Math.atan2(b.y - c.y, b.x - c.x) - Math.atan2(a.y - c.y, a.x - c.x);
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+/** Counts how often a drag changed direction left and right within the last `window` milliseconds: a shake. */
+export class Shake {
+  private turns: number[] = [];
+  private last: { x: number; dir: number } | null = null;
+  constructor(private window = 1200, private least = 12) {}
+  add(x: number, at: number): number {
+    if (!this.last) this.last = { x, dir: 0 };
+    const dx = x - this.last.x;
+    if (Math.abs(dx) >= this.least) {
+      const dir = Math.sign(dx);
+      if (this.last.dir && dir !== this.last.dir) this.turns.push(at);
+      this.last = { x, dir };
+    }
+    this.turns = this.turns.filter((t) => at - t <= this.window);
+    return this.turns.length;
+  }
+  reset() {
+    this.turns = [];
+    this.last = null;
+  }
+}
 
 /** The brain's outline as it comes: a soft pink with a little neon in it. */
 export const BRAIN_COLOUR = "#ff5fc8";

@@ -1445,7 +1445,7 @@ function GraphView({
           <select value={theme} onChange={(e) => setTheme(skyThemeFrom(e.target.value))} aria-label={t("Look of the 3D view")} className="h-7 rounded-md border border-line bg-surface px-1.5 text-xs text-fg">
             {SKY_THEMES.map((s) => (
               <option key={s} value={s}>
-                {s === "stellar" ? t("Stellar") : s === "deepsea" ? t("Deep sea") : s === "brain" ? t("Brain") : t("Synthwave")}
+                {s === "stellar" ? t("Constellation") : s === "solar" ? t("Solar system") : s === "brain" ? t("Brain") : s === "fireflies" ? t("Fireflies") : t("Double helix")}
               </option>
             ))}
           </select>

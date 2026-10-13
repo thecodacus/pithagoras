@@ -413,16 +413,16 @@ test('the 3D view and its look are kept in this browser, and nothing is written 
   await expect(sky.locator('canvas')).toBeVisible();
   const look = page.getByLabel('Look of the 3D view');
   await expect(look).toHaveValue('stellar');
-  for (const theme of ['stellar', 'deepsea', 'brain', 'synthwave']) {
+  for (const theme of ['stellar', 'solar', 'brain', 'fireflies', 'helix']) {
     await look.selectOption(theme);
     await expect(sky).toHaveAttribute('data-theme-3d', theme);
     await frames(page);
     expect(await visibleText(page)).toEqual([]);
     expect(await page.evaluate(() => (window as any).written)).toBe(0);
   }
-  await look.selectOption('deepsea');
+  await look.selectOption('fireflies');
   await page.reload();
-  await expect(page.getByLabel('Look of the 3D view')).toHaveValue('deepsea');
+  await expect(page.getByLabel('Look of the 3D view')).toHaveValue('fireflies');
   // A note's name only while it is reached: Tab to its star, and a small card says it; Enter opens it.
   const owner = sky.getByRole('button', { name: 'The owner' });
   await owner.focus();
@@ -437,6 +437,96 @@ test('the 3D view and its look are kept in this browser, and nothing is written 
   await page.getByRole('button', { name: '2D' }).click();
   await page.reload();
   await expect(page.getByRole('group', { name: /3 notes/ }).locator('line')).toHaveCount(1);
+});
+
+/** Each 3D look's secret, and the gesture that sets it off. */
+const secrets: [string, string, (page: Page) => Promise<void>][] = [
+  // A double-click on the empty sky, in its corner.
+  ['stellar', 'meteor-shower', async (page) => {
+    const b = (await page.locator('.memory-sky canvas').boundingBox())!;
+    await page.mouse.dblclick(b.x + 12, b.y + 12);
+  }],
+  // A drag once right round the sun, which is in the middle.
+  ['solar', 'eclipse', async (page) => {
+    const b = (await page.locator('.memory-sky canvas').boundingBox())!;
+    const [cx, cy] = [b.x + b.width / 2, b.y + b.height / 2];
+    await page.mouse.move(cx + 180, cy);
+    await page.mouse.down();
+    for (let k = 1; k <= 24; k++) await page.mouse.move(cx + 180 * Math.cos((k / 24) * Math.PI * 2), cy + 180 * Math.sin((k / 24) * Math.PI * 2));
+    await page.mouse.up();
+  }],
+  // A press held still on an empty spot.
+  ['brain', 'thought', async (page) => {
+    const b = (await page.locator('.memory-sky canvas').boundingBox())!;
+    await page.mouse.move(b.x + 12, b.y + 12);
+    await page.mouse.down();
+    await page.waitForTimeout(1700);
+    await page.mouse.up();
+  }],
+  // A shake: quickly back and forth.
+  ['fireflies', 'heart', async (page) => {
+    const b = (await page.locator('.memory-sky canvas').boundingBox())!;
+    await page.mouse.move(b.x + 60, b.y + 60);
+    await page.mouse.down();
+    for (let k = 0; k < 6; k++) await page.mouse.move(b.x + 60 + (k % 2 ? 0 : 120), b.y + 60);
+    await page.mouse.up();
+  }],
+  // A fast flick across.
+  ['helix', 'replication', async (page) => {
+    const b = (await page.locator('.memory-sky canvas').boundingBox())!;
+    await page.mouse.move(b.x + 40, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + 440, b.y + b.height / 2);
+    await page.mouse.up();
+  }],
+];
+
+for (const [theme, egg, gesture] of secrets) {
+  test(`the ${theme} look has a secret of its own, ${egg}, and writes nothing while it plays`, async ({ page }) => {
+    test.setTimeout(60_000);
+    await countCanvasText(page);
+    await portal(page, { notes: 40 });
+    await page.goto('/memory?view=graph');
+    await page.getByRole('button', { name: '3D' }).click();
+    await page.getByLabel('Look of the 3D view').selectOption(theme);
+    const sky = page.locator('.memory-sky');
+    await expect(sky.locator('canvas')).toBeVisible();
+    await frames(page);
+    // Another look's gesture is not this one's.
+    const [, , other] = secrets[(secrets.findIndex(([t]) => t === theme) + (theme === 'helix' ? 3 : 2)) % secrets.length];
+    await other(page);
+    await frames(page);
+    await expect(sky).not.toHaveAttribute('data-easter-egg', egg);
+    await expect(sky).not.toHaveAttribute('data-easter-egg', /./, { timeout: 15_000 });
+    await gesture(page);
+    await expect(sky).toHaveAttribute('data-easter-egg', egg);
+    expect(await visibleText(page)).toEqual([]);
+    // It ends by itself, and nothing was opened by it.
+    await expect(sky).not.toHaveAttribute('data-easter-egg', /./, { timeout: 15_000 });
+    await expect(page.getByRole('article')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).written)).toBe(0);
+  });
+}
+
+test('with less motion asked for, the 3D looks hold still and play no secrets', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await portal(page);
+  await page.goto('/memory?view=graph');
+  await page.getByRole('button', { name: '3D' }).click();
+  const canvas = page.locator('.memory-sky canvas');
+  for (const theme of ['stellar', 'solar', 'brain', 'fireflies', 'helix']) {
+    await page.getByLabel('Look of the 3D view').selectOption(theme);
+    await frames(page);
+    const first = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL());
+    await page.waitForTimeout(300);
+    await frames(page);
+    expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(first);
+  }
+  const b = (await canvas.boundingBox())!;
+  await page.getByLabel('Look of the 3D view').selectOption('stellar');
+  await page.mouse.dblclick(b.x + 12, b.y + 12);
+  await frames(page);
+  await expect(page.locator('.memory-sky')).not.toHaveAttribute('data-easter-egg', /./);
 });
 
 /** How many pixels of the canvas are mostly green, the colour the test gives the brain. */
@@ -464,6 +554,7 @@ test("the brain's outline is drawn in the colour chosen for it, and the colour i
   expect(await greenPixels(page)).toBeGreaterThan(200);
   await page.reload();
   await expect(page.getByLabel("Colour of the brain's outline")).toHaveValue('#00ff00');
+  await expect(page.locator('.memory-sky canvas')).toBeVisible();
   await frames(page);
   expect(await greenPixels(page)).toBeGreaterThan(200);
 });

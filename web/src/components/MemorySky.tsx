@@ -1,18 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { LuLocateFixed, LuMinus, LuPlus } from "react-icons/lu";
 import { reducedMotion } from "../motion";
-import { neighbours } from "../memory-graph";
-import { brainOutline, intoBrain, layout3dKept, pick, project, RESTING, seeded, type Camera, type Projected, type SkyTheme } from "../memory-sky";
+import { layout3dKept, pick, project, Shake, turnAround, type Camera, type Projected, type SkyTheme } from "../memory-sky";
 import { t, tp } from "../i18n";
+import { LOOKS, rgbOf, type Gesture, type GraphNote, type Scene } from "./sky-looks";
 
-/** A note as the graph has it. */
-export interface GraphNote {
-  path: string;
-  title?: string;
-  type?: string;
-  description?: string;
-  links: number;
-}
+export type { GraphNote } from "./sky-looks";
 
 /** What a note says of itself when it is pointed at: in both views, the only place the 3D one writes anything. */
 export function NoteCard({ note, colour, hint }: { note: GraphNote; colour: string; hint?: string }) {
@@ -30,52 +23,21 @@ export function NoteCard({ note, colour, hint }: { note: GraphNote; colour: stri
   );
 }
 
-type Rgb = [number, number, number];
-const rgbOf = (hex: string): Rgb => {
-  const n = parseInt(hex.replace("#", "").padEnd(6, "0").slice(0, 6), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-};
-const rgba = ([r, g, b]: Rgb, a: number) => `rgba(${r},${g},${b},${Math.max(0, Math.min(1, a)).toFixed(3)})`;
-/** Part of the way to white: a type's colour as light rather than paint. */
-const lighter = ([r, g, b]: Rgb, k: number): Rgb => [r + (255 - r) * k, g + (255 - g) * k, b + (255 - b) * k];
-
-/** A soft round glow of a colour, drawn once and then stamped at every star of it. */
-function glow(colour: Rgb, core: Rgb, falloff: number): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = c.height = 64;
-  const g = c.getContext("2d")!;
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, rgba(core, 1));
-  grad.addColorStop(0.12, rgba(lighter(colour, 0.5), 0.9));
-  grad.addColorStop(falloff, rgba(colour, 0.22));
-  grad.addColorStop(1, rgba(colour, 0));
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  return c;
-}
-
-/** The dust and the far stars behind the graph: fixed for each theme, so the same view is the same picture. */
-const specks = (seed: number, n: number) => {
-  const random = seeded(seed);
-  return Array.from({ length: n }, () => ({ x: random(), y: random(), size: random(), phase: random() * Math.PI * 2 }));
-};
-const FAR_STARS = specks(11, 260);
-const SNOW = specks(23, 90);
-
-const BRAIN = brainOutline();
-
-/** How big a note's point of light is at the middle's depth, in pixels, from how linked it is: the brain's neurons are smaller. */
-const coreOf = (links: number, theme: SkyTheme) => (theme === "brain" ? 0.9 + Math.min(links, 12) * 0.12 : 1.7 + Math.min(links, 12) * 0.3);
+const clampZoom = (z: number) => Math.max(0.35, Math.min(8, z));
+/** How long a press is held still before it counts as held. */
+const HOLD_MS = 1400;
 
 /**
- * The graph in space, on a canvas: the notes as points of light, their links
- * as thin lines, turning slowly. Drag turns it, the wheel or a pinch zooms,
- * and the buttons zoom and set it back. Nothing is written on it: a note says
- * its name in a small card while it is pointed at or reached with Tab, through
- * buttons only a screen reader and the keyboard see.
+ * The graph in space, on a canvas, in one of the looks of sky-looks.ts: each
+ * places the notes, moves and answers a drag in its own way, and has a secret.
+ * The wheel or a pinch zooms, and the buttons zoom and set the camera back, in
+ * all of them. Nothing is written on it: a note says its name in a small card
+ * while it is pointed at or reached with Tab, through buttons only a screen
+ * reader and the keyboard see.
  *
- * The camera and what it looks at live in refs and are drawn on every frame;
- * React draws only the card and the buttons.
+ * The camera, the look's world and where every note is live in refs and are
+ * drawn on every frame; React draws only the card and the buttons. The secret
+ * playing, if one is, is named on the view as `data-easter-egg`.
  */
 export function MemorySky({
   notes,
@@ -106,58 +68,60 @@ export function MemorySky({
 }) {
   const placed = useMemo(() => layout3dKept(notes.map((n) => n.path), edges), [notes, edges]);
   const index = useMemo(() => new Map(notes.map((n, i) => [n.path, i])), [notes]);
-  const near = useMemo(() => neighbours(edges), [edges]);
   const links = useMemo(
     () => edges.map((e) => [index.get(e.source), index.get(e.target)] as const).filter((l): l is readonly [number, number] => l[0] !== undefined && l[1] !== undefined && l[0] !== l[1]),
     [edges, index],
   );
+  const near = useMemo(() => {
+    const list: number[][] = notes.map(() => []);
+    for (const [a, b] of links) {
+      if (!list[a].includes(b)) list[a].push(b);
+      if (!list[b].includes(a)) list[b].push(a);
+    }
+    return list;
+  }, [notes, links]);
   const colours = useMemo(() => notes.map((n) => rgbOf(colourOf(n.type))), [notes, colourOf]);
+  const types = useMemo(() => [...new Set(notes.map((n) => n.type).filter((x): x is string => !!x))].sort(), [notes]);
+  const isShown = useMemo(() => notes.map((n) => shown.has(n.path)), [notes, shown]);
+  const foundAt = useMemo(() => (found ? new Set([...found].map((p) => index.get(p)).filter((i): i is number => i !== undefined)) : null), [found, index]);
+  // Bumped when what is placed changes, for the look to place it again.
+  const version = useRef(0);
+  const placedVersion = useMemo(() => ++version.current, [placed, isShown, links]);
 
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const card = useRef<HTMLDivElement>(null);
-  const cam = useRef<Camera>({ ...RESTING });
-  const aim = useRef<Camera | null>(null);
-  const spin = useRef({ yaw: 0, pitch: 0 });
-  const seen = useRef<Projected[]>([]);
+  const look = LOOKS[theme];
+  const rig = useRef({ cam: { ...look.rest } as Camera, aim: null as Camera | null });
+  const world = useRef<{ theme: SkyTheme; w: any }>({ theme, w: look.init() });
+  if (world.current.theme !== theme) {
+    // Another look is another world, seen from where it rests.
+    world.current = { theme, w: look.init() };
+    rig.current = { cam: { ...look.rest }, aim: null };
+  }
+  const scene = useRef<Scene | null>(null);
   const dirty = useRef(true);
-  // The note pointed at, and the one reached with Tab: either one is lit and has the card.
   const [hover, setHover] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const tip = hover ?? focused;
 
+  const still = reducedMotion();
   // What the frame loop reads, as of the last render.
-  const live = useRef({ shown, found, selected, theme, outline, tip });
-  live.current = { shown, found, selected, theme, outline, tip };
+  const live = useRef({ isShown, foundAt, selected, theme, outline, tip, placedVersion });
+  live.current = { isShown, foundAt, selected, theme, outline, tip, placedVersion };
   useEffect(() => {
     dirty.current = true;
-  }, [shown, found, selected, theme, outline, tip, placed]);
+  }, [isShown, foundAt, selected, theme, outline, tip, placed]);
 
-  const still = reducedMotion();
   /** The camera to `to`: glided there, or at once for somebody who asked for less motion. */
   const go = (to: Camera) => {
-    spin.current = { yaw: 0, pitch: 0 };
     if (still) {
-      cam.current = { ...to };
-      aim.current = null;
+      rig.current.cam = { ...to };
+      rig.current.aim = null;
       dirty.current = true;
-    } else aim.current = { ...to };
-  };
-  // The chosen note is brought to the middle, a little closer.
-  useEffect(() => {
-    const at = selected === null ? undefined : index.get(selected);
-    if (at === undefined || !shown.has(selected!)) return;
-    const p = where(at);
-    go({ ...cam.current, tx: p[0], ty: p[1], tz: p[2], zoom: Math.max(cam.current.zoom, 1.5) });
-  }, [selected, placed, theme]);
-
-  /** Where note `i` is in this theme's space. */
-  const where = (i: number): [number, number, number] => {
-    const p = placed[i];
-    return live.current.theme === "brain" ? intoBrain(p) : [p.x, p.y, p.z];
+    } else rig.current.aim = { ...to };
   };
 
-  // Sized to its box, in the screen's own pixels.
   useLayoutEffect(() => {
     const el = wrap.current;
     const c = canvas.current;
@@ -174,156 +138,107 @@ export function MemorySky({
     return () => watch.disconnect();
   }, []);
 
+  const grab = useRef<{ x: number; y: number; moved: boolean; id: number; held: boolean; around: number; aroundDone: boolean; shaken: boolean; trail: { x: number; y: number; at: number }[] } | null>(null);
+  const pinch = useRef<number | null>(null);
+  const shake = useRef(new Shake(1600));
+
   // The frame loop.
   useEffect(() => {
     const c = canvas.current;
-    const ctx = c?.getContext("2d");
-    if (!c || !ctx) return;
-    const sprites = new Map<string, HTMLCanvasElement>();
-    const sprite = (key: string, make: () => HTMLCanvasElement) => sprites.get(key) ?? (sprites.set(key, make()), sprites.get(key)!);
+    const g = c?.getContext("2d");
+    if (!c || !g) return;
     let raf = 0;
-    let last = performance.now();
+    const started = performance.now();
+    let last = started;
+    let egg = "";
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
-      const dt = Math.min(0.05, (now - last) / 1000);
+      // The world's clock is the real one, so that a slow machine's frames are long ones and not slow time; a step is never more than a fifth of a second, so that a tab come back after a while does not fling anything.
+      const dt = still ? 0 : Math.min(0.2, (now - last) / 1000);
+      const time = still ? 0 : (now - started) / 1000;
       last = now;
-      const { shown, found, selected, theme, outline, tip } = live.current;
-      const camera = cam.current;
-      if (!still) {
-        // A slow drift, held while a note is pointed at so it stays where the pointer is; a flick goes on a while and slows.
-        if (!grab.current && tip === null) camera.yaw += dt * 0.06;
-        camera.yaw += spin.current.yaw * dt;
-        camera.pitch = clampPitch(camera.pitch + spin.current.pitch * dt);
-        spin.current.yaw *= Math.exp(-dt * 3);
-        spin.current.pitch *= Math.exp(-dt * 3);
-        const to = aim.current;
-        if (to) {
-          const k = 1 - Math.exp(-dt * 5);
-          let done = true;
-          for (const key of ["yaw", "pitch", "zoom", "tx", "ty", "tz"] as const) {
-            camera[key] += (to[key] - camera[key]) * k;
-            if (Math.abs(to[key] - camera[key]) > 1e-3) done = false;
-          }
-          if (done) {
-            Object.assign(camera, to);
-            aim.current = null;
-          }
+      const { isShown, foundAt, selected, theme, outline, tip, placedVersion } = live.current;
+      const lookNow = LOOKS[theme];
+      const r = rig.current;
+      if (r.aim) {
+        const k = still ? 1 : 1 - Math.exp(-dt * 5);
+        let done = true;
+        for (const key of ["yaw", "pitch", "zoom", "tx", "ty", "tz"] as const) {
+          r.cam[key] += (r.aim[key] - r.cam[key]) * k;
+          if (Math.abs(r.aim[key] - r.cam[key]) > 1e-3) done = false;
         }
-      } else if (!dirty.current) return;
+        if (done) {
+          Object.assign(r.cam, r.aim);
+          r.aim = null;
+        }
+      }
+      if (still && !dirty.current) return;
       dirty.current = false;
 
       const dpr = c.width / Math.max(1, c.clientWidth);
       const w = c.width / dpr;
       const h = c.height / dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
-      ctx.shadowBlur = 0;
-      const time = still ? 0 : now / 1000;
-      backdrop(ctx, theme, w, h, camera, time);
-
-      const n = placed.length;
-      const pts: Projected[] = new Array(n);
-      const bob = theme === "deepsea" && !still;
-      for (let i = 0; i < n; i++) {
-        const p = where(i);
-        if (bob) p[1] += Math.sin(time * 0.7 + i * 1.7) * 0.025;
-        pts[i] = project({ x: p[0], y: p[1], z: p[2] }, camera, w, h);
-      }
-      seen.current = pts;
-      const focusAt = tip !== null ? index.get(tip) : selected !== null ? index.get(selected) : undefined;
-      const lit = focusAt === undefined ? null : new Set([focusAt, ...[...(near.get(notes[focusAt].path) ?? [])].map((p) => index.get(p)!).filter((i) => i !== undefined)]);
-      const isShown = (i: number) => shown.has(notes[i].path);
-      const dimOf = (i: number) => (lit ? (lit.has(i) ? 1 : 0.22) : found ? (found.has(notes[i].path) ? 1 : 0.3) : 1);
-      const zoomed = Math.sqrt(camera.zoom);
-
-      if (theme === "brain") {
-        const glowOf = rgbOf(outline);
-        ctx.lineWidth = 1;
-        ctx.shadowColor = rgba(glowOf, 0.9);
-        ctx.shadowBlur = 6;
-        for (const line of BRAIN) {
-          const projected = line.map((q) => project({ x: q[0], y: q[1], z: q[2] }, camera, w, h));
-          // Between a twentieth and a quarter as strong, the far side the fainter.
-          const depth = projected.reduce((s, q) => s + q.depth, 0) / projected.length;
-          ctx.strokeStyle = rgba(glowOf, 0.05 + 0.2 * Math.max(0, Math.min(1, 0.5 - depth / 2)));
-          ctx.beginPath();
-          projected.forEach((q, k) => (k ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
-          ctx.stroke();
-        }
-        ctx.shadowBlur = 0;
-      }
-      // The links: thin, the far ones fainter, those of the note in focus in its colour.
-      const linkColour: Rgb = theme === "brain" ? lighter(rgbOf(outline), 0.3) : theme === "deepsea" ? [120, 230, 255] : theme === "synthwave" ? [45, 226, 230] : [175, 200, 255];
-      ctx.lineCap = "round";
-      for (const [a, b] of links) {
-        if (!isShown(a) || !isShown(b)) continue;
-        const pa = pts[a];
-        const pb = pts[b];
-        const near = Math.max(0.15, Math.min(1, 1 - (pa.depth + pb.depth) / 4));
-        const hot = lit !== null && lit.has(a) && lit.has(b) && (a === focusAt || b === focusAt);
-        ctx.lineWidth = hot ? 1.4 : theme === "synthwave" ? 1 : 0.7;
-        ctx.strokeStyle = hot ? rgba(lighter(colours[focusAt!], 0.25), 0.9) : rgba(linkColour, (theme === "stellar" ? 0.26 : 0.32) * near * Math.min(dimOf(a), dimOf(b)));
-        ctx.beginPath();
-        ctx.moveTo(pa.x, pa.y);
-        ctx.lineTo(pb.x, pb.y);
-        ctx.stroke();
-      }
-
-      // The notes, the far ones first so the near ones are drawn over them.
-      const order = Array.from({ length: n }, (_, i) => i).filter(isShown).sort((a, b) => pts[b].depth - pts[a].depth);
-      ctx.globalCompositeOperation = "lighter";
-      for (const i of order) {
-        const p = pts[i];
-        const base = coreOf(notes[i].links, theme) * p.scale * zoomed;
-        const twinkle = still ? 1 : 0.82 + 0.18 * Math.sin(time * (1.3 + (i % 5) * 0.37) + i * 2.1);
-        const alpha = dimOf(i) * twinkle * Math.max(0.35, Math.min(1, 1.2 - p.depth / 3));
-        const colour = colours[i];
-        const key = `${theme}${colour.join()}`;
-        const img =
-          theme === "deepsea"
-            ? sprite(key, () => glow(lighter(colour, 0.35), [230, 255, 255], 0.5))
-            : theme === "synthwave"
-              ? sprite(key, () => glow(colour, [255, 255, 255], 0.3))
-              : theme === "brain"
-                ? sprite(key, () => glow(lighter(colour, 0.25), [255, 245, 252], 0.35))
-                : sprite(key, () => glow(colour, [255, 255, 255], 0.38));
-        const size = base * (theme === "deepsea" ? 9 : theme === "brain" ? 8 : 7.5);
-        ctx.globalAlpha = alpha;
-        ctx.drawImage(img, p.x - size / 2, p.y - size / 2, size, size);
-        if (theme === "deepsea") {
-          // A jelly's bell: a faint ring that swells and settles.
-          ctx.strokeStyle = rgba(lighter(colour, 0.5), 0.35 * alpha);
-          ctx.lineWidth = 0.8;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, base * (2.4 + (still ? 0 : 0.35 * Math.sin(time * 1.6 + i))), 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
-
-      // A ring for the note chosen, and fainter ones for what the search found.
-      const ring = (i: number, strength: number, gap: number) => {
-        const p = pts[i];
-        const r = coreOf(notes[i].links, theme) * p.scale * zoomed * 2.4 + gap;
-        ctx.strokeStyle = rgba([255, 255, 255], strength);
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.stroke();
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.globalCompositeOperation = "source-over";
+      g.globalAlpha = 1;
+      g.shadowBlur = 0;
+      const n = notes.length;
+      const tipAt = tip === null ? null : (index.get(tip) ?? null);
+      const chosen = selected === null ? null : (index.get(selected) ?? null);
+      const focus = tipAt ?? (chosen !== null && isShown[chosen] ? chosen : null);
+      const lit = focus === null ? null : new Set([focus, ...near[focus].filter((j) => isShown[j])]);
+      const dim = new Float32Array(n);
+      for (let i = 0; i < n; i++) dim[i] = lit ? (lit.has(i) ? 1 : 0.22) : foundAt ? (foundAt.has(i) ? 1 : 0.3) : 1;
+      let view: Camera = r.cam;
+      const s: Scene = {
+        g,
+        w,
+        h,
+        dt,
+        time,
+        still,
+        version: placedVersion,
+        notes,
+        links,
+        near,
+        colours,
+        types,
+        shown: isShown,
+        found: foundAt,
+        selected: chosen,
+        tip: tipAt,
+        focus,
+        lit,
+        dim,
+        base: placed,
+        rig: r,
+        grabbing: !!grab.current?.moved || pinch.current !== null,
+        outline: rgbOf(outline),
+        pos: scene.current?.pos.length === n * 3 ? scene.current.pos : new Float64Array(n * 3),
+        pts: scene.current?.pts ?? [],
+        project: (x, y, z) => project({ x, y, z }, view, w, h),
       };
-      if (found) for (const path of found) {
-        const i = index.get(path);
-        if (i !== undefined && isShown(i)) ring(i, 0.45, 3);
-      }
-      const chosen = selected === null ? undefined : index.get(selected);
-      if (chosen !== undefined && isShown(chosen)) ring(chosen, still ? 0.85 : 0.6 + 0.3 * Math.sin(time * 2.4), 6);
+      const wd = world.current.w;
+      lookNow.step(s, wd);
+      view = lookNow.view?.(s, wd) ?? r.cam;
+      const pts: Projected[] = new Array(n);
+      for (let i = 0; i < n; i++) pts[i] = s.project(s.pos[i * 3], s.pos[i * 3 + 1], s.pos[i * 3 + 2]);
+      s.pts = pts;
+      scene.current = s;
+      lookNow.draw(s, wd);
+      g.globalCompositeOperation = "source-over";
+      g.globalAlpha = 1;
+      g.shadowBlur = 0;
 
-      // The card follows its note as the view turns.
-      const tipAt = tip === null ? undefined : index.get(tip);
+      const playing = wd.egg?.name ?? "";
+      if (playing !== egg && wrap.current) {
+        egg = playing;
+        if (egg) wrap.current.dataset.easterEgg = egg;
+        else delete wrap.current.dataset.easterEgg;
+      }
+      // The card follows its note as the view moves.
       const el = card.current;
-      if (el && tipAt !== undefined) {
+      if (el && tipAt !== null) {
         const p = pts[tipAt];
         const x = Math.max(4, Math.min(w - el.offsetWidth - 4, p.x - el.offsetWidth / 2));
         const above = p.y - el.offsetHeight - 14;
@@ -333,55 +248,87 @@ export function MemorySky({
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [placed, links, colours, notes, index, near, still]);
+  }, [placed, links, near, colours, types, notes, index, still]);
 
-  // Turning, zooming and choosing with the pointer.
-  const grab = useRef<{ x: number; y: number; moved: boolean; id: number } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<number | null>(null);
+  const holding = useRef(0);
   const at = (e: { clientX: number; clientY: number }) => {
     const r = canvas.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const under = (x: number, y: number, touch: boolean) => {
-    const z = Math.sqrt(cam.current.zoom);
-    const i = pick(seen.current, x, y, (k) => Math.max(touch ? 16 : 9, coreOf(notes[k].links, live.current.theme) * seen.current[k].scale * z * 2.5), (k) => !live.current.shown.has(notes[k].path));
+    const s = scene.current;
+    if (!s || !s.pts.length) return null;
+    const z = Math.sqrt(rig.current.cam.zoom);
+    const lookNow = LOOKS[live.current.theme];
+    const i = pick(s.pts, x, y, (k) => Math.max(touch ? 16 : 9, lookNow.core(s, k, world.current.w) * s.pts[k].scale * z * 2.5), (k) => !live.current.isShown[k]);
     return i === null ? null : notes[i].path;
+  };
+  const tell = (g: Gesture) => {
+    const s = scene.current;
+    if (s) LOOKS[live.current.theme].gesture(s, world.current.w, g);
   };
   const down = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    clearTimeout(holding.current);
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       pinch.current = Math.hypot(a.x - b.x, a.y - b.y);
       grab.current = null;
       return;
     }
-    grab.current = { x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
-    spin.current = { yaw: 0, pitch: 0 };
-    aim.current = null;
+    grab.current = { x: e.clientX, y: e.clientY, moved: false, id: e.pointerId, held: false, around: 0, aroundDone: false, shaken: false, trail: [{ x: e.clientX, y: e.clientY, at: performance.now() }] };
+    shake.current.reset();
+    rig.current.aim = null;
+    const p = at(e);
+    // Held still on the empty background: a gesture of its own, and not a click when it is let go.
+    if (!under(p.x, p.y, e.pointerType === "touch"))
+      holding.current = window.setTimeout(() => {
+        const g = grab.current;
+        if (!g || g.moved) return;
+        g.held = true;
+        tell({ kind: "hold", x: p.x, y: p.y });
+      }, HOLD_MS);
   };
   const move = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch.current !== null && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      cam.current.zoom = clampZoom(cam.current.zoom * (d / pinch.current));
+      rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (d / pinch.current));
       pinch.current = d;
       dirty.current = true;
       return;
     }
     const g = grab.current;
+    const s = scene.current;
     if (g && g.id === e.pointerId) {
       const dx = e.clientX - g.x;
       const dy = e.clientY - g.y;
       if (!g.moved && Math.hypot(dx, dy) < 4) return;
       g.moved = true;
+      clearTimeout(holding.current);
+      const lookNow = LOOKS[live.current.theme];
+      // Round the look's middle, if it has one: summed over the drag, a whole turn is a gesture.
+      const centre = s && lookNow.centre?.(s, world.current.w);
+      if (centre && canvas.current) {
+        const r = canvas.current.getBoundingClientRect();
+        g.around += turnAround({ x: g.x - r.left, y: g.y - r.top }, { x: e.clientX - r.left, y: e.clientY - r.top }, centre);
+        if (Math.abs(g.around) >= Math.PI * 2 && !g.aroundDone) {
+          g.aroundDone = true;
+          tell({ kind: "around" });
+        }
+      }
+      if (shake.current.add(e.clientX, performance.now()) >= 4 && !g.shaken) {
+        g.shaken = true;
+        tell({ kind: "shake" });
+      }
       g.x = e.clientX;
       g.y = e.clientY;
-      cam.current.yaw += dx * 0.006;
-      cam.current.pitch = clampPitch(cam.current.pitch - dy * 0.006);
-      if (!still) spin.current = { yaw: dx * 0.35, pitch: -dy * 0.35 };
+      g.trail.push({ x: e.clientX, y: e.clientY, at: performance.now() });
+      if (g.trail.length > 12) g.trail.shift();
+      if (s) lookNow.drag(s, world.current.w, dx, dy);
       dirty.current = true;
       if (hover !== null) setHover(null);
       return;
@@ -393,27 +340,45 @@ export function MemorySky({
   const up = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
+    clearTimeout(holding.current);
     const g = grab.current;
     grab.current = null;
-    if (!g || g.id !== e.pointerId || g.moved || e.type === "pointercancel") return;
+    if (!g || g.id !== e.pointerId || g.held || e.type === "pointercancel") return;
+    if (g.moved) {
+      // How fast it was going when let go, over the last tenth of a second.
+      const now = performance.now();
+      const recent = g.trail.filter((p) => now - p.at < 100);
+      const first = recent.length > 1 ? recent[0] : (g.trail[g.trail.length - 2] ?? g.trail[0]);
+      const span = Math.max(16, now - first.at) / 1000;
+      const s = scene.current;
+      if (s) LOOKS[live.current.theme].release(s, world.current.w, (e.clientX - first.x) / span, (e.clientY - first.y) / span);
+      return;
+    }
     const p = at(e);
     const hit = under(p.x, p.y, e.pointerType === "touch");
     if (hit) onOpen(hit);
     else onSelect(null);
+  };
+  const double = (e: ReactMouseEvent<HTMLCanvasElement>) => {
+    const p = at(e);
+    if (!under(p.x, p.y, false)) tell({ kind: "double", x: p.x, y: p.y });
   };
   useEffect(() => {
     const c = canvas.current;
     if (!c) return;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      aim.current = null;
-      cam.current.zoom = clampZoom(cam.current.zoom * (e.deltaY > 0 ? 1 / 1.12 : 1.12));
+      rig.current.aim = null;
+      rig.current.cam.zoom = clampZoom(rig.current.cam.zoom * (e.deltaY > 0 ? 1 / 1.12 : 1.12));
       dirty.current = true;
     };
     c.addEventListener("wheel", wheel, { passive: false });
-    return () => c.removeEventListener("wheel", wheel);
+    return () => {
+      c.removeEventListener("wheel", wheel);
+      clearTimeout(holding.current);
+    };
   }, []);
-  const zoomBy = (f: number) => go({ ...(aim.current ?? cam.current), zoom: clampZoom((aim.current ?? cam.current).zoom * f) });
+  const zoomBy = (f: number) => go({ ...(rig.current.aim ?? rig.current.cam), zoom: clampZoom((rig.current.aim ?? rig.current.cam).zoom * f) });
 
   const tipNote = tip === null ? undefined : notes[index.get(tip) ?? -1];
   return (
@@ -427,6 +392,7 @@ export function MemorySky({
         onPointerUp={up}
         onPointerCancel={up}
         onPointerLeave={() => hover !== null && setHover(null)}
+        onDoubleClick={double}
       />
       <ul className="sr-only">
         {notes.map((n) =>
@@ -458,140 +424,18 @@ export function MemorySky({
         <button type="button" onClick={() => zoomBy(1 / 1.3)} aria-label={t("Zoom out")} className="border-y border-white/15 p-2 hover:bg-white/10 hover:text-white">
           <LuMinus className="h-3.5 w-3.5" />
         </button>
-        <button type="button" onClick={() => go({ ...RESTING })} aria-label={t("Show all of it")} className="p-2 hover:bg-white/10 hover:text-white">
+        <button
+          type="button"
+          onClick={() => {
+            LOOKS[theme].reset?.(world.current.w);
+            go({ ...LOOKS[theme].rest });
+          }}
+          aria-label={t("Show all of it")}
+          className="p-2 hover:bg-white/10 hover:text-white"
+        >
           <LuLocateFixed className="h-3.5 w-3.5" />
         </button>
       </div>
     </div>
   );
-}
-
-const clampPitch = (p: number) => Math.max(-1.45, Math.min(1.45, p));
-const clampZoom = (z: number) => Math.max(0.35, Math.min(8, z));
-
-/** What is behind the graph in each theme. */
-function backdrop(ctx: CanvasRenderingContext2D, theme: SkyTheme, w: number, h: number, cam: Camera, time: number) {
-  if (theme === "stellar") {
-    const sky = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.75);
-    sky.addColorStop(0, "#141a3a");
-    sky.addColorStop(0.55, "#090c1f");
-    sky.addColorStop(1, "#03040b");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, h);
-    // A faint band of the galaxy across it.
-    const band = ctx.createLinearGradient(0, h * 0.2, w, h * 0.8);
-    band.addColorStop(0, "rgba(90,70,160,0)");
-    band.addColorStop(0.5, "rgba(110,90,190,0.10)");
-    band.addColorStop(1, "rgba(60,120,200,0)");
-    ctx.fillStyle = band;
-    ctx.fillRect(0, 0, w, h);
-    // Far stars, which move a little as the view turns, as far things do.
-    for (const s of FAR_STARS) {
-      const x = (((s.x * w - cam.yaw * 40) % w) + w) % w;
-      const y = (((s.y * h + cam.pitch * 40) % h) + h) % h;
-      ctx.fillStyle = `rgba(220,230,255,${(0.12 + s.size * 0.4) * (0.7 + 0.3 * Math.sin(time * 1.5 + s.phase))})`;
-      ctx.fillRect(x, y, s.size > 0.85 ? 1.6 : 1, s.size > 0.85 ? 1.6 : 1);
-    }
-  } else if (theme === "deepsea") {
-    const sea = ctx.createLinearGradient(0, 0, 0, h);
-    sea.addColorStop(0, "#0b3a4f");
-    sea.addColorStop(0.45, "#06222f");
-    sea.addColorStop(1, "#020a10");
-    ctx.fillStyle = sea;
-    ctx.fillRect(0, 0, w, h);
-    // Light from the surface, in slow swaying shafts.
-    ctx.globalCompositeOperation = "lighter";
-    for (let k = 0; k < 4; k++) {
-      const x = w * (0.18 + k * 0.22) + Math.sin(time * 0.25 + k * 1.9) * w * 0.04;
-      const shaft = ctx.createLinearGradient(0, 0, 0, h * 0.85);
-      shaft.addColorStop(0, "rgba(120,220,255,0.07)");
-      shaft.addColorStop(1, "rgba(120,220,255,0)");
-      ctx.fillStyle = shaft;
-      ctx.beginPath();
-      ctx.moveTo(x - w * 0.03, 0);
-      ctx.lineTo(x + w * 0.03, 0);
-      ctx.lineTo(x + w * 0.12, h * 0.85);
-      ctx.lineTo(x - w * 0.02, h * 0.85);
-      ctx.fill();
-    }
-    ctx.globalCompositeOperation = "source-over";
-    // Marine snow, sinking slowly.
-    for (const s of SNOW) {
-      const x = (((s.x * w + Math.sin(time * 0.3 + s.phase) * 8 - cam.yaw * 25) % w) + w) % w;
-      const y = (((s.y * h + time * (6 + s.size * 10)) % h) + h) % h;
-      ctx.fillStyle = `rgba(200,240,255,${0.08 + s.size * 0.18})`;
-      ctx.beginPath();
-      ctx.arc(x, y, 0.6 + s.size * 1.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else if (theme === "brain") {
-    const dark = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.7);
-    dark.addColorStop(0, "#1a0d1f");
-    dark.addColorStop(1, "#060308");
-    ctx.fillStyle = dark;
-    ctx.fillRect(0, 0, w, h);
-  } else {
-    const dusk = ctx.createLinearGradient(0, 0, 0, h);
-    dusk.addColorStop(0, "#0b0221");
-    dusk.addColorStop(0.55, "#2a0a45");
-    dusk.addColorStop(0.75, "#4a0f4f");
-    dusk.addColorStop(1, "#0b0221");
-    ctx.fillStyle = dusk;
-    ctx.fillRect(0, 0, w, h);
-    // The sun on the horizon, cut by the bands it always has.
-    const r = Math.min(w, h) * 0.24;
-    const cx = w / 2;
-    const cy = h * 0.6;
-    const sun = ctx.createLinearGradient(0, cy - r, 0, cy + r * 0.2);
-    sun.addColorStop(0, "#ffd36e");
-    sun.addColorStop(1, "#ff3d81");
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, Math.PI, 0);
-    ctx.closePath();
-    ctx.clip();
-    ctx.fillStyle = sun;
-    ctx.globalAlpha = 0.55;
-    ctx.fillRect(cx - r, cy - r, r * 2, r);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "#3a0c4c";
-    for (let k = 0; k < 5; k++) ctx.fillRect(cx - r, cy - r * 0.42 + k * r * 0.1, r * 2, 1.5 + k * 1.3);
-    ctx.restore();
-    // The floor: a grid running to the horizon, sliding towards the viewer and aside as the view turns.
-    const floor = ctx.createLinearGradient(0, cy, 0, h);
-    floor.addColorStop(0, "#1c0633");
-    floor.addColorStop(1, "#07011a");
-    ctx.fillStyle = floor;
-    ctx.fillRect(0, cy, w, h - cy);
-    ctx.lineWidth = 1;
-    const rows = 12;
-    const phase = (time * 0.35) % 1;
-    for (let k = 0; k < rows; k++) {
-      const p = (k + phase) / rows;
-      const y = cy + (h - cy) * p * p;
-      ctx.strokeStyle = `rgba(255,47,214,${(0.15 + 0.55 * p).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-    const spacing = w * 0.12;
-    const slide = ((((cam.yaw * w * 0.15) % spacing) + spacing) % spacing) - spacing / 2;
-    for (let k = -14; k <= 14; k++) {
-      const x = cx + k * spacing + slide;
-      ctx.strokeStyle = "rgba(255,47,214,0.45)";
-      ctx.beginPath();
-      ctx.moveTo(cx + (x - cx) * 0.04, cy);
-      ctx.lineTo(cx + (x - cx) * 1.6, h);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = "rgba(255,120,230,0.9)";
-    ctx.shadowColor = "#ff2fd6";
-    ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.moveTo(0, cy);
-    ctx.lineTo(w, cy);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-  }
 }

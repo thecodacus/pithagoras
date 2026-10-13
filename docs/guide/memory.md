@@ -33,16 +33,43 @@ Both show the same notes, filters and search.
   scroll or the zoom buttons to zoom. The glow and the motion stop for a
   memory of more than 300 notes and for anyone who asks their system to reduce
   motion. **Query paths** shows the routes Understory's own queries took.
-- **3D** is the one to look at. The notes float in space and turn slowly; drag
-  to turn them, scroll or pinch to zoom, and the target button sets the view
-  back. Nothing is written on it: a note's name shows in a small card only
-  while you point at it or reach it with Tab. Click a note to open it. It comes
-  in several looks, chosen beside the switch: **Stellar** (stars and thin lines,
-  a constellation), **Deep sea** (glowing creatures drifting in dark water),
-  **Brain** (neurons inside the faint outline of a brain, whose colour you can
-  set with the colour button next to the look; a neon pink to begin with) and
-  **Synthwave** (neon points over a sunset and a grid). The look and the
-  brain's colour are remembered in this browser too.
+- **3D** is the one to look at. Nothing is written on it: a note's name shows
+  in a small card only while you point at it or reach it with Tab. Click a note
+  to open it; scroll or pinch to zoom, and the target button sets the view
+  back. It comes in five looks, chosen beside the switch. Each places the notes
+  in its own way, moves in its own way, and hides a secret:
+  - **Constellation**: the notes are stars where their links pull them, the
+    links the lines of the constellations, and the sky turns slowly. A drag
+    flings it and it coasts; choosing a note flies to its star.
+    *Secret:* double-click the empty sky for a meteor shower.
+  - **Solar system**: the chosen note is the sun (until you choose one, the
+    most linked note), and every other note orbits it on the ring of how many
+    links away it is, the inner ones faster. Notes no link reaches are the
+    asteroid belt. Choosing another note pulls the whole system into new
+    orbits round it; a drag tips the system, which settles back to its plane.
+    *Secret:* drag once right round the sun, and the moon eclipses it.
+  - **Brain**: the notes are neurons in the lobe their type belongs to, linked
+    by curving axons, inside the faint outline of a brain. It sways from side
+    to side and turns heavily under a drag, without coasting. Neurons fire now
+    and then; the chosen one keeps firing into the notes it links with. The
+    colour button next to the look sets the outline's colour (a neon pink to
+    begin with). *Secret:* press and hold on an empty spot, and a thought
+    spreads from the nearest neuron through the links.
+  - **Fireflies**: each note is a firefly over a meadow at dusk, wandering near
+    where its links put it and blinking to its own rhythm. A drag turns the view
+    and blows a breeze through them; choosing a note calls the swarm to it, the
+    notes it links with circling close. *Secret:* shake the view (drag quickly
+    back and forth), and they blink as one and fly into a heart.
+  - **Double helix**: the notes are beads on two strands, in the order their
+    links lead through them, and the links run across. It spins by itself; a
+    drag across spins it and lets it coast, a drag up or down runs along it.
+    Choosing a note brings it to the front and the middle, and the helix
+    loosens round it. *Secret:* flick it fast enough, and it unzips and copies
+    itself.
+
+  The look and the brain's colour are remembered in this browser too. For
+  anyone who asks their system to reduce motion, the 3D looks stand still and
+  keep their secrets.
 
 The colours above the 2D graph (the filter button in 3D) are also switches: a
 type switched off hides its notes in both views, and so does *orphan*. What the
