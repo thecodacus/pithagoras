@@ -173,6 +173,8 @@ test("a tool that pi offers to scripts only is in the chat's tools, to be switch
   const listed = on.tools.find((tool) => tool.name === "scripted");
   assert.ok(listed, "a script can call it, so the chat can switch it");
   assert.equal(listed.enabled, true);
+  assert.equal(listed.scriptsOnly, true, "and says it is only for scripts, so that nothing offers it a lazy mark");
+  assert.equal(on.tools.find((tool) => tool.name === "bash").scriptsOnly, undefined);
   assert.ok(!on.declared.includes("scripted"), "though the model is not offered it by its name");
   const off = await run(chat(), { toolsOff: ["scripted"] });
   assert.equal(off.tools.find((tool) => tool.name === "scripted")?.enabled, false, "and it is listed as off, to be switched on again");

@@ -2441,16 +2441,18 @@ export function lazyToolSets(): string[] {
 /**
  * Can this tool be marked lazy, and have the portal's `tools` tool reach it? Any tool can but pi's own
  * (read, bash, edit and the rest are what a conversation works with at all), the MCP adapter's `mcp`
- * tool, the portal's code mode, and an MCP server's. An MCP server's tool is lazy too, but not by a mark of the portal's: the
+ * tool, the portal's code mode, a tool that is offered to scripts only, and an MCP server's. An MCP server's tool is lazy too, but not by a mark of the portal's: the
  * adapter has a way of its own to keep a server's tools out of the prompt, through its `mcp` tool, and
  * that is the server's setting "Register tools directly" (see lazyOfServer), the one switch for it. The
  * built-in tools are told by their names: the set they are filed in is the extension's that registers
  * them again, such as the sandbox's.
  */
 export function lazyAllowed(
-  tool: Pick<KnownTool, "name" | "source"> & { package?: string | null; inline?: boolean; cached?: boolean },
+  tool: Pick<KnownTool, "name" | "source"> & { package?: string | null; inline?: boolean; cached?: boolean; scriptsOnly?: boolean },
   servers: string[] = mcpServerNames(),
 ): boolean {
+  // Never in what the model is offered, so a mark would keep nothing out of the prompt: it is code mode's description that carries it.
+  if (tool.scriptsOnly) return false;
   if (tool.cached || adapterTool({ source: tool.source, package: tool.package })) return false;
   if (!noServerOf(tool.name) && mcpServerOf(tool.name, servers) !== undefined) return false;
   if (PI_BUILT_IN_TOOLS.includes(tool.name)) return false;
@@ -2556,15 +2558,21 @@ export interface KnownTool {
    * Every report says it, one way or the other; absent only in an entry remembered before this was recorded.
    */
   inline?: boolean;
+  /**
+   * Offered to scripts only: pi never activates it, so the model is not offered it, and code mode's description
+   * carries it. Set only where it is so; a later report without it takes it back.
+   */
+  scriptsOnly?: true;
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
   package: t.package ?? null,
   inline: t.inline === true,
+  ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
 });
 
 /**
@@ -2620,6 +2628,7 @@ export function knownTools(): KnownTool[] {
         ...(typeof t.description === "string" && t.description ? { description: t.description } : {}),
         ...(typeof t.package === "string" && t.package ? { package: t.package } : t.package === null ? { package: null } : {}),
         ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
+        ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
       }));
   } catch {
     return [];
@@ -3024,6 +3033,7 @@ export function rememberTools(reported: KnownTool[]): string[] {
       ...(description ? { description } : {}),
       ...(pkg !== undefined ? { package: pkg } : {}),
       ...(tool.inline !== undefined ? { inline: tool.inline } : {}),
+      ...(tool.scriptsOnly ? { scriptsOnly: true } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

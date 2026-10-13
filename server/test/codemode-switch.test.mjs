@@ -75,6 +75,33 @@ test("code mode cannot be marked lazy: its row says so, and a mark that names it
   assert.equal(db.lazyAllowed({ name: "codemode", source: "pi-other", package: "pi-other", inline: false }), true);
 });
 
+test("a tool that is offered to scripts only cannot be marked lazy either: nothing would be kept out of the prompt", async () => {
+  // As a session reports it (pi's `codemode` exposure): the model is never offered it, so the gateway has nothing to reach.
+  db.rememberTools([
+    db.remembered({ name: "scripted", source: "pi-scripts", scriptsOnly: true }),
+    db.remembered({ name: "direct", source: "pi-scripts" }),
+  ]);
+  // The server reads what is remembered again after a write of its settings, which a report to it would have been.
+  await json("/api/tools/lazy", "PUT", { lazy: [] });
+  const rows = Object.fromEntries((await json("/api/tools")).tools.map((tool) => [tool.name, tool]));
+  assert.equal(rows.scripted.noLazy, true, "no lazy button for its row");
+  assert.equal(rows.direct.noLazy, undefined, "a tool of the same package that is offered keeps its own");
+  const res = await send("/api/tools/lazy", "PUT", { lazy: ["<tool>scripted"] });
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).code, "lazy-refused");
+  // Its package marked lazy is the other tool's mark: it is not applied to this one, and not shown as applied.
+  await json("/api/tools/lazy", "PUT", { lazy: ["pi-scripts"] });
+  const marked = Object.fromEntries((await json("/api/tools")).tools.map((tool) => [tool.name, tool]));
+  assert.equal(marked.direct.lazy, true);
+  assert.equal(marked.scripted.lazy, undefined);
+  assert.deepEqual([...db.lazyToolNames()], ["direct"]);
+  // A report that no longer says it takes the mark off: the tool is offered to the model now, and may be lazy.
+  db.rememberTools([db.remembered({ name: "scripted", source: "pi-scripts" })]);
+  assert.deepEqual([...db.lazyToolNames()].sort(), ["direct", "scripted"]);
+  await json("/api/tools/lazy", "PUT", { lazy: [] });
+  assert.equal((await json("/api/tools")).tools.find((tool) => tool.name === "scripted").noLazy, undefined);
+});
+
 const DB = fileURLToPath(new URL("../dist/db.js", import.meta.url));
 /** What the default is when the portal next starts on the database in `dir`. */
 async function defaultsAfterStart(dir) {

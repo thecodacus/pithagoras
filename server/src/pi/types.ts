@@ -37,6 +37,8 @@ export interface PiTool {
   package?: string;
   /** One of the portal's own, from an inline extension: no file or package of anyone's has a path like that, so it is not mistaken for an extension's of the same name. */
   inline?: true;
+  /** Offered to scripts only (pi's `codemode` and `deferred` exposure): never in what the model is offered, so it has no lazy mark to give. */
+  scriptsOnly?: true;
   /** An MCP server's tool listed from the adapter's cache, its server not started until the tool is first used. */
   cached?: true;
   /** False when this conversation has it switched off. */

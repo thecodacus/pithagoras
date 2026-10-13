@@ -211,9 +211,10 @@ and scripts cannot run models directly, so pictures and videos are only made
 through the [Media](/guide/media) tools and their settings. A tool that an
 extension offers to scripts only is in the list too, so that it can be
 switched off like the others; one that is off is not described to the model
-and a script does not find it. Code mode itself cannot be made lazy. It is
-offered in chats that run on the host; the container executor has no tool
-switches.
+and a script does not find it. Neither it nor code mode itself can be made
+lazy: the model is not offered the one, and the other is how it makes many
+calls in one. Code mode is offered in chats that run on the host; the
+container executor has no tool switches.
 
 Before a chat has started, and in Settings → Tools, the list is what the portal
 has seen registered. The tools of a package that is switched off, narrowed to

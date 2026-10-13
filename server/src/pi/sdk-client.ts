@@ -1567,6 +1567,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       source: sourceLabel(tool.sourceInfo),
       package: packageOf(tool.sourceInfo),
       ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
+      ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }
