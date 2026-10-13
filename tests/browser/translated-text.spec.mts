@@ -25,7 +25,7 @@ async function browserPage(page: Page) {
   await mockPortal(page, ({ path: p, method }) => {
     if (p === '/api/browser' && method === 'GET') {
       return {
-        running: true, unprotected: false, connectedAs: 'browser', version: '1', pages: [], uiPort: '3011', cursor: true, allowlist: '', configured: true, byDefault: false,
+        running: true, unprotected: false, connectedAs: 'browser', version: '1', pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: true, byDefault: false,
         sessions: [{ id: 'demo', title: 'A chat', kind: 'task', allowed: true }, { id: 'beat', title: 'Its rounds', kind: 'heartbeat', allowed: false }, { id: 'new', title: 'From a newer portal', kind: 'future-kind', allowed: true }], routines: [],
         install: { available: true, mode: 'docker', image: true, container: 'running', binary: null, pulling: { active: false, line: '' } },
         config: { user: 'abc', hasPassword: true },
