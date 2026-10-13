@@ -57,8 +57,10 @@ const colleague = { role: "colleague", whoNow: () => ({ role: "colleague", key: 
 async function run(calls, options = {}, inspect = async () => {}) {
   script = calls;
   model.requests.length = 0;
+  // Code mode off, as a chat starts on the portal's defaults: on, pi adds how a script calls each tool to its description.
   const client = await SdkPiClient.create({
     cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `shadow-${n++}`, ...options,
+    toolsOff: ["codemode", ...(options.toolsOff ?? [])],
   });
   const results = [];
   const settled = new Promise((resolve) => client.on("event", (e) => {

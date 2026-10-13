@@ -54,7 +54,8 @@ test("a tool called tools that registers after the switches leaves the lazy tool
   model.requests.length = 0;
   const client = await SdkPiClient.create({
     cwd: mkdtempSync(path.join(process.env.WORKSPACE_ROOT, "chat-")), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m",
-    sessionId: "late-1", toolsLazy: ["docs_open"], lazySets: ["docs"],
+    // Code mode off, as a chat starts on the portal's defaults: on, pi adds how a script calls each tool to its description.
+    sessionId: "late-1", toolsLazy: ["docs_open"], lazySets: ["docs"], toolsOff: ["codemode"],
   });
   try {
     const ask = async () => {
@@ -68,7 +69,7 @@ test("a tool called tools that registers after the switches leaves the lazy tool
     assert.ok(names(first).includes("docs_open"), "the lazy tool is offered by its own name, as nothing else leads to it");
     assert.ok(names(await ask()).includes("docs_open"), "and so it is at the next message");
 
-    await client.setToolsOff([], { tools: [], sets: [] });
+    await client.setToolsOff(["codemode"], { tools: [], sets: [] });
     const unmarked = await ask();
     assert.ok(names(unmarked).includes("docs_open"), "with the mark taken away it is offered as any tool");
     assert.ok(names(unmarked).includes("tools"));
