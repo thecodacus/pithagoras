@@ -519,6 +519,14 @@ test("a change to the provider ends every other login, and the one who saved it 
   assert.equal((await api(saved.cookie)).status, 200, "signed in again with the change");
   saved = await saveSso(base, saved.cookie, ssoSettings(portalPort));
   assert.equal(saved.res.status, 200);
+  // A new client at the same provider is the way to start over with a narrower set of accounts: it ends the logins too.
+  const fromTheOldClient = await signIn();
+  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort, { clientId: "a-narrower-client", clientSecret: null }));
+  assert.equal(saved.res.status, 200, JSON.stringify(saved.body));
+  assert.equal((await api(fromTheOldClient)).status, 401, "another client ID");
+  assert.equal((await api(saved.cookie)).status, 200, "signed in again with the change");
+  saved = await saveSso(base, saved.cookie, ssoSettings(portalPort));
+  assert.equal(saved.res.status, 200);
 });
 
 test("a provider that says it names itself in every answer (RFC 9207) has an answer without its name refused", async () => {

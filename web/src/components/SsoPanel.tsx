@@ -134,7 +134,7 @@ export function SsoPanel() {
     <form onSubmit={save}>
       <Section
         title={t("Provider")}
-        hint={t("Sign in through an OpenID Connect provider, such as Authentik, Keycloak, Entra ID or Google, beside the password or instead of it. Make a client for the authorization code flow there, with the redirect URL below.")}
+        hint={t("Sign in through an OpenID Connect provider, such as Authentik, Keycloak or Entra ID, beside the password or instead of it. Make a client for the authorization code flow there, with the redirect URL below. The portal has no list of its own: every account the provider signs in gets in, so limit the client to your people at the provider.")}
       >
         <div className="max-w-xl space-y-3">
           <Field label={t("Issuer URL")} hint={t("Exactly as the provider names itself in its discovery document.")}>

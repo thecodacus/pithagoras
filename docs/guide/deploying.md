@@ -154,10 +154,20 @@ type the secret again, or to remove it for a public client.
 **Who may sign in is decided at the provider**, not in the portal: the portal has
 no list of emails, groups or accounts. Every account the provider signs in, with an
 ID token that checks out (its signature, issuer, audience, nonce and expiry), gets
-in. Limit the client to your people at the provider (in Authentik with group or
-user bindings on the application, in Entra ID with *Assignment required*), and do
-not point the portal at a provider that signs in anybody, such as one with open
-registration.
+in. Limit the client to your people at the provider before you point the portal at
+it:
+
+- Authentik: group or user bindings on the application.
+- Keycloak: a realm of your own people, with user registration off.
+- Entra ID: *Assignment required* on the enterprise application.
+- Authelia: an authorization policy on the client that names your people.
+- Google: the consent screen's audience *Internal* (a Google Workspace
+  organisation), or *Testing* with your people listed as test users. An *External*
+  app that is published (*In production*) lets in every Google account there is, so
+  do not publish it.
+
+Other providers have a switch of their own for this; find it first. Do not point the
+portal at a provider that signs in anybody, such as one with open registration.
 
 When the settings are saved, the portal reads the provider's discovery document and
 keys, and refuses settings it does not answer to, with the reason: a provider that

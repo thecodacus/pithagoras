@@ -48,6 +48,9 @@ test('a first setup starts from this address, sends what the provider needs and 
   await expect(dialog.getByText('Who may sign in')).toHaveCount(0);
   await expect(dialog.getByLabel('Emails')).toHaveCount(0);
   await expect(dialog.getByLabel('Subjects')).toHaveCount(0);
+  // ...and it says so where the provider is set up, without inviting a provider that signs in anybody.
+  await expect(dialog.getByText(/every account the provider signs in gets in, so limit the client to your people at the provider/)).toBeVisible();
+  await expect(dialog.getByText(/such as Authentik, Keycloak or Entra ID, beside/)).toBeVisible();
   const save = dialog.getByRole('button', { name: 'Save', exact: true });
   await expect(save).toBeDisabled();
   await dialog.getByRole('switch', { name: 'OIDC only' }).click();

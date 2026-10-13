@@ -29,7 +29,7 @@ export interface OidcConfig {
   endSession: boolean;
 }
 
-/** The settings as they are kept, and as the Settings page sends them: plain values, the lists as lists. */
+/** The settings as they are kept, and as the Settings page sends them: plain values. */
 export interface SsoSettings {
   issuer: string;
   clientId: string;

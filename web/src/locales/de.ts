@@ -1057,7 +1057,7 @@ const de: Locale = {
     "The provider's button goes from the login page, and the password is the way in again. Every other browser is signed out.": "Die Schaltfläche des Anbieters verschwindet von der Anmeldeseite, und das Passwort ist wieder der Weg hinein. Alle anderen Browser werden abgemeldet.",
     "Take it out": "Entfernen",
     "Single sign-on is taken out.": "Single Sign-on ist entfernt.",
-    "Sign in through an OpenID Connect provider, such as Authentik, Keycloak, Entra ID or Google, beside the password or instead of it. Make a client for the authorization code flow there, with the redirect URL below.": "Anmelden über einen OpenID-Connect-Anbieter wie Authentik, Keycloak, Entra ID oder Google, neben dem Passwort oder statt seiner. Leg dort einen Client für den Authorization-Code-Flow an, mit der Weiterleitungs-URL unten.",
+    "Sign in through an OpenID Connect provider, such as Authentik, Keycloak or Entra ID, beside the password or instead of it. Make a client for the authorization code flow there, with the redirect URL below. The portal has no list of its own: every account the provider signs in gets in, so limit the client to your people at the provider.": "Anmelden über einen OpenID-Connect-Anbieter wie Authentik, Keycloak oder Entra ID, neben dem Passwort oder statt seiner. Leg dort einen Client für den Authorization-Code-Flow an, mit der Weiterleitungs-URL unten. Das Portal hat keine eigene Liste: Jedes Konto, das der Anbieter anmeldet, kommt hinein. Beschränke den Client beim Anbieter deshalb auf deine Leute.",
     "Issuer URL": "Issuer-URL",
     "Exactly as the provider names itself in its discovery document.": "Genau so, wie sich der Anbieter in seinem Discovery-Dokument nennt.",
     "Client ID": "Client-ID",
