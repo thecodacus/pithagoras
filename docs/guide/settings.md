@@ -73,8 +73,9 @@ that, a session asking for a local model silently started on pi's fallback.
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
-**Media** has two sections, **Image model** and **Video model**. Each has a heading and a line under it, and opens
-and closes with a click on the heading. Its **switches stay in view** either way. The line says what the section is for
+**Media** has two sections, **Image model** and **Video model**. Each has its **switches** at the top, always in view,
+and under them a heading with a line under it, which opens and closes the section with a click; what opens is directly
+under the heading. The line says what the section is for
 while it is open, and the address and model while it is closed. A model that is not set up starts open, to show its
 address; one that is set up starts closed, and what you open or close is kept in this browser. A section with something
 typed in it and not saved stays open, and the search of Settings opens the section, or the group in it, that it finds.

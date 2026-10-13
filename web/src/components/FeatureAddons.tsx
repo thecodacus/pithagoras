@@ -1159,7 +1159,7 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
     return (next === saved ? {} : { [name]: next }) as Partial<Record<K, number | null>>;
   };
 
-  // What a video address has to be, said where it is typed while the section is open and in its heading's row while it is closed, so that it is seen either way.
+  // What a video address has to be, said where it is typed while the section is open and under its heading while it is closed, so that it is seen either way.
   const works = (
     <div role="note" className="flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-fg-muted">
       <LuTriangleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
@@ -1196,9 +1196,9 @@ export function VideosAddon({ onError }: { onError: (e: string) => void }) {
             </p>
           )}
           {note && !busy && <p role="status" className="text-xs text-fg-muted">{note()}</p>}
-          {!open && works}
         </>
       }
+      whileClosed={works}
     >
       <fieldset disabled={busy} className="space-y-3 rounded-xl border border-line bg-raised/40 p-3">
         <legend className="px-1 text-xs text-fg-muted">{t("The video endpoint")}</legend>

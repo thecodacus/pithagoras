@@ -166,7 +166,7 @@ test('a search opens the section or the group it leads to, and lights it up', as
 });
 
 for (const [label, width] of [['wide', 1280], ['phone', 390]] as const) {
-  test(`what opens is directly under the heading, and the switches sit in the heading's row or above it, never between (${label})`, async ({ page }) => {
+  test(`the switches are stacked above the heading, and what opens is directly under it, with no horizontal scroll (${label})`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await portal(page, { imageAddress: 'https://images.example.com/v1', videoAddress: 'https://video.example.com' });
     await page.goto('/settings/media');
@@ -179,7 +179,7 @@ for (const [label, width] of [['wide', 1280], ['phone', 390]] as const) {
       await expect(opener).toHaveAttribute('aria-expanded', 'false');
       await heading.scrollIntoViewIfNeeded();
       // Closed: where the switches are.
-      // Where the switches are in the section, which is not the same as where the heading is: the heading may move for what is in its row.
+      // Where the switches are in the section.
       const top = (await box(region)).y;
       const closed = await Promise.all(switches.map(async (switchName) => (await box(region.getByRole('switch', { name: switchName, exact: true }))).y - top));
 
@@ -192,15 +192,19 @@ for (const [label, width] of [['wide', 1280], ['phone', 390]] as const) {
       expect(under.y - (head.y + head.height), `${name}: and directly`).toBeLessThanOrEqual(24);
       for (const [i, switchName] of switches.entries()) {
         const at = await box(region.getByRole('switch', { name: switchName, exact: true }));
-        const beside = at.y >= head.y - 1 && at.y + at.height <= head.y + head.height + 1;
-        const above = at.y + at.height <= head.y + 1;
-        expect(beside || above, `${switchName}: in the heading's row or above it`).toBe(true);
-        expect(at.y + at.height, `${switchName}: not between the heading and the body`).toBeLessThanOrEqual(under.y);
+        // Stacked: wholly above the heading at every width, never beside it, and so never between it and the body.
+        expect(at.y + at.height, `${switchName}: above the heading`).toBeLessThanOrEqual(head.y + 1);
+        expect(at.x + at.width, `${switchName}: inside the page`).toBeLessThanOrEqual(width);
         // And it has not moved for the opening of the section.
         expect(at.y - (await box(region)).y, `${switchName}: stays where it was`).toBeCloseTo(closed[i], 0);
       }
+      // The heading is the full width of the section under the switches, not a column beside them.
+      const sectionBox = await box(region);
+      expect(Math.abs(head.x - sectionBox.x), `${name}: the heading starts at the section's edge`).toBeLessThanOrEqual(1);
+      expect(head.width, `${name}: and spans it`).toBeGreaterThanOrEqual(sectionBox.width - 1);
       await opener.click();
       await expect(body).toBeHidden();
     }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
   });
 }

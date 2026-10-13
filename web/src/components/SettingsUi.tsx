@@ -28,10 +28,11 @@ export function Section({ title, hint, action, children }: { title: string; hint
 
 /**
  * A section that opens and closes: its heading and one line under it are a button, `controls` stay in view
- * whether it is open or not (the switches a person comes for) in the heading's row — beside it, or above it where
- * there is no room, never between it and what opens — and the rest is `children`, kept drawn but
- * hidden while it is closed so that what was typed in it is not lost. The line is the `hint` while it is open
- * and the `summary` while it is closed. `locked` keeps it open, for a section with something unsaved in it.
+ * whether it is open or not (the switches a person comes for) above the heading, and the rest is `children`,
+ * directly under the heading, kept drawn but hidden while it is closed so that what was typed in it is not lost.
+ * The line is the `hint` while it is open and the `summary` while it is closed. `whileClosed` is shown under the
+ * heading only while it is closed, for what `children` says when it is open. `locked` keeps it open, for a
+ * section with something unsaved in it.
  *
  * A search that names the section, or a group in it, opens it: it is told with a `settings-reveal` event on the element it found, which bubbles.
  */
@@ -43,6 +44,7 @@ export function CollapsibleSection({
   onToggle,
   locked = false,
   controls,
+  whileClosed,
   children,
 }: {
   title: string;
@@ -52,6 +54,7 @@ export function CollapsibleSection({
   onToggle: () => void;
   locked?: boolean;
   controls?: ReactNode;
+  whileClosed?: ReactNode;
   children: ReactNode;
 }) {
   const body = useId();
@@ -69,31 +72,26 @@ export function CollapsibleSection({
   return (
     // Named so Settings' search can scroll to it, and so that it is a region of its own: both models have fields of the same names.
     <section ref={root} aria-label={title} className="settings-section mb-7" data-setting={title}>
-      {/*
-        The heading and the switches are one row: side by side where there is room, the switches above where there
-        is not (wrapping upward), and never between the heading and what opens under it: the heading is as tall as the
-        row, so that what opens is directly under it.
-      */}
-      <div className="flex flex-wrap-reverse items-stretch gap-x-4 gap-y-3">
-        <h3 className="min-w-0 flex-1 basis-40 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-controls={body}
-            aria-disabled={locked || undefined}
-            title={locked ? t("Save or discard the changes first.") : undefined}
-            onClick={() => !locked && onToggle()}
-            className="flex h-full w-full items-start gap-1.5 rounded-lg text-left uppercase tracking-wider transition hover:text-fg"
-          >
-            <LuChevronRight aria-hidden className={`mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
-            <span className="min-w-0 flex-1">
-              <span className="block">{title}</span>
-              <span className="mt-0.5 block text-xs font-normal normal-case tracking-normal text-fg-subtle">{open ? hint : summary}</span>
-            </span>
-          </button>
-        </h3>
-        {controls && <div className="w-full space-y-3 sm:w-72 sm:shrink-0">{controls}</div>}
-      </div>
+      {/* The switches first and the heading under them, one above the other at every width, so that what opens is directly under its heading. */}
+      {controls && <div className="mb-3 space-y-3">{controls}</div>}
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={body}
+          aria-disabled={locked || undefined}
+          title={locked ? t("Save or discard the changes first.") : undefined}
+          onClick={() => !locked && onToggle()}
+          className="flex w-full items-start gap-1.5 rounded-lg text-left uppercase tracking-wider transition hover:text-fg"
+        >
+          <LuChevronRight aria-hidden className={`mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+          <span className="min-w-0 flex-1">
+            <span className="block">{title}</span>
+            <span className="mt-0.5 block text-xs font-normal normal-case tracking-normal text-fg-subtle">{open ? hint : summary}</span>
+          </span>
+        </button>
+      </h3>
+      {!open && whileClosed && <div className="mt-3">{whileClosed}</div>}
       <div id={body} hidden={!open} className="mt-3 space-y-3">
         {children}
       </div>

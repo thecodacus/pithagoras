@@ -198,7 +198,7 @@ test('the search of Settings finds the video endpoint and lights it up', async (
   await expect(dialog.locator('[data-setting="Video model"]')).toHaveClass(/setting-flash/);
 });
 
-test('a note says that only a stable-diffusion.cpp server works and what the address is through llama-swap, under the address field while the section is open, and in its heading row while it is closed', async ({ page }) => {
+test('a note says that only a stable-diffusion.cpp server works and what the address is through llama-swap, under the address field while the section is open, and under its heading while it is closed', async ({ page }) => {
   await portal(page);
   await page.goto('/settings/media');
   const panel = videoPanel(page);
@@ -218,15 +218,16 @@ test('a note says that only a stable-diffusion.cpp server works and what the add
   expect(open.y).toBeGreaterThanOrEqual(address.y + address.height);
   expect(open.y + open.height).toBeLessThanOrEqual(key.y);
 
-  // Closed: still there, once, in the row of the heading and the switch.
+  // Closed: still there, once, right under the heading and its line, and under the switch.
   await panel.getByRole('button', { name: /^Video model/ }).click();
   await expect(panel.getByLabel('API address')).toBeHidden();
   await expect(note).toHaveCount(1);
   await expect(note).toBeVisible();
   const row = await box(heading);
   const closed = await box(note);
-  expect(closed.y).toBeGreaterThanOrEqual(row.y);
-  expect(closed.y + closed.height).toBeLessThanOrEqual(row.y + row.height + 1);
+  expect(closed.y).toBeGreaterThanOrEqual(row.y + row.height);
+  expect(closed.y - (row.y + row.height)).toBeLessThanOrEqual(24);
+  expect((await box(panel.getByRole('switch', { name: 'Video generation', exact: true }))).y).toBeLessThan(row.y);
 
   // And under the address again when it is opened again.
   await panel.getByRole('button', { name: /^Video model/ }).click();
