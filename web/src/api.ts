@@ -1390,7 +1390,7 @@ export interface ToolRule {
   created_at: string;
 }
 
-export type LogLevel = "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /** One line the server printed, for Settings → Logs. */
 export interface LogLine {
@@ -1403,6 +1403,11 @@ export interface LogLine {
 /** `boot` changes when the server starts again, and the ids with it. */
 export interface LogsResponse {
   boot: string;
+  /** What the server runs at: `debug` also keeps its debug lines. Absent from a server that has no such setting. */
+  level?: "info" | "debug";
+  /** What the server holds at most, as lines and as characters; the page holds no more than that either. */
+  keep?: number;
+  chars?: number;
   last: number;
   /** Lines after `since` were let go before they were read, so `lines` does not join what the page holds. */
   gap?: boolean;

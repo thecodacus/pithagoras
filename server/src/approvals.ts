@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { addGrant, addToolRule } from "./db.js";
+import { debugLog } from "./logs.js";
 import { literalPattern, rulePatterns } from "./pi/guard.js";
 import { runsAsPrimary } from "./pi/runs-as-primary.js";
 import type { QuestionRow } from "./questions.js";
@@ -14,6 +15,15 @@ import type { QuestionRow } from "./questions.js";
  */
 export function recordApproval(question: QuestionRow, asking: { id: string } | undefined, approves: boolean, always: boolean): void {
   const tool = question.action_tool || "bash";
+  // Which tool, what the answer was and how long the person waited for it; never the action or the words, which can hold anything.
+  const asked = Date.parse(`${question.asked_at.replace(" ", "T")}Z`);
+  debugLog("approval", "answered", {
+    question: question.id,
+    tool: question.action ? tool : undefined,
+    outcome: !question.action ? "answered" : always ? "always" : approves ? "once" : "denied",
+    waited_ms: Number.isFinite(asked) ? Math.max(0, Date.now() - asked) : undefined,
+    session: asking?.id ?? question.session_id,
+  });
   // Nothing opens these for anybody but the primary user, so there is nothing to write down: a rule would be listed as
   // working and never apply (ask_primary does not offer them, a question from before that was added may still be open).
   if (runsAsPrimary(tool)) return;

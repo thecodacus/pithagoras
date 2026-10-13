@@ -171,6 +171,8 @@ const de: Locale = {
     "{n} errors": { one: "ein Fehler", other: "{n} Fehler" },
     "Search": "Suchen",
     "Nothing matches.": "Nichts passt.",
+    "Debug lines are included: the portal runs with PITHAGORAS_LOG_LEVEL=debug.": "Debug-Zeilen sind dabei: Das Portal läuft mit PITHAGORAS_LOG_LEVEL=debug.",
+    "For debug lines, start the portal with PITHAGORAS_LOG_LEVEL=debug.": "Für Debug-Zeilen starte das Portal mit PITHAGORAS_LOG_LEVEL=debug.",
     "Server logs": "Server-Protokoll",
     "The server has printed nothing yet.": "Der Server hat noch nichts ausgegeben.",
     // components/AuditPanel.tsx

@@ -194,10 +194,54 @@ entry with its time and level, to attach to an issue. Read the file first and
 remove what is personal before you attach it: it can hold folder paths on the
 host, chat ids, the identifiers of people who wrote to a channel, and the file
 paths an agent was refused. The portal keeps the last 2000 lines (and no more
-than about 2 MB of text) in memory, so a restart starts the list again; for what
-happened before one, and for a crash, which ends the process and the list with
-it, the host's own log (`docker logs` for a container) is still where to look.
+than about 2 MB of text; both can be changed, see below) in memory, so a restart
+starts the list again; for what happened before one, and for a crash, which ends
+the process and the list with it, the host's own log (`docker logs` for a
+container) is still where to look.
 Lines of the chats' own tools, and of containers, are not in it.
+
+**Debug lines.** The portal writes at the `info` level unless it is started with
+`PITHAGORAS_LOG_LEVEL=debug` (a container needs it in its environment: both
+Compose files pass it from `.env` or the shell, see
+[Deploying](/guide/deploying#environment)). At `debug` the list, the file and the
+host's log also carry lines marked `DEBUG`, shown in a fainter colour. So far
+they follow the tool calls and the approvals:
+
+```
+[tool] start tool=bash session=k3Vx9aPq_zLm
+[tool] end tool=bash outcome=ok ms=1520 session=k3Vx9aPq_zLm
+[audit] refused tool=bash session=k3Vx9aPq_zLm
+[approval] asked question=h7mq tool=bash session=k3Vx9aPq_zLm immediate=true
+[approval] answered question=h7mq tool=bash outcome=once waited_ms=48210 session=k3Vx9aPq_zLm
+```
+
+A tool call has a line when it begins and one when it ends, with how it ended
+(`ok`, `error`, or `cut-off` when the chat's pi or a subagent stopped under it)
+and how long it ran in milliseconds. An approval has the question's short id,
+the tool, what the answer was (`once`, `always`, `denied`, or `answered` for a
+question that was not about an action) and how long the person waited for it.
+`subagent=` names the subagent a call ran in. An `[audit]` line is a decision
+of the guard that the Audit page lists as well (`refused`, `allowed-by-approval`
+and the like), with its kind and the tool, without the command or the reason.
+Voice, devices and web requests have no debug lines yet.
+
+A debug line holds names, outcomes, times and ids, never what a tool was given
+or returned, the action an approval was about, or the words of a message: those
+can hold anything, and the lines may be attached to an issue. Whatever else
+slips in is run through a filter that takes out what looks like a secret (the
+values of the portal's own secret environment variables, `Authorization` and
+`Cookie` headers, `token=` and `password=` pairs, the user and password of a
+URL, the keys the common services issue). It is a net, not a promise, so the
+note above about reading the file before you attach it holds for debug lines too.
+Anything printed through `console.debug`, by the portal or by a package it
+runs, counts as a debug line: below the `debug` level it prints nothing.
+
+`PITHAGORAS_LOG_LINES` and `PITHAGORAS_LOG_CHARS` change how much is kept: the
+number of lines (default 2000, from 100 to 50000) and the characters of text
+(default 2000000, from 200000 to 20000000). A value that is not a whole number
+leaves the default, one outside the range is brought to its nearest end, and
+the start says so in the list. The line under the title of the Logs tab says
+whether the debug level is on.
 
 ## About
 

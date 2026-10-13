@@ -45,6 +45,11 @@ services:
       # "skip" upgrades the database without the backup it is otherwise made first,
       # for a volume with no room for the copy. See docs/guide/upgrading.md.
       PORTAL_UPGRADE_BACKUP: ${PORTAL_UPGRADE_BACKUP:-}
+      # "debug" also keeps and prints the debug lines (tool calls, approvals); the
+      # default is info. The two numbers size what Settings → Logs keeps in memory.
+      PITHAGORAS_LOG_LEVEL: ${PITHAGORAS_LOG_LEVEL:-}
+      PITHAGORAS_LOG_LINES: ${PITHAGORAS_LOG_LINES:-}
+      PITHAGORAS_LOG_CHARS: ${PITHAGORAS_LOG_CHARS:-}
       # host = pi runs in this container | container = one container per task
       EXECUTOR: ${EXECUTOR:-host}
       PI_IMAGE: ${PI_IMAGE:-pithagoras-runner:latest}

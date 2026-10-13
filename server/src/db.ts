@@ -15,6 +15,7 @@ import { removeThumbs } from "./image-thumbs.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
+import { debugLog } from "./logs.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -1715,6 +1716,8 @@ export function recordAudit(entry: {
   db.prepare(
     `DELETE FROM audit WHERE id <= (SELECT MAX(id) FROM audit) - ?`
   ).run(AUDIT_KEEP);
+  // What was decided and for which tool, not on what: the subject and the reason can hold a command, a path or a URL.
+  debugLog("audit", entry.kind, { tool: entry.tool, session: entry.sessionId });
 }
 
 export const listAudit = (limit = 200): AuditRow[] =>

@@ -54,7 +54,7 @@ export const SETTINGS_INDEX: SettingEntry[] = [
   { tab: "add-ons", title: msg("Add-ons"), words: "portal addon optional voice browser terminal" },
   { tab: "shortcuts", section: msg("Chat"), title: msg("Keyboard shortcuts"), words: "keys hotkey keybinding shortcut tastenkürzel tastatur" },
   { tab: "shortcuts", section: msg("Voice mode"), title: msg("Voice mode shortcuts"), words: "voice speak microphone push to talk sprache" },
-  { tab: "logs", title: msg("Logs"), words: "log logs error errors warning console output stream download audit debug server protokoll fehler" },
+  { tab: "logs", title: msg("Logs"), words: "log logs error errors warning console output stream download audit debug level verbose server protokoll fehler" },
   { tab: "about", section: msg("This portal"), title: msg("Where the agent runs"), words: "executor container host docker" },
   { tab: "about", section: msg("This portal"), title: msg("Workspaces"), words: "folder path directory workspace ordner" },
   { tab: "about", section: msg("This portal"), title: msg("pi's files"), words: "settings.json models.json auth.json agent directory dateien" },
