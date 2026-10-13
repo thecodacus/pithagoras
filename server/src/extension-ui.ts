@@ -9,13 +9,17 @@ import path from "node:path";
  * nothing of it.
  *
  *   "pi":         { "extensions": ["./index.ts"] }
- *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" }
+ *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" }
  *
  * `client` is a JavaScript module the portal's page loads, which puts what it
  * draws into the portal's slots (see web/src/extensions). The folder it is in
  * is the package's web folder: the portal serves that folder, and nothing else
  * of the package, to whoever is signed in. `style`, in the same folder, is a
  * stylesheet loaded with it.
+ *
+ * `server` is a JavaScript module the portal itself loads, once, for all
+ * chats: the package's own routes, what it keeps, and what outlives a chat's
+ * pi (see extension-host.ts).
  *
  * What the browser half draws in a chat talks to the package's own pi
  * extension there over pi's event bus (`pi.events` inside an extension), so
@@ -51,6 +55,29 @@ export interface ClientHalf {
   rev: string;
 }
 
+/** The server half a package declares: a module the portal loads into its own process. See extension-host.ts. */
+export interface ServerHalf {
+  name: string;
+  version?: string;
+  /** The module's file. */
+  file: string;
+  /** Changes when the file does, so the portal loads it again rather than the one it has. */
+  rev: string;
+}
+
+/**
+ * A name a package's files, addresses and data folder can go by: an npm name,
+ * with or without a scope. Anything else (a `..`, a slash of its own) and the
+ * package has no halves here.
+ */
+export const validName = (name: unknown): name is string =>
+  typeof name === "string" && /^(@[\w~-][\w.~-]*\/)?[\w~-][\w.~-]*$/.test(name);
+
+const revOf = (file: string) => {
+  const stat = statSync(file);
+  return `${Math.round(stat.mtimeMs).toString(36)}-${stat.size.toString(36)}`;
+};
+
 /** A file's path inside `dir`, or nothing when it is outside it or not a file. */
 function fileIn(dir: string, file: string): string | undefined {
   const rel = path.relative(dir, file);
@@ -78,12 +105,11 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
     return undefined;
   }
   const declared = meta?.pithagoras;
-  if (typeof meta?.name !== "string" || !meta.name || typeof declared?.client !== "string") return undefined;
+  if (!validName(meta?.name) || typeof declared?.client !== "string") return undefined;
   const root = path.resolve(packageDir);
   const client = path.resolve(root, declared.client);
   const dir = path.dirname(client);
   if (dir === root || !fileIn(root, client)) return undefined;
-  const stat = statSync(client);
   const style = typeof declared.style === "string" ? fileIn(dir, path.resolve(root, declared.style)) : undefined;
   return {
     name: meta.name,
@@ -91,8 +117,23 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
     dir,
     entry: path.basename(client),
     ...(style ? { style } : {}),
-    rev: `${Math.round(stat.mtimeMs).toString(36)}-${stat.size.toString(36)}`,
+    rev: revOf(client),
   };
+}
+
+/** The server half the package in `packageDir` declares, or nothing: it declares none, or what it names is not a file inside it. */
+export function serverHalf(packageDir: string): ServerHalf | undefined {
+  let meta: any;
+  try {
+    meta = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!validName(meta?.name) || typeof meta?.pithagoras?.server !== "string") return undefined;
+  const root = path.resolve(packageDir);
+  const file = path.resolve(root, meta.pithagoras.server);
+  if (!fileIn(root, file)) return undefined;
+  return { name: meta.name, ...(typeof meta.version === "string" ? { version: meta.version } : {}), file, rev: revOf(file) };
 }
 
 type Bus = { on(channel: string, handler: (data: unknown) => void): () => void };

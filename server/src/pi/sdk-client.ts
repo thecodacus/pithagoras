@@ -36,6 +36,7 @@ import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
+import { hostExtension } from "../extension-host.js";
 import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, portalBrowserOn, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
@@ -509,6 +510,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (opts.heartbeatAgent && opts.sessionId) {
         factories.push({ name: "heartbeat", factory: heartbeatTool(opts.heartbeatAgent, opts.sessionId) });
       }
+      // What the installed extensions' server halves add to a chat's pi: see extension-host.ts.
+      if (opts.sessionId) factories.push({ name: "extension-host", factory: hostExtension(opts.sessionId) });
       resourceLoader = new (portalLoader(pi))({
         cwd: opts.cwd,
         // One for the loader and the session, so the folder's trust the loader decides holds for both.

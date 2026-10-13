@@ -4,6 +4,7 @@ import { eventsBefore, getSession, replayStart, type EventRow } from "../db.js";
 import { watchStream } from "../login-streams.js";
 import { eventJson, replaySince } from "../event-replay.js";
 import { sessions } from "../session-manager.js";
+import { openingPushes, pagePushes } from "../extension-host.js";
 
 /**
  * How much of a long conversation a fresh page load replays.
@@ -121,6 +122,13 @@ export function eventsRouter(): Router {
     canvasEvents.on(session.id, onCanvas);
     writeCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
 
+    // What the installed extensions' server halves tell what they drew on this
+    // chat's page, on the same stream under a name of its own: where things
+    // stand first, then each thing as it is said. See extension-host.ts.
+    const writePush = (message: unknown) => res.write(`event: extension\ndata: ${JSON.stringify(message)}\n\n`);
+    pagePushes.on(session.id, writePush);
+    for (const push of openingPushes(session.id)) writePush(push);
+
     // How often this chat's events were put back under seqs a page had read
     // past (see bumpReloads): a page that last saw another count missed one, and
     // loads the chat again rather than go on from its cursor.
@@ -158,6 +166,7 @@ export function eventsRouter(): Router {
       clearInterval(heartbeat);
       sessions.off(`session:${session.id}`, onEvent);
       canvasEvents.off(session.id, onCanvas);
+      pagePushes.off(session.id, writePush);
       clearTimeout(heldTimer);
     });
 

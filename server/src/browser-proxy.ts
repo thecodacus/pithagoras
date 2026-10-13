@@ -3,6 +3,7 @@ import https from "node:https";
 import type { Duplex } from "node:stream";
 import type { Express } from "express";
 import { isAuthedUpgrade, requireAuth } from "./auth.js";
+import { extensionUpgrade } from "./extension-host.js";
 import { watchStream } from "./login-streams.js";
 import { config } from "./extensions/browser-service.js";
 import { viewerConnected, viewerDisconnected } from "./extensions/browser-frames.js";
@@ -124,14 +125,21 @@ export function attachBrowserUpgrade(server: http.Server): void {
     // timeout, no answer — so one that is not the browser's is answered too, and
     // a client that resets the connection is not an error nobody listens to.
     socket.on("error", () => {});
-    if (!isBrowserUrl(req.url)) return refuse(socket, 404, "Not Found");
     // Express never sees an upgrade, so requireAuth did not either: the same
     // login, asked here. And a page of another site may not open the stream with
     // the visitor's cookie — a browser names where the page came from.
-    if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized");
-    if (req.headers.origin && !fromHere(req.headers.origin, req.headers)) return refuse(socket, 403, "Forbidden");
-    // The stream is checked only as it opens: it ends when the password it was opened under goes.
-    socket.once("close", watchStream(() => socket.destroy()));
+    const allowed = () => {
+      if (!isAuthedUpgrade(req)) return refuse(socket, 401, "Unauthorized"), false;
+      if (req.headers.origin && !fromHere(req.headers.origin, req.headers)) return refuse(socket, 403, "Forbidden"), false;
+      // The stream is checked only as it opens: it ends when the password it was opened under goes.
+      socket.once("close", watchStream(() => socket.destroy()));
+      return true;
+    };
+    // An extension's server half may take upgrades under its own routes: checked the same way, then its to answer.
+    const extension = extensionUpgrade(req.url);
+    if (extension) return void (allowed() && extension(req, socket, head));
+    if (!isBrowserUrl(req.url)) return refuse(socket, 404, "Not Found");
+    if (!allowed()) return;
     const proxied = https.request({
       host: UPSTREAM_HOST,
       port: upstreamPort(),

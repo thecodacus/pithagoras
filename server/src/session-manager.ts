@@ -30,6 +30,7 @@ import { forgetBrowserSession } from "./browser/tools.js";
 import { BACKGROUND_SUPPORTED, listJobs, startedWhen, type BackgroundJob } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
 import { forgetCanvases } from "./canvases.js";
+import { chatEvent, chatLife, extensionHolds, setChatBridge } from "./extension-host.js";
 import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor } from "./executors/index.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
@@ -1220,6 +1221,8 @@ class SessionManager extends EventEmitter {
       // A client stopped for an edit or a restart can still have a settle in
       // hand; it speaks for a conversation that is no longer this one.
       if (this.stopping.has(client)) return;
+      // The installed extensions' server halves hear all of it, as it is said.
+      chatEvent(sessionId, msg);
       rememberSessionFile();
       // A run the portal started failed after pi had accepted it. Said here,
       // before its agent_settled, so an ask() waiting on it fails instead of
@@ -1381,6 +1384,7 @@ class SessionManager extends EventEmitter {
     // put it there, and a send from the box finds it.
     client.useDrafts?.({ get: () => this.drafts.get(sessionId), set: (text, caret) => this.setDraft(sessionId, text, caret) });
     this.live.set(sessionId, { client, executor });
+    chatLife("started", sessionId);
     this.touch(sessionId);
 
     return client;
@@ -2546,7 +2550,7 @@ class SessionManager extends EventEmitter {
 
   /** Whether a subagent is working in the background here: its chat looks idle, and stopping it would end the subagent. */
   backgroundWork(sessionId: string): boolean {
-    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0;
+    return (this.live.get(sessionId)?.client.subagentsRunning?.() ?? 0) > 0 || extensionHolds(sessionId);
   }
 
   /** Whether anything at all is using the model: a turn running, or a message waiting for one. */
@@ -2956,6 +2960,7 @@ class SessionManager extends EventEmitter {
 
   /** pi is gone, and what it was holding with it. */
   private forgetPi(sessionId: string): void {
+    chatLife("stopped", sessionId);
     this.activity.delete(sessionId);
     this.dropCommands(sessionId);
     // No memory tool of its is running any more, whatever it last said.
@@ -3031,6 +3036,7 @@ class SessionManager extends EventEmitter {
     this.aborts.delete(sessionId);
     // Its temporary canvases are in memory only, so no row delete reaches them.
     forgetCanvases(sessionId);
+    chatLife("deleted", sessionId);
     // Each on its own: pi's folder is the one that can refuse, and the pictures
     // are what would then stay downloadable.
     for (const [what, remove] of [
@@ -3100,4 +3106,5 @@ class SessionManager extends EventEmitter {
 }
 
 export const sessions = new SessionManager();
+setChatBridge({ tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data) });
 export { SESSION_ROOT, IMAGE_ROOT };

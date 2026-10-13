@@ -7,7 +7,8 @@ import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
-import { clientHalf, type ClientHalf } from "../extension-ui.js";
+import { clientHalf, serverHalf, type ClientHalf, type ServerHalf } from "../extension-ui.js";
+import { serverFailure, syncServerHalves } from "../extension-host.js";
 
 const run = promisify(execFile);
 
@@ -201,23 +202,38 @@ export async function switchPackage(spec: string, enabled: boolean): Promise<boo
 }
 
 /**
- * The browser halves the portal loads: of the packages its own settings
- * install, the ones switched on. Never a package a folder brings: an agent can
- * write that folder, and what it put there would run in the page of everyone
- * who opens the portal.
+ * The halves the portal loads, a browser half into its page and a server half
+ * into its own process: of the packages its own settings install, the ones
+ * switched on. Never a package a folder brings: an agent can write that
+ * folder, and what it put there would run in the page of everyone who opens
+ * the portal, or in the portal itself.
  */
-async function clientHalves(): Promise<ClientHalf[]> {
+async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[] }> {
   const settings = readPiSettings();
   const listed = Array.isArray(settings.packages) ? settings.packages : [];
-  const halves: ClientHalf[] = [];
+  const clients: ClientHalf[] = [];
+  const servers: ServerHalf[] = [];
   for (const pkg of await installedPackages(settings)) {
     if (!pkg.path || (pkg.scope && !/^user/i.test(pkg.scope))) continue;
     const entry = listed.find((e) => sourceOf(e) === pkg.spec);
     if (entry === undefined || isSwitchedOff(entry)) continue;
-    const half = clientHalf(pkg.path);
-    if (half && !halves.some((h) => h.name === half.name)) halves.push(half);
+    const client = clientHalf(pkg.path);
+    if (client && !clients.some((h) => h.name === client.name)) clients.push(client);
+    const server = serverHalf(pkg.path);
+    if (server && !servers.some((h) => h.name === server.name)) servers.push(server);
   }
-  return halves;
+  return { clients, servers };
+}
+
+const clientHalves = async () => (await halves()).clients;
+
+/**
+ * Bring the server halves that run in line with what is installed and switched
+ * on: as the portal starts, and whenever a package is installed, removed,
+ * updated or switched.
+ */
+export async function syncExtensionServers(): Promise<void> {
+  await syncServerHalves((await halves()).servers);
 }
 
 /** Where a page fetches a file of a package's web folder from. */
@@ -229,14 +245,23 @@ export function extensionsRouter(): Router {
 
   router.get("/extension-ui", async (_req, res) => {
     try {
-      const halves = await clientHalves();
+      const { clients, servers } = await halves();
+      const names = [...new Set([...clients, ...servers].map((half) => half.name))];
       res.json({
-        extensions: halves.map((half) => ({
-          name: half.name,
-          version: half.version,
-          entry: clientUrl(half, half.entry),
-          ...(half.style ? { style: clientUrl(half, half.style) } : {}),
-        })),
+        extensions: names.map((name) => {
+          const client = clients.find((half) => half.name === name);
+          const server = servers.find((half) => half.name === name);
+          const failure = server && serverFailure(name);
+          return {
+            name,
+            version: (client ?? server)!.version,
+            ...(client ? { entry: clientUrl(client, client.entry) } : {}),
+            ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
+            // Where its server half's own routes are, when it has one that is running.
+            ...(server && !failure ? { server: `/api/x/${name.split("/").map(encodeURIComponent).join("/")}` } : {}),
+            ...(failure ? { serverError: failure } : {}),
+          };
+        }),
       });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -328,6 +353,7 @@ export function extensionsRouter(): Router {
     try {
       const found = await switchPackage(spec, enabled);
       if (!found) return res.status(404).json({ error: "That package is not installed for this user" });
+      await syncExtensionServers();
       const { reloaded, waiting } = await sessions.reloadIdle();
       res.json({ ok: true, enabled, reloaded, waiting });
     } catch (e) {

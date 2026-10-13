@@ -86,7 +86,8 @@ import { CALLBACK_PATH, OidcConfigError, discover, parseOidcConfig, shownForm } 
 import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
 import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
-import { extensionsRouter } from "./api/extensions.js";
+import { extensionsRouter, syncExtensionServers } from "./api/extensions.js";
+import { extensionRoutes, stopServerHalves } from "./extension-host.js";
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
@@ -166,7 +167,8 @@ const IMAGE_EDIT_ROUTE = "/api/images/edit";
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
   // Understory's requests for a model carry whole conversations: its route reads its own.
-  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path === IMAGE_EDIT_ROUTE || req.path.startsWith("/understory-llm/")) return next();
+  // An extension's routes read their own as well, each as it needs: see extension-host.ts.
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path === IMAGE_EDIT_ROUTE || req.path.startsWith("/understory-llm/") || req.path.startsWith("/api/x/")) return next();
   smallJson(req, res, next);
 });
 app.use(cookieParser());
@@ -1727,6 +1729,8 @@ app.use("/api", updateRouter());
 app.use("/api", voiceRouter());
 app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());
+// The routes of the installed extensions' server halves, each under its package's name.
+app.use("/api/x", extensionRoutes);
 // Before the SPA fallback, which answers everything that is not /api.
 mountBrowserProxy(app);
 
@@ -1864,6 +1868,8 @@ sessions.startReaper();
 sweepRemoved(WORKSPACE_ROOT);
 sweepRemoved(agentsRoot());
 interruptCanvasWrites();
+// The server halves of the installed extensions: see extension-host.ts.
+void syncExtensionServers().catch((e) => console.error("[extensions] could not start the server halves:", e));
 pinConnection();
 adoptPortalBrowser();
 // The sandbox's sudo rules live outside the data volume, so a new container needs them put back.
@@ -1898,6 +1904,8 @@ async function stop(signal: string) {
   const shells = endAllTerminals();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
+  // After the chats: a chat's pi may still be using what a server half holds.
+  await stopServerHalves();
   await shells;
   server.close(() => process.exit(requestedExit()));
   // Every open page holds an event stream that never ends by itself, and
