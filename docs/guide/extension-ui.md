@@ -389,7 +389,8 @@ export default function (portal) {
 
 It is loaded once, into the portal's own process, and stopped and started
 again when the package is installed, removed, updated or switched. It runs
-with the portal's rights, as the package's pi extension does.
+with the portal's rights, as the package's pi extension does. It is an ES
+module (`"type": "module"` in `package.json`, or a `.mjs` file).
 
 | `portal.` | |
 | --- | --- |
@@ -482,7 +483,7 @@ portal.chats.extend((pi, chat) => {
     name: "canvas_create",
     label: "Create a canvas",
     description: "…",
-    parameters: Type.Object({ title: Type.String() }),
+    parameters: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
     async execute(_id, params) {
       const canvas = create(chat.id, params.title);          // the same store the routes read
       portal.chats.send(chat.id, { type: "created", id: canvas.id });
@@ -493,6 +494,10 @@ portal.chats.extend((pi, chat) => {
 ```
 
 The factory is pi's own extension API, called for every chat as its pi loads.
+A server half is plain Node, though: what it imports is its own package's
+dependencies, not what pi lends its extensions. So a tool's parameters are
+written as a JSON schema, as above, unless the package depends on `typebox`
+itself.
 It is there only where pi runs in the portal's process (`portal.executor` is
 `"host"`). `portal.chats.onEvent((chatId, event) => …)` hears everything a
 chat's pi says, a tool call's arguments as they stream included, and what the
