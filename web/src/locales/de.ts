@@ -742,6 +742,8 @@ const de: Locale = {
     "Save file": "Datei speichern",
     "Its interface could not be loaded: {reason}": "Die Oberfläche konnte nicht geladen werden: {reason}",
     "Its server half could not be started: {reason}": "Der Serverteil konnte nicht gestartet werden: {reason}",
+    "The portal's own": "Die des Portals",
+    "Themes the installed extensions brought.": "Themes, die die installierten Erweiterungen mitbringen.",
     "Configure": "Konfigurieren",
     // components/ConfirmDialog.tsx
     "OK": "OK",

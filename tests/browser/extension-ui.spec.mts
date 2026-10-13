@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal, DONE } from './portal-mock';
+import { test, expect, mockPortal, DONE, HANG } from './portal-mock';
 
 /**
  * An extension that draws in the portal: the Notes extension's own browser
@@ -17,14 +17,19 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
     { id: 'b', title: 'Second chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null },
   ];
   const model = { id: 'model-a', name: 'Model A', provider: 'llama-swap' };
-  const state = { installed: true, revision: 1, probeServerError: undefined as string | undefined };
+  const state = { installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false };
+  // The example that is only a theme, as its package.json names it.
+  const dusk = JSON.parse(readFileSync(new URL('../../extensions/theme-dusk/package.json', import.meta.url), 'utf8'));
   /** What the browser half said to its extension, by chat. */
   const said: { chat: string; extension: string; data: any }[] = [];
   await mockPortal(page, async ({ path: p, method, route, json }) => {
     if (p === '/api/extension-ui') {
+      // Not answered: no extension is in the page, however long it waits.
+      if (state.hangs) return HANG;
       const v = `?v=${state.revision}`;
       return {
         extensions: [
+          ...(state.themed ? [{ name: dusk.name, version: dusk.version, themes: dusk.pithagoras.themes }] : []),
           ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}` }] : []),
           ...(probe ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
         ],
@@ -111,6 +116,11 @@ const PROBE = `export default function (portal) {
     h("button", { type: "button", onClick: () => portal.panels.open("files", { path: "README.md" }) }, "Show the README")) });
   portal.slots.register("chat.composer.above", { id: "chip", component: ({ chat }) => h("div", { "data-testid": "above" }, "Above the box of " + chat.id) });
   portal.slots.register("settings.page", { id: "own", component: () => h("p", { "data-testid": "probe-settings" }, "Probe's own settings") });
+  // A theme changer: it switches the portal to a theme another package brought, and back.
+  portal.slots.register("chat.header.action", { id: "theme", component: () => {
+    const now = portal.theme.use();
+    return h("button", { type: "button", "data-mode": now.mode, onClick: () => portal.theme.set(now.theme ? null : "pithagoras-theme-dusk/dusk") }, now.theme ? "Back to the portal's colours" : "Switch to Dusk");
+  } });
 }`;
 
 /** What was said besides asking where things stand: development React draws each part twice, and each asks. */
@@ -388,4 +398,51 @@ test('a window an extension brought to voice mode opens from its button, is plac
   await page.getByTestId('probe-window').getByRole('button', { name: 'Done' }).click();
   await expect(brought).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Show Probe' })).toBeVisible();
+});
+
+test('a theme an extension brought is chosen in Settings or switched to by an extension, painted before anything is loaded, and gone with its package', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.theme', 'dark'));
+  const { changed } = await portal(page, undefined, PROBE);
+  const colour = (token: string) => page.evaluate((token) => getComputedStyle(document.documentElement).getPropertyValue(token).trim(), token);
+  await page.goto('/s/a');
+  expect(await colour('--accent')).toBe('34 211 238');
+
+  // An extension switches the theme: the whole page is in the other's colours, the terminal's included.
+  await header(page).getByRole('button', { name: 'Switch to Dusk' }).click();
+  await expect.poll(() => colour('--accent')).toBe('255 121 198');
+  expect(await colour('--canvas')).toBe('27 22 38');
+  expect(await colour('--terminal')).toBe('21 17 30');
+  // Faded into, as a change of theme is.
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe('rgb(27, 22, 38)');
+  await header(page).getByRole('button', { name: "Back to the portal's colours" }).click();
+  await expect.poll(() => colour('--accent')).toBe('34 211 238');
+
+  // A person chooses it where the portal's own look is chosen.
+  await page.goto('/settings/browser');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const colours = dialog.getByRole('combobox', { name: 'Colours' });
+  await expect(colours).toHaveText(/The portal's own/);
+  await colours.click();
+  await page.getByRole('option', { name: /Dusk/ }).click();
+  await expect.poll(() => colour('--accent')).toBe('255 121 198');
+  // In light it is the theme's light colours, and the portal's own for what the theme does not say.
+  await dialog.getByRole('radio', { name: 'Light' }).click();
+  await expect.poll(() => colour('--accent')).toBe('168 50 130');
+  expect(await colour('--terminal')).toBe('11 11 13');
+  await dialog.getByRole('radio', { name: 'Dark' }).click();
+  await expect.poll(() => colour('--accent')).toBe('255 121 198');
+
+  // Loaded again, with no extension in the page at all: it is painted all the same, from what the browser kept.
+  await changed({ hangs: true });
+  await page.reload();
+  expect(await colour('--accent')).toBe('255 121 198');
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' })).toHaveText(/Dusk/);
+
+  // Its package removed: the portal's own colours are back, and there is nothing to choose from.
+  await changed({ hangs: false, themed: false });
+  await page.reload();
+  await expect.poll(() => colour('--accent')).toBe('34 211 238');
+  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('pithagoras.palette'))).toBe(null);
 });

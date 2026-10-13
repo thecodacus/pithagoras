@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { bridgeExtensionUi, clientHalf, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../server/src/extension-ui.ts';
+import { bridgeExtensionUi, clientHalf, packageThemes, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../server/src/extension-ui.ts';
+import { choose, registerTheme, themes, themesSettled } from '../web/src/extensions/themes.ts';
+import { chosenPalette, choosePalette, coloursOf, toTriplet, TOKENS } from '../web/src/theme.tsx';
 import { register, slotEntries } from '../web/src/extensions/slots.ts';
 import { hasCommand, registerCommand, runCommand } from '../web/src/extensions/commands.ts';
 import { addStrings, forgetStrings, translate } from '../web/src/extensions/strings.ts';
@@ -361,4 +363,84 @@ test('the Notes extension\'s server half keeps each chat\'s notes in the chat\'s
   delete folders.b;
   life.get('deleted')!('b');
   assert.equal(existsSync(kept), false);
+});
+
+test('a colour is written as the portal\'s variables hold one, or as hex, and nothing else is a colour', () => {
+  assert.equal(toTriplet('34 211 238'), '34 211 238');
+  assert.equal(toTriplet('#22d3ee'), '34 211 238');
+  assert.equal(toTriplet('#FFF'), '255 255 255');
+  assert.equal(toTriplet(' #1b1626 '), '27 22 38');
+  for (const not of ['', 'red', 'rgb(1,2,3)', '256 0 0', '1 2', '#12345', '#gggggg', 'var(--x)', '0 0 0; color: red', 12, null, undefined]) assert.equal(toTriplet(not), null, String(not));
+  assert.deepEqual(coloursOf({ accent: '#ff79c6', 'fg-muted': '196 188 214' }), { accent: '255 121 198', 'fg-muted': '196 188 214' });
+  assert.deepEqual(coloursOf(undefined), {}, 'a mode it does not speak of');
+  assert.equal(coloursOf({ accent: 'pink' }), null);
+  assert.equal(coloursOf({ background: '#000000' }), null, 'a name the portal has no colour under');
+  assert.equal(coloursOf(['#000']), null);
+  assert.ok(TOKENS.includes('terminal') && TOKENS.includes('accent-fg'));
+});
+
+test('a theme is one an extension registered, chosen by its id and painted over the portal\'s own colours', () => {
+  // The page, as far as a theme reaches into it: the root's mode and the variables set on it.
+  const set = new Map<string, string>();
+  const root = { dataset: { theme: 'dark' } as Record<string, string>, classList: { add() {}, remove() {} }, style: { setProperty: (k: string, v: string) => set.set(k, v), removeProperty: (k: string) => set.delete(k) } };
+  const kept = new Map<string, string>();
+  Object.assign(globalThis, {
+    document: { documentElement: root, querySelector: () => null },
+    window: { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), setTimeout: () => 0 },
+    getComputedStyle: () => ({ getPropertyValue: () => '10 10 12' }),
+    localStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) },
+  });
+  try {
+    assert.throws(() => registerTheme('dusk-pkg', { id: '', name: 'Dusk', dark: { accent: '#ff79c6' } }), /needs an id and a name/);
+    assert.throws(() => registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk', dark: { accent: 'pink' } }), /not "#rrggbb" or three numbers/);
+    assert.throws(() => registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk', dark: { background: '#000000' } }), /no name for/);
+    assert.throws(() => registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk' }), /sets no colours/);
+    const off = registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6', canvas: '27 22 38' }, light: { accent: '#a83282' } });
+    assert.throws(() => registerTheme('dusk-pkg', { id: 'dusk', name: 'Again', dark: { accent: '#000000' } }), /already has a theme called "dusk"/);
+    assert.deepEqual(themes().map((t) => [t.id, t.name, t.extension]), [['dusk-pkg/dusk', 'Dusk', 'dusk-pkg']]);
+
+    assert.throws(() => choose('dusk-pkg/none'), /no theme called "dusk-pkg\/none"/);
+    choose('dusk-pkg/dusk');
+    assert.equal(chosenPalette()?.id, 'dusk-pkg/dusk');
+    assert.deepEqual(Object.fromEntries(set), { '--accent': '255 121 198', '--canvas': '27 22 38' }, 'the dark colours, in dark');
+    assert.deepEqual(JSON.parse(kept.get('pithagoras.palette')!).light, { accent: '168 50 130' }, 'kept whole in the browser, to be painted before anything is loaded');
+    // In light, its light colours, and the portal's own for what it does not say.
+    kept.set('pithagoras.theme', 'light');
+    choosePalette(chosenPalette());
+    assert.equal(root.dataset.theme, 'light');
+    assert.deepEqual(Object.fromEntries(set), { '--accent': '168 50 130' });
+    kept.set('pithagoras.theme', 'dark');
+
+    // The extension updated: the same theme with other colours is painted as it is now.
+    off();
+    themesSettled();
+    assert.equal(chosenPalette(), null, 'its extension gone, the portal\'s own colours are back');
+    assert.deepEqual(Object.fromEntries(set), {});
+    assert.equal(kept.has('pithagoras.palette'), false);
+
+    registerTheme('dusk-pkg', { id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } });
+    choose('dusk-pkg/dusk');
+    themesSettled();
+    assert.equal(chosenPalette()?.id, 'dusk-pkg/dusk', 'still there: it stays');
+    choose(null);
+    assert.equal(chosenPalette(), null);
+  } finally {
+    for (const name of ['document', 'window', 'getComputedStyle', 'localStorage']) delete (globalThis as any)[name];
+  }
+});
+
+test('a package may name themes in its package.json and bring nothing else', () => {
+  const dir = pkg({ themes: [{ id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' }, light: 'not colours' }, { id: 'nameless' }, 'not a theme'] }, []);
+  assert.deepEqual(packageThemes(dir), { name: 'my-extension', version: '1.2.3', themes: [{ id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } }] });
+  assert.equal(clientHalf(dir), undefined);
+  assert.equal(serverHalf(dir), undefined);
+  assert.equal(packageThemes(pkg({ themes: [] }, [])), undefined);
+  assert.equal(packageThemes(pkg({ client: './web/client.js' }, ['web/client.js'])), undefined);
+  // The one shipped as the example is one the page takes whole.
+  const dusk = packageThemes(path.resolve('extensions/theme-dusk'))!;
+  assert.equal(dusk.name, 'pithagoras-theme-dusk');
+  for (const theme of dusk.themes) {
+    assert.ok(coloursOf(theme.dark) && coloursOf(theme.light), theme.id);
+    assert.deepEqual(Object.keys(theme.dark!).sort(), [...TOKENS].sort(), 'every colour of the portal\'s, in dark');
+  }
 });

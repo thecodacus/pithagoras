@@ -9,7 +9,8 @@ import path from "node:path";
  * nothing of it.
  *
  *   "pi":         { "extensions": ["./index.ts"] }
- *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" }
+ *   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js",
+ *                   "themes": [{ "id": "dusk", "name": "Dusk", "dark": { "canvas": "#1b1626" } }] }
  *
  * `client` is a JavaScript module the portal's page loads, which puts what it
  * draws into the portal's slots (see web/src/extensions). The folder it is in
@@ -20,6 +21,10 @@ import path from "node:path";
  * `server` is a JavaScript module the portal itself loads, once, for all
  * chats: the package's own routes, what it keeps, and what outlives a chat's
  * pi (see extension-host.ts).
+ *
+ * `themes` are colours in place of the portal's own, each by the portal's name
+ * for it: no code, so a package may be nothing but themes. The page checks
+ * them and offers them where themes are chosen (web/src/extensions/themes.ts).
  *
  * What the browser half draws in a chat talks to the package's own pi
  * extension there over pi's event bus (`pi.events` inside an extension), so
@@ -119,6 +124,39 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
     ...(style ? { style } : {}),
     rev: revOf(client),
   };
+}
+
+/** A theme a package names: who it is, and its colours as written, for the page to check. */
+export interface NamedTheme {
+  id: string;
+  name: string;
+  light?: Record<string, string>;
+  dark?: Record<string, string>;
+}
+
+export interface PackageThemes {
+  name: string;
+  version?: string;
+  themes: NamedTheme[];
+}
+
+const colourMap = (given: unknown): Record<string, string> | undefined =>
+  given && typeof given === "object" && !Array.isArray(given) && Object.values(given).every((v) => typeof v === "string") ? (given as Record<string, string>) : undefined;
+
+/** The themes the package in `packageDir` names, or nothing: it names none, or goes by no name of its own. */
+export function packageThemes(packageDir: string): PackageThemes | undefined {
+  let meta: any;
+  try {
+    meta = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8"));
+  } catch {
+    return undefined;
+  }
+  const named = meta?.pithagoras?.themes;
+  if (!validName(meta?.name) || !Array.isArray(named)) return undefined;
+  const themes = named
+    .filter((theme) => typeof theme?.id === "string" && typeof theme.name === "string")
+    .map((theme): NamedTheme => ({ id: theme.id, name: theme.name, ...(colourMap(theme.light) ? { light: theme.light } : {}), ...(colourMap(theme.dark) ? { dark: theme.dark } : {}) }));
+  return themes.length ? { name: meta.name, ...(typeof meta.version === "string" ? { version: meta.version } : {}), themes } : undefined;
 }
 
 /** The server half the package in `packageDir` declares, or nothing: it declares none, or what it names is not a file inside it. */

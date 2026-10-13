@@ -25,9 +25,8 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
     const term = new Terminal({
       fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      // Reads against the portal's own surfaces rather than shipping a second
-      // colour scheme that only matches in one theme.
-      theme: { background: "#0b0b0d", foreground: "#d4d4d8" },
+      // The portal's own colours for a terminal (see index.css), which a theme may set.
+      theme: terminalColours(),
       cursorBlink: true,
       scrollback: 5000,
       // The screen is drawn in a canvas, which a screen reader cannot read: this adds the rows and a live region it can.
@@ -87,14 +86,26 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
     });
     observer.observe(host.current);
 
+    // Another theme chosen, or light for dark: its colours follow.
+    const themed = new MutationObserver(() => (term.options.theme = terminalColours()));
+    themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
+
     return () => {
       closed = true;
       observer.disconnect();
+      themed.disconnect();
       source?.close();
       if (id) api.closeTerminal(id).catch(() => {});
       term.dispose();
     };
   }, [sessionId]);
 
-  return <div ref={host} className="h-full w-full bg-[#0b0b0d] p-1" />;
+  return <div ref={host} className="h-full w-full bg-[rgb(var(--terminal))] p-1" />;
+}
+
+/** The terminal's colours as the page has them now, in the form xterm takes. */
+function terminalColours() {
+  const style = getComputedStyle(document.documentElement);
+  const colour = (token: string) => `rgb(${style.getPropertyValue(token).trim().split(/\s+/).join(", ")})`;
+  return { background: colour("--terminal"), foreground: colour("--terminal-fg") };
 }

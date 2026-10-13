@@ -1749,7 +1749,7 @@ export function Chat({
         </div>
       )}
       {kind === "terminal" && (
-        <div className="relative min-h-0 flex-1 bg-[#0b0b0d]">
+        <div className="relative min-h-0 flex-1 bg-[rgb(var(--terminal))]">
           <div className={terminalTab === "agent" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
             <VoiceTerminal events={events} limit={500} maxOutput={200_000} ended={ended} hidden={terminalTab !== "agent"} focus={terminalFocus} onFocused={() => setTerminalFocus(null)} />
           </div>

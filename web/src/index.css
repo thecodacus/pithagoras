@@ -30,6 +30,10 @@
     --warn: 251 191 36;
     --danger: 248 113 113;
 
+    /* The agent's terminal and a shell of your own: dark in either mode, as a terminal is, unless a theme says otherwise. */
+    --terminal: 11 11 13;
+    --terminal-fg: 212 212 216;
+
     /* Motion: settling out of a move, and overshooting a little into place. */
     --ease-out: cubic-bezier(.22, 1, .36, 1);
     --ease-spring: cubic-bezier(.34, 1.56, .64, 1);

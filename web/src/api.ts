@@ -341,9 +341,11 @@ export interface ExtensionUi {
   /** Absent for a package that has only a server half. */
   entry?: string;
   style?: string;
-  /** Where its server half's own routes are, when it has one running; why not, when it has one that is not. */
+  /** Where its server half's own routes are, when it has one; why it is not running, when it could not be started. */
   server?: string;
   serverError?: string;
+  /** The themes its package.json names: colours in place of the portal's own, with no code. See extensions/themes.ts. */
+  themes?: { id: string; name: string; light?: Record<string, string>; dark?: Record<string, string> }[];
 }
 
 /**

@@ -9,6 +9,8 @@ import { panels, type PanelController } from "./panels";
 import { extensionGone, extensionHere, onlyWaitFor, onServerPush } from "./server-feed";
 import { register, type Entry, type SlotName } from "./slots";
 import { addStrings, forgetStrings, translate } from "./strings";
+import { choose, registerTheme, themes, themesSettled, type ThemeGiven } from "./themes";
+import { chosenPalette, usePalette, useResolvedTheme } from "../theme";
 
 /**
  * Loads the browser halves of the installed extensions into the page, and
@@ -76,9 +78,21 @@ export interface Portal {
     /** What the package's server half says to the pages open on a chat, whichever chat. Listened for as the module is called, nothing is missed. */
     on(handler: (chatId: string, data: unknown) => void): () => void;
   };
+  theme: {
+    /** A theme of the package's: colours in place of the portal's own, chosen in Settings like any other. */
+    register(theme: ThemeGiven): () => void;
+    /** The themes there are, any extension's: `id` is "<package>/<id>". */
+    list(): { id: string; name: string; extension: string }[];
+    /** The theme in effect, or null for the portal's own colours. */
+    current(): string | null;
+    /** Switch to a theme by its id, or to the portal's own with null. Kept in this browser. */
+    set(id: string | null): void;
+    /** A hook: light or dark, and the theme in effect, drawn again when either changes. */
+    use(): { mode: "light" | "dark"; theme: string | null };
+  };
 }
 
-type Loaded = { entry: string; server?: string; leave: () => void };
+type Loaded = { stamp: string; leave: () => void };
 
 const loaded = new Map<string, Loaded>();
 /** Why an extension's browser half is not in the page, by its package's name. */
@@ -104,10 +118,22 @@ const quietly = (fn: () => void) => {
   }
 };
 
-async function activate(ext: ExtensionUi, entry: string): Promise<void> {
+/** The hook behind `portal.theme.use`. */
+function useThemeNow(): { mode: "light" | "dark"; theme: string | null } {
+  return { mode: useResolvedTheme(), theme: usePalette()?.id ?? null };
+}
+
+/** What of an extension the page holds: by these it is known whether what is installed is what is loaded. */
+const stamp = (ext: ExtensionUi) => JSON.stringify([ext.entry ?? null, ext.server ?? null, ext.themes ?? null]);
+
+async function activate(ext: ExtensionUi): Promise<void> {
   const undo: (() => void)[] = [];
   const leave = () => undo.reverse().forEach(quietly);
+  const entry = ext.entry;
   try {
+    // The themes its package.json names need no module: a package may be nothing but themes.
+    for (const theme of ext.themes ?? []) undo.push(registerTheme(ext.name, theme));
+    if (!entry) return void loaded.set(ext.name, { stamp: stamp(ext), leave });
     if (ext.style) {
       const link = document.createElement("link");
       link.rel = "stylesheet";
@@ -166,6 +192,17 @@ async function activate(ext: ExtensionUi, entry: string): Promise<void> {
           return off;
         },
       },
+      theme: {
+        register: (theme) => {
+          const off = registerTheme(ext.name, theme);
+          undo.push(off);
+          return off;
+        },
+        list: () => themes().map((theme) => ({ id: theme.id, name: theme.name, extension: theme.extension })),
+        current: () => chosenPalette()?.id ?? null,
+        set: choose,
+        use: useThemeNow,
+      },
     };
     undo.push(() => {
       extensionGone(ext.name);
@@ -173,7 +210,7 @@ async function activate(ext: ExtensionUi, entry: string): Promise<void> {
     });
     const left = await module.default(portal);
     if (typeof left === "function") undo.push(left);
-    loaded.set(ext.name, { entry, server: ext.server, leave });
+    loaded.set(ext.name, { stamp: stamp(ext), leave });
     // What its server half said before it was here is handed over now.
     extensionHere(ext.name);
   } catch (e) {
@@ -188,16 +225,18 @@ async function sync(): Promise<void> {
   try {
     const { extensions } = await api.extensionUi();
     // Gone, or its module changed: the address of a module carries its revision.
-    // Or its server half came or went: the module is told where its routes are as it is called.
+    // Or its server half came or went, or its themes changed: the module is told where its routes are as it is called.
     for (const [name, was] of [...loaded]) {
-      if (extensions.some((ext) => ext.name === name && ext.entry === was.entry && ext.server === was.server)) continue;
+      if (extensions.some((ext) => ext.name === name && stamp(ext) === was.stamp)) continue;
       was.leave();
       loaded.delete(name);
     }
     failures = {};
     serverFailures = Object.fromEntries(extensions.filter((ext) => ext.serverError).map((ext) => [ext.name, ext.serverError!]));
     onlyWaitFor(extensions.filter((ext) => ext.entry).map((ext) => ext.name));
-    for (const ext of extensions) if (ext.entry && !loaded.has(ext.name)) await activate(ext, ext.entry);
+    for (const ext of extensions) if (!loaded.has(ext.name)) await activate(ext);
+    // Only now is it known which themes there are: one chosen that is gone gives way.
+    themesSettled();
   } catch (e) {
     // The list could not be read: what is loaded stays, and the next change asks again.
     console.error("[extensions] could not read which extensions have an interface:", e);

@@ -57,7 +57,7 @@ import { SandboxSettings } from "./SandboxSettings";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
-import { EffortPicker, Empty, ErrorBanner, LoadFailed, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
+import { EffortPicker, Empty, ErrorBanner, Field, LoadFailed, Section, Switch, SwitchRow, btnCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { PackageCatalog } from "./PackageCatalog";
 import { packageName, webLink } from "../package-names";
@@ -66,7 +66,8 @@ import type { Tab } from "../settings-tabs";
 import { serialSaver } from "../serial-saver";
 import { local } from "../safe-storage";
 import { SETTINGS_INDEX, searchSettings, type SettingEntry } from "../settings-search";
-import { useTheme, type Theme } from "../theme";
+import { usePalette, useTheme, type Theme } from "../theme";
+import { choose as chooseTheme, useThemes } from "../extensions/themes";
 import { humanKey, typed } from "../setting-values";
 import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
@@ -669,10 +670,23 @@ const THEMES: { value: Theme; label: string; icon: ReactNode }[] = [
   { value: "system", label: msg("Match the system"), icon: <LuMonitor /> },
 ];
 
-/** Light, dark, or whichever the system is — as three cards, each a glimpse of itself. */
+/**
+ * Light, dark, or whichever the system is — as three cards, each a glimpse of
+ * itself. And, where an installed extension brought any, whose colours: the
+ * portal's own or a theme's (see extensions/themes.ts).
+ */
 function Appearance() {
   const { theme, setTheme } = useTheme();
+  const brought = useThemes();
+  const chosen = usePalette();
+  // The one chosen is offered before its extension is loaded as well: it is what is painted.
+  const colours = [
+    { value: "", label: t("The portal's own") },
+    ...brought.map((th) => ({ value: th.id, label: th.name, hint: th.extension })),
+    ...(chosen && !brought.some((th) => th.id === chosen.id) ? [{ value: chosen.id, label: chosen.name }] : []),
+  ];
   return (
+    <>
     <div role="radiogroup" aria-label={t("Theme")} className="grid grid-cols-3 gap-2">
       {THEMES.map((th) => (
         <button
@@ -692,6 +706,20 @@ function Appearance() {
         </button>
       ))}
     </div>
+    {colours.length > 1 && (
+      <Field label={t("Colours")} hint={t("Themes the installed extensions brought.")} className="mt-4">
+        <Select
+          className="w-full sm:w-72"
+          aria-label={t("Colours")}
+          value={chosen?.id ?? ""}
+          options={colours}
+          onChange={(id) => {
+            if (id !== (chosen?.id ?? "")) chooseTheme(id || null);
+          }}
+        />
+      </Field>
+    )}
+    </>
   );
 }
 

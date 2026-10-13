@@ -7,7 +7,7 @@ import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
-import { clientHalf, serverHalf, type ClientHalf, type ServerHalf } from "../extension-ui.js";
+import { clientHalf, packageThemes, serverHalf, type ClientHalf, type PackageThemes, type ServerHalf } from "../extension-ui.js";
 import { serverFailure, syncServerHalves } from "../extension-host.js";
 
 const run = promisify(execFile);
@@ -208,11 +208,12 @@ export async function switchPackage(spec: string, enabled: boolean): Promise<boo
  * folder, and what it put there would run in the page of everyone who opens
  * the portal, or in the portal itself.
  */
-async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[] }> {
+async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[]; themed: PackageThemes[] }> {
   const settings = readPiSettings();
   const listed = Array.isArray(settings.packages) ? settings.packages : [];
   const clients: ClientHalf[] = [];
   const servers: ServerHalf[] = [];
+  const themed: PackageThemes[] = [];
   for (const pkg of await installedPackages(settings)) {
     if (!pkg.path || (pkg.scope && !/^user/i.test(pkg.scope))) continue;
     const entry = listed.find((e) => sourceOf(e) === pkg.spec);
@@ -221,8 +222,10 @@ async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[] 
     if (client && !clients.some((h) => h.name === client.name)) clients.push(client);
     const server = serverHalf(pkg.path);
     if (server && !servers.some((h) => h.name === server.name)) servers.push(server);
+    const themes = packageThemes(pkg.path);
+    if (themes && !themed.some((h) => h.name === themes.name)) themed.push(themes);
   }
-  return { clients, servers };
+  return { clients, servers, themed };
 }
 
 const clientHalves = async () => (await halves()).clients;
@@ -245,16 +248,18 @@ export function extensionsRouter(): Router {
 
   router.get("/extension-ui", async (_req, res) => {
     try {
-      const { clients, servers } = await halves();
-      const names = [...new Set([...clients, ...servers].map((half) => half.name))];
+      const { clients, servers, themed } = await halves();
+      const names = [...new Set([...clients, ...servers, ...themed].map((half) => half.name))];
       res.json({
         extensions: names.map((name) => {
           const client = clients.find((half) => half.name === name);
           const server = servers.find((half) => half.name === name);
+          const themes = themed.find((half) => half.name === name);
           const failure = server && serverFailure(name);
           return {
             name,
-            version: (client ?? server)!.version,
+            version: (client ?? server ?? themes)!.version,
+            ...(themes ? { themes: themes.themes } : {}),
             ...(client ? { entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
             // Where its server half's own routes are, when it has one that is running.

@@ -2,8 +2,8 @@
 
 An extension is an ordinary pi package that also brings something to the
 portal: a panel beside a conversation, a page in the sidebar, routes of its
-own on the server, tools for the agent that share what those routes know. It is
-installed, switched and removed like any other package
+own on the server, tools for the agent that share what those routes know, a
+theme. It is installed, switched and removed like any other package
 ([Extensions](/guide/extensions)), and it is loaded as it is: nothing of it is
 compiled into the portal.
 
@@ -97,7 +97,8 @@ While you work on it:
   "pithagoras": {
     "client": "./web/client.js",
     "style": "./web/client.css",
-    "server": "./server.js"
+    "server": "./server.js",
+    "themes": [{ "id": "dusk", "name": "Dusk", "dark": { "accent": "#ff79c6" } }]
   }
 }
 ```
@@ -113,6 +114,8 @@ While you work on it:
   and a heavy part can be loaded when first needed with `import("./big.js")`.
 - **`style`**, in the same folder, is a stylesheet loaded with it.
 - **`server`** is a JavaScript module for Node, anywhere in the package.
+- **`themes`** are [colours in place of the portal's own](#themes), with no
+  code at all.
 
 Both modules are loaded as they are: plain JavaScript, or the output of your
 own build.
@@ -135,6 +138,7 @@ with it either way.
 | `api.url(path)` | The address of a route of the package's [server half](#the-server-half) |
 | `server.on(handler)` | What the server half [says to this page](#telling-the-pages-open-on-a-chat) |
 | `t(text, vars?)`, `locale` | [Its texts in other languages](#other-languages) |
+| `theme` | [Themes](#themes): add one, switch to one, follow the one in effect |
 | `ui` | [The portal's building blocks](#looking-like-the-portal) |
 | `navigate(path)` | Goes to a page of the portal: `/s/<chat id>`, `/x/<package>/<page id>` |
 | `extension`, `version` | The package's name; the version of this interface, `1` |
@@ -156,8 +160,10 @@ your panel is not, unless it [asks for something that changed](#the-chat-s-event
 The page's colours are variables holding the three numbers of a colour, so
 `rgb(var(--fg))`, and likewise `--canvas`, `--surface`, `--raised`, `--line`,
 `--fg-muted`, `--fg-subtle`, `--fg-faint`, `--accent`, `--accent-fg`, `--ok`,
-`--warn` and `--danger`. A stylesheet written with them follows the theme. Give
-your class names a prefix of your own: the stylesheet is the page's.
+`--warn`, `--danger`, and `--terminal` with `--terminal-fg` for a terminal's
+ground and text. A stylesheet written with them follows the theme, the
+portal's own or [one an extension brought](#themes). Give your class names a
+prefix of your own: the stylesheet is the page's.
 
 `portal.ui` is what the portal's own pages are made of:
 
@@ -548,10 +554,78 @@ function Panel() {
 A text you did not add falls back to the portal's own where it has it
 ("Loading…", "Remove"), and to what you wrote otherwise.
 
+## Themes
+
+A theme is a set of colours in place of the portal's own, for dark, for light,
+or for both. A package can be nothing else: name them in `package.json`, and
+there is no code to write.
+
+```json
+{
+  "name": "my-theme",
+  "keywords": ["pi-package"],
+  "pithagoras": {
+    "themes": [
+      {
+        "id": "dusk",
+        "name": "Dusk",
+        "dark":  { "canvas": "#1b1626", "surface": "#241e33", "fg": "#f4f0fa", "accent": "#ff79c6", "terminal": "#15111e" },
+        "light": { "canvas": "#faf7ff", "accent": "#a83282" }
+      }
+    ]
+  }
+}
+```
+
+Each colour goes by the portal's name for what it is for, and is written as
+`"#rrggbb"` or as three numbers (`"27 22 38"`):
+
+| | |
+| --- | --- |
+| `canvas`, `surface`, `raised` | The page; what sits on it; what sits on that |
+| `line` | Borders and rules |
+| `fg`, `fg-muted`, `fg-subtle`, `fg-faint` | Text, and its three quieter tones |
+| `accent`, `accent-fg` | What is chosen or pressed, and text on it |
+| `ok`, `warn`, `danger` | Done; careful; wrong |
+| `terminal`, `terminal-fg` | A terminal's ground and its text. Dark in either mode unless a theme says otherwise |
+
+What a theme does not say stays the portal's, so a theme can be one colour.
+Keep text readable on what it sits on: the portal's own tones are each 4.5:1 or
+better on every surface.
+
+Installed, the theme is offered in **Settings → This browser → Appearance →
+Colours**, beside Light, Dark and Match the system. The choice is kept in the
+browser with its colours, so on the next load it is painted before the app and
+long before any extension is loaded: there is no flash of the portal's own
+colours first. When the package is removed or switched off, the portal's own
+are back.
+
+The browser half can do the same in code, and can be a theme changer: a
+control of its own that switches the portal between themes, its own or any
+other package's.
+
+| `portal.theme.` | |
+| --- | --- |
+| `register({ id, name, dark?, light? })` | Adds a theme, like one named in `package.json` |
+| `list()` | The themes there are: `{ id, name, extension }`, with `id` as `<package>/<id>` |
+| `current()` | The theme in effect, or `null` for the portal's own colours |
+| `set(id)` | Switches to a theme, or to the portal's own with `null` |
+| `use()` | A hook: `{ mode, theme }`, light or dark and the theme in effect |
+
+```js
+portal.slots.register("chat.header.action", { id: "theme", component: () => {
+  const { theme } = portal.theme.use();
+  return h("button", { onClick: () => portal.theme.set(theme ? null : "my-theme/dusk") }, theme ? "Portal colours" : "Dusk");
+} });
+```
+
+`extensions/theme-dusk` in the repository is a whole theme in one
+`package.json`.
+
 ## What is loaded, and when
 
-The portal loads the browser half and the server half of every package that is
-installed in the portal and switched on. Installing, removing, updating or
+The portal loads the browser half, the server half and the themes of every
+package that is installed in the portal and switched on. Installing, removing, updating or
 switching one takes effect in the open page and in the server, without a
 reload or a restart.
 
@@ -604,6 +678,7 @@ extension:
 | Opening itself when the agent makes something | `chat.background` |
 | A window in voice mode | `voice.window` |
 | A page in the sidebar; a page in Settings | `nav.page`, `settings.page` |
+| The colours of everything | [A theme](#themes) |
 
 ## The example
 
@@ -619,4 +694,5 @@ extension:
   folder, a route that answers for all chats, and the count each page is told.
 
 Install it from Settings → Extensions by its path (in the image,
-`/app/extensions/notes`).
+`/app/extensions/notes`). `extensions/theme-dusk` beside it is an extension
+that is only a theme.

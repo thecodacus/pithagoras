@@ -1,0 +1,47 @@
+{
+  "name": "pithagoras-theme-dusk",
+  "version": "0.1.0",
+  "description": "Dusk: a purple theme for the Pithagoras portal, in light and dark. The reference for an extension that is only a theme: no code",
+  "keywords": ["pi-package"],
+  "pithagoras": {
+    "themes": [
+      {
+        "id": "dusk",
+        "name": "Dusk",
+        "dark": {
+          "canvas": "#1b1626",
+          "surface": "#241e33",
+          "raised": "#302843",
+          "line": "#42385a",
+          "fg": "#f4f0fa",
+          "fg-muted": "#c4bcd6",
+          "fg-subtle": "#b0a7c4",
+          "fg-faint": "#a096b6",
+          "accent": "#ff79c6",
+          "accent-fg": "#1b1626",
+          "ok": "#50fa7b",
+          "warn": "#f1fa8c",
+          "danger": "#ff6e6e",
+          "terminal": "#15111e",
+          "terminal-fg": "#e2dcf0"
+        },
+        "light": {
+          "canvas": "#faf7ff",
+          "surface": "#ffffff",
+          "raised": "#f3eefc",
+          "line": "#e2daf0",
+          "fg": "#221a30",
+          "fg-muted": "#54486a",
+          "fg-subtle": "#64587a",
+          "fg-faint": "#706486",
+          "accent": "#a83282",
+          "accent-fg": "#ffffff",
+          "ok": "#059669",
+          "warn": "#a0690a",
+          "danger": "#cd283c"
+        }
+      }
+    ]
+  },
+  "license": "Apache-2.0"
+}

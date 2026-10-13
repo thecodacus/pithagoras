@@ -35,6 +35,11 @@ signed in shows that.
 which follows the machine and changes with it — at sunset, on a desktop that
 flips.
 
+An installed extension can bring a theme: other colours in place of the
+portal's own, for light, for dark or for both. Where one is installed,
+**Colours** under the three appears, with the portal's own and each theme to
+choose from. See [Themes](/guide/extension-ui#themes).
+
 In both themes even the quietest text — hints, timestamps, placeholders — keeps a
 contrast of at least 4.5:1 against what it is drawn on, and the keyboard focus is
 a 2px outline in the full accent colour, round fields, checkboxes, dropdowns and

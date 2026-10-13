@@ -17,6 +17,7 @@ mkdirSync(bin);
 /** A package folder under `home`, with these files and this under `pithagoras` in its package.json. */
 function pkg(folder, name, declared, files) {
   const dir = path.join(home, "packages", folder);
+  mkdirSync(dir, { recursive: true });
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
     writeFileSync(path.join(dir, file), text);
@@ -39,6 +40,8 @@ const plain = pkg("plain", "no-interface", undefined, { "index.ts": "export defa
 const project = pkg("project", "from-a-folder", { ...WEB, server: "./server.js" }, { ...files("project"), "server.js": SERVER });
 // A server half and no browser half, and one whose server half cannot start.
 const headless = pkg("headless", "server-only", { server: "./lib/server.js" }, { "lib/server.js": SERVER });
+// Nothing but themes: no code at all.
+const themed = pkg("themed", "only-themes", { themes: [{ id: "dusk", name: "Dusk", dark: { accent: "#ff79c6" } }] }, {});
 const broken = pkg("broken", "breaks", { ...WEB, server: "./server.js" }, { ...files("broken"), "server.js": "export default function () { throw new Error('no licence'); }" });
 
 writeFileSync(
@@ -57,6 +60,8 @@ User packages:
     ${headless}
   npm:breaks
     ${broken}
+  npm:only-themes
+    ${themed}
 Project packages:
   npm:from-a-folder
     ${project}
@@ -70,7 +75,7 @@ mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 writeFileSync(
   path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"),
   JSON.stringify({
-    packages: ["npm:@codacus/notes", { source: "npm:switched-off", extensions: [], skills: [], prompts: [], themes: [] }, "npm:no-interface", "npm:server-only", "npm:breaks"],
+    packages: ["npm:@codacus/notes", { source: "npm:switched-off", extensions: [], skills: [], prompts: [], themes: [] }, "npm:no-interface", "npm:server-only", "npm:breaks", "npm:only-themes"],
   }),
 );
 
@@ -91,7 +96,9 @@ const at = (p) => `http://127.0.0.1:${server.address().port}${p}`;
 
 test("the browser halves listed are those of the portal's own packages that are switched on", async () => {
   const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
-  assert.deepEqual(extensions.map((e) => e.name).sort(), ["@codacus/notes", "breaks", "server-only"], "not one switched off, one with neither half, or one a folder brings");
+  assert.deepEqual(extensions.map((e) => e.name).sort(), ["@codacus/notes", "breaks", "only-themes", "server-only"], "not one switched off, one with nothing for the portal, or one a folder brings");
+  // A package that is only themes is listed with them, as written, and with nothing to load.
+  assert.deepEqual(extensions.find((e) => e.name === "only-themes"), { name: "only-themes", version: "1.0.0", themes: [{ id: "dusk", name: "Dusk", dark: { accent: "#ff79c6" } }] });
   const notes = extensions.find((e) => e.name === "@codacus/notes");
   assert.equal(notes.version, "1.0.0");
   assert.match(notes.entry, /^\/api\/extension-ui\/%40codacus\/notes\/client\.js\?v=[0-9a-z]+-[0-9a-z]+$/);
@@ -133,7 +140,7 @@ test("nothing else of a package is served, and nothing of a package that has no 
 
 test("the server halves that run are those of the same packages, each said with where its routes are or why it is not running", async () => {
   const before = (await (await fetch(at("/api/extension-ui"))).json()).extensions;
-  assert.deepEqual(before.map((e) => e.server).sort(), ["/api/x/%40codacus/notes", "/api/x/breaks", "/api/x/server-only"], "where each will be, before any is started");
+  assert.deepEqual(before.map((e) => e.server).filter(Boolean).sort(), ["/api/x/%40codacus/notes", "/api/x/breaks", "/api/x/server-only"], "where each will be, before any is started");
   assert.equal((await fetch(at("/api/x/@codacus/notes/hello"))).status, 404);
 
   await syncExtensionServers();
