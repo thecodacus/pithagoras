@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, readlinkSync } from "node:fs";
 import express, { type Router } from "express";
 import { getSession } from "../db.js";
+import { watchStream } from "../login-streams.js";
 import { MARKER } from "../background.js";
 import { signalSession, statOf } from "../proc-stat.js";
 
@@ -320,7 +321,10 @@ export function terminalRouter(): Router {
     watchUnattended(term);
     // Without traffic a proxy takes an idle shell for a dead connection.
     const heartbeat = setInterval(() => res.write(": ping\n\n"), 25_000);
+    // The shell goes on and its page is shown to the next login: the stream is for the password it was opened under.
+    const unwatch = watchStream(drop);
     req.on("close", () => {
+      unwatch();
       clearInterval(heartbeat);
       clearTimeout(stall);
       term.listeners.delete(send);

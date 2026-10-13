@@ -2,8 +2,15 @@ import type { RequestHandler } from 'express';
 import { existsSync } from 'node:fs';
 import net from 'node:net';
 
-export function bindHost(password: string | undefined, allowOpen: string | undefined): string {
-  return password || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
+/** Running without a login is a deliberate choice, never what an empty .env falls back to. */
+export const allowNoPassword = (): boolean => /^(1|true|yes)$/i.test(process.env.PORTAL_ALLOW_NO_PASSWORD ?? '');
+
+/**
+ * Where the portal listens: everywhere once there is a login in front of it (or one to be chosen
+ * on the setup screen), and on this machine only where it is open by choice, unless ALLOW_OPEN says otherwise.
+ */
+export function bindHost(login: boolean, allowOpen: string | undefined): string {
+  return login || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
 }
 
 /**

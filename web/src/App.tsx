@@ -7,7 +7,7 @@ import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type Session
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
-import { Login } from "./components/Login";
+import { Login, Setup } from "./components/Login";
 import { isTab, type Tab } from "./settings-tabs";
 import { setupDismissed } from "./setup-state";
 import { load as loadCached, prefetchSettings } from "./settings-cache";
@@ -15,6 +15,7 @@ import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
 import { lazyComponent } from "./lazy";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { ErrorBanner, ghostCls } from "./components/SettingsUi";
 import { pollWhileVisible, reconnectDelay } from "./poll";
 import { canvasConnection, canvasMessage } from "./canvas-feed";
@@ -48,6 +49,8 @@ export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).
   useLanguage();
   const [authed, setAuthed] = useState<boolean | null>(null);
+  /** No password has been chosen yet: the first start, or after it was removed with the reset command. */
+  const [setup, setSetup] = useState(false);
   /** The portal did not answer when asked who is signed in: not the same as nobody being. */
   const [unreachable, setUnreachable] = useState(false);
   const failed = useRef(0);
@@ -58,6 +61,7 @@ export default function App() {
       (s) => {
         failed.current = 0;
         setUnreachable(false);
+        setSetup(Boolean(s.setup));
         setAuthed(s.authed);
       },
       (e) => {
@@ -106,7 +110,7 @@ export default function App() {
         <div className="fixed right-4 top-4 z-10">
           <ThemeSwitcher />
         </div>
-        <Login onSuccess={() => setAuthed(true)} />
+        {setup ? <Setup onSuccess={() => { setSetup(false); setAuthed(true); }} /> : <Login onSuccess={() => setAuthed(true)} onSetup={() => setSetup(true)} />}
       </>
     );
   }
@@ -661,6 +665,7 @@ function Shell({
     refreshSessions();
   });
   const onOpenSettings = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/general` : "/settings/general"));
+  const openUpdate = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/about` : "/settings/about"));
   const closeSettings = useStable(() => navigate(active ? `/s/${active.id}` : "/"));
   const setUpModel = useStable(() => {
     navigate(active ? `/s/${active.id}` : "/");
@@ -720,6 +725,7 @@ function Shell({
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
           <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
         </header>
+        <UpdateNotice onDetails={openUpdate} />
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
         {/* Not for the first miss: a server restarting, or a wifi that blinked,
             is back before it can be read. Two in a row is an outage. */}

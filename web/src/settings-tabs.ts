@@ -16,6 +16,7 @@ export const TAB_IDS = [
   "mcp",
   "extensions",
   "browser",
+  "password",
   "shortcuts",
   "logs",
   "about",

@@ -782,6 +782,11 @@ export function anySessionRunning(): boolean {
   return Boolean(getDb().prepare("SELECT 1 FROM sessions WHERE status = 'running' LIMIT 1").get());
 }
 
+/** How many sessions have a turn running: chats, routine runs and agents' own looks alike. */
+export function runningSessionCount(): number {
+  return (getDb().prepare("SELECT COUNT(*) AS n FROM sessions WHERE status = 'running'").get() as { n: number }).n;
+}
+
 /** The sessions agents look around in on their own: one per agent, see heartbeat.ts. */
 export function listHeartbeatSessions(): SessionRow[] {
   return getDb().prepare("SELECT * FROM sessions WHERE kind = 'heartbeat'").all() as SessionRow[];

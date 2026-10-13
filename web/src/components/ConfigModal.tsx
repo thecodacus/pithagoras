@@ -14,6 +14,7 @@ import {
   LuShieldCheck,
   LuImages,
   LuInfo,
+  LuKeyRound,
   LuKeyboard,
   LuMonitor,
   LuMoon,
@@ -35,6 +36,7 @@ import { ChannelsPanel } from "./ChannelsPanel";
 import { SkillsPanel } from "./SkillsPanel";
 import { McpPanel } from "./McpPanel";
 import { LogsPanel } from "./LogsPanel";
+import { PasswordPanel } from "./PasswordPanel";
 import { parseWindow } from "../context-window";
 import { KeepRecent, useKeepRecentSave } from "./KeepRecent";
 import { formatTokens } from "../transcript";
@@ -47,6 +49,7 @@ import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
 import { MediaPanel } from "./MediaPanel";
 import { PortalExtensions } from "./PortalExtensions";
+import { UpdateSection } from "./UpdateSection";
 import { Modal, useUnsavedDraft } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
 import { SandboxSettings } from "./SandboxSettings";
@@ -110,6 +113,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     label: msg("Portal"),
     tabs: [
       { id: "browser", label: msg("This browser"), icon: <LuMonitor />, hint: msg("Theme, notifications, confirmations") },
+      { id: "password", label: msg("Password"), icon: <LuKeyRound />, hint: msg("The password that signs in to this portal") },
       { id: "add-ons", label: msg("Add-ons"), icon: <LuPuzzle />, hint: msg("Optional parts of the portal itself") },
       { id: "shortcuts", label: msg("Shortcuts"), icon: <LuKeyboard />, hint: msg("Keyboard shortcuts, and changing them") },
       { id: "logs", label: msg("Logs"), icon: <LuScrollText />, hint: msg("What the server prints, and a file to take away") },
@@ -284,6 +288,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}
+      {nav.kind === "tab" && nav.id === "password" && <PasswordPanel />}
       {nav.kind === "tab" && nav.id === "logs" && <LogsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "about" && <AboutPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "channels" && <ChannelsPanel onError={setError} />}
@@ -620,7 +625,7 @@ function SignOut({ onError }: { onError: (e: string) => void }) {
       </button>
       {short && (
         <p role="note" className="mt-3 text-xs text-warn">
-          {t("The portal's password is shorter than 8 characters. It keeps working because it was already in use, but anybody who can reach the portal can try to guess it. Set a longer PORTAL_PASSWORD and restart.")}
+          {t("The portal's password is shorter than 8 characters. It keeps working because it was already in use, but anybody who can reach the portal can try to guess it. Change it under Settings → Password.")}
         </p>
       )}
     </Section>
@@ -738,8 +743,17 @@ function BrowserPanel({ onError }: { onError: (e: string) => void }) {
   );
 }
 
-/** Where this portal keeps what it keeps, set when it was deployed. */
+/** Where this portal keeps what it keeps, set when it was deployed; and updating it. */
 function AboutPanel({ onError }: { onError: (e: string) => void }) {
+  return (
+    <>
+      <AboutDeployment onError={onError} />
+      <UpdateSection />
+    </>
+  );
+}
+
+function AboutDeployment({ onError }: { onError: (e: string) => void }) {
   // What Defaults reads too, fetched ahead: drawn at once from what is kept.
   const { value: meta, failed, reload } = useCached("settings", api.settings, { onError: refreshFailed("settings", onError) });
   if (!meta && failed) return <LoadFailed error={failed} onRetry={reload} />;

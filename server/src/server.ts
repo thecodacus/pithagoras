@@ -80,7 +80,7 @@ import { sessions, CommandFailed, IMAGE_ROOT } from "./session-manager.js";
 import { ImageError, MAX_IMAGE_BYTES, MAX_IMAGES, imagePath, mimeOf, parseImages, saveImages } from "./prompt-images.js";
 import { defaultsFor, exceptionsFor, heldOffUnshown, toolEnabled, toolSource } from "./tool-policy.js";
 import { mcpRouter, mcpServerNames, onMcpWritten } from "./api/mcp.js";
-import { authEnabled, checkPassword, isAuthed, issueCookie, keptShortPassword, requireAuth, signOut } from "./auth.js";
+import { authMode, changePassword, checkPassword, isAuthed, issueCookie, requireAuth, setUpPassword, shortPassword, signOut } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
@@ -110,6 +110,8 @@ import { trustFlagged } from "./pi/guard.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { logsRouter } from "./api/logs.js";
+import { startUpdateChecks, updateRouter } from "./api/update.js";
+import { requestedExit } from "./restart.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -169,15 +171,41 @@ app.use(cookieParser());
 
 app.get("/api/auth/status", (req, res) => {
   const authed = isAuthed(req);
-  // Said to a login only: to anyone else it would say which password to guess.
-  res.json({ authRequired: authEnabled, authed, ...(authed && keptShortPassword ? { shortPassword: true } : {}) });
+  const mode = authMode();
+  // `setup` says that no password has been chosen yet: the page asks for one instead of for the password.
+  // The warning about a short one is said to a login only: to anyone else it would say which password to guess.
+  res.json({
+    authRequired: mode !== "open",
+    authed,
+    ...(mode === "setup" ? { setup: true } : {}),
+    ...(authed && shortPassword() ? { shortPassword: true } : {}),
+  });
 });
 
-app.post("/api/auth/login", loginThrottle(), (req, res) => {
-  if (!authEnabled) return res.json({ ok: true });
-  if (!checkPassword(req.body?.password)) {
+app.post("/api/auth/login", loginThrottle(), async (req, res) => {
+  const mode = authMode();
+  if (mode === "open") return res.json({ ok: true });
+  if (mode === "setup") return res.status(409).json({ error: "No password has been chosen yet.", setup: true });
+  if (!(await checkPassword(req.body?.password))) {
     return res.status(401).json({ error: "Wrong password" });
   }
+  issueCookie(res);
+  res.json({ ok: true });
+});
+
+// The first password, chosen by whoever opens a portal that has none yet: signed in with it at once.
+app.post("/api/auth/setup", async (req, res) => {
+  const refused = await setUpPassword(req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
+  issueCookie(res);
+  res.json({ ok: true });
+});
+
+// Throttled like the login, since it too takes a guess at the password. Every other login ends with the change,
+// and this browser is signed in again under the new one.
+app.post("/api/auth/password", requireAuth, loginThrottle(), async (req, res) => {
+  const refused = await changePassword(req.body?.current, req.body?.password);
+  if (refused) return res.status(refused.status).json({ error: refused.error });
   issueCookie(res);
   res.json({ ok: true });
 });
@@ -1604,6 +1632,7 @@ app.use("/api", peopleRouter());
 app.use("/api", browserRouter());
 app.use("/api", sandboxRouter(sessions));
 app.use("/api", logsRouter());
+app.use("/api", updateRouter());
 app.use("/api", voiceRouter());
 app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());
@@ -1674,7 +1703,7 @@ const tls =
     ? { cert: readFileSync(tlsAt.cert), key: readFileSync(tlsAt.key) }
     : null;
 
-const host = bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN);
+const host = bindHost(authMode() !== "open", process.env.ALLOW_OPEN);
 // Before anything can start a run: a catch-up routine marked running in the same
 // moment would be taken for one the last server left.
 const cutOff = sessions.recoverOrphans();
@@ -1686,10 +1715,12 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
   console.log(`  local bin: ${BIN_DIR}`);
   console.log(`  executor: ${EXECUTOR_KIND}`);
   console.log(`  workspaces: ${WORKSPACE_ROOT}`);
-  console.log(`  auth:     ${authEnabled ? "password" : "DISABLED"}`);
+  console.log(`  auth:     ${{ password: "password", setup: "waiting for a password to be chosen", open: "DISABLED" }[authMode()]}`);
 
   // Recurring schedules wait for their next slot; overdue one-off routines catch up.
   routineSupervisor.start();
+  // Looks at origin/main for new commits, now and every six hours: only where there is a checkout to update.
+  startUpdateChecks();
   // Agents with a heartbeat look around on their own, when nothing else is using the model.
   heartbeat.start();
 
@@ -1764,14 +1795,14 @@ function shutdown(signal: string): Promise<void> {
 async function stop(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
   // However long the rest takes, and no longer than docker waits before it kills.
-  setTimeout(() => process.exit(0), 10_000).unref();
+  setTimeout(() => process.exit(requestedExit()), 10_000).unref();
   routineSupervisor.stop();
   // Alongside the rest: their shells are given a moment to wind down.
   const shells = endAllTerminals();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
   await shells;
-  server.close(() => process.exit(0));
+  server.close(() => process.exit(requestedExit()));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds
   // of the timer above.
