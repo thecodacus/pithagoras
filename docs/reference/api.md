@@ -17,9 +17,13 @@ curl -s -b jar localhost:4100/api/sessions
 
 | | |
 | --- | --- |
-| `GET /api/auth/status` | `{ authRequired, authed, shortPassword? }`. `shortPassword: true` is sent only to a signed-in caller, and only when the portal runs on a password shorter than 8 characters that it kept from before the minimum |
-| `POST /api/auth/login` | `{ password }` → sets the cookie |
-| `POST /api/auth/logout` | clears the cookie, and refuses the login it held from then on |
+| `GET /api/auth/status` | `{ authRequired, authed, oidc?, shortPassword? }`. `oidc: { name, only }` is there when single sign-on is set up and usable (the login page's button, and whether it is the only way in). `shortPassword: true` is sent only to a signed-in caller, and only when the portal runs on a password shorter than 8 characters that it kept from before the minimum |
+| `POST /api/auth/login` | `{ password }` → sets the cookie; 403 when OIDC only has switched the password login off |
+| `POST /api/auth/logout` | clears the cookie, and refuses the login it held from then on. `{ ok, endSession? }`: `endSession` is the provider's sign-out address, when the settings ask for it |
+| `GET /api/auth/sso` | The single sign-on settings: `{ mode, callbackPath, settings, only }`. `settings` is `null` when it is not set up, otherwise the issuer, client ID, redirect URL, scopes, button name and `endSession`, and `hasSecret` instead of the client secret, which is never sent back |
+| `PUT /api/auth/sso` | `{ current, settings, only? }` → saves them, or takes single sign-on out with `settings: null`. `current` is the current password (403 if wrong); 409 without a password set. The provider's discovery document and keys are read before anything is kept, so settings it does not answer to are 400 with the reason. `only` is the same flag that `GET` returns beside `settings`; left out, it stays as it is. A change of issuer, client ID or `only` ends every other login, and the caller is signed in again |
+| `GET /api/auth/oidc/start` | Browser route, not JSON: sets the state cookie and redirects (303) to the provider. `?returnTo=` is a path on the portal. 404 when single sign-on is not set up, 502 when the provider cannot be reached |
+| `GET /api/auth/oidc/callback` | Browser route: the provider's redirect back. Checks the state, `iss`, the code and the ID token, then sets the login cookie and redirects to `returnTo`; a refusal is a short HTML page. This path is the redirect URI to register at the provider |
 
 ## Workspaces
 

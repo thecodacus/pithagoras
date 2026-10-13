@@ -10,7 +10,7 @@ test('the cursor switch shows what the portal says and a press asks for the othe
   await mockPortal(page, ({ path, method, json }) => {
     if (path === '/api/browser' && method === 'GET') {
       return {
-        running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', cursor, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
+        running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
         install: { available: true, mode: 'docker', image: false, container: 'absent', binary: '/usr/bin/chromium', pulling: { active: false, line: '' } },
         config: { user: 'abc', hasPassword: true },
       };

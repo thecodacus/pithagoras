@@ -15,6 +15,7 @@
     "dev:web": "npm run dev -w web",
     "start": "node server/dist/index.js",
     "reset-password": "node server/dist/reset-password.js",
+    "sso-only-off": "node server/dist/sso-only-off.js",
     "docs": "npm run dev -w docs",
     "docs:build": "npm run build -w docs"
   },

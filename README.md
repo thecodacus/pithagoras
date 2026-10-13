@@ -97,7 +97,7 @@ on Tailscale/LAN rather than the public internet.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login behind an authenticating proxy. The password itself is chosen in the browser on the first start and changed under Settings → Password; there is no variable for it. |
+| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login behind an authenticating proxy. The password itself is chosen in the browser on the first start and changed under Settings → Authentication; there is no variable for it. |
 | `PORTAL_SECRET` | random | HMAC key for the auth cookie. Set it so logins survive restarts. |
 | `WORKSPACES_DIR` | — (required) | Host directory mounted at `/workspaces` (Compose only; it will not start without one). |
 | `PORTAL_DATA_DIR` | named volume | Host directory for the data volume, instead of a Docker volume (Compose only). |

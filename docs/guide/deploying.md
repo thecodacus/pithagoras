@@ -1,8 +1,9 @@
 # Deploying
 
 Pithagoras ships as a container. It expects to run somewhere private — there is
-a single password and no per-user separation, so put it behind Tailscale or a
-VPN rather than on a public address.
+a single login (a password, and optionally a [single sign-on](#single-sign-on)
+provider) and no per-user separation, so put it behind Tailscale or a VPN rather
+than on a public address.
 
 ## Docker Compose
 
@@ -76,7 +77,7 @@ you have, which is easy on Tailscale or a VPN and not on a public address. The
 log says it is waiting. This works the same in Docker and on a headless machine:
 open the address from any browser that can reach it.
 
-**Changing it.** **Settings → Password** takes the current password and the new
+**Changing it.** **Settings → Authentication** takes the current password and the new
 one twice; it signs out every other browser, and closes every chat view, terminal and
 browser stream that was open, in the one you changed it in as well (that page opens
 them again with its new login). See [Settings](/guide/settings#password).
@@ -112,6 +113,119 @@ opened by the reset either: it waits on the setup screen like any other. A *rest
 with the variable still set and no password does run with no login (on this machine
 only, unless `ALLOW_OPEN=1`), so choose a new password before restarting, or take the
 variable out. The command says so when the variable is set where it runs.
+
+## Single sign-on
+
+The portal can also sign you in through an OpenID Connect provider (Authentik,
+Keycloak, Entra ID, Google, Zitadel, Authelia and the like), beside the password or
+instead of it. It is set up in the browser, under **Settings → Authentication**
+(the **Single sign-on** section, closed until you open it),
+and kept in the portal's database like the password; there are no variables to
+set. The login page then has a **Sign in with …** button. What the provider lets in
+gets the same login cookie the password gives, so the API, the event streams and the
+agent's browser work as they do with the password. It is still one login for one
+person: everyone the provider signs in is the same user.
+
+Single sign-on needs the portal's password: it is set up after the password is
+chosen, saving its settings asks for the password, and the login cookie is signed
+with it. On a portal waiting on its setup screen (after `reset-password`, say) the
+button is not shown until a password is chosen again; the settings are kept. A portal
+with `PORTAL_ALLOW_NO_PASSWORD=1` has no login, and so no single sign-on.
+
+At the provider, make an OpenID Connect client for the authorization code flow:
+
+- Redirect URI: the portal's address followed by `/api/auth/oidc/callback`, such
+  as `https://portal.example.com/api/auth/oidc/callback`. The settings page fills it
+  in from the address it is open at; register what it says.
+- Confidential, with a client secret, or public without one: the portal uses PKCE
+  either way.
+- With **End the session at the provider too**, also allow the portal's address
+  with a `/` at the end (`https://portal.example.com/`) as the post-logout redirect URI.
+
+Then fill in the settings page: the **issuer URL** exactly as the provider names
+itself in `/.well-known/openid-configuration` (a trailing `/` counts; `https` only,
+plain `http` only for a provider on the same machine), the **client ID** and
+**secret** and the **redirect URL**. The scopes default to
+`openid email profile`, the button to "SSO". The client secret is never shown again
+once saved; leaving the field empty keeps it. That holds for the same issuer and
+client only: with another one the kept secret is not sent, and saving asks you to
+type the secret again, or to remove it for a public client.
+
+**Who may sign in is decided at the provider**, not in the portal: the portal has
+no list of emails, groups or accounts. Every account the provider signs in, with an
+ID token that checks out (its signature, issuer, audience, nonce and expiry), gets
+in. Limit the client to your people at the provider before you point the portal at
+it:
+
+- Authentik: group or user bindings on the application.
+- Keycloak: a realm of your own people, with user registration off.
+- Entra ID: *Assignment required* on the enterprise application.
+- Authelia: an authorization policy on the client that names your people.
+- Google: the consent screen's audience *Internal* (a Google Workspace
+  organisation), or *Testing* with your people listed as test users. An *External*
+  app that is published (*In production*) lets in every Google account there is, so
+  do not publish it.
+
+Other providers have a switch of their own for this; find it first. Do not point the
+portal at a provider that signs in anybody, such as one with open registration.
+
+When the settings are saved, the portal reads the provider's discovery document and
+keys, and refuses settings it does not answer to, with the reason: a provider that
+cannot be reached, calls itself by another issuer, does not offer PKCE with `S256`,
+or signs ID tokens with nothing but a shared secret. A provider that is down later
+does not open anything: its button says it cannot be reached, and the password
+still signs in (unless OIDC only is on).
+
+The sign-in ends at the address of the redirect URL. A button pressed on the portal
+opened by another name (its IP address, another host name) first sends the browser
+to that address, and you are signed in there, so open the portal at that address.
+
+A login lasts 30 days, as with the password. When the provider's own session or
+token runs out, the portal's login does not end, and blocking an account at the
+provider does not end a login the account already has. Changing the issuer, the
+client ID or **OIDC only** ends every login, the provider's and the
+password's (the browser that saved it is signed in again), as changing the password does.
+
+### OIDC only
+
+**OIDC only** hides the password form on the login page and refuses the password
+login: the provider is the only way in. The password stays set, and saving the
+single sign-on settings still asks for it. Turning it on ends every login, so a
+password login somebody else holds stops working too. Sign in through the provider
+once before you turn it on.
+
+If the provider stops letting you in, a server command switches the password login
+back on, after asking you to type `on`:
+
+```bash
+# Docker Compose
+docker exec -it pithagoras node server/dist/sso-only-off.js
+
+# Native, from the folder the portal runs from (or with the same DATA_DIR)
+npm run sso-only-off
+```
+
+A running portal takes it at once: the password signs in again, every login ends,
+and the provider's settings stay as they were. A lost password as well is removed
+with `reset-password` (above), which leaves OIDC only as it is; run both.
+
+### Authentik
+
+Under **Applications**, create an application with an **OAuth2/OpenID Provider**,
+client type *Confidential*, and the redirect URI above (mode *strict*). The issuer
+is shown on the provider's page, with a `/` at the end, such as
+`https://authentik.example.com/application/o/pithagoras/`. To limit who signs in,
+bind the application to a group or to users (its **Policy / Group / User
+Bindings** tab).
+
+### Keycloak
+
+In the realm, create a client: *OpenID Connect*, **Client authentication** on,
+**Standard flow** on, the redirect URI above under **Valid redirect URIs**, and the
+portal's address with a `/` at the end (`https://portal.example.com/`) under
+**Valid post logout redirect URIs**, since Keycloak compares it as written. Copy the
+secret from **Credentials**. The issuer is `https://keycloak.example.com/realms/<realm>`. Every
+user of the realm can sign in, so use a realm that holds your people only.
 
 ## HTTPS
 

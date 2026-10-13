@@ -65,10 +65,10 @@ The portal checks the recovered database before upgrading it. Rows on damaged pa
 
 ## The password moves into the database
 
-A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Password (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:
+A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:
 
 - **A `PORTAL_PASSWORD` that was in use is moved in.** The portal hashes it, stores it, and says so once in the log. Nothing changes for the people who sign in, except that the logins made before the upgrade are asked for the password once more: the cookies are signed under the password's hash now. A password shorter than 8 characters is moved too if this portal has been used (it keeps working, with a warning in Settings until it is changed), and is not if the portal is new.
-- **The variable is ignored from then on.** Take it out of `.env`, the Compose environment or the Portainer stack. While it is still there and equal to the password nothing is said; a value that differs is reported at each start as ignored, so that editing it does not look like it changed the password. Change the password under Settings → Password instead.
+- **The variable is ignored from then on.** Take it out of `.env`, the Compose environment or the Portainer stack. While it is still there and equal to the password nothing is said; a value that differs is reported at each start as ignored, so that editing it does not look like it changed the password. Change the password under Settings → Authentication instead.
 - **`change-me` and other examples are not moved.** A `PORTAL_PASSWORD` that is the example, or shorter than 8 characters on a portal that is new, is not taken: the portal shows the page that asks for a password, as a new install does.
 - **No `PORTAL_PASSWORD` and no password in the database** is a new install: the page that asks for one. Until it is chosen the portal answers nothing else, and whoever opens it first chooses it.
 - **Going back** to a release that reads `PORTAL_PASSWORD` needs the variable set again: that release does not look in the database.

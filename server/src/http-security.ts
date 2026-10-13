@@ -70,7 +70,9 @@ export function loginThrottle(now = Date.now): RequestHandler {
     entry.count++;
     spent++;
     attempts.set(key, entry);
-    res.on('finish', () => { if (res.statusCode < 400) attempts.delete(key); });
+    // A route that checks the password and then refuses for another reason says so in `res.locals.passwordRight`:
+    // that is no guess, and counts like a login that worked.
+    res.on('finish', () => { if (res.statusCode < 400 || res.locals.passwordRight === true) attempts.delete(key); });
     next();
   };
 }

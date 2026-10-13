@@ -17,8 +17,15 @@ test("a setting is found by its title first, then by what it is about", () => {
 
 test("changing the password is found on its own page, by the English word and the German", () => {
   for (const q of ["password", "passwort", "kennwort", "change password"]) {
-    assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "password" && e.title === "Change password"), `${q} leads to Password`);
+    assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "authentication" && e.title === "Change password"), `${q} leads to Authentication`);
   }
+});
+
+test("single sign-on is found on its own page, by what people call it", () => {
+  for (const q of ["sso", "oidc", "openid connect", "keycloak", "single sign-on", "einmalanmeldung"]) {
+    assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "authentication"), `${q} leads to Single sign-on`);
+  }
+  assert.ok(searchSettings("oidc only", SETTINGS_INDEX).some((e) => e.tab === "authentication" && e.title === "OIDC only"));
 });
 
 test("the picture tools are found in Tools, the image endpoint on the Media tab", () => {
