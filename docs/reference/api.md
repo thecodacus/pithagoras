@@ -357,6 +357,7 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `GET /api/memory/log` | What changed, newest first |
 | `GET /api/memory/graph` | `{ nodes: [{ path, title, type, links }], edges: [{ source, target }] }` |
 | `GET /api/memory/traces` | The paths Understory's own queries and changes took |
+| `GET /api/memory/trace?id=` | One of those runs with its steps: `{ id, kind, input, notation, outcome, steps: [{ seq, tool, summary, paths, write }] }`, `paths` being the full paths of the notes a step read, wrote or found; 404 when it is not there |
 | `GET /api/memory/validate` | `{ conformant, conceptCount, directoryCount, issues }` |
 | `GET /api/memory/health` | `{ writable, health? }` — whether notes can be changed here (the portal's own Understory, running), and what its checks find: `{ healthy, orphans, brokenLinks, issues }` |
 | `PUT /api/memory/concept` | `{ path, frontmatter, body }` — write a note through Understory's own write path (its index and log follow); `frontmatter` needs `type` and `title`. Answers `{ concept, health }`; 409 unless writable |

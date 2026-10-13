@@ -69,7 +69,7 @@ export interface Scene {
   trail: Set<number> | null;
   /** How strongly each note is drawn: dimmed outside what is in focus, on the path traced, or what the search found. */
   dim: Float32Array;
-  /** The flat-free layout, about a unit across. */
+  /** The layout, about a unit across. */
   base: Point3[];
   rig: Rig;
   grabbing: boolean;

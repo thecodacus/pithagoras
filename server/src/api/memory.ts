@@ -27,6 +27,8 @@ const READS = {
   log: { path: "/api/log", params: [] },
   graph: { path: "/api/graph", params: [] },
   traces: { path: "/api/traces", params: [] },
+  /** One run with its steps: what the list leaves out, and the full paths of the notes each step touched. */
+  trace: { path: "/api/trace", params: ["id"] },
   validate: { path: "/api/validate", params: [] },
 } as const;
 

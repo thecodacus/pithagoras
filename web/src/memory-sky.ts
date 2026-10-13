@@ -4,10 +4,12 @@
  * from the drawing (components/MemorySky.tsx) so the geometry can be tested
  * without a browser.
  *
- * The layout is the flat one's (memory-graph.ts) with a third axis: the same
- * pushes and pulls, started on a sphere, so the same memory lands the same way
- * each time. Then it is centred and scaled to a radius of about one, which is
- * what the camera and the themes are made for.
+ * The layout is a force layout in three directions: notes push each other
+ * apart, a link pulls its two ends together, and everything is drawn towards
+ * the middle. It is started on a sphere, so the same memory lands the same way
+ * each time, and run for as many rounds as the number of notes affords
+ * (`roundsFor`, memory-graph.ts). Then it is centred and scaled to a radius of
+ * about one, which is what the camera and the themes are made for.
  */
 import { roundsFor } from "./memory-graph";
 
@@ -101,7 +103,7 @@ export function layout3d(paths: string[], edges: { source: string; target: strin
 }
 
 /** Centred on the middle, and scaled so that nearly all of it is within one of it: a few far-flung notes do not shrink the rest. */
-export function normalised(points: Point3[]): Point3[] {
+function normalised(points: Point3[]): Point3[] {
   if (!points.length) return [];
   const n = points.length;
   const cx = points.reduce((s, p) => s + p.x, 0) / n;

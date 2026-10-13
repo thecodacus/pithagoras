@@ -1,46 +1,73 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { noteOf, notesOf, stepsOf } from "../web/src/memory-trace.ts";
+import { pathOf } from "../web/src/memory-trace.ts";
+import type { MemoryTraceStep } from "../web/src/api.ts";
 
-const paths = ["/deployment/branches.md", "/people/owner.md", "/people/index-of-people.md", "/a/same.md", "/b/same.md"];
+/** The notes of a graph, by their full paths: two share a file name, one has a space in it. */
+const graph = new Set(["/deployment/branches.md", "/people/owner.md", "/projects/a/setup.md", "/projects/b/setup.md", "/x/my owner.md"]);
+const step = (tool: string, paths: string[] = [], write = false, seq = 1): MemoryTraceStep => ({ seq, tool, summary: paths[0] ?? "", paths, write });
 
-test("a name in a step stands for the note it ends the way a path does, and for none when it could be two", () => {
-  assert.equal(noteOf("/deployment/branches.md", paths), "/deployment/branches.md", "the full path");
-  assert.equal(noteOf("deployment/branches.md", paths), "/deployment/branches.md", "from a folder");
-  assert.equal(noteOf("branches.md", paths), "/deployment/branches.md", "the file's name, which only one note has");
-  assert.equal(noteOf("../people/owner.md", paths), "/people/owner.md", "a relative path");
-  assert.equal(noteOf("./owner.md", paths), "/people/owner.md");
-  assert.equal(noteOf("same.md", paths), undefined, "two notes have this name: not guessed");
-  assert.equal(noteOf("/a/same.md", paths), "/a/same.md");
-  assert.equal(noteOf("gone.md", paths), undefined);
-  assert.equal(noteOf("owner.md.bak", paths), undefined);
-});
-
-test("a notation is cut into its steps, each with what it did, to what, and which note that is", () => {
-  const steps = stepsOf("browse layout → read branches.md → write people/owner.md → ✓", paths);
+test("a run is its notation cut into steps, each with what it did and to what, and how it ended last", () => {
+  const run = pathOf({ kind: "query", notation: 'search "owner" (2) → read owner.md → ✓' }, undefined, graph);
   assert.deepEqual(
-    steps.map((s) => [s.verb, s.target, s.notes, s.end]),
+    run.steps.map((s) => [s.verb, s.target, s.end]),
     [
-      ["browse", "layout", [], undefined],
-      ["read", "branches.md", ["/deployment/branches.md"], undefined],
-      ["write", "people/owner.md", ["/people/owner.md"], undefined],
-      ["✓", "", [], "ok"],
+      ["search", '"owner" (2)', undefined],
+      ["read", "owner.md", undefined],
+      ["✓", "", "ok"],
     ],
   );
-  // The ways a run says it ended, and an arrow written in ASCII.
-  assert.equal(stepsOf("read branches.md -> ✗", paths)[1].end, "failed");
-  assert.equal(stepsOf("read branches.md -> ✗", paths).length, 2);
-  // A name in quotes or in a sentence is found, and the steps may name a note in a line that says more.
-  assert.deepEqual(stepsOf('open "branches.md", then', paths)[0].notes, ["/deployment/branches.md"]);
+  // The three ways Understory ends a run.
+  assert.equal(pathOf({ kind: "query", notation: "browse layout → ⚠ partial" }, undefined, graph).steps.at(-1)!.end, "partial");
+  assert.equal(pathOf({ kind: "query", notation: "browse layout → ✗" }, undefined, graph).steps.at(-1)!.end, "failed");
+  assert.deepEqual(pathOf({ kind: "query" }, undefined, graph).steps, []);
+  assert.deepEqual(pathOf({ kind: "query", notation: "  " }, undefined, graph).steps, []);
 });
 
-test("a run with no notation, or a notation naming nothing of the graph, touches no notes", () => {
-  assert.deepEqual(stepsOf(undefined, paths), []);
-  assert.deepEqual(stepsOf("   ", paths), []);
-  assert.deepEqual(notesOf(stepsOf("browse layout → ✓", paths)), []);
-  assert.deepEqual(notesOf(stepsOf("read same.md → ✓", paths)), [], "ambiguous names are left out");
+test("the notes a run touched are the full paths its own steps give, not what its words say", () => {
+  // Understory writes the file name only: `read setup.md` is one of two notes, and its own step says which.
+  const run = pathOf(
+    { kind: "query", notation: 'search "setup" (2) → read setup.md → ✓' },
+    [step("search_knowledge", ["/projects/a/setup.md", "/projects/b/setup.md"]), step("read_concept", ["/projects/a/setup.md"])],
+    graph,
+  );
+  assert.deepEqual(run.notes, ["/projects/a/setup.md"]);
+  assert.deepEqual(run.steps.map((s) => s.notes), [[], ["/projects/a/setup.md"], []], "a search found notes and touched none");
+  assert.ok(run.known);
+  assert.equal(run.touched, 1);
+  // A name with a space in it, and a search that names a file in its query.
+  assert.deepEqual(pathOf({ kind: "query", notation: "read my owner.md → ✓" }, [step("read_concept", ["/x/my owner.md"])], graph).notes, ["/x/my owner.md"]);
+  const searched = pathOf({ kind: "query", notation: 'search "branches.md" (0) → browse layout → ✓' }, [step("search_knowledge"), step("list_directory")], graph);
+  assert.deepEqual(searched.notes, []);
+  assert.equal(searched.touched, 0, "it touched no note at all");
+  assert.ok(searched.known);
 });
 
-test("the notes a run touched come in the order it came to them, each once", () => {
-  assert.deepEqual(notesOf(stepsOf("read owner.md → read branches.md → write owner.md → ✓", paths)), ["/people/owner.md", "/deployment/branches.md"]);
+test("each tool that touches a note lights it, each once and in the order the run came to them", () => {
+  const run = pathOf(
+    { kind: "mutation", notation: "read owner.md → write branches.md → patch owner.md → delete gone.md → ✓" },
+    [step("read_concept", ["/people/owner.md"]), step("write_concept", ["/deployment/branches.md"], true), step("patch_concept", ["/people/owner.md"], true), step("delete_concept", ["/gone.md"], true)],
+    graph,
+  );
+  assert.deepEqual(run.notes, ["/people/owner.md", "/deployment/branches.md"]);
+  assert.equal(run.touched, 3, "three notes touched, and one of them is not in the graph any more");
+});
+
+test("before a run's steps are known nothing is said of its notes, and a notation that does not add up is not guessed at", () => {
+  const before = pathOf({ kind: "mutation", notation: "browse layout → write branches.md → ✓" }, undefined, graph);
+  assert.equal(before.known, false);
+  assert.deepEqual(before.notes, []);
+  assert.equal(before.steps.length, 3, "the words are there all the same");
+  // Two steps for three parts of the notation.
+  const odd = pathOf({ kind: "query", notation: "browse layout → read owner.md → ✓" }, [step("read_concept", ["/people/owner.md"])], graph);
+  assert.equal(odd.known, false);
+  assert.deepEqual(odd.notes, []);
+});
+
+test("a run changed the memory when a step wrote, whoever asked; before its steps are known, when it was a change asked for", () => {
+  const wrote = [step("search_knowledge"), step("write_concept", ["/deployment/branches.md"], true)];
+  assert.equal(pathOf({ kind: "chat", notation: 'search "x" (0) → write branches.md → ✓' }, wrote, graph).changed, true, "the librarian wrote");
+  assert.equal(pathOf({ kind: "mutation", notation: 'search "x" (0) → ✗' }, [step("search_knowledge")], graph).changed, false, "it failed before it wrote");
+  assert.equal(pathOf({ kind: "mutation", notation: "browse layout → ✓" }, undefined, graph).changed, true);
+  assert.equal(pathOf({ kind: "query", notation: "browse layout → ✓" }, undefined, graph).changed, false);
 });

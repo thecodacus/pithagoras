@@ -1243,6 +1243,7 @@ const de: Locale = {
     "Query paths": "Abfragepfade",
     "Point at a path to light it in the graph; click to keep it lit": "Auf einen Pfad zeigen, um ihn im Graphen zu beleuchten; klicken, um ihn beleuchtet zu lassen",
     "No note of this path is in the graph": "Keine Notiz dieses Pfads ist im Graphen",
+    "This run touched no note": "Dieser Lauf hat keine Notiz berührt",
     "tok": "Tok.",
     "Zoom in": "Vergrößern",
     "Zoom out": "Verkleinern",

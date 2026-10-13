@@ -32,13 +32,14 @@ import {
   type MemoryHit,
   type MemoryNode,
   type MemoryTrace,
+  type MemoryTraceRun,
   type MemoryValidation,
 } from "../api";
 import { colours } from "../memory-graph";
 import { colourFrom, SKY_THEMES, skyThemeFrom, type SkyTheme } from "../memory-sky";
 import { local } from "../safe-storage";
 import { MemorySky } from "./MemorySky";
-import { notesOf, stepsOf, type TraceStep } from "../memory-trace";
+import { pathOf, type TracePath } from "../memory-trace";
 import { Select } from "./Select";
 import { ColourPicker } from "./ColourPicker";
 import { useDismiss } from "../use-dismiss";
@@ -1310,7 +1311,7 @@ const OUTLINE_KEY = "memoryGraph.outline";
  */
 function TracePaths({
   traces,
-  steps,
+  paths,
   types,
   colourOf,
   pinned,
@@ -1318,8 +1319,8 @@ function TracePaths({
   onPin,
 }: {
   traces: MemoryTrace[];
-  /** What each run's notation says, by the run's id, and which notes of the graph it names. */
-  steps: Map<string, TraceStep[]>;
+  /** What the graph shows of each run, by the run's id. */
+  paths: Map<string, TracePath>;
   /** The type of each note of the graph, by path. */
   types: Map<string, string | undefined>;
   colourOf: (type: string | undefined) => string;
@@ -1329,12 +1330,12 @@ function TracePaths({
   onPin: (id: string | null) => void;
 }) {
   return (
-    <ul aria-label={t("Query paths")} className="-mx-1 max-h-72 space-y-1 overflow-y-auto px-1 max-sm:max-h-[45vh]">
+    <ul aria-label={t("Query paths")} className="-mx-1 max-h-80 space-y-1 overflow-y-auto px-1 max-sm:max-h-[45vh]">
       {traces.slice(0, 30).map((trace) => {
-        const path = steps.get(trace.id) ?? [];
-        const touched = notesOf(path);
+        const path = paths.get(trace.id);
+        const steps = path?.steps ?? [];
         const kept = pinned === trace.id;
-        const change = trace.kind === "mutation";
+        const change = path?.changed ?? trace.kind === "mutation";
         return (
           <li key={trace.id}>
             <button
@@ -1350,22 +1351,25 @@ function TracePaths({
             >
               <span className="flex items-start gap-2">
                 <span className={`mt-1 h-2 w-2 shrink-0 rounded-full bg-current shadow-[0_0_8px_currentColor] ${change ? "text-warn" : "text-accent"}`} aria-hidden />
-                <span className="line-clamp-2 min-w-0 flex-1 break-words text-xs text-fg">{trace.input}</span>
-                <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                <span className="line-clamp-2 min-w-0 flex-1 break-words text-sm text-fg">{trace.input}</span>
+                <span className="shrink-0 font-mono text-sm text-fg-muted">
                   {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
                 </span>
               </span>
-              {path.length > 0 && (
-                <span className="mt-1.5 flex flex-wrap items-center gap-x-0.5 gap-y-1 pl-4">
-                  {path.map((step, k) => (
+              {steps.length > 0 && (
+                <span className="mt-2 flex flex-wrap items-center gap-x-0.5 gap-y-1.5 pl-4">
+                  {steps.map((step, k) => (
                     <span key={k} className="inline-flex min-w-0 max-w-full items-center gap-0.5">
-                      {k > 0 && <LuChevronRight className="h-3 w-3 shrink-0 text-fg-faint" aria-hidden />}
+                      {k > 0 && <LuChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-faint" aria-hidden />}
                       {step.end ? (
-                        <span className={`text-[11px] ${step.end === "ok" ? "text-ok" : "text-danger"}`}>{step.text}</span>
+                        <span className="inline-flex items-center gap-1 text-sm text-fg">
+                          <span className={`h-2 w-2 rounded-full bg-current ${step.end === "ok" ? "text-ok" : step.end === "partial" ? "text-warn" : "text-danger"}`} aria-hidden />
+                          {step.text}
+                        </span>
                       ) : (
-                        <span className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] ${step.notes.length ? "border-line bg-surface text-fg" : "border-line/60 text-fg-muted"}`}>
+                        <span className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-sm ${step.notes.length ? "border-line bg-surface text-fg" : "border-line/60 text-fg-muted"}`}>
                           {step.notes.map((note) => (
-                            <span key={note} className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: colourOf(types.get(note)), boxShadow: `0 0 6px ${colourOf(types.get(note))}` }} aria-hidden />
+                            <span key={note} className="h-2 w-2 shrink-0 rounded-full" style={{ background: colourOf(types.get(note)), boxShadow: `0 0 6px ${colourOf(types.get(note))}` }} aria-hidden />
                           ))}
                           <span className="shrink-0 text-fg-faint">{step.verb}</span>
                           {step.target && <span className="truncate font-mono">{step.target}</span>}
@@ -1375,7 +1379,10 @@ function TracePaths({
                   ))}
                 </span>
               )}
-              {touched.length === 0 && <span className="mt-1 block pl-4 text-[10px] text-fg-faint">{t("No note of this path is in the graph")}</span>}
+              {/* Said only once the run's own steps are known: before, there is nothing yet to say of its notes. */}
+              {path?.known && path.notes.length === 0 && (
+                <span className="mt-1 block pl-4 text-sm text-fg-faint">{path.touched === 0 ? t("This run touched no note") : t("No note of this path is in the graph")}</span>
+              )}
             </button>
           </li>
         );
@@ -1450,22 +1457,43 @@ function GraphView({
   useEffect(() => {
     if (!tracing) setPointed(null);
   }, [tracing]);
-  const steps = useMemo(() => {
-    const paths = (graph?.nodes ?? []).map((n) => n.path);
-    return new Map(traces.map((trace) => [trace.id, stepsOf(trace.notation, paths)]));
-  }, [graph, traces]);
+  // What each run did, step by step, as Understory keeps it: asked when the list is first opened, for the notes a step touched are in these and not in the notation.
+  const [runs, setRuns] = useState<Map<string, MemoryTraceRun | "failed">>(new Map());
+  const askedRuns = useRef(new Set<string>());
+  useEffect(() => {
+    if (!tracing) return;
+    for (const trace of traces.slice(0, 30)) {
+      if (askedRuns.current.has(trace.id)) continue;
+      askedRuns.current.add(trace.id);
+      api.memoryTrace(trace.id).then(
+        (run) => setRuns((was) => new Map(was).set(trace.id, run)),
+        () => setRuns((was) => new Map(was).set(trace.id, "failed")),
+      );
+    }
+  }, [tracing, traces]);
+  const inGraph = useMemo(() => new Set((graph?.nodes ?? []).map((n) => n.path)), [graph]);
+  const paths = useMemo(
+    () =>
+      new Map(
+        traces.map((trace) => {
+          const run = runs.get(trace.id);
+          return [trace.id, pathOf(trace, run && run !== "failed" ? run.steps : undefined, inGraph)] as const;
+        }),
+      ),
+    [traces, runs, inGraph],
+  );
   const typeOf = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.path, n.type])), [graph]);
   const lit = pointed ?? kept;
   const trail = useMemo(() => {
-    const path = lit ? steps.get(lit) : undefined;
-    return path ? new Set(notesOf(path)) : null;
-  }, [lit, steps]);
+    const path = lit ? paths.get(lit) : undefined;
+    return path ? new Set(path.notes) : null;
+  }, [lit, paths]);
 
   const label = graph ? t("The memory's notes and their links: {notes}, {links}", { notes: tp(shown.size, "{n} note", "{n} notes"), links: tp(shownEdges.length, "{n} link", "{n} links") }) : "";
 
   /** The types as switches: what the colours are, and which of them are shown. */
   const legend = graph && (types.length > 0 || orphans) && (
-    <ul aria-label={t("What the colours are")} className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px]">
+    <ul aria-label={t("What the colours are")} className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
       {[...types.map((ty) => ({ key: ty, name: ty, colour: colourOf(ty) })), ...(untyped && types.length ? [{ key: "", name: t("no type"), colour: colourOf(undefined) }] : [])].map((c) => (
         <li key={c.key}>
           <button
@@ -1515,8 +1543,8 @@ function GraphView({
               <LuChevronDown className="ui-select-chevron" aria-hidden />
             </button>
             {filtering && (
-              <div ref={filterMenu} className="float-in absolute right-0 top-full z-20 mt-1.5 w-64 rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto">
-                <p className="mb-2 text-xs text-fg-muted">{t("Which notes are shown")}</p>
+              <div ref={filterMenu} className="float-in-down absolute right-0 top-full z-20 mt-1.5 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto">
+                <p className="mb-2 text-sm text-fg-muted">{t("Which notes are shown")}</p>
                 {legend}
               </div>
             )}
@@ -1538,9 +1566,9 @@ function GraphView({
               <LuChevronDown className="ui-select-chevron" aria-hidden />
             </button>
             {tracing && (
-              <div ref={traceMenu} className="float-in absolute right-0 top-full z-20 mt-1.5 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto max-sm:max-w-none">
-                <p className="mb-2 text-xs text-fg-muted">{t("Point at a path to light it in the graph; click to keep it lit")}</p>
-                <TracePaths traces={traces} steps={steps} types={typeOf} colourOf={colourOf} pinned={kept} onPoint={setPointed} onPin={setKept} />
+              <div ref={traceMenu} className="float-in-down absolute right-0 top-full z-20 mt-1.5 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto max-sm:max-w-none">
+                <p className="mb-2 text-sm text-fg-muted">{t("Point at a path to light it in the graph; click to keep it lit")}</p>
+                <TracePaths traces={traces} paths={paths} types={typeOf} colourOf={colourOf} pinned={kept} onPoint={setPointed} onPin={setKept} />
               </div>
             )}
           </div>

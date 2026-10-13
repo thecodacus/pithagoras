@@ -10,14 +10,14 @@ export type { GraphNote } from "./sky-looks";
 /** What a note says of itself when it is pointed at: the only place the graph writes anything. */
 function NoteCard({ note, colour }: { note: GraphNote; colour: string }) {
   return (
-    <div className="w-max max-w-[16rem] rounded-lg border border-line bg-surface/95 px-3 py-2 text-left shadow-lg backdrop-blur">
-      <p className="text-xs font-medium text-fg">{note.title || note.path}</p>
-      <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-fg-muted">
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: colour, boxShadow: `0 0 6px ${colour}` }} />
+    <div className="w-max max-w-[min(20rem,calc(100vw-1.5rem))] rounded-lg border border-line bg-surface/95 px-3 py-2 text-left shadow-lg backdrop-blur">
+      <p className="text-sm font-medium text-fg">{note.title || note.path}</p>
+      <p className="mt-0.5 flex items-center gap-1.5 text-sm text-fg-muted">
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: colour, boxShadow: `0 0 6px ${colour}` }} />
         {note.type && <span className="truncate">{note.type}</span>}
         <span className="shrink-0 text-fg-faint">{note.links === 0 ? t("orphan (unlinked)") : tp(note.links, "{n} link", "{n} links")}</span>
       </p>
-      {note.description && <p className="mt-1 line-clamp-3 text-[11px] text-fg-subtle">{note.description}</p>}
+      {note.description && <p className="mt-1 line-clamp-3 text-sm text-fg-subtle">{note.description}</p>}
     </div>
   );
 }
@@ -109,6 +109,11 @@ export function MemorySky({
   // A finger cannot point: the first tap on a note says what it is, as pointing does, and the next opens it.
   const [touched, setTouched] = useState<string | null>(null);
   const tip = hover ?? touched ?? focused;
+  // Filtered away while a finger or the keyboard had it, a note is let go: it does not come back with the filter.
+  useEffect(() => {
+    setTouched((t) => (t !== null && !shown.has(t) ? null : t));
+    setFocused((f) => (f !== null && !shown.has(f) ? null : f));
+  }, [shown]);
 
   const still = reducedMotion();
   // What the frame loop reads, as of the last render.
@@ -188,7 +193,9 @@ export function MemorySky({
       g.globalAlpha = 1;
       g.shadowBlur = 0;
       const n = notes.length;
-      const tipAt = tip === null ? null : (index.get(tip) ?? null);
+      // A note filtered away is not the one pointed at, nor the one a finger tapped: its lighting goes with it.
+      const tipIndex = tip === null ? null : (index.get(tip) ?? null);
+      const tipAt = tipIndex !== null && isShown[tipIndex] ? tipIndex : null;
       const chosen = selected === null ? null : (index.get(selected) ?? null);
       const focus = tipAt ?? (chosen !== null && isShown[chosen] ? chosen : null);
       const lit = focus === null ? null : new Set([focus, ...near[focus].filter((j) => isShown[j])]);
@@ -391,7 +398,7 @@ export function MemorySky({
   }, []);
   const zoomBy = (f: number) => go({ ...(rig.current.aim ?? rig.current.cam), zoom: clampZoom((rig.current.aim ?? rig.current.cam).zoom * f) });
 
-  const tipNote = tip === null ? undefined : notes[index.get(tip) ?? -1];
+  const tipNote = tip === null || !shown.has(tip) ? undefined : notes[index.get(tip) ?? -1];
   return (
     <div ref={wrap} role="group" aria-label={label} data-theme-3d={theme} className={`memory-sky sky-${theme} relative min-h-0 flex-1 overflow-hidden`}>
       <canvas

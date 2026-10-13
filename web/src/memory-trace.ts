@@ -1,12 +1,19 @@
+import type { MemoryTraceStep } from "./api";
+
 /**
- * The path a run of Understory's own agent took through the memory, read from
- * the notation it keeps ("browse layout → read branches.md → ✓"): its steps,
- * and which of them name a note of the graph, so that the graph can light the
- * notes the run touched. Understory writes the notes' file names as it chose
- * to (a full path, a path from some folder, or only the name), so a step is
- * matched to a note by as much of the path as it gives, and left unmatched
- * rather than guessed when more than one note would fit.
+ * A run of Understory's own agent as the graph shows it: its steps in a line,
+ * and the notes it touched.
+ *
+ * The line is the run's notation, which Understory writes for a person to
+ * read (`search "owner" (2) → read owner.md → ✓`): it names a note by its file
+ * name only, and says how many notes a search found, not which. So the notes
+ * are not read from it. They come from the run's own steps (`MemoryTraceStep`,
+ * from Understory's `/api/trace`), which give the full path of each, and a
+ * step that read, wrote, patched or deleted a note is the one that touched it.
+ * A search only found notes, so it lights none: its words say how many.
  */
+export type TraceEnd = "ok" | "partial" | "failed";
+
 export interface TraceStep {
   /** The step as written. */
   text: string;
@@ -14,42 +21,54 @@ export interface TraceStep {
   verb: string;
   /** What it was done to: the rest of the step. */
   target: string;
-  /** The notes of the graph the step names: one, or none. */
+  /** The notes of the graph the step touched, once the run's steps are known. */
   notes: string[];
-  /** The step says how the run ended, with a tick or a cross. */
-  end?: "ok" | "failed";
+  /** The step says how the run ended. */
+  end?: TraceEnd;
 }
 
-const ARROW = /\s*(?:→|->|⟶)\s*/;
-const ENDS: Record<string, "ok" | "failed"> = { "✓": "ok", "✔": "ok", "✗": "failed", "✘": "failed", "✕": "failed", "×": "failed" };
-/** A file name of a note in a step: not cut at a slash, a dot or a dash, and not at the quotes and brackets it may be wrapped in. */
-const FILE = /[^\s"'`,;()[\]<>]+\.md\b/;
+/** How Understory writes how a run ended: its last step. */
+const ENDS: Record<string, TraceEnd> = { "✓": "ok", "⚠ partial": "partial", "✗": "failed" };
+/** The tools that touch a note, as opposed to finding one or looking at the layout. */
+const TOUCHES = new Set(["read_concept", "write_concept", "patch_concept", "delete_concept"]);
 
-/** The note a name in a step stands for, or none: the full path, else a path that ends the way the name does, and a bare file name only when one note has it. */
-export function noteOf(name: string, paths: string[]): string | undefined {
-  const bare = name.replace(/^(?:\.{1,2}\/)+/, "").replace(/^\/+/, "");
-  const exact = paths.filter((p) => p.replace(/^\/+/, "") === bare);
-  if (exact.length === 1) return exact[0];
-  const tail = paths.filter((p) => p.endsWith(`/${bare}`));
-  return tail.length === 1 ? tail[0] : undefined;
+/** A run as the graph shows it. */
+export interface TracePath {
+  steps: TraceStep[];
+  /** The notes the run touched that are in the graph, in the order it came to them, each once. */
+  notes: string[];
+  /** Whether the run changed the memory: by what its steps did when they are known, else by what it was asked. */
+  changed: boolean;
+  /** Whether the run's steps are known: before, nothing is said of which notes it touched. */
+  known: boolean;
+  /** How many notes the run touched, in the graph or not. */
+  touched: number;
 }
 
-/** The steps of a notation, with the notes of `paths` they name. */
-export function stepsOf(notation: string | undefined, paths: string[]): TraceStep[] {
-  if (!notation?.trim()) return [];
-  return notation
-    .split(ARROW)
+/**
+ * What the graph shows of a run: its notation cut into steps, and, when its own
+ * steps are known (`run`), which notes of the graph (`inGraph`) each touched.
+ */
+export function pathOf(trace: { kind: string; notation?: string }, run: MemoryTraceStep[] | undefined, inGraph: ReadonlySet<string>): TracePath {
+  const parts = (trace.notation ?? "")
+    .split(/\s*(?:→|->|⟶)\s*/)
     .map((text) => text.trim())
-    .filter(Boolean)
-    .map((text): TraceStep => {
-      const end = ENDS[text];
-      if (end) return { text, verb: text, target: "", notes: [], end };
-      const [verb, ...rest] = text.split(/\s+/);
-      const file = FILE.exec(text)?.[0];
-      const note = file ? noteOf(file, paths) : undefined;
-      return { text, verb, target: rest.join(" "), notes: note ? [note] : [] };
-    });
+    .filter(Boolean);
+  const end = parts.length && ENDS[parts[parts.length - 1]] ? parts.pop()! : undefined;
+  // One part of the notation for each step, in order; a run that does not add up is not guessed at.
+  const lined = run && run.length === parts.length ? run : undefined;
+  const steps = parts.map((text, i): TraceStep => {
+    const [verb, ...rest] = text.split(/\s+/);
+    const touching = lined && TOUCHES.has(lined[i].tool) ? lined[i].paths.filter((p) => inGraph.has(p)) : [];
+    return { text, verb, target: rest.join(" "), notes: touching };
+  });
+  if (end) steps.push({ text: end, verb: end, target: "", notes: [], end: ENDS[end] });
+  const touched = lined ? new Set(lined.filter((s) => TOUCHES.has(s.tool)).flatMap((s) => s.paths)).size : 0;
+  return {
+    steps,
+    notes: [...new Set(steps.flatMap((s) => s.notes))],
+    changed: run ? run.some((s) => s.write) : trace.kind === "mutation",
+    known: !!lined,
+    touched,
+  };
 }
-
-/** The notes a run touched, in the order it came to them, each once. */
-export const notesOf = (steps: TraceStep[]): string[] => [...new Set(steps.flatMap((s) => s.notes))];

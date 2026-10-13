@@ -7,7 +7,7 @@ import { t } from "../i18n";
 
 /** Colours to choose with one click; any other is typed as a hex code. */
 const PRESETS = ["#ff5fc8", "#ff2fd6", "#ff4d6d", "#fbbf24", "#a3e635", "#34d399", "#22d3ee", "#a78bfa", "#f5f5f7"];
-const SIZE = { width: 232, height: 150 };
+const SIZE = { width: 232, height: 160 };
 
 /**
  * A colour, chosen in a popover of the portal's own: swatches and a hex code.
@@ -64,7 +64,7 @@ export function ColourPicker({ value, onChange, label }: { value: string; onChan
             aria-label={label}
             // Part of whatever popover the picker is in, though drawn at the body: see useDismiss.
             data-popover-layer
-            className="float-in fixed z-[200] rounded-xl border border-line bg-surface p-3 shadow-pop"
+            className={`${place.above ? "float-in" : "float-in-down"} fixed z-[200] rounded-xl border border-line bg-surface p-3 shadow-pop`}
             style={{ left: place.left, top: place.top, width: place.width }}
           >
             <div className="grid grid-cols-9 gap-1">
@@ -82,7 +82,7 @@ export function ColourPicker({ value, onChange, label }: { value: string; onChan
                 </button>
               ))}
             </div>
-            <label className="mt-3 block text-[11px] text-fg-muted">
+            <label className="mt-3 block text-sm text-fg-muted">
               {t("Hex code")}
               <input
                 value={typed}
@@ -93,7 +93,7 @@ export function ColourPicker({ value, onChange, label }: { value: string; onChan
                 spellCheck={false}
                 maxLength={7}
                 aria-invalid={!valid}
-                className={`mt-1 w-full rounded-lg border bg-raised/60 px-2 py-1 font-mono text-xs text-fg outline-none ${valid ? "border-line focus:border-accent/60" : "border-warn/60"}`}
+                className={`mt-1 w-full rounded-lg border bg-raised/60 px-2 py-1 font-mono text-sm text-fg outline-none ${valid ? "border-line focus:border-accent/60" : "border-warn/60"}`}
               />
             </label>
           </div>,
