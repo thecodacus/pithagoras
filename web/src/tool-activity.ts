@@ -1,6 +1,7 @@
 import { insideFolder } from "./file-activity";
 import { t, tp } from "./i18n";
 import { toolArgsOf, toolNameOf } from "./tool-payload";
+import { GATEWAY_TOOL, calledThrough } from "../../server/src/pi/tools-gateway-names";
 
 /**
  * What a tool call is, in words, for the cards that fly out of the orb in voice mode.
@@ -48,12 +49,25 @@ const hostOf = (url: string) => {
 export const SHELL_TOOL = /^(bash|shell|terminal|exec_command)$/i;
 
 /**
+ * A call through the `tools` tool, which reaches the tools kept out of the model's list, as a call of
+ * the tool it calls: its name and its own arguments. Nothing for a search or a describe, or for any
+ * other tool.
+ */
+export function lazyCall(name: string, args: unknown): { name: string; input: Record<string, any> } | undefined {
+  const called = name === GATEWAY_TOOL ? calledThrough(args) : undefined;
+  return called && { name: called.name, input: called.args };
+}
+
+/**
  * The call as the agent made it. The MCP adapter puts every server's tools
  * behind one `mcp` tool, so a web search and a database query would both read
  * "mcp": the tool it was asked to call, and what it was asked to call it with,
- * are what say what happened.
+ * are what say what happened. A lazy tool is called through `tools` in the
+ * same way, and is the tool it calls (see lazyCall).
  */
 export function unwrapCall(name: string, args: unknown): { name: string; input: Record<string, any> } {
+  const lazy = lazyCall(name, args);
+  if (lazy) return lazy;
   const input = args && typeof args === "object" ? (args as Record<string, any>) : {};
   if (name === "mcp" && typeof input.tool === "string" && input.tool) {
     return { name: input.tool, input: input.args && typeof input.args === "object" ? input.args : {} };

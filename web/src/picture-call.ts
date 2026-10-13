@@ -1,4 +1,5 @@
 import { insideFolder } from "./file-activity";
+import { toolName, unwrapCall } from "./tool-activity";
 import type { Item } from "./transcript";
 
 /**
@@ -17,7 +18,7 @@ export const isPictureTool = (name: string): boolean => name === "generate_image
  * that name that an extension brings is the plain card it always was, in every
  * state: pi keeps one tool of a name, and the portal's is not always it.
  */
-export const isPictureCall = (item: Extract<Item, { kind: "tool" }>): boolean => isPictureTool(item.name) && (item.portalPicture === true || !!item.picture);
+export const isPictureCall = (item: Extract<Item, { kind: "tool" }>): boolean => isPictureTool(toolName(item.name, item.args)) && (item.portalPicture === true || !!item.picture);
 
 /**
  * Narrowest and widest a preview is drawn: past that a picture is shown whole in a
@@ -55,9 +56,9 @@ const oneLine = (s: string, n: number): string => {
   return flat.length > n ? `${flat.slice(0, n - 1)}…` : flat;
 };
 
-/** The call as the agent made it: `args` are its parameters, `folder` the chat's. */
-export function pictureCall(name: string, args: unknown, folder: string): PictureCall {
-  const input = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+/** The call as the agent made it: `args` are its parameters, `folder` the chat's. A call through the `tools` tool is its tool's. */
+export function pictureCall(calledAs: string, args: unknown, folder: string): PictureCall {
+  const { name, input } = unwrapCall(calledAs, args);
   const edit = name === "edit_image";
   // With the endpoint taking several, `paths` is a list, in the order the prompt refers to them; the result is named after the first, which is the one shown.
   const first = Array.isArray(input.paths) ? input.paths[0] : input.path;

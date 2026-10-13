@@ -98,6 +98,48 @@ test("a picture the agent shows in a channel's chat goes to the channel as it is
   }
 });
 
+test("a picture a lazy tool shows or makes goes to the channel as one of a direct call does: the call is of the tools tool, and its end says which tool it was", async () => {
+  const workspace = path.join(home, "lazy-pictures-ws");
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(path.join(workspace, "chart.png"), PNG);
+  writeFileSync(path.join(workspace, "made.png"), PNG);
+  createSession({ id: "lazy-shown", title: "lazy-shown", workspace, executor: "host" });
+  const realSubmit = sessions.submit;
+  /** The call of a lazy tool as the portal passes it on: the start has the call in its arguments, the end names the tool. */
+  const through = (id, name, args, result, extra = {}) => {
+    pi.emit("event", { type: "tool_execution_start", toolCallId: id, toolName: "tools", args: { action: "call", name, args } });
+    pi.emit("event", { type: "tool_execution_end", toolCallId: id, toolName: "tools", portalCalledTool: name, result: { content: [{ type: "text", text: "done" }], details: result }, ...extra });
+  };
+  sessions.submit = async () => {
+    setImmediate(() => {
+      pi.emit("event", { type: "agent_start" });
+      pi.emit("event", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Drawing it." } });
+      pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Drawing it." }] } });
+      through("l1", "show_image", { path: "chart.png", title: "Sales" }, { path: "chart.png", title: "Sales" });
+      // The portal's own generate_image, which says so; and what is no picture: a failed call, another tool's path, a search, one an extension brought.
+      through("l2", "generate_image", { prompt: "a cat" }, { path: "made.png", title: "A cat", portalImage: true });
+      through("l3", "show_image", { path: "chart.png" }, { path: "chart.png" }, { isError: true });
+      through("l4", "docs_open", { id: "d" }, { path: "chart.png" });
+      pi.emit("event", { type: "tool_execution_end", toolCallId: "l5", toolName: "tools", result: { details: { path: "chart.png" } } });
+      through("l6", "generate_image", { prompt: "an extension's" }, { path: "/etc/passwd" });
+      pi.emit("event", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "There." } });
+      pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "There." }] } });
+      pi.emit("event", { type: "agent_settled" });
+    });
+  };
+  try {
+    const said = [];
+    const reply = await sessions.ask("lazy-shown", "chart the sales", { streamText: false, onPicture: (picture) => said.push(picture) });
+    assert.deepEqual(said, [
+      { data: PNG.toString("base64"), mimeType: "image/png", name: "chart.png", title: "Sales" },
+      { data: PNG.toString("base64"), mimeType: "image/png", name: "made.png", title: "A cat" },
+    ]);
+    assert.equal(reply, "Drawing it.\n\nThere.");
+  } finally {
+    sessions.submit = realSubmit;
+  }
+});
+
 test("a code a channel package asks to have scanned is on its status until it takes it back, and a stopped start of it cannot put one there", async () => {
   getDb().prepare("INSERT INTO channels (id, slug, kind, name, config, enabled) VALUES ('c2', 'pair', 'pairing', 'Pairing', '{}', 1)").run();
   const row = getDb().prepare("SELECT * FROM channels WHERE id = 'c2'").get();

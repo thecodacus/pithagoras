@@ -271,7 +271,9 @@ A tool call has a line when it begins and one when it ends, with how it ended
 and how long it ran in milliseconds. An approval has the question's short id,
 the tool, what the answer was (`once`, `always`, `denied`, or `answered` for a
 question that was not about an action) and how long the person waited for it.
-`subagent=` names the subagent a call ran in. An `[audit]` line is a decision
+`subagent=` names the subagent a call ran in, and `via=tools` a call of a
+[lazy tool](/guide/extensions#lazy-tools) through the `tools` tool, which is filed under the
+tool it called. An `[audit]` line is a decision
 of the guard that the Audit page lists as well (`refused`, `allowed-by-approval`
 and the like), with its kind and the tool, without the command or the reason.
 Voice, devices and web requests have no debug lines yet.

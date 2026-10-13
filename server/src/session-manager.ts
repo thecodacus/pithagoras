@@ -92,6 +92,9 @@ import {
   sessionSubagentModel,
   anySessionRunning,
   onChannel,
+  lazyMarks,
+  lazyToolNames,
+  lazySetLabels,
 } from "./db.js";
 
 /**
@@ -971,7 +974,7 @@ class SessionManager extends EventEmitter {
       const call = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
       noteToolCall(sessionId, call, event.toolName, event.type === "tool_execution_start" ? "start" : "end");
       const subagent = sub ? String(msg.id) : undefined;
-      if (event.type === "tool_execution_start") toolCallStarted(sessionId, call, event.toolName, subagent);
+      if (event.type === "tool_execution_start") toolCallStarted(sessionId, call, event.toolName, subagent, event.args);
       else toolCallEnded(sessionId, call, event.toolName, Boolean(event.isError), subagent);
     }
     if (msg.type === "portal_subagent" && msg.op === "end") {
@@ -1168,7 +1171,7 @@ class SessionManager extends EventEmitter {
       // The session's settled role picks the context files; the live one gates
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
-      toolsOff: this.piOff(sessionId),
+      ...this.toolsFor(sessionId),
       subagentModel: () => sessionSubagentModel(sessionId) ?? undefined,
       // A chat that names no model is reopened on the model of its last answer,
       // and after a spoken turn on the voice model that would be the voice's.
@@ -1209,7 +1212,10 @@ class SessionManager extends EventEmitter {
     // before you can say "off everywhere" would be the wrong way round.
     void client
       .getTools?.()
-      .then((tools) => rememberTools(tools.map(remembered)))
+      .then((tools) => {
+        // A lazy tool that this chat was started with, because nobody had seen it before, is taken out of its list again.
+        if (rememberTools(tools.map(remembered)).length) return this.applyToolDefaults();
+      })
       .catch(() => {
         // A session that cannot list its tools still works; the catalogue
         // simply stays as it was.
@@ -2660,6 +2666,24 @@ class SessionManager extends EventEmitter {
   }
 
   /**
+   * Of the tools marked lazy, the ones this conversation has on: not offered one by one, and reached
+   * through the `tools` tool. What is off (piOff) is off for good and so not among them. `sets` names
+   * what they are, for the hint to the model.
+   */
+  piLazy(off: string[]): { tools: string[]; sets: string[] } {
+    const gone = new Set(off);
+    const tools = [...lazyToolNames()].filter((name) => !gone.has(name)).sort();
+    return { tools, sets: lazySetLabels(tools) };
+  }
+
+  /** What pi is told about the tools when a conversation starts: the ones that are off, and the lazy ones that are on. */
+  private toolsFor(sessionId: string): { toolsOff: string[]; toolsLazy: string[]; lazySets: string[] } {
+    const toolsOff = this.piOff(sessionId);
+    const lazy = this.piLazy(toolsOff);
+    return { toolsOff, toolsLazy: lazy.tools, lazySets: lazy.sets };
+  }
+
+  /**
    * What a running chat reported, less the MCP servers' tools the adapter's
    * configuration says no to — still loaded from before it changed, and off
    * (piOff) — with those it lists from its cache marked. And the servers' tools
@@ -2692,7 +2716,7 @@ class SessionManager extends EventEmitter {
   async getTools(sessionId: string): Promise<{ tools: PiTool[]; live: boolean }> {
     const client = this.live.get(sessionId)?.client;
     const reported = client?.getTools ? await client.getTools() : [];
-    if (reported.length) rememberTools(reported.map(remembered));
+    if (reported.length && rememberTools(reported.map(remembered)).length) await this.applyToolDefaults();
     const session = getSession(sessionId);
     const workspace = session?.workspace;
     const view = mcpView();
@@ -2700,14 +2724,15 @@ class SessionManager extends EventEmitter {
     // What the chat's agent, project and routine start it with, which is what it is "default" against.
     const defaults = toolDefaultsForSession(session);
     const exceptions = sessionTools(sessionId);
+    const lazy = lazyMarks(view);
     const servers = view.servers;
     // An idle chat is shown what the portal has seen registered; the tool is not there for every kind of chat (see asksQuestions).
     const asks = session ? canAsk(session) : true;
-    const shown: { name: string; source: string; description?: string; inline?: true; cached?: true }[] = listed.length
+    const shown: { name: string; source: string; package?: string | null; description?: string; inline?: true; cached?: true }[] = listed.length
       ? listed
       : shownTools(workspace, view).filter((tool) => asks || !(tool.name === ASK_QUESTION_TOOL && tool.inline));
     return {
-      tools: shown.map(({ name, source, description, inline, cached }) => ({
+      tools: shown.map(({ name, source, package: pkg, description, inline, cached }) => ({
         name,
         ...(description !== undefined ? { description } : {}),
         source: toolSource(name, source, servers),
@@ -2716,6 +2741,8 @@ class SessionManager extends EventEmitter {
         ...(cached ? { cached: true as const } : {}),
         enabled: toolEnabled(name, defaults, exceptions),
         defaultOn: !defaults.includes(name),
+        // Not offered one by one but found through the `tools` tool, or an MCP server's through `mcp`: the page says so beside the switch.
+        ...lazy({ name, source, package: pkg }),
       })),
       live: Boolean(listed.length),
     };
@@ -2756,7 +2783,8 @@ class SessionManager extends EventEmitter {
     // in every chat, and one that is switched back on in the chat needs one.
     setSessionTools(sessionId, exceptionsFor(heldOffUnshown(wantedOff, shown, held), toolDefaultsForSession(session), answered, held));
     const off = this.offFor(sessionId, listed.map((t) => t.name), view.known().keys());
-    await client?.setToolsOff?.(this.piOff(sessionId, reported.map((t) => t.name), view));
+    const piOff = this.piOff(sessionId, reported.map((t) => t.name), view);
+    await client?.setToolsOff?.(piOff, this.piLazy(piOff));
     return off;
   }
 
@@ -2789,7 +2817,8 @@ class SessionManager extends EventEmitter {
         // page showing the opposite of what the database now holds.
         try {
           const listed = client.getTools ? await client.getTools() : [];
-          await client.setToolsOff?.(this.piOff(sessionId, listed.map((t) => t.name), view, homes));
+          const off = this.piOff(sessionId, listed.map((t) => t.name), view, homes);
+          await client.setToolsOff?.(off, this.piLazy(off));
           return true;
         } catch (e) {
           console.error(`[portal] could not apply the tool defaults to ${sessionId}: ${(e as Error).message}`);

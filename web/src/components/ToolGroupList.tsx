@@ -19,6 +19,8 @@ export function ToolGroupList({
   roomy,
   naming,
   beside,
+  onLazy,
+  lazyFixed,
 }: {
   tools: PortalTool[];
   /** The names given to groups, which stand in for what installed them. */
@@ -31,6 +33,10 @@ export function ToolGroupList({
   naming?: (group: ToolGroup) => ReactNode;
   /** What goes after the name of a group, before the switch for all of it. */
   beside?: (group: ToolGroup) => ReactNode;
+  /** Settings only: mark one tool lazy, or take the mark away. Without it the label is only shown. */
+  onLazy?: (tool: PortalTool) => void;
+  /** A tool whose own mark cannot be changed: lazy because its whole set is, or an MCP server's, whose setting is the server's. */
+  lazyFixed?: (tool: PortalTool) => boolean;
 }) {
   const groups = useOpenGroups();
   return (
@@ -91,6 +97,37 @@ export function ToolGroupList({
                       >
                         {t("cached")}
                       </span>
+                    )}
+                    {/* Not in the model's list one by one, but on: it finds the tool through the `tools` tool, or an MCP server's through `mcp`. */}
+                    {onLazy ? (
+                      !tool.noLazy && (
+                        <button
+                          type="button"
+                          disabled={busy || lazyFixed?.(tool)}
+                          aria-pressed={Boolean(tool.lazy)}
+                          aria-label={t("Lazy {name}", { name: tool.name })}
+                          onClick={(e) => {
+                            // The tool sits in a label whose click flips its switch.
+                            e.preventDefault();
+                            onLazy(tool);
+                          }}
+                          title={tool.mcp ? t("Set for the whole server, with the lazy button of its group: it is the server's \"Register tools directly\", turned off. A lazy tool is not in the model's list one by one; the model finds and calls it through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
+                          className={`shrink-0 rounded border px-1 text-[10px] disabled:opacity-60 ${
+                            tool.lazy ? "border-accent/40 bg-accent/15 text-accent" : "border-transparent text-fg-faint hover:text-fg"
+                          }`}
+                        >
+                          {t("lazy")}
+                        </button>
+                      )
+                    ) : (
+                      tool.lazy && (
+                        <span
+                          title={tool.mcp ? t("Not in the model's list one by one: it finds and calls this tool through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
+                          className="shrink-0 rounded border border-line px-1 text-[10px] text-fg-faint"
+                        >
+                          {t("lazy")}
+                        </span>
+                      )
                     )}
                     {/* Only where this chat disagrees with the default, so the
                         setting is findable from the place it is being overruled. */}

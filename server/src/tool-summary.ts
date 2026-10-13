@@ -6,6 +6,8 @@
  * the page's bundle can take it as it is.
  */
 
+import { GATEWAY_TOOL, calledThrough } from "./pi/tools-gateway-names.js";
+
 /** Parameters that are what a call acted on: said bare, without a label. */
 const PRIMARY = ["command", "file_path", "path", "pattern", "query", "url"] as const;
 
@@ -57,7 +59,8 @@ export function argsSummary(input: unknown, max = 160): string | undefined {
 
 /**
  * A tool call as a channel says it: its name and what it was given. Through
- * the MCP adapter, the tool inside and what that was given.
+ * the MCP adapter, or the `tools` tool that reaches the lazy ones, the tool
+ * inside and what that was given.
  */
 export function describeToolCall(payload: any): { name: string; detail?: string } {
   const name = String(payload?.toolName ?? payload?.name ?? "tool");
@@ -65,5 +68,7 @@ export function describeToolCall(payload: any): { name: string; detail?: string 
   if (name === "mcp" && input && typeof input === "object" && typeof input.tool === "string" && input.tool) {
     return { name: input.tool, detail: argsSummary(input.args && typeof input.args === "object" ? input.args : undefined, 80) };
   }
+  const lazy = name === GATEWAY_TOOL ? calledThrough(input) : undefined;
+  if (lazy) return { name: lazy.name, detail: argsSummary(lazy.args, 80) };
   return { name, detail: argsSummary(input, 80) };
 }

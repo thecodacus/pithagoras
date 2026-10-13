@@ -58,9 +58,9 @@ const { saveImageGeneration } = await import("../dist/image-generation.js");
 const started = [];
 
 /** One message to a conversation in `folder`, and the results of the tool calls it led to. */
-async function run(folder) {
+async function run(folder, options = {}) {
   const client = await SdkPiClient.create({
-    cwd: folder, sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `edit-${path.basename(folder)}`,
+    cwd: folder, sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `edit-${path.basename(folder)}`, ...options,
   });
   const results = [];
   const settled = new Promise((resolve) => client.on("event", (e) => {
@@ -105,6 +105,26 @@ test("a model that calls edit_image gets a new picture in the chat's folder, sho
     assert.ok(asked[0].body.includes(PNG), "the picture's bytes went with it");
     assert.ok(asked[0].body.includes("make it red") && asked[0].body.includes("edit-model"));
   } finally {
+    saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false, editModel: "" });
+  }
+});
+
+test("an edit_image that is lazy is the portal's own to the chat as well: its start says so, and its end which tool it was", async () => {
+  const folder = chat();
+  saveImageGeneration({ baseUrl: `http://127.0.0.1:${endpoint.address().port}/v1`, editEnabled: true, editModel: "edit-model" });
+  named = "tools";
+  try {
+    call = { action: "call", name: "edit_image", args: { path: "photo.png", prompt: "make it red", title: "Red" } };
+    const [result, ...more] = await run(folder, { toolsLazy: ["edit_image"] });
+    assert.equal(more.length, 0);
+    assert.ok(!offered.at(-1).includes("edit_image") && offered.at(-1).includes("tools"), "it is reached through the gateway");
+    assert.equal(result.isError, false);
+    assert.equal(started.at(-1).toolName, "tools");
+    assert.equal(started.at(-1).portalImage, true, "the start says the call is of the portal's tool, as a direct call's does");
+    assert.equal(result.portalCalledTool, "edit_image");
+    assert.deepEqual(result.result.details, { path: "generated-images/photo-edited.jpg", title: "Red", portalImage: true });
+  } finally {
+    named = "edit_image";
     saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false, editModel: "" });
   }
 });

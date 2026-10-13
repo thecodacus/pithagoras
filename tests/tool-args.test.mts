@@ -53,3 +53,18 @@ test('nothing in the page is written in a way older Safari cannot read', async (
   const found = files.filter((f) => /\(\?<[!=]/.test(readFileSync(`web/src/${f}`, 'utf8')));
   assert.deepEqual(found, []);
 });
+
+test('a channel says a call through the tools tool as the tool it calls, and a search of the lazy tools as it is', () => {
+  // The lazy tools are reached through `tools`: the line is the tool and what it was given, as for a direct call.
+  assert.deepEqual(
+    describeToolCall({ toolName: 'tools', args: { action: 'call', name: 'browser_navigate', args: { url: 'https://example.com' } } }),
+    describeToolCall({ toolName: 'browser_navigate', args: { url: 'https://example.com' } }),
+  );
+  assert.deepEqual(
+    describeToolCall({ toolName: 'tools', args: { action: 'call', name: 'browser_navigate', args: '{"url":"https://example.com"}' } }),
+    { name: 'browser_navigate', detail: 'https://example.com' },
+  );
+  assert.deepEqual(describeToolCall({ toolName: 'tools', args: { action: 'call', name: 'browser_back' } }), { name: 'browser_back', detail: undefined });
+  // A search calls nothing, so it stays a line of `tools`.
+  assert.equal(describeToolCall({ toolName: 'tools', args: { action: 'search', query: 'pdf' } }).name, 'tools');
+});

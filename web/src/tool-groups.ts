@@ -34,7 +34,8 @@ const MEDIA_TOOLS = ["show_image", "generate_image", "edit_image", "show_video",
  * What to file a tool under. The portal's own picture and video tools share one group, whichever way each was
  * registered; an extension's tool of the same name is not the portal's and stays in its own.
  */
-const sourceOf = (tool: PortalTool): string => (tool.inline && MEDIA_TOOLS.includes(tool.name) ? MEDIA : tool.source?.trim() || BUILT_IN);
+export const sourceOf = (tool: Pick<PortalTool, "name" | "source" | "inline">): string =>
+  tool.inline && MEDIA_TOOLS.includes(tool.name) ? MEDIA : tool.source?.trim() || BUILT_IN;
 
 /** Where a group goes in the list: what is installed first, what the portal brings after it, what is built in last. */
 const shippedRank = (source: string): number => (source === BUILT_IN ? 2 : source === MEDIA ? 1 : 0);
