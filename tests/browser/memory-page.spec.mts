@@ -403,22 +403,31 @@ test("the 3D toolbar's look, colour and filter are the portal's own controls", a
   await expect(page.getByRole('list', { name: 'What the colours are' })).toHaveCount(0);
 });
 
-test('notes in the flat graph are small dots that stay the same size on the screen as it zooms, as the labels do', async ({ page }) => {
+test('notes in the flat graph are small stars that stay the same size on the screen as it zooms, as the labels do', async ({ page }) => {
   await portal(page, { notes: 140, longNames: true });
   await page.goto('/memory?view=graph');
   const graph = page.getByRole('group', { name: /140 notes/ });
   await expect(graph).toBeVisible();
   const sizes = () =>
     graph.evaluate((svg) => {
-      const orbs = [...svg.querySelectorAll(':scope > .mg-base circle.mg-orb')].map((c) => c.getBoundingClientRect().width);
+      const notes = [...svg.querySelectorAll(':scope > .mg-base [data-note]')];
+      const orbs = notes.map((n) => n.querySelector('circle.mg-orb')!.getBoundingClientRect().width);
+      // A star, not a blob: fine spikes reaching well past a small bright core.
+      const stars = notes.map((n) => (n.querySelector('path.mg-spark') as SVGGraphicsElement | null)?.getBBox());
+      // Measured without the twinkle, which turns and swells each star a little.
+      const vb = (svg as SVGSVGElement).viewBox.baseVal;
+      const px = Math.min(svg.clientWidth / vb.width, svg.clientHeight / vb.height);
+      const spikes = stars.map((b) => (b ? b.width * px : 0));
       const labels = [...svg.querySelectorAll(':scope > g.mg-labels text')].map((t) => t.getBoundingClientRect().height);
-      return { orb: Math.max(...orbs), label: labels.length ? Math.max(...labels) : 0 };
+      return { orb: Math.max(...orbs), star: Math.max(...spikes), stars: stars.filter(Boolean).length, all: notes.length, label: labels.length ? Math.max(...labels) : 0 };
     });
   await page.waitForTimeout(400);
   const before = await sizes();
-  // At most 7 pixels across the largest of them, smaller than a label is tall.
-  expect(before.orb).toBeLessThanOrEqual(15);
-  expect(before.orb).toBeLessThan(before.label * 1.2);
+  // A small core, a few pixels across, inside spikes about three times as wide: still smaller than a label is long.
+  expect(before.stars).toBe(before.all);
+  expect(before.orb).toBeLessThanOrEqual(8);
+  expect(before.star).toBeGreaterThan(before.orb * 2);
+  expect(before.star).toBeLessThanOrEqual(20);
   const box = (await graph.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -100);
@@ -427,6 +436,8 @@ test('notes in the flat graph are small dots that stay the same size on the scre
   // Zoomed in more than twice, they keep their size, give or take the step the scale settles on.
   expect(closer.orb / before.orb).toBeGreaterThan(0.75);
   expect(closer.orb / before.orb).toBeLessThan(1.35);
+  expect(closer.star / before.star).toBeGreaterThan(0.75);
+  expect(closer.star / before.star).toBeLessThan(1.35);
   expect(closer.label / before.label).toBeGreaterThan(0.75);
   expect(closer.label / before.label).toBeLessThan(1.35);
 });

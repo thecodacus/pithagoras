@@ -240,8 +240,12 @@
     radial-gradient(ellipse at 15% 90%, rgb(var(--fg) / .035), transparent 55%);
 }
 .mg-edge { opacity: .38; transition: opacity .2s; }
-.mg-note .mg-orb { transition: filter .2s, transform .25s cubic-bezier(.22,1,.36,1); transform-box: fill-box; transform-origin: center; }
-.mg-note:hover .mg-orb, .mg-note:focus-visible .mg-orb { transform: scale(1.22); filter: brightness(1.15); }
+.mg-note :is(.mg-orb, .mg-spark) { transition: filter .2s, transform .25s cubic-bezier(.22,1,.36,1); transform-box: fill-box; transform-origin: center; }
+.mg-note:hover :is(.mg-orb, .mg-spark), .mg-note:focus-visible :is(.mg-orb, .mg-spark) { transform: scale(1.22); filter: brightness(1.15); }
+/* A note is a star: fine spikes round a bright core, which twinkle in a graph small enough to afford it. */
+.mg-spark { opacity: .85; }
+.mg-rich .mg-spark { animation: mg-twinkle 3.2s ease-in-out infinite; }
+@keyframes mg-twinkle { 0%, 100% { opacity: .7; transform: scale(.88) rotate(0deg); } 50% { opacity: 1; transform: scale(1.06) rotate(10deg); } }
 .mg-halo { transform-box: fill-box; transform-origin: center; opacity: .85; pointer-events: none; }
 .mg-orphan { opacity: .8; }
 /* Labels with a rim of the page's own colour, readable over the links that cross them. */
@@ -265,8 +269,8 @@
 @keyframes mg-breathe { 0%, 100% { transform: scale(.82); opacity: .55; } 50% { transform: scale(1.1); opacity: 1; } }
 @keyframes mg-blink { 0%, 100% { opacity: .35; } 50% { opacity: .9; } }
 @media (prefers-reduced-motion: reduce) {
-  .mg-rich .mg-edge, .mg-rich .mg-note, .mg-rich .mg-halo, .mg-rich .mg-orphan, .mg-hot, .mg-lit, .mg-selected, .mg-found { animation: none; }
+  .mg-rich .mg-edge, .mg-rich .mg-note, .mg-rich .mg-halo, .mg-rich .mg-orphan, .mg-rich .mg-spark, .mg-hot, .mg-lit, .mg-selected, .mg-found { animation: none; }
   .mg-rich .mg-edge, .mg-hot { stroke-dasharray: none; }
   .mg-base, .memory-graph svg > .mg-labels { transition: none; }
-  .mg-note .mg-orb { transition: none; }
+  .mg-note :is(.mg-orb, .mg-spark) { transition: none; }
 }

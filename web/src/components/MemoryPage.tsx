@@ -1326,11 +1326,26 @@ function useMeasure(): (text: string) => number {
 }
 
 /**
- * The radius a note is drawn at, in screen pixels, from how linked it is: small,
- * and the same at every zoom, as the labels are. Times the view's scale it is
- * in the drawing's units.
+ * How far a note's star reaches, tip to middle, in screen pixels, from how
+ * linked it is: small, and the same at every zoom, as the labels are. Times
+ * the view's scale it is in the drawing's units. Its bright core is a part of it.
  */
-export const notePx = (links: number) => 3.5 + Math.min(links, 10) * 0.35;
+export const notePx = (links: number) => 5 + Math.min(links, 10) * 0.4;
+const CORE = 0.4;
+
+/** The points of a star at (`x`, `y`), `reach` long: four fine spikes on the axes, and four shorter between them. */
+function sparkle(x: number, y: number, reach: number): string {
+  const spikes = (length: number, start: number, waist: number) => {
+    const at = (a: number, r: number) => `${(x + r * Math.cos(a)).toFixed(2)} ${(y + r * Math.sin(a)).toFixed(2)}`;
+    let d = `M${at(start, length)}`;
+    for (let k = 0; k < 4; k++) {
+      const a = start + (k * Math.PI) / 2;
+      d += `Q${at(a + Math.PI / 4, waist)} ${at(a + Math.PI / 2, length)}`;
+    }
+    return `${d}Z`;
+  };
+  return spikes(reach, -Math.PI / 2, reach * 0.14) + spikes(reach * 0.55, -Math.PI / 4, reach * 0.09);
+}
 /** How far round a note a pointer still reaches it, in screen pixels: a small dot is still easy to hit. */
 const REACH_PX = 9;
 
@@ -1666,7 +1681,7 @@ function FlatGraph({
     const asks: LabelAsk[] = order.map(({ n, rank }) => {
       const p = where.get(n.path)!;
       const text = labelOf(n.title || n.path);
-      return { path: n.path, x: p.x, y: p.y, r: radiusOf(n.links) + (n.links === 0 ? 4.5 : 1) * k, width: (measure(text) + 4) * k, height: LABEL_PX * 1.5 * k, must: rank === 0 };
+      return { path: n.path, x: p.x, y: p.y, r: radiusOf(n.links) * 0.85 + (n.links === 0 ? 2 : 0) * k, width: (measure(text) + 4) * k, height: LABEL_PX * 1.5 * k, must: rank === 0 };
     });
     return new Map(placeLabels(asks, 2 * k, { x0: fit.x, y0: fit.y, x1: fit.x + fit.width, y1: fit.y + fit.height }).map((l) => [l.path, l]));
   }, [graph, shown, selected, found, where, scale, measure, fit]);
@@ -1703,7 +1718,7 @@ function FlatGraph({
             graph.nodes.map((n, i) => {
               if (!shown.has(n.path)) return null;
               const p = where.get(n.path)!;
-              return <circle key={n.path} cx={p.x} cy={p.y} r={radiusOf(n.links) * 3} fill={`url(#mg-halo-${gradient(colourOf(n.type))})`} className="mg-halo" style={{ animationDelay: `${(i * 370) % 3600}ms` }} />;
+              return <circle key={n.path} cx={p.x} cy={p.y} r={radiusOf(n.links) * 2.2} fill={`url(#mg-halo-${gradient(colourOf(n.type))})`} className="mg-halo" style={{ animationDelay: `${(i * 370) % 3600}ms` }} />;
             })}
           {graph.edges.map((e, i) => {
             const a = where.get(e.source);
@@ -1734,8 +1749,9 @@ function FlatGraph({
                 style={rich ? { animationDelay: `${(i % 12) * 60}ms` } : undefined}
               >
                 <circle cx={p.x} cy={p.y} r={Math.max(r, REACH_PX * (scale || 1))} fill="transparent" className="mg-reach" />
-                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 3 * (scale || 1)} fill="none" className="mg-orphan stroke-danger" strokeWidth={1.3} vectorEffect="non-scaling-stroke" />}
-                <circle cx={p.x} cy={p.y} r={r} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} stroke="transparent" strokeWidth={3} vectorEffect="non-scaling-stroke" className="mg-orb" />
+                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r * 0.75} fill="none" className="mg-orphan stroke-danger" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
+                <path d={sparkle(p.x, p.y, r)} fill={colourOf(n.type)} className="mg-spark" style={rich ? { animationDelay: `${(i * 530) % 3200}ms` } : undefined} />
+                <circle cx={p.x} cy={p.y} r={r * CORE} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} stroke="transparent" strokeWidth={3} vectorEffect="non-scaling-stroke" className="mg-orb" />
               </g>
             );
           })}
@@ -1864,8 +1880,9 @@ function FlatGraph({
               if (!p || !n) return null;
               return (
                 <g key={path}>
-                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links)} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} />
-                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links) + 3.5 * (scale || 1)} fill="none" className="mg-found stroke-accent" strokeWidth={1.8} vectorEffect="non-scaling-stroke" />
+                  <path d={sparkle(p.x, p.y, radiusOf(n.links))} fill={colourOf(n.type)} />
+                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links) * CORE} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} />
+                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links) + 2 * (scale || 1)} fill="none" className="mg-found stroke-accent" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
                 </g>
               );
             })}
@@ -1890,8 +1907,9 @@ function FlatGraph({
               const r = radiusOf(n.links);
               return (
                 <g key={path} className="mg-lit">
-                  {path === focus && <circle cx={p.x} cy={p.y} r={r * 3.2} fill={`url(#mg-halo-${gradient(colourOf(n.type))})`} />}
-                  <circle cx={p.x} cy={p.y} r={path === focus ? r * 1.2 : r} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} />
+                  {path === focus && <circle cx={p.x} cy={p.y} r={r * 2.6} fill={`url(#mg-halo-${gradient(colourOf(n.type))})`} />}
+                  <path d={sparkle(p.x, p.y, path === focus ? r * 1.25 : r)} fill={colourOf(n.type)} />
+                  <circle cx={p.x} cy={p.y} r={(path === focus ? r * 1.25 : r) * CORE} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} />
                 </g>
               );
             })}
@@ -1901,7 +1919,7 @@ function FlatGraph({
           </g>
         )}
         {selected && shown.has(selected) && where.get(selected) && (
-          <circle aria-hidden="true" cx={where.get(selected)!.x} cy={where.get(selected)!.y} r={radiusOf(nodeOf.get(selected)?.links ?? 0) + 5 * (scale || 1)} fill="none" strokeWidth={1.8} vectorEffect="non-scaling-stroke" className="mg-selected pointer-events-none stroke-accent" />
+          <circle aria-hidden="true" cx={where.get(selected)!.x} cy={where.get(selected)!.y} r={radiusOf(nodeOf.get(selected)?.links ?? 0) + 3.5 * (scale || 1)} fill="none" strokeWidth={1.8} vectorEffect="non-scaling-stroke" className="mg-selected pointer-events-none stroke-accent" />
         )}
       </svg>
 
