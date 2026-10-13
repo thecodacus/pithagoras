@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -238,4 +239,39 @@ test("a server half changed is stopped and started anew, one gone is stopped, an
   await host.syncServerHalves([]);
   assert.equal((await fetch(at("/api/x/@codacus/notes/hello2"))).status, 404);
   assert.match(readFileSync(path.join(pkg, "server.js"), "utf8"), /nothing to stop/);
+});
+
+// The sandbox needs root on Linux, as the portal runs in its image, and its tools.
+const linuxRoot = process.platform === "linux" && process.getuid?.() === 0;
+const has = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`]).status === 0;
+const noSandbox = !linuxRoot ? "needs root on Linux, as the portal runs in its image" : !has("setpriv") || !has("useradd") ? "needs setpriv and useradd" : false;
+
+test("with the sandbox on, what a server half runs for a chat runs as the chat's agent, with none of the portal's own environment", { skip: noSandbox }, async () => {
+  const exists = (kind, name) => spawnSync("getent", [kind, name]).status === 0;
+  if (!exists("group", "pi-sandbox")) execFileSync("groupadd", ["--gid", "10010", "pi-sandbox"]);
+  if (!exists("passwd", "pi-tools")) execFileSync("useradd", ["--uid", "10002", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "pi-tools"]);
+  await host.syncServerHalves([write(MODULE)]);
+  const { portal } = seen();
+  const { parsePolicy, saveSandboxPolicy, defaultRules } = await import("../dist/sandbox/policy.js");
+  // Switched on, not applied: applying writes the system's sudo rules, which the sandbox's own test relies on.
+  const policy = parsePolicy({ enabled: true, rules: defaultRules(), trusted: [] });
+  saveSandboxPolicy(policy);
+  process.env.PORTAL_OWN_SECRET = "not for an agent";
+  try {
+    assert.equal(portal.sandbox.on(), true);
+    const as = portal.sandbox.spawnAs("a");
+    assert.equal(as.argv[0], "setpriv");
+    assert.equal(as.env.PORTAL_OWN_SECRET, undefined);
+    assert.match(as.env.USER, /^pi-agent-[0-9a-f]{8}$/);
+    // The command itself is the agent's: its user, its own HOME, and nothing of the portal's to print.
+    const ran = await portal.sandbox.run("a", ["sh", "-c", "id -un; id -u; echo ${PORTAL_OWN_SECRET:-nothing}"], { cwd: "/" });
+    assert.equal(ran.code, 0, ran.stderr);
+    const [user, uid, secret] = ran.stdout.toString().trim().split("\n");
+    assert.equal(user, as.env.USER);
+    assert.notEqual(uid, "0");
+    assert.equal(secret, "nothing");
+  } finally {
+    delete process.env.PORTAL_OWN_SECRET;
+    saveSandboxPolicy({ ...policy, enabled: false });
+  }
 });
