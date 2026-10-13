@@ -1,0 +1,143 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { linkSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import ts from 'typescript';
+import docsServer from '../extensions/docs/server.js';
+import { resolveInside } from '../server/src/workspace-files.ts';
+import { scratch } from './helpers.mts';
+
+type Res = { status(code: number): Res; json(body: unknown): void };
+type Handler = (req: { params: Record<string, string> }, res: Res) => void;
+
+/** The Documents extension's server half, given chats that work in these folders, as the portal gives it them. */
+function server(folders: Record<string, string>) {
+  const routes = new Map<string, Handler>();
+  docsServer({
+    extension: 'pithagoras-docs',
+    router: { get: (route: string, handler: Handler) => routes.set(route, handler) },
+    files: { inside: resolveInside },
+    chats: {
+      list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
+      folder: (id: string) => realpathSync(folders[id]),
+    },
+  });
+  const ask = (route: string, params: Record<string, string> = {}) => {
+    let answer: { status: number; body: any } = { status: 200, body: undefined };
+    const res: Res = {
+      status: (code) => ((answer.status = code), res),
+      json: (body) => void (answer.body = body),
+    };
+    routes.get(route)!({ params }, res);
+    return answer;
+  };
+  return {
+    folders: () => ask('/folders').body.folders,
+    read: (folder: string, name: string) => ask('/folders/:folder/documents/:name', { folder, name }),
+  };
+}
+
+function folderWith(prefix: string, files: Record<string, string>) {
+  const folder = scratch(prefix);
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
+    writeFileSync(path.join(folder, name), text);
+  }
+  return folder;
+}
+
+test('the Documents page is told every folder chats work in that has documents, each once, with its documents by title', () => {
+  const site = folderWith('docs-site-', {
+    'documents/plan.md': '# The plan\n\nShip it.\n',
+    // A `#` in a code block is a comment: the title is the heading after it.
+    'documents/setup.md': '```bash\n# install first\nnpm ci\n```\n\n## Setting up\n',
+    'documents/untitled.md': 'No heading at all.\n',
+    // Not documents: another kind of file, a hidden one, one in a folder below, and one beside the documents folder.
+    'documents/picture.png': 'png',
+    'documents/.draft.md': '# Hidden',
+    'documents/old/archive.md': '# Archived',
+    'README.md': '# Not in documents',
+  });
+  const empty = folderWith('docs-empty-', { 'notes.md': '# Not a document' });
+  const docs = server({ a: site, b: site, c: empty });
+  const [only, ...more] = docs.folders();
+  assert.deepEqual(more, [], 'a folder without documents is left out');
+  assert.equal(only.path, realpathSync(site));
+  assert.equal(only.name, path.basename(site));
+  assert.match(only.id, /^[0-9a-f]{16}$/, 'named by an id, not by its path');
+  assert.deepEqual(only.chats, [{ id: 'a', title: 'Chat a' }, { id: 'b', title: 'Chat b' }], 'two chats in one folder: one folder');
+  assert.deepEqual(only.documents.map((d: any) => [d.name, d.title]), [
+    ['setup.md', 'Setting up'],
+    ['plan.md', 'The plan'],
+    ['untitled.md', 'untitled'],
+  ]);
+  assert.equal(only.documents[1].size, Buffer.byteLength('# The plan\n\nShip it.\n'));
+  assert.ok(!Number.isNaN(Date.parse(only.documents[1].modified)));
+});
+
+test('a chat whose folder is gone has no documents, and the others are still listed', () => {
+  const site = folderWith('docs-gone-', { 'documents/plan.md': '# Plan' });
+  const docs = server({ a: site, gone: path.join(site, 'no-such-folder') });
+  assert.deepEqual(docs.folders().map((f: any) => f.chats.map((c: any) => c.id)), [['a']]);
+});
+
+test('a document is read by its folder\'s id and its name, and nothing else is', () => {
+  const site = folderWith('docs-read-', {
+    'documents/plan.md': '# The plan\n\nShip it.\n',
+    'documents/other.md': '# Other',
+    'secret.md': '# Outside the documents folder',
+    'documents/big.md': '#'.repeat(1024 * 1024 + 1),
+  });
+  const outside = folderWith('docs-outside-', { 'private.md': '# Not this folder' });
+  // A link, a link to another document, and a second name of a file outside: none of them is a document.
+  symlinkSync(path.join(outside, 'private.md'), path.join(site, 'documents', 'link.md'));
+  symlinkSync('other.md', path.join(site, 'documents', 'alias.md'));
+  linkSync(path.join(outside, 'private.md'), path.join(site, 'documents', 'hard.md'));
+  const docs = server({ a: site });
+  const [folder] = docs.folders();
+  assert.deepEqual(folder.documents.map((d: any) => d.name), ['other.md', 'plan.md'], 'neither links nor a file too big are listed');
+
+  const plan = docs.read(folder.id, 'plan.md');
+  assert.equal(plan.status, 200);
+  assert.equal(plan.body.markdown, '# The plan\n\nShip it.\n');
+  assert.equal(plan.body.title, 'The plan');
+  assert.equal(plan.body.name, 'plan.md');
+
+  for (const name of ['../secret.md', 'link.md', 'alias.md', 'hard.md', 'big.md', 'missing.md', '.', '', 'documents/plan.md', 'plan.md\0']) {
+    const refused = docs.read(folder.id, name);
+    assert.equal(refused.status, 404, name);
+    assert.deepEqual(refused.body, { error: 'There is no such document' }, name);
+  }
+  // A folder is only one a chat works in: an id the portal does not list, or a path, is no folder.
+  assert.equal(docs.read('0123456789abcdef', 'plan.md').status, 404);
+  assert.equal(docs.read(realpathSync(site), 'plan.md').status, 404);
+  assert.equal(server({ b: outside }).read(folder.id, 'plan.md').status, 404, 'the chat that worked there is gone');
+});
+
+test('every text the Documents page shows has a German one, and no German one is left over', () => {
+  const file = new URL('../extensions/docs/web/client.js', import.meta.url);
+  const src = ts.createSourceFile('client.js', readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const shown = new Set<string>();
+  let german: Set<string> | undefined;
+  const visit = (n: ts.Node) => {
+    if (ts.isCallExpression(n)) {
+      const callee = n.expression.getText(src);
+      const first = n.arguments[0];
+      if (callee === 't' && first && ts.isStringLiteralLike(first)) shown.add(first.text);
+      if (callee === 'portal.locale.add' && first && ts.isStringLiteralLike(first) && first.text === 'de') {
+        const table = n.arguments[1] as ts.ObjectLiteralExpression;
+        german = new Set(table.properties.map((p) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) ? p.name.text : '')));
+      }
+    }
+    // A page's title in the sidebar is shown as well.
+    if (ts.isPropertyAssignment(n) && n.name.getText(src) === 'title' && ts.isStringLiteralLike(n.initializer)) shown.add(n.initializer.text);
+    ts.forEachChild(n, visit);
+  };
+  visit(src);
+  // The portal's own texts, which it translates itself.
+  shown.delete('Loading…');
+  assert.ok(german, 'German texts are added');
+  assert.ok(shown.size > 3);
+  assert.deepEqual([...shown].filter((text) => !german!.has(text)), [], 'shown without German');
+  assert.deepEqual([...german!].filter((text) => !shown.has(text)), [], 'German for nothing shown');
+});
