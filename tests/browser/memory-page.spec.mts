@@ -954,9 +954,8 @@ const aRun = (list: Locator, question: RegExp) => {
     row,
     pin: row.locator('button[aria-pressed]'),
     toggle,
-    /** Opened with its toggle, as a person does, unless it is open: the pointer on the toggle, which shows what the toggle says. */
+    /** Opened with its toggle, as a person does, unless it is open. */
     open: async () => {
-      await toggle.hover();
       if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
       await expect(toggle).toHaveAttribute('aria-expanded', 'true');
       return row;
@@ -1093,7 +1092,9 @@ test('a path that touched no note of the graph lights nothing and dims nothing',
   expect(found).toHaveLength(3);
   const before = await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)));
   const list = await openPaths(page);
-  await aRun(list, /What was asked/).pin.hover();
+  const run = aRun(list, /What was asked/);
+  await run.open();
+  await run.pin.hover();
   await expect(list).toContainText('No note of this path is in the graph');
   await frames(page);
   expect(await Promise.all(found.map((s) => lightAt(page, s.x, s.y, 2)))).toEqual(before);
@@ -1131,7 +1132,9 @@ test('on a phone the list of paths is short and scrolls, and nothing in it makes
   await last.scrollIntoViewIfNeeded();
   await last.click();
   await expect(last).toHaveAttribute('aria-pressed', 'true');
-  // Opened by being kept lit, with its long names: they are cut, and do not widen the list.
+  // Kept lit it is still shut; opened with its toggle, with its long names: they are cut, and do not widen the list.
+  await expect(list.getByRole('listitem').last()).not.toContainText('the-notes-about');
+  await list.getByRole('listitem').last().locator('button[aria-expanded]').click();
   await expect(list.getByRole('listitem').last()).toContainText('the-notes-about');
   expect(await list.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -1313,6 +1316,7 @@ test('a step goes by the path Understory gives for it: a file name two notes sha
   const list = await openPaths(page);
   const [a, b, c, d] = ['How is project A', 'Is there a note called', 'What did my owner', 'How do I go from deploy'].map((name) => aRun(list, new RegExp(name)));
   const lit = async () => (await Promise.all([...(await graph.getByRole('button').all())].map(async (button) => ((await button.getAttribute('aria-description')) === 'On the path traced' ? await button.textContent() : null)))).filter(Boolean).sort();
+  for (const one of [a, b, c, d]) await one.open();
   // `read setup.md` is one of two notes; the step says which, and the search that found both lights neither.
   await a.pin.hover();
   await expect.poll(lit).toEqual(['Setup of project A']);
@@ -1458,33 +1462,47 @@ test("a run opens and shuts with its toggle, by the mouse and by the keyboard, a
   await expect(run.pin).toBeFocused();
 });
 
-test('the run the pointer is on, or that is kept lit, is open; the rest are shut; what the person shut stays shut', async ({ page }) => {
+test('a run does not open on pointing alone, nor on being kept lit; its toggle opens it, and it stays as the person left it', async ({ page }) => {
   await portal(page);
   await page.goto('/memory?view=graph');
   await expect(page.locator('.memory-sky canvas')).toBeVisible();
   const list = await openPaths(page);
   const [change, query] = [aRun(list, /Persist the following knowledge/), aRun(list, /Who runs the test host/)];
   await expect(list.locator('button[aria-expanded="false"]')).toHaveCount(2);
-  // Pointed at, it opens; the pointer gone, it shuts.
+  // Pointed at, on its row and on its question, for a while: it is lit in the graph and stays shut.
+  const graph = page.getByRole('group', { name: /3 notes, 1 link/ });
   await query.pin.hover();
+  await page.waitForTimeout(400);
+  await expect(graph.getByRole('button', { name: 'The owner' })).toHaveAccessibleDescription('On the path traced');
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  await query.toggle.hover();
+  await query.row.hover({ position: { x: 20, y: 6 } });
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(query.row).not.toContainText('branches.md');
+  await page.mouse.move(5, 5);
+  // Kept lit, it is still shut.
+  await query.pin.click();
+  await expect(query.pin).toHaveAttribute('aria-pressed', 'true');
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  // The toggle opens it, and the pointer going away does not shut it.
+  await query.toggle.click();
+  await expect(query.toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(query.row).toContainText('branches.md');
+  await page.mouse.move(5, 5);
   await expect(query.toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(change.toggle).toHaveAttribute('aria-expanded', 'false');
-  await page.mouse.move(5, 5);
-  await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
-  // Kept lit, it stays open, with the pointer away and the list shut and opened again.
-  await query.pin.click();
-  await page.mouse.move(5, 5);
-  await expect(query.toggle).toHaveAttribute('aria-expanded', 'true');
+  // Open, it stays open with the list shut and opened again, and the other stays shut.
   await page.keyboard.press('Escape');
   await openPaths(page);
   await expect(query.toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(change.toggle).toHaveAttribute('aria-expanded', 'false');
-  // The person shuts it with its toggle, though it is kept lit: it stays shut, the pointer on it or not.
+  // The toggle shuts it, and pointing at it again does not open it.
   await query.toggle.click();
   await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(query.pin).toHaveAttribute('aria-pressed', 'true');
   await query.pin.hover();
+  await page.waitForTimeout(300);
   await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(query.pin).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('a run that is shut lights its notes in the graph all the same, pointed at, reached with Tab, or kept lit', async ({ page }) => {
@@ -1496,9 +1514,7 @@ test('a run that is shut lights its notes in the graph all the same, pointed at,
   const query = aRun(list, /Who runs the test host/);
   const owner = graph.getByRole('button', { name: 'The owner' });
   const loose = graph.getByRole('button', { name: 'A loose note' });
-  // Opened and shut by the person: shut it stays, and the pointer on it lights the notes of its path.
-  await query.open();
-  await query.toggle.click();
+  // Shut, as it begins: the pointer on it lights the notes of its path, and it stays shut.
   await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');
   await query.pin.hover();
   await expect(query.toggle).toHaveAttribute('aria-expanded', 'false');

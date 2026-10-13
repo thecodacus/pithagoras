@@ -1314,7 +1314,9 @@ function TracePaths({
   paths,
   types,
   colourOf,
+  opened,
   pinned,
+  onOpen,
   onPoint,
   onPin,
 }: {
@@ -1324,32 +1326,32 @@ function TracePaths({
   /** The type of each note of the graph, by path. */
   types: Map<string, string | undefined>;
   colourOf: (type: string | undefined) => string;
+  /** The runs the person has opened with their toggles. */
+  opened: ReadonlySet<string>;
   /** The run kept lit. */
   pinned: string | null;
+  /** A run's toggle was used: it opens if it was shut, and shuts if it was open. */
+  onOpen: (id: string) => void;
   /** The run being pointed at or reached with Tab, or null: lit in the graph, closed or open. */
   onPoint: (id: string | null) => void;
   onPin: (id: string | null) => void;
 }) {
   const base = useId();
-  // A run is a row of its question, its cost and a toggle for its steps. Closed to begin with, so that a long list is short; the run the pointer is on (but not on its toggle) or that is kept lit opens, unless the person has said otherwise with the toggle. Reaching one with Tab lights it in the graph and leaves it as it is.
-  const [said, setSaid] = useState<Map<string, boolean>>(new Map());
-  const [hovered, setHovered] = useState<string | null>(null);
-  // On a run's toggle the row shows what the toggle says (and a click on it changes), not what pointing at the row would open.
-  const [onToggle, setOnToggle] = useState<string | null>(null);
+  // A run is a row of its question, its cost and a toggle for its steps. Shut to begin with, so that a long list is short, and opened only with its toggle: pointing at a run, reaching it with Tab or keeping it lit lights its notes in the graph and leaves the row as it is.
   return (
     <ul aria-label={t("Query paths")} className="-mx-1 max-h-[50vh] space-y-0.5 overflow-y-auto px-1">
       {traces.slice(0, 30).map((trace) => {
         const path = paths.get(trace.id);
         const steps = path?.steps ?? [];
         const kept = pinned === trace.id;
-        const open = said.get(trace.id) ?? (kept || (hovered === trace.id && onToggle !== trace.id));
+        const open = opened.has(trace.id);
         const change = path?.changed ?? trace.kind === "mutation";
         const id = `${base}-${trace.id}`;
         return (
           <li
             key={trace.id}
-            onPointerEnter={() => (setHovered(trace.id), onPoint(trace.id))}
-            onPointerLeave={() => (setHovered(null), onPoint(null))}
+            onPointerEnter={() => onPoint(trace.id)}
+            onPointerLeave={() => onPoint(null)}
             onFocus={() => onPoint(trace.id)}
             onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && onPoint(null)}
             className={`rounded-lg border transition ${kept ? "border-accent/50 bg-accent/10" : "border-transparent"}`}
@@ -1373,9 +1375,7 @@ function TracePaths({
                 aria-expanded={open}
                 aria-controls={open ? `${id}-steps` : undefined}
                 aria-labelledby={`${id}-toggle ${id}-question`}
-                onPointerEnter={() => setOnToggle(trace.id)}
-                onPointerLeave={() => setOnToggle(null)}
-                onClick={() => setSaid((was) => new Map(was).set(trace.id, !open))}
+                onClick={() => onOpen(trace.id)}
                 className="shrink-0 rounded-md p-1.5 text-fg-muted transition hover:bg-fg/5 hover:text-fg"
               >
                 <span id={`${id}-toggle`} className="sr-only">{open ? t("Hide the steps") : t("Show the steps")}</span>
@@ -1483,6 +1483,8 @@ function GraphView({
   // The run pointed at, or else the one kept lit: its notes and the links between them are lit in the graph, the rest steps back. A path kept lit stays when the list is shut.
   const [pointed, setPointed] = useState<string | null>(null);
   const [kept, setKept] = useState<string | null>(null);
+  // The runs the person opened: they stay open, with the list shut and opened again, and the others stay shut.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     if (!tracing) setPointed(null);
   }, [tracing]);
@@ -1597,7 +1599,7 @@ function GraphView({
             {tracing && (
               <div ref={traceMenu} className="float-in-down absolute right-0 top-full z-20 mt-1.5 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto max-sm:max-w-none">
                 <p className="mb-2 text-sm text-fg-muted">{t("Point at a path to light it in the graph; click to keep it lit")}</p>
-                <TracePaths traces={traces} paths={paths} types={typeOf} colourOf={colourOf} pinned={kept} onPoint={setPointed} onPin={setKept} />
+                <TracePaths traces={traces} paths={paths} types={typeOf} colourOf={colourOf} opened={opened} pinned={kept} onOpen={(id) => setOpened((was) => (was.has(id) ? new Set([...was].filter((x) => x !== id)) : new Set(was).add(id)))} onPoint={setPointed} onPin={setKept} />
               </div>
             )}
           </div>

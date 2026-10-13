@@ -70,12 +70,13 @@ record) lists the latest runs of Understory's own agent, one line each: what it
 was asked or told, how many tokens it took, and a dot that is warm when the run
 changed the memory (a step wrote, patched or deleted a note, whoever asked: a
 change, or the librarian) and in the accent colour when it only read. The list
-is short because the runs are shut. The arrow at the end of a line opens a run
-and shuts it again; open, it shows the path the run went, step by step, in the
-words Understory keeps for it (`search "owner" (2) → read owner.md → ✓`; how it
-ended is the last step: a tick, *partial* or a cross). A run opens by itself
-while the pointer is on it (off its arrow) and while it is kept lit, unless you
-shut it with its arrow, and then it stays shut. A step that read, wrote,
+is short because the runs are shut. The arrow at the end of a line (Tab reaches
+it; Enter or Space presses it) opens a run and shuts it again, and only it does:
+pointing at a run, or keeping it lit, does not open it. A run you opened stays
+open, with the list shut and opened again, and one you shut stays shut. Open, it
+shows the path the run went, step by step, in the words Understory keeps for it
+(`search "owner" (2) → read owner.md → ✓`; how it ended is the last step: a
+tick, *partial* or a cross). A step that read, wrote,
 patched or deleted a note gets a glowing mark in the colour of that note's type;
 a search says how many notes it found and lights none, and a step that went by a
 file name another note shares still lights the right note, because the portal
