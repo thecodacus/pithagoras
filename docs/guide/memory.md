@@ -17,14 +17,39 @@ and links that open other notes here.
 
 **Log.** What changed in the memory, newest first.
 
-**Graph.** Every note is a glowing orb coloured by its type, its links are lines
-with a slow current along them, and notes nothing links to are ringed in red.
-The glow and the motion stop for a memory of more than 300 notes (the notes
-are then plain orbs) and for anyone who asks their system to reduce motion. **Query paths** shows the routes
-Understory's own queries took. Drag to move, scroll or the zoom buttons to zoom,
-click a note to open it. A memory of many hundreds of notes is laid out in fewer
-passes, so that the page opens at once: the picture is rougher, and still shows
-what is linked.
+**Graph.** The notes and their links, drawn flat (**2D**) or in space (**3D**);
+the switch is in the graph's toolbar, and this browser remembers the choice.
+Both show the same notes, filters and search.
+
+- **2D** is the one to read. Every note is a glowing orb coloured by its type,
+  its links are lines with a slow current along them, and notes nothing links
+  to are ringed in red. A note's name is written beside it wherever there is
+  room: names never lie on each other or on another note, so in a crowded part
+  some are left out, and zooming in brings them back. Point at a note (or reach
+  it with Tab) and it lights up with the notes it links with, the rest steps
+  back, and a card gives its whole title, type, link count and description.
+  Click a note to open it. The note you opened last is ringed and centred when
+  you come back to the graph; click the background to let it go. Drag to move,
+  scroll or the zoom buttons to zoom. The glow and the motion stop for a
+  memory of more than 300 notes and for anyone who asks their system to reduce
+  motion. **Query paths** shows the routes Understory's own queries took.
+- **3D** is the one to look at. The notes float in space and turn slowly; drag
+  to turn them, scroll or pinch to zoom, and the target button sets the view
+  back. Nothing is written on it: a note's name shows in a small card only
+  while you point at it or reach it with Tab. Click a note to open it. It comes
+  in several looks, chosen beside the switch: **Stellar** (stars and thin lines,
+  a constellation), **Deep sea** (glowing creatures drifting in dark water),
+  **Brain** (neurons inside the faint outline of a brain, whose colour you can
+  set with the colour button next to the look; a neon pink to begin with) and
+  **Synthwave** (neon points over a sunset and a grid). The look and the
+  brain's colour are remembered in this browser too.
+
+The colours above the 2D graph (the filter button in 3D) are also switches: a
+type switched off hides its notes in both views, and so does *orphan*. What the
+search down the side finds is lit in the graph and the rest dimmed, and the 2D
+graph says how many notes match. A memory of many hundreds of notes is laid out
+in fewer passes, so that the page opens at once: the picture is rougher, and
+still shows what is linked.
 
 **Librarian.** The chat button under the notes opens Understory's own agent, the
 one its web UI chats with: ask it what the memory holds, or tell it what to

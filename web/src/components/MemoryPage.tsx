@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Markdown } from "./Markdown";
 import {
@@ -8,6 +8,7 @@ import {
   LuChevronRight,
   LuCircleCheck,
   LuEraser,
+  LuFilter,
   LuFileText,
   LuFolder,
   LuHistory,
@@ -36,7 +37,11 @@ import {
   type MemoryTrace,
   type MemoryValidation,
 } from "../api";
-import { bounds, colours, layoutKept } from "../memory-graph";
+import { bounds, colours, graphModeFrom, layoutKept, neighbours, placeLabels, type GraphMode, type LabelAsk } from "../memory-graph";
+import { colourFrom, SKY_THEMES, skyThemeFrom, type SkyTheme } from "../memory-sky";
+import { reducedMotion } from "../motion";
+import { local } from "../safe-storage";
+import { MemorySky, NoteCard } from "./MemorySky";
 import { applyChunk, eventReader, history, textOf, toolName, usedTools, type ChatMessage, type ToolPart, type Turn } from "../memory-chat";
 import { NOTE_LINK, linkNotes } from "../memory-links";
 import { forgetNoteDraft, forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
@@ -218,6 +223,13 @@ export function MemoryPage() {
   }, [asked]);
 
   const palette = useMemo(() => colours(typesIn(tree)), [tree]);
+  // The graph's own state, kept while a note is open: the note last opened is the one it lights, and what its filter hides stays hidden.
+  const [chosen, setChosen] = useState<string | null>(note);
+  useEffect(() => {
+    if (note) setChosen(note);
+  }, [note]);
+  const [hiddenTypes, setHiddenTypes] = useState<Hidden>(() => new Set());
+  const found = useMemo(() => (hits ? new Set(hits.map((h) => h.path)) : null), [hits]);
 
   if (failed && !tree) {
     return (
@@ -344,7 +356,7 @@ export function MemoryPage() {
           ) : view === "log" ? (
             <LogView key={round} writable={writable} onOpen={openNote} onBack={close} onCleared={refresh} />
           ) : view === "graph" ? (
-            <GraphView key={round} onOpen={openNote} onBack={close} />
+            <GraphView key={round} onOpen={openNote} onBack={close} selected={chosen} onSelect={setChosen} hidden={hiddenTypes} onHide={setHiddenTypes} found={found} asked={asked} />
           ) : view === "chat" && writable ? (
             <LibrarianView chat={librarian} onOpen={openNote} onBack={close} />
           ) : view === "issues" ? (
@@ -1284,7 +1296,63 @@ const tokens = (n?: number) => (n === undefined ? "?" : formatTokens(n));
 /** Notes up to which the graph glows and moves. */
 const RICH_UP_TO = 300;
 
-function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: () => void }) {
+/** The key the filter hides notes nothing links to by, beside their types; no type is called this. */
+const ORPHANS = "\u0000orphans";
+
+/** What the graph's filter hides, by type ("" for notes without one) and `ORPHANS`. */
+export type Hidden = ReadonlySet<string>;
+
+/** The longest a label is, in letters; the card says the whole title. */
+const LABEL_LETTERS = 30;
+/** A label's letters, in screen pixels: the same at every zoom. Each is given a little more room than its letters take, so that two never quite touch. */
+const LABEL_PX = 11;
+
+const labelOf = (title: string) => (title.length > LABEL_LETTERS ? `${title.slice(0, LABEL_LETTERS - 1)}…` : title);
+
+/** How wide a text is at the labels' size, in pixels, measured once for each text in the page's own font. */
+function useMeasure(): (text: string) => number {
+  return useMemo(() => {
+    const ctx = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+    if (ctx) ctx.font = `${LABEL_PX}px ${getComputedStyle(document.body).fontFamily || "sans-serif"}`;
+    const known = new Map<string, number>();
+    return (text: string) => {
+      let w = known.get(text);
+      if (w === undefined) known.set(text, (w = ctx ? ctx.measureText(text).width : text.length * LABEL_PX * 0.6));
+      return w;
+    };
+  }, []);
+}
+
+/** The radius a note is drawn at, from how linked it is. */
+const radiusOf = (links: number) => 6 + Math.min(links, 10) * 0.8;
+
+type ViewBox = { x: number; y: number; width: number; height: number };
+
+const VIEW_KEY = "memoryGraph.view";
+const THEME_KEY = "memoryGraph.theme";
+const OUTLINE_KEY = "memoryGraph.outline";
+
+function GraphView({
+  onOpen,
+  onBack,
+  selected,
+  onSelect,
+  hidden,
+  onHide,
+  found,
+  asked,
+}: {
+  onOpen: (path: string) => void;
+  onBack: () => void;
+  /** The note last opened: lit in the graph, and what it is centred on. */
+  selected: string | null;
+  onSelect: (path: string | null) => void;
+  hidden: Hidden;
+  onHide: (hidden: Hidden) => void;
+  /** What the search found, or null while nothing is searched for. */
+  found: ReadonlySet<string> | null;
+  asked: string;
+}) {
   const colourOf = useContext(Colours);
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
   const [traces, setTraces] = useState<MemoryTrace[]>([]);
@@ -1294,96 +1362,390 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
     api.memoryTraces().then(setTraces, () => {});
   }, []);
 
-  const placed = useMemo(() => (graph ? layoutKept(graph.nodes.map((n) => n.path), graph.edges) : []), [graph]);
+  // Flat or in space, the look of the space, and the brain's colour: kept in this browser.
+  const [mode, setModeNow] = useState<GraphMode>(() => graphModeFrom(local.get(VIEW_KEY)));
+  const [theme, setThemeNow] = useState<SkyTheme>(() => skyThemeFrom(local.get(THEME_KEY)));
+  const [outline, setOutlineNow] = useState(() => colourFrom(local.get(OUTLINE_KEY)));
+  const setMode = (m: GraphMode) => (setModeNow(m), local.set(VIEW_KEY, m));
+  const setTheme = (s: SkyTheme) => (setThemeNow(s), local.set(THEME_KEY, s));
+  const setOutline = (c: string) => (setOutlineNow(colourFrom(c)), local.set(OUTLINE_KEY, colourFrom(c)));
+
+  const types = useMemo(() => [...new Set((graph?.nodes ?? []).map((n) => n.type).filter((t): t is string => !!t))].sort(), [graph]);
+  const untyped = useMemo(() => (graph?.nodes ?? []).some((n) => !n.type), [graph]);
+  const orphans = useMemo(() => (graph?.nodes ?? []).some((n) => n.links === 0), [graph]);
+  const shown = useMemo(
+    () => new Set((graph?.nodes ?? []).filter((n) => !hidden.has(n.type ?? "") && !(n.links === 0 && hidden.has(ORPHANS))).map((n) => n.path)),
+    [graph, hidden],
+  );
+  const shownEdges = useMemo(() => (graph?.edges ?? []).filter((e) => shown.has(e.source) && shown.has(e.target)), [graph, shown]);
+  const foundShown = useMemo(() => (found ? new Set([...found].filter((p) => shown.has(p))) : null), [found, shown]);
+  const toggle = (key: string) => {
+    const next = new Set(hidden);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onHide(next);
+  };
+  // The filter's menu shuts when something else is clicked, as a menu does.
+  const filter = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const shut = (e: PointerEvent) => {
+      if (filter.current?.open && !filter.current.contains(e.target as Node)) filter.current.open = false;
+    };
+    document.addEventListener("pointerdown", shut);
+    return () => document.removeEventListener("pointerdown", shut);
+  }, []);
+  const label = graph ? t("The memory's notes and their links: {notes}, {links}", { notes: tp(shown.size, "{n} note", "{n} notes"), links: tp(shownEdges.length, "{n} link", "{n} links") }) : "";
+
+  /** The types as switches: what the colours are, and which of them are shown. */
+  const legend = graph && (types.length > 0 || orphans) && (
+    <ul aria-label={t("What the colours are")} className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px]">
+      {[...types.map((ty) => ({ key: ty, name: ty, colour: colourOf(ty) })), ...(untyped && types.length ? [{ key: "", name: t("no type"), colour: colourOf(undefined) }] : [])].map((c) => (
+        <li key={c.key}>
+          <button
+            type="button"
+            onClick={() => toggle(c.key)}
+            aria-pressed={!hidden.has(c.key)}
+            title={hidden.has(c.key) ? t("Show these notes") : t("Hide these notes")}
+            className={`inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${hidden.has(c.key) ? "border-line text-fg-faint line-through" : "border-line bg-surface/80 text-fg-muted hover:text-fg"}`}
+          >
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: hidden.has(c.key) ? "transparent" : c.colour, boxShadow: hidden.has(c.key) ? `inset 0 0 0 1.5px ${c.colour}` : `0 0 8px ${c.colour}` }} />
+            <span className="truncate">{c.name}</span>
+          </button>
+        </li>
+      ))}
+      {orphans && (
+        <li>
+          <button
+            type="button"
+            onClick={() => toggle(ORPHANS)}
+            aria-pressed={!hidden.has(ORPHANS)}
+            title={hidden.has(ORPHANS) ? t("Show these notes") : t("Hide these notes")}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${hidden.has(ORPHANS) ? "border-line text-fg-faint line-through" : "border-line bg-surface/80 text-fg-muted hover:text-fg"}`}
+          >
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-danger" />
+            {t("orphan (unlinked)")}
+          </button>
+        </li>
+      )}
+    </ul>
+  );
+
+  return (
+    <>
+      <Bar title={t("Graph")} onBack={onBack}>
+        {mode === "3d" && legend && (
+          <details ref={filter} className="relative">
+            <summary aria-label={t("Which notes are shown")} title={t("Which notes are shown")} className={`flex h-7 cursor-pointer list-none items-center rounded px-1.5 transition before:hidden hover:bg-fg/5 hover:text-fg ${hidden.size ? "text-accent" : "text-fg-subtle"}`}>
+              <LuFilter className="h-3.5 w-3.5" />
+            </summary>
+            <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-line bg-surface p-2 shadow-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto">{legend}</div>
+          </details>
+        )}
+        {mode === "3d" && (
+          <select value={theme} onChange={(e) => setTheme(skyThemeFrom(e.target.value))} aria-label={t("Look of the 3D view")} className="h-7 rounded-md border border-line bg-surface px-1.5 text-xs text-fg">
+            {SKY_THEMES.map((s) => (
+              <option key={s} value={s}>
+                {s === "stellar" ? t("Stellar") : s === "deepsea" ? t("Deep sea") : s === "brain" ? t("Brain") : t("Synthwave")}
+              </option>
+            ))}
+          </select>
+        )}
+        {mode === "3d" && theme === "brain" && (
+          <input type="color" value={outline} onChange={(e) => setOutline(e.target.value)} aria-label={t("Colour of the brain's outline")} title={t("Colour of the brain's outline")} className="h-7 w-8 shrink-0 cursor-pointer rounded-md border border-line bg-surface p-0.5" />
+        )}
+        <div role="group" aria-label={t("How the graph is drawn")} className="flex shrink-0 overflow-hidden rounded-md border border-line text-xs">
+          {(["2d", "3d"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              aria-pressed={mode === m}
+              title={m === "2d" ? t("Flat, to read") : t("In space, to look at")}
+              className={`h-7 px-2 transition ${mode === m ? "bg-accent/15 text-accent" : "text-fg-muted hover:bg-fg/5 hover:text-fg"}`}
+            >
+              {m === "2d" ? t("2D") : t("3D")}
+            </button>
+          ))}
+        </div>
+      </Bar>
+      {failed ? (
+        <p role="alert" className="p-4 text-sm text-warn">{failed}</p>
+      ) : !graph ? (
+        <div className="skeleton m-4 h-64" role="status"><span className="sr-only">{t("Loading the graph")}</span></div>
+      ) : mode === "3d" ? (
+        <MemorySky notes={graph.nodes} edges={graph.edges} shown={shown} colourOf={colourOf} found={foundShown} selected={selected} theme={theme} outline={outline} label={label} onOpen={onOpen} onSelect={onSelect} />
+      ) : (
+        <>
+          {(legend || traces.length > 0) && (
+            <div className="flex items-start gap-2 border-b border-line px-3 py-2">
+              <div className="max-h-20 min-w-0 flex-1 overflow-y-auto">{legend}</div>
+              {traces.length > 0 && (
+                <details className="relative shrink-0 text-[11px] max-md:hidden">
+                  <summary className="cursor-pointer rounded px-2 py-0.5 text-xs font-medium text-fg hover:bg-fg/5">{t("Query paths")}</summary>
+                  <ul className="absolute right-0 top-full z-20 mt-1 max-h-72 w-72 space-y-2 overflow-y-auto rounded-lg border border-line bg-surface p-3 shadow-lg">
+                    {traces.slice(0, 30).map((trace) => (
+                      <li key={trace.id} title={trace.input}>
+                        <p className="flex items-center gap-1.5 text-fg">
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${trace.kind === "mutation" ? "bg-warn" : "bg-accent"}`} />
+                          <span className="truncate">{trace.input}</span>
+                        </p>
+                        <p className="mt-0.5 flex gap-2 font-mono text-[10px] text-fg-faint">
+                          <span className="min-w-0 flex-1 truncate">{trace.notation}</span>
+                          <span className="shrink-0">
+                            {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
+                          </span>
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+          <FlatGraph graph={graph} shown={shown} found={foundShown} selected={selected} label={label} onOpen={onOpen} onSelect={onSelect} />
+          <p className="flex flex-wrap gap-x-2 border-t border-line px-3 py-1.5 text-[11px] text-fg-faint">
+            {foundShown && asked && (
+              <span className="text-accent">{tp(foundShown.size, "{n} note matches “{query}”", "{n} notes match “{query}”", { query: asked })}</span>
+            )}
+            <span>
+              {tp(shown.size, "{n} note", "{n} notes")} · {tp(shownEdges.length, "{n} link", "{n} links")}
+              {shown.size < graph.nodes.length && ` (${tp(graph.nodes.length - shown.size, "{n} hidden", "{n} hidden")})`}
+            </span>
+            <span className="max-sm:hidden">{t("— drag to move · scroll to zoom · click to open")}</span>
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * The graph laid flat, as SVG: every note a glowing orb with its name beside
+ * it where there is room, its links lines with a slow current. Pointing at a
+ * note (or reaching it with Tab) lights it and those it links with and says
+ * what it is in a card; the note last opened is lit and ringed until the
+ * background is clicked.
+ *
+ * Drawn in layers so that what changes often draws little: the notes and links
+ * as they are (`drawn`), the labels (`named`, placed again only when the zoom
+ * has settled at another scale), and on top the few notes in focus.
+ */
+function FlatGraph({
+  graph,
+  shown,
+  found,
+  selected,
+  label,
+  onOpen,
+  onSelect,
+}: {
+  graph: MemoryGraph;
+  shown: Set<string>;
+  found: Set<string> | null;
+  selected: string | null;
+  label: string;
+  onOpen: (path: string) => void;
+  onSelect: (path: string | null) => void;
+}) {
+  const colourOf = useContext(Colours);
+  const measure = useMeasure();
+  const placed = useMemo(() => layoutKept(graph.nodes.map((n) => n.path), graph.edges), [graph]);
   const where = useMemo(() => new Map(placed.map((p) => [p.path, p])), [placed]);
   const fit = useMemo(() => bounds(placed), [placed]);
-  const [box, setBox] = useState(fit);
-  useEffect(() => setBox(fit), [fit]);
-  const types = useMemo(() => [...new Set((graph?.nodes ?? []).map((n) => n.type).filter((t): t is string => !!t))].sort(), [graph]);
+  const near = useMemo(() => neighbours(graph.edges), [graph]);
+  const nodeOf = useMemo(() => new Map(graph.nodes.map((n) => [n.path, n])), [graph]);
+  const [box, setBoxNow] = useState<ViewBox>(fit);
+  const boxNow = useRef(box);
+  const setBox = (b: ViewBox | ((b: ViewBox) => ViewBox)) =>
+    setBoxNow((was) => {
+      const next = typeof b === "function" ? b(was) : b;
+      boxNow.current = next;
+      return next;
+    });
 
   // Glow and motion are drawn per note, which a graph of thousands cannot afford: past this the notes are plain orbs without halos or animation.
-  const rich = (graph?.nodes.length ?? 0) <= RICH_UP_TO;
-  const hues = useMemo(() => [...new Set((graph?.nodes ?? []).map((n) => colourOf(n.type)))], [graph, colourOf]);
-  const typeOf = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.path, n.type])), [graph]);
+  const rich = graph.nodes.length <= RICH_UP_TO;
+  const hues = useMemo(() => [...new Set(graph.nodes.map((n) => colourOf(n.type)))], [graph, colourOf]);
+  const typeOf = useMemo(() => new Map(graph.nodes.map((n) => [n.path, n.type])), [graph]);
   const gradient = (colour: string) => colour.replace(/[^0-9a-z]/gi, "");
+
+  const svg = useRef<SVGSVGElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = svg.current;
+    if (!el) return;
+    const read = () => setSize({ width: el.clientWidth, height: el.clientHeight });
+    read();
+    const watch = new ResizeObserver(read);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+  /** Drawing units per screen pixel. */
+  const unitsPerPx = (b: ViewBox) => (size.width && size.height ? Math.max(b.width / size.width, b.height / size.height) : 1);
+
+  // The view glides to where it is sent, unless motion is to be kept down.
+  const glide = useRef({ frame: 0, to: null as ViewBox | null });
+  const stopGlide = () => {
+    cancelAnimationFrame(glide.current.frame);
+    glide.current.to = null;
+  };
+  const glideTo = (to: ViewBox) => {
+    stopGlide();
+    if (reducedMotion()) return setBox(to);
+    const from = boxNow.current;
+    const started = performance.now();
+    glide.current.to = to;
+    const step = (now: number) => {
+      const k = Math.min(1, (now - started) / 420);
+      const e = 1 - (1 - k) ** 3;
+      setBox(k === 1 ? to : { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, width: from.width + (to.width - from.width) * e, height: from.height + (to.height - from.height) * e });
+      if (k < 1) glide.current.frame = requestAnimationFrame(step);
+      else glide.current.to = null;
+    };
+    glide.current.frame = requestAnimationFrame(step);
+  };
+  useEffect(() => stopGlide, []);
+  // The whole of it to begin with; the note last opened, if it is here, glided to the middle.
+  useEffect(() => {
+    setBox(fit);
+    const p = selected ? where.get(selected) : undefined;
+    if (!p || !shown.has(selected!)) return;
+    const width = Math.min(fit.width, 900);
+    const height = (width * fit.height) / fit.width;
+    glideTo({ x: p.x - width / 2, y: p.y - height / 2, width, height });
+  }, [fit]);
+
+  // Labels are placed for the scale the view settles at: a zoom that is still moving keeps the last ones, which scale with it and so still do not meet.
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    if (!size.width) return;
+    const timer = setTimeout(() => {
+      const s = unitsPerPx(glide.current.to ?? box);
+      setScale(1.25 ** Math.round(Math.log(s) / Math.log(1.25)));
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [box, size]);
+
+  const labels = useMemo(() => {
+    const k = scale;
+    const order = graph.nodes
+      .filter((n) => shown.has(n.path))
+      .map((n) => ({ n, rank: n.path === selected ? 0 : found?.has(n.path) ? 1 : 2 }))
+      .sort((a, b) => a.rank - b.rank || b.n.links - a.n.links || (a.n.title || a.n.path).localeCompare(b.n.title || b.n.path));
+    const asks: LabelAsk[] = order.map(({ n, rank }) => {
+      const p = where.get(n.path)!;
+      const text = labelOf(n.title || n.path);
+      return { path: n.path, x: p.x, y: p.y, r: radiusOf(n.links) + (n.links === 0 ? 5.5 : 1), width: (measure(text) + 4) * k, height: LABEL_PX * 1.5 * k, must: rank === 0 };
+    });
+    return new Map(placeLabels(asks, 2 * k, { x0: fit.x, y0: fit.y, x1: fit.x + fit.width, y1: fit.y + fit.height }).map((l) => [l.path, l]));
+  }, [graph, shown, selected, found, where, scale, measure, fit]);
+
+  const [hover, setHover] = useState<string | null>(null);
+  const [keyed, setKeyed] = useState<string | null>(null);
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const focus = hover ?? keyed ?? (selected && shown.has(selected) ? selected : null);
+  const lit = useMemo(() => (focus ? new Set([focus, ...[...(near.get(focus) ?? [])].filter((p) => shown.has(p))]) : null), [focus, near, shown]);
 
   // The notes and links, kept as they are drawn while the view moves: a pan or a zoom changes the box many times a second, and a thousand notes drawn again each time stutters.
   const drawn = useMemo(
-    () =>
-      graph && (
-        <>
-          <defs>
-            {hues.map((c) => (
-              <g key={c}>
-                <radialGradient id={`mg-halo-${gradient(c)}`}>
-                  <stop offset="0" stopColor={c} stopOpacity=".55" />
-                  <stop offset=".55" stopColor={c} stopOpacity=".16" />
-                  <stop offset="1" stopColor={c} stopOpacity="0" />
-                </radialGradient>
-                <radialGradient id={`mg-orb-${gradient(c)}`} cx=".35" cy=".3" r=".8">
-                  <stop offset="0" stopColor="#fff" stopOpacity=".85" />
-                  <stop offset=".35" stopColor={c} />
-                  <stop offset="1" stopColor={c} stopOpacity=".78" />
-                </radialGradient>
-              </g>
-            ))}
-          </defs>
-          <g className={rich ? "mg-rich" : undefined}>
-            {/* Behind the links and apart from the notes: a halo that breathes would otherwise never hold still under a click. */}
-            {rich &&
-              graph.nodes.map((n, i) => {
-                const p = where.get(n.path)!;
-                const r = 6 + Math.min(n.links, 10) * 0.8;
-                return <circle key={n.path} cx={p.x} cy={p.y} r={r * 3} fill={`url(#mg-halo-${gradient(colourOf(n.type))})`} className="mg-halo" style={{ animationDelay: `${(i * 370) % 3600}ms` }} />;
-              })}
-            {graph.edges.map((e, i) => {
-              const a = where.get(e.source);
-              const b = where.get(e.target);
-              if (!a || !b) return null;
-              return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colourOf(typeOf.get(e.source))} className="mg-edge" strokeWidth={1.4} strokeLinecap="round" />;
-            })}
-            {graph.nodes.map((n, i) => {
+    () => (
+      <>
+        <defs>
+          {hues.map((c) => (
+            <g key={c}>
+              <radialGradient id={`mg-halo-${gradient(c)}`}>
+                <stop offset="0" stopColor={c} stopOpacity=".55" />
+                <stop offset=".55" stopColor={c} stopOpacity=".16" />
+                <stop offset="1" stopColor={c} stopOpacity="0" />
+              </radialGradient>
+              <radialGradient id={`mg-orb-${gradient(c)}`} cx=".35" cy=".3" r=".8">
+                <stop offset="0" stopColor="#fff" stopOpacity=".85" />
+                <stop offset=".35" stopColor={c} />
+                <stop offset="1" stopColor={c} stopOpacity=".78" />
+              </radialGradient>
+            </g>
+          ))}
+        </defs>
+        <g className={`mg-base${rich ? " mg-rich" : ""}`}>
+          {/* Behind the links and apart from the notes: a halo that breathes would otherwise never hold still under a click. */}
+          {rich &&
+            graph.nodes.map((n, i) => {
+              if (!shown.has(n.path)) return null;
               const p = where.get(n.path)!;
-              const r = 6 + Math.min(n.links, 10) * 0.8;
-              const title = n.title || n.path;
-              const c = colourOf(n.type);
-              return (
-                <g
-                  key={n.path}
-                  data-note
-                  role="button"
-                  tabIndex={0}
-                  aria-label={title}
-                  onClick={() => onOpen(n.path)}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(n.path))}
-                  className="mg-note cursor-pointer outline-none [&:focus-visible_.mg-orb]:stroke-accent"
-                  style={rich ? { animationDelay: `${(i % 12) * 60}ms` } : undefined}
-                >
-                  <title>{n.description ? `${title} — ${n.description}` : title}</title>
-                  {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" className="mg-orphan stroke-danger" strokeWidth={1.5} />}
-                  <circle cx={p.x} cy={p.y} r={r} fill={`url(#mg-orb-${gradient(c)})`} stroke="transparent" strokeWidth={3} className="mg-orb" />
-                  <text x={p.x} y={p.y + r + 13} textAnchor="middle" className="fill-fg text-[11px]">
-                    {title.length > 32 ? `${title.slice(0, 31)}…` : title}
-                  </text>
-                </g>
-              );
+              return <circle key={n.path} cx={p.x} cy={p.y} r={radiusOf(n.links) * 3} fill={`url(#mg-halo-${gradient(colourOf(n.type))})`} className="mg-halo" style={{ animationDelay: `${(i * 370) % 3600}ms` }} />;
             })}
-          </g>
-        </>
-      ),
-    [graph, where, colourOf, onOpen, hues, rich, typeOf],
+          {graph.edges.map((e, i) => {
+            const a = where.get(e.source);
+            const b = where.get(e.target);
+            if (!a || !b || !shown.has(e.source) || !shown.has(e.target)) return null;
+            return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colourOf(typeOf.get(e.source))} className="mg-edge" strokeWidth={1.4} strokeLinecap="round" />;
+          })}
+          {graph.nodes.map((n, i) => {
+            if (!shown.has(n.path)) return null;
+            const p = where.get(n.path)!;
+            const r = radiusOf(n.links);
+            const title = n.title || n.path;
+            return (
+              <g
+                key={n.path}
+                data-note
+                role="button"
+                tabIndex={0}
+                aria-label={title}
+                aria-description={n.description || undefined}
+                onClick={() => onOpen(n.path)}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(n.path))}
+                onPointerEnter={() => !drag.current && setHover(n.path)}
+                onPointerLeave={() => setHover((h) => (h === n.path ? null : h))}
+                onFocus={() => setKeyed(n.path)}
+                onBlur={() => setKeyed((k) => (k === n.path ? null : k))}
+                className="mg-note cursor-pointer outline-none [&:focus-visible_.mg-orb]:stroke-accent"
+                style={rich ? { animationDelay: `${(i % 12) * 60}ms` } : undefined}
+              >
+                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" className="mg-orphan stroke-danger" strokeWidth={1.5} />}
+                <circle cx={p.x} cy={p.y} r={r} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} stroke="transparent" strokeWidth={3} className="mg-orb" />
+              </g>
+            );
+          })}
+        </g>
+      </>
+    ),
+    [graph, where, colourOf, onOpen, hues, rich, typeOf, shown],
   );
 
-  const svg = useRef<SVGSVGElement>(null);
+  /** A label as drawn: the same in the layer of all of them and in the one of the notes in focus, so that the two lie exactly on each other. */
+  const text = (path: string) => {
+    const l = labels.get(path)!;
+    const n = nodeOf.get(path)!;
+    return (
+      <text key={path} x={l.x} y={l.y} textAnchor={l.anchor} dominantBaseline="central" className="mg-label">
+        {labelOf(n.title || n.path)}
+      </text>
+    );
+  };
+  const named = useMemo(
+    () => (
+      <g className="mg-labels" fontSize={LABEL_PX * scale} strokeWidth={3 * scale} aria-hidden="true">
+        {[...labels.keys()].map(text)}
+      </g>
+    ),
+    [labels, scale],
+  );
+
   /** Zoom by `factor` around a point in the drawing's own units. */
-  const zoom = (factor: number, cx = box.x + box.width / 2, cy = box.y + box.height / 2) =>
-    setBox((b) => ({ x: cx - (cx - b.x) * factor, y: cy - (cy - b.y) * factor, width: b.width * factor, height: b.height * factor }));
+  const zoom = (factor: number) => {
+    const b = glide.current.to ?? boxNow.current;
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    glideTo({ x: cx - (cx - b.x) * factor, y: cy - (cy - b.y) * factor, width: b.width * factor, height: b.height * factor });
+  };
   // Not passive: a wheel over the graph zooms it rather than scrolling the page.
   useEffect(() => {
     const el = svg.current;
     if (!el) return;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      stopGlide();
       const r = el.getBoundingClientRect();
       setBox((b) => {
         const scale = Math.max(b.width / r.width, b.height / r.height);
@@ -1395,108 +1757,144 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
     };
     el.addEventListener("wheel", wheel, { passive: false });
     return () => el.removeEventListener("wheel", wheel);
-  }, [graph]);
+  }, []);
 
-  const drag = useRef<{ x: number; y: number } | null>(null);
   const down = (e: ReactPointerEvent<SVGSVGElement>) => {
     if ((e.target as Element).closest("[data-note]")) return;
-    drag.current = { x: e.clientX, y: e.clientY };
+    stopGlide();
+    drag.current = { x: e.clientX, y: e.clientY, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const move = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (!drag.current || !svg.current) return;
+    const d = drag.current;
+    if (!d || !svg.current) return;
     const r = svg.current.getBoundingClientRect();
-    const dx = e.clientX - drag.current.x;
-    const dy = e.clientY - drag.current.y;
-    drag.current = { x: e.clientX, y: e.clientY };
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    if (!d.moved && Math.hypot(dx, dy) < 4) return;
+    d.moved = true;
+    drag.current = { x: e.clientX, y: e.clientY, moved: true };
     setBox((b) => {
       const scale = Math.max(b.width / r.width, b.height / r.height);
       return { ...b, x: b.x - dx * scale, y: b.y - dy * scale };
     });
   };
-  const up = () => (drag.current = null);
+  const up = () => {
+    // A click on the background, not a drag: the note that was chosen is let go.
+    if (drag.current && !drag.current.moved) onSelect(null);
+    drag.current = null;
+  };
 
+  // Where the note in focus is on the screen, for its card.
+  const cardAt = (() => {
+    const path = hover ?? keyed;
+    const p = path ? where.get(path) : undefined;
+    if (!p || !size.width) return null;
+    const s = unitsPerPx(box);
+    const x = (p.x - (box.x + box.width / 2)) / s + size.width / 2;
+    const y = (p.y - (box.y + box.height / 2)) / s + size.height / 2;
+    if (x < 0 || y < 0 || x > size.width || y > size.height) return null;
+    const r = radiusOf(nodeOf.get(path!)!.links) / s;
+    return { path: path!, x: Math.max(8, Math.min(size.width - 8, x)), y, r, below: y < 120 };
+  })();
+
+  // Centred over its note, and kept inside the graph at its edges.
+  const card = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = card.current;
+    if (!el || !cardAt) return;
+    el.style.left = `${Math.max(8, Math.min(size.width - el.offsetWidth - 8, cardAt.x - el.offsetWidth / 2))}px`;
+  });
+
+  const lines = lit && focus ? graph.edges.filter((e) => (e.source === focus || e.target === focus) && lit.has(e.source) && lit.has(e.target)) : [];
   return (
-    <>
-      <Bar title={t("Graph")} onBack={onBack} />
-      <div className="memory-graph relative min-h-0 flex-1 overflow-hidden">
-        {failed ? (
-          <p role="alert" className="p-4 text-sm text-warn">{failed}</p>
-        ) : !graph ? (
-          <div className="skeleton m-4 h-64" role="status"><span className="sr-only">{t("Loading the graph")}</span></div>
-        ) : (
-          <>
-            <svg
-              ref={svg}
-              // A group, not a picture: the notes in it are links, which a picture would hide from a screen reader while Tab still lands on them.
-              role="group"
-              aria-label={t("The memory's notes and their links: {notes}, {links}", { notes: tp(graph.nodes.length, "{n} note", "{n} notes"), links: tp(graph.edges.length, "{n} link", "{n} links") })}
-              viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
-              className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
-              onPointerDown={down}
-              onPointerMove={move}
-              onPointerUp={up}
-              onPointerCancel={up}
-            >
-              {drawn}
-            </svg>
-
-            {(types.length > 0 || graph.nodes.some((n) => n.links === 0)) && (
-              <ul aria-label={t("What the colours are")} className="absolute left-3 top-3 max-w-[45%] space-y-1 rounded-lg border border-line bg-surface/90 px-3 py-2 text-[11px] text-fg-muted">
-                {types.map((t) => (
-                  <li key={t} className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colourOf(t), boxShadow: `0 0 8px ${colourOf(t)}` }} />
-                    <span className="truncate">{t}</span>
-                  </li>
-                ))}
-                {graph.nodes.some((n) => n.links === 0) && (
-                  <li className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-danger" />
-                    {t("orphan (unlinked)")}
-                  </li>
-                )}
-              </ul>
+    <div className="memory-graph relative min-h-0 flex-1 overflow-hidden">
+      <svg
+        ref={svg}
+        // A group, not a picture: the notes in it are links, which a picture would hide from a screen reader while Tab still lands on them.
+        role="group"
+        aria-label={label}
+        viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
+        className={`h-full w-full cursor-grab touch-none select-none active:cursor-grabbing ${lit ? "mg-dim" : found ? "mg-search" : ""}`}
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={() => (drag.current = null)}
+      >
+        {drawn}
+        {named}
+        {/* What the search found, ringed. */}
+        {found && !lit && (
+          <g aria-hidden="true" className="mg-found-layer pointer-events-none">
+            {[...found].map((path) => {
+              const p = where.get(path);
+              const n = nodeOf.get(path);
+              if (!p || !n) return null;
+              return (
+                <g key={path}>
+                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links)} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} />
+                  <circle cx={p.x} cy={p.y} r={radiusOf(n.links) + 5} fill="none" className="mg-found stroke-accent" strokeWidth={2} />
+                </g>
+              );
+            })}
+            {[...found].filter((p) => labels.has(p)).length > 0 && (
+              <g className="mg-labels" fontSize={LABEL_PX * scale} strokeWidth={3 * scale}>
+                {[...found].filter((p) => labels.has(p)).map(text)}
+              </g>
             )}
-
-            {traces.length > 0 && (
-              <details className="absolute right-3 top-3 w-72 max-w-[calc(100%-1.5rem)] rounded-lg border border-line bg-surface/90 text-[11px] max-md:hidden">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-fg">{t("Query paths")}</summary>
-                <ul className="max-h-72 space-y-2 overflow-y-auto px-3 pb-3">
-                  {traces.slice(0, 30).map((trace) => (
-                    <li key={trace.id} title={trace.input}>
-                      <p className="flex items-center gap-1.5 text-fg">
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${trace.kind === "mutation" ? "bg-warn" : "bg-accent"}`} />
-                        <span className="truncate">{trace.input}</span>
-                      </p>
-                      <p className="mt-0.5 flex gap-2 font-mono text-[10px] text-fg-faint">
-                        <span className="min-w-0 flex-1 truncate">{trace.notation}</span>
-                        <span className="shrink-0">
-                          {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
-                        </span>
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-
-            <div className="absolute bottom-10 right-3 flex flex-col overflow-hidden rounded-lg border border-line bg-surface/90">
-              <button type="button" onClick={() => zoom(1 / 1.3)} aria-label={t("Zoom in")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
-                <LuPlus className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={() => zoom(1.3)} aria-label={t("Zoom out")} className="border-y border-line p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
-                <LuMinus className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={() => setBox(fit)} aria-label={t("Show all of it")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
-                <LuLocateFixed className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <p className="absolute bottom-3 left-3 text-[11px] text-fg-faint">
-              {tp(graph.nodes.length, "{n} note", "{n} notes")} · {tp(graph.edges.length, "{n} link", "{n} links")} {t("— drag to move · scroll to zoom · click to open")}
-            </p>
-          </>
+          </g>
         )}
+        {/* The note in focus and those it links with, over the rest, which is dimmed. */}
+        {lit && focus && (
+          <g aria-hidden="true" className="mg-focus pointer-events-none">
+            {lines.map((e, i) => {
+              const a = where.get(e.source)!;
+              const b = where.get(e.target)!;
+              return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={colourOf(typeOf.get(focus))} strokeWidth={2.2} strokeLinecap="round" className="mg-hot" />;
+            })}
+            {[...lit].map((path) => {
+              const p = where.get(path)!;
+              const n = nodeOf.get(path)!;
+              const r = radiusOf(n.links);
+              return (
+                <g key={path} className="mg-lit">
+                  {path === focus && <circle cx={p.x} cy={p.y} r={r * 3.2} fill={`url(#mg-halo-${gradient(colourOf(n.type))})`} />}
+                  <circle cx={p.x} cy={p.y} r={path === focus ? r * 1.2 : r} fill={`url(#mg-orb-${gradient(colourOf(n.type))})`} />
+                </g>
+              );
+            })}
+            <g className="mg-labels" fontSize={LABEL_PX * scale} strokeWidth={3 * scale}>
+              {[...lit].filter((p) => labels.has(p)).map(text)}
+            </g>
+          </g>
+        )}
+        {selected && shown.has(selected) && where.get(selected) && (
+          <circle aria-hidden="true" cx={where.get(selected)!.x} cy={where.get(selected)!.y} r={radiusOf(nodeOf.get(selected)?.links ?? 0) + 7} fill="none" strokeWidth={2} className="mg-selected pointer-events-none stroke-accent" />
+        )}
+      </svg>
+
+      {cardAt && (
+        <div
+          ref={card}
+          aria-hidden="true"
+          className="pointer-events-none absolute z-10"
+          style={{ left: cardAt.x, top: cardAt.below ? cardAt.y + cardAt.r + 10 : cardAt.y - cardAt.r - 10, transform: `translateY(${cardAt.below ? "0" : "-100%"})` }}
+        >
+          <NoteCard note={nodeOf.get(cardAt.path)!} colour={colourOf(nodeOf.get(cardAt.path)!.type)} hint={t("Click to open")} />
+        </div>
+      )}
+
+      <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-line bg-surface/90">
+        <button type="button" onClick={() => zoom(1 / 1.3)} aria-label={t("Zoom in")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+          <LuPlus className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" onClick={() => zoom(1.3)} aria-label={t("Zoom out")} className="border-y border-line p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+          <LuMinus className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" onClick={() => glideTo(fit)} aria-label={t("Show all of it")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
+          <LuLocateFixed className="h-3.5 w-3.5" />
+        </button>
       </div>
-    </>
+    </div>
   );
 }
