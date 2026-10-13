@@ -74,11 +74,13 @@ import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
 
 /**
- * The pages that take all the width the dialog has: a grid of packages, lines
- * of a log, a file to edit. The others are forms, and a field or a sentence
- * across a wide screen is harder to read than one that stops.
+ * The pages that lay out the width of the dialog themselves: a grid of
+ * packages, lines of a log, a file to edit. Every other page takes the width
+ * too, and where the dialog is very wide its sections stand two abreast
+ * (`settings-flow`, in shell.css): a field across all of a wide screen is
+ * harder to read than two columns of them.
  */
-const FULL_WIDTH = new Set<Tab>(["extensions", "logs", "advanced"]);
+const OWN_LAYOUT = new Set<Tab>(["extensions", "logs", "advanced"]);
 
 /** Either a fixed tab or one extension's own configuration page. */
 type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string };
@@ -294,7 +296,7 @@ export const ConfigModal = memo(function ConfigModal({
     >
       {error && <ErrorBanner ref={banner} className="mb-4" onClose={() => setError(null)}>{error}</ErrorBanner>}
 
-      <div key={section} ref={page} className={`settings-page ${nav.kind === "tab" && FULL_WIDTH.has(nav.id) ? "" : "max-w-5xl"}`}>
+      <div key={section} ref={page} className={`settings-page${nav.kind === "tab" && OWN_LAYOUT.has(nav.id) ? "" : " settings-flow"}`}>
       {nav.kind === "tab" && nav.id === "models" && <ProvidersPanel onError={setError} onSetup={onSetup} />}
       {nav.kind === "tab" && nav.id === "general" && <GeneralPanel onError={setError} onProviders={() => setNav({ kind: "tab", id: "models" })} />}
       {nav.kind === "tab" && nav.id === "browser" && <BrowserPanel onError={setError} />}

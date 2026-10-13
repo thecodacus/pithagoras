@@ -14,7 +14,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { formatTokens } from "../transcript";
 import { Select } from "./Select";
-import { Empty, Field, LoadFailed, Section, btnCls, ghostCls, inputCls, inputSmCls, primaryCls } from "./SettingsUi";
+import { Empty, Field, LoadFailed, Section, btnCls, ghostCls, gridCls2, inputCls, inputSmCls, primaryCls } from "./SettingsUi";
 import { t, tp } from "../i18n";
 import { SkeletonGroup } from "./Skeleton";
 import { forgetModels } from "../model-catalogue";
@@ -113,9 +113,9 @@ export function ProvidersPanel({ onError, onSetup }: { onError: (e: string) => v
             <p className="mt-1 text-xs text-fg-faint">{t("Add a llama.cpp server, Ollama, OpenRouter or any OpenAI-compatible endpoint.")}</p>
           </Empty>
         ) : (
-          <ul className="stagger-in space-y-2">
+          <ul className={`stagger-in ${gridCls2}`}>
             {view.providers.map((p) => (
-              <li key={p.id}>
+              <li key={p.id} className={editing === p.id ? "col-span-full" : "min-w-0"}>
                 {editing === p.id ? (
                   <ProviderEditor view={view} provider={p} taken={ids} onCancel={() => setEditing(null)} onSaved={saved} onError={onError} />
                 ) : (

@@ -14,7 +14,7 @@ import {
   LuWrench,
 } from "react-icons/lu";
 import { api, type FoundSkill, type Skill, type SkillDiagnostic, type SkippedSkill } from "../api";
-import { LoadFailed, Switch, btnCls, codeAreaCls, inputCls, primaryCls } from "./SettingsUi";
+import { LoadFailed, Switch, btnCls, codeAreaCls, gridCls, inputCls, primaryCls } from "./SettingsUi";
 import { confirmDialog } from "./ConfirmDialog";
 import { useUnsavedDraft } from "./Modal";
 import { isEnter } from "../shortcuts";
@@ -162,7 +162,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
             </p>
           </div>
         ) : (
-          <ul className="mt-2 space-y-1">
+          <ul className={`mt-2 ${gridCls}`}>
             {mine.map((s) => (
               <SkillRow
                 key={s.name}
@@ -187,7 +187,7 @@ export function SkillsPanel({ onError }: { onError: (e: string) => void }) {
           <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             {t("Built in and from packages ({n})", { n: theirs.length })}
           </h3>
-          <ul className="mt-2 space-y-1">
+          <ul className={`mt-2 ${gridCls}`}>
             {theirs.map((s) => (
               <SkillRow key={s.name} skill={s} onOpen={() => setOpenName(s.name)} />
             ))}

@@ -122,6 +122,13 @@ export function DetailsGroup({ title, summary, defaultOpen = false, children }: 
   );
 }
 
+/**
+ * A list as a grid where the Settings dialog has room for it (see Modal): two abreast on a laptop, three on a screen
+ * wide enough that the dialog is. `gridCls2` stops at two, for a list inside a section that is itself one of two columns.
+ */
+export const gridCls2 = "grid gap-2 xl:grid-cols-2 [&>*]:min-w-0";
+export const gridCls = `${gridCls2} min-[2200px]:grid-cols-3`;
+
 export function Empty({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-xl border border-dashed border-line px-3 py-8 text-center text-sm text-fg-subtle">

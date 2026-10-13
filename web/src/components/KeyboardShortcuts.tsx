@@ -49,7 +49,7 @@ export function KeyboardShortcuts() {
   }, [recording, layout]);
 
   const changed = ACTIONS.some(a => describe(bindings[a.id], null, false) !== describe(a.default, null, false));
-  return <div>
+  return <div className="xl:grid xl:grid-cols-[3fr_2fr] xl:items-start xl:gap-x-8">
     <section className="mb-6">
       <div className="flex items-start justify-between gap-3">
         <div>

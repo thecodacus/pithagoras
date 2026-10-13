@@ -85,6 +85,14 @@
  * jolt. The placeholder waits a moment, so a page that is quick never shows it. */
 .settings-page > :not(.skeleton-group) { animation: view-in .3s var(--ease-out) both; }
 .settings-page > .skeleton-group { animation-delay: .18s; }
+/* On a screen wide enough that the Settings dialog is too (see Modal), a page's sections stand two abreast: a field
+   across all of it is harder to read than two columns of them. What is not a section keeps the whole width, and so
+   does a section that is the page's only one. */
+@media (min-width: 2200px) {
+  .settings-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 2.5rem; align-items: start; }
+  .settings-flow > :not(.settings-section),
+  .settings-flow:not(:has(> .settings-section ~ .settings-section)) > .settings-section { grid-column: 1 / -1; }
+}
 /* The heading a search went to, lit for a moment. */
 .setting-flash { animation: setting-flash 1.6s var(--ease-out); border-radius: 14px; }
 @keyframes setting-flash {
