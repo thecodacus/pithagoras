@@ -1248,6 +1248,8 @@ export const api = {
 
   extensions: () =>
     json<{ extensions: ExtensionInfo[]; settingsPath: string }>("/api/extensions"),
+  /** What comes with the portal and can be installed with a click. */
+  shippedExtensions: () => json<{ extensions: ShippedExtension[] }>("/api/extensions/shipped"),
   setExtensionSetting: (key: string, value: unknown) =>
     json<{ ok: true }>("/api/extensions/settings", {
       method: "PUT",
@@ -1417,6 +1419,19 @@ export interface ExtensionInfo {
   enabled?: boolean;
   /** Narrowed by hand in settings.json: some of what it brings is off already. */
   filtered?: boolean;
+  /** What it brings: something for pi (the agent), something the portal draws or runs, colours for the portal. */
+  kinds?: PackageKind[];
+}
+
+export type PackageKind = "pi" | "pithagoras" | "themes";
+
+/** An extension that comes with the portal, installed from its own folder (`spec`). */
+export interface ShippedExtension {
+  name: string;
+  version?: string;
+  description?: string;
+  kinds: PackageKind[];
+  spec: string;
 }
 
 export interface GlobalSettings {

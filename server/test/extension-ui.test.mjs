@@ -109,6 +109,27 @@ test("the browser halves listed are those of the portal's own packages that are 
   assert.match(notes.style, /^\/api\/extension-ui\/%40codacus\/notes\/client\.css\?v=/);
 });
 
+test("each installed package is listed with what it brings, for the page to tell them apart by", async () => {
+  const { extensions } = await (await fetch(at("/api/extensions"))).json();
+  const kinds = Object.fromEntries(extensions.map((e) => [e.spec, e.kinds]));
+  assert.deepEqual(kinds["npm:no-interface"], ["pi"]);
+  assert.deepEqual(kinds["npm:@codacus/notes"], ["pi", "pithagoras"]);
+  assert.deepEqual(kinds["npm:server-only"], ["pi", "pithagoras"]);
+  assert.deepEqual(kinds["npm:only-themes"], ["pi", "themes"]);
+  // Said of what the package is, whether or not it is loaded: one switched off, and one a folder brings.
+  assert.deepEqual(kinds["npm:switched-off"], ["pi", "pithagoras"]);
+  assert.deepEqual(kinds["npm:from-a-folder"], ["pi", "pithagoras"]);
+});
+
+test("what comes with the portal is listed to install from its own folder, without the add-on that has a switch of its own", async () => {
+  const { extensions } = await (await fetch(at("/api/extensions/shipped"))).json();
+  assert.deepEqual(extensions.map((e) => [e.name, e.kinds]), [["pithagoras-docs", ["pithagoras"]], ["pithagoras-notes", ["pi", "pithagoras"]], ["pithagoras-theme-dusk", ["themes"]]]);
+  for (const shipped of extensions) {
+    assert.ok(path.isAbsolute(shipped.spec) && shipped.spec.endsWith(path.join("extensions", shipped.name.replace(/^pithagoras-/, ""))), shipped.spec);
+    assert.ok(shipped.version && shipped.description, shipped.name);
+  }
+});
+
 test("a package's web folder is served as the addresses listed say, and as what each file is", async () => {
   const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
   const module = await fetch(at(extensions[0].entry));

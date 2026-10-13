@@ -74,7 +74,7 @@ export default function (portal) {
 .hello pre { border: 1px solid rgb(var(--line)); border-radius: 8px; padding: 8px; }
 ```
 
-Install it in **Settings → Extensions → Install a package** by its path
+Install it in **Settings → Extensions → Discover → Install by name** by its path
 (`/absolute/path/to/hello`). A **Hello** button appears in every chat's header.
 Open it, ask the agent to run something, and the command and its output appear
 in your panel as they happen.
@@ -744,8 +744,8 @@ extension:
 - `server.js`, the server half: a copy of each chat's notes in the chat's
   folder, a route that answers for all chats, and the count each page is told.
 
-Install it from Settings → Extensions by its path (in the image,
-`/app/extensions/notes`). `extensions/theme-dusk` beside it is an extension
-that is only a theme. `extensions/docs` is a larger one that is still being
-built: a page in the sidebar, fed by its server half's routes
-([Documents](/guide/documents)).
+Install it from **Settings → Extensions → Discover**, where it is listed under
+**Comes with Pithagoras**. `extensions/theme-dusk` beside it is an extension
+that is only a theme, and is listed there too. `extensions/docs` is a larger
+one that is still being built: a page in the sidebar, fed by its server half's
+routes ([Documents](/guide/documents)).

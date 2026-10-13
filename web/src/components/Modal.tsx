@@ -164,12 +164,13 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === "string" ? title : undefined}
-        className={`ui-dialog${fresh ? " is-fresh" : ""} outline-none flex max-h-[94dvh] w-full sm:max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
-          // Grows with the viewport rather than to it: the rail plus a settings
-          // form has a comfortable width, and a 34-inch screen should not
-          // stretch a two-column form across all of it.
-          wide ? "max-w-3xl xl:max-w-5xl" : "max-w-2xl"
-        } ${rail ? "min-h-[min(34rem,94dvh)] sm:h-[min(44rem,88vh)]" : ""}`}
+        className={`ui-dialog${fresh ? " is-fresh" : ""} outline-none flex max-h-[94dvh] w-full flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop ${
+          // The rail layout holds whole pages (lists, logs, an editor), so it
+          // takes the room the screen has: nearly all of a laptop's, and three
+          // quarters of the width of a screen wider than that. The others hold
+          // one form, and grow with the viewport rather than to it.
+          rail ? "min-h-[min(34rem,94dvh)] max-w-[max(88rem,75vw)] sm:h-[92vh] sm:max-h-[92vh]" : `sm:max-h-[88vh] ${wide ? "max-w-3xl xl:max-w-5xl" : "max-w-2xl"}`
+        }`}
       >
         <header className="flex items-center gap-3 border-b border-line px-5 py-3.5">
           {rail && !inRail && (
@@ -211,11 +212,11 @@ export function Modal({
                 turns to it; the rail's own state says which. */}
             <nav
               onClick={(e) => (e.target as HTMLElement).closest("button") && setInRail(false)}
-              className={`min-h-0 flex-1 overflow-y-auto bg-canvas/40 p-2 sm:block sm:w-52 sm:flex-none sm:shrink-0 sm:border-r sm:border-line ${inRail ? "" : "hidden"}`}
+              className={`min-h-0 flex-1 overflow-y-auto bg-canvas/40 p-2 sm:block sm:w-52 sm:flex-none sm:shrink-0 sm:border-r sm:border-line xl:w-60 xl:p-3 ${inRail ? "" : "hidden"}`}
             >
               {rail}
             </nav>
-            <div className={`min-w-0 flex-1 overflow-y-auto px-5 py-4 sm:block ${inRail ? "hidden" : ""}`}>{body}</div>
+            <div className={`min-w-0 flex-1 overflow-y-auto px-5 py-4 sm:block xl:px-8 xl:py-6 ${inRail ? "hidden" : ""}`}>{body}</div>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-5 py-4">{body}</div>

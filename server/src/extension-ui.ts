@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -172,6 +172,35 @@ export function serverHalf(packageDir: string): ServerHalf | undefined {
   const file = path.resolve(root, meta.pithagoras.server);
   if (!fileIn(root, file)) return undefined;
   return { name: meta.name, ...(typeof meta.version === "string" ? { version: meta.version } : {}), file, rev: revOf(file) };
+}
+
+/** What a package brings: something for pi (the agent), something drawn or run by the portal, colours for the portal. */
+export type PackageKind = "pi" | "pithagoras" | "themes";
+
+const PI_RESOURCES = ["extensions", "skills", "prompts", "themes"];
+
+/**
+ * Whether the package in `packageDir` brings pi anything, as pi itself reads
+ * it: what its `pi` key names, or without one the folders pi looks in.
+ */
+function bringsPi(packageDir: string): boolean {
+  let declared: any;
+  try {
+    declared = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8"))?.pi;
+  } catch {
+    // No package.json to say: the folders do.
+  }
+  if (declared && typeof declared === "object" && !Array.isArray(declared)) return PI_RESOURCES.some((type) => Array.isArray(declared[type]) && declared[type].length > 0);
+  return PI_RESOURCES.some((type) => existsSync(path.join(packageDir, type)));
+}
+
+/** The kinds of thing the package in `packageDir` brings, for a list of packages to be told apart by. */
+export function packageKinds(packageDir: string): PackageKind[] {
+  const kinds: PackageKind[] = [];
+  if (bringsPi(packageDir)) kinds.push("pi");
+  if (clientHalf(packageDir) || serverHalf(packageDir)) kinds.push("pithagoras");
+  if (packageThemes(packageDir)) kinds.push("themes");
+  return kinds;
 }
 
 type Bus = { on(channel: string, handler: (data: unknown) => void): () => void };

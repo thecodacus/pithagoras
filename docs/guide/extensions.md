@@ -20,8 +20,13 @@ are a portal concept with a separate format and a separate install directory.
 
 ## Installing
 
-Settings → Extensions has three parts: **Find packages**, **Install a package**
-and the **Installed** list.
+Settings → Extensions has two views. **Installed** is what you have; **Discover**
+is what there is to install, in three parts: **Comes with Pithagoras**, **Find
+packages** and **Install by name**.
+
+**Comes with Pithagoras** lists the extensions shipped with the portal itself
+(the Notes sample, the Dusk theme and [Documents](/guide/documents)), each installed from the portal's own
+folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and
@@ -30,7 +35,7 @@ package runs inside pi with the same rights as the agent, reading files and
 running commands, so install ones you trust. The registry can be another one
 (`NPM_REGISTRY_URL`); results are kept for ten minutes.
 
-**Install a package** takes a spec, in four forms:
+**Install by name** takes a spec, in four forms:
 
 | Form | Example |
 | --- | --- |
@@ -43,6 +48,22 @@ They persist across restarts, because `HOME` points at the data volume. **Update
 all** upgrades the installed packages; pi itself comes with the portal's version,
 so a new pi arrives with an update of the portal. The bin icon removes one. Chats
 started from then on have the package; open ones pick it up with `/reload`.
+
+## What is installed
+
+**Installed** shows each package as a card: its name and version, what it says
+about itself, a switch, **Configure** where it has settings, and the bin icon.
+The chips above the cards narrow the list by what a package brings, and each
+card says the same in small:
+
+| Kind | A package that brings |
+| --- | --- |
+| **pi** | Something for the agent: tools, commands, skills, prompts. What its `pi` key names, or without one the `extensions`, `skills`, `prompts` and `themes` folders pi looks in |
+| **Pithagoras** | Something for the portal: a browser half that draws in it, or a server half that runs beside the chats. See [Building an extension](/guide/extension-ui) |
+| **Themes** | Colours for the portal, picked in Settings → This browser → Appearance |
+
+A package can be more than one: the Notes sample is both **pi** and
+**Pithagoras**.
 
 ## Switching one off
 

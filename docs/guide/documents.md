@@ -9,10 +9,9 @@ It is under construction. This page describes what it does so far.
 
 ## Installing it
 
-Open **Settings → Extensions → Install a package** and enter the package's
-path: `/app/extensions/docs` in the image, or the `extensions/docs` folder of
-a checkout. Like any extension, you can switch it off or remove it there again
-([Extensions](/guide/extensions)).
+It comes with the portal: open **Settings → Extensions → Discover** and
+install it under **Comes with Pithagoras**. Like any extension, you can switch
+it off or remove it under **Installed** ([Extensions](/guide/extensions)).
 
 ## What a document is
 

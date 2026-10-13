@@ -334,7 +334,8 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `POST /api/packages` | `{ spec }` |
 | `DELETE /api/packages` | `{ spec }` |
 | `POST /api/packages/update` | Update the installed pi packages (`pi update --extensions`); pi itself comes with the portal's version |
-| `GET /api/extensions` | Parsed packages with their recovered settings |
+| `GET /api/extensions` | Parsed packages with their recovered settings, each with `kinds`: what it brings, of `pi`, `pithagoras` and `themes` |
+| `GET /api/extensions/shipped` | `{ extensions: [{ name, version?, description?, kinds, spec }] }` — the extensions that come with the portal; `spec` is the folder each is installed by |
 | `GET /api/extension-ui` | `{ extensions: [{ name, version, entry?, style?, server?, serverError?, themes? }] }` — the installed packages, switched on, that bring a browser half, a server half or themes: the addresses its module and stylesheet are fetched from, where its server half's routes are, and why that half is not running if it could not be started |
 | `GET /api/extension-ui/<package>/<file>` | A file of that package's web folder |
 | `/api/x/<package>/…` | The routes of that package's server half, whatever it serves there, behind the portal's login; no body is read for them unless the route asks. WebSocket upgrades under the same address go to it, checked for the login and for the page they come from |
