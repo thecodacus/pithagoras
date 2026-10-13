@@ -43,12 +43,15 @@ Both show the same notes, filters and search.
     links the lines of the constellations, and the sky turns slowly. A drag
     flings it and it coasts; choosing a note flies to its star.
     *Secret:* double-click the empty sky for a meteor shower.
-  - **Solar system**: the chosen note is the sun (until you choose one, the
-    most linked note), and every other note orbits it on the ring of how many
-    links away it is, the inner ones faster. Notes no link reaches are the
-    asteroid belt. Choosing another note pulls the whole system into new
-    orbits round it; a drag tips the system, which settles back to its plane.
-    *Secret:* drag once right round the sun, and the moon eclipses it.
+  - **Galaxy**: a spiral galaxy seen at a slant, its bright core the chosen
+    note (until you choose one, the most linked note). Every other note is a
+    star out along an arm as far as it is links away, on the arm of its type,
+    in clusters with the notes as far out as it; notes no link reaches are
+    scattered through the halo. The disc turns slowly round the core, its arms
+    glowing and crossed by dark dust lanes. Choosing another note makes it the
+    core, and the galaxy swirls round to it; a drag tips the disc, which settles
+    back to its slant. *Secret:* drag once right round the core, and it goes
+    supernova.
   - **Brain**: the notes are neurons in the lobe their type belongs to, linked
     by curving axons, inside the faint outline of a brain. It sways from side
     to side and turns heavily under a drag, without coasting. Neurons fire now

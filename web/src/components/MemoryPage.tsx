@@ -1467,7 +1467,7 @@ function GraphView({
             onChange={setTheme}
             options={SKY_THEMES.map((s) => ({
               value: s,
-              label: s === "stellar" ? t("Constellation") : s === "solar" ? t("Solar system") : s === "brain" ? t("Brain") : s === "fireflies" ? t("Fireflies") : t("Double helix"),
+              label: s === "stellar" ? t("Constellation") : s === "galaxy" ? t("Galaxy") : s === "brain" ? t("Brain") : s === "fireflies" ? t("Fireflies") : t("Double helix"),
             }))}
           />
         )}

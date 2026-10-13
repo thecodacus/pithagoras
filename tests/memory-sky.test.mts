@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BRAIN_COLOUR, brainOutline, colourFrom, heart, helixAt, helixOrder, intoBrain, layout3d, layout3dKept, LOBES, lobeOf, ORBITS, pick, project, RESTING, ringsFrom, seeded, Shake, skyThemeFrom, solarOrbits, turnAround } from "../web/src/memory-sky.ts";
+import { BRAIN_COLOUR, brainOutline, colourFrom, heart, helixAt, helixOrder, intoBrain, layout3d, layout3dKept, galaxyStars, GALAXY_TURN, LOBES, lobeOf, pick, project, RESTING, ringsFrom, seeded, Shake, skyThemeFrom, turnAround, WINDING } from "../web/src/memory-sky.ts";
 
 const chain = (n: number) => {
   const paths = Array.from({ length: n }, (_, i) => `/n${i}.md`);
@@ -83,6 +83,7 @@ test("the theme and the brain's colour read from storage fall back to the defaul
   assert.equal(skyThemeFrom("helix"), "helix");
   assert.equal(skyThemeFrom(null), "stellar");
   assert.equal(skyThemeFrom("deepsea"), "stellar", "a look that is no longer there");
+  assert.equal(skyThemeFrom("solar"), "galaxy", "the solar system became the galaxy");
   assert.equal(skyThemeFrom("toString"), "stellar");
   assert.equal(colourFrom("#00FF00"), "#00ff00");
   assert.equal(colourFrom("red"), BRAIN_COLOUR);
@@ -96,7 +97,7 @@ const adjacency = (n: number, pairs: [number, number][]) => {
   return near;
 };
 
-test("the solar system's rings are how many links away from the sun a note is, and what no link reaches is the belt", () => {
+test("the galaxy's rings are how many links away from its core a note is, and what no link reaches is the halo", () => {
   // 0 - 1 - 2 - 3, 0 - 4, and 5 - 6 on their own; 7 is filtered out.
   const near = adjacency(8, [[0, 1], [1, 2], [2, 3], [0, 4], [5, 6]]);
   const shown = [true, true, true, true, true, true, true, false];
@@ -107,17 +108,27 @@ test("the solar system's rings are how many links away from the sun a note is, a
   assert.equal(ringsFrom(0, near, [true, true, false, true, true, true, true, false])[3], 2, "one past the farthest ring");
 });
 
-test("orbits: the inner ones faster, a long chain shares a few orbits, and the belt is outermost", () => {
-  const ring = Int32Array.from([0, 1, 1, 2, 3, 9]);
-  const orbits = solarOrbits(ring, 9);
-  assert.equal(orbits[0].radius, 0, "the sun stays put");
-  assert.ok(orbits[1].radius < orbits[3].radius && orbits[3].radius < orbits[4].radius);
-  assert.ok(orbits[1].speed > orbits[4].speed, "Kepler");
-  assert.ok(orbits[5].radius > orbits[4].radius, "the belt is outside the rest");
-  assert.notEqual(orbits[1].phase, orbits[2].phase, "two on one ring are spread round it");
-  const chain = solarOrbits(Int32Array.from({ length: 60 }, (_, i) => i));
-  assert.ok(new Set(chain.map((o) => o.level)).size <= ORBITS + 1, "the sun and a few orbits");
-  assert.ok(Math.max(...chain.map((o) => o.radius)) < 1.3);
+test("the galaxy: the core in the middle, the rest out along the arms as far as they are links away, and the halo round it", () => {
+  // Rings from the core 0; the last two are the halo no link reaches.
+  const ring = Int32Array.from([0, 1, 1, 2, 3, 3, 3, 9, 9]);
+  const arm = [0, 0, 1, 0, 0, 0, 1, 0, 1];
+  const stars = galaxyStars(ring, 9, arm, 2);
+  assert.deepEqual(galaxyStars(ring, 9, arm, 2), stars, "the same galaxy each time");
+  assert.equal(stars[0].radius, 0, "the core stays in the middle");
+  assert.ok(stars[1].radius < stars[3].radius && stars[3].radius < stars[4].radius, "further out the more links away");
+  assert.ok(stars.slice(1, 7).every((st) => !st.halo && Math.abs(st.height) < 0.05), "a thin disc");
+  assert.ok(stars.slice(7).every((st) => st.halo && st.radius > Math.max(...stars.slice(1, 7).map((x) => x.radius))), "the halo round it");
+  // On an arm: the angle winds on with the radius; the other arm is half a turn round.
+  const along = (st: { angle: number; radius: number }, a: number) => ((st.angle - a * Math.PI - st.radius * WINDING) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+  for (const i of [1, 2, 3, 4, 5, 6]) assert.ok(Math.abs(along(stars[i], arm[i])) < 0.2, `note ${i} on its arm`);
+  // One ring and arm make a cluster: closer to each other than to the same ring on the other arm.
+  const xy = (st: { radius: number; angle: number }) => [st.radius * Math.cos(st.angle), st.radius * Math.sin(st.angle)];
+  const apart = (a: number, b: number) => Math.hypot(xy(stars[a])[0] - xy(stars[b])[0], xy(stars[a])[1] - xy(stars[b])[1]);
+  assert.ok(apart(4, 5) < apart(4, 6) / 2, `${apart(4, 5)} ${apart(4, 6)}`);
+  // The disc turns as one, so the arms keep their shape.
+  assert.ok(stars.slice(1, 7).every((st) => st.speed === GALAXY_TURN));
+  const chain = galaxyStars(Int32Array.from({ length: 80 }, (_, i) => i), -1, Array(80).fill(0), 2);
+  assert.ok(Math.max(...chain.map((st) => st.radius)) < 1.05, "a long chain of links does not run off into space");
 });
 
 test("along the helix linked notes sit near each other, two to a turn, the strands opposite", () => {

@@ -275,14 +275,16 @@ export function brainOutline(): Vec[][] {
  * how it moves and answers a drag, what a chosen note does to it, and a
  * secret — over the same notes, filters and search.
  */
-export const SKY_THEMES = ["stellar", "solar", "brain", "fireflies", "helix"] as const;
+export const SKY_THEMES = ["stellar", "galaxy", "brain", "fireflies", "helix"] as const;
 export type SkyTheme = (typeof SKY_THEMES)[number];
-export const skyThemeFrom = (stored: string | null): SkyTheme => (SKY_THEMES as readonly string[]).includes(stored ?? "") ? (stored as SkyTheme) : "stellar";
+export const skyThemeFrom = (stored: string | null): SkyTheme =>
+  // The galaxy was a solar system once: a browser that chose that keeps its place.
+  stored === "solar" ? "galaxy" : (SKY_THEMES as readonly string[]).includes(stored ?? "") ? (stored as SkyTheme) : "stellar";
 
 /**
  * How many links away from `centre` each note is, over the notes shown: 0 for
  * the centre, -1 for one that is not shown, and one past the farthest ring for
- * those no link leads to (the solar system's asteroid belt).
+ * those no link leads to (the galaxy's halo).
  */
 export function ringsFrom(centre: number, near: number[][], shown: boolean[]): Int32Array {
   const n = shown.length;
@@ -306,40 +308,47 @@ export function ringsFrom(centre: number, near: number[][], shown: boolean[]): I
   return ring;
 }
 
-export interface Orbit {
-  /** Which of the system's orbits, from 1 inside out; 0 for the sun. */
-  level: number;
+/** Where a note is in the galaxy, before it turns: in polar terms in the plane of its disc. */
+export interface GalaxyStar {
   radius: number;
-  phase: number;
-  /** Radians a second: the inner ones faster, as Kepler has it. */
+  angle: number;
+  /** Above or below the disc. */
+  height: number;
+  /** Radians a second: the galaxy turns round its core, the inner stars faster. */
   speed: number;
-  /** How far its plane leans from the system's. */
-  tilt: number;
+  /** Out in the halo, round the disc, rather than on an arm: notes no link reaches. */
+  halo: boolean;
 }
 
-/** The most orbits a system has: rings further out share them, so that a long chain of links is not a hundred circles. */
-export const ORBITS = 7;
+/** How fast the disc turns round its core, in radians a second. */
+export const GALAXY_TURN = 0.07;
+
+/** How tightly the arms wind: radians of turn for each unit out from the core. */
+export const WINDING = 4.2;
 
 /**
- * An orbit for each note from its ring: up to `ORBITS` of them spaced out to
- * a radius of about one, the notes of each spread around it, and the ring
- * `belt` (the notes no link reaches) outermost, apart from the rest.
+ * Where each note goes in a spiral galaxy round the note at ring 0, its core:
+ * out along an arm as far as it is links away (rings beyond `levels` sharing
+ * the outermost reach, so that a long chain does not run off into space), on
+ * the arm of its type (`arm`, out of `arms`), close to the others of its ring
+ * and arm so that they make a cluster, and the disc thinner further out. The
+ * ring `belt`, which no link reaches, is scattered through the halo.
  */
-export function solarOrbits(ring: Int32Array, belt = -1): Orbit[] {
+export function galaxyStars(ring: Int32Array, belt: number, arm: number[], arms: number, levels = 7): GalaxyStar[] {
   const most = Math.max(1, ...Array.from(ring).filter((r) => r !== belt));
-  const levels = Math.min(most, ORBITS);
-  const levelOf = (r: number) => (r === belt ? levels + 1 : Math.ceil((r * levels) / most));
-  const counts = new Map<number, number>();
-  const seen = new Map<number, number>();
-  for (const r of ring) if (r > 0) counts.set(levelOf(r), (counts.get(levelOf(r)) ?? 0) + 1);
-  const outer = belt > 0 ? levels + 1 : levels;
+  const steps = Math.min(most, levels);
   return Array.from(ring, (r, i) => {
-    if (r <= 0) return { level: 0, radius: 0, phase: 0, speed: 0, tilt: 0 };
-    const level = levelOf(r);
-    const k = seen.get(level) ?? 0;
-    seen.set(level, k + 1);
-    const radius = 0.32 + (0.85 * (level - 1)) / Math.max(1, outer - 1) + ((k % 3) - 1) * 0.02;
-    return { level, radius, phase: (2 * Math.PI * k) / (counts.get(level) ?? 1) + level * 0.7, speed: 0.22 / radius ** 1.5, tilt: (((i * 7919) % 17) / 17 - 0.5) * 0.18 };
+    const random = seeded(i * 7919 + 13);
+    if (r <= 0) return { radius: 0, angle: 0, height: 0, speed: 0, halo: false };
+    if (r === belt) {
+      const radius = 1.05 + random() * 0.3;
+      return { radius, angle: random() * Math.PI * 2, height: (random() - 0.5) * 1.1, speed: 0.03, halo: true };
+    }
+    const level = Math.ceil((r * steps) / most);
+    const radius = 0.16 + (0.82 * (level - 1)) / Math.max(1, steps - 1) + (random() - 0.5) * 0.06;
+    const angle = (2 * Math.PI * (arm[i] % arms)) / arms + radius * WINDING + (random() - 0.5) * 0.35;
+    // The whole disc turns as one, so that the arms keep their shape however long it is watched.
+    return { radius, angle, height: (random() - 0.5) * 0.08 * (1.1 - radius), speed: GALAXY_TURN, halo: false };
   });
 }
 

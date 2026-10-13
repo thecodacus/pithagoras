@@ -12,7 +12,7 @@
  * Somebody who asks for less motion gets each world standing still (`still`):
  * no drift, no time, and no secrets, which are all motion.
  */
-import { brainOutline, heart, helixAt, helixOrder, intoBrain, lobeOf, ringsFrom, seeded, solarOrbits, type Camera, type Orbit, type Point3, type Projected, type SkyTheme } from "../memory-sky";
+import { brainOutline, galaxyStars, GALAXY_TURN, heart, helixAt, helixOrder, intoBrain, lobeOf, ringsFrom, seeded, WINDING, type Camera, type GalaxyStar, type Point3, type Projected, type SkyTheme } from "../memory-sky";
 
 /** A note as the graph has it. */
 export interface GraphNote {
@@ -319,31 +319,66 @@ const stellar: Look<StellarWorld> = {
 };
 
 // ---------------------------------------------------------------------------
-// Solar system: the chosen note is the sun (the most linked one until a note
-// is chosen), and every other note orbits it on the ring of how many links
-// away it is, the inner ones faster; what no link reaches is the asteroid belt.
-// Choosing another note pulls the whole system into new orbits round it. A
-// drag tips the system, which settles back to its plane. Secret: drag the
-// pointer once right round the sun, and the moon eclipses it.
+// Galaxy: a spiral galaxy seen at a slant, its core the chosen note (the most
+// linked one until a note is chosen). Every other note is a star out along an
+// arm as far as it is links away, on the arm of its type, close to the others
+// of its ring so that they make clusters; what no link reaches is scattered
+// through the halo. The disc turns slowly round the core, its arms glowing
+// with dust and stars and crossed by dark lanes. Choosing another note makes
+// it the core, and the whole galaxy swirls round to it. A drag tips the disc,
+// which settles back to its slant. Secret: drag once right round the core, and
+// it goes supernova: a flash, and a shock that runs out through the disc.
 
-interface SolarWorld {
+interface GalaxyWorld {
   egg: Egg | null;
   key: string;
   centre: number;
   /** The ring of the notes no link reaches, or -1. */
   belt: number;
   ring: Int32Array;
-  orbits: Orbit[];
+  stars: GalaxyStar[];
   from: Float64Array | null;
   movedAt: number;
   spin: number;
 }
-const BELT = specks(37, 160);
 
-const solar: Look<SolarWorld> = {
-  rest: { yaw: 0.4, pitch: -0.48, zoom: 1, tx: 0, ty: 0, tz: 0 },
-  init: () => ({ egg: null, key: "", centre: -1, belt: -1, ring: new Int32Array(0), orbits: [], from: null, movedAt: 0, spin: 0 }),
-  core: (s, i, w) => (i === w.centre ? 13 : 3 + Math.min(s.notes[i].links, 12) * 0.35),
+/** The glow of the arms and the dust lanes along them: fixed, and turning with the disc. */
+const ARM_GLOW = (() => {
+  const random = seeded(71);
+  return Array.from({ length: 900 }, (_, k) => {
+    const u = 0.06 + random() ** 0.8 * 1.02;
+    const spread = (random() + random() + random() - 1.5) * 0.45;
+    return { u, a: (k % 2) * Math.PI + u * WINDING + spread, y: (random() - 0.5) * 0.05, size: random(), warm: u < 0.32 || random() < 0.15 };
+  });
+})();
+const LANES = (() => {
+  const random = seeded(83);
+  return Array.from({ length: 260 }, (_, k) => {
+    const u = 0.14 + random() * 0.8;
+    // On the inner side of each arm, where the dust gathers.
+    return { u, a: (k % 2) * Math.PI + u * WINDING - 0.32 + (random() - 0.5) * 0.12, size: random() };
+  });
+})();
+const lane = (() => {
+  let c: HTMLCanvasElement | null = null;
+  return () => {
+    if (c) return c;
+    c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const g = c.getContext("2d")!;
+    const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, "rgba(14,8,6,0.55)");
+    grad.addColorStop(1, "rgba(14,8,6,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 32, 32);
+    return c;
+  };
+})();
+
+const galaxy: Look<GalaxyWorld> = {
+  rest: { yaw: 0.3, pitch: -0.62, zoom: 1, tx: 0, ty: 0, tz: 0 },
+  init: () => ({ egg: null, key: "", centre: -1, belt: -1, ring: new Int32Array(0), stars: [], from: null, movedAt: 0, spin: 0 }),
+  core: (s, i, w) => (i === w.centre ? 4.5 : 1.6 + Math.min(s.notes[i].links, 12) * 0.28),
   step(s, w) {
     let centre = s.selected !== null && s.shown[s.selected] ? s.selected : -1;
     if (centre < 0) {
@@ -351,31 +386,35 @@ const solar: Look<SolarWorld> = {
     }
     const key = `${centre}|${s.version}`;
     if (key !== w.key) {
-      // A new sun: every planet glides from where it is to its new orbit.
+      // A new core: every star swirls from where it is to its place round it.
       w.from = w.key ? s.pos.slice() : null;
       w.key = key;
       w.centre = centre;
       w.ring = ringsFrom(centre, s.near, s.shown);
-      // Every note a link reaches has a neighbour one ring nearer; those of the outermost ring without one are the belt.
+      // Every note a link reaches has a neighbour one ring nearer; those of the outermost ring without one are the halo.
       const most = Math.max(0, ...Array.from(w.ring));
       w.belt = most > 1 && Array.from(w.ring).some((r, i) => r === most && !(s.near[i] ?? []).some((j) => w.ring[j] === most - 1)) ? most : -1;
-      w.orbits = solarOrbits(w.ring, w.belt);
+      const arms = s.types.length >= 3 ? 3 : 2;
+      w.stars = galaxyStars(w.ring, w.belt, s.notes.map((n, i) => (n.type ? s.types.indexOf(n.type) : i)), arms);
       w.movedAt = s.time;
     }
-    const k = s.still || !w.from ? 1 : ease((s.time - w.movedAt) / 1.6);
+    const k = s.still || !w.from ? 1 : ease((s.time - w.movedAt) / 1.8);
+    const nova = w.egg ? (s.time - w.egg.at) / (w.egg.until - w.egg.at) : -1;
     for (let i = 0; i < s.notes.length; i++) {
-      const o = w.orbits[i];
-      const a = o.phase + o.speed * s.time;
-      const x = o.radius * Math.cos(a);
-      const z = o.radius * Math.sin(a);
-      const y = o.radius * Math.sin(a) * o.tilt;
+      const st = w.stars[i];
+      // The shock pushes each star out a little as it passes.
+      const push = nova >= 0 ? 1 + 0.12 * Math.exp(-(((st.radius - nova * 1.5) / 0.12) ** 2)) : 1;
+      const a = st.angle + st.speed * s.time;
+      const x = st.radius * push * Math.cos(a);
+      const z = st.radius * push * Math.sin(a);
+      const y = st.height;
       if (w.from && k < 1) put(s, i, w.from[i * 3] + (x - w.from[i * 3]) * k, w.from[i * 3 + 1] + (y - w.from[i * 3 + 1]) * k, w.from[i * 3 + 2] + (z - w.from[i * 3 + 2]) * k);
       else put(s, i, x, y, z);
     }
     const cam = s.rig.cam;
     if (!s.still && !s.grabbing && !s.rig.aim) {
-      // The plane of the system draws the view back to it, like a spring.
-      cam.pitch += (solar.rest.pitch - cam.pitch) * (1 - Math.exp(-s.dt * 1.4));
+      // The slant the galaxy is seen at draws the view back to it, like a spring.
+      cam.pitch += (galaxy.rest.pitch - cam.pitch) * (1 - Math.exp(-s.dt * 1.2));
       cam.yaw += w.spin * s.dt;
       w.spin *= Math.exp(-s.dt * 1.8);
     }
@@ -383,104 +422,77 @@ const solar: Look<SolarWorld> = {
   },
   draw(s, w) {
     const { g, w: W, h: H } = s;
-    g.fillStyle = "#020205";
+    g.fillStyle = "#020208";
     g.fillRect(0, 0, W, H);
     for (const st of FAR_STARS) {
-      g.fillStyle = `rgba(230,230,255,${(0.08 + st.size * 0.25).toFixed(3)})`;
+      g.fillStyle = `rgba(220,225,255,${(0.06 + st.size * 0.22).toFixed(3)})`;
       g.fillRect(st.x * W, st.y * H, 1, 1);
     }
-    const eclipse = w.egg ? clamp((s.time - w.egg.at) / (w.egg.until - w.egg.at), 0, 1) : -1;
-    // The orbits, one faint ellipse for each.
-    const radii = new Map<number, number[]>();
-    w.orbits.forEach((o, i) => o.level > 0 && w.ring[i] !== w.belt && radii.set(o.level, [...(radii.get(o.level) ?? []), o.radius]));
-    g.lineWidth = 0.8;
-    for (const list of radii.values()) {
-      const radius = list.reduce((a, b) => a + b, 0) / list.length;
-      g.strokeStyle = "rgba(170,180,220,0.16)";
-      polyline(g, Array.from({ length: 73 }, (_, k) => s.project(radius * Math.cos((k / 72) * Math.PI * 2), 0, radius * Math.sin((k / 72) * Math.PI * 2))));
+    const z = Math.sqrt(s.rig.cam.zoom);
+    const spun = GALAXY_TURN * s.time;
+    const nova = w.egg ? clamp((s.time - w.egg.at) / (w.egg.until - w.egg.at), 0, 1) : -1;
+    const core = s.project(0, 0, 0);
+    // The disc's light: a soft ellipse, as flat as the slant makes it.
+    const flat = Math.max(0.22, Math.abs(Math.sin(s.rig.cam.pitch)));
+    const reach = Math.min(W, H) * 0.4 * s.rig.cam.zoom * core.scale;
+    g.save();
+    g.translate(core.x, core.y);
+    g.scale(1, flat);
+    const disc = g.createRadialGradient(0, 0, 0, 0, 0, reach * 1.1);
+    disc.addColorStop(0, "rgba(255,230,190,0.32)");
+    disc.addColorStop(0.25, "rgba(200,180,220,0.12)");
+    disc.addColorStop(1, "rgba(90,110,200,0)");
+    g.fillStyle = disc;
+    g.beginPath();
+    g.arc(0, 0, reach * 1.1, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    // The arms: dust and far stars along them, warm near the core and blue out in the arms.
+    g.globalCompositeOperation = "lighter";
+    for (const d of ARM_GLOW) {
+      const p = s.project(d.u * Math.cos(d.a + spun), d.y, d.u * Math.sin(d.a + spun));
+      g.fillStyle = d.warm ? `rgba(255,214,160,${(0.18 + d.size * 0.3).toFixed(3)})` : `rgba(150,180,255,${(0.14 + d.size * 0.28).toFixed(3)})`;
+      const size = (0.8 + d.size * 1.6) * p.scale;
+      g.fillRect(p.x - size / 2, p.y - size / 2, size, size);
     }
-    // The asteroid belt: dust where the notes no link reaches go round.
-    if (w.belt > 0) {
-      const r = Math.max(...w.orbits.filter((_, i) => w.ring[i] === w.belt).map((o) => o.radius));
-      for (const b of BELT) {
-        const a = b.phase + s.time * 0.05 * (0.5 + b.speed);
-        const rr = r + (b.size - 0.5) * 0.12;
-        const p = s.project(rr * Math.cos(a), (b.speed - 0.5) * 0.03, rr * Math.sin(a));
-        g.fillStyle = `rgba(160,150,140,${(0.25 + b.size * 0.3).toFixed(3)})`;
-        g.fillRect(p.x, p.y, 1.3, 1.3);
-      }
+    g.globalCompositeOperation = "source-over";
+    // The dust lanes, dark along the inner edge of each arm.
+    const dark = lane();
+    for (const d of LANES) {
+      const p = s.project(d.u * Math.cos(d.a + spun), 0, d.u * Math.sin(d.a + spun));
+      const size = (8 + d.size * 12) * p.scale * z;
+      g.drawImage(dark, p.x - size / 2, p.y - size / 2, size, size * flat * 1.4);
     }
     for (const [a, b] of s.links) {
       if (!s.shown[a] || !s.shown[b]) continue;
       const hot = s.focus !== null && (a === s.focus || b === s.focus);
-      g.strokeStyle = hot ? rgba(mix(s.colours[s.focus!], WHITE, 0.3), 0.85) : rgba([200, 210, 255], 0.1 * Math.min(s.dim[a], s.dim[b]));
+      g.strokeStyle = hot ? rgba(mix(s.colours[s.focus!], WHITE, 0.3), 0.85) : rgba([190, 205, 255], 0.09 * Math.min(s.dim[a], s.dim[b]));
       g.lineWidth = hot ? 1.2 : 0.6;
-      g.setLineDash(hot ? [] : [2, 4]);
       g.beginPath();
       g.moveTo(s.pts[a].x, s.pts[a].y);
       g.lineTo(s.pts[b].x, s.pts[b].y);
       g.stroke();
     }
-    g.setLineDash([]);
-    const z = Math.sqrt(s.rig.cam.zoom);
-    const sun = w.centre >= 0 ? s.pts[w.centre] : null;
+    g.globalCompositeOperation = "lighter";
+    // The core, and the flash when it goes.
+    const flash = nova >= 0 ? (1 - nova) ** 2 : 0;
+    stamp(g, glow([255, 214, 150], [255, 250, 235], 0.4), core.x, core.y, (70 + flash * 260) * z, 0.9);
     for (const i of backToFront(s)) {
       const p = s.pts[i];
-      const r = solar.core(s, i, w) * p.scale * z;
-      if (i === w.centre) {
-        const hue = mix([255, 190, 70], s.colours[i], 0.2);
-        g.globalCompositeOperation = "lighter";
-        stamp(g, glow(hue, [255, 250, 220], 0.45), p.x, p.y, r * (eclipse >= 0 ? 9 + 5 * Math.sin(eclipse * Math.PI) : 7), 0.95);
-        g.globalCompositeOperation = "source-over";
-        g.fillStyle = rgba(mix(hue, WHITE, 0.55), 1);
-        g.beginPath();
-        g.arc(p.x, p.y, r, 0, Math.PI * 2);
-        g.fill();
-        continue;
-      }
-      // A planet lit from the sun's side.
-      const lx = sun ? clamp((sun.x - p.x) / 200, -0.6, 0.6) : -0.4;
-      const ly = sun ? clamp((sun.y - p.y) / 200, -0.6, 0.6) : -0.4;
-      const shade = g.createRadialGradient(p.x + lx * r, p.y + ly * r, r * 0.1, p.x, p.y, r * 1.1);
-      const c = s.colours[i];
-      const alpha = s.dim[i] * (eclipse >= 0 ? 1 - 0.5 * Math.sin(eclipse * Math.PI) : 1);
-      shade.addColorStop(0, rgba(mix(c, WHITE, 0.6), alpha));
-      shade.addColorStop(0.5, rgba(c, alpha));
-      shade.addColorStop(1, rgba(mix(c, [0, 0, 0], 0.75), alpha));
-      g.fillStyle = shade;
-      g.beginPath();
-      g.arc(p.x, p.y, r, 0, Math.PI * 2);
-      g.fill();
-      if (s.notes[i].links >= 4) {
-        g.strokeStyle = rgba(mix(c, WHITE, 0.4), 0.45 * alpha);
-        g.lineWidth = 0.8;
-        g.beginPath();
-        g.ellipse(p.x, p.y, r * 1.9, r * 0.5, -0.35, 0, Math.PI * 2);
-        g.stroke();
-      }
+      const r = galaxy.core(s, i, w) * p.scale * z;
+      const twinkle = s.still ? 1 : 0.85 + 0.15 * Math.sin(s.time * (1.1 + (i % 7) * 0.3) + i);
+      const colour = i === w.centre ? mix(s.colours[i], [255, 235, 200], 0.6) : s.colours[i];
+      stamp(g, glow(colour), p.x, p.y, r * 7, s.dim[i] * twinkle * clamp(1.2 - p.depth / 3, 0.35, 1));
     }
-    // The eclipse: the moon slides over the sun, and the corona streams out round it.
-    if (eclipse >= 0 && sun) {
-      const r = solar.core(s, w.centre, w) * sun.scale * z;
-      const strength = Math.sin(eclipse * Math.PI);
-      g.globalCompositeOperation = "lighter";
-      g.strokeStyle = `rgba(255,220,160,${(0.35 * strength).toFixed(3)})`;
-      g.lineWidth = 1;
-      for (let k = 0; k < 28; k++) {
-        const a = (k / 28) * Math.PI * 2 + s.time * 0.1;
-        const len = r * (1.6 + ((k * 37) % 11) / 5) * (0.6 + strength);
-        g.beginPath();
-        g.moveTo(sun.x + Math.cos(a) * r * 1.05, sun.y + Math.sin(a) * r * 1.05);
-        g.lineTo(sun.x + Math.cos(a) * len, sun.y + Math.sin(a) * len);
-        g.stroke();
-      }
-      g.globalCompositeOperation = "source-over";
-      g.fillStyle = "#050507";
-      g.beginPath();
-      g.arc(sun.x + (eclipse * 2 - 1) * r * 2.6, sun.y + (eclipse * 2 - 1) * r * 0.3, r * 1.02, 0, Math.PI * 2);
-      g.fill();
+    // The shock, a ring running out through the disc.
+    if (nova >= 0) {
+      const radius = nova * 1.5;
+      g.strokeStyle = `rgba(190,215,255,${(0.75 * (1 - nova)).toFixed(3)})`;
+      g.lineWidth = 2 + 3 * (1 - nova);
+      polyline(g, Array.from({ length: 97 }, (_, k) => s.project(radius * Math.cos((k / 96) * Math.PI * 2), 0, radius * Math.sin((k / 96) * Math.PI * 2))));
     }
-    marks(s, solar, w);
+    g.globalCompositeOperation = "source-over";
+    marks(s, galaxy, w);
   },
   drag: (s, _w, dx, dy) => turn(s, dx, dy, 0.005),
   release(_s, w, vx) {
@@ -488,9 +500,10 @@ const solar: Look<SolarWorld> = {
   },
   centre: (s, w) => (w.centre >= 0 && s.pts[w.centre] ? { x: s.pts[w.centre].x, y: s.pts[w.centre].y } : null),
   gesture(s, w, g) {
-    if (g.kind === "around" && !s.still && w.centre >= 0) w.egg = { name: "eclipse", at: s.time, until: s.time + 4.5 };
+    if (g.kind === "around" && !s.still && w.centre >= 0) w.egg = { name: "supernova", at: s.time, until: s.time + 3.2 };
   },
 };
+
 // ---------------------------------------------------------------------------
 // Brain: neurons in the lobes their types belong to, axons curving between
 // them, inside the faint outline of a brain. It sways from side to side like a
@@ -989,4 +1002,4 @@ const helix: Look<HelixWorld> = {
   },
 };
 
-export const LOOKS: Record<SkyTheme, Look<any>> = { stellar, solar, brain, fireflies, helix };
+export const LOOKS: Record<SkyTheme, Look<any>> = { stellar, galaxy, brain, fireflies, helix };

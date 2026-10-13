@@ -363,7 +363,7 @@ test('the type switches filter both views, and what the search found is lit in b
 });
 
 /** The 3D looks by the names the menu gives them. */
-const LOOK_NAMES: Record<string, string> = { stellar: 'Constellation', solar: 'Solar system', brain: 'Brain', fireflies: 'Fireflies', helix: 'Double helix' };
+const LOOK_NAMES: Record<string, string> = { stellar: 'Constellation', galaxy: 'Galaxy', brain: 'Brain', fireflies: 'Fireflies', helix: 'Double helix' };
 /** Picks a 3D look from the toolbar's menu, as a person does. */
 async function chooseLook(page: Page, theme: string) {
   await page.getByRole('combobox', { name: 'Look of the 3D view' }).click();
@@ -380,7 +380,7 @@ test("the 3D toolbar's look, colour and filter are the portal's own controls", a
   await expect(look).toHaveClass(/ui-select/);
   await look.click();
   const list = page.getByRole('listbox', { name: 'Look of the 3D view' });
-  await expect(list.getByRole('option')).toHaveText(['Constellation', 'Solar system', 'Brain', 'Fireflies', 'Double helix']);
+  await expect(list.getByRole('option')).toHaveText(['Constellation', 'Galaxy', 'Brain', 'Fireflies', 'Double helix']);
   await expect(list.getByRole('option', { name: 'Constellation' })).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
@@ -483,7 +483,7 @@ test('the 3D view and its look are kept in this browser, and nothing is written 
   await expect(sky.locator('canvas')).toBeVisible();
   const look = page.getByRole('combobox', { name: 'Look of the 3D view' });
   await expect(look).toHaveText('Constellation');
-  for (const theme of ['stellar', 'solar', 'brain', 'fireflies', 'helix']) {
+  for (const theme of ['stellar', 'galaxy', 'brain', 'fireflies', 'helix']) {
     await chooseLook(page, theme);
     await expect(sky).toHaveAttribute('data-theme-3d', theme);
     await frames(page);
@@ -516,8 +516,8 @@ const secrets: [string, string, (page: Page) => Promise<void>][] = [
     const b = (await page.locator('.memory-sky canvas').boundingBox())!;
     await page.mouse.dblclick(b.x + 12, b.y + 12);
   }],
-  // A drag once right round the sun, which is in the middle.
-  ['solar', 'eclipse', async (page) => {
+  // A drag once right round the core, which is in the middle.
+  ['galaxy', 'supernova', async (page) => {
     const b = (await page.locator('.memory-sky canvas').boundingBox())!;
     const [cx, cy] = [b.x + b.width / 2, b.y + b.height / 2];
     await page.mouse.move(cx + 180, cy);
@@ -584,7 +584,7 @@ test('with less motion asked for, the 3D looks hold still and play no secrets', 
   await page.goto('/memory?view=graph');
   await page.getByRole('button', { name: '3D' }).click();
   const canvas = page.locator('.memory-sky canvas');
-  for (const theme of ['stellar', 'solar', 'brain', 'fireflies', 'helix']) {
+  for (const theme of ['stellar', 'galaxy', 'brain', 'fireflies', 'helix']) {
     await chooseLook(page, theme);
     await frames(page);
     const first = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL());

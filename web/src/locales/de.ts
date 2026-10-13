@@ -1254,7 +1254,7 @@ const de: Locale = {
     "Which notes are shown": "Welche Notizen gezeigt werden",
     "Look of the 3D view": "Aussehen der 3D-Ansicht",
     "Constellation": "Sternbild",
-    "Solar system": "Sonnensystem",
+    "Galaxy": "Galaxie",
     "Brain": "Gehirn",
     "Fireflies": "Glühwürmchen",
     "Double helix": "Doppelhelix",
