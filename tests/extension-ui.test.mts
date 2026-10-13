@@ -424,6 +424,18 @@ test('a theme is one an extension registered, chosen by its id and painted over 
     assert.equal(chosenPalette()?.id, 'dusk-pkg/dusk', 'still there: it stays');
     choose(null);
     assert.equal(chosenPalette(), null);
+
+    // Two extensions with themes, under the same id even: each its own, both offered, and one in effect at a time.
+    registerTheme('other-pkg', { id: 'dusk', name: 'Other dusk', dark: { canvas: '#101820' } });
+    registerTheme('other-pkg', { id: 'noon', name: 'Noon', light: { accent: '#0055aa' } });
+    assert.deepEqual(themes().map((t) => t.id), ['dusk-pkg/dusk', 'other-pkg/dusk', 'other-pkg/noon']);
+    choose('dusk-pkg/dusk');
+    assert.deepEqual(Object.fromEntries(set), { '--accent': '255 121 198' });
+    // The other chosen: it replaces the first whole. What it does not say is the portal's own, not what the first had.
+    choose('other-pkg/dusk');
+    assert.deepEqual(Object.fromEntries(set), { '--canvas': '16 24 32' });
+    assert.equal(chosenPalette()?.name, 'Other dusk');
+    choose(null);
   } finally {
     for (const name of ['document', 'window', 'getComputedStyle', 'localStorage']) delete (globalThis as any)[name];
   }
