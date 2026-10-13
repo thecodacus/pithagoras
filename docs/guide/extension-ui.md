@@ -370,6 +370,29 @@ when it is drawn (the `ready` above), and the extension keeps its state where
 pi keeps a conversation's: `pi.appendEntry()` for what the model should not
 see, a tool result's `details` for what follows the branch.
 
+### Slash commands
+
+A slash command is the pi extension's to register (`pi.registerCommand`), as
+in any pi package, and the portal's palette lists it with the rest. When the
+command should do something in the page, its handler says so to the browser
+half, which is there to hear it whether or not a panel is open:
+
+```ts
+// index.ts
+pi.registerCommand("notes", {
+  description: "Open this chat's notes",
+  handler: async () => pi.events.emit("pithagoras:v1:ui:send", { extension: NAME, data: { type: "open" } }),
+});
+```
+
+```js
+// web/client.js
+portal.slots.register("chat.background", { id: "commands", component: ({ channel, panels }) => {
+  React.useEffect(() => channel.on((data) => data.type === "open" && panels.open("notes")), [channel, panels]);
+  return null;
+} });
+```
+
 `channel.send` starts the chat's agent if it had been let go, so a panel
 opened on such a chat reaches its extension after a moment. What an extension
 sends on its own clock does not count as use of the chat. `channel.send`
@@ -683,6 +706,7 @@ extension:
 | Opening itself when the agent makes something | `chat.background` |
 | A window in voice mode | `voice.window` |
 | A page in the sidebar; a page in Settings | `nav.page`, `settings.page` |
+| A slash command | `pi.registerCommand` in the pi extension, and the channel for what it does in the page |
 | The colours of everything | [A theme](#themes) |
 
 ## The example
