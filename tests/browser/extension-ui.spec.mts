@@ -30,6 +30,8 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
       return {
         extensions: [
           ...(state.themed ? [{ name: dusk.name, version: dusk.version, themes: dusk.pithagoras.themes }] : []),
+          // A second package with themes of its own, two of them, one under the id the first uses.
+          ...(state.themed ? [{ name: 'more-themes', version: '1.0.0', themes: [{ id: 'dusk', name: 'Noon', light: { accent: '#0055aa' } }, { id: 'midnight', name: 'Midnight', dark: { canvas: '#05070d' } }] }] : []),
           ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}` }] : []),
           ...(probe ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
         ],
@@ -424,8 +426,17 @@ test('a theme an extension brought is chosen in Settings or switched to by an ex
   const colours = dialog.getByRole('combobox', { name: 'Colours' });
   await expect(colours).toHaveText(/The portal's own/);
   await colours.click();
+  // Every theme of every installed extension is here, each with the package it came from, after the portal's own.
+  await expect(page.getByRole('option')).toHaveText([/^The portal's own/, /^Dusk.*pithagoras-theme-dusk/, /^Noon.*more-themes/, /^Midnight.*more-themes/]);
+  // One of the second package's: it alone is in effect, and nothing of another theme with it.
+  await page.getByRole('option', { name: /Midnight/ }).click();
+  await expect.poll(() => colour('--canvas')).toBe('5 7 13');
+  expect(await colour('--accent')).toBe('34 211 238');
+  await expect(colours).toHaveText(/Midnight/);
+  await colours.click();
   await page.getByRole('option', { name: /Dusk/ }).click();
   await expect.poll(() => colour('--accent')).toBe('255 121 198');
+  expect(await colour('--canvas')).toBe('27 22 38');
   // In light it is the theme's light colours, and the portal's own for what the theme does not say.
   await dialog.getByRole('radio', { name: 'Light' }).click();
   await expect.poll(() => colour('--accent')).toBe('168 50 130');
