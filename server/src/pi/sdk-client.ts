@@ -1407,8 +1407,11 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       this.wanted = new Set();
     }
     session._setActiveTools = (names: string[]) => {
-      this.wanted = new Set([...names, ...this.heldBack(session, names, this.fromExtension)]);
-      const active = names.filter((name) => !this.keptOut(name));
+      const held = this.heldBack(session, names, this.fromExtension);
+      this.wanted = new Set([...names, ...held]);
+      // What was held back and is not kept out now is offered: a lazy tool when an extension's `tools` has taken the
+      // gateway's place since, which pi's list never had, as the tool was kept out when pi made it.
+      const active = [...names, ...held].filter((name) => !this.keptOut(name));
       // An extension's list leaves out the gateway, which it never saw, or which was idle when it took its snapshot:
       // when a lazy tool is reachable now, so is the way to it.
       if (this.isGateway(GATEWAY_TOOL) && this.wanted.has(GATEWAY_TOOL) && !this.keptOut(GATEWAY_TOOL) && !active.includes(GATEWAY_TOOL)) active.push(GATEWAY_TOOL);
@@ -1514,7 +1517,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // An extension's list is not taken for a lazy tool's: it was shown that (hearExtensions), so it said what it meant.
     // The gateway is the portal's, whatever an extension's list says (a fixed list never names it): whether it is
     // offered is for keptOut to say, by whether a lazy tool is reachable.
-    const kept = (name: string) => (always ? this.switchedOff.has(name) || this.isGateway(name) : this.keptOut(name));
+    // A tool marked lazy is kept even where keptOut does not keep it out: an extension's own `tools` that registers
+    // later takes the gateway's place, and the tool is offered by its own name from then on. It must stay wanted
+    // for that, and for the day its mark is taken away.
+    const kept = (name: string) => (always ? this.switchedOff.has(name) || this.isGateway(name) : this.keptOut(name) || this.lazy.has(name));
     return [...this.wanted].filter((name) => kept(name) && !names.includes(name) && known.has(name));
   }
 

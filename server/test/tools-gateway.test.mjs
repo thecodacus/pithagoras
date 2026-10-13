@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeModel, resultsIn } from "./fake-model.mjs";
 import { inProcessHome } from "./server-harness.mjs";
@@ -145,6 +145,32 @@ export default function (pi) {
   });
   pi.on("tool_result", (event) => {
     if (event.toolName === "soft_fail") (globalThis.__softSeen ??= []).push(event.isError);
+  });
+  // A tool that a hook refuses with a stop, the tool that would follow it, and one that a slow hook holds up before it writes.
+  pi.registerTool({
+    name: "stop_refused",
+    label: "Refused",
+    description: "Be refused by a hook that says to stop.",
+    parameters: { type: "object", properties: {} },
+    async execute() { return text("stop_refused ran"); },
+  });
+  pi.registerTool({
+    name: "after_stop",
+    label: "After",
+    description: "Follow the tool that was refused.",
+    parameters: { type: "object", properties: {} },
+    async execute() { writeFileSync(${JSON.stringify(marker + ".after")}, "x"); return text("after_stop ran"); },
+  });
+  pi.registerTool({
+    name: "slow_write",
+    label: "Slow write",
+    description: "Write a file once the hook has had its say.",
+    parameters: { type: "object", properties: {} },
+    async execute() { writeFileSync(${JSON.stringify(marker + ".slow")}, "x"); return text("wrote"); },
+  });
+  pi.on("tool_call", async (event) => {
+    if (event.toolName === "stop_refused") return { block: true, reason: "refused, and stop", terminate: true };
+    if (event.toolName === "slow_write") await new Promise((resolve) => setTimeout(resolve, 400));
   });
   pi.registerTool({
     name: "mcp_page",
@@ -412,6 +438,52 @@ test("a lazy tool that ends the turn ends it through the tools tool too", async 
   const through = await run([via("call", { name: "stop_here", args: {} })], { toolsLazy: ["stop_here"], lazySets: ["stop"] });
   assert.equal(direct.requests.length, 1, "a direct call that terminates is the last request of the turn");
   assert.equal(through.requests.length, direct.requests.length, "and so is one through tools");
+});
+
+test("a lazy tool that a hook refuses with a stop ends the turn through the tools tool too", async () => {
+  rmSync(marker + ".after", { force: true });
+  const calls = [{ name: "stop_refused", args: {} }, { name: "after_stop", args: {} }];
+  const direct = await run(calls, {});
+  assert.equal(direct.requests.length, 1, "a direct call that is refused with terminate ends the turn");
+  assert.equal(existsSync(marker + ".after"), false);
+  const through = await run([via("call", { name: "stop_refused", args: {} }), { name: "after_stop", args: {} }], { toolsLazy: ["stop_refused"], lazySets: ["stop"] });
+  assert.equal(through.requests.length, direct.requests.length, "and so does one through tools");
+  assert.equal(existsSync(marker + ".after"), false, "the next step did not run");
+  assert.equal(through.results[0].isError, true);
+  assert.match(textOf(through.results[0]), /refused, and stop/);
+  assert.deepEqual(through.results[0].result.content, direct.results[0].result.content, "the model reads what it reads for a direct call");
+});
+
+test("a lazy tool is not run when the turn was stopped while a hook of the call was still running", async () => {
+  /** The slow tool called as the script says, with a stop 100 ms after the call started, and what became of it. */
+  const stopped = async (calls, options) => {
+    rmSync(marker + ".slow", { force: true });
+    script = calls;
+    model.requests.length = 0;
+    const client = await SdkPiClient.create({
+      cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `gateway-${n++}`, ...options,
+    });
+    try {
+      const results = [];
+      const settled = new Promise((resolve) => client.on("event", (e) => {
+        if (e?.type === "tool_execution_start") setTimeout(() => client.abort(), 100);
+        if (e?.type === "tool_execution_end") results.push(e);
+        if (e?.type === "agent_settled") resolve();
+      }));
+      await client.prompt("Go on");
+      await settled;
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return { results, wrote: existsSync(marker + ".slow") };
+    } finally {
+      client.dispose();
+    }
+  };
+  const direct = await stopped([{ name: "slow_write", args: {} }], {});
+  assert.equal(direct.wrote, false, "the premise: a direct call that was stopped during the hook does not run");
+  const through = await stopped([via("call", { name: "slow_write", args: {} })], { toolsLazy: ["slow_write"], lazySets: ["slow"] });
+  assert.equal(through.wrote, false, "nor does one through tools");
+  assert.equal(through.results[0]?.isError, true);
+  assert.doesNotMatch(textOf(through.results[0]), /wrote/);
 });
 
 test("a call of a lazy tool tells the portal's pages which tool it called, and a direct call is as it was", async () => {

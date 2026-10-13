@@ -259,9 +259,12 @@ export class ToolsGateway {
     args = validateToolArguments(definition, { type: "toolCall", id, name: tool.name, arguments: args });
 
     // As pi does for a direct call: the hooks before it, which may refuse it or change its arguments in place.
-    if (runner.hasHandlers("tool_call")) {
-      const verdict = await runner.emitToolCall({ type: "tool_call", toolName: tool.name, toolCallId: id, input: args });
-      if (verdict?.block) return fail(verdict.reason || `"${tool.name}" was refused.`);
+    const verdict = runner.hasHandlers("tool_call") ? await runner.emitToolCall({ type: "tool_call", toolName: tool.name, toolCallId: id, input: args }) : undefined;
+    // A stop that came while a hook was awaited keeps the tool from running, as it does for a direct call.
+    if (signal?.aborted) return fail("Operation aborted");
+    if (verdict?.block) {
+      // An error result and not a throw, so that a refusal that says to stop (terminate) ends the turn, as it does for a direct call.
+      return { content: [{ type: "text" as const, text: verdict.reason || `"${tool.name}" was refused.` }], details: {}, isError: true, ...(verdict.terminate === true ? { terminate: true } : {}) };
     }
 
     let result: any;

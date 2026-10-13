@@ -334,7 +334,8 @@ a moment after it starts.
 that one, because it loads before the portal's, and the portal's is not there. The extension's tool is then
 a tool like any other: the guard asks for a rule or an approval before a colleague may use it, it is not
 hidden while nothing is lazy, and it can be switched off in **Settings → Tools**. With no way to reach them,
-the tools marked lazy are offered one by one in a chat it is in, and the portal logs a warning.
+the tools marked lazy are offered one by one in a chat it is in, and the portal logs a warning. That holds when
+the tool registers after the chat has started too, as an MCP server's does once it has connected.
 
 All the switches above a tool still apply, and a tool that is switched **off** is off for good, lazy or
 not. The portal-wide default, an [agent](/guide/agents#tools), a [project](/guide/projects#tools), a
