@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# What the Update button puts aside while it installs and builds (server/src/update-files.ts)
+*.update-old
 data/
 .env
 .env.local

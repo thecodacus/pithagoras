@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { DiffOf, GhState, GitState } from "../../git-api";
+import type { DiffOf, GhState, GitState, GitTarget } from "../../git-api";
 import type { DiffFile } from "../../git-diff";
 
 /** What is running now: `act`'s label and what it names. */
@@ -17,7 +17,8 @@ export type View =
   | { kind: "pull"; n: number };
 
 export interface GitCtx {
-  id: string;
+  /** The chat and the repository in its folder: what every call of gitApi is made for. */
+  id: GitTarget;
   repo: Repo;
   /**
    * Do something to the repository: one thing at a time, named while it runs,

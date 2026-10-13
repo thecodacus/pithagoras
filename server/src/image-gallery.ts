@@ -1,18 +1,16 @@
-import { randomBytes } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { agentsRoot, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getDb, getSession } from "./db.js";
+import { getDb } from "./db.js";
 import type { ExtraValue } from "./image-generation.js";
+import { openThumb, removeThumbs, wantsThumb } from "./image-thumbs.js";
 import { OUTPUT_FORMATS, type OutputFormat } from "./image-settings.js";
-import { listProjects } from "./projects.js";
-import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
-import { workspaceRoot } from "./workspaces.js";
+import { ChatGone, chatFolder, folderLabel, folderOf, foundFolder, knownFolders, locateRow, newId, realFolderOf, type MediaOrigin } from "./media-folders.js";
+import { isWithinText, realPath } from "./within.js";
 import { FileError, baseDir, openPicture, readPicture, removeEntry, resolveInside, saveNewFile } from "./workspace-files.js";
 
 /**
- * The pictures of the Images page, in one list: the ones the page made itself
+ * The pictures of the Media page, in one list: the ones the page made itself
  * and the ones the agent made with generate_image or edit_image.
  *
  * A row in the `images` table names a picture and says what it was made from;
@@ -41,7 +39,7 @@ import { FileError, baseDir, openPicture, readPicture, removeEntry, resolveInsid
 export const GENERATED_DIR = "generated-images";
 
 /** Made on the page; made by the agent in a chat; or found in a folder the agent's tools write into, with no chat that could be named for it. */
-export type PictureOrigin = "page" | "chat" | "folder";
+export type PictureOrigin = MediaOrigin;
 /** Made from a description, changed from another picture, put in by the person to be changed, or found with nothing to tell how it was made. */
 export type PictureKind = "generated" | "edited" | "uploaded" | "unknown";
 
@@ -83,6 +81,8 @@ export interface GalleryPicture {
   bytes: number;
   /** What a download is called. */
   fileName: string;
+  /** The tiles show a small copy of it, which the portal makes when it is first asked for (see image-thumbs.ts), instead of the file. */
+  thumb: boolean;
 }
 
 interface Row {
@@ -136,16 +136,6 @@ function downloadName(row: Row): string {
   return `image-${stamp}-${row.id.slice(0, 4)}${path.extname(row.path)}`;
 }
 
-/** What a folder is called to the person: its agent for an agent's home, else its place under the workspace root (a project's name, or the way to a folder in one). `home` marks the first agent's home. */
-function folderLabel(folder: string): { name: string; home: boolean } {
-  const agents = listAgents();
-  const agent = agents.find((a) => realPath(a.home) === folder);
-  // Named after its agent, as the sidebar names it. The first agent's home stays the one that is Home.
-  if (agent) return { name: agent.name, home: agent === agents[0] };
-  const inRoot = pathBelow(realPath(workspaceRoot()) ?? workspaceRoot(), folder);
-  return { name: inRoot || path.basename(folder), home: false };
-}
-
 function shown(row: ListedRow): GalleryPicture {
   return {
     id: row.id,
@@ -159,6 +149,7 @@ function shown(row: ListedRow): GalleryPicture {
     createdAt: row.created_at,
     bytes: row.bytes,
     fileName: downloadName(row),
+    thumb: wantsThumb(row.bytes, downloadName(row)),
   };
 }
 
@@ -166,102 +157,9 @@ const SELECT = "SELECT images.*, sessions.title AS chat_title FROM images LEFT J
 
 const rowOf = (id: string): ListedRow | undefined => getDb().prepare(`${SELECT} WHERE images.id = ?`).get(id) as ListedRow | undefined;
 
-/** The chat of a picture is not there any more. */
-class ChatGone extends FileError {
-  constructor() {
-    super("missing", "The chat that made this picture is gone");
-  }
-}
-
-/**
- * The folder of a chat, real; the reason it is not there otherwise. What a pass
- * over many pictures has worked out is kept in `folders`, failures too, so that
- * a chat with a hundred pictures is asked about once.
- */
-function chatFolder(sessionId: string, folders: Map<string, string | FileError>): string {
-  let found = folders.get(sessionId);
-  if (found === undefined) {
-    try {
-      const session = getSession(sessionId);
-      if (!session) throw new ChatGone();
-      found = baseDir(session.workspace);
-    } catch (e) {
-      if (!(e instanceof FileError)) throw e;
-      found = e;
-    }
-    folders.set(sessionId, found);
-  }
-  if (found instanceof FileError) throw found;
-  return found;
-}
-
-/** The real folder a chat's files are in, or nothing when it cannot be told: the chat is gone, or its folder cannot be reached. */
-function folderOf(sessionId: string): string | undefined {
-  try {
-    const session = getSession(sessionId);
-    return session ? baseDir(session.workspace) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Whether a folder, real, is one a picture may be found in or served from: the
- * home of an agent, a folder made for one in `agents/` (that of an agent that was
- * deleted with its folder kept stays one, with its pictures, for the agent
- * made under the same name to take up again) or inside the workspace root, as
- * a chat's folder has to be. Asked once for all the folders a pass looks at.
- */
-function folderAllowed(): (real: string) => boolean {
-  const homes = new Set(listAgents().map((a) => realPath(a.home)));
-  const made = realPath(agentsRoot());
-  const root = realPath(workspaceRoot());
-  return (real) => homes.has(real) || (made !== null && path.dirname(real) === made) || (root !== null && isWithinText(root, real));
-}
-
-/** The real folder a picture that was found is in, the same for all of a pass; the reason it cannot be used otherwise. */
-function foundFolder(folder: string, folders: Map<string, string | FileError>): string {
-  const key = `\0${folder}`;
-  let found = folders.get(key);
-  if (found === undefined) {
-    try {
-      try {
-        found = baseDir(folder);
-      } catch {
-        throw new FileError("missing", "The folder this picture is in does not exist");
-      }
-      if (!folderAllowed()(found)) throw new FileError("invalid", "That is not a folder the portal looks for pictures in");
-    } catch (e) {
-      if (!(e instanceof FileError)) throw e;
-      found = e;
-    }
-    folders.set(key, found);
-  }
-  if (found instanceof FileError) throw found;
-  return found;
-}
-
-/** The real folder a found picture's folder is now, or nothing when it cannot be told. */
-function realFolderOf(folder: string): string | undefined {
-  try {
-    return baseDir(folder);
-  } catch {
-    return undefined;
-  }
-}
-
-/** Where a picture's file is, as a folder the portal knows and a path inside it; the reason it is not anywhere that can be served otherwise. */
-function locate(row: Row, folders: Map<string, string | FileError> = new Map()): { base: string; rel: string } {
-  if (row.origin === "page") return { base: baseDir(imagesDir()), rel: row.path };
-  // Only what the agent's tools write: inside the folder of generated pictures, by where the path really goes and not by how it begins, wherever the index may have come from.
-  if (!isUnderText(GENERATED_DIR, row.path)) throw new FileError("invalid", "That is not a picture the agent made");
-  if (row.origin === "folder") {
-    if (!row.folder) throw new FileError("invalid", "That is not a picture the agent made");
-    return { base: foundFolder(row.folder, folders), rel: row.path };
-  }
-  if (!row.session_id) throw new FileError("invalid", "That is not a picture the agent made");
-  return { base: chatFolder(row.session_id, folders), rel: row.path };
-}
+const WHAT = "picture";
+/** Where the page's own pictures are, and where the agent's tools put theirs: how a row's file is found (see media-folders.ts). */
+const locate = (row: Row, folders: Map<string, string | FileError> = new Map()) => locateRow(row, { own: imagesDir(), generated: GENERATED_DIR, what: WHAT }, folders);
 
 /**
  * Whether a picture's folder is only out of reach for the moment: a folder on a
@@ -312,8 +210,6 @@ const insert = (row: Row) =>
   getDb()
     .prepare("INSERT OR IGNORE INTO images (id, origin, session_id, folder, path, kind, prompt, params, source_id, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .run(row.id, row.origin, row.session_id, row.folder, row.path, row.kind, row.prompt, row.params, row.source_id, row.bytes, row.created_at);
-
-const newId = (): string => randomBytes(6).toString("hex");
 
 /** Puts a picture the page made, or was given, in the page's own folder and in the list. */
 export function addPagePicture(picture: { bytes: Buffer; ext: string; kind: PictureKind; prompt: string; params: PictureParams; sourceId?: string }): GalleryPicture {
@@ -406,7 +302,7 @@ export function pruneMissing(): number {
     } else if (row.origin === "folder" && row.folder) {
       let real: string;
       try {
-        real = foundFolder(row.folder, folders);
+        real = foundFolder(row.folder, folders, WHAT);
       } catch (e) {
         // Kept for a folder that is out of reach for the moment: there is no real place to put it under.
         if (e instanceof FileError) continue;
@@ -426,36 +322,6 @@ const MAX_LOOKED_AT = 5_000;
 /** What a file that is no picture looked like when it was looked at, so that it is not opened again until it changes. Kept to no more than this, and started again beyond it. */
 const refused = new Map<string, string>();
 const MAX_REFUSED = 10_000;
-
-/**
- * The real folders the tools may have written into, each once: the agents'
- * homes, the projects, the folders chats work in, and those that pictures were
- * found in before. A folder that cannot be reached, or is not an agent's home or
- * inside the workspace root, is not one of them.
- */
-function knownFolders(): string[] {
-  const allowed = folderAllowed();
-  const found = new Set<string>();
-  const add = (dir: string | null) => {
-    if (!dir) return;
-    try {
-      const real = baseDir(dir);
-      if (allowed(real)) found.add(real);
-    } catch {
-      // Not there, or out of reach: nothing to look at.
-    }
-  };
-  for (const agent of listAgents()) add(agent.home);
-  try {
-    for (const project of listProjects(workspaceRoot())) add(project.path);
-  } catch {
-    // No workspace root yet.
-  }
-  const d = getDb();
-  for (const row of d.prepare("SELECT DISTINCT workspace AS dir FROM sessions").all() as { dir: string | null }[]) add(row.dir);
-  for (const row of d.prepare("SELECT DISTINCT folder AS dir FROM images WHERE folder IS NOT NULL").all() as { dir: string }[]) add(row.dir);
-  return [...found];
-}
 
 /** What a file is, by its name: the tools name what they make by the time, and an edit after its original. */
 function kindByName(name: string): PictureKind {
@@ -520,7 +386,7 @@ export function scanFolders(): number {
     listed = new Set();
     for (const row of d.prepare("SELECT origin, session_id, folder, path FROM images WHERE origin != 'page'").all() as Pick<Row, "origin" | "session_id" | "folder" | "path">[]) {
       try {
-        const folder = row.origin === "folder" ? (row.folder ? foundFolder(row.folder, folders) : null) : row.session_id ? chatFolder(row.session_id, folders) : null;
+        const folder = row.origin === "folder" ? (row.folder ? foundFolder(row.folder, folders, WHAT) : null) : row.session_id ? chatFolder(row.session_id, folders, WHAT) : null;
         if (folder) listed.add(key(folder, row.path));
       } catch (e) {
         if (!(e instanceof FileError)) throw e;
@@ -530,7 +396,7 @@ export function scanFolders(): number {
   };
   return d.transaction(() => {
     let added = 0;
-    for (const real of knownFolders()) {
+    for (const real of knownFolders("images")) {
       let names: string[];
       try {
         const dir = path.join(real, GENERATED_DIR);
@@ -583,6 +449,7 @@ function forget(ids: string[]): void {
       unlink.run(id);
     }
   })();
+  removeThumbs(ids);
 }
 
 /**
@@ -704,6 +571,16 @@ export function openListed(id: string): { fd: number; size: number; name: string
     if (e instanceof FileError && e.code === "missing") forget([id]);
     throw e;
   }
+}
+
+/**
+ * The small copy of a picture, opened to be sent the way the picture is: made now when there is
+ * none for the file as it is. A picture that gets no copy (a small file, a GIF) is sent whole.
+ * Whoever may open the picture may have its copy, and nobody else: it is opened as the picture is.
+ */
+export async function openListedThumb(id: string): Promise<ReturnType<typeof openListed>> {
+  const whole = openListed(id);
+  return { ...(await openThumb(whole, id, () => !!rowOf(id))), origin: whole.origin };
 }
 
 /** The bytes of a picture, for an edit that starts from it; same checks as serving one. */

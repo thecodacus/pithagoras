@@ -3,7 +3,9 @@ import { unwrapCall } from "./tool-activity";
 import { argsSummary } from "./tool-args";
 import { toolArgsOf, toolNameOf } from "./tool-payload";
 import { msg, t } from "./i18n";
-import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
+import { GENERATED_PICTURE_MARK, shownPicture, type ShownPicture } from "../../server/src/generated-picture";
+import { GENERATED_VIDEO_MARK } from "../../server/src/generated-video";
+import type { AgentQuestion } from "./components/QuestionCard";
 
 /** A picture that went with a message, by the name the server keeps it under. */
 export interface SentImage {
@@ -17,27 +19,34 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
   return list.length ? list : undefined;
 };
 
-/** A picture the agent put in front of the person with show_image, or made or changed for them with generate_image or edit_image: its path in the chat's folder. */
-export interface ShownPicture {
+// The picture a show_image, generate_image or edit_image call ended with: read
+// on the server's side as well, where a channel sends it on.
+export { shownPicture, type ShownPicture } from "../../server/src/generated-picture";
+
+/** A clip the agent put in front of the person with show_video, or made for them with generate_video: its path in the chat's folder. */
+export interface ShownVideo {
   path: string;
   title?: string;
+  /** For a clip a browser cannot play, which generate_video kept as it is: what the file is, in words. It is not played in the chat. */
+  notPlayable?: string;
 }
 
 /**
- * The picture a show_image, generate_image or edit_image call ended with, when it succeeded.
- *
- * All answer with a path in the chat's folder and a title. generate_image and
- * edit_image are taken only with the mark the portal's own tool sets: an
- * extension may bring a tool of that name, whose path is not one in the
- * chat's folder.
+ * The clip a show_video or generate_video call ended with, when it succeeded. Both answer with a path in the
+ * chat's folder and a title; generate_video is taken only with the mark the portal's own tool sets, as an
+ * extension may bring a tool of that name whose path is not one in the chat's folder.
  */
-export function shownPicture(payload: any): ShownPicture | undefined {
+export function shownVideo(payload: any): ShownVideo | undefined {
   if (payload?.isError) return undefined;
   const name = toolNameOf(payload);
   const details = payload?.result?.details;
-  if (name === "generate_image" || name === "edit_image" ? details?.[GENERATED_PICTURE_MARK] !== true : name !== "show_image") return undefined;
+  if (name === "generate_video" ? details?.[GENERATED_VIDEO_MARK] !== true : name !== "show_video") return undefined;
   if (typeof details?.path !== "string" || !details.path) return undefined;
-  return { path: details.path, ...(typeof details.title === "string" && details.title ? { title: details.title } : {}) };
+  return {
+    path: details.path,
+    ...(typeof details.title === "string" && details.title ? { title: details.title } : {}),
+    ...(name === "generate_video" && typeof details.notPlayable === "string" && details.notPlayable ? { notPlayable: details.notPlayable.slice(0, 40) } : {}),
+  };
 }
 
 /**
@@ -133,6 +142,11 @@ export type Item =
       pictureSeq?: number;
       /** A call of the portal's own generate_image or edit_image, as its start says (see generated-picture.ts), not of a tool of that name an extension brings. */
       portalPicture?: true;
+      /** The clip a show_video or generate_video call ended with, and the seq of the end that showed it: what versions its URL. */
+      video?: ShownVideo;
+      videoSeq?: number;
+      /** A call of the portal's own generate_video, as its start says (see generated-video.ts), not of a tool of that name an extension brings. */
+      portalVideo?: true;
       args?: unknown;
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
@@ -141,6 +155,8 @@ export type Item =
       details?: unknown;
       /** How many updates it streamed while it ran: a tool that reports as it goes is doing something worth watching. */
       updates?: number;
+      /** The guard flagged what it returned as a suspected prompt injection: its envelope's id, the signs, and the message of the turn it is in. */
+      flagged?: { id: string; signals: string[]; turnSeq?: number };
       /** The run ended with this call still open: it never said how it came out. */
       interrupted?: boolean;
       since?: number;
@@ -155,7 +171,16 @@ export type Item =
    * its own, `quiet` when it ran and showed nothing, `started`/`queued` when it
    * became a run, `failed` with why.
    */
-  | { kind: "command"; id: string; seq: number; text: string; state: CommandState; error?: string };
+  | { kind: "command"; id: string; seq: number; text: string; state: CommandState; error?: string }
+  /**
+   * The agent's questions (ask_question), by the id the page answers them under. Drawn above the message box
+   * while `open`, and as their record where they were asked once they have ended: `answers` when answered.
+   */
+  | { kind: "question"; id: string; questionId: string; title?: string; questions: AgentQuestion[]; state: QuestionState; answers?: Record<string, string | string[]> };
+
+/** How the agent's questions stand: see QuestionOutcome on the server. */
+export type QuestionState = "open" | "answered" | "cancelled" | "expired" | "stopped";
+const QUESTION_ENDS: readonly QuestionState[] = ["answered", "cancelled", "expired", "stopped"];
 
 export type CommandState = "running" | "done" | "quiet" | "started" | "queued" | "failed";
 
@@ -205,6 +230,15 @@ function setToolOutput(item: Extract<Item, { kind: "tool" }>, text: string) {
 
 /** Text without the colour and cursor codes a terminal would act on. */
 export const stripAnsi = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+
+/**
+ * A result the guard flagged as a suspected prompt injection: the first line of
+ * the envelope it put around it (server/src/pi/guard.ts, flaggedResult).
+ */
+export function flaggedOf(text: string): { id: string; signals: string[] } | undefined {
+  const match = /^<<<untrusted:([0-9a-f]{16})>>> \(suspected prompt injection: ([a-z, -]+)\)/.exec(text);
+  return match ? { id: match[1], signals: match[2].split(", ") } : undefined;
+}
 
 /**
  * Some extensions put a block of markup in the chat that is written for the
@@ -516,6 +550,7 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           status: "running",
           detail: summarizeToolInput(p),
           ...(p[GENERATED_PICTURE_MARK] === true ? { portalPicture: true as const } : {}),
+          ...(p[GENERATED_VIDEO_MARK] === true ? { portalVideo: true as const } : {}),
           ...(args !== undefined ? { args } : {}),
           ...(ev.at !== undefined ? { since: ev.at } : {}),
         });
@@ -567,6 +602,12 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             if (ev.at !== undefined) it.until = ev.at;
             const text = toolOutputText(p.result);
             if (typeof text === "string" && text) setToolOutput(it, text);
+            const flag = typeof text === "string" ? flaggedOf(text) : undefined;
+            if (flag) {
+              let turn: UserItem | undefined;
+              for (let j = items.length - 1; j >= 0 && !turn; j--) { const item = items[j]; if (item.kind === "user") turn = item; }
+              it.flagged = { ...flag, ...(turn ? { turnSeq: turn.seq } : {}) };
+            }
             if (p.result?.details !== undefined) it.details = p.result.details;
             // Its updates were live only; how many there were is kept on its end.
             if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);
@@ -574,6 +615,11 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             if (picture) {
               it.picture = picture;
               it.pictureSeq = ev.seq;
+            }
+            const video = shownVideo(p);
+            if (video) {
+              it.video = video;
+              it.videoSeq = ev.seq;
             }
             break;
           }
@@ -597,6 +643,31 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           const notice = failures.get(it.seq);
           if (notice) items.splice(items.indexOf(notice), 1);
         } else it.state = p.quiet ? "quiet" : p.outcome === "started" ? "started" : p.outcome === "queued" ? "queued" : "done";
+        break;
+      }
+
+      // The agent asking. Each once: a page is sent the open ones again with the stream (see liveSnapshot),
+      // for a long chat whose loaded end does not reach back to where they were asked.
+      case "portal_question": {
+        const questionId = typeof p.id === "string" ? p.id : "";
+        if (!questionId || !Array.isArray(p.questions) || items.some((x) => x.kind === "question" && x.questionId === questionId)) break;
+        items.push({
+          kind: "question",
+          id: `q${questionId}`,
+          questionId,
+          ...(typeof p.title === "string" && p.title ? { title: p.title } : {}),
+          questions: p.questions,
+          state: "open",
+        });
+        break;
+      }
+
+      case "portal_question_end": {
+        const it = items.find((x): x is Extract<Item, { kind: "question" }> => x.kind === "question" && x.questionId === p.of);
+        // Its start is on a page not loaded yet.
+        if (!it || !QUESTION_ENDS.includes(p.outcome)) break;
+        it.state = p.outcome;
+        if (p.outcome === "answered" && p.answers && typeof p.answers === "object") it.answers = p.answers;
         break;
       }
 

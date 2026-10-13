@@ -2,8 +2,15 @@ import type { RequestHandler } from 'express';
 import { existsSync } from 'node:fs';
 import net from 'node:net';
 
-export function bindHost(password: string | undefined, allowOpen: string | undefined): string {
-  return password || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
+/** Running without a login is a deliberate choice, never what an empty .env falls back to. */
+export const allowNoPassword = (): boolean => /^(1|true|yes)$/i.test(process.env.PORTAL_ALLOW_NO_PASSWORD ?? '');
+
+/**
+ * Where the portal listens: everywhere once there is a login in front of it (or one to be chosen
+ * on the setup screen), and on this machine only where it is open by choice, unless ALLOW_OPEN says otherwise.
+ */
+export function bindHost(login: boolean, allowOpen: string | undefined): string {
+  return login || allowOpen === '1' ? '0.0.0.0' : '127.0.0.1';
 }
 
 /**
@@ -63,7 +70,9 @@ export function loginThrottle(now = Date.now): RequestHandler {
     entry.count++;
     spent++;
     attempts.set(key, entry);
-    res.on('finish', () => { if (res.statusCode < 400) attempts.delete(key); });
+    // A route that checks the password and then refuses for another reason says so in `res.locals.passwordRight`:
+    // that is no guess, and counts like a login that worked.
+    res.on('finish', () => { if (res.statusCode < 400 || res.locals.passwordRight === true) attempts.delete(key); });
     next();
   };
 }

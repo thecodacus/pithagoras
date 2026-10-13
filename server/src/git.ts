@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { insideReal, isUnderText, realPath } from "./within.js";
 
@@ -65,7 +65,7 @@ interface RunOptions {
 }
 
 /** What every git here runs with: no colour, no pager, names as they are, nothing the repo's config would run just to look. */
-const GIT_CONFIG = [
+export const GIT_CONFIG = [
   "-c", "core.quotepath=false",
   "-c", "color.ui=false",
   "-c", "core.fsmonitor=false",
@@ -292,6 +292,103 @@ export async function findRepo(folder: string): Promise<Repo | null> {
     throw e;
   }
 }
+
+/** A repository the panel can show: where it is, as a path from the chat's folder ("" for the one around it). */
+export interface RepoEntry {
+  path: string;
+  name: string;
+}
+
+/** How far below the chat's folder a clone is looked for, and how much of the tree is looked at for it. */
+const SCAN_DEPTH = 4;
+const SCAN_FOLDERS = 4000;
+const SCAN_REPOS = 50;
+/** Folders no clone the agent works in is kept in, and that are the most of what a scan would walk. */
+const SCAN_SKIP = new Set(["node_modules", "__pycache__", "dist", "build", "target", "vendor"]);
+
+/**
+ * The repositories the chat's folder has: the one it is in, if any ("" in
+ * `path`), and the clones below it — a project that holds a repository of its
+ * own, or several. A repository is a folder with a `.git` (a file there is a
+ * worktree or a submodule); one is not looked into any further, and neither is
+ * a link, which may lead out of the folder. Bounded in depth, folders and
+ * repositories, since it runs on the machine that serves every other request.
+ */
+export async function findRepos(folder: string): Promise<{ repos: RepoEntry[]; truncated: boolean }> {
+  const repos: RepoEntry[] = [];
+  const around = await findRepo(folder);
+  if (around) repos.push({ path: "", name: path.basename(around.root) });
+  let truncated = false;
+  let seen = 0;
+  let level: string[] = [""];
+  for (let depth = 0; level.length && depth <= SCAN_DEPTH; depth++) {
+    const next: string[] = [];
+    for (const rel of level) {
+      if (++seen > SCAN_FOLDERS) return { repos: sorted(repos), truncated: true };
+      let names;
+      try {
+        names = await readdir(path.join(folder, rel), { withFileTypes: true });
+      } catch {
+        // Gone since it was listed, or not ours to read.
+        continue;
+      }
+      // The folder itself having a .git is the repository around it, listed above.
+      const dotGit = rel ? names.find((d) => d.name === ".git") : undefined;
+      if (dotGit && (await looksLikeRepo(path.join(folder, rel, ".git"), dotGit.isDirectory()))) {
+        if (repos.length >= SCAN_REPOS) truncated = true;
+        else repos.push({ path: rel, name: path.posix.basename(rel) });
+        continue;
+      }
+      for (const d of names) {
+        if (!d.isDirectory() || d.name.startsWith(".") || SCAN_SKIP.has(d.name)) continue;
+        next.push(rel ? `${rel}/${d.name}` : d.name);
+      }
+    }
+    level = next;
+  }
+  return { repos: sorted(repos), truncated };
+}
+
+/**
+ * Whether a `.git` is one git takes for a repository: a folder that is a git dir, or a file naming one, as a
+ * worktree's or a submodule's does. An empty or half-made one, as an interrupted clone or a deleted main
+ * clone leaves, is skipped by git, which then works in the repository around it — so listing it would offer one
+ * repository and act on another.
+ */
+async function looksLikeRepo(dotGit: string, isDir: boolean): Promise<boolean> {
+  if (isDir) return isGitDir(dotGit);
+  try {
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(dotGit, "utf8"));
+    return m ? await isGitDir(path.resolve(path.dirname(dotGit), m[1])) : false;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `dir` has what git needs of a git dir: a HEAD, and the refs and objects, or the `commondir` of a worktree's. */
+async function isGitDir(dir: string): Promise<boolean> {
+  const is = async (name: string, dirOk: boolean) => {
+    try {
+      const st = await stat(path.join(dir, name));
+      return dirOk ? st.isDirectory() : st.isFile();
+    } catch {
+      return false;
+    }
+  };
+  if (!(await is("HEAD", false))) return false;
+  return (await is("commondir", false)) || ((await is("objects", true)) && (await is("refs", true)));
+}
+
+/** Whether `dir` is the top of the repository git works in there, not a folder in a bigger one. */
+export async function isRepoRoot(dir: string): Promise<boolean> {
+  const repo = await findRepo(dir);
+  if (!repo) return false;
+  const root = realPath(repo.root);
+  return root !== null && root === realPath(dir);
+}
+
+/** The one around first, then the clones by path. */
+const sorted = (repos: RepoEntry[]) => repos.sort((a, b) => (a.path === "" ? -1 : b.path === "" ? 1 : a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 
 /** Make the chat's folder a repository. */
 export async function initRepo(folder: string): Promise<void> {

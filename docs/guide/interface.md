@@ -136,9 +136,9 @@ in two places:
   extensions registered. The portal's own `generate_image` and `edit_image` are the exception:
   they are listed as soon as image generation or editing is switched on. A group
   can be switched off as a whole, and each package can be given a name of your own — *Rename* — for the list. The
-  portal's picture tools (`show_image`, `generate_image` and `edit_image`) share
-  one group, **Images**, in every tool list; an extension's tool of one of those
-  names stays in the group of its extension.
+  portal's picture and video tools (`show_image`, `generate_image`, `edit_image`, `generate_video` and
+  `show_video`) share one group, **Media**, in every tool list; an extension's tool of one of those
+  names stays in the group of its extension. The video tools are listed as soon as video generation is switched on.
 - **Projects → Tools** on a project's row sets what every chat in that project starts
   with, against the portal-wide default; see [Projects](/guide/projects#tools).
 - **Tools** on an agent's page sets what every chat in its home and every run it does on

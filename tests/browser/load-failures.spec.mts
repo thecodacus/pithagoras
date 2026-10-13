@@ -25,7 +25,7 @@ const answers: Record<string, unknown> = {
   '/api/channels': { channels: [], kinds: [], agentHome: '/a/home' },
   '/api/skills': { skills: [{ name: 'release-notes', description: 'How releases are cut', editable: true, enabled: true, source: 'user', path: '/a/skills/release-notes' }], diagnostics: [], root: '/a/skills' },
   '/api/browser': {
-    running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
+    running: false, unprotected: false, connectedAs: null, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
     install: { available: true, mode: 'docker', image: false, container: 'absent', binary: '/usr/bin/chromium', pulling: { active: false, line: '' } }, config: { user: 'abc', hasPassword: true },
   },
   '/api/voice': { enabled: false, whisperUrl: 'http://127.0.0.1:8178/inference', breezeUrl: 'http://127.0.0.1:7860/v1/audio/speech', instruction: 'Clear speech', voice: 'design', runtime: 'breeze', language: 'auto', cfgScale: 4 },
@@ -172,7 +172,9 @@ test('the Projects page offers to read the list again instead of a placeholder f
   await expect(page.getByRole('alert')).toContainText(FAILED);
   up('/api/projects');
   await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page.getByText('/w/demo')).toBeVisible();
+  // The list shows a project by its name; the folder's path is not drawn (issue #120).
+  await expect(page.getByRole('main').getByText('demo', { exact: true })).toBeVisible();
+  await expect(page.getByText('/w/demo')).toHaveCount(0);
 });
 
 test('Settings → Tools tells a deployment without tool switches from a portal that did not answer', async ({ page }) => {

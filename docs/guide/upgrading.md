@@ -63,6 +63,18 @@ mv portal.db portal-damaged.db && rm -f portal.db-wal portal.db-shm && mv portal
 
 The portal checks the recovered database before upgrading it. Rows on damaged pages can't be recovered, which usually means part of the event history of some conversations. Once you're happy with the result, delete `portal-damaged.db`.
 
+## The password moves into the database
+
+A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hashed, in its database, chosen in the browser and changed under Settings → Authentication (see [The password](/guide/deploying#the-password)). What the first start after the upgrade does:
+
+- **A `PORTAL_PASSWORD` that was in use is moved in.** The portal hashes it, stores it, and says so once in the log. Nothing changes for the people who sign in, except that the logins made before the upgrade are asked for the password once more: the cookies are signed under the password's hash now. A password shorter than 8 characters is moved too if this portal has been used (it keeps working, with a warning in Settings until it is changed), and is not if the portal is new.
+- **The variable is ignored from then on.** Take it out of `.env`, the Compose environment or the Portainer stack. While it is still there and equal to the password nothing is said; a value that differs is reported at each start as ignored, so that editing it does not look like it changed the password. Change the password under Settings → Authentication instead.
+- **`change-me` and other examples are not moved.** A `PORTAL_PASSWORD` that is the example, or shorter than 8 characters on a portal that is new, is not taken: the portal shows the page that asks for a password, as a new install does.
+- **No `PORTAL_PASSWORD` and no password in the database** is a new install: the page that asks for one. Until it is chosen the portal answers nothing else, and whoever opens it first chooses it.
+- **Going back** to a release that reads `PORTAL_PASSWORD` needs the variable set again: that release does not look in the database.
+
+A password that is lost is removed with `npm run reset-password`, or `docker exec -it pithagoras node server/dist/reset-password.js` in a container, see [A lost password](/guide/deploying#a-lost-password).
+
 ## Upgrading from the first release
 
 What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:
@@ -70,7 +82,7 @@ What the first start after an install of version 0.1.0, or of any build made bef
 - **The Upgrading page.** The database is checked, backed up and upgraded, as above. The schema version was raised for this release, so an install made before it goes through this once.
 - **A voice add-on.** The container of a voice add-on that an older version made is made again, with the engines and the card it had, the next time it is started or installed from Settings → Add-ons; the models and builds in its volume are kept. Rebuilding the portal does not touch it until then.
 - **`WORKSPACES_DIR` is required.** An install whose `.env` never set it was mounting the folder `/root/repos` of the host, and Compose now stops until the variable is set. Set it to the folder your repositories are in; for an install that relied on the old default, that is `/root/repos`. The Portainer stack asks for it too.
-- **The password.** A portal whose `PORTAL_PASSWORD` is still `change-me`, the example of the first release's `.env.example`, no longer starts, so change it before you upgrade. A new or changed password has to be at least 8 characters; a portal that already ran with a shorter one keeps starting with it, with a warning. See [Deploying](/guide/deploying#environment).
+- **The password.** It is kept in the portal's database now, no longer read from `PORTAL_PASSWORD`; see [The password moves into the database](#the-password-moves-into-the-database). A `PORTAL_PASSWORD` that is still `change-me`, the example of the first release's `.env.example`, is not taken as the password.
 - **The Portainer stack's data folder.** The first release's Portainer stack ignored `PORTAL_DATA_DIR` and always kept its data in the volume `<stack>_pithagoras-data`. It now mounts the folder that variable names, as `docker-compose.yml` does. If your stack's environment sets `PORTAL_DATA_DIR`, the update would start the portal on that folder, empty if it did not exist, and everything you had would look gone. Either remove the variable to stay on the volume, or stop the stack first and copy the volume into the folder: `docker run --rm -v <stack>_pithagoras-data:/from:ro -v /that/folder:/to alpine cp -a /from/. /to/`.
 - **Rules for `subagent` and the routine tools.** `subagent`, `routine_create`, `routine_update` and `routine_run` run what a person writes with your rights, so no rule or approval opens them for anybody else now (see [roles](/people/roles#what-a-colleague-may-do)). A rule the first release let you or an approval make for one of them could never apply, so the upgrade removes it from Settings → People, a heartbeat's own excepted. A colleague who was allowed to delegate with `subagent` is not any more.
 - **Channel packages.** A third-party channel has to say who sent each message (`from` in `ctx.ask`, with the sender's id as a string), or once a primary user is named its messages are turned away like a stranger's. See [Writing a channel](/channels/writing-a-channel).
@@ -81,6 +93,7 @@ What the first start after an install of version 0.1.0, or of any build made bef
 - **Deleting.** Deleting an agent with its folder deletes its routines as well; the sessions of their runs are kept. Deleting an agent or a project stops the background jobs started in its folder.
 - **Pictures from other sites** in replies, notes and pull requests are not loaded; the chat says which site the picture was from. The portal's own pictures load as before.
 - **The `pi` in the image** is the one the lock names, as the portal's own, instead of the newest published. `pi install` and the Terminal use it.
+- **pi is 1.1.** The portal's pi, and the `pi` in the image, move from 0.82 to 1.1. The extensions and packages you installed stay at their versions; one written for an older pi may need an update of its own, as pi 1.0 changed parts of its extension and provider interfaces. `pi-mcp-adapter` 2.18.0, which the portal installs, works as before. pi now reads `AGENTS.override.md` before `AGENTS.md` in a folder. If you use Azure, its provider is renamed from `azure-openai-responses` to `azure`: rename it in pi's `auth.json`, `models.json` and `settings.json`, or sign in again.
 - **`deploy/cortex-voice` is gone** from the repository. A machine set up from those files keeps running; keep a copy of them if you set one up again.
 
 ## Pin a version

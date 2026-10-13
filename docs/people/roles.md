@@ -38,7 +38,7 @@ instruction to it, or a process of the portal.
 | `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` | the portal | the agent's own context |
 | `WATCH.md` | the heartbeat | what it is asked on every look |
 | `.agent-name` | the portal | which agent a kept folder belongs to, and so who takes up what is in it |
-| `AGENTS.md`, `CLAUDE.md` | pi, from the folder and from every folder above it | the project's instructions |
+| `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md` | pi, from the folder and from every folder above it | the project's instructions |
 | `.pi`, `.agents` | pi, with everything in them | its system prompt, settings, skills, prompts, themes and extensions, which run in the portal |
 | `.mcp.json`, `.vscode/mcp.json`, `opencode.json` | pi's MCP adapter | tool servers it starts, each a process of the portal |
 
@@ -47,8 +47,8 @@ talking to, one that was kept when its agent was deleted and one that nobody has
 made yet (the next agent of that name takes up what it finds there), and in any
 folder of a project. A name in a folder no conversation runs in, such as
 `notes/memory.md` in an agent's home, is only a note. A folder named `.pi` or
-`.agents` is held wherever it is, and so are `AGENTS.md`, `CLAUDE.md` and
-`opencode.json`, which are read from above the folder as well.
+`.agents` is held wherever it is, and so are `AGENTS.override.md`, `AGENTS.md`,
+`CLAUDE.md` and `opencode.json`, which are read from above the folder as well.
 
 Some places are held whole, whatever is in them: pi's own agent folder, `~/.agents`
 in the home of the user the portal runs as (the user skills pi loads, and the MCP
@@ -63,7 +63,7 @@ these places as they really are, in whatever case the folder spells them, so a
 file is judged by where it ends up, for a file that is not there yet as for one
 that is. A link at one of these names is followed to what it leads to, in an
 agent's home, in the folder of the conversation, in every folder above those
-(pi reads `AGENTS.md` and `CLAUDE.md` from there as well), and in the folders of
+(pi reads `AGENTS.override.md`, `AGENTS.md` and `CLAUDE.md` from there as well), and in the folders of
 the projects, the first 5,000 of them in all, nearest the top. So is a link *inside*
 a place that is held whole, and inside what such a link leads to: where a
 project shares its skills between tools with `.agents/skills` as a link to

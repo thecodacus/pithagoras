@@ -3,9 +3,8 @@ import { Link } from "react-router-dom";
 import { LuChevronLeft, LuChevronRight, LuLoader, LuPlus, LuSlidersHorizontal, LuSparkles, LuUpload, LuWandSparkles, LuX } from "react-icons/lu";
 import { api, type GalleryPicture, type ImagesFeature, type PictureJob } from "../api";
 import { IMAGE_TYPES, sortFiles } from "../attachments";
-import { MAX_SOURCES, MAX_SOURCES_BYTES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName } from "../edit-sources";
+import { MAX_SOURCES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName } from "../edit-sources";
 import { COMPRESSIBLE, FORM_KEY, LIMITS, OUTPUT_FORMATS, readForm, settingsBody, sizeParts, viewerPicture, type FieldName, type Fields, type FormMemory, type Problem } from "../images-gallery";
-import { bytesLabel } from "../projects";
 import { local } from "../safe-storage";
 import { isEnter } from "../shortcuts";
 import { t, tp, tx } from "../i18n";
@@ -151,9 +150,7 @@ export function ImageMaker({
   const why =
     refused === "one"
       ? t("This editing endpoint takes one picture per edit, and {n} are chosen. Take out all but one, or switch on “Several pictures per edit”.", { n: sources.length })
-      : refused === "weight"
-        ? t("Together the pictures are over {max}, which is more than an edit takes. Take some out.", { max: bytesLabel(MAX_SOURCES_BYTES) })
-        : undefined;
+      : undefined;
 
   // Another picture to change is another picture to paint on.
   const first = sources[0]?.id;
@@ -416,8 +413,8 @@ export function ImageMaker({
             <p className="mt-1 text-[11px] text-fg-faint sm:col-span-2">
               {tx("Using stable-diffusion.cpp? Switch on “Stable Diffusion extra settings” in {settings} for more options.", {
                 settings: (
-                  <Link to="/settings/images" className="text-accent hover:underline">
-                    {t("Settings → Agent → Images")}
+                  <Link to="/settings/media" className="text-accent hover:underline">
+                    {t("Settings → Agent → Media")}
                   </Link>
                 ),
               })}
@@ -496,8 +493,8 @@ export function ImageMaker({
       {editing && !changing && (
         <p className="text-sm text-fg-muted">
           {t("Image editing is switched off, or has no address.")}{" "}
-          <Link to="/settings/images" className="text-accent hover:underline">
-            {t("Set it up in Settings → Agent → Images")}
+          <Link to="/settings/media" className="text-accent hover:underline">
+            {t("Set it up in Settings → Agent → Media")}
           </Link>
         </p>
       )}
@@ -553,7 +550,7 @@ export function ImageMaker({
                     {/* A button, so that it can be looked at larger and a keyboard reaches it. */}
                     <button type="button" data-source-id={p.id} onClick={() => setLooking(p.id)} aria-label={t("Look at {name}", { name: sourceName(p) })} title={t("Look at {name}", { name: sourceName(p) })} className="block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
                       <img
-                        src={api.galleryFileUrl(p.id)}
+                        src={p.thumb ? api.galleryThumbUrl(p.id) : api.galleryFileUrl(p.id)}
                         alt={sourceName(p)}
                         loading="lazy"
                         draggable={false}
@@ -662,8 +659,8 @@ export function ImageMaker({
               {!multiple && (
                 <>
                   {" "}
-                  <Link to="/settings/images" className="text-accent hover:underline">
-                    {t("Set it up in Settings → Agent → Images")}
+                  <Link to="/settings/media" className="text-accent hover:underline">
+                    {t("Set it up in Settings → Agent → Media")}
                   </Link>
                 </>
               )}
@@ -675,8 +672,8 @@ export function ImageMaker({
       {!editing && !generating && (
         <p className="mb-3 text-sm text-fg-muted">
           {t("Image generation is switched off, or has no address.")}{" "}
-          <Link to="/settings/images" className="text-accent hover:underline">
-            {t("Set it up in Settings → Agent → Images")}
+          <Link to="/settings/media" className="text-accent hover:underline">
+            {t("Set it up in Settings → Agent → Media")}
           </Link>
           {changing && <span className="mt-1 block text-xs text-fg-subtle">{t("Pictures can still be changed: choose Edit above.")}</span>}
         </p>

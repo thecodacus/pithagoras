@@ -1,5 +1,5 @@
-import { Children, cloneElement, forwardRef, isValidElement, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { LuCircleAlert, LuX } from "react-icons/lu";
+import { Children, cloneElement, forwardRef, isValidElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { LuChevronRight, LuCircleAlert, LuX } from "react-icons/lu";
 import { t } from "../i18n";
 import { EFFORT_LEVELS, effortLabel } from "../effort";
 import { Select } from "./Select";
@@ -23,6 +23,102 @@ export function Section({ title, hint, action, children }: { title: string; hint
       </div>
       <div className="mt-2.5">{children}</div>
     </section>
+  );
+}
+
+/**
+ * A section that opens and closes: its heading and one line under it are a button, `controls` stay in view
+ * whether it is open or not (the switches a person comes for) above the heading, and the rest is `children`,
+ * directly under the heading, kept drawn but hidden while it is closed so that what was typed in it is not lost.
+ * The line is the `hint` while it is open and the `summary` while it is closed. `whileClosed` is shown under the
+ * heading only while it is closed, for what `children` says when it is open. `locked` keeps it open, for a
+ * section with something unsaved in it.
+ *
+ * A search that names the section, or a group in it, opens it: it is told with a `settings-reveal` event on the element it found, which bubbles.
+ */
+export function CollapsibleSection({
+  title,
+  hint,
+  summary,
+  open,
+  onToggle,
+  locked = false,
+  controls,
+  whileClosed,
+  children,
+}: {
+  title: string;
+  hint: ReactNode;
+  summary: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  locked?: boolean;
+  controls?: ReactNode;
+  whileClosed?: ReactNode;
+  children: ReactNode;
+}) {
+  const body = useId();
+  const root = useRef<HTMLElement>(null);
+  const reveal = useRef(onToggle);
+  reveal.current = () => {
+    if (!open) onToggle();
+  };
+  useEffect(() => {
+    const el = root.current;
+    const show = () => reveal.current();
+    el?.addEventListener("settings-reveal", show);
+    return () => el?.removeEventListener("settings-reveal", show);
+  }, []);
+  return (
+    // Named so Settings' search can scroll to it, and so that it is a region of its own: both models have fields of the same names.
+    <section ref={root} aria-label={title} className="settings-section mb-7" data-setting={title}>
+      {/* The switches first and the heading under them, one above the other at every width, so that what opens is directly under its heading. */}
+      {controls && <div className="mb-3 space-y-3">{controls}</div>}
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={body}
+          aria-disabled={locked || undefined}
+          title={locked ? t("Save or discard the changes first.") : undefined}
+          onClick={() => !locked && onToggle()}
+          className="flex w-full items-start gap-1.5 rounded-lg text-left uppercase tracking-wider transition hover:text-fg"
+        >
+          <LuChevronRight aria-hidden className={`mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+          <span className="min-w-0 flex-1">
+            <span className="block">{title}</span>
+            <span className="mt-0.5 block text-xs font-normal normal-case tracking-normal text-fg-subtle">{open ? hint : summary}</span>
+          </span>
+        </button>
+      </h3>
+      {!open && whileClosed && <div className="mt-3">{whileClosed}</div>}
+      <div id={body} hidden={!open} className="mt-3 space-y-3">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** A group inside a section that opens and closes by itself (a native disclosure): a title, one line under it, and the rest when opened. A search that names it opens it, as it does a section. */
+export function DetailsGroup({ title, summary, defaultOpen = false, children }: { title: string; summary: ReactNode; defaultOpen?: boolean; children: ReactNode }) {
+  const root = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    const show = () => {
+      if (el) el.open = true;
+    };
+    el?.addEventListener("settings-reveal", show);
+    return () => el?.removeEventListener("settings-reveal", show);
+  }, []);
+  return (
+    <details ref={root} open={defaultOpen} data-setting={title} className="rounded-xl border border-line bg-raised/40">
+      {/* The chevron that turns is the page's own for every disclosure (index.css). */}
+      <summary className="flex items-center px-3 py-2 text-xs">
+        <span className="text-fg-muted">{title}</span>
+        <span className="ml-auto min-w-0 truncate text-fg-faint">{summary}</span>
+      </summary>
+      <div className="space-y-3 border-t border-line p-3">{children}</div>
+    </details>
   );
 }
 
@@ -53,6 +149,24 @@ export const ErrorBanner = forwardRef<HTMLDivElement, { children: ReactNode; onC
     </div>
   );
 });
+
+/**
+ * Something that worked but not quite as asked, said where the person sees it: the warning's colours, as a status
+ * rather than an alert, since nothing failed. Put away by hand, and by whoever owns it when something new is asked.
+ */
+export function WarnBanner({ children, onClose, className = "" }: { children: ReactNode; onClose?: () => void; className?: string }) {
+  return (
+    <div role="status" className={`flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn ${className}`}>
+      <LuCircleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">{children}</div>
+      {onClose && (
+        <button type="button" onClick={onClose} aria-label={t("Dismiss")} title={t("Dismiss")} className="shrink-0 rounded p-0.5 hover:bg-warn/10">
+          <LuX aria-hidden className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
 
 /**
  * What a page shows when its first read failed. Without it the page keeps its

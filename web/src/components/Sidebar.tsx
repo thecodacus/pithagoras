@@ -12,7 +12,7 @@ import {
   LuFolderKanban,
   LuGlobe,
   LuBrain,
-  LuImage,
+  LuImages,
   LuMessagesSquare,
   LuPlus,
   LuSearch,
@@ -24,7 +24,7 @@ import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
 import { pick, useFlip } from "../motion";
-import { HOME, folderKeys, folderName, groupByFolder, sortFolders, type Places } from "../session-folders";
+import { HOME, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t, useLanguage } from "../i18n";
 
@@ -41,7 +41,7 @@ export const Sidebar = memo(function Sidebar({
   view,
   hasBrowser,
   hasMemory = false,
-  hasImages = false,
+  hasMedia = false,
   places,
   onSelect,
   onNewChat,
@@ -57,17 +57,17 @@ export const Sidebar = memo(function Sidebar({
   executor: string;
   activeId: string | null;
   /** Which top-level destination is showing, so the nav can mark it. */
-  view: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
+  view: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit";
   /** Whether the optional browser service is there at all. */
   hasBrowser: boolean;
   /** Understory is the agent's memory: its page is there to read. */
   hasMemory?: boolean;
-  /** Image generation is on and has an address: the Images page is there to make pictures in and to look through them. */
-  hasImages?: boolean;
+  /** Image or video generation is on and has an address: the Media page is there to make pictures and videos in and to look through them. */
+  hasMedia?: boolean;
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
   places?: Places | null;
   onSelect: (id: string) => void;
-  /** A chat in `workspace`, or in Home without one, opened. */
+  /** A chat in `workspace`, or where New starts without one, opened. */
   onNewChat: (workspace?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
@@ -109,17 +109,22 @@ export const Sidebar = memo(function Sidebar({
   // The field goes away when the list shrinks below the limit; what was typed
   // in it must not go on hiding chats from a list that has no box to clear it.
   const searching = searchable && query.trim() !== "";
-  const found = useMemo(() => filterSessions(sessions, searching ? query : ""), [sessions, searching, query]);
+  // Gathered by folder only where there is more than Home to gather them in.
+  const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
+  const hasPlaces = !!places && hasMoreThanHome(places);
+  // Until the places are known, the chats are listed as they were: not held back for them.
+  const byFolder = grouping === "folders" && hasPlaces;
+  // The search goes by what the list shows: the name, and the folder's name where the chats are gathered under it.
+  // A pinned chat is listed at the top with no folder next to it, so it is found by its title only.
+  const found = useMemo(() => {
+    const nameOf = searching && byFolder ? folderNameOf(sessions, places) : undefined;
+    return filterSessions(sessions, searching ? query : "", nameOf && ((s) => (s.pinned ? "" : nameOf(s))));
+  }, [sessions, searching, query, byFolder, places]);
   const pinned = found.filter((s) => s.pinned);
   const recents = found.filter((s) => !s.pinned);
   // A search looks through all of them, not only the dozen that are listed.
   const shownRecents = searching ? recents : recents.slice(0, RECENTS_LIMIT);
 
-  // Gathered by folder only where there is more than Home to gather them in.
-  const { grouping, sort, order, setGrouping, setSort, move } = useFolderPrefs();
-  const hasProjects = !!places && places.projects.length > 0;
-  // Until the places are known, the chats are listed as they were: not held back for them.
-  const byFolder = grouping === "folders" && hasProjects;
   // Each folder is counted, marked running and ordered by all its chats, as
   // on the Sessions page, so that the two agree; pinned ones are listed at the
   // top rather than in it (`listed`).
@@ -185,8 +190,8 @@ export const Sidebar = memo(function Sidebar({
     ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
     // Likewise: only while Understory holds the agent's memory.
     ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
-    // And only while there is an image endpoint to make pictures with.
-    ...(hasImages ? [{ to: "images" as const, icon: <LuImage />, label: t("Images") }] : []),
+    // And only while there is an endpoint to make pictures or videos with.
+    ...(hasMedia ? [{ to: "media" as const, icon: <LuImages />, label: t("Media") }] : []),
     { to: "audit", icon: <LuShield />, label: t("Audit") },
   ];
   const anyRunning = sessions.some((s) => s.status === "running");
@@ -281,7 +286,7 @@ export const Sidebar = memo(function Sidebar({
               isOpen={openFolders.isOpen}
               onToggle={openFolders.toggle}
               onMove={searching || !allKeys ? undefined : (shown, key, to) => move(shown, key, to, allKeys)}
-              onNewChat={(f) => newChat(f.key === HOME ? undefined : f.path!)}
+              onNewChat={(f) => newChat(f.path || undefined)}
             >
               {(f) => {
                 const chats = listed.get(f.key)!;
@@ -313,7 +318,7 @@ export const Sidebar = memo(function Sidebar({
         {!byFolder && shownRecents.length > 0 && (
           <>
             <Divider />
-            <ChatsHeading label={t("Recents")} controls={hasProjects} {...headingProps} />
+            <ChatsHeading label={t("Recents")} controls={hasPlaces} {...headingProps} />
             {shownRecents.map(item)}
             {recents.length > shownRecents.length && (
               <button
@@ -353,7 +358,7 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
+type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit";
 
 function RailButton({
   icon,
@@ -479,11 +484,6 @@ function SessionItem({
         <div className={`ml-auto hidden shrink-0 items-center gap-0.5 group-focus-within:flex group-hover:flex ${active ? "[@media(hover:none)]:flex" : ""}`}>
           <SessionActions session={s} small onPin={onPin} onStartRename={() => setRenaming(true)} onDelete={onDelete} onError={onError} />
         </div>
-      </div>
-      {/* Cut at the start, not the end: what tells chats apart is the last part of
-          the path. rtl moves the ellipsis; bdi keeps the path itself left to right. */}
-      <div className="truncate pl-4 text-left font-mono text-[10px] text-fg-subtle [direction:rtl]" title={s.workspace}>
-        <bdi>{s.workspace}</bdi>
       </div>
     </div>
   );

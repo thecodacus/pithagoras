@@ -3,6 +3,9 @@ import { installFetchWaits } from "./fetch-waits.js";
 import { DATA_DIR } from "./data-dir.js";
 import { holdDataDir } from "./instance-lock.js";
 import { piCli } from "./pi/package.js";
+import { installLogCapture } from "./logs.js";
+// Records the command line the portal was started with, before `process.argv[1]` is replaced below.
+import "./restart.js";
 
 /**
  * The server's entry.
@@ -15,6 +18,8 @@ import { piCli } from "./pi/package.js";
 // loading by the time this line runs, and none of them reach out at load; everything else that does —
 // every server life of the process — gets its waits here first.
 installFetchWaits();
+// What the server prints is kept from here on, for Settings → Logs.
+installLogCapture();
 
 let ours: boolean;
 try {

@@ -13,6 +13,9 @@ that started there. Nothing outside it can be reached.
 - **Browse.** Click a folder to go in, the path at the top to go back.
   Folders come first; `.git` is not listed. A link that leads out of the folder
   is shown greyed out and cannot be opened. A file's size is on its row, in B, KB, MB or GB.
+- **See the full path.** The pin button at the top shows the folder's full path
+  (and the folder you are in) on a line of its own; click it again to hide it.
+  The sidebar and the chat's header do not carry the path.
 - **Hide or show dotfiles.** Names that start with a dot (`.env`, `.cache`, …) are
   hidden to begin with, and a line under the list says how many. The eye icon at
   the top turns them on and off, and the choice is remembered in the browser.
@@ -21,6 +24,12 @@ that started there. Nothing outside it can be reached.
   (or press <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd>). A PNG, JPEG, GIF or WebP picture is
   shown as a picture (up to 25 MB). Any other file that is not text, or is over
   1 MB, is not shown; download it instead.
+- **Read markdown as a page.** A `.md`, `.markdown` or `.mdx` file opens as the
+  rendered page, with headings, lists, code and tables drawn. A button in its
+  header swaps to the source, to edit it, and back. The page follows what you type, even
+  before you save, and a picture it names from the chat's folder is shown from
+  the path in the file's own folder. The choice is remembered in the browser. A new
+  or empty file opens as the source anyway, so you can type into it.
 - **Download** without opening: every row has a download button, for a file or,
   for a folder, as a `.tar.gz`. The button at the top downloads the folder you are
   in (without `node_modules`, `.git`, `dist`, `build` and virtual environments).

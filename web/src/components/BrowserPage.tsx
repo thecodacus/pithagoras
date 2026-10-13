@@ -90,11 +90,15 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
 
   // Through the portal when that is secure — one certificate, one password, and
   // the frame inherits the context. Otherwise straight at the browser's own
-  // HTTPS port, which is a secure context on its own. Pointing the fallback at
-  // the proxy would have offered a link to the same dead end.
+  // HTTPS port, which is a secure context on its own — if that port is open to
+  // other machines, which it is not unless someone chose it. Pointing the
+  // fallback at the proxy would have offered a link to the same dead end.
+  const proxyUrl = "/browser-ui/";
   const uiUrl = embeddable
-    ? "/browser-ui/"
-    : `https://${window.location.hostname}:${status.uiPort}/`;
+    ? proxyUrl
+    : status.uiExposed
+      ? `https://${window.location.hostname}:${status.uiPort}/`
+      : null;
 
   return (
     <div className="h-full overflow-y-auto px-4 py-6">
@@ -142,19 +146,21 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                 {t("Stop")}
               </button>
             )}
-            <a
-              href={uiUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition ${
-                embeddable
-                  ? "bg-fg/5 text-fg-muted hover:bg-fg/10"
-                  : "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
-              }`}
-            >
-              <LuExternalLink className="h-3.5 w-3.5" />
-              {embeddable ? t("New tab") : t("Open browser")}
-            </a>
+            {uiUrl && (
+              <a
+                href={uiUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition ${
+                  embeddable
+                    ? "bg-fg/5 text-fg-muted hover:bg-fg/10"
+                    : "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
+                }`}
+              >
+                <LuExternalLink className="h-3.5 w-3.5" />
+                {embeddable ? t("New tab") : t("Open browser")}
+              </a>
+            )}
           </div>
         </PageHeader>
 
@@ -190,6 +196,15 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
           </div>
         )}
 
+        {status.uiOutdated && (
+          <div className="mb-5 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-fg-muted">
+            <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+            <span>
+              {t("This browser was installed before its own port was kept to this machine, so it still answers on every network interface. Remove it and install it again to close that; the profile and its logins stay.")}
+            </span>
+          </div>
+        )}
+
         {status.unprotected && (
           <div className="mb-5 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-xs text-fg-muted">
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
@@ -205,7 +220,9 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
             <LuCircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
             <span>
               {t("The portal is on plain HTTP, so the browser cannot be embedded — a frame only counts as secure when every page above it does.")}{" "}
-              {tx("{open} still works: it goes straight to the browser's own HTTPS port, which is secure on its own. Give the portal a certificate and it embeds here instead.", { open: <strong>{t("Open browser")}</strong> })}
+              {uiUrl
+                ? tx("{open} still works: it goes straight to the browser's own HTTPS port, which is secure on its own. Give the portal a certificate and it embeds here instead.", { open: <strong>{t("Open browser")}</strong> })
+                : tx("The browser's own port answers this machine only, so there is no link to it from here. Give the portal a certificate and it embeds here; {name} opens the port to other machines.", { name: <span className="font-mono">BROWSER_BIND</span> })}
             </span>
           </div>
         )}
@@ -220,7 +237,7 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
                 className="fx-power relative h-[32rem] overflow-hidden rounded-xl border border-line bg-black [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
               >
                 <iframe
-                  src={uiUrl}
+                  src={proxyUrl}
                   title={t("The agent's browser")}
                   className="h-full w-full border-0"
                   // The VNC client wants the keyboard and the clipboard.

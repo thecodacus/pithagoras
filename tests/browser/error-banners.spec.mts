@@ -35,7 +35,7 @@ test('the browser page forgets a failed poll when the next one works, and keeps 
   let down = false;
   const status = {
     running: false, unprotected: false, connectedAs: null, install: { available: true, image: true, container: 'stopped', pulling: { active: false, line: '' } },
-    config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '3011', cursor: true, allowlist: '', configured: true, byDefault: false, sessions: [], routines: [],
+    config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '3011', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: true, byDefault: false, sessions: [], routines: [],
   };
   await mockPortal(page, ({ path, method }) => {
     if (path === '/api/browser' && method === 'GET') return down ? reply(500, { error: 'The browser did not answer' }) : status;

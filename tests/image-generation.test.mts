@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
 
 const temp = inProcessHome("pitha-images-");
@@ -87,7 +88,7 @@ test("a request is checked: the address is a base with no secret in it, the size
     assert.equal(typeof parse({ baseUrl: bad }), "string", bad);
   }
   assert.equal(typeof parse({ size: "huge" }), "string");
-  // A default size is one the Images page takes as well: each side from 64 to 8192, or auto.
+  // A default size is one the Media page takes as well: each side from 64 to 8192, or auto.
   for (const bad of ["16x16", "99999x99999", "63x64", "1024x8193"]) assert.match(String(parse({ size: bad })), /each side from 64 to 8192/, bad);
   for (const good of ["auto", "64x64", "8192x8192", " 1024x768 "]) assert.equal((parse({ size: good }) as { size: string }).size, good.trim(), good);
   assert.equal((parse({ size: "  " }) as { size: string }).size, "", "emptied is the way back to none");
@@ -803,8 +804,9 @@ test("a picture to edit is checked by its bytes and its size before anything is 
       await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG, mask: bad }), /The mask is not a PNG, JPEG, GIF or WebP picture/);
     }
     const big = Buffer.concat([PNG, Buffer.alloc(4096)]);
-    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: big }, { maxInputBytes: 1024 }), /The image is over/);
-    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG, mask: big }, { maxInputBytes: 1024 }), /The mask is over/);
+    // Too heavy is scaled down, and what is no picture that can be read cannot be: refused, and nothing is sent.
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: big }, { maxInputBytes: 1024 }), /The image cannot be made to fit an edit: its size cannot be read.*Nothing was sent/);
+    await assert.rejects(editing.editImage(target(origin), { prompt: "p", image: PNG, mask: big }, { maxInputBytes: 1024 }), /The mask cannot be made to fit an edit/);
     assert.equal(seen.length, 0, "nothing left the portal");
     assert.equal((await editing.editImage(target(origin), { prompt: "p", image: big }, { maxInputBytes: 1024 * 1024 })).ext, "png");
   } finally {
@@ -932,12 +934,12 @@ test("a picture that takes longer than the old limit is waited for, one past the
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 1 }), { prompt: "p" }), (e: Error) => {
       assert.ok(e instanceof gen.ImageGenerationError);
       assert.match(e.message, /did not answer within 1 seconds/, "it names the limit");
-      assert.match(e.message, /time limit in Settings → Agent → Images/, "and where to change it");
+      assert.match(e.message, /time limit in Settings → Agent → Media/, "and where to change it");
       return true;
     });
     // Editing has the same limit, from its target.
     assert.equal((await editing.editImage(target(origin, { timeoutSeconds: 3 }), { prompt: "p", image: PNG })).ext, "png");
-    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Images/);
+    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Media/);
     // An explicit limit of the call still wins, as the tests above use it.
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" }, { timeoutMs: 150 }), /did not answer within 0 seconds/);
   } finally {
@@ -1080,10 +1082,10 @@ test("several pictures are limited in number and in weight, and one that is refu
     await assert.rejects(ask([PNG, SVG, JPEG]), /Picture 2 is not a PNG, JPEG, GIF or WebP picture/);
     await assert.rejects(ask([PNG, JPEG, Buffer.alloc(0)]), /Picture 3 is not a PNG/);
     const big = Buffer.concat([PNG, Buffer.alloc(4096)]);
-    await assert.rejects(ask([PNG, big], { maxInputBytes: 1024 }), /Picture 2 is over/);
+    await assert.rejects(ask([PNG, big], { maxInputBytes: 1024 }), /Picture 2 cannot be made to fit an edit/);
     await assert.rejects(editing.editImage(several, { prompt: "p", image: [PNG, JPEG], mask: SVG }), /The mask is not a PNG/);
-    // Together, too: not scaled and not cut.
-    await assert.rejects(ask([big, big, big], { maxTotalBytes: 10 * 1024 }), /pictures are over 0 MB together, which is more than an edit takes.*none is scaled or cut/);
+    // Together, too: these cannot be scaled (they are padding, not pictures), so the first that is over its share is refused.
+    await assert.rejects(ask([big, big, big], { maxTotalBytes: 10 * 1024 }), /Picture 1 cannot be made to fit an edit/);
     assert.equal((await ask([big, big], { maxTotalBytes: 10 * 1024 })).ext, "png", "within the weight");
     assert.equal(seen.length, sent + 1, "nothing was sent for any of the refusals");
     assert.equal(editing.MAX_EDIT_TOTAL_BYTES, 50 * 1024 * 1024);
@@ -1252,7 +1254,7 @@ test("a picture over the limit is refused as too large for an edit, not told to 
     gen.saveImageGeneration({ baseUrl: origin, editEnabled: true });
     const { call } = loadEdit(folder);
     await assert.rejects(call({ path: "huge.png", prompt: "p" }), (e: Error) => {
-      assert.match(e.message, /over 25 MB, which is more than an edit takes/);
+      assert.match(e.message, /over 25 MB, which is more than can be read to be scaled down for an edit/);
       assert.doesNotMatch(e.message, /download/i);
       return true;
     });
@@ -1364,9 +1366,9 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   const one = loadEdit(folder).registered[0];
   assert.match(one.description, /set up to take ONE picture per edit/, "the limit is said, not left out");
   assert.match(one.description, /do not make the edit with one of them as if it were all/, "no picture is dropped without a word");
-  assert.match(one.description, /Settings → Agent → Images \(Several pictures per edit\)/, "and where several are switched on");
+  assert.match(one.description, /Settings → Agent → Media \(Several pictures per edit\)/, "and where several are switched on");
   assert.match(one.description, /reference for a new picture/, "one reference picture is still what it can be given");
-  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Images page/;
+  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Media page/;
   assert.match(one.description, attached, "a picture only attached to a message has no path: the agent says so rather than guess one");
 
   // With several taken, the same sentence is not there, and the limits are: the count and the weight.
@@ -1375,7 +1377,7 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   assert.doesNotMatch(many.description, /ONE picture|as if it were all/);
   assert.match(many.description, new RegExp(`one to ${editing.MAX_EDIT_PICTURES} pictures`));
   assert.match(many.description, new RegExp(`at most ${editing.MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB`));
-  assert.match(many.description, /size limit set for edits is refused, and the error names it/);
+  assert.match(many.description, /size limit set for edits, or too heavy, is scaled down to fit.*one that cannot be made to fit is refused, and the error names it/);
   assert.match(many.description, attached, "and the same for a list: attached pictures cannot be named in it");
   reset();
 });
@@ -1389,7 +1391,7 @@ test("a list of pictures for an endpoint that takes one is refused before anythi
     // A call that was loaded when several were on, or by a model that sends a list anyway: asked of the setting as it is now.
     await assert.rejects(
       loadEdit(folder).call({ paths: ["a.png", "b.jpg", "c.gif"], prompt: "p" }),
-      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Images/,
+      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Media/,
     );
     assert.equal(seen.length, 0, "nothing reached the endpoint");
     assert.deepEqual(readdirSync(folder).sort(), ["a.png", "b.jpg", "c.gif"], "and nothing was written");
@@ -1459,9 +1461,9 @@ test("a picture of a list that is refused refuses the call, says which it is, an
     await refused(["vector.png", "a.png"], /^Picture 1 \(vector\.png\): .*not a PNG, JPEG, GIF or WebP/);
     await refused(["a.png", "missing.png"], /^Picture 2 \(missing\.png\): .*no such file/i);
     await refused(["a.png", ""], /^Picture 2 \(\): Only a picture in the chat's folder can be edited/);
-    await refused(["a.png", "huge.png"], /^Picture 2 \(huge\.png\): The picture is over 25 MB, which is more than an edit takes\. It is not scaled or cut/);
-    // Each within the limit of a picture, but not together: not scaled and not cut.
-    await refused(["big-1.png", "big-2.png", "big-3.png"], /^The pictures are over 50 MB together, which is more than an edit takes\..*none is scaled or cut/);
+    await refused(["a.png", "huge.png"], /^Picture 2 \(huge\.png\): The picture is over 25 MB, which is more than can be read to be scaled down for an edit/);
+    // Each within the limit of a picture, but not together: they would be scaled down to share the 50 MB, which these (padding, not pictures) cannot be.
+    await refused(["big-1.png", "big-2.png", "big-3.png"], /^Picture 1 cannot be made to fit an edit/);
     await refused(Array(editing.MAX_EDIT_PICTURES + 1).fill("a.png"), /at most 8 pictures, and 9 were given/);
     await refused([], /no picture to change/);
     await assert.rejects(call({ paths: ["a.png", 5], prompt: "p" }), /Picture 2 \(5\): Name the picture by its path/);
@@ -1827,59 +1829,210 @@ test("the maximum size of an edit is saved as the size of generation is written,
   reset();
 });
 
-test("an edit beyond the maximum size is refused before anything is sent, and says what the limit is", async () => {
+/** A real picture: solid colour (light as a file) or noise (heavy as a file, and what the byte limits are tested with). */
+const real = (width: number, height: number, how: { noise?: boolean; alpha?: boolean; format?: "png" | "jpeg" | "webp" | "gif"; orientation?: number } = {}) => {
+  const channels = how.alpha ? 4 : 3;
+  const image = sharp({
+    create: { width, height, channels, background: { r: 200, g: 40, b: 40, alpha: how.alpha ? 0.5 : 1 }, ...(how.noise ? { noise: { type: "gaussian" as const, mean: 128, sigma: 60 } } : {}) },
+  });
+  const tagged = how.orientation ? image.withMetadata({ orientation: how.orientation }) : image;
+  switch (how.format ?? "png") {
+    case "jpeg": return tagged.jpeg().toBuffer();
+    case "webp": return tagged.webp().toBuffer();
+    case "gif": return tagged.gif().toBuffer();
+    default: return tagged.png().toBuffer();
+  }
+};
+const sentImages = (seen: Seen) => partList(seen).filter((part) => part.name === "image" || part.name === "image[]");
+const dimensions = async (bytes: Buffer) => {
+  const { width, height } = await sharp(bytes).metadata();
+  return `${width}x${height}`;
+};
+
+test("an edit beyond the maximum size is scaled down to fit, keeping its ratio, and goes ahead", async () => {
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
   try {
     const limited = target(origin, { maxSize: "2048x1024", multiple: true });
-    const refused = (request: Parameters<typeof editing.editImage>[1], message: RegExp) =>
-      assert.rejects(editing.editImage(limited, request), (e: Error) => {
-        assert.ok(e instanceof gen.ImageGenerationError);
-        assert.match(e.message, message);
-        assert.match(e.message, /Nothing was sent/);
-        return true;
-      });
-    await refused({ prompt: "p", image: pngOf(2049, 1024) }, /^The image is 2049x1024 pixels, which is over the maximum of 2048x1024 for an edit\./);
-    await refused({ prompt: "p", image: pngOf(1000, 2049) }, /^The image is 1000x2049 pixels, which is over the maximum of 2048x1024/);
-    await refused({ prompt: "p", image: pngOf(3000, 3000) }, /3000x3000 pixels.*maximum of 2048x1024/);
-    await refused({ prompt: "p", image: pngOf(100, 100), mask: pngOf(4096, 100) }, /^The mask is 4096x100 pixels/);
-    await refused({ prompt: "p", image: [pngOf(100, 100), pngOf(5000, 100)] }, /^Picture 2 is 5000x100 pixels/);
-    // The pixels are not read from a picture that is not one, or from one with no header to read.
-    await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024/);
-    await refused({ prompt: "p", image: Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xff, 0xe0]) }, /^The image has a size that cannot be read.*maximum of 2048x1024/);
-    assert.equal(seen.length, 0, "no request reached the endpoint");
-
-    // Within it, either way up, and exactly at it: sent as it always was.
-    for (const image of [pngOf(2048, 1024), pngOf(1024, 2048), pngOf(10, 10), pngOf(1500, 700)]) {
-      await editing.editImage(limited, { prompt: "p", image, mask: pngOf(64, 64) });
+    const edit = async (image: Buffer | Buffer[], mask?: Buffer) => {
+      const before = seen.length;
+      const result = await editing.editImage(limited, { prompt: "p", image, mask });
+      assert.equal(seen.length, before + 1, "the edit was sent, not refused");
+      return { sent: sentImages(seen.at(-1)!), result };
+    };
+    // Either way up: the box fits a portrait picture as it fits a landscape one. 4096x2048 halves; 1000x4000 is 512x2048 (the box on its side).
+    for (const [from, to] of [["4096x2048", "2048x1024"], ["2049x1024", "2048x1023"], ["3000x3000", "1024x1024"], ["1000x4000", "512x2048"], ["1024x2049", "1023x2048"]]) {
+      const [w, h] = from.split("x").map(Number);
+      const { sent, result } = await edit(await real(w, h));
+      assert.equal(await dimensions(sent[0].bytes), to, `${from} is scaled to ${to}`);
+      assert.match(result.notes[0], new RegExp(`^The image was scaled down from ${from} pixels .* to ${to} pixels`));
     }
-    assert.equal(seen.length, 4);
-    // None set: any size goes, as it did.
-    await editing.editImage(target(origin), { prompt: "p", image: pngOf(9000, 9000) });
-    await editing.editImage(target(origin), { prompt: "p", image: PNG });
-    assert.equal(seen.length, 6);
+    // Never up, and a picture that fits is sent byte for byte.
+    for (const fits of [await real(2048, 1024), await real(1024, 2048), await real(10, 10), await real(1500, 700, { format: "jpeg" })]) {
+      const { sent, result } = await edit(fits);
+      assert.deepEqual(sent[0].bytes, fits);
+      assert.deepEqual(result.notes, []);
+    }
+    // Each kind stays what it was, and transparency stays.
+    for (const [format, type] of [["jpeg", "image/jpeg"], ["webp", "image/webp"], ["gif", "image/gif"], ["png", "image/png"]] as const) {
+      const { sent } = await edit(await real(4096, 2048, { format, alpha: format === "png" || format === "webp" }));
+      assert.equal(sent[0].type, type);
+      assert.equal(await dimensions(sent[0].bytes), "2048x1024");
+      if (format === "png" || format === "webp") assert.equal((await sharp(sent[0].bytes).metadata()).hasAlpha, true, `${format} keeps its alpha`);
+    }
+    // A picture a camera held on its side is scaled as it is seen, not as it is stored.
+    const turned = await edit(await real(4000, 2000, { format: "jpeg", orientation: 6 }));
+    assert.equal(await dimensions(turned.sent[0].bytes), "1024x2048", "stored 4000x2000, seen 2000x4000");
+    // Several: the ones that fit are untouched, in the order given.
+    const small = await real(100, 100);
+    const several = await edit([small, await real(5000, 500)]);
+    assert.deepEqual(several.sent[0].bytes, small);
+    assert.equal(await dimensions(several.sent[1].bytes), "2048x204");
+    assert.equal(several.result.notes.length, 1);
+    assert.match(several.result.notes[0], /^Picture 2 was scaled down from 5000x500/);
   } finally {
     server.close();
   }
 });
 
-test("edit_image tells the agent that the maximum size is exceeded, and sends and keeps nothing", async () => {
-  const folder = chatWith({ "small.png": pngOf(512, 512), "wide.png": pngOf(4000, 500), "tall.png": pngOf(300, 3000) });
+test("a mask is scaled with its picture to the same size, and stays a mask", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    const limited = target(origin, { maxSize: "2048x1024" });
+    // Black on the left and white on the right, the edge at an odd place: smoothing would make it grey there.
+    const width = 4001;
+    const height = 2000;
+    const raw = Buffer.alloc(width * height);
+    for (let y = 0; y < height; y++) raw.fill(255, y * width + 1999, (y + 1) * width);
+    const mask = await sharp(raw, { raw: { width, height, channels: 1 } }).png().toBuffer();
+    await editing.editImage(limited, { prompt: "p", image: await real(width, height), mask });
+    const parts = partList(seen[0]);
+    const image = parts.find((part) => part.name === "image")!;
+    const sentMask = parts.find((part) => part.name === "mask")!;
+    assert.equal(await dimensions(sentMask.bytes), await dimensions(image.bytes), "the same size as the picture");
+    assert.equal(await dimensions(image.bytes), "2048x1023", "4001x2000 within 2048x1024, the ratio kept");
+    const values = new Set(await sharp(sentMask.bytes).greyscale().raw().toBuffer());
+    assert.deepEqual([...values].sort((a, b) => a - b), [0, 255], "no grey where black meets white");
+
+    // A mask of a size of its own is left to the endpoint, as it always was: it is not made to match.
+    await editing.editImage(limited, { prompt: "p", image: await real(4000, 2000), mask: await real(64, 64) });
+    assert.equal(await dimensions(partList(seen[1]).find((part) => part.name === "mask")!.bytes), "64x64");
+    // A picture that fits is sent as it is, mask and all.
+    const fitting = await real(800, 600);
+    const fittingMask = await real(800, 600, { alpha: true });
+    await editing.editImage(limited, { prompt: "p", image: fitting, mask: fittingMask });
+    assert.deepEqual(partList(seen[2]).filter((part) => part.name === "image" || part.name === "mask").map((part) => part.bytes), [fitting, fittingMask]);
+  } finally {
+    server.close();
+  }
+});
+
+test("a picture over the byte limits is made lighter in proportion, keeping its ratio and its transparency, and goes ahead", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    const several = target(origin, { multiple: true });
+    const heavy = await real(700, 500, { noise: true });
+    assert.ok(heavy.length > 400 * 1024, `the noise is heavy (${heavy.length} bytes)`);
+    const limit = 120 * 1024;
+    const one = await editing.editImage(several, { prompt: "p", image: heavy }, { maxInputBytes: limit });
+    const [sent] = sentImages(seen[0]);
+    assert.ok(sent.bytes.length <= limit, `now ${sent.bytes.length} bytes`);
+    assert.equal(sent.type, "image/jpeg", "a PNG without transparency is a JPEG when it has to be lighter");
+    assert.equal(sent.filename, "image.jpg");
+    const { width, height } = await sharp(sent.bytes).metadata();
+    assert.ok(Math.abs(width! / height! - 700 / 500) < 0.03, `the ratio of 700x500 is kept: ${width}x${height}`);
+    assert.match(one.notes[0], /^The image was (scaled down from 700x500 pixels|compressed from)/);
+
+    // With transparency it is a WebP, which has some, and the transparency is still there.
+    const see = await real(600, 400, { noise: true, alpha: true });
+    await editing.editImage(several, { prompt: "p", image: see }, { maxInputBytes: 100 * 1024 });
+    const [lighter] = sentImages(seen[1]);
+    assert.equal(lighter.type, "image/webp");
+    assert.ok(lighter.bytes.length <= 100 * 1024);
+    assert.equal((await sharp(lighter.bytes).metadata()).hasAlpha, true);
+
+    // Together: pictures that are each fine share what is allowed, and the light one is left alone.
+    const light = await real(50, 50);
+    const [a, b] = [await real(500, 500, { noise: true }), await real(500, 500, { noise: true })];
+    const total = 150 * 1024;
+    assert.ok(a.length + b.length + light.length > total);
+    const together = await editing.editImage(several, { prompt: "p", image: [a, light, b] }, { maxTotalBytes: total });
+    const sentTogether = sentImages(seen[2]);
+    assert.deepEqual(sentTogether[1].bytes, light, "the light one is sent as it is");
+    assert.ok(sentTogether.reduce((sum, part) => sum + part.bytes.length, 0) <= total);
+    assert.deepEqual(together.notes.map((note) => note.slice(0, 9)), ["Picture 1", "Picture 3"]);
+  } finally {
+    server.close();
+  }
+});
+
+test("a large PNG with a tight budget is shrunk from what its lossy copy weighs, ending near the budget", async () => {
+  const { fitBytes } = await import("../server/src/picture-scale.ts");
+  const big = await real(2000, 1500, { noise: true });
+  const budget = 350 * 1024;
+  assert.ok(big.length > 20 * budget, `the original is far heavier than the budget (${big.length} bytes)`);
+  const out = await fitBytes(big, budget);
+  assert.ok(out.bytes.length <= budget, `now ${out.bytes.length} bytes`);
+  // The original's weight would have sent the first factor to the 0.3 floor (600x450, about 20 KB).
+  assert.ok(out.size.width >= 1000, `not shrunk to the floor: ${out.size.width}x${out.size.height}`);
+  assert.ok(out.bytes.length > budget / 3, `near the budget, not far under it: ${out.bytes.length} bytes`);
+});
+
+test("a picture that cannot be made to fit is refused with a message, and nothing is sent", async () => {
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(PNG) }] }));
+  try {
+    const limited = target(origin, { maxSize: "2048x1024", multiple: true });
+    const refused = (request: Parameters<typeof editing.editImage>[1], message: RegExp, options = {}) =>
+      assert.rejects(editing.editImage(limited, request, options), (e: Error) => {
+        assert.ok(e instanceof gen.ImageGenerationError);
+        assert.match(e.message, message);
+        assert.match(e.message, /Nothing was sent/);
+        return true;
+      });
+    // Too heavy at any size it may be: a few bytes cannot hold a picture.
+    await refused({ prompt: "p", image: await real(600, 400, { noise: true }) }, /^The image cannot be made to fit an edit: it stays too heavy even when it is scaled down and compressed as far as it can be\./, { maxInputBytes: 200 });
+    await refused({ prompt: "p", image: [await real(600, 400, { noise: true }), await real(600, 400, { noise: true })] }, /^Picture 1 cannot be made to fit an edit/, { maxTotalBytes: 300 });
+    // Over the maximum size but no picture that can be read; one with no size to read at all.
+    await refused({ prompt: "p", image: pngOf(3000, 3000) }, /^The image cannot be made to fit an edit: it cannot be read as a picture/);
+    await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024.*Settings → Agent → Media/);
+    await refused({ prompt: "p", image: Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xff, 0xe0]) }, /^The image has a size that cannot be read/);
+    // One refused refuses all, with its place.
+    await refused({ prompt: "p", image: [await real(100, 100), await real(5000, 500), PNG] }, /^Picture 3 has a size that cannot be read/);
+    assert.equal(seen.length, 0, "no request reached the endpoint");
+
+    // None set: any size goes, as it did, unread.
+    await editing.editImage(target(origin), { prompt: "p", image: pngOf(9000, 9000) });
+    await editing.editImage(target(origin), { prompt: "p", image: PNG });
+    assert.equal(seen.length, 2);
+  } finally {
+    server.close();
+  }
+});
+
+test("edit_image scales a picture beyond the maximum size down, says so in its answer, and keeps the original", async () => {
+  const wide = await real(4000, 500);
+  const folder = chatWith({ "small.png": await real(512, 512), "wide.png": wide, "tall.png": await real(300, 3000) });
   const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(JPEG) }] }));
   try {
     reset();
     gen.saveImageGeneration({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "2048x2048" });
     const { call } = loadEdit(folder);
-    await assert.rejects(call({ path: "wide.png", prompt: "p" }), /^Error: The image is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\..*Settings → Agent → Images/);
-    await assert.rejects(call({ paths: ["small.png", "tall.png"], prompt: "p" }), /^Error: Picture 2 is 300x3000 pixels, which is over the maximum of 2048x2048/);
-    assert.equal(seen.length, 0, "no request reached the endpoint");
-    assert.deepEqual(readdirSync(folder).sort(), ["small.png", "tall.png", "wide.png"], "no file or folder was made");
+    const one = await call({ path: "wide.png", prompt: "p" });
+    assert.equal(seen.length, 1, "sent");
+    assert.equal(await dimensions(sentImages(seen[0])[0].bytes), "2048x256");
+    assert.match(one.content[0].text, /^Edited wide\.png, and shown to the user: generated-images\/wide-edited\.jpg\. The image was scaled down from 4000x500 pixels \(.*\) to 2048x256 pixels \(.*\) to fit what an edit takes\. The result is not scaled back up\.$/);
+    assert.deepEqual(readFileSync(path.join(folder, "wide.png")), wide, "the original is as it was");
 
-    // The limit is read at each call: raised, the same picture goes.
+    // Several: the one over the box is named by its place.
+    const two = await call({ paths: ["small.png", "tall.png"], prompt: "p" });
+    assert.equal(await dimensions(sentImages(seen[1])[1].bytes), "204x2048");
+    assert.match(two.content[0].text, /^Made from small\.png, tall\.png \(in this order\), and shown to the user: .*\. Picture 2 was scaled down from 300x3000/);
+
+    // A picture within the limit has nothing added to its answer.
+    assert.match((await call({ path: "small.png", prompt: "p" })).content[0].text, /^Edited small\.png, and shown to the user: generated-images\/small-edited \(2\)\.jpg$/);
+    // The limit is read at each call: raised, the same picture goes as it is.
     gen.saveImageGeneration({ editMaxSize: "4096x4096" });
-    assert.match((await call({ path: "wide.png", prompt: "p" })).content[0].text, /^Edited wide\.png/);
-    assert.equal(seen.length, 1);
-    gen.saveImageGeneration({ editMaxSize: "" });
-    assert.match((await call({ paths: ["small.png", "tall.png"], prompt: "p" })).content[0].text, /^Made from small\.png, tall\.png/);
+    await call({ path: "wide.png", prompt: "p" });
+    assert.deepEqual(sentImages(seen.at(-1)!)[0].bytes, wide);
   } finally {
     server.close();
     reset();

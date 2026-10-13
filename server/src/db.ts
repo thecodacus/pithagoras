@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
+import { GENERATE_VIDEO_SOURCE, GENERATE_VIDEO_TOOL, SHOW_VIDEO_SOURCE, SHOW_VIDEO_TOOL, videoGenerationReady } from "./video-generation.js";
 import { PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, mcpServerOf, toolEnabled } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
@@ -11,9 +12,12 @@ import path from "node:path";
 import { isWithinText } from "./within.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
+import { removeThumbs } from "./image-thumbs.js";
+import { removePosters } from "./video-posters.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
+import { debugLog } from "./logs.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -364,6 +368,18 @@ function schema(db: Database.Database): void {
       tools_on TEXT NOT NULL DEFAULT ''
     );
 
+    -- Which agent a project works with, and whether Understory is its memory.
+    -- No row, or an empty agent, is a blank slate: the chats get the project's
+    -- AGENTS.md and nothing else. Kept here and not as a file in the folder for
+    -- the reason project_tools is: the agent works in the folder and can write
+    -- to it, and whose soul and memory it gets is not for it to change. A project
+    -- is only a folder, so it is known by its name; a row goes with the project.
+    CREATE TABLE IF NOT EXISTS project_agent (
+      project TEXT PRIMARY KEY,
+      agent TEXT NOT NULL DEFAULT '',
+      understory_off INTEGER NOT NULL DEFAULT 0
+    );
+
     -- An agent's exceptions to the portal-wide tool default, for every chat in
     -- its home and every run it does on its own: the first layer above the
     -- default. Here for the same reason as a project's: the agent can write to
@@ -383,7 +399,7 @@ function schema(db: Database.Database): void {
       PRIMARY KEY (session_id, id)
     );
 
-    -- The pictures of the Images page: the ones it made itself, which are files
+    -- The pictures of the Media page: the ones it made itself, which are files
     -- in the portal's own images folder, the ones the agent made in a chat with
     -- generate_image or edit_image, which are files in that chat's folder and
     -- are listed here as they are made, and those found lying in a folder the
@@ -410,6 +426,27 @@ function schema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_images_created ON images(created_at DESC, id DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_images_chat_file ON images(session_id, path) WHERE session_id IS NOT NULL;
+
+    -- The clips of the Media page, as the pictures are listed above: the ones it
+    -- made itself, which are files in the portal's own videos folder, the ones the
+    -- agent made in a chat with generate_video, which are files in that chat's
+    -- folder, and those found lying in a folder the tool writes into that nobody
+    -- listed (see video-gallery.ts). A row names the file, never holds it.
+    CREATE TABLE IF NOT EXISTS videos (
+      id TEXT PRIMARY KEY,
+      origin TEXT NOT NULL,
+      session_id TEXT,
+      folder TEXT,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      params TEXT NOT NULL DEFAULT '{}',
+      bytes INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC, id DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_chat_file ON videos(session_id, path) WHERE session_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_folder_file ON videos(folder, path) WHERE folder IS NOT NULL;
 
     -- The voices saved in the settings, for speech to be told to sound like (see voice-presets.ts).
     CREATE TABLE IF NOT EXISTS voice_presets (
@@ -746,6 +783,11 @@ export function anySessionRunning(): boolean {
   return Boolean(getDb().prepare("SELECT 1 FROM sessions WHERE status = 'running' LIMIT 1").get());
 }
 
+/** How many sessions have a turn running: chats, routine runs and agents' own looks alike. */
+export function runningSessionCount(): number {
+  return (getDb().prepare("SELECT COUNT(*) AS n FROM sessions WHERE status = 'running'").get() as { n: number }).n;
+}
+
 /** The sessions agents look around in on their own: one per agent, see heartbeat.ts. */
 export function listHeartbeatSessions(): SessionRow[] {
   return getDb().prepare("SELECT * FROM sessions WHERE kind = 'heartbeat'").all() as SessionRow[];
@@ -836,6 +878,7 @@ function removeSession(id: string): void {
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   setSessionSubagentModel(id, null);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
+  d.prepare("DELETE FROM settings WHERE key = ?").run(trustedKey(id));
   // The pictures stay in the chat's folder, which is not the chat's to take away, and so they stay in the gallery, as pictures of that folder with what they were asked for.
   // Nothing else may name the folder once the chat is gone, so it is kept with them (see image-gallery.ts).
   let real: string | undefined;
@@ -847,7 +890,14 @@ function removeSession(id: string): void {
   if (real) d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
   // What is left is what could not be kept, and what was made of it no longer names it.
   d.prepare("UPDATE images SET source_id = NULL WHERE source_id IN (SELECT id FROM images WHERE session_id = ?)").run(id);
+  const left = (d.prepare("SELECT id FROM images WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
   d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
+  removeThumbs(left);
+  // The same for its clips (see video-gallery.ts).
+  if (real) d.prepare("UPDATE OR IGNORE videos SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
+  const leftClips = (d.prepare("SELECT id FROM videos WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
+  d.prepare("DELETE FROM videos WHERE session_id = ?").run(id);
+  removePosters(leftClips);
 }
 
 /**
@@ -1338,6 +1388,26 @@ export function getSetting(key: string): string | undefined {
   return row?.value || undefined;
 }
 
+/** Where a conversation's trusted results are kept: see trustedResults. */
+const trustedKey = (sessionId: string) => `taint_trusted:${sessionId}`;
+
+/**
+ * The results flagged as a suspected prompt injection in a conversation that
+ * the person has looked at and trusted, by the id of the envelope around each
+ * (see pi/guard.ts): they no longer hold the conversation back.
+ */
+export function trustedResults(sessionId: string): Set<string> {
+  try {
+    return new Set(JSON.parse(getSetting(trustedKey(sessionId)) ?? "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function trustResult(sessionId: string, id: string): void {
+  putSetting(trustedKey(sessionId), JSON.stringify([...trustedResults(sessionId), id]));
+}
+
 /**
  * The speaking instructions saved with the voice settings; empty where the
  * built-in ones are used. They live in the same JSON as the rest of them.
@@ -1356,6 +1426,17 @@ export function getSkipThinkingProviders(): string[] | undefined {
   try {
     const saved = JSON.parse(getSetting("voice") ?? "{}").skipThinkingProviders;
     return Array.isArray(saved) ? saved.filter((name): name is string => typeof name === "string") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The model spoken turns run on, as saved in the voice settings; undefined where they use the chat's own. */
+export function getVoiceModel(): { provider: string; modelId: string } | undefined {
+  try {
+    const saved = JSON.parse(getSetting("voice") ?? "{}").voiceModel;
+    const at = typeof saved === "string" ? saved.indexOf("/") : -1;
+    return at > 0 && at < saved.length - 1 ? { provider: saved.slice(0, at), modelId: saved.slice(at + 1) } : undefined;
   } catch {
     return undefined;
   }
@@ -1418,6 +1499,16 @@ export function chatModel(
   settings: GlobalSettings = getSettings(),
 ): { provider: string; model: string } {
   return { provider: session.provider || settings.provider, model: session.model || settings.model };
+}
+
+/**
+ * Writes a chat's model to its row when nothing names one for it, not even the
+ * defaults. pi reopens such a chat on the model of its last answer, and after a
+ * spoken turn on the voice model that would be the voice model.
+ */
+export function keepChatModel(sessionId: string, provider: string, model: string): void {
+  const row = getSession(sessionId);
+  if (row && !chatModel(row).model) updateSession(sessionId, { provider, model });
 }
 
 export { SETTING_DEFAULTS as getSettingDefaults };
@@ -1653,6 +1744,8 @@ export function recordAudit(entry: {
   db.prepare(
     `DELETE FROM audit WHERE id <= (SELECT MAX(id) FROM audit) - ?`
   ).run(AUDIT_KEEP);
+  // What was decided and for which tool, not on what: the subject and the reason can hold a command, a path or a URL.
+  debugLog("audit", entry.kind, { tool: entry.tool, session: entry.sessionId });
 }
 
 export const listAudit = (limit = 200): AuditRow[] =>
@@ -2019,6 +2112,59 @@ export function projectsWithTools(): Set<string> {
   );
 }
 
+/** What a project says about the agent it works with: see the table. A project that never said anything is a blank slate. */
+export interface ProjectAgent {
+  /** The agent's id; "" for none. */
+  agent: string;
+  /** Whether Understory is not this project's memory, though it is the portal's. */
+  understoryOff: boolean;
+}
+
+export function projectAgent(project: string): ProjectAgent {
+  const row = getDb().prepare("SELECT agent, understory_off FROM project_agent WHERE project = ?").get(project) as
+    | { agent: string; understory_off: number }
+    | undefined;
+  return { agent: row?.agent ?? "", understoryOff: !!row?.understory_off };
+}
+
+export function setProjectAgent(project: string, say: ProjectAgent): ProjectAgent {
+  if (!say.agent && !say.understoryOff) clearProjectAgent(project);
+  else
+    getDb()
+      .prepare(
+        `INSERT INTO project_agent (project, agent, understory_off) VALUES (?, ?, ?)
+         ON CONFLICT(project) DO UPDATE SET agent = excluded.agent, understory_off = excluded.understory_off`
+      )
+      .run(project, say.agent, say.understoryOff ? 1 : 0);
+  return { agent: say.agent, understoryOff: say.understoryOff };
+}
+
+/** Forgets what a project said about its agent, as when it is deleted or made again. */
+export function clearProjectAgent(project: string): void {
+  getDb().prepare("DELETE FROM project_agent WHERE project = ?").run(project);
+}
+
+/**
+ * Lets go of an agent that is deleted: the projects that worked with it are
+ * blank slates again, and keep what they said about Understory.
+ */
+export function releaseProjectsOf(agent: string): void {
+  getDb().transaction(() => {
+    getDb().prepare("UPDATE project_agent SET agent = '' WHERE agent = ?").run(agent);
+    getDb().prepare("DELETE FROM project_agent WHERE agent = '' AND understory_off = 0").run();
+  })();
+}
+
+/** What every project that says something about its agent says, by name. */
+export function projectAgents(): Map<string, ProjectAgent> {
+  const rows = getDb().prepare("SELECT project, agent, understory_off FROM project_agent").all() as {
+    project: string;
+    agent: string;
+    understory_off: number;
+  }[];
+  return new Map(rows.map((r) => [r.project, { agent: r.agent, understoryOff: !!r.understory_off }]));
+}
+
 /**
  * What an agent says about tools, as exceptions to the portal-wide default:
  * for every chat in its home and every run it does on its own — its heartbeat,
@@ -2227,6 +2373,26 @@ export function setExtensionStash(stash: Record<string, unknown>): void {
   putSetting("extension_stash", Object.keys(stash).length ? JSON.stringify(stash) : "");
 }
 
+/** The minutes ask_question waits for an answer; 0, the default, is until it is answered. */
+export const QUESTION_WAIT_MINUTES = [0, 5, 15, 30, 60] as const;
+
+export function questionWaitMinutes(): number {
+  const saved = Number(getSetting("ask_question_wait_minutes"));
+  return (QUESTION_WAIT_MINUTES as readonly number[]).includes(saved) ? saved : 0;
+}
+
+/** Stores one of QUESTION_WAIT_MINUTES; returns undefined for anything else. */
+export function setQuestionWaitMinutes(minutes: unknown): number | undefined {
+  if (typeof minutes !== "number" || !(QUESTION_WAIT_MINUTES as readonly number[]).includes(minutes)) return undefined;
+  putSetting("ask_question_wait_minutes", String(minutes));
+  return minutes;
+}
+
+/** The wait for a question in milliseconds, read when it is asked. */
+export function questionWaitMs(): number {
+  return questionWaitMinutes() * 60_000;
+}
+
 /** Tools that are off unless a conversation says otherwise. */
 export function toolDefaultsOff(): string[] {
   return parseToolsOff(getSetting("tools_off_default"));
@@ -2355,14 +2521,17 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   // called image-generation.ts has the label the portal's factory has.
   const images = imageGenerationReady();
   const editing = imageEditingReady();
+  // The video tools, which exist while video generation is on: the same, for the same reasons.
+  const videos = videoGenerationReady();
   const known = [...view.known().values()];
   // Every MCP server's tools, from the adapter's cache, whether a chat has had them one by one or not: a server is a
   // group like any other, whole or tool by tool. A tool a chat reported is listed as it reported it.
   const seen = new Set(known.map((t) => t.name));
   const available = [...known, ...catalogue.filter((t) => !seen.has(t.name))].filter(toolAvailability(user, project));
-  return [...available, ...notYetSeen(available, images, editing)]
+  return [...available, ...notYetSeen(available, images, editing, videos)]
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))
+    .filter((tool) => videos || !((tool.name === GENERATE_VIDEO_TOOL || tool.name === SHOW_VIDEO_TOOL) && tool.inline))
     .flatMap((known) => {
       const offer = offers(known);
       if (unlisted(offer)) return [];
@@ -2382,19 +2551,27 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
  * registers the tool after a reload without telling anyone. The tool is the portal's, so the lists know it
  * without waiting; a tool of the same name that a chat has reported, an extension's included while its package is on, is kept as it is.
  */
-function notYetSeen(available: KnownTool[], images: boolean, editing: boolean): KnownTool[] {
+function notYetSeen(available: KnownTool[], images: boolean, editing: boolean, videos: boolean): KnownTool[] {
   // Of the tools that can be loaded: an extension's of the same name in a package that is switched off is not, and the portal's is then the one chats have.
   const seen = new Set(available.map((tool) => tool.name));
   const wanted: [string, string, boolean][] = [
     [GENERATE_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, images],
     [EDIT_IMAGE_TOOL, EDIT_IMAGE_SOURCE, editing],
+    [GENERATE_VIDEO_TOOL, GENERATE_VIDEO_SOURCE, videos],
+    [SHOW_VIDEO_TOOL, SHOW_VIDEO_SOURCE, videos],
   ];
   return wanted.filter(([name, , ready]) => ready && !seen.has(name)).map(([name, source]) => ({ name, source, package: null, inline: true }));
 }
 
-/** What the portal files its own picture tools under, by name. Read when asked: image-generation.ts imports this module. */
+/** What the portal files its own picture and video tools under, by name. Read when asked: image-generation.ts and video-generation.ts import this module. */
 const pictureSource = (name: string): string | undefined =>
-  ({ show_image: SHOW_IMAGE_SOURCE, [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE, [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE } as Record<string, string>)[name];
+  ({
+    show_image: SHOW_IMAGE_SOURCE,
+    [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE,
+    [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE,
+    [GENERATE_VIDEO_TOOL]: GENERATE_VIDEO_SOURCE,
+    [SHOW_VIDEO_TOOL]: SHOW_VIDEO_SOURCE,
+  } as Record<string, string>)[name];
 
 /**
  * Whether the portal registered this tool itself, for the pages to group its picture tools apart from an extension's of the same name.

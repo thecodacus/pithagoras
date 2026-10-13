@@ -23,9 +23,9 @@ features:
   - title: Runs on the server, not the tab
     details: A prompt is accepted and then owned by the server. Every event pi emits is appended to a log, so a browser that reconnects days later replays what it missed instead of having lost the run.
   - title: Agents, Home and projects
-    details: New starts a chat in Home, the first agent's directory, and more agents can have a character and memory of their own. Projects are folders of their own with instructions for the agent, as an AGENTS.md. Each session keeps its own model, effort level and conversation, and pinned ones stay at the top of the sidebar.
+    details: New starts a chat with the agent picked for new chats (Home, the first agent's directory, by default), and more agents can have a character and memory of their own. Projects are folders of their own with instructions for the agent, as an AGENTS.md. Each session keeps its own model, effort level and conversation, and pinned ones stay at the top of the sidebar.
   - title: Pluggable channels
-    details: Reach the agent from Telegram, Slack, Discord, a webhook, or anything you write yourself. Channel types are packages, installable from a GitHub repo.
+    details: Reach the agent from Telegram, Slack, Discord, Signal, a webhook, or anything you write yourself. Channel types are packages, installable from a GitHub repo.
   - title: pi's own extensions
     details: Packages installed through pi contribute their slash commands to the portal, dialogs and all — a command that asks a question opens the same menu the TUI draws.
   - title: A base prompt under 4k tokens

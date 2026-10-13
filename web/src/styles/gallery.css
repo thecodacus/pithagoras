@@ -1,5 +1,5 @@
-/* ───────────────────── The Images page's gallery ─────────────────────
- * components/ImagesPage.tsx. Every tile is an ImagePreview — a picture, one
+/* ───────────────────── The Media page's gallery ─────────────────────
+ * components/MediaPage.tsx. Every tile is an ImagePreview — a picture, one
  * being made, one that was not — made the same shape, so that a grid of them
  * has no ragged edge and a picture arrives where its wait was.
  *
@@ -17,13 +17,24 @@
 .gallery-tile .image-preview.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: 1; }
 .gallery-tile .image-preview-failed { padding: 8px 10px; font-size: 11.5px; }
 .gallery-tile .image-preview-failed p { -webkit-line-clamp: 3; }
+/* A clip that was not made is as high as its message, and at least as high as a square tile is wide enough for. */
+.gallery-tile .image-preview.is-clip.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: auto; min-height: 9.5rem; }
 .gallery-tile .image-preview-caption { margin-top: 4px; }
+
+/* A clip a browser does not play, shown as the file it is: square as the others, its kind in words, and opened to be downloaded. */
+.gallery-type-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 100%; aspect-ratio: 1; padding: 8px; border: 1px dashed rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .4); color: rgb(var(--fg-muted)); text-align: center; cursor: pointer; transition: background .15s, border-color .15s; }
+.gallery-type-tile:hover { background: rgb(var(--raised) / .7); border-color: rgb(var(--fg-faint)); }
+.gallery-type-tile > svg { width: 28px; height: 28px; opacity: .7; }
+.gallery-type-tile b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: rgb(var(--fg)); }
+.gallery-type-tile small { font-size: 11px; line-height: 1.35; color: rgb(var(--fg-subtle)); }
 
 /* Under the picture: where it is from and when, quietly. */
 .gallery-meta { display: flex; align-items: center; gap: 5px; min-width: 0; margin: 1px 0 0; font-size: 11px; color: rgb(var(--fg-faint)); }
 .gallery-meta > svg { flex-shrink: 0; width: 11px; height: 11px; }
 .gallery-meta > span { flex: 1; min-width: 0; }
 .gallery-meta > time { flex-shrink: 0; }
+/* How long a clip plays, between where it is from and when. */
+.gallery-meta > span.gallery-length { flex: none; font-variant-numeric: tabular-nums; }
 
 /* The box on a picture's corner, which ticks it: it has a round place of its own, so that it is found on any picture and by a thumb, and the picture marked. A click on the picture itself opens it. */
 .gallery-check-hit { position: absolute; top: 4px; left: 4px; z-index: 5; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9999px; border: 1px solid rgb(var(--line)); background: rgb(var(--surface) / .88); cursor: pointer; transition: opacity .15s; }

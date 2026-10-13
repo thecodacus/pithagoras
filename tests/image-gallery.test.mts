@@ -1,8 +1,9 @@
 import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, get } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
 
 const temp = inProcessHome("pitha-gallery-");
@@ -205,7 +206,7 @@ test("a picture is made without any chat: a job, a picture in the gallery that i
     assert.deepEqual({ ...picture, createdAt: 0, bytes: 0, fileName: "" }, {
       id: job.pictureId, origin: "page", chat: null, folder: null, kind: "generated", prompt: "a lighthouse at dusk",
       params: { model: "other-model", size: "512x512", outputFormat: "webp", outputCompression: 60, negativePrompt: "blurry", seed: 7, sampleSteps: 25 },
-      from: null, createdAt: 0, bytes: 0, fileName: "",
+      from: null, createdAt: 0, bytes: 0, fileName: "", thumb: false,
     });
     assert.match(picture.fileName, /^image-\d{8}-\d{6}-[0-9a-f]{4}\.png$/);
     assert.equal(picture.bytes, PNG.length);
@@ -340,7 +341,7 @@ test("nothing is made while the add-on is off, and a request is checked before i
     settings({ baseUrl: origin, enabled: false });
     const off = await call("POST", "/images/generate", { prompt: "x" });
     assert.equal(off.status, 409);
-    assert.match(off.body.error, /Settings → Agent → Images/);
+    assert.match(off.body.error, /Settings → Agent → Media/);
     assert.equal((await call("POST", "/images/edit", { prompt: "x", sources: ["0123456789ab"] })).status, 409);
     settings({ baseUrl: origin });
     for (const bad of [{}, { prompt: "   " }, { prompt: "x".repeat(gen.MAX_PROMPT + 1) }, { prompt: "x", size: "huge" }, { prompt: "x", model: "m".repeat(201) }, { prompt: "x", extra: { n: 4 } }, { prompt: "x", extra: [1] }, { prompt: "x", count: 1.5 }, { prompt: "x", count: "2" }, ...BAD_SETTINGS]) {
@@ -354,6 +355,31 @@ test("nothing is made while the add-on is off, and a request is checked before i
     }
   } finally {
     server.close();
+    gone();
+  }
+});
+
+test("an edit job carries what was done to make a too-large picture fit, and none when nothing was", async () => {
+  const { origin, server } = await answering(png("edited"));
+  await clearJobs();
+  try {
+    const flat = (width: number, height: number) => sharp({ create: { width, height, channels: 3, background: { r: 200, g: 40, b: 40 } } }).png().toBuffer();
+    const wide = (await call("POST", "/images/upload?name=wide.png", undefined, { raw: await flat(3000, 300) })).body.picture;
+    const small = (await call("POST", "/images/upload?name=small.png", undefined, { raw: await flat(100, 100) })).body.picture;
+    settings({ baseUrl: origin, editEnabled: true, editMaxSize: "1024x1024" });
+    assert.equal((await call("POST", "/images/edit", { prompt: "brighter", sources: [wide.id] })).status, 202);
+    const [scaled] = await settled();
+    assert.equal(scaled.state, "done", scaled.error);
+    assert.equal(scaled.notes.length, 1);
+    assert.match(scaled.notes[0], /^The image was scaled down from 3000x300 pixels .* to 1024x102 pixels/);
+    await clearJobs();
+    assert.equal((await call("POST", "/images/edit", { prompt: "brighter", sources: [small.id] })).status, 202);
+    const [kept] = await settled();
+    assert.equal(kept.state, "done", kept.error);
+    assert.equal("notes" in kept, false, "a picture that fit is not warned about");
+  } finally {
+    server.close();
+    gen.saveImageGeneration({ editMaxSize: "" });
     gone();
   }
 });
@@ -627,33 +653,33 @@ const pngOf = (w: number, h: number) => {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]), Buffer.from("IHDR"), dim(w), dim(h), Buffer.alloc(16)]);
 };
 
-test("an edit of several pictures from the page holds each one to the maximum size, says which is over, and sends nothing", async () => {
+test("an edit of several pictures from the page scales the one over the maximum size down, and refuses one that cannot be, sending nothing", async () => {
   const { origin, seen, server } = await answering(png("edited"));
   await clearJobs();
   try {
-    const small = (await call("POST", "/images/upload?name=small.png", undefined, { raw: pngOf(512, 512) })).body.picture;
-    const wide = (await call("POST", "/images/upload?name=wide.png", undefined, { raw: pngOf(4000, 500) })).body.picture;
-    const fine = (await call("POST", "/images/upload?name=fine.png", undefined, { raw: pngOf(1024, 768) })).body.picture;
+    const real = (w: number, h: number) => sharp({ create: { width: w, height: h, channels: 3, background: "#c82828" } }).png().toBuffer();
+    const small = (await call("POST", "/images/upload?name=small.png", undefined, { raw: await real(512, 512) })).body.picture;
+    const wide = (await call("POST", "/images/upload?name=wide.png", undefined, { raw: await real(4000, 500) })).body.picture;
+    const fine = (await call("POST", "/images/upload?name=fine.png", undefined, { raw: await real(1024, 768) })).body.picture;
+    const fake = (await call("POST", "/images/upload?name=fake.png", undefined, { raw: pngOf(4000, 500) })).body.picture;
     settings({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "2048x2048" });
 
-    // The second of three is over: the job fails with its place, and no request is made.
+    // The second of three is over: it is scaled to fit and the three go in one request, in the order given.
     const started = await call("POST", "/images/edit", { prompt: "the first, in the style of the second", sources: [small.id, wide.id, fine.id] });
     assert.equal(started.status, 202);
-    const [refused] = await settled();
-    assert.equal(refused.state, "failed");
-    assert.match(refused.error, /^Picture 2 is 4000x500 pixels, which is over the maximum of 2048x2048 for an edit\. Nothing was sent\./);
-    // The way to the limit is where the person finds it: Settings → Agent → Images, not a page that is not there.
-    assert.match(refused.error, /the limit is set in Settings → Agent → Images\.$/);
-    assert.equal(seen.length, 0, "none of the three was sent");
-
-    // Raised, the same three go in one request, in the order given.
-    settings({ baseUrl: origin, editEnabled: true, editMultiple: true, editMaxSize: "4096x4096" });
-    await clearJobs();
-    await call("POST", "/images/edit", { prompt: "the first, in the style of the second", sources: [small.id, wide.id, fine.id] });
     const [done] = await settled();
     assert.equal(done.state, "done", done.error);
     assert.equal(seen.length, 1);
-    assert.deepEqual(partList(seen[0]).filter((part) => part.name === "image[]").map((part) => part.bytes.length), [pngOf(512, 512).length, pngOf(4000, 500).length, pngOf(1024, 768).length]);
+    const sizes = await Promise.all(partList(seen[0]).filter((part) => part.name === "image[]").map(async (part) => { const m = await sharp(part.bytes).metadata(); return `${m.width}x${m.height}`; }));
+    assert.deepEqual(sizes, ["512x512", "2048x256", "1024x768"]);
+
+    // One that cannot be scaled (it is no picture that can be read) refuses the job with its place, and nothing is sent.
+    await clearJobs();
+    await call("POST", "/images/edit", { prompt: "the first, in the style of the second", sources: [small.id, fake.id, fine.id] });
+    const [refused] = await settled();
+    assert.equal(refused.state, "failed");
+    assert.match(refused.error, /^Picture 2 cannot be made to fit an edit: .*Nothing was sent\./);
+    assert.equal(seen.length, 1, "none of the three was sent");
   } finally {
     server.close();
     // The maximum is the setting of every test after this one, too.
@@ -1093,4 +1119,274 @@ test("the sidebar is told whether the page is there: on while an address is set 
   gen.saveImageGeneration({ editEnabled: false });
   assert.deepEqual((await call("GET", "/features/flags")).body.images, { enabled: false }, "an address for changes that is switched off is not a page");
   gone();
+});
+
+
+// Pictures with real pixels: the portal decodes them to make the small copy. Random pixels do not compress, so these are well over the 48 KB below which no copy is made.
+const { default: sharp } = await import("sharp");
+const { randomBytes } = await import("node:crypto");
+const { thumbJobsPeak } = await import("../server/src/image-thumbs.ts");
+const noise = (width: number, height: number, channels: 3 | 4 = 3) => sharp(randomBytes(width * height * channels), { raw: { width, height, channels } });
+const bigPng = (width: number, height: number) => noise(width, height).png().toBuffer();
+const meta = (bytes: Buffer) => sharp(bytes).metadata();
+const thumbs = path.join(temp, "image-thumbs");
+const kept = () => (existsSync(thumbs) ? readdirSync(thumbs) : []);
+const upload = async (raw: Buffer, name = "p.png") => (await call("POST", `/images/upload?name=${name}`, undefined, { raw })).body.picture;
+/** A picture in a chat's folder, which the agent may write over. */
+async function inChat(id: string, name: string, bytes: Buffer) {
+  const folder = chat(id);
+  const file = path.join(folder, GENERATED_DIR, name);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, bytes);
+  gallery.recordChatPicture({ sessionId: id, path: `${GENERATED_DIR}/${name}`, kind: "generated", prompt: id, params: {}, bytes: bytes.length });
+  const picture = (await listed("?origin=chat")).pictures.find((p: any) => p.chat?.id === id);
+  return { folder, file, picture };
+}
+const writeOver = (file: string, bytes: Buffer, minutesLater = 1) => {
+  writeFileSync(file, bytes);
+  const later = new Date(Date.now() + minutesLater * 60_000);
+  utimesSync(file, later, later);
+};
+
+test("the portal makes the small copy of a big picture itself: WebP, at most 480 pixels on the long side, the picture's proportions", async () => {
+  const wide = await bigPng(1200, 800);
+  const picture = await upload(wide);
+  assert.equal(picture.thumb, true, "the gallery says the tile shows a small copy");
+  assert.deepEqual(kept(), [], "none is made before it is asked for");
+  const got = await call("GET", `/images/${picture.id}/thumb`);
+  assert.equal(got.status, 200);
+  assert.equal(got.headers.get("content-type"), "image/webp");
+  assert.equal(got.headers.get("cache-control"), "private, max-age=86400");
+  assert.equal(got.headers.get("x-content-type-options"), "nosniff");
+  const info = await meta(got.bytes);
+  assert.equal(info.format, "webp");
+  assert.deepEqual([info.width, info.height], [480, 320]);
+  assert.ok(got.bytes.length < wide.length / 5, `${got.bytes.length} bytes is far below the file's ${wide.length}`);
+  assert.deepEqual((await call("GET", `/images/${picture.id}/file`)).bytes, wide, "the file itself is as it was");
+  assert.equal(kept().length, 1);
+
+  const tall = await upload(await bigPng(600, 1500));
+  const info2 = await meta((await call("GET", `/images/${tall.id}/thumb`)).bytes);
+  assert.deepEqual([info2.width, info2.height], [192, 480], "the long side is the height");
+  const small = await upload(await bigPng(300, 200));
+  assert.ok(small.bytes > 48 * 1024, "heavy for its size, so it gets a copy");
+  const info3 = await meta((await call("GET", `/images/${small.id}/thumb`)).bytes);
+  assert.deepEqual([info3.width, info3.height], [300, 200], "a picture below 480 is not made larger");
+  await call("POST", "/images/delete", { ids: [picture.id, tall.id, small.id] });
+  assert.deepEqual(kept(), []);
+});
+
+test("the small copy keeps transparency, and turns a picture the way its camera said", async () => {
+  const pixels = randomBytes(800 * 600 * 4);
+  // The left half is see-through, the right one is not.
+  for (let y = 0; y < 600; y++) for (let x = 0; x < 800; x++) pixels[(y * 800 + x) * 4 + 3] = x < 400 ? 0 : 255;
+  const see = await upload(await sharp(pixels, { raw: { width: 800, height: 600, channels: 4 } }).png().toBuffer());
+  const got = await call("GET", `/images/${see.id}/thumb`);
+  assert.equal(got.headers.get("content-type"), "image/webp");
+  const raw = await sharp(got.bytes).raw().toBuffer({ resolveWithObject: true });
+  assert.equal(raw.info.channels, 4, "it has an alpha channel");
+  const alpha = (x: number, y: number) => raw.data[(y * raw.info.width + x) * 4 + 3];
+  assert.equal(alpha(20, 100), 0, "the left side is still see-through");
+  assert.equal(alpha(raw.info.width - 20, 100), 255, "and the right side is not");
+
+  // A photo taken with the phone on its side says so in its metadata, which the copy does not keep.
+  const turned = await upload(await noise(1000, 600).jpeg({ quality: 95 }).withMetadata({ orientation: 6 }).toBuffer(), "turned.jpg");
+  const info = await meta((await call("GET", `/images/${turned.id}/thumb`)).bytes);
+  assert.deepEqual([info.width, info.height], [288, 480], "it stands up, as the viewer shows it");
+  await call("POST", "/images/delete", { ids: [see.id, turned.id] });
+});
+
+test("a small file, a GIF, an animated picture and one that cannot be read are sent whole, and get no copy", async () => {
+  const tiny = await sharp({ create: { width: 20, height: 20, channels: 3, background: "#c33" } }).png().toBuffer();
+  assert.ok(tiny.length < 48 * 1024);
+  const little = await upload(tiny);
+  assert.equal(little.thumb, false, "the gallery says the tile shows the file");
+  const gotLittle = await call("GET", `/images/${little.id}/thumb`);
+  assert.equal(gotLittle.status, 200);
+  assert.deepEqual(gotLittle.bytes, tiny);
+
+  const gifBytes = await noise(400, 300).gif().toBuffer();
+  assert.ok(gifBytes.length > 48 * 1024);
+  const gif = await upload(gifBytes, "move.gif");
+  assert.equal(gif.thumb, false);
+  const gotGif = await call("GET", `/images/${gif.id}/thumb`);
+  assert.equal(gotGif.headers.get("content-type"), "image/gif");
+  assert.deepEqual(gotGif.bytes, gifBytes, "a copy would stand still");
+
+  // An animated WebP, which the gallery cannot tell by its name.
+  const frames = Buffer.concat([randomBytes(400 * 300 * 3), randomBytes(400 * 300 * 3)]);
+  const moving = await sharp(frames, { raw: { width: 400, height: 600, channels: 3, pageHeight: 300 } }).webp({ quality: 90 }).toBuffer();
+  assert.equal((await meta(moving)).pages, 2);
+  const animated = await upload(moving, "move.webp");
+  assert.deepEqual((await call("GET", `/images/${animated.id}/thumb`)).bytes, moving);
+
+  // A header that is a PNG's and nothing after it.
+  const broken = Buffer.concat([PNG.subarray(0, 8), randomBytes(100 * 1024)]);
+  const bad = await upload(broken);
+  const gotBad = await call("GET", `/images/${bad.id}/thumb`);
+  assert.equal(gotBad.status, 200);
+  assert.deepEqual(gotBad.bytes, broken, "what cannot be drawn small is shown as it is");
+  assert.deepEqual(kept(), [], "none of them has a copy");
+  await call("POST", "/images/delete", { ids: [little.id, gif.id, animated.id, bad.id] });
+});
+
+test("a copy is made once, kept, and sent from then on", async () => {
+  const picture = await upload(await bigPng(900, 900));
+  const [first, second, third] = await Promise.all([1, 2, 3].map(() => call("GET", `/images/${picture.id}/thumb`)));
+  assert.deepEqual(second.bytes, first.bytes);
+  assert.deepEqual(third.bytes, first.bytes);
+  assert.equal(kept().length, 1, "asked for three times at once, made once");
+
+  // Put back in time: a copy that is made again would have the time of now.
+  const [name] = kept();
+  // A whole second: utimes turns a time with milliseconds into a fraction of seconds that Node 22 (on CI) hands
+  // to the file system a millisecond short about half the time, and the time written is not the one asserted below.
+  const long = new Date(Math.floor(Date.now() / 1000) * 1000 - 3_600_000);
+  utimesSync(path.join(thumbs, name), long, long);
+  const again = await call("GET", `/images/${picture.id}/thumb`);
+  assert.deepEqual(again.bytes, first.bytes);
+  assert.equal(statSync(path.join(thumbs, name)).mtimeMs, long.getTime(), "the copy that was kept is the one that was sent");
+  // The browser that has it is told so.
+  const tag = again.headers.get("etag")!;
+  assert.ok(tag);
+  // (not through fetch, which adds a no-cache of its own to a request that asks with a tag)
+  const status = await new Promise<number>((resolve) => get(`${at}/images/${picture.id}/thumb`, { headers: { "if-none-match": tag } }, (res) => { res.resume(); resolve(res.statusCode!); }));
+  assert.equal(status, 304);
+  await call("DELETE", `/images/${picture.id}`);
+});
+
+test("a file that is written over gets a new copy, and the old one goes", async () => {
+  const one = await bigPng(1000, 500);
+  const { file, picture } = await inChat("chat-thumb-over", "owl.png", one);
+  const before = await call("GET", `/images/${picture.id}/thumb`);
+  assert.equal(before.headers.get("cache-control"), "private, no-cache", "the folder's, not the page's: the browser asks");
+  assert.deepEqual([(await meta(before.bytes)).width, (await meta(before.bytes)).height], [480, 240]);
+  const [oldName] = kept();
+
+  // The agent made another picture under the same name.
+  writeOver(file, await bigPng(500, 1000));
+  const after = await call("GET", `/images/${picture.id}/thumb`);
+  assert.equal(after.status, 200);
+  assert.deepEqual([(await meta(after.bytes)).width, (await meta(after.bytes)).height], [240, 480], "it is of the new picture");
+  assert.notEqual(after.headers.get("etag"), before.headers.get("etag"));
+  assert.equal(kept().length, 1, "and the copy of the old one is not kept");
+  assert.notEqual(kept()[0], oldName);
+
+  // The same bytes with another time are another file: its copy is made again.
+  const [middleName] = kept();
+  const later = new Date(Date.now() + 120_000);
+  utimesSync(file, later, later);
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, 1);
+  assert.notEqual(kept()[0], middleName, "the time alone makes it a new copy");
+
+  // The same time with another size, as a file system that keeps only seconds would give.
+  const stamp = statSync(file).mtime;
+  writeFileSync(file, await bigPng(700, 700));
+  utimesSync(file, stamp, stamp);
+  const sized = await call("GET", `/images/${picture.id}/thumb`);
+  assert.deepEqual([(await meta(sized.bytes)).width, (await meta(sized.bytes)).height], [480, 480]);
+  await call("DELETE", `/images/${picture.id}`);
+});
+
+test("a copy is only sent for a picture whose file can be read in full", async () => {
+  const { folder, file, picture } = await inChat("chat-thumb-away", "bat.png", await bigPng(800, 800));
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, 1);
+  const moved = `${folder}-moved`;
+  renameSync(folder, moved);
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 404, "the copy is not a way round: a folder that cannot be reached shows nothing of its pictures");
+  renameSync(moved, folder);
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+
+  // The file has become a link out of the folder: not a picture of this gallery any more, and not made small either.
+  const outside = path.join(temp, "outside.png");
+  writeFileSync(outside, await bigPng(900, 900));
+  rmSync(file);
+  symlinkSync(outside, file);
+  const linked = await call("GET", `/images/${picture.id}/thumb`);
+  assert.notEqual(linked.status, 200);
+  assert.equal((await call("GET", `/images/${picture.id}/file`)).status, linked.status, "the same answer as for the file");
+  assert.equal((await call("GET", "/images/ffffffffffff/thumb")).status, 404);
+  assert.equal((await call("GET", "/images/..%2F..%2Fx/thumb")).status, 404);
+
+  // The file is something that is no picture.
+  const second = await inChat("chat-thumb-svg", "x.png", await bigPng(800, 800));
+  writeOver(second.file, Buffer.concat([SVG, Buffer.alloc(60 * 1024)]));
+  const before = kept().length;
+  assert.notEqual((await call("GET", `/images/${second.picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, before, "nothing was made of it");
+  await call("POST", "/images/delete", { ids: [picture.id, second.picture.id] });
+});
+
+test("the small copies go with their pictures, however the pictures go", async () => {
+  getDb().prepare("DELETE FROM images").run();
+  const page = await upload(await bigPng(700, 700));
+  assert.equal((await call("GET", `/images/${page.id}/thumb`)).status, 200);
+  assert.equal((await call("DELETE", `/images/${page.id}`)).status, 200);
+  assert.deepEqual(kept(), [], "deleted in the gallery");
+
+  const { folder, picture } = await inChat("chat-thumb-gone", "a.png", await bigPng(700, 700));
+  assert.equal((await call("GET", `/images/${picture.id}/thumb`)).status, 200);
+  assert.equal(kept().length, 1);
+  renameSync(folder, `${folder}-away`);
+  deleteSession("chat-thumb-gone");
+  assert.equal((await listed("?origin=chat")).total, 0);
+  assert.deepEqual(kept(), [], "the chat is deleted and its folder cannot be reached: nothing lists the copy any more, so it has to go with the row");
+
+  const gonePicture = await inChat("chat-thumb-file-gone", "b.png", await bigPng(700, 700));
+  assert.equal((await call("GET", `/images/${gonePicture.picture.id}/thumb`)).status, 200);
+  rmSync(gonePicture.file);
+  assert.equal((await call("GET", `/images/${gonePicture.picture.id}/thumb`)).status, 404, "its file is gone");
+  assert.deepEqual(kept(), [], "and so the copy is, as the row is forgotten");
+});
+
+test("only a few small copies are made at the same time", async () => {
+  const ids: string[] = [];
+  for (let i = 0; i < 8; i++) ids.push((await upload(await bigPng(1600, 1200))).id);
+  const all = await Promise.all(ids.map((id) => call("GET", `/images/${id}/thumb`)));
+  assert.ok(all.every((r) => r.status === 200 && r.headers.get("content-type") === "image/webp"));
+  assert.equal(kept().length, 8);
+  assert.ok(thumbJobsPeak() >= 1 && thumbJobsPeak() <= 2, `at most 2 at once, saw ${thumbJobsPeak()}`);
+  await call("POST", "/images/delete", { ids });
+});
+
+/** Open file descriptors of this process that lead into the folder of the small copies (Linux only: nothing is seen elsewhere). */
+const openCopies = () => {
+  try {
+    return readdirSync("/proc/self/fd").filter((fd) => { try { return readlinkSync(`/proc/self/fd/${fd}`).startsWith(thumbs); } catch { return false; } }).length;
+  } catch {
+    return 0;
+  }
+};
+const settle = async (done: () => boolean) => {
+  for (let i = 0; i < 200 && !done(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+};
+
+test("a request that is dropped while it waits for its small copy does not keep the copy open", { skip: !existsSync("/proc/self/fd") }, async () => {
+  const ids: string[] = [];
+  for (let i = 0; i < 8; i++) ids.push((await upload(await bigPng(2000, 1500))).id);
+  await Promise.all(ids.map((id) => new Promise<void>((resolve) => {
+    const request = get(`${at}/images/${id}/thumb`, (res) => res.resume());
+    request.on("error", () => resolve());
+    request.on("close", () => resolve());
+    setTimeout(() => request.destroy(), 30);
+  })));
+  // The copies are made all the same, for the next view.
+  await settle(() => kept().length === 8 && thumbJobsPeak() >= 1);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(kept().length, 8);
+  assert.equal(openCopies(), 0, "no copy is left open by a request that was gone before it was answered");
+  await call("POST", "/images/delete", { ids });
+});
+
+test("a copy that is still being made when its picture is deleted is not kept", async () => {
+  const ids: string[] = [];
+  for (let i = 0; i < 8; i++) ids.push((await upload(await bigPng(1600, 1200))).id);
+  const asked = Promise.all(ids.map((id) => call("GET", `/images/${id}/thumb`)));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const deleted = await call("POST", "/images/delete", { ids });
+  assert.equal(deleted.body.deleted.length, 8);
+  await asked;
+  assert.deepEqual(kept(), [], "the pictures are gone, and so are the copies that were not done yet");
 });

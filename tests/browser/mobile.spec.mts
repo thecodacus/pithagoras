@@ -19,7 +19,8 @@ test('phone can send, open workspace navigation, and scroll slash commands witho
  await expect(page.getByLabel('Sidebar',{exact:true})).toBeHidden();
  await page.getByRole('button',{name:'Open navigation',exact:true}).click();
  await expect(page.getByLabel('Sidebar',{exact:true})).toBeVisible();
- await expect(page.getByLabel('Sidebar',{exact:true}).getByText('/workspaces/demo').first()).toBeVisible();
+ await expect(page.getByLabel('Sidebar',{exact:true}).getByText('Mobile session').first()).toBeVisible();
+ await expect(page.getByLabel('Sidebar',{exact:true}).getByText('/workspaces/demo')).toHaveCount(0);
  await page.getByLabel('Close navigation',{exact:true}).click();
  const dimensions=await page.evaluate(()=>({w:document.body.scrollWidth,h:document.body.scrollHeight,vw:innerWidth,vh:innerHeight,font:getComputedStyle(document.querySelector('.prompt-input')!).fontSize}));
  expect(dimensions.w).toBeLessThanOrEqual(dimensions.vw);expect(dimensions.h).toBeLessThanOrEqual(dimensions.vh);expect(dimensions.font).toBe('16px');

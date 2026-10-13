@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   LuArrowLeft,
+  LuBookOpen,
+  LuCode,
   LuChevronRight,
   LuCircleAlert,
   LuDownload,
@@ -12,6 +14,7 @@ import {
   LuFolderPlus,
   LuLink,
   LuLocateFixed,
+  LuMapPin,
   LuPencil,
   LuRefreshCw,
   LuSave,
@@ -24,6 +27,8 @@ import { flushFileDraft, keepFileDraft, readFileDraft } from "../file-drafts";
 import { local } from "../safe-storage";
 import { bytesLabel } from "../projects";
 import { confirmDialog } from "./ConfirmDialog";
+import { Markdown } from "./Markdown";
+import { canvasPictures } from "../canvas-pictures";
 import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
 import { deleteAsking, unsavedNotes } from "../unsaved";
@@ -43,6 +48,11 @@ interface Open {
 const HIDDEN_KEY = "filesShowHidden";
 /** Whether names that start with a dot are shown. Off unless it was turned on: they are mostly settings and tools' own folders. */
 const savedShowHidden = (): boolean => local.get(HIDDEN_KEY) === "1";
+
+const RENDERED_KEY = "filesMarkdownRendered";
+/** Whether a markdown file is shown as the page it describes rather than as its source. The page unless the source was chosen: most people open a markdown file to read it, and the choice is kept. */
+const savedRendered = (): boolean => local.get(RENDERED_KEY) !== "0";
+const isMarkdown = (p: string) => /\.(md|markdown|mdx)$/i.test(p);
 
 /** By its name only: whether it is one is the server's to say, from its bytes, and a refusal falls back to the note. */
 const looksLikePicture = (p: string) => /\.(png|jpe?g|gif|webp)$/i.test(p);
@@ -123,6 +133,13 @@ export const FilesPanel = memo(function FilesPanel({
   // The agent's next file would take an edit away from the screen: it follows only when nothing was left open.
   const [following, setFollowing] = useState(!left);
   const [showHidden, setShowHidden] = useState(savedShowHidden);
+  const [rendered, setRendered] = useState(savedRendered);
+  // A file made to be written in, or empty, opens as the source whatever the saved choice is: a blank page cannot be typed into. The choice itself is left alone.
+  // An edit brought back for a file that was empty on disk is the same case: it comes back as the source, also after it was saved with text and edited again.
+  const [writing, setWriting] = useState(() => left?.writing ?? (!!left && !left.saved));
+  const asPage = rendered && !writing;
+  // The chat's full path is not drawn in the sidebar or the chat's header any more: it is here, on request.
+  const [showPath, setShowPath] = useState(false);
   // The entry being given a name, and the name so far.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -167,8 +184,8 @@ export const FilesPanel = memo(function FilesPanel({
   // Kept while there are changes, for a panel that is unmounted with them: switching chat or leaving the page.
   useEffect(() => {
     if (!keepDraft) return;
-    keepFileDraft(sessionId, dirty && file ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size } : null);
-  }, [keepDraft, sessionId, dirty, file, draft]);
+    keepFileDraft(sessionId, dirty && file ? { path: file.path, text: draft, saved: file.saved, mtime: file.mtime, size: file.size, writing } : null);
+  }, [keepDraft, sessionId, dirty, file, draft, writing]);
   // Written before it goes: unmounting must not lose what was typed a moment ago. Closing the panel on purpose forgets it first.
   useEffect(() => (keepDraft ? () => flushFileDraft(sessionId) : undefined), [keepDraft, sessionId]);
   // An edit brought back may be of a file that changed meanwhile: told the way a save would, instead of at the save.
@@ -217,8 +234,9 @@ export const FilesPanel = memo(function FilesPanel({
   }, [loadDir, dir]);
 
   const loadFile = useCallback(
-    (path: string) => {
+    (path: string, write = false) => {
       const ask = ++fileAsk.current;
+      setWriting(write);
       setChanged(false);
       setSaveError(null);
       setFile({ path, loading: true, binary: false, size: 0, mtime: 0, saved: "" });
@@ -230,6 +248,7 @@ export const FilesPanel = memo(function FilesPanel({
           const text = r.binary ? "" : r.content;
           setFile({ path, loading: false, binary: r.binary, size: r.size, mtime: r.mtime, saved: text });
           setDraft(text);
+          if (!r.binary && !text) setWriting(true);
         })
         .catch((e) => {
           if (ask !== fileAsk.current) return;
@@ -439,7 +458,7 @@ export const FilesPanel = memo(function FilesPanel({
     // A new file is made to be written in.
     if (kind === "file") {
       setFollowing(false);
-      void loadFile(join(dir, name));
+      void loadFile(join(dir, name), true);
     }
   };
 
@@ -532,6 +551,15 @@ export const FilesPanel = memo(function FilesPanel({
           </>
         )}
         <button
+          onClick={() => setShowPath((v) => !v)}
+          aria-pressed={showPath}
+          title={showPath ? t("Hide the full path") : t("Show the full path of this folder")}
+          aria-label={showPath ? t("Hide the full path") : t("Show the full path")}
+          className={`shrink-0 rounded p-1 transition hover:bg-fg/5 hover:text-fg ${showPath ? "text-accent" : "text-fg-faint"}`}
+        >
+          <LuMapPin aria-hidden className="h-3.5 w-3.5" />
+        </button>
+        <button
           onClick={toggleHidden}
           aria-pressed={showHidden}
           title={showHidden ? t("Hide names that start with a dot") : t("Show names that start with a dot")}
@@ -557,6 +585,12 @@ export const FilesPanel = memo(function FilesPanel({
           <LuDownload aria-hidden className="h-3.5 w-3.5" />
         </a>
       </div>
+      {showPath && (
+        // Cut at the start, not the end: what tells folders apart is the last part. rtl moves the ellipsis; bdi keeps the path itself left to right.
+        <div className="shrink-0 truncate border-b border-line px-3 py-1 text-left font-mono text-[11px] text-fg-subtle [direction:rtl]" title={dir ? `${folder}/${dir}` : folder}>
+          <bdi data-testid="files-full-path">{dir ? `${folder}/${dir}` : folder}</bdi>
+        </div>
+      )}
 
       {file ? (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -578,6 +612,20 @@ export const FilesPanel = memo(function FilesPanel({
             <a href={api.fileDownloadUrl(sessionId, file.path)} title={t("Download this file")} aria-label={t("Download this file")} className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg">
               <LuDownload aria-hidden className="h-3.5 w-3.5" />
             </a>
+            {!file.binary && !file.loading && !file.error && isMarkdown(file.path) && (
+              <button
+                onClick={() => {
+                  local.set(RENDERED_KEY, asPage ? "0" : "1");
+                  setRendered(!asPage);
+                  setWriting(false);
+                }}
+                title={asPage ? t("Show the source") : t("Show the rendered page")}
+                aria-label={asPage ? t("Show the source") : t("Show the rendered page")}
+                className="shrink-0 rounded p-1 text-fg-faint transition hover:bg-fg/5 hover:text-fg"
+              >
+                {asPage ? <LuCode aria-hidden className="h-3.5 w-3.5" /> : <LuBookOpen aria-hidden className="h-3.5 w-3.5" />}
+              </button>
+            )}
             {!file.binary && !file.loading && !file.error && (
               <button
                 onClick={() => void save()}
@@ -615,6 +663,11 @@ export const FilesPanel = memo(function FilesPanel({
             <FilePicture key={`${file.path}@${file.mtime}`} src={api.pictureUrl(sessionId, file.path, file.mtime)} name={file.path} />
           ) : file.binary ? (
             <p className="p-6 text-center text-xs text-fg-subtle">{t("Not text, or too large to show. Download it to open it.")}</p>
+          ) : asPage && isMarkdown(file.path) ? (
+            // The draft, not the saved text: what is typed shows at once, and the page is never behind the source.
+            <div role="region" aria-label={t("Rendered {path}", { path: file.path })} className="prose prose-sm min-h-0 max-w-none flex-1 overflow-auto p-3">
+              <Markdown>{canvasPictures(draft, folder, (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
+            </div>
           ) : (
             <textarea
               value={draft}

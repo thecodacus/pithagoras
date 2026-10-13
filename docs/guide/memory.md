@@ -26,8 +26,22 @@ click a note to open it. A memory of many hundreds of notes is laid out in fewer
 passes, so that the page opens at once: the picture is rougher, and still shows
 what is linked.
 
-What is open is in the address (`/memory?note=…`, `?view=log`, `?view=graph`), so
-it can be linked to.
+**Librarian.** The chat button under the notes opens Understory's own agent, the
+one its web UI chats with: ask it what the memory holds, or tell it what to
+keep. It reads and writes the notes with the same tools the agent has, and links
+in its answers open the notes here. The side and the graph read themselves again
+after an answer in which it used a tool. The conversation is kept while the page
+is open, also while you look at a note; **Clear chat** empties it. **Stop**
+(and Clear chat, or leaving the page) stops you listening to an answer under way,
+not the librarian: Understory cannot be told to break off, so it finishes the
+steps it has started, notes it writes included, and the page does not show
+those. A new question waits until that is over ("still working on the previous
+question"); reopen the page afterwards to see the notes. It is offered in the Understory the portal runs only,
+like editing; the model that answers is the one that tidies the memory (see
+[Opt-in features](/guide/features#memory-understory)).
+
+What is open is in the address (`/memory?note=…`, `?view=log`, `?view=graph`,
+`?view=chat`), so it can be linked to.
 
 ### Editing
 
@@ -55,7 +69,7 @@ nothing links to, an index that misses something — and offers:
 **Clear the log** empties the record of changes and the query paths; the notes
 stay. **Clear the memory** deletes every note and folder and starts as a new
 memory does. Both ask first and cannot be undone. A memory run elsewhere is read
-only here.
+only here, and has no librarian chat.
 
 Setting Understory up — installing it, choosing the model that tidies it, the
 nightly pass — is in [Opt-in features](/guide/features#memory-understory).

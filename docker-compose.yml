@@ -24,13 +24,15 @@ services:
       PORTAL_CONTAINER_NAME: pithagoras
       # With host networking the portal binds PORT directly on the host.
       PORT: ${PORT:-4100}
+      # The password is chosen in the browser on the first start and kept in the
+      # portal's database. This is read only by a portal upgraded from a release
+      # that took its password from here, to move it there once; it is ignored after.
       PORTAL_PASSWORD: ${PORTAL_PASSWORD:-}
-      # The portal refuses to start without a password unless this is set, so an
-      # empty or misspelt PORTAL_PASSWORD cannot quietly open the port. Set it
+      # Runs the portal with no login at all and no password to choose. Set it
       # only for a portal behind a reverse proxy which authenticates already;
       # then nothing here stops whoever reaches the port.
       PORTAL_ALLOW_NO_PASSWORD: ${PORTAL_ALLOW_NO_PASSWORD:-}
-      # Without a password the portal listens on 127.0.0.1 only, which a proxy on
+      # Without a login the portal listens on 127.0.0.1 only, which a proxy on
       # this host reaches and one in another container does not. Set this to 1 for
       # that proxy; then nothing but the proxy's own login stands in the way.
       ALLOW_OPEN: ${ALLOW_OPEN:-}
@@ -43,6 +45,11 @@ services:
       # "skip" upgrades the database without the backup it is otherwise made first,
       # for a volume with no room for the copy. See docs/guide/upgrading.md.
       PORTAL_UPGRADE_BACKUP: ${PORTAL_UPGRADE_BACKUP:-}
+      # "debug" also keeps and prints the debug lines (tool calls, approvals); the
+      # default is info. The two numbers size what Settings → Logs keeps in memory.
+      PITHAGORAS_LOG_LEVEL: ${PITHAGORAS_LOG_LEVEL:-}
+      PITHAGORAS_LOG_LINES: ${PITHAGORAS_LOG_LINES:-}
+      PITHAGORAS_LOG_CHARS: ${PITHAGORAS_LOG_CHARS:-}
       # host = pi runs in this container | container = one container per task
       EXECUTOR: ${EXECUTOR:-host}
       PI_IMAGE: ${PI_IMAGE:-pithagoras-runner:latest}
@@ -75,6 +82,11 @@ services:
       # something else. Left empty, the card with the most room is used.
       VOICE_GPU: ${VOICE_GPU:-}
       VOICE_VRAM_RESERVE_MIB: ${VOICE_VRAM_RESERVE_MIB:-}
+      # The address the Browser add-on's own web page (ports 3010 and 3011) listens on.
+      # Left empty it is 127.0.0.1, so the page is reached through the portal's
+      # /browser-ui; 0.0.0.0 opens it to every machine that can reach this one.
+      # Read when the browser is installed. See docs/guide/browser.md.
+      BROWSER_BIND: ${BROWSER_BIND:-}
       # How long, in ms, the portal waits on Understory's model before giving up and saying so —
       # see docs/reference/configuration.md. Left empty, its 30-minute defaults stand.
       UNDERSTORY_LLM_HEADERS_TIMEOUT_MS: ${UNDERSTORY_LLM_HEADERS_TIMEOUT_MS:-}

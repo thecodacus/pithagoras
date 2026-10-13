@@ -1,15 +1,19 @@
 # Projects
 
 Every chat works in a folder. Most chats do not need one of their own, so there
-is a single **Home**, and **New** starts a chat there. Home is the agent's own
+is a single **Home**, and **New** starts a chat there, unless you picked another
+agent for new chats (see [Agents](/guide/agents)). Home is the first agent's own
 directory: its SOUL.md, PrimaryUser.md and MEMORY.md are there, so in Home the agent
 knows who it is and who it works for, and keeps its memory. A **project** is an extra
-folder you make on purpose, with instructions for the agent in an AGENTS.md — and
-only that — for work that should stay together.
+folder you make on purpose, with instructions for the agent in an AGENTS.md, for work
+that should stay together. A project is a blank slate by default, so only that file
+reaches its chats; you can have it work with one of your agents instead, see
+[An agent for a project](#an-agent-for-a-project).
 
 ## Home and New
 
-**New** in the sidebar starts a chat in Home straight away: no dialog, no name.
+**New** in the sidebar starts a chat straight away, with the agent picked for new
+chats (Home's agent by default, see [Agents](/guide/agents)): no dialog, no name.
 The chat is called *New chat* until you send its first message, and is then named
 after it (the first line, shortened). Rename it any time from the sidebar.
 
@@ -24,7 +28,8 @@ chats start without them.
 | Chat in | The agent has |
 | --- | --- |
 | Home | SOUL.md, PrimaryUser.md and MEMORY.md (MEMORY.md not while [Understory](/guide/features#memory-understory) is the memory) |
-| A project | The project's AGENTS.md, and nothing of the agent's own |
+| A project, blank slate | The project's AGENTS.md, and nothing of the agent's own |
+| A project that works with an agent | The project's AGENTS.md, and that agent's SOUL.md, PrimaryUser.md and MEMORY.md (MEMORY.md not while Understory is the memory of the project) |
 
 ## The Projects tab
 
@@ -32,11 +37,15 @@ chats start without them.
 has and when one last moved.
 
 - **Click a project** to open its latest chat, or start one if it has none.
-- **New project** asks for a name and, optionally, instructions and tools, then creates
-  the folder and opens a chat in it. "Cool Project" becomes the folder `cool-project`.
+- **New project** asks for a name and, optionally, instructions, an agent and tools, then
+  creates the folder and opens a chat in it. "Cool Project" becomes the folder `cool-project`.
   A name that is taken, or `home`, is refused.
 - **New chat here** (the plus on a row) starts another chat in that folder.
 - **Instructions** (the document icon) edits the folder's instructions.
+- **Agent** (the robot icon) picks the agent the project works with, and whether
+  Understory is its memory, see [An agent for a project](#an-agent-for-a-project). A
+  project with an agent carries *with* and its name on its row, and beside its folder in
+  the sidebar.
 - **Tools** (the blocks icon) sets which tools the project's chats start with, see
   [Tools](#tools). A project that does this carries a *tools* mark on its row.
 - **Delete** removes the project: its chats and its folder, after a confirmation
@@ -60,8 +69,10 @@ has and when one last moved.
 ## Chats inside a project
 
 In any chat, `/new` or `/clear` starts a fresh chat in the same project. The
-sidebar shows each chat's full path under its title — Home is the agent's own
-directory, a project is a folder under the workspace root.
+sidebar groups the chats by folder — Home is the agent's own directory, a
+project is a folder under the workspace root. A chat's full path is not drawn
+under its title, in the sidebar, on the Sessions or Projects page or beside a
+terminal; the pin button in the Files panel's header shows it.
 
 Deleting a chat never deletes a folder — only pi's conversation file for it, which is not part of any project. Folders are only made by **New project**
 and only removed by deleting a project.
@@ -80,10 +91,53 @@ after you opened it" and offers **Load the new version** or **Save mine anyway**
 Chats started after a change pick it up. A chat that is already open does after
 `/reload`.
 
+## An agent for a project
+
+An agent and a project are separate things: the agent is a character with a home, a
+project is a folder of work. So a chat in a project does not know the agent's soul,
+user or memory unless you say so. **New project** has an **Agent** menu with two
+choices:
+
+- **None — a blank slate**, which is the default and how every project was before: the
+  chats have the project's AGENTS.md, and nothing of any agent's.
+- **One of your agents.** The chats in the project then start with that agent's
+  `SOUL.md`, `PrimaryUser.md` and `MEMORY.md`, read from the agent's home, next to the
+  project's AGENTS.md. Its skills are the project's too, and voice mode shows its
+  avatar and speaks with its voice. The agent is still the same one: a project does not
+  copy anything, so a change to its `SOUL.md` reaches the project's next chat.
+
+**Agent** on the project's row changes the choice later, in either direction, and saves
+it as it is picked. Chats started after the change have it; a chat that is open has it
+after `/reload`. If the agent is deleted, its projects are blank slates again.
+
+The files are read from the agent's home and never from the project's folder, which the
+agent may write to: a `SOUL.md` it leaves there is only a file. A project that works with
+no agent reads none of them, from its folder or anywhere: it has only its AGENTS.md, and
+no [Understory](/guide/features#memory-understory) either, since there is no agent whose
+memory it would be.
+
+**Understory as memory** is one more switch in the same place, shown where the portal has
+[Understory](/guide/features#memory-understory) and the project has an agent: a blank slate has
+none, and no Understory. While it is on, Understory is the
+project's memory, as it is in Home: the agent is told how to use it and `MEMORY.md`
+is left out. Off, the chats in this project do not get those instructions, and a project
+with an agent has the agent's `MEMORY.md` instead. It decides what the chats are told
+and handed, not what they can reach: the Understory tools stay unless you switch them
+off in the project's [Tools](#tools). Home keeps Understory, and so does a project with an agent unless it is switched off.
+
+The choice is kept in the portal's database by the project's name, not as a file in the
+folder, for the reason the tool switches are (see [Tools](#tools)), and goes when the
+project is deleted. Over the API, `GET` and `PUT /api/projects/:name/agent` read and
+change `{ agent, understory }`, and `POST /api/projects` takes the same two fields and
+checks them before any folder is made.
+
+The agent's heartbeat and its conversations on the Agents page stay in its home and are
+not changed by this.
+
 ## Tools
 
 A project can have tools of its own: **Tools** on its row lists the tools the portal has
-seen registered, as a chat's tools control does (the picture tools together in one **Images** group), and what you switch there is what
+seen registered, as a chat's tools control does (the picture and video tools together in one **Media** group), and what you switch there is what
 every chat in the project starts with. "The research project never goes online" and
 "the dev project always has the shell tools" are then said once, not at the start of
 every chat.

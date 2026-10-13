@@ -17,7 +17,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 4, fingerprint: "e40d3b7b0f6575145b65a873f53267fa097c833d3b323ccd410229dac424b1c9" };
+const PINNED = { version: 4, fingerprint: "efbdd8979a8d5394300b7204d1486827c1831b1a13d4956828900facc7aba461" };
 
 const home = inProcessHome("pithagoras-schema-");
 
@@ -181,6 +181,9 @@ function startToolsUpgrade(dataDir, port) {
       project: db.projectTools("research"),
       defaults: db.toolDefaultsOff(),
       agentTools: db.getDb().prepare("SELECT COUNT(*) AS n FROM agent_tools").get().n,
+      // The agent a project works with (#127): a project of v0.1.0 has none, and keeps Understory.
+      projectAgent: db.projectAgent("research"),
+      projectAgents: db.getDb().prepare("SELECT COUNT(*) AS n FROM project_agent").get().n,
     }));`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
     env: { ...process.env, DATA_DIR: dataDir, WORKSPACE_ROOT: path.join(dataDir, "ws"), AGENT_HOME: path.join(dataDir, "home"), PORT: String(port), PORTAL_PASSWORD: "", ALLOW_OPEN: "" },
@@ -194,7 +197,7 @@ function startToolsUpgrade(dataDir, port) {
 
 // fixtures/portal-v3.db was made by the code of v0.1.0 (SCHEMA_VERSION 3): a routine with its Browser switch on (news), one
 // with it off in a project (tidy), a project that switches bash off, and web_search off by default. Version 4 gives routines
-// tool switches of their own and agents a table of them (#81).
+// tool switches of their own and agents a table of them (#81), projects a table of the agent they work with (#127), and the Media page a table of clips (#79).
 test("a database of v0.1.0 is brought to the pinned schema, and each routine keeps the browser it had", async () => {
   const dir = path.join(home, "from-v3");
   mkdirSync(dir, { recursive: true });
@@ -210,6 +213,7 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
 
   const d = new Database(file, { readonly: true });
   assert.equal(schemaFingerprint(d), PINNED.fingerprint);
+  assert.equal(d.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 0, "the Media page's table is there, and empty");
   d.close();
 
   const result = JSON.parse(/RESULT (.*)/.exec(run.output())[1]);
@@ -218,4 +222,6 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
   assert.deepEqual(result.project, { off: ["bash"], on: [] });
   assert.deepEqual(result.defaults, ["web_search"]);
   assert.equal(result.agentTools, 0, "no agent says anything yet");
+  assert.deepEqual(result.projectAgent, { agent: "", understoryOff: false }, "a project of v0.1.0 is a blank slate, as it was");
+  assert.equal(result.projectAgents, 0);
 });

@@ -98,7 +98,14 @@ export function useOpenFolders(key: string, byDefault: (folder: string) => boole
 const agentsFrom = (raw: unknown) =>
   (Array.isArray(raw) ? raw : []).filter(
     (a): a is PlaceAgent => typeof a?.id === "string" && typeof a?.name === "string" && typeof a?.home === "string" && a.home !== "",
-  ).map((a) => ({ id: a.id, name: a.name, home: a.home }));
+  ).map((a) => ({ id: a.id, name: a.name, home: a.home, ...(typeof a.newChats === "boolean" ? { newChats: a.newChats } : {}) }));
+
+/** A project as the places say it: where it is, and the agent it works with where it works with one. */
+const projectFrom = (p: { name: string; path: string; agent?: unknown }) => ({
+  name: p.name,
+  path: p.path,
+  ...(typeof p.agent === "string" && p.agent ? { agent: p.agent } : {}),
+});
 
 /** Places as they were last known, so that the chats are gathered from the start rather than once they are asked for. */
 function knownPlaces(): Places | undefined {
@@ -107,9 +114,9 @@ function knownPlaces(): Places | undefined {
     if (typeof p?.home !== "string" || !Array.isArray(p.projects)) return undefined;
     // Only projects that are whole: one without its path would take the page down.
     const projects = p.projects.filter(
-      (x): x is { name: string; path: string } => typeof x?.name === "string" && typeof x?.path === "string" && x.path !== "",
+      (x): x is { name: string; path: string; agent?: unknown } => typeof x?.name === "string" && typeof x?.path === "string" && x.path !== "",
     );
-    return { home: p.home, agents: agentsFrom(p.agents), projects };
+    return { home: p.home, agents: agentsFrom(p.agents), projects: projects.map(projectFrom) };
   } catch {
     return undefined;
   }
@@ -137,7 +144,7 @@ export function usePlaces(sessions: readonly { id: string; workspace: string }[]
         const now: Places = {
           home: typeof r.home === "string" ? r.home : "",
           agents: agentsFrom(r.agents),
-          projects: (Array.isArray(r.projects) ? r.projects : []).map((p) => ({ name: p.name, path: p.path })),
+          projects: (Array.isArray(r.projects) ? r.projects : []).map(projectFrom),
         };
         local.set("knownPlaces", JSON.stringify(now));
         // The one already held when it says the same: asked every half minute, it is rarely news.

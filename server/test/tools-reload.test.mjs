@@ -7,12 +7,13 @@ inProcessHome("pithagoras-reload-");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 
 /**
- * The parts of pi 0.82's AgentSession that decide which tools are active.
+ * The parts of pi 1.x's AgentSession that decide which tools are active.
  *
  * The registry holds every definition, `grep`, `find` and `ls` among them, and
  * a session starts with only read/bash/edit/write plus the extensions' tools
- * active. Activation from anywhere — an extension registering later, a reload —
- * goes through `setActiveToolsByName`, called on `this`.
+ * active. Activation from anywhere ends in `_setActiveTools`, called on `this`:
+ * an extension registering later and a reload call it themselves, and
+ * `setActiveToolsByName`, which extensions reach, goes through it.
  */
 function fakeSession() {
   const session = {
@@ -21,19 +22,22 @@ function fakeSession() {
     extension: ["web_search", "browser_browser_click"],
     getAllTools: () => session.registry.map((name) => ({ name })),
     getActiveToolNames: () => [...session.active],
-    setActiveToolsByName(names) {
+    _setActiveTools(names) {
       session.active = [...new Set(names)].filter((name) => session.registry.includes(name));
+    },
+    setActiveToolsByName(names) {
+      this._setActiveTools(names);
     },
     /** `ctx.refreshTools()`: whatever was not there before comes up active. */
     register(name) {
       session.registry.push(name);
       session.extension.push(name);
-      this.setActiveToolsByName([...session.active, name]);
+      this._setActiveTools([...session.active, name]);
     },
     async reload() {
       // A new runner, bound as pi binds one, before the tools are refreshed.
       session._bindExtensionCore({ runtime: {} });
-      this.setActiveToolsByName([...session.active, ...session.extension]);
+      this._setActiveTools([...session.active, ...session.extension]);
     },
     /** What every extension's `pi.getActiveTools()` / `pi.setActiveTools()` goes through. */
     _extensionRunner: null,

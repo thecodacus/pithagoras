@@ -1,8 +1,9 @@
 # Deploying
 
 Pithagoras ships as a container. It expects to run somewhere private — there is
-a single password and no per-user separation, so put it behind Tailscale or a
-VPN rather than on a public address.
+a single login (a password, and optionally a [single sign-on](#single-sign-on)
+provider) and no per-user separation, so put it behind Tailscale or a VPN rather
+than on a public address.
 
 ## Docker Compose
 
@@ -12,26 +13,30 @@ cd Pithagoras
 ```
 
 Create a `.env` next to `docker-compose.yml`. This writes one, with a secret of
-its own (change the password and the folder first, between the single quotes,
-where `%`, `$` and `\` are taken as they are, and neither can hold a `'`):
+its own (change the folder first, between the single quotes, where `%`, `$` and
+`\` are taken as they are, and it cannot hold a `'`):
 
 ```bash
-printf "PORTAL_PASSWORD='%s'\nWORKSPACES_DIR='%s'\nPORTAL_SECRET=%s\n" 'something-long' '/path/to/repos' "$(openssl rand -hex 32)" > .env
+printf "WORKSPACES_DIR='%s'\nPORTAL_SECRET=%s\n" '/path/to/repos' "$(openssl rand -hex 32)" > .env
 ```
 
-The two typed values go into the file in single quotes on purpose. Compose reads
-a `.env` value without quotes as its own syntax: `$name` becomes a variable (or
+The typed value goes into the file in single quotes on purpose. Compose reads a
+`.env` value without quotes as its own syntax: `$name` becomes a variable (or
 nothing), `$$` becomes one `$`, and ` #` starts a comment. The portal would then
-get another password than the one you typed, and the sign-in would refuse it.
-Between single quotes the value is taken as it is. If you write the file by
-hand, quote a password that has a `$` or a `#` in it the same way.
+get another folder than the one you typed. Between single quotes the value is
+taken as it is. If you write the file by hand, quote a value that has a `$` or a
+`#` in it the same way.
+
+There is no password in it: the portal asks for one in the browser the first
+time you open it, see [The password](#the-password).
 
 Write `PORTAL_SECRET=` followed by the output of `openssl rand -hex 32` if you
 make the file by hand. Compose does not run commands in a `.env`: the text
 `PORTAL_SECRET=$(openssl rand -hex 32)` would be the secret itself, the same for
 everyone who copied it from here. The portal says so when it starts with one.
 
-`.env.example` lists every variable Compose reads. `WORKSPACES_DIR` is the host
+`.env.example` lists every variable Compose reads, bar `PORTAL_PASSWORD`, which only
+an install from before has. `WORKSPACES_DIR` is the host
 folder your repositories are in, and it is required: there is no default, and
 Compose stops with a message until it is set, rather than mount a folder nobody
 chose. `PORTAL_DATA_DIR` (optional) is an absolute host path to keep the
@@ -49,13 +54,178 @@ Then:
 docker compose up -d --build
 ```
 
-Open `http://<host>:4100`, sign in, and add a model provider under **Settings →
-Providers** — the setup assistant offers to find a local server, or take a key.
-Nothing else is needed for a first chat.
+Open `http://<host>:4100`, choose a password when the page asks for one, and add
+a model provider under **Settings → Providers** — the setup assistant offers to
+find a local server, or take a key. Nothing else is needed for a first chat.
 
 The portal listens on `:4100`. Compose uses `network_mode: host`, so it binds
 that port directly on the host — which is also what lets pi reach a llama-server
 running on the same machine at `localhost`.
+
+## The password
+
+The portal runs arbitrary commands on the host, so it is behind one password. The
+password is chosen in the browser and kept, hashed (scrypt), in the portal's
+database; there is no `PORTAL_PASSWORD` to set, in Compose, in `.env` or anywhere
+else.
+
+**The first start.** A portal with no password shows a page that asks for one, at
+least 8 characters, typed twice, and signs you in with it. Until it is chosen the
+portal answers nothing else, and **whoever opens it first chooses the password**:
+open it yourself as soon as it is up, and keep the port closed to others until
+you have, which is easy on Tailscale or a VPN and not on a public address. The
+log says it is waiting. This works the same in Docker and on a headless machine:
+open the address from any browser that can reach it.
+
+**Changing it.** **Settings → Authentication** takes the current password and the new
+one twice; it signs out every other browser, and closes every chat view, terminal and
+browser stream that was open, in the one you changed it in as well (that page opens
+them again with its new login). See [Settings](/guide/settings#password).
+
+**An install from before.** A portal that took its password from `PORTAL_PASSWORD`
+moves it into the database on its first start after the upgrade and says so in the
+log. The variable is ignored from then on (a value that differs from the password
+in the database is said to be ignored at each start), so remove it from `.env`.
+Logins made before the upgrade are asked for the password once more. See
+[Upgrading](/guide/upgrading#the-password-moves-into-the-database).
+
+### A lost password
+
+Nothing recovers a password from the portal, which keeps only its hash. A server
+command removes it instead, after asking you to type `reset`:
+
+```bash
+# Docker Compose (the container is called pithagoras in both Compose files)
+docker exec -it pithagoras node server/dist/reset-password.js
+
+# Native, from the folder the portal runs from (or with the same DATA_DIR)
+npm run reset-password
+```
+
+A running portal needs no restart: it is waiting on its setup screen at once, every
+login is ended and so is every chat view, terminal and browser stream that was open
+(within a couple of seconds), and you choose a new password as on the first start (so
+do it straight away, for the same reason). A leftover `PORTAL_PASSWORD` is not read
+again, so the reset cannot be undone by a restart.
+
+A portal that was started with `PORTAL_ALLOW_NO_PASSWORD=1` and a password is not
+opened by the reset either: it waits on the setup screen like any other. A *restart*
+with the variable still set and no password does run with no login (on this machine
+only, unless `ALLOW_OPEN=1`), so choose a new password before restarting, or take the
+variable out. The command says so when the variable is set where it runs.
+
+## Single sign-on
+
+The portal can also sign you in through an OpenID Connect provider (Authentik,
+Keycloak, Entra ID, Google, Zitadel, Authelia and the like), beside the password or
+instead of it. It is set up in the browser, under **Settings → Authentication**
+(the **Single sign-on** section, closed until you open it),
+and kept in the portal's database like the password; there are no variables to
+set. The login page then has a **Sign in with …** button. What the provider lets in
+gets the same login cookie the password gives, so the API, the event streams and the
+agent's browser work as they do with the password. It is still one login for one
+person: everyone the provider signs in is the same user.
+
+Single sign-on needs the portal's password: it is set up after the password is
+chosen, saving its settings asks for the password, and the login cookie is signed
+with it. On a portal waiting on its setup screen (after `reset-password`, say) the
+button is not shown until a password is chosen again; the settings are kept. A portal
+with `PORTAL_ALLOW_NO_PASSWORD=1` has no login, and so no single sign-on.
+
+At the provider, make an OpenID Connect client for the authorization code flow:
+
+- Redirect URI: the portal's address followed by `/api/auth/oidc/callback`, such
+  as `https://portal.example.com/api/auth/oidc/callback`. The settings page fills it
+  in from the address it is open at; register what it says.
+- Confidential, with a client secret, or public without one: the portal uses PKCE
+  either way.
+- With **End the session at the provider too**, also allow the portal's address
+  with a `/` at the end (`https://portal.example.com/`) as the post-logout redirect URI.
+
+Then fill in the settings page: the **issuer URL** exactly as the provider names
+itself in `/.well-known/openid-configuration` (a trailing `/` counts; `https` only,
+plain `http` only for a provider on the same machine), the **client ID** and
+**secret** and the **redirect URL**. The scopes default to
+`openid email profile`, the button to "SSO". The client secret is never shown again
+once saved; leaving the field empty keeps it. That holds for the same issuer and
+client only: with another one the kept secret is not sent, and saving asks you to
+type the secret again, or to remove it for a public client.
+
+**Who may sign in is decided at the provider**, not in the portal: the portal has
+no list of emails, groups or accounts. Every account the provider signs in, with an
+ID token that checks out (its signature, issuer, audience, nonce and expiry), gets
+in. Limit the client to your people at the provider before you point the portal at
+it:
+
+- Authentik: group or user bindings on the application.
+- Keycloak: a realm of your own people, with user registration off.
+- Entra ID: *Assignment required* on the enterprise application.
+- Authelia: an authorization policy on the client that names your people.
+- Google: the consent screen's audience *Internal* (a Google Workspace
+  organisation), or *Testing* with your people listed as test users. An *External*
+  app that is published (*In production*) lets in every Google account there is, so
+  do not publish it.
+
+Other providers have a switch of their own for this; find it first. Do not point the
+portal at a provider that signs in anybody, such as one with open registration.
+
+When the settings are saved, the portal reads the provider's discovery document and
+keys, and refuses settings it does not answer to, with the reason: a provider that
+cannot be reached, calls itself by another issuer, does not offer PKCE with `S256`,
+or signs ID tokens with nothing but a shared secret. A provider that is down later
+does not open anything: its button says it cannot be reached, and the password
+still signs in (unless OIDC only is on).
+
+The sign-in ends at the address of the redirect URL. A button pressed on the portal
+opened by another name (its IP address, another host name) first sends the browser
+to that address, and you are signed in there, so open the portal at that address.
+
+A login lasts 30 days, as with the password. When the provider's own session or
+token runs out, the portal's login does not end, and blocking an account at the
+provider does not end a login the account already has. Changing the issuer, the
+client ID or **OIDC only** ends every login, the provider's and the
+password's (the browser that saved it is signed in again), as changing the password does.
+
+### OIDC only
+
+**OIDC only** hides the password form on the login page and refuses the password
+login: the provider is the only way in. The password stays set, and saving the
+single sign-on settings still asks for it. Turning it on ends every login, so a
+password login somebody else holds stops working too. Sign in through the provider
+once before you turn it on.
+
+If the provider stops letting you in, a server command switches the password login
+back on, after asking you to type `on`:
+
+```bash
+# Docker Compose
+docker exec -it pithagoras node server/dist/sso-only-off.js
+
+# Native, from the folder the portal runs from (or with the same DATA_DIR)
+npm run sso-only-off
+```
+
+A running portal takes it at once: the password signs in again, every login ends,
+and the provider's settings stay as they were. A lost password as well is removed
+with `reset-password` (above), which leaves OIDC only as it is; run both.
+
+### Authentik
+
+Under **Applications**, create an application with an **OAuth2/OpenID Provider**,
+client type *Confidential*, and the redirect URI above (mode *strict*). The issuer
+is shown on the provider's page, with a `/` at the end, such as
+`https://authentik.example.com/application/o/pithagoras/`. To limit who signs in,
+bind the application to a group or to users (its **Policy / Group / User
+Bindings** tab).
+
+### Keycloak
+
+In the realm, create a client: *OpenID Connect*, **Client authentication** on,
+**Standard flow** on, the redirect URI above under **Valid redirect URIs**, and the
+portal's address with a `/` at the end (`https://portal.example.com/`) under
+**Valid post logout redirect URIs**, since Keycloak compares it as written. Copy the
+secret from **Credentials**. The issuer is `https://keycloak.example.com/realms/<realm>`. Every
+user of the realm can sign in, so use a realm that holds your people only.
 
 ## HTTPS
 
@@ -130,6 +300,12 @@ chats interrupted.
 git pull && docker compose up -d --build
 ```
 
+A portal in a container cannot rebuild itself, so it is updated this way, from
+outside, or by pulling the new image in Portainer. Settings → About says the same
+there. A portal [run from source](#running-from-source) has an **Update** button
+in Settings → About that pulls, builds and restarts it, see
+[Settings](/guide/settings#update).
+
 Your data lives in a volume, not in the image (`portal-data`, or `pithagoras-data` in the Portainer stack). Sessions,
 transcripts, installed pi packages and installed channel packages all survive a
 rebuild. When the new version changes the database, the portal copies it aside
@@ -175,9 +351,13 @@ Inside `/data`:
 | `/data/sessions/<id>` | Per-session working area, and pi's file of the chat's conversation: it is what the agent remembers. Do not clear it |
 | `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings, skills and packages |
 | `/data/channels` | Installed third-party channel packages |
+| `/data/channel-state` | What a channel keeps between its starts, such as where Signal's stream was |
 | `/data/agent-home` | The first agent's home: its `SOUL.md`, `PrimaryUser.md`, `MEMORY.md` |
 | `/data/agents/<id>` | The home of every other [agent](/guide/agents) |
-| `/data/images` | The pictures the [Images page](/guide/images) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |
+| `/data/images` | The pictures the [Media page](/guide/media) made itself, and the pictures sent with each chat's messages, in a folder per chat. What the agent makes is in the chat's folder, under `generated-images` |
+| `/data/videos` | The videos the [Media page](/guide/media) made itself, kept until you delete them. What the agent makes is in the chat's folder, under `generated-videos` |
+| `/data/video-posters` | The small first-frame pictures the portal makes of videos when there is an `ffmpeg` (see [Media](/guide/media#the-gallery)); they can be deleted at any time and are made again |
+| `/data/video-copies` | The playable WebM copies the portal makes, on request and with an `ffmpeg`, of clips a browser cannot play (see [Media](/guide/media#clips-a-browser-cannot-play)); the originals are in `videos`, and a copy can be deleted at any time |
 | `/data/bin` | CLIs you add yourself — on `PATH`, survives rebuilds |
 
 `HOME` deliberately points at the volume. Otherwise every image rebuild would
@@ -274,18 +454,21 @@ anyway. This is the right home for `apt-get install` lines.
 
 ## Environment
 
-Everything here is optional except the password and, with the Compose files,
-`WORKSPACES_DIR`.
+Everything here is optional except, with the Compose files, `WORKSPACES_DIR`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PORTAL_PASSWORD` | — | Required. The single login password, at least 8 characters and not the example from `.env.example`; the portal will not start without one. A portal that already ran with a shorter password keeps starting with it, with a warning in the log and in Settings, but a new or changed one has to be long enough. Changing it ends every login made under the old one. |
-| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. See [Running without a password](#running-without-a-password). |
-| `ALLOW_OPEN` | — | `1` makes a portal with no password listen on every interface instead of `127.0.0.1` only. Both Compose files pass it. |
+| `PORTAL_PASSWORD` | — | Not a setting any more: the password is chosen in the browser ([The password](#the-password)). An install from before that has it set has it moved into the database once, on the first start after the upgrade, and the variable is ignored from then on. |
+| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login at all, and with no password to choose. Only safe behind a reverse proxy that authenticates, with the port unreachable otherwise. See [Running without a password](#running-without-a-password). |
+| `ALLOW_OPEN` | — | `1` makes a portal with no login listen on every interface instead of `127.0.0.1` only. Both Compose files pass it. |
 | `PORTAL_SECRET` | random | Signs the session cookie. Set it to survive restarts. |
 | `PORT` | `4100` | Port to listen on. |
+| `PITHAGORAS_LOG_LEVEL` | `info` | `debug` also keeps and prints the debug lines in the server's log and in Settings → Logs: so far one per tool call and approval, with the tool, the outcome and the time it took, and nothing a tool was given or returned. Both Compose files pass it. See [Settings](/guide/settings#logs). |
+| `PITHAGORAS_LOG_LINES` / `PITHAGORAS_LOG_CHARS` | `2000` / `2000000` | How many lines, and how many characters of them, Settings → Logs keeps in memory (100 to 50000 lines, 200000 to 20000000 characters). Debug lines count against the same limits, so raise the lines with `PITHAGORAS_LOG_LEVEL=debug`. Both Compose files pass them. |
+| `PORTAL_UPDATE_RESTART` | — | From source: how the **Update** button in Settings → About restarts the portal after it has built the new version. `exit` only stops it, with status 75, for a portal that something else starts again (pm2, a restart policy); `self` starts the new one itself. Unset, a portal that is a systemd service's own process exits; one that only is in a service's control group (`npm start` under dash, a wrapper script, a cron job) starts its own copy and exits with status 75 as well; any other starts its own. A systemd unit needs `Restart=on-failure` or `Restart=always`. See [Settings](/guide/settings#update). |
 | `TZ` | UTC | The time zone of the portal's clock, such as `Europe/Berlin`. A container keeps UTC unless it is told one. The quiet hours of an [agent's heartbeat](/guide/agents#its-heartbeat) and the schedule of a repeating [routine](/guide/routines) are read on this clock. Both Compose files pass it from `.env` or the shell. |
 | `PORTAL_UPGRADE_BACKUP` | — | `skip` upgrades the database without the backup it is otherwise made first, for a volume with no room for the copy. Both Compose files pass it; see [Upgrading](/guide/upgrading#no-room-for-the-backup). |
+| `PORTAL_UPDATE_CHECK` | — | From source: `off` stops the portal from fetching `origin/main` by itself at the start and every six hours to see whether there is something new. The **Update** button in Settings → About still asks when it is pressed. See [Settings](/guide/settings#update). |
 | `EXECUTOR` | `host` | `host` or `container` — see [Architecture](/reference/architecture#executors). |
 | `WORKSPACE_ROOT` | `/workspaces` | Where workspaces live inside the container. |
 | `WORKSPACES_DIR` | — (required) | Compose only: the host folder mounted at `/workspaces`. |
@@ -339,8 +522,7 @@ node --input-type=module -e 'import Database from "better-sqlite3"; const db = n
 
 A working installation prints `{ ok: 1 }`.
 
-The server needs the `pi` CLI on your `PATH`, as the image has it, and a
-password, as above. Everything it keeps for itself goes in `./data` unless you
+The server needs the `pi` CLI on your `PATH`, as the image has it. Everything it keeps for itself goes in `./data` unless you
 set `DATA_DIR`: the database, `bin/`, `agent-home/`, `channels/` and the local
 browser's profile. Nothing is written to `/data`, which only the image has.
 The one exception is pi's conversation files, which go to `./data/sessions`
@@ -349,12 +531,27 @@ unless `SESSION_DIR` is set, also when `DATA_DIR` is: set both, or a moved
 
 ```bash
 npm install
-PORTAL_PASSWORD='a password of 8 or more characters' npm run dev:server   # API on :4100
+npm run dev:server   # API on :4100
 npm run dev:web      # Vite dev server, proxying to it
 ```
 
-To try it without a login, set
-`PORTAL_ALLOW_NO_PASSWORD=1` instead of the password; the server then listens on
+`npm run dev:server` restarts the server when a source file changes. That is for
+developing, and Settings → About has no **Update** button for it. To run the
+portal from a checkout and update it from the page, build it and start the build:
+`npm run build && npm start`, or as a service:
+
+```ini
+[Service]
+WorkingDirectory=/srv/pithagoras
+ExecStart=/usr/bin/node server/dist/index.js
+Restart=on-failure
+```
+
+The update ends the portal with status 75, which `Restart=on-failure` (or
+`Restart=always`) starts again; see [Settings → Update](/guide/settings#update).
+
+The page asks for a password the first time. To try it without a login, set
+`PORTAL_ALLOW_NO_PASSWORD=1` for the server instead; it then listens on
 `127.0.0.1` only, unless `ALLOW_OPEN=1` is set.
 
 And the docs site you are reading:
@@ -402,12 +599,14 @@ Existing session directories must be writable by that portal user. For a custom 
 
 ## Running without a password
 
-Without `PORTAL_PASSWORD` the portal does not start: it runs arbitrary commands, so an empty or misspelt password must not quietly open the port. Two settings, both deliberate, change that:
+A portal with no password does not run without a login by itself: it waits on the page that asks for one ([The password](#the-password)), and answers nothing else. Two settings, both deliberate, run it with no login at all instead:
 
-- `PORTAL_ALLOW_NO_PASSWORD=1` lets it start with no login. It then listens on `127.0.0.1` only, so a reverse proxy on the same host reaches it and nothing else does.
+- `PORTAL_ALLOW_NO_PASSWORD=1` lets it start with no login and no password to choose (there is none to change in Settings either). It then listens on `127.0.0.1` only, so a reverse proxy on the same host reaches it and nothing else does.
 - `ALLOW_OPEN=1` on top of that makes it listen on every interface. This is what a proxy in another container, or on another machine, needs; anyone who can reach the port can then run commands, so the port must be closed to everything but the proxy.
 
-Both Compose files pass both variables on. They bind to the host (`network_mode: host`), so `127.0.0.1` there is the host's own loopback, which a container on Docker's bridge network cannot reach: for a proxy in such a container, set `ALLOW_OPEN=1` and keep the port closed with the host's firewall. With a password, the portal listens on every interface and neither is needed.
+A password the portal already holds wins over `PORTAL_ALLOW_NO_PASSWORD`: the login applies, and a password removed with the reset command leaves the running portal on its setup screen, not open. Only a start with no password at all runs with no login.
+
+Both Compose files pass both variables on. They bind to the host (`network_mode: host`), so `127.0.0.1` there is the host's own loopback, which a container on Docker's bridge network cannot reach: for a proxy in such a container, set `ALLOW_OPEN=1` and keep the port closed with the host's firewall. With a password, or while it waits for one, the portal listens on every interface and neither is needed.
 
 Login attempts are limited per direct network source. A reverse proxy shares that limit across its clients; untrusted forwarding headers do not bypass it. The production UI sends a Content Security Policy that permits the local browser, microphone processing, and configured HTTP/WebSocket services.
 

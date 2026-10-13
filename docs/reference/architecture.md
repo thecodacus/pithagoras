@@ -92,7 +92,8 @@ stray file would attach the wrong conversation.
 | `settings` | Portal-wide overrides, and the small things the portal remembers (the tools it has seen, the browser switch, the model's context windows) |
 | `project_tools` | A project's tool switches |
 | `open_subagents` | The subagents still running in a session |
-| `images` | The pictures of the [Images page](/guide/images), and what each was made from |
+| `images` | The pictures of the [Media page](/guide/media), and what each was made from |
+| `videos` | The clips of the [Media page](/guide/media): the page's own, the agent's and those found in its folders, and what each was asked for |
 | `voice_presets` | The saved voices |
 | `signed_out` | Logins that were ended early, until they would have expired anyway |
 
@@ -107,8 +108,8 @@ transaction, showing an Upgrading page meanwhile. See
 
 Not everything goes through pi. The agent's own browser tools (`browser/tools.ts`)
 drive the Chromium over its debugging port from inside the portal, not as an MCP
-server, and the image tools (`generate_image`, `edit_image`, `show_image`) are
-registered by the portal the same way. The Files, Git and terminal panels talk to the
+server, and the image tools (`generate_image`, `edit_image`, `show_image`) and
+the video tools (`generate_video`, `show_video`) are registered by the portal the same way. The Files, Git and terminal panels talk to the
 session's folder directly (`server/src/workspace-files.ts`, `git.ts`, a pty per
 terminal). Managed add-ons — Browser, Voice, Understory — are Docker containers
 the portal starts through the socket; voice shares the portal's network

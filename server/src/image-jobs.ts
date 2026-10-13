@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { addPagePicture, readListed, type PictureParams } from "./image-gallery.js";
 import { FileError, MAX_PICTURE_BYTES } from "./workspace-files.js";
-import { checkCount, checkTotal, editImage } from "./image-editing.js";
+import { checkCount, editImage } from "./image-editing.js";
 import {
   ImageGenerationError,
   generateImage,
@@ -13,7 +13,7 @@ import {
 import { forPicture, hasNative, type PictureSettings } from "./image-settings.js";
 
 /**
- * Making pictures for the Images page: a request becomes a job that runs on
+ * Making pictures for the Media page: a request becomes a job that runs on
  * the server, so that closing the page, or going to another, does not lose a
  * picture that is being paid for. The page asks which jobs there are, and shows
  * each as the picture being made until it is in the gallery.
@@ -50,6 +50,8 @@ export interface PictureJob {
   finishedAt?: number;
   /** When it is done: the picture, in the gallery. */
   pictureId?: string;
+  /** When an edit was scaled down or compressed to fit what an edit takes: what was done to which, in words for the person. Left out when nothing was. */
+  notes?: string[];
   /** When it failed: why, in words with no secret in them. */
   error?: string;
 }
@@ -110,15 +112,16 @@ const said = (e: unknown): string => {
 };
 
 /** Runs `make` as a job: it is started now, and what it ends with is kept on the job. */
-function start(job: Omit<PictureJob, "id" | "state" | "startedAt">, make: (signal: AbortSignal) => Promise<string>): PictureJob {
+function start(job: Omit<PictureJob, "id" | "state" | "startedAt">, make: (signal: AbortSignal) => Promise<{ pictureId: string; notes?: string[] }>): PictureJob {
   const held: Held = { ...job, id: randomBytes(6).toString("hex"), state: "running", startedAt: Date.now(), controller: new AbortController() };
   jobs.set(held.id, held);
   void make(held.controller.signal).then(
-    (pictureId) => {
+    ({ pictureId, notes }) => {
       // Stopped meanwhile: the job is gone, and what came back is not wanted.
       if (!jobs.has(held.id)) return;
       held.state = "done";
       held.pictureId = pictureId;
+      if (notes?.length) held.notes = notes;
       held.finishedAt = Date.now();
     },
     (e) => {
@@ -132,7 +135,7 @@ function start(job: Omit<PictureJob, "id" | "state" | "startedAt">, make: (signa
 }
 
 /** What a request with a setting that only stable-diffusion.cpp reads is told while the switch for them is off: they are not sent, and not dropped without a word either. */
-const SD_OFF = "Stable Diffusion extra settings are switched off, so seed, steps, negative prompt, strength and starting from noise are not sent. Switch them on in Settings → Agent → Images, or leave them out";
+const SD_OFF = "Stable Diffusion extra settings are switched off, so seed, steps, negative prompt, strength and starting from noise are not sent. Switch them on in Settings → Agent → Media, or leave them out";
 
 /** Whether there is room for `count` more, or the refusal that says there is not. */
 function room(count: number): void {
@@ -184,7 +187,7 @@ const requestOf = ({ model, size, outputFormat, outputCompression, fromNoise, ne
  */
 export function startGenerations(request: GenerateJob): PictureJob[] {
   const config = imageGenerationConfig();
-  if (!imageGenerationReady(config)) throw new JobRefusal("Image generation is switched off, or has no address: set it up in Settings → Agent → Images", 409);
+  if (!imageGenerationReady(config)) throw new JobRefusal("Image generation is switched off, or has no address: set it up in Settings → Agent → Media", 409);
   if (!config.sdExtras && hasNative(request)) throw new JobRefusal(SD_OFF, 409);
   room(request.count);
   return Array.from({ length: request.count }, (_, i) => {
@@ -193,7 +196,7 @@ export function startGenerations(request: GenerateJob): PictureJob[] {
     const params = paramsOf({ ...settings, model: settings.model || config.model, size: settings.size || config.size });
     return start({ kind: "generate", prompt: request.prompt, ...(params.size ? { size: params.size } : {}) }, async (signal) => {
       const { bytes, ext } = await generateImage(config, { prompt: request.prompt, ...requestOf(settings) }, { signal });
-      return addPagePicture({ bytes, ext, kind: "generated", prompt: request.prompt, params }).id;
+      return { pictureId: addPagePicture({ bytes, ext, kind: "generated", prompt: request.prompt, params }).id };
     });
   });
 }
@@ -210,13 +213,13 @@ export interface EditJob extends PictureSettings {
 
 /**
  * Starts an edit, or several of the same. The pictures are read now, from the
- * gallery, and checked as the agent's tool checks them (count, size, weight,
- * what they are) before anything is sent: a request that is refused is refused
+ * gallery, and checked as the agent's tool checks them (count, what they are, and
+ * that they can be made to fit, which scales one that is over the limits down) before anything is sent: a request that is refused is refused
  * here, with the reason.
  */
 export function startEdit(request: EditJob): PictureJob[] {
   const config = imageGenerationConfig();
-  if (!imageEditingReady(config)) throw new JobRefusal("Image editing is switched off, or has no address: set it up in Settings → Agent → Images", 409);
+  if (!imageEditingReady(config)) throw new JobRefusal("Image editing is switched off, or has no address: set it up in Settings → Agent → Media", 409);
   const target = imageEditingTarget(config);
   if (!target.sdExtras && hasNative(request)) throw new JobRefusal(SD_OFF, 409);
   room(request.count);
@@ -226,18 +229,15 @@ export function startEdit(request: EditJob): PictureJob[] {
     throw new JobRefusal((e as Error).message, 400);
   }
   const images: Buffer[] = [];
-  let total = 0;
   for (const [i, id] of request.sources.entries()) {
     try {
       images.push(readListed(id).bytes);
-      total += images[i].length;
-      checkTotal(total);
     } catch (e) {
       const which = request.sources.length > 1 ? `Picture ${i + 1}: ` : "";
       // The Files panel's words for a picture that is too large ("download it instead") are no way forward for an edit.
       const why =
         e instanceof FileError && e.code === "too_large"
-          ? `The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is more than an edit takes. It is not scaled or cut.`
+          ? `The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is more than can be read to be scaled down for an edit. Use a smaller picture.`
           : (e as Error).message;
       throw new JobRefusal(`${which}${why}`, 400);
     }
@@ -247,8 +247,8 @@ export function startEdit(request: EditJob): PictureJob[] {
     // The size is the request's own: an edit has none of the add-on's, which is the size of a new picture.
     const params: PictureParams = { ...paramsOf({ ...settings, model: settings.model || target.model }), sources: request.sources, ...(request.mask ? { masked: true } : {}) };
     return start({ kind: "edit", prompt: request.prompt, from: request.sources[0] }, async (signal) => {
-      const { bytes, ext } = await editImage(target, { prompt: request.prompt, image: images.length > 1 ? images : images[0], mask: request.mask, ...requestOf(settings) }, { signal });
-      return addPagePicture({ bytes, ext, kind: "edited", prompt: request.prompt, params, sourceId: request.sources[0] }).id;
+      const { bytes, ext, notes } = await editImage(target, { prompt: request.prompt, image: images.length > 1 ? images : images[0], mask: request.mask, ...requestOf(settings) }, { signal });
+      return { pictureId: addPagePicture({ bytes, ext, kind: "edited", prompt: request.prompt, params, sourceId: request.sources[0] }).id, notes };
     });
   });
 }

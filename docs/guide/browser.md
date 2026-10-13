@@ -45,9 +45,9 @@ machine's own Chrome are not broken.
 
 ## Logging in
 
-**Browser → Open browser** in the portal, or `https://<host>:3011` directly.
-That is a full Chromium in a web page: sign into whatever the agent should have,
-then close the tab. The profile lives on its own volume and survives restarts.
+**Browser → Open browser** in the portal. That is a full Chromium in a web page:
+sign into whatever the agent should have, then close the tab. The profile lives on
+its own volume and survives restarts.
 
 ### Embedded, or in a tab
 
@@ -85,9 +85,38 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 On a tailnet, `tailscale cert <machine>.<tailnet>.ts.net` gives a real one and
 no warnings at all.
 
-The direct port still works if you would rather not: `https://<host>:3011`, with
-`BROWSER_USER` and `BROWSER_PASSWORD`, and its own self-signed certificate to
-accept.
+### The browser's own port
+
+The browser's web page is also served by its container, on ports `3010` (HTTP) and
+`3011` (HTTPS), with its own login and a self-signed certificate. It listens on
+**this machine only** (`127.0.0.1`): the container shares the host's network, so
+anything it listens on is the host's own address, and the one password in front of
+it should not be what stands between a browser holding the agent's logins and
+everyone on the network. The portal's `/browser-ui` above is the way in from other
+machines, behind the portal's login.
+
+From the host itself, `https://127.0.0.1:3011` with `BROWSER_USER` and
+`BROWSER_PASSWORD` works. From another machine, forward the port over SSH and open
+it on your own side:
+
+```bash
+ssh -L 3011:127.0.0.1:3011 <host>
+# then open https://127.0.0.1:3011
+```
+
+If the portal is on plain HTTP it cannot embed the browser, and there is no direct
+link from its page either; give it a certificate as above, or open the port yourself
+by setting `BROWSER_BIND` on the portal (see [Docker add-ons](/guide/add-ons)) to
+`0.0.0.0`, or to the one address of this machine that you want it on; the portal
+itself keeps reaching it on `127.0.0.1` either way. Then the page links to
+`https://<host>:3011` again. That is every machine that can reach the address, and
+your password only, so use a long one and a firewall. With the shipped Compose files
+or the Portainer stack, put `BROWSER_BIND=0.0.0.0` in `.env` (they pass it on to the
+portal), recreate the stack, and remove and install the browser again.
+
+A browser installed by an earlier version listens on every interface until it is
+removed and installed again (**Remove** keeps the profile and its logins); the
+Browser page says so while that is the case.
 
 Give the agent **its own accounts** rather than sharing yours. That is what
 makes it a teammate rather than a proxy, and it keeps a colleague's request from
@@ -255,8 +284,11 @@ browser, which is not built yet.
 Chromium exposes `127.0.0.1:9222`, and that port is **unauthenticated**. Whoever
 reaches it owns every account the browser is signed into.
 
-Host networking is what keeps it to the box. Never publish it, never put it
-behind a reverse proxy, and treat the profile volume as the secret it is.
+Host networking is what keeps it to the box: Chromium binds that port to the
+loopback address only. Never publish it, never put it behind a reverse proxy, and
+treat the profile volume as the secret it is. The browser's web page on `3010` and
+`3011` is held to the loopback address as well, by the portal (see
+[above](#the-browser-s-own-port)).
 
 ### Playwright MCP screenshots
 

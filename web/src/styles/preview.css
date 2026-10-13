@@ -38,6 +38,9 @@
 .image-preview-img { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; object-fit: contain; opacity: 0; }
 .image-preview-link > .image-preview-img { z-index: 0; }
 .image-preview-frame.is-loaded .image-preview-img { opacity: 1; }
+/* A clip says it plays: a mark in the corner, over its poster or first frame. */
+.image-preview-play { position: absolute; z-index: 1; right: 7px; bottom: 7px; box-sizing: content-box; width: 14px; height: 14px; padding: 6px; border-radius: 9999px; background: rgb(var(--surface) / .88); color: rgb(var(--fg)); pointer-events: none; }
+.image-preview-link.is-clip { cursor: pointer; }
 
 /* Not made, or gone from the folder: quiet, as wide as a message and as high as its words. */
 .image-preview.is-failed:not(.is-compact) { width: min(100%, 24rem); }
@@ -47,6 +50,8 @@
 .image-preview-failed > div { min-width: 0; }
 .image-preview-failed b { display: block; font-weight: 500; color: rgb(var(--fg)); }
 .image-preview-failed p { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: rgb(var(--fg-subtle)); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+/* A clip's message is shown whole, however long: it says what the server sent, and is all there is to read to find out why. */
+.image-preview.is-clip .image-preview-failed p { display: block; -webkit-line-clamp: unset; overflow: visible; }
 /* In a tile there is room for the mark only: the card says the rest. */
 .image-preview.is-compact .image-preview-failed { position: absolute; inset: 0; align-items: center; justify-content: center; padding: 0; }
 
@@ -62,3 +67,10 @@
 .picture-call .chat-tool-body { margin-left: 0; }
 .picture-call .chat-tool-body > .chat-tool-name { align-self: flex-start; max-width: 100%; color: rgb(var(--fg-subtle)); }
 @media (prefers-reduced-motion: reduce) { .picture-call-more, .picture-call-more svg { transition: none; } }
+
+/* A clip in the chat, played where the agent put it: as wide as a picture's frame at most, whole in its player. */
+.video-call-player { margin: 2px auto 4px; width: min(100%, 36rem); }
+.chat-video { display: block; width: 100%; max-height: 20rem; border: 1px solid rgb(var(--line)); border-radius: 8px; background: #000; }
+.chat-picture .chat-video { width: auto; max-width: 100%; }
+.chat-video-gone { padding: 11px 13px; border: 1px dashed rgb(var(--line)); border-radius: 8px; font-size: 12.5px; color: rgb(var(--fg-muted)); }
+.video-call .image-preview-caption { margin-top: 5px; }

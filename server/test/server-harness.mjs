@@ -77,10 +77,11 @@ export const withoutCredentials = (env) => Object.fromEntries(Object.entries(env
  * points every folder into it, so nothing reaches the developer's own pi
  * settings or a portal's data, and it is removed when the file's tests end.
  * Call it before the modules are imported (they read the environment as they
- * load), and `await import(...)` them after it.
+ * load), and `await import(...)` them after it. Given the home of a server the
+ * test starts, both work on the same database.
  */
-export function inProcessHome(prefix) {
-  const home = testHome(prefix);
+export function inProcessHome(prefix, existing) {
+  const home = existing ?? testHome(prefix);
   Object.assign(process.env, homeEnv(home));
   for (const name of Object.keys(process.env)) if (CREDENTIALS.test(name)) delete process.env[name];
   mkdirSync(process.env.WORKSPACE_ROOT, { recursive: true });
@@ -95,6 +96,8 @@ export const serverEnv = (home, port, overrides = {}) => ({
   ...withoutCredentials(process.env),
   PORT: String(port), ...homeEnv(home),
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
+  // The checkout a test server runs from is the developer's own: it does not fetch from its remote on a schedule.
+  PORTAL_UPDATE_CHECK: "off",
   ...overrides,
 });
 
@@ -119,12 +122,14 @@ export function runToEnd(args, env, { cwd, ms = 60_000 } = {}) {
  * Starts the server and waits until it says it listens. A port from `freePort` is free only until something else
  * takes it, and that can be another test's server or a fake one before this server has opened its database: whatever
  * answers on the port is not the server that was started, so the line the server itself prints is what is waited for.
- * When it could not take the port, it is started again on another one. `port` is the one it listens on.
+ * When it could not take the port, it is started again on another one. `port` is the one it listens on,
+ * and `log()` what the server has printed so far. `entry` is the server's entry, where a test runs a copy of it from
+ * another place.
  */
-export async function startServer(env, tries = 5) {
+export async function startServer(env, tries = 5, entry = ENTRY) {
   for (let attempt = 1; ; attempt++) {
     const run = attempt === 1 ? env : { ...env, PORT: String(await freePort()) };
-    const child = spawn(process.execPath, [ENTRY], { env: run, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [entry], { env: run, stdio: ["ignore", "pipe", "pipe"] });
     started.push(child);
     let log = "";
     const listening = new RegExp(`pithagoras listening on :${run.PORT}\\b`);
@@ -140,7 +145,7 @@ export async function startServer(env, tries = 5) {
       const base = `http://127.0.0.1:${run.PORT}`;
       for (let i = 0; i < 200; i++) {
         try {
-          if ((await fetch(`${base}/api/auth/status`)).ok) return { child, base, port: Number(run.PORT) };
+          if ((await fetch(`${base}/api/auth/status`)).ok) return { child, base, port: Number(run.PORT), log: () => log };
         } catch { /* not answering yet */ }
         if (child.exitCode !== null) break;
         await new Promise((r) => setTimeout(r, 50));

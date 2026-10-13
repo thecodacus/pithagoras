@@ -12,12 +12,14 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.82.1",
+    "@earendil-works/pi-coding-agent": "^1.1.0",
     "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",
     "express": "^5.0.1",
+    "jose": "^6.2.12",
     "nanoid": "^5.0.9",
     "playwright-core": "1.63.0",
+    "sharp": "0.35.5",
     "typebox": "^1.1.38",
     "undici": "^8.11.2"
   },

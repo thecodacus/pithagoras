@@ -1,5 +1,5 @@
 /**
- * The settings of one picture beyond its description, as the Images page offers
+ * The settings of one picture beyond its description, as the Media page offers
  * them, and how each reaches the image endpoint.
  *
  * The endpoint speaks the OpenAI image format, in which a request has a prompt, a
