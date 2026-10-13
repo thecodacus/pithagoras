@@ -208,7 +208,8 @@ test('with models, the assistant saves the model and effort, then offers package
   await expect(setup.getByText('pi-subagents')).toBeVisible();
   await setup.getByRole('button', { name: 'Install pi-subagents' }).click();
   await page.getByRole('button', { name: 'Install', exact: true }).click();
-  await expect(setup.getByText('Installed')).toBeVisible();
+  // Its own row: pi-web-access above it is installed already and says the same.
+  await expect(setup.getByRole('listitem').filter({ hasText: 'pi-subagents' }).getByText('Installed')).toBeVisible();
   await expect.poll(() => api.installed()).toEqual(['npm:pi-subagents']);
   await setup.getByRole('button', { name: 'Done' }).click();
   await expect(setup).toBeHidden();
