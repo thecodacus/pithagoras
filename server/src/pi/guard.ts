@@ -311,8 +311,10 @@ const envelope = (id: string) => ({
  * Checked per call rather than fixed at launch with allowedToolNames, because a
  * group conversation changes sender between messages and a launch-time list
  * would freeze capability to whoever happened to speak first.
+ *
+ * The gateway to the lazy tools is read-only too, but not by its name: see gatewayNow.
  */
-const READ_ONLY = new Set(["read", "grep", "find", "ls", "ask_primary", NOTE_TOOL, GATEWAY_TOOL]);
+const READ_ONLY = new Set(["read", "grep", "find", "ls", "ask_primary", NOTE_TOOL]);
 
 /**
  * Playwright's element argument, whatever shape it arrives in.
@@ -939,6 +941,13 @@ export function guardExtension(
   alsoReadable: string[] = [],
   /** What this conversation has switched off, read at each call: see switchedOffVia. */
   offNow: () => ReadonlySet<string> = () => new Set(),
+  /**
+   * Whether the tool called `tools` that pi runs is the portal's gateway to the lazy tools. The name is any
+   * extension's to use, and pi keeps the first tool of a name, so a tool of that name is the gateway only if it
+   * is that one: the guard trusts the gateway, which runs what it calls through the guard again, and not a tool
+   * that merely has its name. Read at each call, as an extension may be loaded later.
+   */
+  gatewayNow: () => boolean = () => false,
 ) {
   return (pi: any): void => {
     // Per session, not global: a taint belongs to the conversation that read the
@@ -1026,9 +1035,13 @@ export function guardExtension(
           sessionId: portalSessionId,
         });
 
+      // Held to what the gateway is only if it is the gateway: see gatewayNow.
+      const gateway = event.toolName === GATEWAY_TOOL && gatewayNow();
+      const readOnly = READ_ONLY.has(event.toolName) || gateway;
+
       // Before anything that could allow it: a tool switched off is off for
       // everybody, and no rule or approval switches it back on.
-      const offTool = switchedOffVia(event.toolName, event.input ?? {}, offNow());
+      const offTool = event.toolName === GATEWAY_TOOL && !gateway ? undefined : switchedOffVia(event.toolName, event.input ?? {}, offNow());
       if (offTool) {
         note("refused", `Switched off in this conversation: ${offTool}`);
         return {
@@ -1112,7 +1125,7 @@ export function guardExtension(
         const reached = viaMcp(event.toolName, event.input ?? {});
         const why = reads
           ? unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
-          : READ_ONLY.has(event.toolName)
+          : readOnly
             ? undefined
             : unrunnable(event.toolName, event.input ?? {}, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
         if (why) {
@@ -1135,7 +1148,7 @@ export function guardExtension(
 
       if (
         role !== "primary" &&
-        !READ_ONLY.has(event.toolName) &&
+        !readOnly &&
         !allowedByRule(role, event.toolName, event.input ?? {}, key, workspace, note) &&
         // Not an approval that the taint refuses after all: it is refused below, with its own reason, and keeps its use.
         !heldByTaint &&

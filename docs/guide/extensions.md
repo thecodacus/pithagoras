@@ -330,6 +330,12 @@ with nothing lazy there is no extra tool, and no hint, in any prompt. A tool the
 first time is offered one by one in the chat that registers it only until that chat has listed its tools,
 a moment after it starts.
 
+`tools` is a name an extension may use too. If an installed extension has a tool called `tools`, pi keeps
+that one, because it loads before the portal's, and the portal's is not there. The extension's tool is then
+a tool like any other: the guard asks for a rule or an approval before a colleague may use it, it is not
+hidden while nothing is lazy, and it can be switched off in **Settings → Tools**. With no way to reach them,
+the tools marked lazy are offered one by one in a chat it is in, and the portal logs a warning.
+
 All the switches above a tool still apply, and a tool that is switched **off** is off for good, lazy or
 not. The portal-wide default, an [agent](/guide/agents#tools), a [project](/guide/projects#tools), a
 [routine](/guide/routines#tools) and a single chat each switch tools as they do for any tool, and the

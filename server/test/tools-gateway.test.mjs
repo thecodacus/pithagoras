@@ -128,6 +128,24 @@ export default function (pi) {
   pi.on("before_agent_start", () => {
     if (globalThis.__fixedList) pi.setActiveTools(["read", "bash", "ask_q"]);
   });
+  // Tools that report a failure as pi 1.1 reads it, in the result and without throwing, and one that ends the turn.
+  pi.registerTool({
+    name: "soft_fail",
+    label: "Soft failure",
+    description: "Refuse the way pi 1.1 reads, with isError in the result.",
+    parameters: { type: "object", properties: {} },
+    async execute() { return { content: [{ type: "text", text: "it failed" }], details: { why: "kept" }, isError: true }; },
+  });
+  pi.registerTool({
+    name: "stop_here",
+    label: "Stop here",
+    description: "Say it is done, and end the turn.",
+    parameters: { type: "object", properties: {} },
+    async execute() { return { content: [{ type: "text", text: "that is all" }], details: {}, terminate: true }; },
+  });
+  pi.on("tool_result", (event) => {
+    if (event.toolName === "soft_fail") (globalThis.__softSeen ??= []).push(event.isError);
+  });
   pi.registerTool({
     name: "mcp_page",
     label: "Page",
@@ -373,6 +391,27 @@ test("a tool that is lazy answers a call exactly as it does when called directly
   const through = await run([via("call", { name: "docs_open", args: { id: "d-1" } })], lazy);
   assert.equal(direct.results[0].isError, through.results[0].isError);
   assert.equal(textOf(direct.results[0]), textOf(through.results[0]));
+});
+
+test("a lazy tool that reports a failure in its result, as pi 1.1 reads it, fails the call as a direct call does", async () => {
+  globalThis.__softSeen = [];
+  const direct = await run([{ name: "soft_fail", args: {} }], {});
+  const directSeen = globalThis.__softSeen;
+  globalThis.__softSeen = [];
+  const through = await run([via("call", { name: "soft_fail", args: {} })], { toolsLazy: ["soft_fail"], lazySets: ["soft"] });
+  assert.equal(direct.results[0].isError, true);
+  assert.equal(through.results[0].isError, true, "the call through tools is an error too");
+  assert.equal(textOf(through.results[0]), textOf(direct.results[0]));
+  assert.deepEqual(through.results[0].result.details, { why: "kept" }, "what the result carried is not dropped");
+  assert.deepEqual(globalThis.__softSeen, directSeen, "the hooks are told of the error, as for a direct call");
+  assert.deepEqual(globalThis.__softSeen, [true]);
+});
+
+test("a lazy tool that ends the turn ends it through the tools tool too", async () => {
+  const direct = await run([{ name: "stop_here", args: {} }], {});
+  const through = await run([via("call", { name: "stop_here", args: {} })], { toolsLazy: ["stop_here"], lazySets: ["stop"] });
+  assert.equal(direct.requests.length, 1, "a direct call that terminates is the last request of the turn");
+  assert.equal(through.requests.length, direct.requests.length, "and so is one through tools");
 });
 
 test("a call of a lazy tool tells the portal's pages which tool it called, and a direct call is as it was", async () => {

@@ -72,12 +72,6 @@ function argsOf(raw: unknown): Record<string, unknown> {
   return { ...(value as Record<string, unknown>) };
 }
 
-const textOf = (content: unknown): string =>
-  (Array.isArray(content) ? content : [])
-    .filter((part: any) => part?.type === "text" && typeof part.text === "string")
-    .map((part: any) => part.text)
-    .join("\n");
-
 /**
  * The one line that tells the model which lazy tools exist, by the names of their sets: the tools are not
  * in its list, and a model that does not know of them says it cannot do what they do.
@@ -96,6 +90,8 @@ export class ToolsGateway {
   private rules: string[] = [];
   /** Where the calls of tools that run one at a time wait for each other: see inTurn. */
   private line: Promise<void> = Promise.resolve();
+  /** The definition this gateway registered last: what tells its tool from an extension's of the same name, see owns. */
+  private definition?: unknown;
 
   constructor(private sets: string[] = []) {}
 
@@ -129,6 +125,28 @@ export class ToolsGateway {
   /** Once the session exists: the extension is registered before it does. */
   attach(host: GatewayHost): void {
     this.host = host;
+  }
+
+  /** The tool pi runs under the gateway's name: the first registration of the name is pi's, and inline extensions load after the others. */
+  private held(): unknown {
+    return this.host?.session()?.extensionRunner?.getToolDefinition?.(GATEWAY_TOOL);
+  }
+
+  /**
+   * Whether the tool called `tools` that pi runs is this gateway. `tools` is a name any extension may use, and
+   * the portal's loads last, so an extension's tool of that name is the one pi keeps and the one the model
+   * calls. What the portal trusts the gateway for (the guard lets a colleague use it) is for this tool alone,
+   * which a name does not tell from another that has the same one.
+   */
+  owns(): boolean {
+    const held = this.held();
+    return held !== undefined && held === this.definition;
+  }
+
+  /** Whether an extension's tool of the gateway's name is what pi has: the gateway is then out of reach, and nothing is lazy. */
+  taken(): boolean {
+    const held = this.held();
+    return held !== undefined && held !== this.definition;
   }
 
   /** The lazy tools this conversation has: those pi has registered, less any that is also switched off. */
@@ -250,6 +268,8 @@ export class ToolsGateway {
     let isError = false;
     try {
       result = await definition.execute(id, args, signal, onUpdate, ctx);
+      // As pi 1.1 reads it: a tool that fails without throwing says so in its result.
+      isError = result?.isError === true;
     } catch (e) {
       isError = true;
       result = { content: [{ type: "text", text: (e as Error)?.message ?? String(e) }], details: {} };
@@ -263,16 +283,28 @@ export class ToolsGateway {
         input: args,
         content: result?.content,
         details: result?.details,
+        ...(result?.structuredContent === undefined ? {} : { structuredContent: result.structuredContent }),
         isError,
         usage: result?.usage,
       });
       if (hooked) {
-        result = { ...result, content: hooked.content ?? result?.content, details: hooked.details ?? result?.details };
+        // The hooks' result holds the structured content that is left: one that replaced the content has dropped the old.
+        result = {
+          ...result,
+          content: hooked.content ?? result?.content,
+          details: hooked.details ?? result?.details,
+          usage: hooked.usage ?? result?.usage,
+        };
+        if (hooked.structuredContent === undefined) delete result.structuredContent;
+        else result.structuredContent = hooked.structuredContent;
         isError = hooked.isError ?? isError;
       }
     }
-    if (isError) return fail(textOf(result?.content) || `"${tool.name}" failed.`);
-    return { content: result?.content ?? [], details: result?.details ?? {} };
+    // The result as the tool returned it, so pi has what a direct call gives it: what else the result carries (terminate,
+    // structuredContent, usage), and the error flag, which pi reads off the result: it is what the hooks made of it.
+    const answer = { ...result, content: result?.content ?? [], details: result?.details ?? {} };
+    if (isError || answer.isError !== undefined) answer.isError = isError;
+    return answer;
   }
 
   /** An ExtensionFactory — see pi's InlineExtension. */
@@ -282,7 +314,7 @@ export class ToolsGateway {
   };
 
   private register(pi: any): void {
-    pi.registerTool({
+    const definition = {
       name: GATEWAY_TOOL,
       label: "Tools",
       description:
@@ -321,6 +353,8 @@ export class ToolsGateway {
             return fail('action is search, describe or call.');
         }
       },
-    });
+    };
+    this.definition = definition;
+    pi.registerTool(definition);
   }
 }
