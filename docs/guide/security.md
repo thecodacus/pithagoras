@@ -38,6 +38,15 @@ What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, and the browser. The
 agent's own tools, a subagent's answer and a routine's are not.
 
+A [code mode](/guide/extensions#code-mode) script calls tools one at a time
+through the same guard, so each of its calls is checked by the rules below as the
+model's own would be, and a tool switched off in the chat is refused to a script
+too. What a script's calls read goes to the script, not to the model. So the
+script's own result is wrapped whenever one of its calls read something from
+outside, and flagged with the signs those calls carried, even when the script
+keeps what it read to itself. Until the script ends, what its calls read holds
+the conversation back as a flagged result would.
+
 ## Suspected prompt injection
 
 Wrapped content only taints the conversation when it looks like it tries to

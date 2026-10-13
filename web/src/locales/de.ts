@@ -2575,6 +2575,8 @@ const de: Locale = {
     "{n} off": { one: "{n} aus", other: "{n} aus" },
     "{off} of {n} off": { one: "{off} von {n} aus", other: "{off} von {n} aus" },
     "{n} on": { one: "{n} an", other: "{n} an" },
+    "Code mode": "Code-Modus",
+    "Lets the model write a script that calls the other tools, and gives it only what the script returns.": "Lässt das Modell ein Skript schreiben, das die anderen Werkzeuge aufruft, und gibt ihm nur, was das Skript zurückgibt.",
     // transcript.ts
     "Aborted": "Abgebrochen",
     "Reading the conversation": "Liest den Chat",

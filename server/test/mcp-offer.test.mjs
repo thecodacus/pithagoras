@@ -14,7 +14,9 @@ const cacheFile = (servers) => writeFileSync(path.join(agent, "mcp-cache.json"),
 
 const { mcpCatalogue, mcpOffer } = await import("../dist/mcp-offer.js");
 const { switchedOffVia, guardExtension } = await import("../dist/pi/guard.js");
-const { createSession, rememberTools, shownTools, withdrawnMcpTools } = await import("../dist/db.js");
+const { createSession, rememberTools, setToolDefaultsOff, shownTools, withdrawnMcpTools } = await import("../dist/db.js");
+// Nothing off by default, not even code mode, which a new install has off: what is off here is the servers' doing.
+setToolDefaultsOff([]);
 const { sessions } = await import("../dist/session-manager.js");
 const { onMcpWritten, writeMcpFile } = await import("../dist/api/mcp.js");
 

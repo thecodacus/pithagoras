@@ -32,7 +32,8 @@ test("a browser no session has registered yet is on, like any server nobody has 
 
 test("registering the tools changes nothing about that", () => {
   rememberTools([{ name: "browser_browser_click", source: "pi-mcp-adapter" }]);
-  assert.deepEqual(toolDefaultsOff(), []);
+  // Code mode only, which every install starts with off.
+  assert.deepEqual(toolDefaultsOff(), ["codemode"]);
   assert.equal(browserAllowed(getSession("first")), true);
 });
 

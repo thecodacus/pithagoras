@@ -47,7 +47,8 @@ test("the first start after an upgrade has nothing to carry yet, and does not pr
   // Not done: no session has registered a tool, so there is no telling which
   // are the browser's. Marking it done here is what made the migration a no-op.
   assert.equal(flag(), "pending");
-  assert.deepEqual(toolDefaultsOff(), []);
+  // Code mode only, which an upgrade switches off by default.
+  assert.deepEqual(toolDefaultsOff(), ["codemode"]);
 });
 
 test("until the tools are seen, the old grant stands", () => {

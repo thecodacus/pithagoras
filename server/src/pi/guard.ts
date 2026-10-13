@@ -7,7 +7,7 @@ import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { bareRef } from "../browser/ref.js";
 import { listToolRules, mcpView, recordAudit, trustResult, trustedResults, useGrant, type McpView, type ToolRule } from "../db.js";
-import { injectionSignals } from "./injection.js";
+import { injectionSignals, type Signal } from "./injection.js";
 import { EDIT_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS, mcpServerOf } from "../tool-policy.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
@@ -909,7 +909,14 @@ export function guardExtension(
     const flagged = new Set<string>();
     let marked = false;
     let trusted = portalSessionId ? trustedResults(portalSessionId) : new Set<string>();
-    const isTainted = () => marked || [...flagged].some((id) => !trusted.has(id));
+    /**
+     * What the calls a tool made itself read from outside, by the id of the call that made them — a code
+     * mode script's calls, by the script's. Their results go to the script and not to the model: what
+     * the model is given is the script's own result, so that is the one wrapped and flagged with what
+     * they carried. Until it comes, what they carried holds the conversation back as a flagged result would.
+     */
+    const readByCalls = new Map<string, Signal[]>();
+    const isTainted = () => marked || [...flagged].some((id) => !trusted.has(id)) || [...readByCalls.values()].some((signals) => signals.length > 0);
     if (portalSessionId) {
       const taint = {
         mark: () => { marked = true; },
@@ -932,7 +939,7 @@ export function guardExtension(
         // A history that cannot be read is not evidence of anything.
       }
       // A new conversation has read nothing yet.
-      if (event?.reason === "new") { flagged.clear(); marked = false; }
+      if (event?.reason === "new") { flagged.clear(); readByCalls.clear(); marked = false; }
       for (const id of found) flagged.add(id);
       if (portalSessionId) trusted = trustedResults(portalSessionId);
     });
@@ -942,13 +949,31 @@ export function guardExtension(
       const formatted = compact ? (event.content ?? []).map((part: any) =>
         part?.type === 'text' && typeof part.text === 'string' ? { ...part, text: cleanBrowserSnapshot(part.text) } : part,
       ) : event.content;
-      const untrusted = untrustedResult(String(event.toolName ?? ""), event.input ?? {});
+      // What the calls this one made read is this one's to carry: a script that read a page and returned it hands the page on.
+      const carried = typeof event.toolCallId === "string" ? readByCalls.get(event.toolCallId) : undefined;
+      if (carried) readByCalls.delete(event.toolCallId);
+      const untrusted = untrustedResult(String(event.toolName ?? ""), event.input ?? {}) || carried !== undefined;
       if (!untrusted) return compact ? { content: formatted } : undefined;
 
       // Wrapped as data whatever it says; it taints the conversation only when it looks like it tries to instruct the agent.
       const id = randomBytes(8).toString("hex");
-      const signals = injectionSignals(textsOf(formatted).join("\n"));
+      const own = injectionSignals(textsOf(formatted).join("\n"));
+      const signals = [...own, ...(carried ?? []).filter((signal) => !own.includes(signal))];
       const wrap = (PORTAL_BROWSER_TOOLS as readonly string[]).includes(event.toolName) ? pageEnvelope(id) : envelope(id);
+      const content = (Array.isArray(formatted) ? formatted : []).map((part: any) =>
+        part?.type === "text" && typeof part.text === "string"
+          ? { ...part, text: deface(part.text) }
+          : part,
+      );
+      const parent = typeof event.parentToolCallId === "string" && event.parentToolCallId ? event.parentToolCallId : undefined;
+      if (parent) {
+        // Read by a call another tool made: wrapped all the same, for a script that hands it on as it is, and
+        // held for the call that made it, which is flagged in its place. Not flagged here as well: that would be
+        // two flags for one read, and trusting the one the model was given would leave the other holding it back.
+        const held = readByCalls.get(parent) ?? [];
+        readByCalls.set(parent, [...held, ...signals.filter((signal) => !held.includes(signal))]);
+        return { content: [{ type: "text", text: wrap.open }, ...content, { type: "text", text: wrap.close }] };
+      }
       const open = signals.length
         ? wrap.open.replace(`<<<untrusted:${id}>>>`, `<<<untrusted:${id}>>> (suspected prompt injection: ${signals.map((s) => s.name).join(", ")})`)
         : wrap.open;
@@ -964,11 +989,6 @@ export function guardExtension(
           sessionId: portalSessionId,
         });
       }
-      const content = (Array.isArray(formatted) ? formatted : []).map((part: any) =>
-        part?.type === "text" && typeof part.text === "string"
-          ? { ...part, text: deface(part.text) }
-          : part,
-      );
       return {
         content: [{ type: "text", text: open }, ...content, { type: "text", text: close }],
       };
@@ -989,6 +1009,16 @@ export function guardExtension(
 
       // Before anything that could allow it: a tool switched off is off for
       // everybody, and no rule or approval switches it back on.
+      // A call a script makes is one the model did not, and pi lets a script call a tool that is not declared
+      // to the model, where one says it may be: switched off here, it is off for scripts too.
+      if (event.parentToolCallId && offNow().has(event.toolName)) {
+        note("refused", `Switched off in this conversation: ${event.toolName}`);
+        return {
+          block: true,
+          reason: `Refused: "${event.toolName}" is switched off in this conversation, and a script does not reach it either. ` +
+            "Say that it is switched off rather than looking for another way to it.",
+        };
+      }
       const offTool = switchedOffVia(event.toolName, event.input ?? {}, offNow());
       if (offTool) {
         note("refused", `Switched off in this conversation: ${offTool}`);

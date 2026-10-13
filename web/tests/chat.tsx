@@ -236,6 +236,25 @@ if (phase === 'git') {
   });
 }
 
+// The tools list of a chat with code mode, which a chat starts with off: `?phase=codemode`. What the page sent is in window.sentTools.
+if (phase === 'codemode') {
+  (window as any).sentTools = [];
+  let off: string[] = ['codemode'];
+  mockFetch((u, init) => {
+    if (u.endsWith('/tools') && init?.method === 'PUT') {
+      off = JSON.parse(init.body as string).off;
+      (window as any).sentTools.push(off);
+      return { off };
+    }
+    if (u.endsWith('/tools')) return { live: true, off, names: {}, tools: [
+      { name: 'web_search', source: 'pi-web-access', enabled: !off.includes('web_search'), defaultOn: true },
+      { name: 'bash', source: 'built in', enabled: !off.includes('bash'), defaultOn: true },
+      // The portal's code mode, registered by an inline extension of that name, with pi's long description for the model.
+      { name: 'codemode', source: 'codemode', inline: true, description: 'Raw JavaScript source. Globals: tools, text, image…', enabled: !off.includes('codemode'), defaultOn: false },
+    ] };
+  });
+}
+
 const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'stats' || phase === 'flagged' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.

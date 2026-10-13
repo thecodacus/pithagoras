@@ -220,7 +220,8 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
   assert.deepEqual(result.news, { off: [], on: ["browser_navigate"] }, "Browser on stays on");
   assert.deepEqual(result.tidy, { off: ["browser_navigate"], on: [] }, "Browser off stays off");
   assert.deepEqual(result.project, { off: ["bash"], on: [] });
-  assert.deepEqual(result.defaults, ["web_search"]);
+  // And code mode, which an upgrade switches off by default beside what the operator had.
+  assert.deepEqual(result.defaults, ["codemode", "web_search"]);
   assert.equal(result.agentTools, 0, "no agent says anything yet");
   assert.deepEqual(result.projectAgent, { agent: "", understoryOff: false }, "a project of v0.1.0 is a blank slate, as it was");
   assert.equal(result.projectAgents, 0);

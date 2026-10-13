@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import type { PortalTool } from "../api";
-import { displayName, groupSummary, groupTools, sourceName, type ToolGroup } from "../tool-groups";
+import { displayName, groupSummary, groupTools, sourceName, toolTitle, type ToolGroup } from "../tool-groups";
 import { useOpenGroups } from "../use-open-groups";
 import { t } from "../i18n";
 
@@ -74,7 +74,7 @@ export function ToolGroupList({
             <ul className={open ? (roomy ? "py-1" : "pb-1") : "hidden"}>
               {group.tools.map((tool) => (
                 <li key={tool.name}>
-                  <label title={tool.description} className="flex cursor-pointer items-center gap-2 px-3 py-1 text-xs transition hover:bg-fg/5">
+                  <label title={toolTitle(tool)} className="flex cursor-pointer items-center gap-2 px-3 py-1 text-xs transition hover:bg-fg/5">
                     <input
                       type="checkbox"
                       checked={tool.enabled}

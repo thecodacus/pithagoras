@@ -30,14 +30,22 @@ const MEDIA = "<portal:media>";
 /** The tools that make up pictures and videos: showing one, making one, changing a picture. */
 const MEDIA_TOOLS = ["show_image", "generate_image", "edit_image", "show_video", "generate_video"];
 
+/** The group of pi's code mode, which the portal gives every chat it starts and leaves off unless switched on. Bracketed as MEDIA is. */
+const CODEMODE = "<portal:codemode>";
+
+/** The portal's code mode, not an extension's tool of that name. */
+const isCodemode = (tool: PortalTool): boolean => Boolean(tool.inline) && tool.name === "codemode";
+
 /**
  * What to file a tool under. The portal's own picture and video tools share one group, whichever way each was
- * registered; an extension's tool of the same name is not the portal's and stays in its own.
+ * registered; an extension's tool of the same name is not the portal's and stays in its own. Code mode is a
+ * group of its own, called what it is rather than what registered it.
  */
-const sourceOf = (tool: PortalTool): string => (tool.inline && MEDIA_TOOLS.includes(tool.name) ? MEDIA : tool.source?.trim() || BUILT_IN);
+const sourceOf = (tool: PortalTool): string =>
+  tool.inline && MEDIA_TOOLS.includes(tool.name) ? MEDIA : isCodemode(tool) ? CODEMODE : tool.source?.trim() || BUILT_IN;
 
 /** Where a group goes in the list: what is installed first, what the portal brings after it, what is built in last. */
-const shippedRank = (source: string): number => (source === BUILT_IN ? 2 : source === MEDIA ? 1 : 0);
+const shippedRank = (source: string): number => (source === BUILT_IN ? 2 : source === MEDIA || source === CODEMODE ? 1 : 0);
 
 export function groupTools(tools: PortalTool[]): ToolGroup[] {
   const groups = new Map<string, PortalTool[]>();
@@ -96,7 +104,17 @@ export function toggleOpen(open: string[], source: string): string[] {
 }
 
 /** Where a group of tools comes from, as it is: a package's spec, or what the portal brings itself, in words. */
-export const sourceName = (source: string): string => (source === BUILT_IN ? t(BUILT_IN) : source === MEDIA ? t("Media") : source);
+export const sourceName = (source: string): string =>
+  source === BUILT_IN ? t(BUILT_IN) : source === MEDIA ? t("Media") : source === CODEMODE ? t("Code mode") : source;
+
+/**
+ * What a tool's row says about it when pointed at. Code mode's own description is the model's: how to write a
+ * script, at length. A person deciding whether to switch it on is told what it does instead.
+ */
+export const toolTitle = (tool: PortalTool): string | undefined =>
+  isCodemode(tool)
+    ? t("Lets the model write a script that calls the other tools, and gives it only what the script returns.")
+    : tool.description;
 
 /**
  * What a group is called on the page.
@@ -110,6 +128,6 @@ export const sourceName = (source: string): string => (source === BUILT_IN ? t(B
 export function displayName(source: string, names: Record<string, string> = {}): string {
   const given = names[source]?.trim();
   if (given) return given;
-  if (source === BUILT_IN || source === MEDIA) return sourceName(source);
+  if (source === BUILT_IN || source === MEDIA || source === CODEMODE) return sourceName(source);
   return source.replace(/^@[^/]+\//, "") || source;
 }

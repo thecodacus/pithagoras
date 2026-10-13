@@ -16,6 +16,7 @@ import { removeThumbs } from "./image-thumbs.js";
 import { removePosters } from "./video-posters.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
+import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 import { debugLog } from "./logs.js";
 
@@ -729,8 +730,25 @@ function migrate(d: Database.Database): void {
   if (noteCols.length && !noteCols.includes("pending_delivery")) {
     d.exec("ALTER TABLE notes ADD COLUMN pending_delivery INTEGER NOT NULL DEFAULT 0");
   }
+  seedCodemodeOff(d);
   // Last, because it reads the settings the tables above have to exist for.
   adoptBrowserGrants(d);
+}
+
+/**
+ * Code mode starts off: a chat has it when somebody switches it on there, or
+ * for a project, an agent or every chat (see pi/codemode.ts). The tool is in
+ * the portal-wide default as off, once, so that the operator can change that
+ * default like any other, and a later start does not undo what they chose.
+ */
+function seedCodemodeOff(d: Database.Database): void {
+  const flag = "codemode_off_seeded";
+  if (d.prepare("SELECT 1 FROM settings WHERE key = ?").get(flag)) return;
+  const row = d.prepare("SELECT value FROM settings WHERE key = 'tools_off_default'").get() as { value: string } | undefined;
+  const off = clean([...parseToolsOff(row?.value), CODEMODE_TOOL]);
+  const put = d.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+  put.run("tools_off_default", off.join("\n"));
+  put.run(flag, "1");
 }
 
 export function createSession(row: {

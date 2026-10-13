@@ -28,6 +28,7 @@ import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
 import { guardExtension } from "./guard.js";
+import { CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
 import { heartbeatTool } from "./heartbeat-tool.js";
@@ -444,6 +445,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       voiceSpeaks,
     );
     const canvases = opts.sessionId ? new CanvasTools(opts.sessionId) : undefined;
+    // Code mode, active from the start and switched like any other tool: off by default (see codemode.ts).
+    const codemode = codemodeExtension(pi);
     try {
       // Both are required: the constructor resolves each and throws on
       // undefined, which previously left every session with no extensions.
@@ -452,7 +455,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       const skillsOf = agentFor(opts.cwd);
       // Every session, unconditionally: the point is to limit what a turn can do
       // after it reads something untrusted, and any session can read something.
-      const factories: { name: string; factory: (pi: any) => void }[] = [
+      const factories: { name: string; factory: (pi: any) => void; replaceable?: boolean }[] = [
         { name: "voice-first", factory: voiceFirst.extension },
         // After a model switch, the earlier model's thinking is not handed on as answer text: see #60.
         { name: "cross-model-thinking", factory: crossModelThinkingExtension },
@@ -496,6 +499,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (opts.sessionId && portalBrowserOn()) {
         factories.push({ name: "browser", factory: browserTools(opts.sessionId) });
       }
+      if (codemode) factories.push(codemode);
       // A heartbeat's way of saying what it found: it can do nothing else.
       if (opts.heartbeatAgent && opts.sessionId) {
         factories.push({ name: "heartbeat", factory: heartbeatTool(opts.heartbeatAgent, opts.sessionId) });
@@ -583,6 +587,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       sessionManager,
       modelRuntime,
       ...(resourceLoader ? { resourceLoader, settingsManager } : {}),
+      // Added to pi's default tools, not in place of them; the switches take it out again where it is off.
+      ...(resourceLoader && codemode ? { tools: CODEMODE_TOOLS } : {}),
       ...(model ? { model } : {}),
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });

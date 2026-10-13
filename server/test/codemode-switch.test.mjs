@@ -1,0 +1,88 @@
+import { test, before } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+import { freePort, inProcessHome, runToEnd, scratch, serverEnv, startServer, withoutCredentials } from "./server-harness.mjs";
+
+/**
+ * Code mode as a switch of a chat, against the whole server: off unless a
+ * chat says otherwise, the chat's choice stored with the chat, and a default
+ * the operator can change like any other.
+ */
+const home = inProcessHome("pithagoras-codemode-switch-");
+mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.stringify({}));
+
+const db = await import("../dist/db.js");
+// As a session reports it: the portal's own inline extension, named for the tool.
+db.rememberTools([
+  { name: "codemode", source: "codemode", package: null, inline: true },
+  { name: "bash", source: "built in", package: null },
+]);
+
+let base;
+before(async () => {
+  ({ base } = await startServer(serverEnv(home, await freePort())));
+});
+
+const send = (url, method, body) =>
+  fetch(base + url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+const json = async (url, method = "GET", body) => {
+  const res = await send(url, method, body);
+  assert.ok(res.ok, `${url}: ${res.status} ${await res.clone().text()}`);
+  return res.json();
+};
+const codemodeOf = (r) => r.tools.find((t) => t.name === "codemode");
+
+test("a new install starts every chat with code mode off", async () => {
+  const defaults = await json("/api/tools");
+  assert.deepEqual(defaults.off, ["codemode"]);
+  assert.equal(codemodeOf(defaults).defaultOn, false);
+  const chat = await json("/api/sessions", "POST", {});
+  const tools = await json(`/api/sessions/${chat.id}/tools`);
+  assert.equal(codemodeOf(tools).enabled, false);
+  assert.equal(codemodeOf(tools).defaultOn, false);
+  assert.equal(tools.tools.find((t) => t.name === "bash").enabled, true);
+});
+
+test("switched on in one chat, it is that chat's, kept with it, and the others keep it off", async () => {
+  const chat = await json("/api/sessions", "POST", {});
+  const other = await json("/api/sessions", "POST", {});
+  const saved = await json(`/api/sessions/${chat.id}/tools`, "PUT", { off: [] });
+  assert.ok(!saved.off.includes("codemode"));
+  assert.deepEqual(db.sessionTools(chat.id), { off: [], on: ["codemode"] });
+  assert.equal(codemodeOf(await json(`/api/sessions/${chat.id}/tools`)).enabled, true);
+  assert.equal(codemodeOf(await json(`/api/sessions/${other.id}/tools`)).enabled, false);
+  // And off again: what the default says, so nothing is left written down.
+  await json(`/api/sessions/${chat.id}/tools`, "PUT", { off: ["codemode"] });
+  assert.equal(codemodeOf(await json(`/api/sessions/${chat.id}/tools`)).enabled, false);
+});
+
+const DB = fileURLToPath(new URL("../dist/db.js", import.meta.url));
+/** What the default is when the portal next starts on the database in `dir`. */
+async function defaultsAfterStart(dir) {
+  const { code, out, err } = await runToEnd(
+    ["--input-type=module", "-e", `const db = await import(${JSON.stringify(DB)}); console.log(JSON.stringify(db.toolDefaultsOff()));`],
+    { ...withoutCredentials(process.env), DATA_DIR: dir },
+  );
+  assert.equal(code, 0, err);
+  return JSON.parse(out.trim().split("\n").at(-1));
+}
+
+test("an install that had defaults keeps them, with code mode off beside them", async () => {
+  const dir = scratch("pithagoras-codemode-upgrade-");
+  const old = new Database(path.join(dir, "portal.db"));
+  old.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  old.prepare("INSERT INTO settings (key, value) VALUES ('tools_off_default', 'web_fetch')").run();
+  old.close();
+  assert.deepEqual(await defaultsAfterStart(dir), ["codemode", "web_fetch"]);
+});
+
+test("once the operator has it on by default, a later start leaves it on", async () => {
+  await json("/api/tools", "PUT", { off: [] });
+  assert.deepEqual(await defaultsAfterStart(home), []);
+  const chat = await json("/api/sessions", "POST", {});
+  assert.equal(codemodeOf(await json(`/api/sessions/${chat.id}/tools`)).enabled, true);
+});
