@@ -160,6 +160,19 @@ export function ownFiles(cwd: string, role?: string): string[] {
     : [];
 }
 
+/**
+ * Whether a Playwright MCP server is attached to the browser. A file that cannot be read or parsed says
+ * there is none: this runs while the options of the resource loader are made, and a failure there leaves
+ * the chat without the loader, and with it without every extension of the portal's, the guard among them.
+ */
+function hasPlaywrightBrowser(): boolean {
+  try {
+    return browserServers().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function framing(): string[] {
   // The rule for spoken replies is not here: the resource loader adds it, to
   // the conversations that have had voice (see PortalLoader and AudioRule).
@@ -169,7 +182,7 @@ function framing(): string[] {
   // The portal's own browser tools carry their rules as promptGuidelines, which pi
   // includes only while they are active; these are for a Playwright MCP someone attached by hand,
   // so they are said only where there is such a server.
-  const lines: string[] = !portalBrowserOn() && browserServers().length ? [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE] : [];
+  const lines: string[] = !portalBrowserOn() && hasPlaywrightBrowser() ? [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE] : [];
   // The bracketed-ref trap that used to need a line here is handled in the
   // guard now, which normalises the argument for every session whether it
   // reads this or not. Nothing to say, so nothing spent saying it.

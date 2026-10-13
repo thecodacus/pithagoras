@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -61,7 +61,12 @@ test("the rules for a Playwright browser are sent only where there is one", asyn
     // Another server is no browser.
     writeFileSync(mcp, JSON.stringify({ mcpServers: { files: { command: "npx", args: ["-y", "some-other-server"] } } }));
     assert.deepEqual(await said(), { reading: false, screenshot: false }, "a server that is not a browser");
-    // A Playwright server pointed at the browser.
+    // A Playwright server that starts a Chromium of its own is not the agent's browser either.
+    writeFileSync(mcp, JSON.stringify({ mcpServers: { playwright: { command: "npx", args: ["-y", "@playwright/mcp@0.0.79"] } } }));
+    assert.deepEqual(await said(), { reading: false, screenshot: false }, "a Playwright server with a browser of its own");
+    // A Playwright server pointed at the browser, whatever it is called.
+    writeFileSync(mcp, JSON.stringify({ mcpServers: { chrome: playwright } }));
+    assert.deepEqual(await said(), { reading: true, screenshot: true }, "a server attached to the browser");
     writeFileSync(mcp, JSON.stringify({ mcpServers: { browser: playwright } }));
     assert.deepEqual(await said(), { reading: true, screenshot: true }, "a browser server, the portal's own off");
     // The portal's own tools have rules of their own.
@@ -70,5 +75,32 @@ test("the rules for a Playwright browser are sent only where there is one", asyn
   } finally {
     setPortalBrowser(false);
     rmSync(mcp, { force: true });
+  }
+});
+
+test("a configuration that cannot be read says there is no browser server, and leaves the chat its extensions", async () => {
+  const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
+  const errors = mock.method(console, "error", () => {});
+  const names = (request) => (request.tools ?? []).map((t) => t.function.name);
+  try {
+    for (const [why, put] of [
+      ["a server that is null", () => writeFileSync(mcp, JSON.stringify({ mcpServers: { old: null } }))],
+      ["a server that is a number", () => writeFileSync(mcp, JSON.stringify({ mcpServers: { old: 3 } }))],
+      ["text that is not JSON", () => writeFileSync(mcp, "{ not json")],
+      // A file that cannot be read, whoever the portal runs as.
+      ["a file that is a folder", () => mkdirSync(mcp)],
+    ]) {
+      rmSync(mcp, { recursive: true, force: true });
+      put();
+      const request = await ask();
+      // Without the resource loader a chat has pi's own tools only: no canvases, no pictures, and no guard.
+      assert.ok(names(request).includes("canvas_list") && names(request).includes("show_image"), `${why}: the portal's tools are there`);
+      const system = systemOf(request);
+      assert.ok(!system.includes(BROWSER_READING_RULE) && !system.includes(BROWSER_SCREENSHOT_RULE), `${why}: no Playwright rules`);
+      assert.equal(errors.mock.calls.filter((call) => /resource loader unavailable/.test(String(call.arguments[0]))).length, 0, `${why}: the loader was made`);
+    }
+  } finally {
+    rmSync(mcp, { recursive: true, force: true });
+    errors.mock.restore();
   }
 });

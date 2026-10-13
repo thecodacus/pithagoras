@@ -177,7 +177,8 @@ export const BROWSER_CDP = browserCdp();
 function connectedIn(config: McpFile): string[] {
   const names: string[] = [];
   for (const [name, entry] of Object.entries(config.mcpServers ?? {})) {
-    const args = (entry as { args?: unknown }).args;
+    // An entry that is not an object (`"old": null`) is no server that attaches to anything.
+    const args = entry && typeof entry === "object" ? (entry as { args?: unknown }).args : undefined;
     if (Array.isArray(args) && args.includes("--cdp-endpoint") && args.includes(BROWSER_CDP)) {
       names.push(name);
     }
