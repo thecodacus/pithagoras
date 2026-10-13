@@ -40,7 +40,7 @@ export default defineConfig({
           { text: "Settings", link: "/guide/settings" },
           { text: "Models and providers", link: "/guide/models" },
           { text: "Extensions", link: "/guide/extensions" },
-          { text: "Extensions that draw", link: "/guide/extension-ui" },
+          { text: "Building an extension", link: "/guide/extension-ui" },
           { text: "Skills", link: "/guide/skills" },
           { text: "Prompt injection", link: "/guide/security" },
           { text: "Sandbox", link: "/guide/sandbox" },

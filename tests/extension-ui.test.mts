@@ -2,10 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { bridgeExtensionUi, clientHalf, UI_RECEIVE, UI_SEND } from '../server/src/extension-ui.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { bridgeExtensionUi, clientHalf, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../server/src/extension-ui.ts';
 import { register, slotEntries } from '../web/src/extensions/slots.ts';
+import { hasCommand, registerCommand, runCommand } from '../web/src/extensions/commands.ts';
+import { addStrings, forgetStrings, translate } from '../web/src/extensions/strings.ts';
+import { extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from '../web/src/extensions/server-feed.ts';
+import { panels, panelsFor, setPanelController } from '../web/src/extensions/panels.ts';
+import { chatFeed, forgetChatFeed, onChatFeed, publishChat } from '../web/src/extensions/chat-feed.ts';
+import { addLocale, setLanguage } from '../web/src/i18n.ts';
 import { settlePanels } from '../web/src/use-work-panels.ts';
+import { placeWindows } from '../web/src/voice-windows.ts';
 import notes from '../extensions/notes/index.ts';
+import notesServer from '../extensions/notes/server.js';
 import { scratch } from './helpers.mts';
 
 const bus = () => {
@@ -183,4 +192,173 @@ test('the Notes extension has its notes back when the chat is loaded again, and 
   assert.deepEqual(lastNotes(n.said), [{ id: 4, text: 'From before', by: 'agent' }]);
   n.tell({ type: 'pin-last' });
   assert.deepEqual(lastNotes(n.said), [{ id: 4, text: 'From before', by: 'agent' }, { id: 5, text: 'First answer', by: 'you' }]);
+});
+
+test('a package may name a server half anywhere in itself, and has none where the file is not its own', () => {
+  const dir = pkg({ client: './web/client.js', server: './server.js' }, ['web/client.js', 'server.js']);
+  const half = serverHalf(dir)!;
+  assert.deepEqual({ name: half.name, version: half.version, file: half.file }, { name: 'my-extension', version: '1.2.3', file: path.join(dir, 'server.js') });
+  assert.match(half.rev, /^[0-9a-z]+-[0-9a-z]+$/);
+  assert.equal(serverHalf(pkg({ client: './web/client.js' }, ['web/client.js'])), undefined, 'declares none');
+  assert.equal(serverHalf(pkg({ server: './server.js' }, [])), undefined, 'names a file that is not there');
+  assert.equal(serverHalf(pkg({ server: '../server.js' }, [])), undefined, 'names a file above it');
+  assert.ok(serverHalf(pkg({ server: './lib/server.js' }, ['lib/server.js'])), 'a server half alone, with no browser half');
+});
+
+test('a package goes by a name its addresses can carry, and has no halves under any other', () => {
+  for (const name of ['notes', 'pithagoras-notes', '@codacus/notes', 'a.b_c~d', '@a/b.c']) assert.equal(validName(name), true, name);
+  for (const name of ['', '..', '.hidden', 'a/b', '@a/b/c', '@a/..', 'a b', 'a?b', '../up', '@/x', 42, undefined]) assert.equal(validName(name), false, String(name));
+  assert.equal(clientHalf(pkg({ client: './web/client.js' }, ['web/client.js'], 'my ext')), undefined);
+  assert.equal(serverHalf(pkg({ server: './server.js' }, ['server.js'], '../other')), undefined);
+});
+
+test('a command is asked for by its name, by whoever knows it, until it is taken back', () => {
+  const off = registerCommand('my-files.reveal', (path: string, line = 1) => `${path}:${line}`);
+  assert.equal(hasCommand('my-files.reveal'), true);
+  assert.equal(runCommand('my-files.reveal', 'src/a.ts', 7), 'src/a.ts:7');
+  assert.throws(() => registerCommand('my-files.reveal', () => 0), /already a command called "my-files\.reveal"/);
+  assert.throws(() => registerCommand('', () => 0), /needs a name/);
+  off();
+  off();
+  assert.equal(hasCommand('my-files.reveal'), false);
+  assert.throws(() => runCommand('my-files.reveal'), /no command called "my-files\.reveal"/);
+});
+
+test('an extension\'s texts are its own in each language, beside the portal\'s and not in place of them', () => {
+  addLocale({ code: 'xx', name: 'Test', strings: { Remove: 'Weg', 'Hello {name}': 'Portal says hallo {name}' } });
+  const offNotes = addStrings('notes', 'xx', { Notes: 'Notizen', 'Hello {name}': 'Hallo {name}' });
+  addStrings('other', 'xx', { Notes: 'Zettel' });
+  try {
+    setLanguage('en');
+    assert.equal(translate('notes', 'Notes'), 'Notes', 'English is what the code says');
+    setLanguage('xx');
+    assert.equal(translate('notes', 'Notes'), 'Notizen');
+    assert.equal(translate('other', 'Notes'), 'Zettel', 'each extension its own');
+    assert.equal(translate('notes', 'Hello {name}', { name: 'Ada' }), 'Hallo Ada', 'its own before the portal\'s');
+    assert.equal(translate('notes', 'Remove'), 'Weg', 'the portal\'s where it has none');
+    assert.equal(translate('notes', 'Never said'), 'Never said');
+    offNotes();
+    assert.equal(translate('notes', 'Notes'), 'Notes');
+    forgetStrings('other');
+    assert.equal(translate('other', 'Notes'), 'Notes');
+  } finally {
+    setLanguage('system');
+  }
+});
+
+test('what a server half says waits for a module that is not in the page yet, and is handed over in order once it is', () => {
+  const got: unknown[][] = [];
+  // The page's stream opened first: where things stand, and a change, before the module was called.
+  serverPush('a', 'late', { type: 'state', n: 0 });
+  serverPush('b', 'late', { type: 'state', n: 5 });
+  serverPush('a', 'never-installed', 'dropped');
+  const off = onServerPush('late', (chatId, data) => got.push([chatId, data]));
+  assert.deepEqual(got, [], 'nothing until its module has been called');
+  onlyWaitFor(['late']);
+  extensionHere('late');
+  serverPush('a', 'late', { type: 'changed', n: 1 });
+  assert.deepEqual(got, [['a', { type: 'state', n: 0 }], ['b', { type: 'state', n: 5 }], ['a', { type: 'changed', n: 1 }]]);
+  // Nothing was kept for one that has no browser half.
+  const other: unknown[] = [];
+  onServerPush('never-installed', (_chat, data) => other.push(data));
+  extensionHere('never-installed');
+  assert.deepEqual(other, []);
+  off();
+  serverPush('a', 'late', 'after it stopped listening');
+  assert.equal(got.length, 3);
+  extensionGone('late');
+  extensionGone('never-installed');
+});
+
+test('the panels of the chat on screen are opened by name from anywhere, an extension\'s own by its ids', () => {
+  assert.equal(panels.isOpen('files'), false, 'with no chat on screen nothing is open');
+  assert.throws(() => panels.open('files'), /No chat is on screen/);
+  const calls: unknown[][] = [];
+  setPanelController({ isOpen: (key) => key === 'terminal', open: (key, params) => calls.push(['open', key, params]), close: (key) => calls.push(['close', key]) });
+  panels.open('files', { path: 'src/a.ts' });
+  const own = panelsFor('my-extension');
+  assert.equal(own, panelsFor('my-extension'), 'the same object each time');
+  own.open('notes', { draft: 'x' });
+  own.close('notes');
+  assert.equal(panels.isOpen('terminal'), true);
+  assert.equal(own.isOpen('notes'), false);
+  assert.deepEqual(calls, [['open', 'files', { path: 'src/a.ts' }], ['open', 'my-extension/notes', { draft: 'x' }], ['close', 'my-extension/notes']]);
+  setPanelController(undefined);
+});
+
+test('a chat is said as the page has it, to whoever listens to that chat', () => {
+  const heard: number[] = [];
+  const off = onChatFeed('a', (feed) => heard.push(feed.events.length));
+  assert.equal(chatFeed('a').loading, true, 'before the chat has said anything it is being fetched');
+  publishChat('a', { events: [{ seq: 1, type: 'agent_start', payload: {} }], items: [], running: true, loading: false });
+  publishChat('b', { events: [], items: [], running: false, loading: false });
+  assert.deepEqual(heard, [1], 'another chat is not this one\'s');
+  assert.equal(chatFeed('a').running, true);
+  off();
+  publishChat('a', { events: [], items: [], running: false, loading: false });
+  assert.deepEqual(heard, [1]);
+  forgetChatFeed('a');
+  forgetChatFeed('b');
+  assert.equal(chatFeed('a').loading, true);
+});
+
+test('a window an extension brought to voice mode is placed as Files is: at the side, or in the middle when the side is taken', () => {
+  assert.deepEqual(placeWindows({ 'x:notes/notes': true }), { main: undefined, side: 'x:notes/notes' });
+  assert.deepEqual(placeWindows({ terminal: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'terminal' });
+  assert.deepEqual(placeWindows({ browser: true, 'x:notes/notes': true }), { main: 'browser', side: 'x:notes/notes' });
+  assert.deepEqual(placeWindows({ files: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'files' }, 'after the portal\'s own');
+  assert.deepEqual(placeWindows({ files: true, 'x:notes/notes': false }), { main: undefined, side: 'files' });
+});
+
+test('the Notes extension\'s server half keeps each chat\'s notes in the chat\'s folder, answers for all chats, and tells a page how many', () => {
+  const folders = { a: scratch('notes-a-'), b: scratch('notes-b-') } as Record<string, string>;
+  const sent: unknown[][] = [];
+  const routes = new Map<string, (req: unknown, res: { json(body: unknown): void }) => void>();
+  let onEvent: (chatId: string, event: any) => void = () => {};
+  let onOpen: (chatId: string) => unknown = () => undefined;
+  const life = new Map<string, (chatId: string) => void>();
+  notesServer({
+    extension: 'pithagoras-notes',
+    router: { get: (route: string, handler: any) => routes.set(route, handler) },
+    files: { inside: (base: string, rel: string) => path.join(base, rel) },
+    chats: {
+      folder: (id: string) => {
+        if (!folders[id]) throw new Error('No such chat');
+        return folders[id];
+      },
+      list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
+      send: (chatId: string, data: unknown) => sent.push([chatId, data]),
+      onEvent: (handler: typeof onEvent) => { onEvent = handler; },
+      onOpen: (handler: typeof onOpen) => { onOpen = handler; },
+      on: (event: string, handler: (chatId: string) => void) => life.set(event, handler),
+    },
+  });
+  const all = () => {
+    let body: any;
+    routes.get('/notes')!({}, { json: (b) => { body = b; } });
+    return body.chats;
+  };
+  const says = (chatId: string, list: unknown[], extension = 'pithagoras-notes') => onEvent(chatId, { type: 'portal_extension_ui', extension, data: { type: 'notes', notes: list } });
+  assert.deepEqual(all(), []);
+  assert.deepEqual(onOpen('a'), { type: 'count', count: 0 });
+
+  says('a', [{ id: 1, text: 'Ship on Friday', by: 'agent' }]);
+  says('a', [{ id: 9, text: 'Another extension\'s', by: 'you' }], 'someone-else');
+  onEvent('a', { type: 'message_update' });
+  const file = path.join(folders.a, '.pithagoras-notes', 'a.json');
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), [{ id: 1, text: 'Ship on Friday', by: 'agent' }], 'in the folder the chat works in');
+  assert.deepEqual(sent, [['a', { type: 'count', count: 1 }]]);
+  assert.deepEqual(onOpen('a'), { type: 'count', count: 1 });
+  assert.deepEqual(all(), [{ id: 'a', title: 'Chat a', notes: [{ id: 1, text: 'Ship on Friday', by: 'agent' }] }], 'only chats that have notes');
+
+  // The last note taken off: nothing is left behind in the folder.
+  says('a', []);
+  assert.equal(existsSync(file), false);
+  // A chat deleted takes its notes' file with it, though it no longer says where it worked.
+  says('b', [{ id: 1, text: 'Mine', by: 'you' }]);
+  const kept = path.join(folders.b, '.pithagoras-notes', 'b.json');
+  assert.equal(existsSync(kept), true);
+  delete folders.b;
+  life.get('deleted')!('b');
+  assert.equal(existsSync(kept), false);
 });

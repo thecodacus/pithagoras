@@ -8,6 +8,15 @@ import { KeyboardShortcuts } from '../src/components/KeyboardShortcuts';
 import type { PortalEvent, Session } from '../src/api';
 import { canvasConnection, canvasMessage, type CanvasMessage } from '../src/canvas-feed';
 import '../src/styles';
+import { register } from '../src/extensions/slots';
+// `?brought=1`: with a window an extension brought, as the installed ones register theirs.
+if (new URLSearchParams(location.search).has('brought')) {
+  register('probe', 'voice.window', {
+    id: 'probe',
+    title: 'Probe',
+    component: ({ chat, close }) => <div data-testid="probe-window" style={{ padding: 16 }}>Probe for {chat.title} <button type="button" onClick={close}>Done</button></div>,
+  });
+}
 const microphone = new AudioContext();
 let destination = microphone.createMediaStreamDestination();
 Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: async () => {

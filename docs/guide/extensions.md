@@ -100,9 +100,10 @@ Those models only exist once extensions are bound, which is later than session
 creation — the portal handles that, but it is worth knowing when a local model
 seems not to stick.
 
-A package can also bring an interface of its own to the portal: a panel beside
-the conversation, a control in a chat's header, a page in the sidebar. See
-[Extensions that draw in the portal](/guide/extension-ui).
+A package can also bring an interface of its own to the portal (a panel beside
+the conversation, its own card for its tool's calls, a page in the sidebar) and
+a server half with routes of its own. See
+[Building an extension](/guide/extension-ui).
 
 ## Built-in skills
 

@@ -3,11 +3,17 @@
  * conversation — and can pin one of their own, or take one off.
  *
  * The reference for an extension that draws in the portal
- * (server/src/extension-ui.ts there). This file is the half pi loads, one per
- * chat: it holds the notes and keeps them with the conversation. `web/` is the
- * half the portal's page loads: a panel, a button in the chat's header and a
- * page. The two talk over pi's event bus, so outside the portal nobody
- * listens and this is simply a tool that keeps notes.
+ * (server/src/extension-ui.ts there), in three halves:
+ *
+ * - This file is the one pi loads, one per chat: it holds the notes and keeps
+ *   them with the conversation.
+ * - `web/` is the one the portal's page loads: a panel, a button in the chat's
+ *   header, how a call of `note` is drawn, a window in voice mode and a page.
+ * - `server.js` is the one the portal itself loads, once: every chat's notes,
+ *   for the page, with no chat's pi started for it.
+ *
+ * This half and the page talk over pi's event bus, so outside the portal
+ * nobody listens and this is simply a tool that keeps notes.
  *
  * What the browser half sends:  { type: "ready" } · { type: "add", text } ·
  *                               { type: "remove", id } · { type: "pin-last" }

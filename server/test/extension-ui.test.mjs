@@ -32,10 +32,14 @@ const files = (marker) => ({
   "web/img/logo.svg": "<svg xmlns='http://www.w3.org/2000/svg'/>",
   "web/.env": "KEY=value",
 });
-const scoped = pkg("scoped", "@codacus/notes", WEB, files("scoped"));
-const off = pkg("off", "switched-off", WEB, files("off"));
+const SERVER = "export default function (portal) { portal.router.get('/hello', (_req, res) => res.json({ from: portal.extension })); }";
+const scoped = pkg("scoped", "@codacus/notes", { ...WEB, server: "./server.js" }, { ...files("scoped"), "server.js": SERVER });
+const off = pkg("off", "switched-off", { ...WEB, server: "./server.js" }, { ...files("off"), "server.js": SERVER });
 const plain = pkg("plain", "no-interface", undefined, { "index.ts": "export default () => {};" });
-const project = pkg("project", "from-a-folder", WEB, files("project"));
+const project = pkg("project", "from-a-folder", { ...WEB, server: "./server.js" }, { ...files("project"), "server.js": SERVER });
+// A server half and no browser half, and one whose server half cannot start.
+const headless = pkg("headless", "server-only", { server: "./lib/server.js" }, { "lib/server.js": SERVER });
+const broken = pkg("broken", "breaks", { ...WEB, server: "./server.js" }, { ...files("broken"), "server.js": "export default function () { throw new Error('no licence'); }" });
 
 writeFileSync(
   path.join(bin, "pi"),
@@ -49,6 +53,10 @@ User packages:
     ${off}
   npm:no-interface
     ${plain}
+  npm:server-only
+    ${headless}
+  npm:breaks
+    ${broken}
 Project packages:
   npm:from-a-folder
     ${project}
@@ -62,24 +70,29 @@ mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
 writeFileSync(
   path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"),
   JSON.stringify({
-    packages: ["npm:@codacus/notes", { source: "npm:switched-off", extensions: [], skills: [], prompts: [], themes: [] }, "npm:no-interface"],
+    packages: ["npm:@codacus/notes", { source: "npm:switched-off", extensions: [], skills: [], prompts: [], themes: [] }, "npm:no-interface", "npm:server-only", "npm:breaks"],
   }),
 );
 
 const { default: express } = await import("express");
-const { extensionsRouter } = await import("../dist/api/extensions.js");
+const { extensionsRouter, syncExtensionServers } = await import("../dist/api/extensions.js");
+const { extensionRoutes, stopServerHalves } = await import("../dist/extension-host.js");
 const app = express();
+app.use("/api/x", extensionRoutes);
 app.use("/api", extensionsRouter());
 const server = await new Promise((resolve) => {
   const s = app.listen(0, "127.0.0.1", () => resolve(s));
 });
-test.after(() => server.close());
+test.after(async () => {
+  await stopServerHalves();
+  server.close();
+});
 const at = (p) => `http://127.0.0.1:${server.address().port}${p}`;
 
 test("the browser halves listed are those of the portal's own packages that are switched on", async () => {
   const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
-  assert.deepEqual(extensions.map((e) => e.name), ["@codacus/notes"], "not one switched off, one without a browser half, or one a folder brings");
-  const [notes] = extensions;
+  assert.deepEqual(extensions.map((e) => e.name).sort(), ["@codacus/notes", "breaks", "server-only"], "not one switched off, one with neither half, or one a folder brings");
+  const notes = extensions.find((e) => e.name === "@codacus/notes");
   assert.equal(notes.version, "1.0.0");
   assert.match(notes.entry, /^\/api\/extension-ui\/%40codacus\/notes\/client\.js\?v=[0-9a-z]+-[0-9a-z]+$/);
   assert.match(notes.style, /^\/api\/extension-ui\/%40codacus\/notes\/client\.css\?v=/);
@@ -116,4 +129,24 @@ test("nothing else of a package is served, and nothing of a package that has no 
     assert.equal(res.status, 404, asked);
     assert.doesNotMatch(await res.text(), /the half pi loads|KEY=value|project|off \*\//, asked);
   }
+});
+
+test("the server halves that run are those of the same packages, each said with where its routes are or why it is not running", async () => {
+  const before = (await (await fetch(at("/api/extension-ui"))).json()).extensions;
+  assert.deepEqual(before.map((e) => e.server).sort(), ["/api/x/%40codacus/notes", "/api/x/breaks", "/api/x/server-only"], "where each will be, before any is started");
+  assert.equal((await fetch(at("/api/x/@codacus/notes/hello"))).status, 404);
+
+  await syncExtensionServers();
+  const byName = Object.fromEntries((await (await fetch(at("/api/extension-ui"))).json()).extensions.map((e) => [e.name, e]));
+  assert.equal(byName["@codacus/notes"].server, "/api/x/%40codacus/notes");
+  assert.deepEqual(await (await fetch(at(byName["@codacus/notes"].server + "/hello"))).json(), { from: "@codacus/notes" });
+  // A server half alone is listed without a module for the page.
+  assert.deepEqual({ entry: byName["server-only"].entry, server: byName["server-only"].server }, { entry: undefined, server: "/api/x/server-only" });
+  assert.deepEqual(await (await fetch(at("/api/x/server-only/hello"))).json(), { from: "server-only" });
+  // One that could not start says why, and its browser half is still offered.
+  assert.equal(byName.breaks.server, undefined);
+  assert.equal(byName.breaks.serverError, "no licence");
+  assert.match(byName.breaks.entry, /^\/api\/extension-ui\/breaks\/client\.js/);
+  // Switched off, or a folder's: never loaded into the portal.
+  for (const none of ["/api/x/switched-off/hello", "/api/x/from-a-folder/hello"]) assert.equal((await fetch(at(none))).status, 404, none);
 });

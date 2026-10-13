@@ -144,6 +144,12 @@ Each data message is one event:
 
 Track the highest `seq` you have seen and pass it as `since` when reconnecting.
 
+The stream also carries named events (`event: canvas`, `event: extension`, and
+a few of the portal's own). `extension` is what an installed extension's server
+half tells what it drew on the page: `{ "extension": "<package>", "data": … }`,
+first where things stand as the stream opens, then each thing as it is said.
+None of them has a `seq`, and none is stored.
+
 ::: warning Negative seq
 Live-only events — streaming message/tool updates, queue updates, prefill progress and extension dialogs — carry a negative `seq`. They are never
 persisted, so they must not move your cursor. Ignore anything `<= 0` when
@@ -240,7 +246,7 @@ the folder is not a repository, except `init`. See [Git](/guide/git).
 | `POST /api/sessions/:id/background/:key/stop` · `/background/clear` | Stop one; clear the finished ones |
 | `POST /api/sessions/:id/subagents/:agent/input` | `{ text }` — say something to a running subagent. 409 when it cannot be reached |
 | `POST /api/sessions/:id/subagents/:agent/stop` | Stop it |
-| `POST /api/sessions/:id/extension-ui` | `{ extension, data }` — what an extension's browser half says to its own pi extension in the chat ([Extensions that draw in the portal](/guide/extension-ui)); starts the chat's agent if it was let go. 409 when the chat's agent does not run its extensions inside the portal |
+| `POST /api/sessions/:id/extension-ui` | `{ extension, data }` — what an extension's browser half says to its own pi extension in the chat ([Building an extension](/guide/extension-ui)); starts the chat's agent if it was let go. 409 when the chat's agent does not run its extensions inside the portal |
 
 ## Model providers
 
@@ -328,8 +334,9 @@ overrides; `defaults` is what an unset field falls back to. An empty string in
 | `DELETE /api/packages` | `{ spec }` |
 | `POST /api/packages/update` | Update the installed pi packages (`pi update --extensions`); pi itself comes with the portal's version |
 | `GET /api/extensions` | Parsed packages with their recovered settings |
-| `GET /api/extension-ui` | `{ extensions: [{ name, version, entry, style? }] }` — the installed packages, switched on, that bring a browser half, with the addresses its module and stylesheet are fetched from |
+| `GET /api/extension-ui` | `{ extensions: [{ name, version, entry?, style?, server?, serverError? }] }` — the installed packages, switched on, that bring a browser half or a server half: the addresses its module and stylesheet are fetched from, where its server half's routes are, and why that half is not running if it could not be started |
 | `GET /api/extension-ui/<package>/<file>` | A file of that package's web folder |
+| `/api/x/<package>/…` | The routes of that package's server half, whatever it serves there, behind the portal's login; no body is read for them unless the route asks. WebSocket upgrades under the same address go to it, checked for the login and for the page they come from |
 | `PUT /api/extensions/enabled` | `{ spec, enabled }` — switch a package off or on without uninstalling it; reloads idle open sessions and says how many were left waiting |
 | `PUT /api/extensions/settings` | `{ key, value }` — empty value removes the key |
 | `GET /api/pi-settings` | Raw `settings.json` |
