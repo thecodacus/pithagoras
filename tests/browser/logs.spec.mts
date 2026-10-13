@@ -2,14 +2,14 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
 /** Settings → Logs over a server whose lines are the test's: what the page asks for, and what it shows of the answer. */
-async function portal(page: Page, lines: { id: number; level: string; text: string }[], boot = { value: 'a' }, gap = { value: false }) {
+async function portal(page: Page, lines: { id: number; level: string; text: string }[], boot = { value: 'a' }, gap = { value: false }, extra: Record<string, unknown> = {}) {
   const asked: string[] = [];
   await mockPortal(page, ({ path, url }) => {
     if (path !== '/api/logs') return undefined;
     asked.push(url.search);
     const since = url.searchParams.get('since');
     const wanted = lines.filter((l) => since === null || l.id > Number(since));
-    return { boot: boot.value, gap: gap.value, last: lines.length ? lines[lines.length - 1].id : 0, lines: wanted.map((l) => ({ ...l, at: '2026-10-01T09:00:00Z' })) };
+    return { ...extra, boot: boot.value, gap: gap.value, last: lines.length ? lines[lines.length - 1].id : 0, lines: wanted.map((l) => ({ ...l, at: '2026-10-01T09:00:00Z' })) };
   }, { settings: true });
   return asked;
 }
@@ -103,4 +103,50 @@ test('the page holds no more text than the server does, the newest lines staying
   expect(held.length).toBeLessThanOrEqual(Math.floor(2_000_000 / 8000));
   expect(held.length).toBeGreaterThan(200);
   expect(held[0]).toBe(300 - held.length + 1);
+});
+
+test('debug lines are listed with their level, and only the warnings and errors filters hide them', async ({ page }) => {
+  await portal(page, [
+    { id: 1, level: 'info', text: 'listening on port 3000' },
+    { id: 2, level: 'debug', text: '[tool] end tool=bash outcome=ok ms=1520 session=abc' },
+    { id: 3, level: 'warn', text: 'slow disk' },
+  ], { value: 'a' }, { value: false }, { level: 'debug' });
+  await page.goto('/settings/logs');
+  const log = page.getByRole('log', { name: 'Server logs' });
+  await expect(log).toContainText('[tool] end tool=bash outcome=ok ms=1520 session=abc');
+  await expect(log.locator('div.flex').nth(1)).toContainText('debug');
+  await expect(page.getByRole('status').filter({ hasText: '3 lines' })).toBeVisible();
+  await page.getByRole('radio', { name: 'Warnings and errors' }).click();
+  await expect(log).not.toContainText('[tool] end');
+  await expect(log).toContainText('slow disk');
+  await page.getByRole('radio', { name: 'Everything' }).click();
+  await page.getByRole('searchbox', { name: 'Search the logs' }).fill('outcome=ok');
+  await expect(log).toContainText('[tool] end');
+  await expect(log).not.toContainText('listening on port');
+});
+
+test('the page says whether the server runs at the debug level, and how to turn it on when it does not', async ({ page }) => {
+  await portal(page, [{ id: 1, level: 'info', text: 'listening' }], { value: 'a' }, { value: false }, { level: 'info' });
+  await page.goto('/settings/logs');
+  await expect(page.getByText('For debug lines, start the portal with PITHAGORAS_LOG_LEVEL=debug.')).toBeVisible();
+  await expect(page.getByText('Debug lines are included')).toHaveCount(0);
+
+  await portal(page, [{ id: 1, level: 'debug', text: 'fine' }], { value: 'a' }, { value: false }, { level: 'debug' });
+  await page.goto('/settings/logs');
+  await expect(page.getByText('Debug lines are included: the portal runs with PITHAGORAS_LOG_LEVEL=debug.')).toBeVisible();
+  await expect(page.getByText('For debug lines, start')).toHaveCount(0);
+});
+
+test('a server that keeps fewer lines than the default is held to that by the page too', async ({ page }) => {
+  const lines = Array.from({ length: 5 }, (_, i) => ({ id: i + 1, level: 'info', text: `entry-${i + 1}` }));
+  await portal(page, lines, { value: 'a' }, { value: false }, { keep: 8, chars: 2_000_000 });
+  await page.goto('/settings/logs');
+  const log = page.getByRole('log', { name: 'Server logs' });
+  await expect(log).toContainText('entry-5');
+  for (let id = 6; id <= 12; id++) lines.push({ id, level: 'info', text: `entry-${id}` });
+  await expect(log).toContainText('entry-12', { timeout: 8000 });
+  // Twelve were printed; the server keeps eight, and so does the page: the oldest four are gone from it.
+  await expect(log.locator('div.flex')).toHaveCount(8);
+  await expect(log).not.toContainText('entry-4');
+  await expect(log).toContainText('entry-5');
 });

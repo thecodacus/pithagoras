@@ -4,6 +4,8 @@ import { DATA_DIR } from "./data-dir.js";
 import { holdDataDir } from "./instance-lock.js";
 import { piCli } from "./pi/package.js";
 import { installLogCapture } from "./logs.js";
+// Records the command line the portal was started with, before `process.argv[1]` is replaced below.
+import "./restart.js";
 
 /**
  * The server's entry.

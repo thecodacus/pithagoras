@@ -62,8 +62,8 @@ portal's slash command palette, interactive menus included, and
 **Models** are set up from Settings, without editing files — see
 [Models and providers](/guide/models). **Voice** talks to the agent with local
 speech recognition and synthesis ([Voice control](/guide/voice)). The agent's
-own [browser](/guide/browser), an [Understory memory](/guide/memory) and
-[image generation and editing](/guide/images) are optional add-ons. The portal
+own [browser](/guide/browser), an [Understory memory](/guide/memory),
+image generation and editing and video generation ([Media](/guide/media)) are optional add-ons. The portal
 installs as an app and speaks English and German — see
 [The interface](/guide/interface).
 
@@ -78,6 +78,7 @@ Honest state of things, so you know what you are getting:
 | Slash commands — builtin, extension, prompt, skill | Working |
 | Agents, heartbeat, routines, people and the guard | Working |
 | Files, Git, terminal, canvases, voice, images, model providers | Working |
+| Video generation (stable-diffusion.cpp's server) | Working; the one backend there is |
 | Settings, extension config, package management | Working |
 | Channel packages: loading, installing, configuring | Working |
 | The channel supervisor — starting them, routing replies | Working |

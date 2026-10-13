@@ -2,12 +2,12 @@ import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvents, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus } from "./api";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus, type SingleSignOn } from "./api";
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
-import { Login } from "./components/Login";
+import { Login, Setup } from "./components/Login";
 import { isTab, type Tab } from "./settings-tabs";
 import { setupDismissed } from "./setup-state";
 import { load as loadCached, prefetchSettings } from "./settings-cache";
@@ -15,6 +15,7 @@ import { ExtensionDialog, type UiRequest } from "./components/ExtensionDialog";
 import { lazyComponent } from "./lazy";
 import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { ConfirmHost } from "./components/ConfirmDialog";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { ErrorBanner, ghostCls } from "./components/SettingsUi";
 import { pollWhileVisible, reconnectDelay } from "./poll";
 import { canvasConnection, canvasMessage } from "./canvas-feed";
@@ -37,17 +38,21 @@ const RoutinesPage = lazyComponent(() => import("./components/RoutinesPage"), "R
 const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditPage");
 const BrowserPage = lazyComponent(() => import("./components/BrowserPage"), "BrowserPage");
 const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
-const ImagesPage = lazyComponent(() => import("./components/ImagesPage"), "ImagesPage");
+const MediaPage = lazyComponent(() => import("./components/MediaPage"), "MediaPage");
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
-// Legacy routes ("session", "global") still resolve — old links stay valid.
-const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general" };
+// Legacy routes still resolve — old links stay valid: "session" and "global" were the defaults, "password" and "sso" had a tab each before they were both on Authentication, and so did the pictures and the videos before there was one tab for both.
+const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general", password: "authentication", sso: "authentication", images: "media", videos: "media" };
 
 export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).
   useLanguage();
   const [authed, setAuthed] = useState<boolean | null>(null);
+  /** No password has been chosen yet: the first start, or after it was removed with the reset command. */
+  const [setup, setSetup] = useState(false);
+  /** The single sign-on provider the login page offers, where there is one. */
+  const [sso, setSso] = useState<SingleSignOn | undefined>();
   /** The portal did not answer when asked who is signed in: not the same as nobody being. */
   const [unreachable, setUnreachable] = useState(false);
   const failed = useRef(0);
@@ -58,6 +63,8 @@ export default function App() {
       (s) => {
         failed.current = 0;
         setUnreachable(false);
+        setSetup(Boolean(s.setup));
+        setSso(s.oidc);
         setAuthed(s.authed);
       },
       (e) => {
@@ -106,7 +113,7 @@ export default function App() {
         <div className="fixed right-4 top-4 z-10">
           <ThemeSwitcher />
         </div>
-        <Login onSuccess={() => setAuthed(true)} />
+        {setup ? <Setup onSuccess={() => { setSetup(false); setAuthed(true); }} /> : <Login sso={sso} onSuccess={() => setAuthed(true)} onSetup={() => setSetup(true)} />}
       </>
     );
   }
@@ -126,7 +133,10 @@ export default function App() {
       <Route path="/routines" element={<Shell view="routines" />} />
       <Route path="/browser" element={<Shell view="browser" />} />
       <Route path="/memory" element={<Shell view="memory" />} />
-      <Route path="/images" element={<Shell view="images" />} />
+      <Route path="/media" element={<Shell view="media" />} />
+      {/* Where the pictures and the videos were while each had a page: old links and bookmarks. */}
+      <Route path="/images" element={<MediaRedirect show="images" />} />
+      <Route path="/videos" element={<MediaRedirect show="videos" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
@@ -139,6 +149,14 @@ export default function App() {
   );
 }
 
+/** The gallery of one kind that was a page of its own, as one of the two kinds of the Media page, with the filters it had. */
+function MediaRedirect({ show }: { show: "images" | "videos" }) {
+  const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  params.set("show", show);
+  return <Navigate to={{ pathname: "/media", search: `?${params}` }} replace />;
+}
+
 /** Once per page load, not once per page: the Shell is drawn again on every route. */
 let setupAsked = false;
 
@@ -147,7 +165,7 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "images" | "audit";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit";
 }) {
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
@@ -195,19 +213,19 @@ function Shell({
   const [hasBrowser, setHasBrowser] = useState(false);
   // Whether Understory is the agent's memory, which is when its page is in the sidebar.
   const [hasMemory, setHasMemory] = useState(false);
-  // Likewise whether image generation is on and has an address, which is when the Images page is.
-  const [hasImages, setHasImages] = useState(false);
+  // Likewise whether image generation or video generation is on and has an address, which is when the Media page is.
+  const [hasMedia, setHasMedia] = useState(false);
   useEffect(() => {
     const ask = () =>
       api
         .featureFlags()
         .then((f) => {
           setHasMemory(f.understory?.enabled === true);
-          setHasImages(f.images?.enabled === true);
+          setHasMedia(f.images?.enabled === true || f.videos?.enabled === true);
         })
         .catch(() => {});
     ask();
-    // Said by Settings when it switches Understory (Add-ons) or the images (Agent → Images), so the sidebar follows at once.
+    // Said by Settings when it switches Understory (Add-ons), the images or the videos (Agent → Media), so the sidebar follows at once.
     window.addEventListener("features-changed", ask);
     return () => window.removeEventListener("features-changed", ask);
   }, []);
@@ -650,6 +668,7 @@ function Shell({
     refreshSessions();
   });
   const onOpenSettings = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/general` : "/settings/general"));
+  const openUpdate = useStable(() => navigate(sessionId ? `/s/${sessionId}/settings/about` : "/settings/about"));
   const closeSettings = useStable(() => navigate(active ? `/s/${active.id}` : "/"));
   const setUpModel = useStable(() => {
     navigate(active ? `/s/${active.id}` : "/");
@@ -689,7 +708,7 @@ function Shell({
         view={view}
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
-        hasImages={hasImages}
+        hasMedia={hasMedia}
         places={places}
         onNavigate={onNavigate}
         onOpenFolder={onOpenFolder}
@@ -709,6 +728,7 @@ function Shell({
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
           <span className="truncate text-sm text-fg">{active?.title || "Pithagoras"}</span>
         </header>
+        <UpdateNotice onDetails={openUpdate} />
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
         {/* Not for the first miss: a server restarting, or a wifi that blinked,
             is back before it can be read. Two in a row is an outage. */}
@@ -752,8 +772,8 @@ function Shell({
           <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "memory" ? (
           <MemoryPage />
-        ) : view === "images" ? (
-          <ImagesPage />
+        ) : view === "media" ? (
+          <MediaPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : active ? (

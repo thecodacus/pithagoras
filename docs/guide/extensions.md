@@ -174,7 +174,8 @@ one go. An MCP server is its own group rather than a share of the adapter that
 attached it — three servers used to arrive as one pile of forty tools called
 `pi-mcp-adapter`, and nobody thinks of them that way.
 The portal's own picture tools, `show_image`, `generate_image` and `edit_image`,
-are together in one **Images** group, whichever of them is on offer.
+and the video tools, `generate_video` and `show_video`, are together in one **Media** group,
+whichever of them is on offer.
 
 ::: tip The browser is one of them
 It used to have a switch of its own beside the composer, which was a second
@@ -273,7 +274,7 @@ below). The portal marks no other tool and no other set on its own, so a portal 
 you choose.
 
 **Settings → Tools** has a **lazy** button on the header of each group (a package, the browser, the
-**Images** group, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
+**Media** group, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
 including tools that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers
 the tool one by one again.
 

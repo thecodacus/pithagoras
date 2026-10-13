@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { LiveEvents } from "./live-events.js";
 import type { Timings } from "./llama-progress.js";
 import { forgetChat, noteToolCall, subagentGone } from "./memory-llm.js";
+import { toolCallEnded, toolCallsCutOff, toolCallStarted } from "./tool-debug.js";
 import { ModelErrors, plainFailure } from "./model-errors.js";
 import { EventEmitter } from "node:events";
 import { hasPrimary, type PersonRow, type Role } from "./people.js";
@@ -968,8 +969,14 @@ class SessionManager extends EventEmitter {
     if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
       const call = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
       noteToolCall(sessionId, call, event.toolName, event.type === "tool_execution_start" ? "start" : "end");
+      const subagent = sub ? String(msg.id) : undefined;
+      if (event.type === "tool_execution_start") toolCallStarted(sessionId, call, event.toolName, subagent, event.args);
+      else toolCallEnded(sessionId, call, event.toolName, Boolean(event.isError), subagent);
     }
-    if (msg.type === "portal_subagent" && msg.op === "end") subagentGone(sessionId, String(msg.id));
+    if (msg.type === "portal_subagent" && msg.op === "end") {
+      subagentGone(sessionId, String(msg.id));
+      toolCallsCutOff(sessionId, `${msg.id}:`);
+    }
     const id = `${sub ? `${msg.id}:` : ""}${String(event.toolCallId ?? "")}`;
     let calls = this.calls.get(sessionId);
     if (event.type === "tool_execution_start") {
@@ -2981,6 +2988,7 @@ class SessionManager extends EventEmitter {
     this.failuresSaid.delete(sessionId);
     this.inRun.delete(sessionId);
     this.calls.delete(sessionId);
+    toolCallsCutOff(sessionId);
     this.callWindows.delete(sessionId);
     this.fresh.delete(sessionId);
     this.piQueue.delete(sessionId);

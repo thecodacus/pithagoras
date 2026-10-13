@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inProcessHome } from './helpers.mts';
 inProcessHome('pithagoras-canvas-test-');
 const {getDb}=await import('../server/src/db.js');
@@ -73,7 +76,9 @@ test('AI can continue its own edits without rereading, including in a resumed co
 });
 
 test('installed agent runtime forwards canvas data and errors to the next model request',async()=>{
- const {runAgentLoop}=await import(new URL('../node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js',import.meta.resolve('@earendil-works/pi-coding-agent')).href);
+ // pi's own agent core, wherever npm put it: beside pi, or inside it.
+ const core=createRequire(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))).resolve('@earendil-works/pi-agent-core/package.json');
+ const {runAgentLoop}=await import(pathToFileURL(join(dirname(core),'dist','agent-loop.js')).href);
  const {tools}=setup();const created=value(await tools.canvas_create.execute('create',{title:'Visible to model'}));
  let calls=0;
  const stream=async(_model:any,context:any)=>{

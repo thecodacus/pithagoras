@@ -2,8 +2,9 @@ import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /**
- * The Images page (web/src/components/ImagesPage.tsx) over a portal that is made up: the pictures
- * of its gallery, and the jobs that make more, which the test lets finish when it likes.
+ * The pictures of the Media page (web/src/components/MediaPage.tsx) over a portal that makes pictures and no videos: the
+ * pictures of its gallery, and the jobs that make more, which the test lets finish when it likes. The page with both
+ * kinds is media-page.spec.mts.
  */
 
 interface Pic {
@@ -74,14 +75,14 @@ const feature = (over: Record<string, unknown> = {}) => {
   return { ready: f.enabled && f.baseUrl !== '', ...f };
 };
 
-async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false } = {}) {
+async function portal(page: Page, { pictures = [] as Pic[], images = feature(), flagOn = true, jobs = [] as Job[], failList = false, videosOn = false } = {}) {
   const pics = [...pictures];
   const state = { jobs: [...jobs], generated: [] as any[], edited: [] as any[], deleted: [] as string[][], stopped: [] as string[], uploads: [] as { name: string | null; type: string | undefined; size: number }[], listed: [] as string[], files: [] as string[], thumbFiles: [] as string[], limit: 4 };
   const sorted = () => [...pics].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
   const job = (over: Partial<Job>): Job => ({ id: `j${state.jobs.length + 1}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: '', startedAt: Date.now(), ...over });
 
   await mockPortal(page, async ({ path: p, method, url, json, route }) => {
-    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: flagOn } };
+    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: false }, images: { enabled: flagOn }, videos: { enabled: videosOn } };
     if (p === '/api/features/images') return { images };
     if (p === '/api/images' && method === 'GET') {
       state.listed.push(url.search);
@@ -235,21 +236,21 @@ async function loaded(image: Locator) {
   await expect.poll(() => image.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
 }
 
-test('the sidebar has Images only while image generation is on and has an address', async ({ page }) => {
+test('the sidebar has Media only while image generation is on and has an address', async ({ page }) => {
   await portal(page, { flagOn: false });
   await page.goto('/sessions');
   await expect(page.getByRole('button', { name: 'Sessions' }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Images' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Media' })).toHaveCount(0);
 });
 
-test('Images in the sidebar opens the page: the form first, the gallery under it, newest first', async ({ page }) => {
+test('Media in the sidebar opens the page, with the pictures in it: the form first, the gallery under it, newest first', async ({ page }) => {
   const a = pic({ prompt: 'A lighthouse at dusk', age: 30 });
   const b = pic({ prompt: 'A red bicycle', age: 5, origin: 'chat', chat: { id: 'c1', title: 'Holiday plans' } });
   await portal(page, { pictures: [a, b] });
   await page.goto('/sessions');
-  await page.getByRole('button', { name: 'Images' }).first().click();
-  await expect(page).toHaveURL(/\/images$/);
-  await expect(page.getByRole('heading', { name: 'Images' })).toBeVisible();
+  await page.getByRole('button', { name: 'Media' }).first().click();
+  await expect(page).toHaveURL(/\/media$/);
+  await expect(page.getByRole('heading', { name: 'Media' })).toBeVisible();
   await expect(maker(page)).toBeVisible();
   const names = await grid(page).getByRole('button').evaluateAll((els) => els.map((e) => e.getAttribute('title')));
   expect(names).toEqual(['A red bicycle', 'A lighthouse at dusk']);
@@ -263,7 +264,7 @@ test('Images in the sidebar opens the page: the form first, the gallery under it
 test('the portal is asked to look through its folders when the page opens and with Refresh, and not on each tick of the timer', async ({ page }) => {
   await page.clock.install();
   const p = await portal(page, { pictures: [pic({ prompt: 'One', age: 5 })] });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(tile(page, 'One')).toBeVisible();
   const lists = () => p.state.listed.filter((q) => !q.includes('ids='));
   // (The dev build is in strict mode, which opens the page twice.)
@@ -280,23 +281,32 @@ test('the portal is asked to look through its folders when the page opens and wi
   expect(lists().at(-1)).toBe('?limit=48');
 });
 
+
+test('without video generation the viewer has no way to a video', async ({ page }) => {
+  await portal(page, { pictures: [pic({ prompt: 'A lighthouse at dusk' })], videosOn: false });
+  await page.goto('/media');
+  await tile(page, 'A lighthouse at dusk').click();
+  await expect(viewer(page)).toBeVisible();
+  await expect(viewer(page).getByRole('button', { name: 'Make a video from it' })).toHaveCount(0);
+});
+
 test('with nothing made yet the gallery says so, and a gallery that cannot be read says that', async ({ page }) => {
   await portal(page);
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(page.getByText('No pictures yet. Describe one above to make the first.')).toBeVisible();
 });
 
 test('a gallery that cannot be read says why', async ({ page }) => {
   await portal(page, { failList: true });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(page.getByRole('alert')).toContainText('The gallery could not be read');
 });
 
 test('with image generation and editing switched off the page says so in both modes, with the way to the setting, and still shows what there is', async ({ page }) => {
   await portal(page, { pictures: [pic({ prompt: 'Left over' })], images: feature({ enabled: false, editEnabled: false, editReady: false }), flagOn: false });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(page.getByText('Image generation is switched off, or has no address.')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  await expect(page.getByRole('link', { name: 'Set it up in Settings → Agent → Media' })).toHaveAttribute('href', '/settings/media');
   // The form is there, with both modes, each saying that it is not set up.
   await expect(maker(page)).toBeVisible();
   await expect(maker(page).getByRole('radio', { name: /^Generate/ })).toContainText('not set up');
@@ -305,7 +315,7 @@ test('with image generation and editing switched off the page says so in both mo
   await toEdit(page);
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
   await expect(maker(page).getByText('Image editing is switched off, or has no address.')).toBeVisible();
-  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Media' })).toHaveAttribute('href', '/settings/media');
   await expect(describe(page)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Change the picture' })).toHaveCount(0);
   await expect(tile(page, 'Left over')).toBeVisible();
@@ -315,7 +325,7 @@ test('with only changing set up the page opens in Edit: no form to make a pictur
   const made = pic({ prompt: 'A fox' });
   const edited = pic({ prompt: 'Make it night', kind: 'edited', from: made.id, params: { sources: [made.id] }, age: 1 });
   const p = await portal(page, { pictures: [made, edited], images: feature({ enabled: false, baseUrl: '', editBaseUrl: 'https://edits.example.com/v1' }) });
-  await page.goto('/images');
+  await page.goto('/media');
   // Where only changing is set up the form opens there; making says that it is not set up.
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
   await expect(maker(page).getByRole('radio', { name: /^Generate/ })).toContainText('not set up');
@@ -323,7 +333,7 @@ test('with only changing set up the page opens in Edit: no form to make a pictur
   await expect(page.getByPlaceholder('Describe the picture')).toHaveCount(0);
   await toMake(page);
   await expect(page.getByText('Image generation is switched off, or has no address.')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Set it up in Settings → Agent → Media' })).toBeVisible();
   await expect(page.getByText('Pictures can still be changed: choose Edit above.')).toBeVisible();
   await expect(page.getByPlaceholder('Describe the picture')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Make the picture' })).toHaveCount(0);
@@ -348,7 +358,7 @@ test('with only changing set up the page opens in Edit: no form to make a pictur
 test('whether pictures can be made is what the portal says, not worked out again from the address', async ({ page }) => {
   // Switched on and with an address, but the portal says that it is not ready: the page believes it, in the form and in the viewer.
   await portal(page, { pictures: [pic({ prompt: 'A fox' })], images: feature({ ready: false }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(maker(page).getByRole('radio', { name: /^Generate/ })).toContainText('not set up');
   await tile(page, 'A fox').click();
   await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
@@ -356,7 +366,7 @@ test('whether pictures can be made is what the portal says, not worked out again
 
 test('with only making set up Edit is still there, and says that it is not set up and where to switch it on; there is no upload', async ({ page }) => {
   await portal(page, { pictures: [pic({ prompt: 'A fox' })], images: feature({ editEnabled: false, editReady: false }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(page.getByPlaceholder('Describe the picture')).toBeVisible();
   await expect(maker(page).getByRole('radio', { name: /^Edit/ })).toContainText('not set up');
   await expect(page.getByLabel('Upload a picture')).toHaveCount(0);
@@ -367,7 +377,7 @@ test('with only making set up Edit is still there, and says that it is not set u
   await expect(viewer(page)).toHaveCount(0);
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
   await expect(maker(page).getByText('Image editing is switched off, or has no address.')).toBeVisible();
-  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Media' })).toHaveAttribute('href', '/settings/media');
   await expect(page.getByLabel('Upload a picture')).toHaveCount(0);
   await expect(describe(page)).toHaveCount(0);
   // Back to making, which still works.
@@ -377,28 +387,28 @@ test('with only making set up Edit is still there, and says that it is not set u
 
 test('the filters ask the portal for what they say, and are in the address', async ({ page }) => {
   const p = await portal(page, { pictures: [pic({ prompt: 'Mine' }), pic({ prompt: 'The agent’s', origin: 'chat', chat: { id: 'c1', title: 'A chat' } }), pic({ prompt: 'Changed one', kind: 'edited' })] });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(3);
   await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'From chats' }).click();
-  await expect(page).toHaveURL(/\/images\?origin=chat$/);
+  await expect(page).toHaveURL(/\/media\?origin=chat$/);
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
   await expect(tile(page, 'The agent’s')).toBeVisible();
   expect(p.state.listed.some((q) => q.includes('origin=chat'))).toBe(true);
   await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'All' }).click();
   await page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Changed' }).click();
-  await expect(page).toHaveURL(/\/images\?kind=edited$/);
+  await expect(page).toHaveURL(/\/media\?kind=edited$/);
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
   await expect(tile(page, 'Changed one')).toBeVisible();
   // Back goes through the filters, one at a time: the unfiltered list in between, and the chats before it.
   await page.goBack();
-  await expect(page).toHaveURL(/\/images$/);
+  await expect(page).toHaveURL(/\/media$/);
   await expect(grid(page).getByRole('listitem')).toHaveCount(3);
   await page.goBack();
-  await expect(page).toHaveURL(/\/images\?origin=chat$/);
+  await expect(page).toHaveURL(/\/media\?origin=chat$/);
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
   await expect(tile(page, 'The agent’s')).toBeVisible();
   // A link with a filter in it opens on it.
-  await page.goto('/images?origin=chat&kind=generated');
+  await page.goto('/media?origin=chat&kind=generated');
   await expect(page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'From chats' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Made', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
@@ -412,7 +422,7 @@ test('a picture found in an agent\'s home says which agent, the first one includ
   const other = found({ fileName: 'fox.png', folder: { name: 'Research Bot', home: false }, age: 2 });
   const unnamed = found({ fileName: 'moth.png', folder: { name: '', home: true }, age: 1 });
   await portal(page, { pictures: [first, other, unnamed] });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(3);
   await expect(grid(page).getByRole('listitem').filter({ hasText: 'Nova' })).toHaveCount(1);
   await expect(grid(page).getByRole('listitem').filter({ hasText: 'Research Bot' })).toHaveCount(1);
@@ -423,29 +433,29 @@ test('pictures that were found in a folder are in the gallery by their file name
   const named = found({ fileName: 'fox.png', age: 3 });
   const home = found({ fileName: 'owl.png', folder: { name: '', home: true }, kind: 'generated', age: 2 });
   const p = await portal(page, { pictures: [pic({ prompt: 'Mine', age: 1 }), named, home] });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(3);
   // Without a description a tile is called by its file, and says which folder it is in: Home or the project's.
   await expect(tile(page, 'fox.png')).toBeVisible();
   await expect(grid(page).getByRole('listitem').filter({ hasText: 'garden' })).toHaveCount(1);
   await expect(grid(page).getByRole('listitem').filter({ hasText: 'Home' })).toHaveCount(1);
   await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'From folders' }).click();
-  await expect(page).toHaveURL(/\/images\?origin=folder$/);
+  await expect(page).toHaveURL(/\/media\?origin=folder$/);
   await expect(grid(page).getByRole('listitem')).toHaveCount(2);
   expect(p.state.listed.some((q) => q.includes('origin=folder'))).toBe(true);
   await page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Not known' }).click();
-  await expect(page).toHaveURL(/\/images\?origin=folder&kind=unknown$/);
+  await expect(page).toHaveURL(/\/media\?origin=folder&kind=unknown$/);
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
   await expect(tile(page, 'fox.png')).toBeVisible();
   // A link with them in it opens on them.
-  await page.goto('/images?kind=unknown');
+  await page.goto('/media?kind=unknown');
   await expect(page.getByRole('radiogroup', { name: 'How it was made' }).getByRole('radio', { name: 'Not known' })).toHaveAttribute('aria-checked', 'true');
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
 });
 
 test('Details of a picture that was found says where, and that nothing is kept of how it was made; it can be changed but not run again', async ({ page }) => {
   await portal(page, { pictures: [found({ fileName: 'fox.png', createdAt: Date.parse('2026-09-30T08:15:00Z'), bytes: 2_500_000 })] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'fox.png').click();
   await expect(viewer(page).getByRole('button', { name: 'Edit it' })).toBeVisible();
   await expect(viewer(page).getByRole('button', { name: 'Run again' })).toHaveCount(0);
@@ -465,7 +475,7 @@ test('a picture that was found is deleted only on purpose, with the folder named
   const other = found({ fileName: 'owl.png', folder: { name: 'work/art', home: false }, age: 4 });
   const mine = pic({ prompt: 'Mine' });
   const p = await portal(page, { pictures: [theirs, other, mine] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'fox.png').click();
   await viewer(page).getByRole('button', { name: 'Delete' }).click();
   const dialog = page.getByRole('alertdialog', { name: 'Delete this picture?' });
@@ -489,7 +499,7 @@ test('a gallery of hundreds is asked for a page at a time, and pictures far down
   await page.setViewportSize({ width: 375, height: 760 });
   const many = Array.from({ length: 150 }, (_, i) => pic({ prompt: `Many ${i + 1}`, age: i }));
   const p = await portal(page, { pictures: many });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(48);
   expect(p.state.listed[0]).toContain('limit=48');
   await expect(page.getByText('150', { exact: true }).first()).toBeVisible();
@@ -511,7 +521,7 @@ test('a gallery of hundreds is asked for a page at a time, and pictures far down
 
 test('making a picture starts a job that holds its place in the grid, and the picture arrives there', async ({ page }) => {
   const p = await portal(page, { pictures: [pic({ prompt: 'Older', age: 60 })] });
-  await page.goto('/images');
+  await page.goto('/media');
   await page.getByPlaceholder('Describe the picture').fill('A fox in the snow');
   await page.getByRole('button', { name: 'Make the picture' }).click();
   expect(p.state.generated).toEqual([{ prompt: 'A fox in the snow', count: 1 }]);
@@ -533,7 +543,7 @@ test('making a picture starts a job that holds its place in the grid, and the pi
 
 test('a picture made here and deleted somewhere else is not kept as a tile by its job', async ({ page }) => {
   const p = await portal(page, { pictures: [pic({ prompt: 'Older', age: 60 })] });
-  await page.goto('/images');
+  await page.goto('/media');
   await page.getByPlaceholder('Describe the picture').fill('A fox in the snow');
   await page.getByRole('button', { name: 'Make the picture' }).click();
   const made = p.finish(p.state.jobs[0].id);
@@ -548,7 +558,7 @@ test('a picture made here and deleted somewhere else is not kept as a tile by it
 
 test('a picture made here does not stay above one that came after it: the grid is newest first, and the viewer steps in its order', async ({ page }) => {
   const p = await portal(page, { pictures: [pic({ prompt: 'Older', age: 60 })] });
-  await page.goto('/images');
+  await page.goto('/media');
   await page.getByPlaceholder('Describe the picture').fill('A fox in the snow');
   await page.getByRole('button', { name: 'Make the picture' }).click();
   const made = p.finish(p.state.jobs[0].id);
@@ -585,11 +595,11 @@ async function advanced(page: Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   return maker(page);
 }
-const TIP = 'Using stable-diffusion.cpp? Switch on “Stable Diffusion extra settings” in Settings → Agent → Images for more options.';
+const TIP = 'Using stable-diffusion.cpp? Switch on “Stable Diffusion extra settings” in Settings → Agent → Media for more options.';
 
 test('the settings of a request are sent as set, and are kept for the next visit, not the words', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/images');
+  await page.goto('/media');
   await fillOpenAi(page);
   await page.getByPlaceholder('Describe the picture').fill('Two boats');
   await page.getByRole('button', { name: 'Make 2 pictures' }).click();
@@ -610,7 +620,7 @@ test('the settings of a request are sent as set, and are kept for the next visit
 
 test('a field that is left empty shows what is used instead, and sends nothing; the model and size of the add-on are those', async ({ page }) => {
   const p = await portal(page, { images: feature({ model: 'saved-model', size: '640x480', editModel: 'edit-model' }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(page.getByLabel('Model')).toHaveAttribute('placeholder', 'saved-model');
   await expect(page.getByLabel('Width')).toHaveAttribute('placeholder', '640');
   await expect(page.getByLabel('Height')).toHaveAttribute('placeholder', '480');
@@ -634,13 +644,13 @@ test('without the Stable Diffusion switch only the OpenAI settings are there, an
   });
   const first = pic({ prompt: 'A fox' });
   const p = await portal(page, { pictures: [first] });
-  await page.goto('/images');
+  await page.goto('/media');
   const form = await advanced(page);
   for (const name of ['Negative prompt', 'Seed', 'Steps', 'Strength']) await expect(page.getByLabel(name)).toHaveCount(0);
   // Under Advanced a quiet line says where more is switched on, with the way there, and the form has no box for what is not shown.
   const tip = form.getByText(TIP);
   await expect(tip).toBeVisible();
-  await expect(tip.getByRole('link', { name: 'Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  await expect(tip.getByRole('link', { name: 'Settings → Agent → Media' })).toHaveAttribute('href', '/settings/media');
   expect(await tip.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeLessThanOrEqual(12);
   await expect(form.locator('fieldset')).toHaveCount(0);
   await expect(page.getByRole('group', { name: /stable-diffusion/i })).toHaveCount(0);
@@ -662,7 +672,7 @@ test('without the Stable Diffusion switch only the OpenAI settings are there, an
 
 test('with the Stable Diffusion switch on its fields are plain fields under the Advanced ones, in the same style and with no box or tip of their own, and are sent', async ({ page }) => {
   const p = await portal(page, { images: feature({ sdExtras: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   // Under Advanced, which is closed until it is opened: nothing of it before.
   for (const name of ['Negative prompt', 'Seed', 'Steps']) await expect(page.getByLabel(name)).toHaveCount(0);
   const form = await advanced(page);
@@ -708,7 +718,7 @@ test('with the Stable Diffusion switch on its fields are plain fields under the 
 test('the fields of stable-diffusion.cpp are there only while the switch is on: it comes on with the page, and takes them away again, and the tip with it', async ({ page }) => {
   const feat = feature({ sdExtras: false });
   const p = await portal(page, { images: feat });
-  await page.goto('/images');
+  await page.goto('/media');
   const form = await advanced(page);
   await expect(form.getByText(TIP)).toBeVisible();
   await expect(page.getByLabel('Seed')).toHaveCount(0);
@@ -730,7 +740,7 @@ test('in Edit its fields have a strength and a start from noise: the strength is
   const first = pic({ prompt: 'A fox' });
   const second = pic({ prompt: 'A hat' });
   const p = await portal(page, { pictures: [first, second], images: feature({ sdExtras: true, editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'A fox', 'A hat');
   // Under Advanced like the rest: nothing of it while the fold is shut, and no box of its own once it is open.
   await expect(page.getByLabel('Strength')).toHaveCount(0);
@@ -771,7 +781,7 @@ test('in Edit its fields have a strength and a start from noise: the strength is
 
 test('a setting that is wrong is said, with the field it is in marked and focused, and nothing is sent', async ({ page }) => {
   const p = await portal(page, { images: feature({ sdExtras: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await page.getByPlaceholder('Describe the picture').fill('A boat');
   const make = page.getByRole('button', { name: 'Make the picture' });
   const alert = page.getByRole('alert');
@@ -833,7 +843,7 @@ test('a setting that is wrong is said, with the field it is in marked and focuse
 
 test('a compression is only for a format that has one: it is off and says so for the others, and not sent', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/images');
+  await page.goto('/media');
   await page.getByRole('button', { name: 'Advanced' }).click();
   const compression = page.getByLabel('Compression');
   await expect(compression).toBeDisabled();
@@ -852,7 +862,7 @@ test('a compression is only for a format that has one: it is off and says so for
 
 test('how many is the portal\'s own dropdown, not the browser\'s: it works by keyboard, and is drawn on the theme and within a phone', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/images');
+  await page.goto('/media');
   // Nothing on the page is a native select, whose open list ignores the theme.
   await expect(page.locator('select')).toHaveCount(0);
   const many = page.getByRole('combobox', { name: 'How many' });
@@ -909,7 +919,7 @@ test('how many is the portal\'s own dropdown, not the browser\'s: it works by ke
 
 test('what the portal refuses is shown, and a button does nothing without words', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(page.getByRole('button', { name: 'Make the picture' })).toBeDisabled();
   await page.getByPlaceholder('Describe the picture').fill('refuse me');
   await page.getByRole('button', { name: 'Make the picture' }).click();
@@ -921,7 +931,7 @@ test('when as many pictures are being made as may be, no more is started from th
   const now = Date.now();
   const running: Job[] = Array.from({ length: 4 }, (_, i) => ({ id: `r${i}`.padEnd(12, '0'), kind: 'generate', state: 'running', prompt: `Running ${i}`, startedAt: now - i }));
   await portal(page, { jobs: running });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).locator('.image-preview.is-making')).toHaveCount(4);
   await page.getByPlaceholder('Describe the picture').fill('One too many');
   await expect(page.getByRole('button', { name: 'Make the picture' })).toBeDisabled();
@@ -935,7 +945,7 @@ test('a picture that was not made says why, and can be dismissed; one that is be
       { id: 'b'.repeat(12), kind: 'generate', state: 'running', prompt: 'Slow picture', startedAt: now - 9000 },
     ],
   });
-  await page.goto('/images');
+  await page.goto('/media');
   const failed = grid(page).locator('.image-preview.is-failed');
   await expect(failed).toContainText('No picture was made');
   await expect(failed).toContainText('that prompt is not allowed');
@@ -950,7 +960,7 @@ test('a picture that was not made says why, and can be dismissed; one that is be
 test('jobs that were done when the page was opened are not shown again: their pictures are in the gallery', async ({ page }) => {
   const made = pic({ prompt: 'Made before' });
   await portal(page, { pictures: [made], jobs: [{ id: 'd'.repeat(12), kind: 'generate', state: 'done', prompt: 'Made before', startedAt: Date.now() - 9000, finishedAt: Date.now() - 8000, pictureId: made.id }] });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(1);
 });
 
@@ -959,7 +969,7 @@ test('a picture opens in the viewer over the page, which steps through the galle
   const b = pic({ prompt: 'Second', age: 2 });
   const c = pic({ prompt: 'Third', age: 1 });
   await portal(page, { pictures: [a, b, c] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'Second').click();
   await expect(viewer(page)).toBeVisible();
   await expect(viewer(page).locator('img[data-picture]')).toHaveAttribute('src', `/api/images/${b.id}/file`);
@@ -978,7 +988,7 @@ test('the original and its edit reach each other, also when the original is furt
   const filler = Array.from({ length: 60 }, (_, i) => pic({ prompt: `Filler ${i}`, age: 10 + i }));
   const edit = pic({ prompt: 'Make it blue', kind: 'edited', from: original.id, age: 1 });
   const p = await portal(page, { pictures: [original, ...filler, edit] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'Make it blue').click();
   await expect(viewer(page).getByRole('button', { name: 'Show the original' })).toBeVisible();
   expect(p.state.listed.some((q) => q.includes(`ids=${original.id}`))).toBe(true);
@@ -994,7 +1004,7 @@ test('an original that was reached from its edit and is deleted there is gone fr
   const filler = Array.from({ length: 60 }, (_, i) => pic({ prompt: `Filler ${i}`, age: 10 + i }));
   const edit = pic({ prompt: 'Make it blue', kind: 'edited', from: original.id, age: 1 });
   const p = await portal(page, { pictures: [original, ...filler, edit] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'Make it blue').click();
   await viewer(page).getByRole('button', { name: 'Show the original' }).click();
   await expect(viewer(page)).toContainText('The original');
@@ -1013,7 +1023,7 @@ test('an original that was reached from its edit and is deleted there is gone fr
 test('stepping on in the viewer asks for the next page of the gallery', async ({ page }) => {
   const many = Array.from({ length: 60 }, (_, i) => pic({ prompt: `Step ${i + 1}`, age: i }));
   await portal(page, { pictures: many });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(48);
   await tile(page, 'Step 44').click();
   // Within a few of the end of what is loaded: the rest is loaded behind it, and the count has it.
@@ -1031,7 +1041,7 @@ test('Details tells what a picture was made with and when, and where a chat’s 
     createdAt: Date.parse('2026-09-30T08:15:00Z'), fileName: 'fox.png', bytes: 2_500_000,
   });
   await portal(page, { pictures: [made] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox\nin the snow').click();
   await viewer(page).getByRole('button', { name: 'Details' }).click();
   const details = viewer(page).getByRole('region', { name: 'Details' });
@@ -1051,7 +1061,7 @@ test('Details tells what a picture was made with and when, and where a chat’s 
 test('Edit it puts the picture in the form, and the change is sent with it', async ({ page }) => {
   const made = pic({ prompt: 'A fox' });
   const p = await portal(page, { pictures: [made] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox').click();
   await viewer(page).getByRole('button', { name: 'Edit it' }).click();
   await expect(viewer(page)).toHaveCount(0);
@@ -1077,7 +1087,7 @@ test('Edit it puts the picture in the form, and the change is sent with it', asy
 test('an edit that scaled or compressed its picture says so in a warning, until it is put away or the next thing is asked', async ({ page }) => {
   const made = pic({ prompt: 'A fox' });
   const p = await portal(page, { pictures: [made] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox').click();
   await viewer(page).getByRole('button', { name: 'Edit it' }).click();
   await page.keyboard.type('Make the fur white');
@@ -1105,7 +1115,7 @@ test('an edit that scaled or compressed its picture says so in a warning, until 
 test('in Edit a tick in the box of a picture takes it into the edit, after the ones there, and again takes it out; a click on the picture itself never does, it opens it', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   // Nothing yet: the form says how pictures get in, and there is nothing to send.
   await expect(maker(page).getByText('No picture yet. Pick pictures from the gallery below, drop or paste them here, or add them from this computer.')).toBeVisible();
@@ -1151,7 +1161,7 @@ test('in Edit a tick in the box of a picture takes it into the edit, after the o
 test('in Edit the viewer takes the picture it shows into the edit or out of it, and stays open to go on to the next', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   // The newest is the first of the gallery, and the viewer steps on to the older.
   await tile(page, 'Gamma').click();
@@ -1181,7 +1191,7 @@ test('in Edit the viewer takes the picture it shows into the edit or out of it, 
 test('a click or Enter on a picture opens the viewer in either mode, and the box has its own name, is a tab stop of its own, and is ticked with Space', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
   await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   for (const mode of ['Generate', 'Edit']) {
     if (mode === 'Edit') await toEdit(page);
     // Enter on the picture, from the keyboard: the viewer, and nothing ticked.
@@ -1214,7 +1224,7 @@ test('a click or Enter on a picture opens the viewer in either mode, and the box
 test('where a pointer can hover the box is there while the picture is pointed at or has focus, and always once one is ticked or the form is in Edit', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
   await portal(page, { pictures: [a, b] });
-  await page.goto('/images');
+  await page.goto('/media');
   const shown = (name: string) => cell(page, name).locator('.gallery-check-hit').evaluate((el) => ({ opacity: Number(getComputedStyle(el).opacity), ...el.getBoundingClientRect().toJSON() }));
   // A mouse: hidden until the tile is pointed at or the box has focus, so that it does not cover every picture.
   await page.mouse.move(0, 0);
@@ -1242,7 +1252,7 @@ test.describe('on a touch screen', () => {
   test('the boxes are always there, with a place a thumb can find, and a tap on one ticks it where a tap on the picture opens it', async ({ page }) => {
     const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
     await portal(page, { pictures: [a, b] });
-    await page.goto('/images');
+    await page.goto('/media');
     const hit = cell(page, 'Beta').locator('.gallery-check-hit');
     // No hover to wait for, and at least the 44 pixels a finger needs.
     await expect.poll(() => hit.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
@@ -1265,7 +1275,7 @@ test.describe('on a touch screen', () => {
 test('where the endpoint takes one picture, a tick takes the place of the one there is, with no place numbers, and the viewer has one button for it', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
   const p = await portal(page, { pictures: [a, b] });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   await expect(maker(page).getByText('No picture yet. Pick one from the gallery below, drop or paste it here, or add it from this computer.')).toBeVisible();
   await expect(page.getByText('Tick a picture to use it in the edit. A click on a picture opens it.')).toBeVisible();
@@ -1276,7 +1286,7 @@ test('where the endpoint takes one picture, a tick takes the place of the one th
   await expect(box(page, 'Alpha')).not.toBeChecked();
   await expect(grid(page).locator('.gallery-order')).toHaveCount(0);
   // The way to several is said, with the way to the setting.
-  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Media' })).toHaveAttribute('href', '/settings/media');
   await describe(page).fill('Make it night');
   await page.getByRole('button', { name: 'Change the picture' }).click();
   await expect.poll(() => p.state.edited.length).toBe(1);
@@ -1295,7 +1305,7 @@ test('where the endpoint takes one picture, a tick takes the place of the one th
 
 test('several pictures are picked at once, shown in the order picked with their place and the limit, and sent in that order', async ({ page }) => {
   const p = await portal(page, { images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   await page.getByLabel('Upload a picture').setInputFiles([png('a.png'), png('b.png'), png('c.png')]);
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
@@ -1314,7 +1324,7 @@ test('several pictures are picked at once, shown in the order picked with their 
 test('more pictures are added one after another, also from the add button in the row of them', async ({ page }) => {
   const made = pic({ prompt: 'A fox' });
   const p = await portal(page, { pictures: [made], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox').click();
   await viewer(page).getByRole('button', { name: 'Edit it' }).click();
   await expect.poll(() => names(page)).toEqual(['A fox']);
@@ -1335,7 +1345,7 @@ test('more pictures are added one after another, also from the add button in the
 
 test('the add button is reachable and works from the keyboard', async ({ page }) => {
   await portal(page, { pictures: [pic({ prompt: 'A fox' })], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox').click();
   await viewer(page).getByRole('button', { name: 'Edit it' }).click();
   const add = strip(page).getByRole('button', { name: 'Add pictures from this computer' });
@@ -1355,7 +1365,7 @@ test('the add button is reachable and works from the keyboard', async ({ page })
 test('moving or removing a picture from the keyboard leaves focus in the row, so that the next press goes on from there', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha', 'Beta', 'Gamma');
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta', 'Gamma']);
   // Later, again and again: the same button has focus after each, and the picture goes on to the end.
@@ -1388,7 +1398,7 @@ test('moving or removing a picture from the keyboard leaves focus in the row, so
 
 test('taking out the only picture from the keyboard, where only changing is set up, leaves focus in the description', async ({ page }) => {
   await portal(page, { images: feature({ enabled: false, baseUrl: '', editBaseUrl: 'https://edits.example.com/v1' }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await page.getByLabel('Upload a picture').setInputFiles([png('only.png')]);
   await expect.poll(() => names(page)).toEqual(['only.png']);
   await strip(page).getByRole('button', { name: 'Remove only.png' }).focus();
@@ -1400,7 +1410,7 @@ test('taking out the only picture from the keyboard, where only changing is set 
 
 test('pictures dropped on the form are added after the ones there, and a drop shows where it will go', async ({ page }) => {
   const p = await portal(page, { images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   // From nothing: a drop starts an edit, as choosing a picture from this computer does.
   await drop(maker(page), ['one.png', 'two.png']);
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
@@ -1421,7 +1431,7 @@ test('pictures dropped on the form are added after the ones there, and a drop sh
 
 test('a picture pasted in the description is added, and text that came with it is the text', async ({ page }) => {
   const p = await portal(page, { images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await paste(page.getByPlaceholder('Describe the picture'), ['image.png']);
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
   await expect.poll(() => names(page)).toEqual(['image.png']);
@@ -1436,7 +1446,7 @@ test('a picture pasted in the description is added, and text that came with it i
 test('the eight pictures kept for an edit lock no box of Generate: there the boxes are for a download, a delete and a change', async ({ page }) => {
   const many = Array.from({ length: 10 }, (_, i) => pic({ prompt: `Pic ${i + 1}`, age: i }));
   await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, ...Array.from({ length: 8 }, (_, i) => `Pic ${i + 1}`));
   await expect(box(page, 'Pic 9')).toBeDisabled();
   // Back to making a new picture: the eight stay for the way back, and nothing is locked.
@@ -1462,7 +1472,7 @@ test('the eight pictures kept for an edit lock no box of Generate: there the box
 test('a picture of the gallery dragged into the form is that picture, added once: nothing is uploaded and the gallery stays as it is', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'A fox', age: 2 }), pic({ prompt: 'A hat', age: 1 })];
   const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   const tiles = page.locator('.gallery-tile');
   await expect(tiles).toHaveCount(2);
   // The picture itself, not the thumbnail of the same one in the form's row.
@@ -1512,7 +1522,7 @@ test('a picture of the gallery dragged into the form is that picture, added once
 test('a picture of the gallery dragged in where the endpoint takes one takes the place of the one there is', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'A fox', age: 2 }), pic({ prompt: 'A hat', age: 1 })];
   const p = await portal(page, { pictures: [a, b] });
-  await page.goto('/images');
+  await page.goto('/media');
   await page.locator('.gallery-tile .image-preview-img[alt="A fox"]').dragTo(page.getByPlaceholder('Describe the picture'));
   await expect.poll(() => names(page)).toEqual(['A fox']);
   await page.locator('.gallery-tile .image-preview-img[alt="A hat"]').dragTo(describe(page));
@@ -1524,7 +1534,7 @@ test('a picture of the gallery dragged in where the endpoint takes one takes the
 test('a picture of the gallery dragged into a row that has room for one takes it, one that is there already is no loss, and one that does not fit is said to be left out', async ({ page }) => {
   const many = Array.from({ length: 9 }, (_, i) => pic({ prompt: `Picture ${i + 1}`, age: i + 1 }));
   const p = await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   for (const m of many.slice(0, 7)) await tick(page, m.prompt);
   await expect(strip(page).getByRole('img')).toHaveCount(7);
@@ -1547,7 +1557,7 @@ test('a picture of the gallery dragged into a row that has room for one takes it
 test('a picture of the gallery copied and pasted is that picture; the viewer\'s button for the edit adds it once, and neither makes a copy', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   const tiles = page.locator('.gallery-tile');
   // "Copy image": the picture, and the page it was an `<img>` of, which names it.
   await page.getByPlaceholder('Describe the picture').evaluate((el, id) => {
@@ -1587,7 +1597,7 @@ test('a picture of the gallery copied and pasted is that picture; the viewer\'s 
 test('a picture is taken out with its button, and moved earlier or later, and the places and the request follow', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha', 'Beta', 'Gamma');
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta', 'Gamma']);
   // The first cannot go earlier, the last not later.
@@ -1614,7 +1624,7 @@ const FIRST_COUNTS = 'The first picture counts most: it is the one that is chang
 test('a picture of the row is dragged to another place, and the request has them in that order: the first is the one that counts most', async ({ page }) => {
   const [a, b, c, d] = [pic({ prompt: 'Alpha', age: 4 }), pic({ prompt: 'Beta', age: 3 }), pic({ prompt: 'Gamma', age: 2 }), pic({ prompt: 'Delta', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c, d], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha', 'Beta', 'Gamma', 'Delta');
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta']);
   await expect(slot(page, 'Delta')).toHaveAttribute('draggable', 'true');
@@ -1646,7 +1656,7 @@ test('a picture of the row is dragged to another place, and the request has them
 test('a single picture is not dragged, and a row of several says that the first counts most', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
   await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha');
   await expect(slot(page, 'Alpha')).not.toHaveAttribute('draggable', 'true');
   await expect(maker(page)).not.toContainText(FIRST_COUNTS);
@@ -1660,7 +1670,7 @@ test('a single picture is not dragged, and a row of several says that the first 
 test('the order is changed from the keyboard alone, with the arrows, and said as it changes; the request has that order', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha', 'Beta', 'Gamma');
   const said = maker(page).locator('[aria-live="polite"]');
   // Tab reaches the arrows in the row, one picture after the other.
@@ -1686,7 +1696,7 @@ test('the order is changed from the keyboard alone, with the arrows, and said as
 
 test('at most eight pictures go into an edit: the rest of a pick is not uploaded, and it is said', async ({ page }) => {
   const p = await portal(page, { images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   await page.getByLabel('Upload a picture').setInputFiles(Array.from({ length: 6 }, (_, i) => png(`p${i + 1}.png`)));
   await expect.poll(() => names(page)).toHaveLength(6);
@@ -1705,7 +1715,7 @@ test('at most eight pictures go into an edit: the rest of a pick is not uploaded
 test('pictures that were uploaded while the row filled up from the gallery are said to be left out, not dropped without a word', async ({ page }) => {
   const extra = pic({ prompt: 'Zeta' });
   const p = await portal(page, { pictures: [extra], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   await page.getByLabel('Upload a picture').setInputFiles(Array.from({ length: 6 }, (_, i) => png(`p${i + 1}.png`)));
   await expect.poll(() => names(page)).toHaveLength(6);
@@ -1731,7 +1741,7 @@ test('pictures that were uploaded while the row filled up from the gallery are s
 test('an edit waits for the pictures that are still being added: neither the button nor Ctrl+Enter sends it without them', async ({ page }) => {
   const alpha = pic({ prompt: 'Alpha' });
   const p = await portal(page, { pictures: [alpha], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -1762,7 +1772,7 @@ test('an edit waits for the pictures that are still being added: neither the but
 test('where the endpoint takes one picture, an edit does not go out from the picture that a drop is replacing', async ({ page }) => {
   const alpha = pic({ prompt: 'Alpha' });
   const p = await portal(page, { pictures: [alpha] });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -1786,7 +1796,7 @@ test('where the endpoint takes one picture, an edit does not go out from the pic
 
 test('where the endpoint takes one picture, a picture put in replaces it, the extra ones are said to be left out, and the setting is named', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/images');
+  await page.goto('/media');
   await drop(maker(page), ['one.png', 'two.png', 'three.png']);
   await expect.poll(() => names(page)).toEqual(['one.png']);
   expect(p.state.uploads.map((u) => u.name), 'only the one that is used was put in the gallery').toEqual(['one.png']);
@@ -1797,7 +1807,7 @@ test('where the endpoint takes one picture, a picture put in replaces it, the ex
   await expect(page.getByLabel('Upload a picture')).not.toHaveAttribute('multiple', '');
   // What is said of the setting, with the way to it.
   await expect(maker(page).getByText(/takes one picture per edit, and a picture you add takes the place of the one there is/)).toBeVisible();
-  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Images' })).toHaveAttribute('href', '/settings/images');
+  await expect(maker(page).getByRole('link', { name: 'Set it up in Settings → Agent → Media' })).toHaveAttribute('href', '/settings/media');
   // Another put in takes the place of the one there is.
   await drop(maker(page), ['four.png']);
   await expect.poll(() => names(page)).toEqual(['four.png']);
@@ -1808,7 +1818,7 @@ test('several pictures chosen for an endpoint that takes one are said to be too 
   const b = pic({ prompt: 'Beta', age: 2 });
   const edit = pic({ prompt: 'Both', kind: 'edited', from: a.id, params: { sources: [a.id, b.id] }, age: 1 });
   const p = await portal(page, { pictures: [a, b, edit] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'Both').click();
   await viewer(page).getByRole('button', { name: 'Run again' }).click();
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta']);
@@ -1826,7 +1836,7 @@ test('the mask belongs to the first picture, which says so, and moving another f
   const a = pic({ prompt: 'Alpha', age: 2 });
   const b = pic({ prompt: 'Beta', age: 1 });
   const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha', 'Beta');
   // Chosen in this order: Alpha, then Beta.
   await expect.poll(() => names(page)).toEqual(['Alpha', 'Beta']);
@@ -1854,7 +1864,7 @@ test('the mask painter is not reused for another first picture: it would keep th
   const a = pic({ prompt: 'Alpha', age: 2 });
   const b = pic({ prompt: 'Beta', age: 1 });
   await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha', 'Beta');
   await page.getByRole('button', { name: 'Only change a part: paint a mask' }).click();
   await expect(page.getByRole('img', { name: 'The picture to change' })).toHaveAttribute('src', `/api/images/${a.id}/file`);
@@ -1877,7 +1887,7 @@ test('a picture of the row opens larger in the viewer, which steps through them 
   const a = pic({ prompt: 'Alpha', age: 2 });
   const b = pic({ prompt: 'Beta', age: 1 });
   await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'Alpha', 'Beta');
   await strip(page).getByRole('button', { name: 'Look at Beta' }).click();
   await expect(viewer(page).getByText('2 / 2', { exact: true })).toBeVisible();
@@ -1892,7 +1902,7 @@ test('a picture of the row opens larger in the viewer, which steps through them 
 test('at most eight pictures can be chosen in the gallery: the others are dimmed and cannot be chosen until one is taken out, and the limit is said', async ({ page }) => {
   const many = Array.from({ length: 10 }, (_, i) => pic({ prompt: `Pic ${i + 1}`, age: i }));
   const p = await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, ...Array.from({ length: 8 }, (_, i) => `Pic ${i + 1}`));
   await expect.poll(() => names(page)).toHaveLength(8);
   await expect(maker(page).getByText('8 of 8 pictures')).toBeVisible();
@@ -1924,7 +1934,7 @@ test('at most eight pictures can be chosen in the gallery: the others are dimmed
 
 test('a file that is no picture is said so by name, and the pictures with it are still added', async ({ page }) => {
   await portal(page, { images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await maker(page).evaluate((el) => {
     const data = new DataTransfer();
     data.items.add(new File(['x'], 'notes.pdf', { type: 'application/pdf' }));
@@ -1937,7 +1947,7 @@ test('a file that is no picture is said so by name, and the pictures with it are
 
 test('where only generation is set up a drop or a paste does nothing, and the browser does not open the file', async ({ page }) => {
   const p = await portal(page, { images: feature({ editEnabled: false, editReady: false }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await drop(maker(page), ['one.png']);
   await paste(page.getByPlaceholder('Describe the picture'), ['two.png']);
   await page.waitForTimeout(150);
@@ -1948,7 +1958,7 @@ test('where only generation is set up a drop or a paste does nothing, and the br
 test('on a phone eight pictures in the row stay on the screen, each reachable, and the form needs no sideways scroll', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 760 });
   const p = await portal(page, { images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   await page.getByLabel('Upload a picture').setInputFiles(Array.from({ length: 8 }, (_, i) => png(`phone${i + 1}.png`)));
   await expect.poll(() => names(page)).toHaveLength(8);
@@ -1971,7 +1981,7 @@ test('the row of pictures reads in the dark theme as in the light: the places, t
   await portal(page, { images: feature({ editMultiple: true }) });
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
-    await page.goto('/images');
+    await page.goto('/media');
     await toEdit(page);
     await page.getByLabel('Upload a picture').setInputFiles([png('x.png'), png('y.png')]);
     await expect.poll(() => names(page)).toHaveLength(2);
@@ -1993,7 +2003,7 @@ test('the row of pictures reads in the dark theme as in the light: the places, t
 test('Run again makes a picture from a description once more, as it was asked for, and not with the free fields an older version sent', async ({ page }) => {
   const made = pic({ prompt: 'A fox', params: { model: 'draw-2', size: '768x512', outputFormat: 'jpeg', outputCompression: 80, extra: { quality: 'high', seed: '42', hd: true } } });
   const p = await portal(page, { pictures: [made] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox').click();
   await viewer(page).getByRole('button', { name: 'Run again' }).click();
   await expect(viewer(page)).toHaveCount(0);
@@ -2005,7 +2015,7 @@ for (const sdExtras of [false, true]) {
   test(`Run again ${sdExtras ? 'sends' : 'does not send'} what only stable-diffusion.cpp reads while the switch for it is ${sdExtras ? 'on' : 'off'}; the picture keeps it either way`, async ({ page }) => {
     const made = pic({ prompt: 'A fox', params: { model: 'draw-2', negativePrompt: 'blurry', seed: 42, sampleSteps: 20, strength: 0.5, fromNoise: true } });
     const p = await portal(page, { pictures: [made], images: feature({ sdExtras }) });
-    await page.goto('/images');
+    await page.goto('/media');
     await tile(page, 'A fox').click();
     await viewer(page).getByRole('button', { name: 'Details' }).click();
     const details = viewer(page).getByRole('region', { name: 'Details' });
@@ -2023,7 +2033,7 @@ test('Run again of a change shows it in the form, with its pictures and words, s
   const a = pic({ prompt: 'Alpha', age: 5 });
   const edit = pic({ prompt: 'Make it night', kind: 'edited', from: a.id, params: { sources: [a.id], masked: true }, age: 1 });
   const p = await portal(page, { pictures: [a, edit] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'Make it night').click();
   await viewer(page).getByRole('button', { name: 'Run again' }).click();
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
@@ -2036,7 +2046,7 @@ test('Run again of a change puts the form in Edit, where the boxes are the pictu
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 5 }), pic({ prompt: 'Bravo', age: 4 }), pic({ prompt: 'Charlie', age: 3 })];
   const edit = pic({ prompt: 'Make it night', kind: 'edited', from: c.id, params: { sources: [c.id] }, age: 1 });
   const p = await portal(page, { pictures: [a, b, c, edit] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tick(page, 'Alpha');
   await tick(page, 'Bravo');
   await expect(bar(page).getByText('2 selected')).toBeVisible();
@@ -2055,7 +2065,7 @@ test('Run again of a change puts the form in Edit, where the boxes are the pictu
 
 test('a picture put in from this computer is in the gallery and is the one to change', async ({ page }) => {
   const p = await portal(page);
-  await page.goto('/images');
+  await page.goto('/media');
   await toEdit(page);
   await page.getByLabel('Upload a picture').setInputFiles({ name: 'cat.png', mimeType: 'image/png', buffer: Buffer.from('not really a png, the portal looks') });
   await expect(maker(page)).toHaveAccessibleName('Change a picture');
@@ -2067,7 +2077,7 @@ test('a picture put in from this computer is in the gallery and is the one to ch
 test('a part of the picture can be painted as a mask, which goes with the change at the picture’s own size', async ({ page }) => {
   const made = pic({ prompt: 'A fox' });
   const p = await portal(page, { pictures: [made] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox').click();
   await viewer(page).getByRole('button', { name: 'Edit it' }).click();
   await page.getByRole('button', { name: 'Only change a part: paint a mask' }).click();
@@ -2102,7 +2112,7 @@ test('a part of the picture can be painted as a mask, which goes with the change
 test('without a stroke no mask is sent, and the whole picture may change', async ({ page }) => {
   const made = pic({ prompt: 'A fox' });
   const p = await portal(page, { pictures: [made] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'A fox').click();
   await viewer(page).getByRole('button', { name: 'Edit it' }).click();
   await page.getByRole('button', { name: 'Only change a part: paint a mask' }).click();
@@ -2116,7 +2126,7 @@ test('deleting a picture of the page asks, and takes it away', async ({ page }) 
   const mine = pic({ prompt: 'Mine' });
   const other = pic({ prompt: 'Other', age: 5 });
   const p = await portal(page, { pictures: [mine, other] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tile(page, 'Mine').click();
   await viewer(page).getByRole('button', { name: 'Delete' }).click();
   const dialog = page.getByRole('alertdialog', { name: 'Delete this picture?' });
@@ -2139,7 +2149,7 @@ test('the page says how much of the disk its own pictures take, and the number g
   const more = pic({ prompt: 'More', age: 1 });
   const theirs = pic({ prompt: 'From a chat', origin: 'chat', chat: { id: 'c1', title: 'A chat' }, age: 2 });
   await portal(page, { pictures: [mine, more, theirs] });
-  await page.goto('/images');
+  await page.goto('/media');
   // A chat’s files are the chat’s: only the two of the page are counted, and a filter does not change it.
   const kept = page.getByText('kept from this page').locator('..');
   await expect(kept).toContainText('234.4 KB');
@@ -2158,7 +2168,7 @@ test('a picture in a chat’s folder is deleted only on purpose, with a warning,
   const theirs = pic({ prompt: 'From a chat', origin: 'chat', chat: { id: 'c1', title: 'Holiday plans' } });
   const mine = pic({ prompt: 'Mine', age: 5 });
   const p = await portal(page, { pictures: [theirs, mine] });
-  await page.goto('/images');
+  await page.goto('/media');
   // The page's own goes at once, where Settings says not to ask.
   await tile(page, 'Mine').click();
   await viewer(page).getByRole('button', { name: 'Delete' }).click();
@@ -2180,7 +2190,7 @@ test('several pictures can be selected with their boxes, to download or delete t
   const b = pic({ prompt: 'Two', age: 2 });
   const c = pic({ prompt: 'Three', age: 1, origin: 'chat', chat: { id: 'c1', title: 'A chat' } });
   const p = await portal(page, { pictures: [a, b, c] });
-  await page.goto('/images');
+  await page.goto('/media');
   // No select mode to go into, and no bar while nothing is ticked: the gallery says the boxes are there.
   await expect(page.getByRole('button', { name: 'Select', exact: true })).toHaveCount(0);
   await expect(bar(page)).toHaveCount(0);
@@ -2219,7 +2229,7 @@ test('several pictures can be selected with their boxes, to download or delete t
 test('the bar of the selection has the actions, clears with its button or Escape, and is let go of when the form goes to Edit', async ({ page }) => {
   const [a, b, c] = [pic({ prompt: 'Alpha', age: 3 }), pic({ prompt: 'Beta', age: 2 }), pic({ prompt: 'Gamma', age: 1 })];
   const p = await portal(page, { pictures: [a, b, c], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await tick(page, 'Gamma');
   const actions = bar(page).getByRole('button');
   await expect(actions).toHaveText(['Select all shown', 'Edit', 'Download', 'Delete', 'Clear selection']);
@@ -2261,7 +2271,7 @@ test('the bar of the selection has the actions, clears with its button or Escape
 test('a selection that cannot all be an edit says why, where the endpoint takes one picture, and the Edit button is off', async ({ page }) => {
   const [a, b] = [pic({ prompt: 'Alpha', age: 2 }), pic({ prompt: 'Beta', age: 1 })];
   const p = await portal(page, { pictures: [a, b] });
-  await page.goto('/images');
+  await page.goto('/media');
   await tick(page, 'Alpha');
   const edit = bar(page).getByRole('button', { name: 'Edit', exact: true });
   await expect(edit).toBeEnabled();
@@ -2287,7 +2297,7 @@ test('a selection does not follow a change of filter: a chat’s picture that is
   const theirs = pic({ prompt: 'From a chat', origin: 'chat', chat: { id: 'c1', title: 'Holiday plans' }, age: 5 });
   const mine = pic({ prompt: 'Mine' });
   const p = await portal(page, { pictures: [theirs, mine] });
-  await page.goto('/images?origin=chat');
+  await page.goto('/media?origin=chat');
   await tick(page, 'From a chat');
   await expect(page.getByText('1 selected')).toBeVisible();
   await page.getByRole('radiogroup', { name: 'Where from' }).getByRole('radio', { name: 'Made here' }).click();
@@ -2309,7 +2319,7 @@ test('a selection does not follow a change of filter: a chat’s picture that is
 test('a gallery of hundreds can be selected whole and deleted: the portal takes 200 at a time, and one question covers them all', async ({ page }) => {
   const many = Array.from({ length: 240 }, (_, i) => pic({ prompt: `Many ${i + 1}`, age: i }));
   const p = await portal(page, { pictures: many });
-  await page.goto('/images');
+  await page.goto('/media');
   // A page at a time, by the button, until all of it is loaded.
   for (const shown of [96, 144, 192, 240]) {
     await page.getByRole('button', { name: 'Show more' }).click();
@@ -2331,7 +2341,7 @@ test('on a phone the grid has two columns, the viewer reaches every action, and 
   const many = Array.from({ length: 6 }, (_, i) => pic({ prompt: `Phone ${i + 1}`, age: i }));
   // Every button there can be: the row of them is longer than the screen.
   await portal(page, { pictures: many, images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await expect(grid(page).getByRole('listitem')).toHaveCount(6);
   const columns = await grid(page).evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
   expect(columns).toBe(2);
@@ -2356,7 +2366,7 @@ test('the gallery reads in the dark theme as in the light', async ({ page }) => 
   await portal(page, { pictures: [pic({ prompt: 'Dim one' })], jobs: [{ id: 'e'.repeat(12), kind: 'generate', state: 'failed', prompt: 'Not made', startedAt: Date.now() - 5000, error: 'No luck' }] });
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
-    await page.goto('/images');
+    await page.goto('/media');
     const tileBox = tile(page, 'Dim one');
     await expect(tileBox).toBeVisible();
     // The failure is readable on either: its words are not the colour of what is behind them.
@@ -2373,7 +2383,7 @@ test('a tile of a big picture loads its small copy, and one of a small file or a
   const small = pic({ prompt: 'A small file', age: 4, bytes: 2_000 });
   const animated = pic({ prompt: 'A moving one', age: 3, fileName: 'move.gif' });
   const p = await portal(page, { pictures: [big, small, animated] });
-  await page.goto('/images');
+  await page.goto('/media');
   for (const name of ['A heavy picture', 'A small file', 'A moving one']) await loaded(tile(page, name).getByRole('img'));
   await expect(tile(page, 'A heavy picture').getByRole('img')).toHaveAttribute('src', `/api/images/${big.id}/thumb`);
   await expect(tile(page, 'A small file').getByRole('img')).toHaveAttribute('src', `/api/images/${small.id}/file`);
@@ -2386,7 +2396,7 @@ test('the pictures of an edit show their small copies in the form', async ({ pag
   const a = pic({ prompt: 'With a copy', age: 5, thumb: true });
   const b = pic({ prompt: 'Without one', age: 4 });
   const p = await portal(page, { pictures: [a, b], images: feature({ editMultiple: true }) });
-  await page.goto('/images');
+  await page.goto('/media');
   await pick(page, 'With a copy', 'Without one');
   await expect(thumbs(page)).toHaveCount(2);
   await loaded(thumbs(page).first());

@@ -29,11 +29,11 @@ adds 150–300 tokens per tool.
 
 ```bash
 git clone https://github.com/thecodacus/pithagoras.git && cd pithagoras
-cp .env.example .env      # set PORTAL_PASSWORD (8+ characters, in single quotes if it has a $ or #; it will not start without), and uncomment WORKSPACES_DIR with the folder your repos are in
+cp .env.example .env      # uncomment WORKSPACES_DIR with the folder your repos are in
 docker compose up -d --build
 ```
 
-Then open `http://<host>:4100` and sign in. The setup assistant in **Settings → Providers**
+Then open `http://<host>:4100` and choose a password: the portal has none until you do, so do it as soon as it is up. The setup assistant in **Settings → Providers**
 walks you through adding a model provider (a local llama.cpp / Ollama server, OpenRouter,
 Anthropic, …); you can also set a key in `.env`.
 
@@ -60,8 +60,10 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
 - **Voice mode** — local speech-to-text and text-to-speech in a managed container, pictures
   both ways, push-to-talk.
 - **Add-ons** — the agent's own browser, and opt-in features: a subagent tool, Understory
-  memory with a Memory page, and image generation and editing through an endpoint you choose,
-  with an Images page to make pictures without a chat and a gallery of them.
+  memory with a Memory page, image generation and editing through an endpoint you choose,
+  and video generation through a stable-diffusion.cpp server, with one Media page to make pictures
+  and short videos without a chat (from a description, or from a picture), a gallery of both, and a
+  player for the videos.
 - **Channels and people** — reach the agent from Telegram, Slack, Discord, Signal or a webhook, with
   roles, approvals and an audit log.
 - **Routines** — scheduled runs that report to a channel.
@@ -95,7 +97,7 @@ on Tailscale/LAN rather than the public internet.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORTAL_PASSWORD` | — | **Required** (or `PORTAL_ALLOW_NO_PASSWORD=1` behind an authenticating proxy). |
+| `PORTAL_ALLOW_NO_PASSWORD` | — | `1` runs with no login behind an authenticating proxy. The password itself is chosen in the browser on the first start and changed under Settings → Authentication; there is no variable for it. |
 | `PORTAL_SECRET` | random | HMAC key for the auth cookie. Set it so logins survive restarts. |
 | `WORKSPACES_DIR` | — (required) | Host directory mounted at `/workspaces` (Compose only; it will not start without one). |
 | `PORTAL_DATA_DIR` | named volume | Host directory for the data volume, instead of a Docker volume (Compose only). |
@@ -110,7 +112,7 @@ The rest is in [Configuration](https://thecodacus.github.io/pithagoras/reference
 ## Settings
 
 **Settings** (bottom of the sidebar) is the web equivalent of pi's slash commands:
-**Providers** and **Defaults** for models, **Tools**, **Images**, **Skills**, **MCP** and
+**Providers** and **Defaults** for models, **Tools**, **Media**, **Skills**, **MCP** and
 **Extensions** for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
 **About** and **Advanced** for the portal. What a chat uses lives on the pills under its
 composer. Defaults you set apply to **newly started** sessions only.

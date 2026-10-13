@@ -7,9 +7,9 @@ German. Navigation runs down the left edge, in four groups:
 | Group | Pages |
 | --- | --- |
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
-| **Agent** | **Tools**, **Images**, **Skills**, **MCP**, **Extensions** |
+| **Agent** | **Tools**, **Media**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
-| **Portal** | **This browser**, **Add-ons**, **Shortcuts**, **Logs**, **About**, **Advanced** |
+| **Portal** | **This browser**, **Authentication**, **Add-ons**, **Shortcuts**, **Logs**, **About** (with **Update**), **Advanced** |
 
 Plus a page for every extension that exposes configuration.
 
@@ -73,13 +73,26 @@ that, a session asking for a local model silently started on pi's fallback.
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
-**Images** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, and the
-switches for **Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**, see
+**Media** has two sections, **Image model** and **Video model**. Each has its **switches** at the top, always in view,
+and under them a heading with a line under it, which opens and closes the section with a click; what opens is directly
+under the heading. The line says what the section is for
+while it is open, and the address and model while it is closed. A model that is not set up starts open, to show its
+address; one that is set up starts closed, and what you open or close is kept in this browser. A section with something
+typed in it and not saved stays open, and the search of Settings opens the section, or the group in it, that it finds.
+
+**Image model** holds the image endpoint behind generation and editing, including the maximum picture size of an edit, and the
+switches for **Image generation** and **Image editing** (always in view), and **Several pictures per edit** and **Stable Diffusion extra settings** (under **More options**). The image endpoint is in the section; **Editing endpoint**, a group of its own that opens and closes, holds the address, key, model and maximum size for editing, which are empty when editing uses the image endpoint. See
 [Opt-in features](/guide/features#image-generation). The first two switch the feature on or off as a whole: the
-[Images page](/guide/images) and the existence of the tools. Whether a chat's agent gets the tools,
-`show_image`, `generate_image` and `edit_image`, is set only in the Tools list, where they are together in one **Images** group. **Stable Diffusion extra settings** (off by default) is
-for an endpoint that is a stable-diffusion.cpp server: it lets the Images page offer and send the settings only that server
-reads, see [Images](/guide/images#stable-diffusion-settings). The tools do not use it.
+[Media page](/guide/media) and the existence of the tools. Whether a chat's agent gets the tools,
+`show_image`, `generate_image` and `edit_image`, is set only in the Tools list, where they are together in one **Media** group, with the video tools. **Stable Diffusion extra settings** (off by default) is
+for an endpoint that is a stable-diffusion.cpp server: it lets the Media page offer and send the settings only that server
+reads, see [Media](/guide/media#stable-diffusion-settings). The tools do not use it.
+
+**Video model** holds the video endpoint behind video generation: its address, key, model, size, frames and frame rate, the time
+limit, the disk limit, and the switch for **Video generation**, see
+[Opt-in features](/guide/features#video-generation). The switch turns the feature on or off as a whole: the
+[Media page](/guide/media) and the existence of the tools. Whether a chat's agent gets the tools, `generate_video` and
+`show_video`, is set only in the Tools list, in the same **Media** group.
 
 ## Channels
 
@@ -128,10 +141,16 @@ a hidden page keeps checking every fifteen seconds.
 ### Sign out
 
 Appears when the portal has a password. It signs out this browser only, and the
-login it held stops working anywhere a copy of its cookie was taken. A login that
+login it held stops working anywhere a copy of its cookie was taken. With
+**End the session at the provider too** under [single sign-on](#single-sign-on),
+the browser goes on to the provider's sign-out page. A login that
 runs out — after thirty days, or when the portal restarts without
 `PORTAL_SECRET` — brings the password screen back rather than failing every
 request with *Unauthorized*.
+
+A password that is shorter than 8 characters, which an older portal took from
+`PORTAL_PASSWORD` and which is kept because it was already in use, is said here
+too, with where to change it: **Authentication**.
 
 ### Language
 
@@ -146,6 +165,65 @@ A language is one file in `web/src/locales/`, named by its language code
 (`de.ts`), mapping each English text to its own; adding one means adding that
 file, and the tests list what it lacks. A page fetches only the file of the
 language it is in, so an English page does not carry the German text.
+
+## Authentication
+
+How people sign in to the portal: the password, and single sign-on through an
+OpenID Connect provider beside it. Both are on this one page. The password's
+part is open; single sign-on is a section that opens and closes, closed at first,
+and says while it is closed whether it is off or which provider it uses (with
+"OIDC only" where the password login is switched off). A search for one of its
+settings opens it.
+
+With `PORTAL_ALLOW_NO_PASSWORD=1` there is no login, and so no password and no
+single sign-on; the page says so.
+
+### Password
+
+The one password that signs in to the portal, kept in its database as a salted
+scrypt hash and never in a file you have to protect. A portal that has none yet
+asks for one on its first start, in the browser; see
+[Deploying](/guide/deploying#the-password).
+
+**Change password** takes the current password once and the new one twice, which
+has to be at least 8 characters and not `change-me`, the example the older
+guides gave. Every other browser is signed out by the change and asks for the new
+password. What is open under the old password is closed in every browser, the one
+you changed it in too, since a copied cookie must not keep its streams: a chat's
+live view, a terminal, the agent's browser. The page you changed it in stays signed
+in and opens them again by itself, with its new login. Wrong current
+passwords are counted on their own, apart from the sign-in's: after ten from one
+source in fifteen minutes the page is told to wait, and not even the right one is
+taken until the time is up.
+
+A lost password is not recovered here (you cannot get in to this page
+without it): it is removed with a command on the server, see
+[Deploying](/guide/deploying#a-lost-password).
+
+### Single sign-on
+
+Signing in through an OpenID Connect provider, beside the password or instead of
+it; how to set up the provider's side, and what each field means, is in
+[Deploying](/guide/deploying#single-sign-on).
+
+- **Provider**: the issuer URL, the client ID and secret, the redirect URL (filled
+  in from the address the page is open at), the scopes and the name on the login
+  page's button. The secret is never shown again once saved: an empty field keeps
+  it for the same issuer and client, another one asks for it again, and **Remove the
+  kept secret** is for a public client. There is no list of who may sign in: that is
+  decided at the provider, and every account it signs in gets in.
+- **End the session at the provider too**: signing out of the portal goes on to the
+  provider's sign-out page.
+- **OIDC only**: the password form is hidden and the password login refused. If the
+  provider stops letting you in, `npm run sso-only-off` on the server switches the
+  password login back on; see [Deploying](/guide/deploying#oidc-only).
+
+**Save** asks for the portal's current password, and the provider is read before
+anything is kept: settings it does not answer to are refused with its reason. A
+change to the provider or to **OIDC only** signs out every other
+browser; this one stays signed in. **Take out single sign-on** removes the button
+and the settings, after asking. Wrong passwords here are counted like those of
+**Change password**; settings refused after the right password are not.
 
 ## Add-ons
 
@@ -167,10 +245,59 @@ entry with its time and level, to attach to an issue. Read the file first and
 remove what is personal before you attach it: it can hold folder paths on the
 host, chat ids, the identifiers of people who wrote to a channel, and the file
 paths an agent was refused. The portal keeps the last 2000 lines (and no more
-than about 2 MB of text) in memory, so a restart starts the list again; for what
-happened before one, and for a crash, which ends the process and the list with
-it, the host's own log (`docker logs` for a container) is still where to look.
+than about 2 MB of text; both can be changed, see below) in memory, so a restart
+starts the list again; for what happened before one, and for a crash, which ends
+the process and the list with it, the host's own log (`docker logs` for a
+container) is still where to look.
 Lines of the chats' own tools, and of containers, are not in it.
+
+**Debug lines.** The portal writes at the `info` level unless it is started with
+`PITHAGORAS_LOG_LEVEL=debug` (a container needs it in its environment: both
+Compose files pass it from `.env` or the shell, see
+[Deploying](/guide/deploying#environment)). At `debug` the list, the file and the
+host's log also carry lines marked `DEBUG`, shown in a fainter colour. So far
+they follow the tool calls and the approvals:
+
+```
+[tool] start tool=bash session=k3Vx9aPq_zLm
+[tool] end tool=bash outcome=ok ms=1520 session=k3Vx9aPq_zLm
+[audit] refused tool=bash session=k3Vx9aPq_zLm
+[approval] asked question=h7mq tool=bash session=k3Vx9aPq_zLm immediate=true
+[approval] answered question=h7mq tool=bash outcome=once waited_ms=48210 session=k3Vx9aPq_zLm
+```
+
+A tool call has a line when it begins and one when it ends, with how it ended
+(`ok`, `error`, or `cut-off` when the chat's pi or a subagent stopped under it)
+and how long it ran in milliseconds. An approval has the question's short id,
+the tool, what the answer was (`once`, `always`, `denied`, or `answered` for a
+question that was not about an action) and how long the person waited for it.
+`subagent=` names the subagent a call ran in, and `via=tools` a call of a
+[lazy tool](/guide/extensions#lazy-tools) through the `tools` tool, which is filed under the
+tool it called. An `[audit]` line is a decision
+of the guard that the Audit page lists as well (`refused`, `allowed-by-approval`
+and the like), with its kind and the tool, without the command or the reason.
+Voice, devices and web requests have no debug lines yet.
+
+A debug line holds names, outcomes, times and ids, never what a tool was given
+or returned, the action an approval was about, or the words of a message: those
+can hold anything, and the lines may be attached to an issue. Whatever else
+slips in is run through a filter that takes out what looks like a secret (the
+values of the portal's own secret environment variables, `Authorization` and
+`Cookie` headers, `token=` and `password=` pairs, the user and password of a
+URL, the keys the common services issue). It is a net, not a promise, so the
+note above about reading the file before you attach it holds for debug lines too.
+Anything printed through `console.debug`, by the portal or by a package it
+runs, counts as a debug line: below the `debug` level it prints nothing.
+
+`PITHAGORAS_LOG_LINES` and `PITHAGORAS_LOG_CHARS` change how much is kept: the
+number of lines (default 2000, from 100 to 50000) and the characters of text
+(default 2000000, from 200000 to 20000000). A value that is not a whole number
+leaves the default, one outside the range is brought to its nearest end, and
+the start says so in the list. Debug lines count against the same limits as the
+others, and every tool call adds two of them: a long session at `debug` pushes
+older warnings and errors out sooner than at `info`, so raise
+`PITHAGORAS_LOG_LINES` when you turn `debug` on. The line under the title of the Logs tab says
+whether the debug level is on.
 
 ## About
 
@@ -178,6 +305,130 @@ Where this portal keeps what it keeps, set when it was deployed through its
 environment: whether the agent runs on this host or in a container per chat, the
 workspace root where each chat's folder is made, and where pi keeps its files
 (`settings.json`, `models.json`, `auth.json` and installed packages).
+
+### Update
+
+A portal that runs from a git checkout of the repository, built (`npm start`,
+or a service that runs `node server/dist/index.js` in it), can update itself, so
+that nobody has to log in to the host. The folder is the one the portal itself
+runs from. The section shows the branch and commit that are checked out, and how
+many new commits `origin/main` has. The portal looks for them when it starts,
+every six hours, and when this page opens: a `git fetch` of `origin/main`
+and a count of the commits the checkout lacks. A failed look is written to the
+[log](#logs) and tried again at the next time; it is not shown as an error.
+`PORTAL_UPDATE_CHECK=off` leaves out the looks the portal makes by itself.
+
+**Update** asks `origin` once more, then shows the commit you are on and the one
+it would move to, and asks for a confirmation. The portal's own request names the
+commit that was shown, and is refused without it (`expect`, see the
+[API](/reference/api#updating-the-portal)): nothing starts from a request that
+did not ask. It says how many chats and
+routines are running: the restart stops them as stopping the portal does, and a
+chat carries on when you send it a message. Once you confirm, the portal runs
+these steps, one update at a time:
+
+1. `git fetch origin main`
+2. `git merge --ff-only origin/main`
+3. `npm ci --prefer-offline --no-audit --no-fund`
+4. `npm run build`
+5. restarts, and this page loads again when the portal is back.
+
+The page shows each step as it goes. Nothing is reset, forced or discarded: an
+update is **refused**, with the reason and before anything is changed, when the
+checkout has changes to files git tracks (files git does not track are no
+reason), is not on a branch, or has commits of its own that `origin/main` lacks,
+so that it cannot be moved straight to it. Fix that on the host and press
+Update again.
+
+**A step that fails.** The update stops where it is, names the step and shows the
+last lines the program printed, and the portal goes on running its old build.
+`npm ci` empties `node_modules` and a build writes `server/dist` and `web/dist`
+as it goes, even a server build with a type error, so the update puts the three
+aside (`node_modules.update-old`, `server/dist.update-old`, `web/dist.update-old`)
+before the step that works on them, puts them back if it fails, and throws them
+away only when the whole build has worked. What a failed step wrote is removed.
+The checkout itself stays at the new commit, which the update never takes back.
+What the build was made from is written in `server/dist/.built-from`, with the
+times at which the build's own files were written, and goes aside and comes back
+with the build: so after a failed build, and after any restart of the portal,
+**Update** says that the build is not of the commit that is checked out and
+builds it again, with a merge of whatever is new on `main` meanwhile, or without
+one. A build made on the host (`git pull && npm ci && npm run build`) writes
+those files again, so the record is then of a build that is not in place any more
+and says nothing: the portal is not told to build what is built. A portal that
+never ran an update has no record and is not told it needs a build. (Between `npm ci` and the end of the build the
+running portal has no `node_modules` and no build to read from disk, as with
+any rebuild in place; a power cut or a kill of the portal in that time leaves
+the `.update-old` folders, which can be moved back by hand.)
+
+**The restart.** What starts the portal again depends on how it is run.
+
+- Run by hand, with `npm start` or `node server/dist/index.js` in a terminal, tmux
+  or `nohup`: the portal starts a copy of itself with the command line it was
+  started with, detached and writing where the portal wrote, and then stops as it
+  does on SIGTERM; the copy waits until the old one is gone.
+- Run as a **systemd service**, as the unit's own process (`ExecStart=/usr/bin/node
+  server/dist/index.js`): the portal stops with status 75 and leaves the start to
+  systemd. It knows from its control group and from the unit's `MainPID`, which
+  is the portal or its parent. A copy that the portal started itself would be in
+  the service's control group and be ended with it, so it does not start one. The
+  unit has to start it again:
+
+  ```ini
+  [Service]
+  WorkingDirectory=/srv/pithagoras
+  ExecStart=/usr/bin/node server/dist/index.js
+  Restart=on-failure
+  ```
+
+  `Restart=on-failure` or `Restart=always` is needed. A unit with `Restart=no` (the
+  default), `on-success`, `on-abnormal` and so on would leave the portal down, so
+  the check refuses the update beforehand, says why, and changes nothing. systemd
+  logs the stop as a failure, status 75, and starts the portal after `RestartSec`.
+- In a **systemd service's control group without being its process**: `ExecStart=npm
+  start` on Debian and Ubuntu, where `/bin/sh` is dash and does not exec the
+  command, so the shell and npm stand between systemd and the portal; a wrapper
+  script that does not `exec` it; a job of cron, which runs in `cron.service`. The
+  portal cannot tell these apart, and has to work for all of them, so it does
+  both: it starts its own copy, as above, and stops with status 75. For cron, which
+  does not look at the status and does not end with its job, the copy lives on.
+  For a unit whose process is npm or a shell, the status passes up to systemd,
+  which starts the unit again (and ends the copy with the old control group, the
+  new portal turns away a second start of itself). This needs `Restart=on-failure`
+  or `Restart=always` in that unit too, and the check cannot warn about a unit
+  that does not have it, since it cannot tell which unit is the portal's. Better, in
+  the unit: `ExecStart=/usr/bin/node server/dist/index.js`, or `exec` in the wrapper.
+- Run by something else that restarts it (pm2, a container's restart policy,
+  `while true`): set `PORTAL_UPDATE_RESTART=exit`. The portal then only stops, with
+  status 75, and its manager starts the new build; started by itself too, it would
+  be started twice. `PORTAL_UPDATE_RESTART=self` makes the portal start its own
+  copy where it would otherwise exit.
+
+The password is in the portal's database, so the new portal asks for it as before;
+the logins that were open end with the restart, as with any restart, unless
+`PORTAL_SECRET` is set (see [Deploying](/guide/deploying#environment)).
+
+If the replacement cannot be started, the update fails at the last step, and the
+portal goes on running. If the new portal does not come up, the page says after
+three minutes that it has not come back, and the log on the host says why.
+
+**Not offered.** A portal that runs from the source files with a file watcher
+(`npm run dev:server`, which is `tsx watch`, or `node --watch`) has no Update
+button. The watcher restarts the portal as soon as the merge changes a file,
+with `npm ci` just started and its node_modules half deleted; the section says so
+and suggests `npm run build && npm start`.
+
+**The notice.** When a look finds new commits, a line at the top of every page says
+*N new commits on main, update available*, with **Update** (the same question,
+then the same steps), **Details** (this page) and a button to put it away until
+the next new commit on main (a failed update's line can be put away the same way). A browser with [notifications](#notifications) on is
+told once for each new commit on `origin/main`, when nobody is looking.
+
+Anyone who can sign in can update the portal, as they can already run commands
+on the host. The section is not there when the portal is not a git checkout.
+In a Docker container, which cannot rebuild itself, there is no button and no
+notice: the section says to update the image instead, see
+[Updating](/guide/deploying#updating).
 
 ## Shortcuts
 

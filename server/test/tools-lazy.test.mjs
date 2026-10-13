@@ -391,10 +391,11 @@ test("without the mark a new tool is on and not lazy, as before", async () => {
   assert.deepEqual(db.toolDefaultsOff(), []);
 });
 
-test("the browser's and the pictures' tools are not lazy until marked, and are sets that can be", async () => {
+test("the browser's and the media tools are not lazy until marked, and are sets that can be", async () => {
   db.rememberTools([
     { name: "show_image", source: "pictures", package: null, inline: true },
     { name: "generate_image", source: "image-generation", package: null, inline: true },
+    { name: "show_video", source: "videos", package: null, inline: true },
     { name: "browser_navigate", source: "browser", package: null, inline: true },
     { name: "browser_click", source: "browser", package: null, inline: true },
   ]);
@@ -403,9 +404,9 @@ test("the browser's and the pictures' tools are not lazy until marked, and are s
   assert.deepEqual(sessions.piLazy([]), { tools: [], sets: [] });
   // Not taken for an MCP server's, though the portal also attaches its browser as an MCP server of that name.
   writeMcp({ browser: {} });
-  await json("/api/tools/lazy", "PUT", { lazy: ["<portal:images>", "browser"] });
-  assert.deepEqual([...db.lazyToolNames()].sort(), ["browser_click", "browser_navigate", "generate_image", "show_image"]);
-  assert.deepEqual(db.lazySetLabels(db.lazyToolNames()), ["browser", "image"]);
+  await json("/api/tools/lazy", "PUT", { lazy: ["<portal:media>", "browser"] });
+  assert.deepEqual([...db.lazyToolNames()].sort(), ["browser_click", "browser_navigate", "generate_image", "show_image", "show_video"]);
+  assert.deepEqual(db.lazySetLabels(db.lazyToolNames()), ["browser", "media"]);
   assert.deepEqual(db.toolDefaultsOff(), []);
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { LuImage, LuImageOff } from "react-icons/lu";
+import { LuImage, LuImageOff, LuPlay, LuVideo, LuVideoOff } from "react-icons/lu";
 import { fancy } from "../motion";
 import { shapeOf } from "../picture-call";
 import { formatElapsed } from "../transcript";
@@ -9,6 +9,16 @@ export type PreviewState = "making" | "done" | "failed";
 
 interface ImagePreviewProps {
   state: PreviewState;
+  /**
+   * What is being made: a picture (the default), or a clip. A clip's frame is its poster picture (`src`) or, where the
+   * portal has none, its first frame as the browser decodes it from the clip itself (`video`); a click opens it in the
+   * viewer as it does a picture, and a mark on it says it plays.
+   */
+  kind?: "picture" | "video";
+  /** A clip without a poster: the clip, for its first frame to be the picture. */
+  video?: string;
+  /** While it is made, one more line under what it is: where the clip is, waiting its turn or being made. */
+  detail?: string;
   /** An edit of a picture rather than a new one: what the label says, and what is shown under the wait. */
   edit?: boolean;
   /** The picture, once there. */
@@ -51,10 +61,16 @@ interface ImagePreviewProps {
  *
  * Only a picture that was watched being made arrives with a transition: one
  * drawn from the history just is there, and costs nothing while it is not.
- * It knows nothing of chats or tools, so that the Images page can use it as
+ * It knows nothing of chats or tools, so that the Media page can use it as
  * well; what goes in `actions` and around it is the caller's.
  */
-export function ImagePreview({ state, edit = false, src, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {
+export function ImagePreview({ state, kind = "picture", video, detail, edit = false, src, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {
+  const clip = kind === "video";
+  // A poster that could not be had (the portal has none for this clip: ffmpeg cannot make a frame of every file) is no reason to say the clip is gone: its own first frame is shown instead.
+  const [posterGone, setPosterGone] = useState<string>();
+  const poster = !!src && !(clip && !!video && posterGone === src);
+  // What the frame shows once there: the picture, or the poster of a clip, or the clip's own first frame.
+  const still = poster ? src : clip ? video : undefined;
   // Taken once: whether it was being made when it first appeared here.
   const arriving = useRef(state === "making").current;
   // What has loaded, and what has not, by the address: another picture in the same place starts over.
@@ -63,9 +79,20 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
   const [original, setOriginal] = useState<{ shape?: number; gone?: boolean }>({});
   const [settled, setSettled] = useState(false);
   const img = useRef<HTMLImageElement>(null);
+  const frameEl = useRef<HTMLDivElement>(null);
+  // A clip with no poster is fetched, for its first frame, only once it is near the screen: a gallery of hundreds does not ask for every start at once.
+  const [near, setNear] = useState(typeof IntersectionObserver === "undefined");
+  const needsClip = clip && !poster && state === "done" && !!still;
+  useEffect(() => {
+    const el = frameEl.current;
+    if (!needsClip || near || !el) return;
+    const observer = new IntersectionObserver((seen) => seen.some((s) => s.isIntersecting) && setNear(true), { rootMargin: "400px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [needsClip, near]);
 
-  const ready = !!src && loaded?.src === src;
-  const missing = !!src && gone === src;
+  const ready = !!still && loaded?.src === still;
+  const missing = !!still && gone === still;
   const shown: PreviewState = missing ? "failed" : state;
   const making = state === "making";
   // The call is over, and the picture is on its way, or fading in over what was there: only worth a place for one that was being made.
@@ -74,12 +101,12 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
   const withOriginal = !!before && !compact && waiting && !original.gone;
   const shape = (ready ? loaded?.shape : undefined) ?? (withOriginal ? original.shape : undefined) ?? ratio ?? 1;
 
-  const loadedNow = (el: HTMLImageElement) => src && setLoaded({ src, shape: shapeOf(el.naturalWidth, el.naturalHeight) });
+  const loadedNow = (width: number, height: number) => still && setLoaded({ src: still, shape: shapeOf(width, height) });
   // A picture that was there already may have loaded before this saw it.
   useEffect(() => {
     const el = img.current;
-    if (el?.complete && el.naturalWidth) loadedNow(el);
-  }, [src]);
+    if (el?.complete && el.naturalWidth) loadedNow(el.naturalWidth, el.naturalHeight);
+  }, [still]);
   useEffect(() => {
     if (!arriving || !ready) return;
     // Long enough for the fade, and at once where there is none.
@@ -87,28 +114,56 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
     return () => clearTimeout(timer);
   }, [arriving, ready]);
 
-  const picture = state === "done" && src && !missing && (
-    <img
-      key={src}
-      ref={img}
-      className="image-preview-img"
-      src={src}
-      alt={compact ? "" : title ?? ""}
-      // One that was waited for is fetched now, wherever the page is scrolled to and whether or not it is on show: the browser decides when a lazy one is, and a picture the chat is waiting on cannot wait for that.
-      loading={arriving ? "eager" : "lazy"}
-      decoding="async"
-      onLoad={(e) => loadedNow(e.currentTarget)}
-      onError={() => setGone(src)}
-    />
+  const picture = state === "done" && still && !missing && (needsClip ? near : true) && (
+    clip && !poster ? (
+      // Muted and never played here: the first frame is all it is for. Its size says the clip's shape.
+      <video
+        key={still}
+        className="image-preview-img"
+        src={still}
+        preload="metadata"
+        muted
+        playsInline
+        tabIndex={-1}
+        aria-hidden
+        onLoadedData={(e) => loadedNow(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
+        onError={() => setGone(still)}
+      />
+    ) : (
+      <img
+        key={still}
+        ref={img}
+        className="image-preview-img"
+        src={still}
+        alt={compact ? "" : title ?? ""}
+        // One that was waited for is fetched now, wherever the page is scrolled to and whether or not it is on show: the browser decides when a lazy one is, and a picture the chat is waiting on cannot wait for that.
+        loading={arriving ? "eager" : "lazy"}
+        decoding="async"
+        onLoad={(e) => loadedNow(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+        onError={() => (clip && video ? setPosterGone(still) : setGone(still))}
+      />
+    )
   );
   // One that was just made is not gone from the folder: what failed was getting it here.
-  const headline = missing ? (arriving ? t("The picture could not be loaded.") : t("This picture is no longer in the folder.")) : edit ? t("The picture was not changed") : t("No picture was made");
-  const label = edit ? t("Editing a picture") : t("Making a picture");
+  const headline = clip
+    ? missing
+      ? arriving
+        ? t("The video could not be loaded.")
+        : t("This video is no longer in the folder.")
+      : t("No video was made")
+    : missing
+      ? arriving
+        ? t("The picture could not be loaded.")
+        : t("This picture is no longer in the folder.")
+      : edit
+        ? t("The picture was not changed")
+        : t("No picture was made");
+  const label = clip ? t("Making a video") : edit ? t("Editing a picture") : t("Making a picture");
   // What a screen reader is told, in one place that stays: a live region that appears with its words is not read, one whose words change is.
-  const said = making ? label : shown === "failed" ? [headline, !missing && reason].filter(Boolean).join(". ") : arriving && ready ? t("The picture is ready") : "";
-  const busy = making || (shown === "done" && !!src && !ready);
+  const said = making ? [label, detail].filter(Boolean).join(". ") : shown === "failed" ? [headline, !missing && reason].filter(Boolean).join(". ") : arriving && ready ? (clip ? t("The video is ready") : t("The picture is ready")) : "";
+  const busy = making || (shown === "done" && !!still && !ready);
   const frame = (
-    <div className={`image-preview-frame is-${shown}${arriving ? " is-arriving" : ""}${ready ? " is-loaded" : ""}${withOriginal ? " has-before" : ""}`}>
+    <div ref={frameEl} className={`image-preview-frame is-${shown}${arriving ? " is-arriving" : ""}${ready ? " is-loaded" : ""}${withOriginal ? " has-before" : ""}`}>
       {withOriginal && (
         <img
           className="image-preview-before"
@@ -122,15 +177,16 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
       {waiting && (
         // Looked at, not read: what is said is the status below the picture. The seconds are not part of it.
         <div className={making ? "image-preview-making" : "image-preview-loading"} aria-hidden>
-          <LuImage aria-hidden />
-          {!compact && <span>{making ? label : t("Loading the picture")}</span>}
+          {clip ? <LuVideo aria-hidden /> : <LuImage aria-hidden />}
+          {!compact && <span>{making ? label : clip ? t("Loading the video") : t("Loading the picture")}</span>}
+          {!compact && making && detail && <small>{detail}</small>}
           {!compact && making && elapsed !== undefined && elapsed >= 3 && <small className="tabular-nums">{formatElapsed(elapsed)}</small>}
         </div>
       )}
-      {picture && (onOpen && pictureId && !compact ? <button type="button" className="image-preview-link" data-picture-id={pictureId} aria-haspopup="dialog" title={title} onClick={() => onOpen(pictureId)}>{picture}</button> : picture)}
+      {picture && (onOpen && pictureId && !compact ? <button type="button" className={`image-preview-link${clip ? " is-clip" : ""}`} data-picture-id={pictureId} aria-haspopup="dialog" title={title} onClick={() => onOpen(pictureId)}>{picture}{clip && <LuPlay aria-hidden className="image-preview-play" />}</button> : picture)}
       {shown === "failed" && (
         <div className="image-preview-failed" aria-hidden>
-          <LuImageOff aria-hidden />
+          {clip ? <LuVideoOff aria-hidden /> : <LuImageOff aria-hidden />}
           {!compact && (
             <div>
               <b>{headline}</b>
@@ -145,7 +201,7 @@ export function ImagePreview({ state, edit = false, src, before, ratio, title, r
   const style = { "--ratio": shape } as CSSProperties;
   if (compact) return <div className={`image-preview is-compact is-${shown}`} style={style}>{frame}</div>;
   return (
-    <figure className={`image-preview is-${shown}`} style={style} aria-busy={busy}>
+    <figure className={`image-preview is-${shown}${clip ? " is-clip" : ""}`} style={style} aria-busy={busy}>
       {frame}
       <span className="sr-only" role="status">{said}</span>
       {(title || actions) && (

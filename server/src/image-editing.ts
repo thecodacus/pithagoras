@@ -21,7 +21,7 @@ import { MAX_PICTURE_BYTES } from "./workspace-files.js";
  * pictures used as references: the route does not tell the two apart, the
  * prompt does.
  *
- * What the agent's tool and the Images page share is here: the checked request
+ * What the agent's tool and the Media page share is here: the checked request
  * and the picture that comes back. Nothing is written by it; where the result
  * goes is the caller's business, and a request that failed has left nothing
  * anywhere.
@@ -50,7 +50,7 @@ export interface EditRequest {
   image: Buffer | Buffer[];
   /** Marks the area to change, where the endpoint takes one. Checked as a picture; its size must match the picture's, which the endpoint tells. */
   mask?: Buffer;
-  /** Instead of the model set for editing, for the Images page: the agent's tool has the saved one only. */
+  /** Instead of the model set for editing, for the Media page: the agent's tool has the saved one only. */
   model?: string;
   /** What the result comes out as, `1024x1024`; not sent without it, since the endpoint's own is usually the picture's. */
   size?: string;
@@ -145,7 +145,7 @@ async function fit(pictures: Item[], mask: Item | undefined, maxSize: string, ma
       const size = item.was.size;
       if (!size) {
         throw new ImageGenerationError(
-          `${item.who} has a size that cannot be read, so it cannot be shown to be within the maximum of ${box.width}x${box.height} pixels for an edit. ${advice} The limit is set in Settings → Agent → Images.`,
+          `${item.who} has a size that cannot be read, so it cannot be shown to be within the maximum of ${box.width}x${box.height} pixels for an edit. ${advice} The limit is set in Settings → Agent → Media.`,
         );
       }
       // The mask is scaled with the first picture, below: its size is the picture's, whatever that comes to.
@@ -194,7 +194,7 @@ export function checkCount(count: number, multiple: boolean): void {
   if (count < 1) throw new ImageGenerationError("There is no picture to change");
   if (count > 1 && !multiple) {
     throw new ImageGenerationError(
-      `The editing endpoint is not set up to take several pictures, so none was sent (${count} were given). Use one, or tell the person that "Several pictures per edit" can be switched on in Settings → Agent → Images if the endpoint takes them.`,
+      `The editing endpoint is not set up to take several pictures, so none was sent (${count} were given). Use one, or tell the person that "Several pictures per edit" can be switched on in Settings → Agent → Media if the endpoint takes them.`,
     );
   }
   if (count > MAX_EDIT_PICTURES) throw new ImageGenerationError(`An edit takes at most ${MAX_EDIT_PICTURES} pictures, and ${count} were given`);

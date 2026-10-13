@@ -1,9 +1,10 @@
 import type { GalleryPicture, OutputFormat, PictureJob, PictureKind, PictureOrigin, PictureSettingsBody } from "./api";
+import { appendNew, mergeHead, sameList } from "./gallery-list";
 import type { ViewerPicture } from "./image-viewer";
 import { COMPRESSIBLE as COMPRESSIBLE_FORMATS, LIMITS, OUTPUT_FORMATS } from "../../server/src/image-settings";
 
 /**
- * What the Images page (components/ImagesPage.tsx) works out without a page:
+ * What the Media page (components/MediaPage.tsx) works out for its pictures without a page:
  * which pictures are drawn and in what order, how a page that was asked for
  * again joins the ones already there, what the viewer is given, and the form's
  * settings and what it remembers.
@@ -27,37 +28,13 @@ export function readFilter(params: URLSearchParams): Filter {
   };
 }
 
-/** Whether `a` comes before `b` in the gallery's order: newest first, and by id among those made in the same moment, as the server orders them. */
-const before = (a: { createdAt: number; id: string }, b: { createdAt: number; id: string }): boolean =>
-  a.createdAt > b.createdAt || (a.createdAt === b.createdAt && a.id > b.id);
+/** The pictures there are, once the top of the list has been asked for again (see mergeHead). */
+export const mergeTop = (loaded: GalleryPicture[], fresh: { pictures: GalleryPicture[]; next: string | null }): GalleryPicture[] => mergeHead(loaded, fresh.pictures, fresh.next);
 
-/**
- * The pictures there are, once the top of the list has been asked for again —
- * a picture was made, or one was deleted, since: the fresh page takes the place
- * of the head of what is shown, and what was loaded further down stays. A list
- * that fits in the fresh page is that page. A picture that is as it was is the
- * very one that was shown, so that what is drawn of it is not drawn again.
- */
-export function mergeTop(loaded: GalleryPicture[], fresh: { pictures: GalleryPicture[]; next: string | null }): GalleryPicture[] {
-  const known = new Map(loaded.map((p) => [p.id, p]));
-  const head = fresh.pictures.map((p) => {
-    const was = known.get(p.id);
-    return was && JSON.stringify(was) === JSON.stringify(p) ? was : p;
-  });
-  const last = head[head.length - 1];
-  if (fresh.next === null || !last) return head;
-  const have = new Set(head.map((p) => p.id));
-  return [...head, ...loaded.filter((p) => !have.has(p.id) && before(last, p))];
-}
+export { sameList };
 
-/** Whether two lists are the same pictures, the very same ones, in the same order. */
-export const sameList = (a: readonly unknown[], b: readonly unknown[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
-
-/** A page that was loaded further down joins the end of the list; one that was already there, from the top being asked for meanwhile, is not drawn twice. */
-export function appendPage(loaded: GalleryPicture[], page: GalleryPicture[]): GalleryPicture[] {
-  const have = new Set(loaded.map((p) => p.id));
-  return [...loaded, ...page.filter((p) => !have.has(p.id))];
-}
+/** A page that was loaded further down joins the end of the list (see appendNew). */
+export const appendPage = appendNew<GalleryPicture>;
 
 /** What the viewer gets for a picture, from where the page fetches its file. */
 export function viewerPicture(picture: GalleryPicture, fileUrl: (id: string) => string): ViewerPicture {

@@ -55,7 +55,7 @@ export default defineConfig({
           { text: "Git", link: "/guide/git" },
           { text: "Terminal and background jobs", link: "/guide/terminal" },
           { text: "Memory and audit", link: "/guide/memory" },
-          { text: "Images", link: "/guide/images" },
+          { text: "Media", link: "/guide/media" },
         ],
       },
       {

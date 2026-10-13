@@ -1,4 +1,4 @@
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
 
 /** The portal with no server: Settings → Add-ons, over canned answers for the opt-in features. */
@@ -24,7 +24,9 @@ async function portal(page: Page, { reachable = true, available = true, docker =
     };
     if (p === '/api/models') return { models: [{ provider: 'p', id: 'm', name: 'M', contextWindow: 65536 }, { provider: 'llama-swap', id: 'model-b', name: 'Model B' }], providers: { p: 'p' } };
     if (p === '/api/features/subagent' && method === 'GET') return { subagent: state.subagent };
-    if (p === '/api/features/flags') return { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled }, images: { enabled: images.enabled && images.baseUrl !== '' } };
+    if (p === '/api/features/flags') return { subagent: { enabled: state.subagent.enabled }, understory: { enabled: state.understory.enabled }, images: { enabled: images.enabled && images.baseUrl !== '' }, videos: { enabled: false } };
+    // The Media tab has the video model beside the image model: here it is not set up.
+    if (p === '/api/features/videos' && method === 'GET') return { videos: { enabled: false, backend: 'sdcpp', backends: [{ id: 'sdcpp', label: 'stable-diffusion.cpp' }], baseUrl: '', model: '', size: '', frames: null, fps: null, keySet: false, timeoutSeconds: 1800, storageLimitMb: 0, ready: false } };
     if (p === '/api/features/images' && method === 'GET') return { images };
     if (p === '/api/features/images' && method === 'PUT') {
       const patch = json();
@@ -96,6 +98,14 @@ async function portal(page: Page, { reachable = true, available = true, docker =
 }
 
 const addons = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
+/** The image model's half of Settings → Agent → Media: the video model's has fields of the same names. */
+const imagePanel = (page: Page) => addons(page).getByRole('region', { name: 'Image model' });
+/** A group inside the image model's section ("Editing endpoint", "More options"), opened if it is closed. */
+async function openGroup(panel: Locator, name: string) {
+  const group = panel.locator(`details:has(> summary:has-text("${name}"))`);
+  if (!(await group.evaluate((el: HTMLDetailsElement) => el.open))) await group.locator('summary').click();
+  await expect(group).toHaveAttribute('open', '');
+}
 
 test('a fresh install has no subagent tool; switching it on installs it, and the mode is its own choice', async ({ page }) => {
   const { sent } = await portal(page);
@@ -325,21 +335,21 @@ test("the Subagents tab opens whatever Docker's state: it asks nothing of it", a
 test('Escape over the image endpoint that was typed in asks first, and over one that was saved does not', async ({ page }) => {
   const { sent } = await portal(page);
   const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
-  await page.goto('/settings/images');
-  await expect(addons(page).getByLabel('API address')).toBeVisible();
+  await page.goto('/settings/media');
+  await expect(imagePanel(page).getByLabel('API address')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(addons(page)).toBeHidden();
 
-  await page.goto('/settings/images');
-  const address = addons(page).getByLabel('API address');
+  await page.goto('/settings/media');
+  const address = imagePanel(page).getByLabel('API address');
   await address.fill('https://images.example.com/v1');
   await page.keyboard.press('Escape');
   await expect(ask).toBeVisible();
   await ask.getByRole('button', { name: 'Cancel' }).click();
   await expect(address).toHaveValue('https://images.example.com/v1');
-  await addons(page).getByLabel('Model', { exact: true }).fill('image-model');
-  await addons(page).getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(addons(page).getByRole('button', { name: 'Save', exact: true })).toBeHidden();
+  await imagePanel(page).getByLabel('Model', { exact: true }).fill('image-model');
+  await imagePanel(page).getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(imagePanel(page).getByRole('button', { name: 'Save', exact: true })).toBeHidden();
   expect(sent).toHaveLength(1);
   await page.keyboard.press('Escape');
   await expect(addons(page)).toBeHidden();
@@ -370,14 +380,14 @@ test('Escape over the memory settings that were changed asks first, and over one
 
 test('image generation needs an endpoint before it can be switched on, and the key is sent once and never shown again', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/images');
-  const panel = addons(page);
+  await page.goto('/settings/media');
+  const panel = imagePanel(page);
   const tool = panel.getByRole('switch', { name: 'Image generation', exact: true });
   await expect(tool).toHaveAttribute('aria-checked', 'false');
   await expect(tool).toBeDisabled();
   // Both switches say it: generation's is the first.
   await expect(panel.getByText('Save the address of an image endpoint first.').first()).toBeVisible();
-  await expect(panel.getByText('Off: no pictures are made, on the Images page or by the agent.')).toBeVisible();
+  await expect(panel.getByText('Off: no pictures are made.')).toBeVisible();
 
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
   await panel.getByLabel('API key').fill('sk-test-123');
@@ -394,7 +404,7 @@ test('image generation needs an endpoint before it can be switched on, and the k
   await expect(tool).toBeEnabled();
   await tool.click();
   await expect(tool).toHaveAttribute('aria-checked', 'true');
-  await expect(panel.getByText('On: pictures are made on the Images page, and the agent can have a generate_image tool.')).toBeVisible();
+  await expect(panel.getByText('On: pictures are made on the Media page and by the agent.')).toBeVisible();
   await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ enabled: true });
 
@@ -409,12 +419,12 @@ test('image generation needs an endpoint before it can be switched on, and the k
   expect(sent.at(-1)!.body).toEqual({ apiKey: '' });
 });
 
-test('the Images page is in the sidebar while image generation is on, and the switch moves it at once', async ({ page }) => {
+test('the Media page is in the sidebar while image generation is on, and the switch moves it at once', async ({ page }) => {
   await portal(page);
-  await page.goto('/settings/images');
-  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Images' });
+  await page.goto('/settings/media');
+  const entry = page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Media' });
   await expect(entry).toHaveCount(0);
-  const panel = addons(page);
+  const panel = imagePanel(page);
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
@@ -428,8 +438,8 @@ test('the Images page is in the sidebar while image generation is on, and the sw
 
 test('the time limit of a picture is a field of the image endpoint: five minutes, whole seconds from 30 to 3600, sent only when changed', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/images');
-  const panel = addons(page);
+  await page.goto('/settings/media');
+  const panel = imagePanel(page);
   const field = panel.getByLabel('Time limit (seconds)');
   await expect(field).toHaveValue('300');
 
@@ -467,12 +477,13 @@ test('the time limit of a picture is a field of the image endpoint: five minutes
 
 test('image editing has a switch and an endpoint of its own: it needs an address, may use the one above, and its key is sent once', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/images');
-  const panel = addons(page);
+  await page.goto('/settings/media');
+  const panel = imagePanel(page);
   const editing = panel.getByRole('switch', { name: 'Image editing', exact: true });
   await expect(editing).toHaveAttribute('aria-checked', 'false');
   await expect(editing).toBeDisabled();
-  await expect(panel.getByText('Off: no pictures are changed, on the Images page or by the agent.')).toBeVisible();
+  await expect(panel.getByText('Off: no pictures are changed.')).toBeVisible();
+  await openGroup(panel, 'Editing endpoint');
 
   // Generation's address is enough, and its key is the one used: the form says so.
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
@@ -484,7 +495,7 @@ test('image editing has a switch and an endpoint of its own: it needs an address
   await expect(editing).toBeEnabled();
   await editing.click();
   await expect(editing).toHaveAttribute('aria-checked', 'true');
-  await expect(panel.getByText('On: pictures are changed on the Images page, and the agent can have an edit_image tool.')).toBeVisible();
+  await expect(panel.getByText('On: pictures are changed on the Media page and by the agent.')).toBeVisible();
   await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ editEnabled: true });
   // Generation is its own switch: still off.
@@ -521,8 +532,9 @@ test('image editing has a switch and an endpoint of its own: it needs an address
 
 test('image editing has a maximum picture size of its own, sent only when changed, and refuses what is no size', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/images');
-  const panel = addons(page);
+  await page.goto('/settings/media');
+  const panel = imagePanel(page);
+  await openGroup(panel, 'Editing endpoint');
   const field = panel.getByLabel('Maximum picture size');
   const save = panel.getByRole('button', { name: 'Save', exact: true });
   await expect(field).toHaveValue('');
@@ -559,12 +571,14 @@ test('image editing has a maximum picture size of its own, sent only when change
 
 test('several pictures per edit is a switch of its own that waits for the editing address, and says what the tool takes', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/images');
-  const panel = addons(page);
+  await page.goto('/settings/media');
+  const panel = imagePanel(page);
+  await openGroup(panel, 'More options');
+  await openGroup(panel, 'Editing endpoint');
   const several = panel.getByRole('switch', { name: 'Several pictures per edit' });
   await expect(several).toHaveAttribute('aria-checked', 'false');
   await expect(panel.getByText('Off: an edit takes one picture.')).toBeVisible();
-  await expect(panel.getByText(/Switch on several pictures only if the editing endpoint takes more than one/)).toBeVisible();
+  await expect(panel.getByText(/Switch it on only if the editing endpoint takes more than one picture in a request/)).toBeVisible();
 
   await panel.getByLabel('API address').fill('https://images.example.com/v1');
   await panel.getByRole('button', { name: 'Save', exact: true }).click();
@@ -581,7 +595,7 @@ test('several pictures per edit is a switch of its own that waits for the editin
 
   await several.click();
   await expect(several).toHaveAttribute('aria-checked', 'true');
-  await expect(panel.getByText('On: an edit takes up to eight pictures, on the Images page and for edit_image.')).toBeVisible();
+  await expect(panel.getByText('On: an edit takes up to eight pictures.')).toBeVisible();
   // The tool has another shape from now on, so the chats are reloaded like for a tool that came.
   await expect(panel.getByText(/one busy chat picks it up/)).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ editMultiple: true });
@@ -592,21 +606,23 @@ test('several pictures per edit is a switch of its own that waits for the editin
 
 test('Stable Diffusion extra settings is a switch of its own, off by default, that says plainly what it does and for which servers', async ({ page }) => {
   const { sent } = await portal(page);
-  await page.goto('/settings/images');
-  const panel = addons(page);
+  await page.goto('/settings/media');
+  const panel = imagePanel(page);
+  await openGroup(panel, 'More options');
+  await openGroup(panel, 'Editing endpoint');
   const sd = panel.getByRole('switch', { name: 'Stable Diffusion extra settings' });
   await expect(sd).toHaveAttribute('aria-checked', 'false');
   await expect(sd).toBeEnabled();
-  await expect(panel.getByText('Off: the Images page shows and sends only the settings of the OpenAI image format.')).toBeVisible();
+  await expect(panel.getByText('Off: the Media page shows only the settings of the OpenAI image format.')).toBeVisible();
   // What it does, and that only one kind of server understands it: any other would read the block as words of the description.
-  await expect(panel.getByText(/Switch this on only if the image endpoint, for generating and for editing, is a stable-diffusion\.cpp server/)).toBeVisible();
-  await expect(panel.getByText(/any other endpoint would take the block as part of the description/)).toBeVisible();
-  await expect(panel.getByText(/the agent's tools do not use these settings/)).toBeVisible();
+  await expect(panel.getByText(/Only for a stable-diffusion\.cpp server/)).toBeVisible();
+  await expect(panel.getByText(/Any other endpoint would take the block as part of the description/)).toBeVisible();
+  await expect(panel.getByText(/The agent does not use these settings/)).toBeVisible();
 
   // It is a setting of the endpoint, not of a tool: no address is needed to say it, and nothing reloads.
   await sd.click();
   await expect(sd).toHaveAttribute('aria-checked', 'true');
-  await expect(panel.getByText('On: the Images page shows settings that only stable-diffusion.cpp servers understand, under Advanced, and sends them in the description.')).toBeVisible();
+  await expect(panel.getByText('On: the Media page shows stable-diffusion.cpp settings under Advanced.')).toBeVisible();
   expect(sent.at(-1)!.body).toEqual({ sdExtras: true });
   await expect(panel.getByText(/one busy chat picks it up/)).toHaveCount(0);
   await sd.click();
@@ -624,16 +640,17 @@ test('Stable Diffusion extra settings is a switch of its own, off by default, th
   await expect(sd).toBeEnabled();
 });
 
-test('the Images page holds the image settings and no switch for the tools themselves', async ({ page }) => {
+test('the Media tab holds the image settings and no switch for the tools themselves', async ({ page }) => {
   await portal(page);
-  await page.goto('/settings/images');
+  await page.goto('/settings/media');
   const here = addons(page);
-  await expect(here.getByRole('switch', { name: 'Image generation', exact: true })).toBeVisible();
-  await expect(here.getByRole('switch', { name: 'Image editing', exact: true })).toBeVisible();
-  await expect(here.getByRole('switch', { name: 'Several pictures per edit' })).toBeVisible();
+  const panel = imagePanel(page);
+  await expect(panel.getByRole('switch', { name: 'Image generation', exact: true })).toBeVisible();
+  await expect(panel.getByRole('switch', { name: 'Image editing', exact: true })).toBeVisible();
+  await openGroup(panel, 'More options');
+  await expect(panel.getByRole('switch', { name: 'Several pictures per edit' })).toBeVisible();
   // The switches are the feature's, and say so: which chat's agent gets a tool is for the tool lists, in their one group.
-  await expect(here.getByText(/whether a chat's agent gets the generate_image tool is set in the tool lists \(Settings → Agent → Tools/)).toBeVisible();
-  await expect(here.getByText(/whether a chat's agent gets the edit_image tool is set in the tool lists/)).toBeVisible();
+  await expect(here.getByText(/Which chats' agents get the tools is set in the tool lists \(Settings → Agent → Tools\), in the Media group/)).toBeVisible();
   await expect(here.getByText('Picture tools', { exact: true })).toHaveCount(0);
   for (const name of ['show_image', 'generate_image', 'edit_image']) await expect(here.getByRole('switch', { name: `${name} in new chats` })).toHaveCount(0);
   // Settings → Add-ons has no Images tab.
@@ -641,11 +658,12 @@ test('the Images page holds the image settings and no switch for the tools thems
   await expect(here.getByRole('tab', { name: 'Images' })).toHaveCount(0);
 });
 
-test('the Images section fits a phone', async ({ page }) => {
+test('the Media tab fits a phone', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await portal(page);
-  await page.goto('/settings/images');
-  await expect(addons(page).getByRole('switch', { name: 'Image editing', exact: true })).toBeVisible();
+  await page.goto('/settings/media');
+  await expect(imagePanel(page).getByRole('switch', { name: 'Image editing', exact: true })).toBeVisible();
+  await expect(addons(page).getByRole('switch', { name: 'Video generation', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   expect(await addons(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 });

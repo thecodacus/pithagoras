@@ -99,14 +99,14 @@ export function toolSource(name: string, source: string, servers: Iterable<strin
 }
 
 /**
- * The key of the set the portal's picture tools share, as the tool lists show them in one box.
+ * The key of the set the portal's picture and video tools share, as the tool lists show them in one box.
  * Brackets, as no package, file or MCP server is called: a set an extension's tool of the same
  * name could be filed in by accident. The web app keys the same box the same way.
  */
-export const PICTURES_SET = "<portal:images>";
+export const MEDIA_SET = "<portal:media>";
 
-/** Showing a picture, making one, changing one: the tools that make up PICTURES_SET. */
-const PICTURE_TOOLS = ["show_image", "generate_image", "edit_image"];
+/** Showing a picture or a clip, making one, changing a picture: the tools that make up MEDIA_SET. */
+const MEDIA_TOOLS = ["show_image", "generate_image", "edit_image", "show_video", "generate_video"];
 
 /** What the web app calls the tools that say nothing about where they came from: pi's own among them. */
 export const BUILT_IN_SET = "built in";
@@ -120,10 +120,10 @@ export const PI_BUILT_IN_TOOLS = ["read", "bash", "edit", "write", "grep", "find
 
 /**
  * The tool set a tool belongs to: the box the tool lists show it in, which is also what
- * can be made lazy. The portal's own picture tools are one set, whichever extension registered each.
+ * can be made lazy. The portal's own picture and video tools are one set, whichever extension registered each.
  */
 export function toolSetOf(tool: { name: string; source: string; inline?: boolean }, servers: Iterable<string>): string {
-  if (tool.inline && PICTURE_TOOLS.includes(tool.name)) return PICTURES_SET;
+  if (tool.inline && MEDIA_TOOLS.includes(tool.name)) return MEDIA_SET;
   return toolSource(tool.name, tool.source, servers).trim() || BUILT_IN_SET;
 }
 

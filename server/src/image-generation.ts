@@ -71,7 +71,7 @@ export interface ImageGenerationConfig {
   timeoutSeconds: number;
   /**
    * The endpoint is stable-diffusion.cpp's server, which reads settings the OpenAI format does not have out of the
-   * prompt (see image-settings.ts). Off until the person says it is: nothing of the sort is shown on the Images page
+   * prompt (see image-settings.ts). Off until the person says it is: nothing of the sort is shown on the Media page
    * or sent, to this endpoint or to any other, whatever was typed or kept. It is said of the endpoint, for generating
    * and editing: either address moving to another server takes it off again.
    */
@@ -184,7 +184,7 @@ export interface ImageGenerationPatch {
 }
 
 /** An API address as the settings keep it, or the reason it is not one. */
-function parseBase(value: unknown): { base: string } | { error: string } {
+export function parseBase(value: unknown): { base: string } | { error: string } {
   if (typeof value !== "string") return { error: "The address must be text" };
   const given = value.trim();
   if (!given) return { base: "" };
@@ -222,7 +222,7 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
   }
   if (b.size !== undefined) {
     if (typeof b.size !== "string") return 'The size looks like "1024x1024"';
-    // The same sizes the Images page and the agent's tool take: a default that the gallery refuses is none.
+    // The same sizes the Media page and the agent's tool take: a default that the gallery refuses is none.
     const size = b.size.trim() ? parseSize(b.size) : "";
     if (typeof size !== "string") return size.error;
     patch.size = size;
@@ -244,7 +244,7 @@ export function parseImageGenerationPatch(body: unknown): ImageGenerationPatch |
   return patch;
 }
 
-const originOf = (address: string): string => {
+export const originOf = (address: string): string => {
   try {
     return new URL(address).origin;
   } catch {
@@ -261,7 +261,7 @@ const originOf = (address: string): string => {
  * does "takes several pictures", which was said of one endpoint and is not
  * assumed of another. And so does "stable-diffusion.cpp", which is said of the
  * endpoint as a whole: either address moving takes it off, since any other
- * server would read what it makes the Images page send as part of the description.
+ * server would read what it makes the Media page send as part of the description.
  */
 export function saveImageGeneration(patch: ImageGenerationPatch): ImageGenerationConfig {
   const had = imageGenerationConfig();
@@ -307,7 +307,7 @@ export function endpointUrl(baseUrl: string): URL {
 }
 
 /** `message` without the key, in case the server repeated it. */
-const without = (message: string, key: string): string => (key ? message.split(key).join("[key]") : message);
+export const without = (message: string, key: string): string => (key ? message.split(key).join("[key]") : message);
 
 const seconds = (ms: number) => Math.round(ms / 1000);
 
@@ -315,7 +315,7 @@ const seconds = (ms: number) => Math.round(ms / 1000);
 export const MAX_PROMPT = 4000;
 
 /**
- * A field of the request that an older version of the Images page sent as it was typed. Not sent any more: what
+ * A field of the request that an older version of the Media page sent as it was typed. Not sent any more: what
  * is not in the OpenAI format goes in the prompt (see image-settings.ts). Pictures made then still have theirs,
  * which the page shows as they were.
  */
@@ -326,7 +326,7 @@ export interface GenerateRequest {
   prompt: string;
   /** Instead of the saved size. */
   size?: string;
-  /** Instead of the saved model, for the Images page: the agent's tool has the saved one only. */
+  /** Instead of the saved model, for the Media page: the agent's tool has the saved one only. */
   model?: string;
   /** Sent as `output_format`, and `output_compression` with it. */
   outputFormat?: OutputFormat;
@@ -380,7 +380,7 @@ export async function requestPicture(
     // The chat was stopped: nobody is told it failed.
     if (options.signal?.aborted) return e as Error;
     if (signal.aborted) return new ImageGenerationError(
-        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Agent → Images if it needs longer.`,
+        `The image endpoint did not answer within ${seconds(timeoutMs)} seconds. Raise the time limit in Settings → Agent → Media if it needs longer.`,
       );
     if (e instanceof ImageGenerationError) return e;
     const why = (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.message ?? "unknown error";
@@ -428,27 +428,48 @@ async function post(endpoint: URL, apiKey: string, body: string | FormData, sign
   const sent = typeof body === "string" ? undefined : new Response(body);
   const bytes = sent ? Buffer.from(await sent.arrayBuffer()) : Buffer.from(body as string);
   const type = sent ? sent.headers.get("content-type") : "application/json";
+  return sendRequest(endpoint, apiKey, { method: "POST", signal, body: bytes, type: type ?? undefined, what: "image endpoint" });
+}
+
+/**
+ * One request to an endpoint, answered once the headers are in: the way every request to an image or video endpoint
+ * is made (see `post`). `body` is the bytes of a request that has one, and `type` its content type. The key goes with
+ * this request to this address and is not followed anywhere else: a redirect is refused, naming `what` the endpoint is,
+ * as the error `fail` makes of it.
+ */
+export function sendRequest(
+  endpoint: URL,
+  apiKey: string,
+  options: { method: "GET" | "POST"; signal: AbortSignal; body?: Buffer; type?: string; what: string; fail?: (message: string) => Error },
+): Promise<http.IncomingMessage> {
+  const { method, signal, body, type, what, fail = (message) => new ImageGenerationError(message) } = options;
   return new Promise((resolve, reject) => {
     const request = endpoint.protocol === "https:" ? https.request : http.request;
     const req = request(
       endpoint,
       {
-        method: "POST",
+        method,
         signal,
         // fetch sent one, and some endpoints sit behind a firewall that refuses a request with none.
-        headers: { "user-agent": "pithagoras", ...(type ? { "content-type": type } : {}), "content-length": bytes.length, accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+        headers: {
+          "user-agent": "pithagoras",
+          ...(type ? { "content-type": type } : {}),
+          ...(body ? { "content-length": body.length } : {}),
+          accept: "application/json",
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
       },
       (res) => {
         const status = res.statusCode ?? 0;
         if (status >= 300 && status < 400 && res.headers.location) {
           res.resume();
-          return reject(new ImageGenerationError("The image endpoint answered with a redirect, which is not followed: give the address it redirects to"));
+          return reject(fail(`The ${what} answered with a redirect, which is not followed: give the address it redirects to`));
         }
         resolve(res);
       },
     );
     req.on("error", reject);
-    req.end(bytes);
+    req.end(body);
   });
 }
 
@@ -469,14 +490,14 @@ function fromBase64(given: string, max: number): Buffer {
   return decoded.bytes;
 }
 
-/** A body read up to a limit, which is not read past. */
-async function readBody(stream: AsyncIterable<Uint8Array> | null, max: number, what: string): Promise<Buffer> {
+/** A body read up to a limit, which is not read past; `fail` makes the error of one that is over it. */
+export async function readBody(stream: AsyncIterable<Uint8Array> | null, max: number, what: string, fail: (message: string) => Error = (message) => new ImageGenerationError(message)): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   if (!stream) return Buffer.alloc(0);
   for await (const chunk of stream) {
     total += chunk.length;
-    if (total > max) throw new ImageGenerationError(`${what} is over ${Math.round(max / 1024 / 1024)} MB`);
+    if (total > max) throw fail(`${what} is over ${Math.round(max / 1024 / 1024)} MB`);
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);

@@ -341,7 +341,7 @@ test("nothing is made while the add-on is off, and a request is checked before i
     settings({ baseUrl: origin, enabled: false });
     const off = await call("POST", "/images/generate", { prompt: "x" });
     assert.equal(off.status, 409);
-    assert.match(off.body.error, /Settings → Agent → Images/);
+    assert.match(off.body.error, /Settings → Agent → Media/);
     assert.equal((await call("POST", "/images/edit", { prompt: "x", sources: ["0123456789ab"] })).status, 409);
     settings({ baseUrl: origin });
     for (const bad of [{}, { prompt: "   " }, { prompt: "x".repeat(gen.MAX_PROMPT + 1) }, { prompt: "x", size: "huge" }, { prompt: "x", model: "m".repeat(201) }, { prompt: "x", extra: { n: 4 } }, { prompt: "x", extra: [1] }, { prompt: "x", count: 1.5 }, { prompt: "x", count: "2" }, ...BAD_SETTINGS]) {
