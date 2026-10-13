@@ -540,7 +540,7 @@ test("a lazy browser keeps the rule that a page is data and not instructions", a
     const lazyBrowser = await run([], { toolsLazy: [...PORTAL_BROWSER_TOOLS], lazySets: ["browser"] });
     assert.deepEqual(names(lazyBrowser.requests[0]).filter((name) => name.startsWith("browser_")), []);
     assert.ok(systemOf(lazyBrowser.requests[0]).includes(BROWSER_UNTRUSTED_GUIDELINE), "lazy, it still is: the guard's short envelope relies on it");
-    assert.match(systemOf(lazyBrowser.requests[0]), /never guess or reuse a ref/, "and so are the rules for its refs");
+    assert.match(systemOf(lazyBrowser.requests[0]), /Browser refs come from browser_snapshot or browser_find; never guess one/, "and so are the rules for its refs");
   } finally {
     setPortalBrowser(false);
   }
