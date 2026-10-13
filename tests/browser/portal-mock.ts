@@ -80,6 +80,7 @@ const settingsBase = ({ path, method }: Ask): Answer => {
   if (path === '/api/providers') return { presets: [], apis: ['openai-completions'], hosted: [], providers: [] };
   if (path === '/api/routines/report-targets') return { targets: [], default: null };
   if (path === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [] };
+  if (path === '/api/extensions/shipped') return { extensions: [] };
   if (path === '/api/tool-names') return { names: {} };
   if (path === '/api/packages/catalog') return { packages: [] };
   if (path === '/api/workspaces') return { root: '/w', workspaces: [] };

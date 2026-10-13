@@ -7,7 +7,9 @@ import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
-import { clientHalf, packageThemes, serverHalf, type ClientHalf, type PackageThemes, type ServerHalf } from "../extension-ui.js";
+import { clientHalf, packageKinds, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
+import { bundledPath } from "../bundled.js";
+import { SUBAGENT_PACKAGE } from "../features.js";
 import { isServing, serverFailure, serversSettled, syncServerHalves } from "../extension-host.js";
 
 const run = promisify(execFile);
@@ -34,6 +36,47 @@ export interface ExtensionInfo {
   enabled?: boolean;
   /** Some of its files are off by hand; switching it off and on must not lose that. */
   filtered?: boolean;
+  /** What it brings: something for pi, something the portal draws or runs, colours for the portal. Empty where its folder could not be read. */
+  kinds: PackageKind[];
+}
+
+/** An extension that comes with the portal and is installed from its own folder. */
+export interface ShippedExtension {
+  name: string;
+  version?: string;
+  description?: string;
+  kinds: PackageKind[];
+  /** What it is installed by: its folder. */
+  spec: string;
+}
+
+/**
+ * The extensions in the portal's own `extensions` folder, each a package in a
+ * folder of its own. Not the subagent tool: that one is switched in Settings →
+ * Add-ons, which also keeps its settings.
+ */
+export function shippedExtensions(dir = bundledPath("extensions")): ShippedExtension[] {
+  if (!dir) return [];
+  const out: ShippedExtension[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const folder = path.join(dir, entry.name);
+    let meta: any;
+    try {
+      meta = JSON.parse(readFileSync(path.join(folder, "package.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    if (typeof meta?.name !== "string" || meta.name === SUBAGENT_PACKAGE) continue;
+    out.push({
+      name: meta.name,
+      ...(typeof meta.version === "string" ? { version: meta.version } : {}),
+      ...(typeof meta.description === "string" ? { description: meta.description } : {}),
+      kinds: packageKinds(folder),
+      spec: folder,
+    });
+  }
+  return out.sort((x, y) => x.name.localeCompare(y.name));
 }
 
 /**
@@ -317,6 +360,7 @@ export function extensionsRouter(): Router {
           path: pkg.path,
           scope: pkg.scope,
           settings: [],
+          kinds: pkg.path ? packageKinds(pkg.path) : [],
         };
 
         if (!pkg.scope || /^user/i.test(pkg.scope)) {
@@ -354,6 +398,15 @@ export function extensionsRouter(): Router {
       });
 
       res.json({ extensions: infos, settingsPath: piSettingsPath() });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  /** What comes with the portal and can be installed from its own folder. */
+  router.get("/extensions/shipped", (_req, res) => {
+    try {
+      res.json({ extensions: shippedExtensions() });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
     }

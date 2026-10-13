@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { bridgeExtensionUi, clientHalf, packageThemes, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../server/src/extension-ui.ts';
+import { bridgeExtensionUi, clientHalf, packageKinds, packageThemes, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../server/src/extension-ui.ts';
 import { choose, registerTheme, themes, themesSettled } from '../web/src/extensions/themes.ts';
 import { chosenPalette, choosePalette, coloursOf, toTriplet, TOKENS } from '../web/src/theme.tsx';
 import { register, slotEntries } from '../web/src/extensions/slots.ts';
@@ -464,6 +464,24 @@ test('a package may name themes in its package.json and bring nothing else', () 
     assert.ok(coloursOf(theme.dark) && coloursOf(theme.light), theme.id);
     assert.deepEqual(Object.keys(theme.dark!).sort(), [...TOKENS].sort(), 'every colour of the portal\'s, in dark');
   }
+});
+
+test('a package is told apart by what it brings: something for pi, something for the portal, colours', () => {
+  assert.deepEqual(packageKinds(path.resolve('extensions/notes')), ['pi', 'pithagoras']);
+  assert.deepEqual(packageKinds(path.resolve('extensions/theme-dusk')), ['themes'], 'no code, so nothing for pi');
+  assert.deepEqual(packageKinds(path.resolve('extensions/subagent')), ['pi']);
+  assert.deepEqual(packageKinds(pkg({ server: './server.js', themes: [{ id: 'a', name: 'A' }] }, ['server.js'])), ['pi', 'pithagoras', 'themes']);
+  // A half it names and does not have is not one it brings.
+  assert.deepEqual(packageKinds(pkg({ client: './web/client.js' }, [])), ['pi']);
+  // Without a `pi` key, pi looks in the folders it knows; with one, only at what the key names.
+  const folders = scratch('extension-kinds-');
+  mkdirSync(path.join(folders, 'skills'));
+  assert.deepEqual(packageKinds(folders), ['pi'], 'no package.json at all');
+  writeFileSync(path.join(folders, 'package.json'), JSON.stringify({ name: 'by-folders' }));
+  assert.deepEqual(packageKinds(folders), ['pi']);
+  writeFileSync(path.join(folders, 'package.json'), JSON.stringify({ name: 'by-key', pi: {} }));
+  assert.deepEqual(packageKinds(folders), [], 'a key that names nothing');
+  assert.deepEqual(packageKinds(scratch('extension-kinds-')), []);
 });
 
 const feedOf = (n: number) => ({ events: Array.from({ length: n }, (_, i) => ({ seq: i + 1, type: 'x', payload: {} })), items: [], running: false, loading: false });
