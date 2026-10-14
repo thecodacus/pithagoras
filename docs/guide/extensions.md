@@ -328,7 +328,9 @@ you choose.
 **Settings → Tools** has a **lazy** button on the header of each group (a package, the browser, the
 **Media** group, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
 including tools that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers
-the tool one by one again.
+the tool one by one again. The button of a tool that is switched off is greyed out, and so is a
+group's while every tool in it is off: an off tool is not offered to the model at all, lazy or not, so
+a mark on it changes nothing until it is switched on again. A mark that was set stays as it is.
 
 Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`, `write`, `grep`, `find`
 and `ls`), which every conversation works with and which are always offered. They have no lazy button, and

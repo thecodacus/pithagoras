@@ -39,6 +39,11 @@ async function portal(page: Page, { lazy = [] as string[], off = [] as string[],
         lazy,
       };
     }
+    // The page's switches: what it turns off is off from then on.
+    if (p === '/api/tools' && method === 'PUT') {
+      off.splice(0, off.length, ...json().off);
+      return { off, applied: 0 };
+    }
     if (p === '/api/tools/lazy' && method === 'PUT') {
       const { lazy: wanted } = json();
       puts.push(wanted);
@@ -209,4 +214,30 @@ test('a lazy tool carries its label in a project\'s switches, and keeps it as th
   await expect.poll(() => puts).toEqual([['heavy_open'], [], ['web_search']]);
   await expect(label).toHaveCount(1);
   await expect(search.locator('xpath=ancestor::label').getByText('lazy', { exact: true })).toHaveCount(0);
+});
+
+test('the lazy buttons are greyed out for a tool that is off, and for a group of tools that are all off', async ({ page }) => {
+  // heavy_open is off in the defaults, heavy_read is on; every tool of pi-web-access is off.
+  const { puts } = await portal(page, { off: ['heavy_open', 'web_search'], lazy: ['<tool>heavy_open'] });
+  const heavy = page.getByRole('button', { name: 'Lazy pi-heavy' });
+  const web = page.getByRole('button', { name: 'Lazy pi-web-access' });
+  // One tool of the set is still on: the set can be marked.
+  await expect(heavy).toBeEnabled();
+  await expect(web).toBeDisabled();
+  await expect(web).toHaveAttribute('title', /All of its tools are off/);
+  await page.getByRole('button', { name: /^pi-heavy/ }).click();
+  await page.getByRole('button', { name: /^pi-web-access/ }).click();
+  const off = page.getByRole('button', { name: 'Lazy heavy_open' });
+  await expect(off).toBeDisabled();
+  await expect(off).toHaveAttribute('title', /This tool is off/);
+  // What was marked stays shown as it is, and is not changed from here.
+  await expect(off).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Lazy web_search' })).toBeDisabled();
+  await off.click({ force: true });
+  await expect(page.getByRole('button', { name: 'Lazy heavy_read' })).toBeEnabled();
+
+  // Switched on, the button is live again.
+  await page.getByRole('checkbox', { name: /heavy_open/ }).check();
+  await expect(off).toBeEnabled();
+  expect(puts).toEqual([]);
 });

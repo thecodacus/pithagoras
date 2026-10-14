@@ -254,19 +254,23 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                 {group.tools.some((tool) => !tool.noLazy) && (() => {
                   const server = group.tools.find((tool) => tool.mcp !== undefined)?.mcp;
                   const pressed = server !== undefined ? group.tools.every((tool) => tool.lazy) : lazy.includes(group.source);
+                  // Nothing in the set is offered while every tool is off, so there is nothing for a mark to change.
+                  const idle = group.allOff;
                   return (
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || idle}
                       aria-pressed={pressed}
                       onClick={() => (server !== undefined ? flipMcp(server, pressed) : flipLazy(group.source))}
                       title={
-                        server !== undefined
+                        idle
+                          ? t("All of its tools are off, so none is offered to the model, lazy or not. Switch one on to change the lazy mark.")
+                          : server !== undefined
                           ? t("Lazy: the server's tools are not in the model's list one by one; the model finds and calls them through the `mcp` tool. It is the server's \"Register tools directly\", turned off, and it applies to chats that start from now on. They stay on or off as they are.")
                           : t("Lazy: its tools are not in the model's list one by one; the model finds and calls them through the `tools` tool, so nothing in the set is lost to it. They stay on or off as they are; an off tool is not reachable that way. Tools that turn up later start lazy too.")
                       }
                       aria-label={t("Lazy {name}", { name: displayName(group.source, names) })}
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-fg/5 disabled:opacity-50 ${
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] transition hover:bg-fg/5 disabled:cursor-not-allowed disabled:opacity-50 ${
                         pressed ? "bg-accent/15 text-accent" : "text-fg-subtle hover:text-fg"
                       }`}
                     >
