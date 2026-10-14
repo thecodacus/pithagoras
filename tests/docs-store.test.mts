@@ -384,8 +384,12 @@ test('a save that looks like it holds a secret is kept, with a warning', async (
  * other ids mapped, where the system allows one.
  */
 test('with the sandbox on, a saved document keeps its owner, and a new one gets the documents folder\'s', async (t) => {
-  const probe = spawnSync('unshare', ['--map-auto', '--map-root-user', 'true'], { encoding: 'utf8' });
-  if (probe.status !== 0) return t.skip(`no user namespace with mapped ids here: ${probe.stderr?.trim() || probe.error?.message}`);
+  // Checked with the very chown the test needs: a namespace that starts can still
+  // refuse to give a file to another id (no subordinate ids mapped, no CAP_CHOWN).
+  const probeDir = scratch('docs-owner-probe-');
+  const probe = spawnSync('unshare', ['--map-auto', '--map-root-user', 'sh', '-c', 'touch "$1" && chown 1234:1235 "$1"', 'sh', path.join(probeDir, 'probe')], { encoding: 'utf8' });
+  rmSync(probeDir, { recursive: true, force: true });
+  if (probe.status !== 0) return t.skip(`cannot chown to other ids in a user namespace here: ${probe.stderr?.trim() || probe.error?.message || `exit ${probe.status}`}`);
   const script = `
     import express from 'express';
     import { chownSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
