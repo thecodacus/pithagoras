@@ -29,7 +29,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, chownSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { blobId, messageFor, parseTrailers, Repo } from "./git.js";
-import { isAdoptable, isDocumentName, isTempName, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
+import { isAdoptable, isDocumentName, isTempName, isPlainFile, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
 
 export const DOCUMENTS = "documents";
 export const STORE = ".pithagoras-docs";
@@ -229,11 +229,13 @@ export class Store {
     });
   }
 
-  /** Whether the store's folder is still the one opened: one deleted or replaced is opened again. */
+  /** Whether the store's folder is still the one opened, with its history and database in it: one deleted, replaced or missing a part is opened again. */
   stillThere() {
     try {
       const now = lstatSync(this.storeDir);
-      return now.isDirectory() && now.ino === this.storeStat.ino && now.dev === this.storeStat.dev;
+      if (!now.isDirectory() || now.ino !== this.storeStat.ino || now.dev !== this.storeStat.dev) return false;
+      // Opening makes what is missing: the history again from nothing, the database again from the history.
+      return lstatSync(path.join(this.storeDir, "git")).isDirectory() && lstatSync(path.join(this.storeDir, "docs.sqlite")).isFile();
     } catch {
       return false;
     }
@@ -605,7 +607,10 @@ export class Store {
       const bytes = await this.repo.show(found.sha, row.name);
       const file = this.fileOf(row);
       if (file?.bytes.equals(bytes)) return { ...this.describe(row, file), changed: false };
-      return this.#write(row, bytes, { author, subject: `Restore ${row.name} to revision ${revision}`, restoredFrom: revision, create: !file });
+      // A file that is only too big to be read (an outside change) is written over, as a save would; only no file at all is made again.
+      const dir = file ? null : this.documentsDir();
+      const replace = !file && dir !== null && isPlainFile(this.inside, dir, row.name);
+      return this.#write(row, bytes, { author, subject: `Restore ${row.name} to revision ${revision}`, restoredFrom: revision, create: !file && !replace });
     });
   }
 }

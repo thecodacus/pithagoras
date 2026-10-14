@@ -63,6 +63,18 @@ export function openDocument(inside, dir, name) {
   return { fd, size: Number(stat.size), modified: stat.mtime, key: keyOf(stat) };
 }
 
+/** Whether `name` in `dir` is a plain file with one name, whatever its size: what a write can replace. */
+export function isPlainFile(inside, dir, name) {
+  const file = placeOf(inside, dir, name);
+  if (!file) return false;
+  try {
+    const stat = lstatSync(file);
+    return stat.isFile() && stat.nlink === 1;
+  } catch {
+    return false;
+  }
+}
+
 export function readOpen(fd, bytes) {
   const buffer = Buffer.alloc(bytes);
   let at = 0;

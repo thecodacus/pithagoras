@@ -499,3 +499,34 @@ test('a store that fails to open does not keep its database open on every reques
     await again.close();
   }
 });
+
+test('a document an outside change pushed past 1 MB is restored over, not refused', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-big-', '# Plan\n\nOne.\n');
+  try {
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+    const file = path.join(folder, 'documents', 'plan.md');
+    writeFileSync(file, `# Plan\n\n${'log\n'.repeat(300_000)}`);
+    assert.ok(statSync(file).size > 1024 * 1024);
+    const restored = await docs.call('POST', `${url}/restore`, { revision: 1 });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+    assert.equal(readFileSync(file, 'utf8'), '# Plan\n\nOne.\n');
+    assert.equal((await docs.call('GET', url)).body.revision, 3);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a store whose history was deleted while the portal runs is opened again, not failed on every request', async () => {
+  const { folder, docs, f, doc, url } = await withDocument('docs-store-nogit-');
+  try {
+    rmSync(path.join(folder, '.pithagoras-docs', 'git'), { recursive: true, force: true });
+    const read = await docs.call('GET', url);
+    assert.equal(read.status, 200, JSON.stringify(read.body));
+    assert.equal(read.body.id, doc);
+    assert.deepEqual((await docs.listed()).map((x: any) => x.id), [f]);
+    // And it takes saves again, with a history of its own.
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: read.body.revision })).status, 200);
+  } finally {
+    await docs.close();
+  }
+});
