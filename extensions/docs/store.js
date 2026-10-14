@@ -33,10 +33,11 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, chownSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DocError } from "./errors.js";
-import { blobId, messageFor, parseTrailers, Repo } from "./git.js";
+import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
 import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
 import { isAdoptable, isDocumentName, isTempName, isPlainFile, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
+import { merge3 } from "./web/merge.js";
 
 export const DOCUMENTS = "documents";
 /** As many documents as a folder lists: the store takes in no more than that. */
@@ -139,10 +140,11 @@ export class Store {
    * there yet, then put right. `inside` is the portal's files helper.
    * `faults` lets a test break a write after one of its steps:
    * `faults.after(step)` is called after "write" and after "commit".
-   * `gitTimeoutMs` is how long one git run may take.
+   * `gitTimeoutMs` is how long one git run may take. `onRevision` is told of
+   * every revision made from here on, as it is made (see `commit`).
    */
-  static async open(folder, { dir, inside, Database, faults, gitTimeoutMs }) {
-    const store = new Store(folder, dir, inside, faults, gitTimeoutMs);
+  static async open(folder, { dir, inside, Database, faults, gitTimeoutMs, onRevision }) {
+    const store = new Store(folder, dir, inside, faults, gitTimeoutMs, onRevision);
     try {
       await store.#open(Database);
     } catch (e) {
@@ -158,11 +160,12 @@ export class Store {
     return store;
   }
 
-  constructor(folder, dir, inside, faults, gitTimeoutMs) {
+  constructor(folder, dir, inside, faults, gitTimeoutMs, onRevision) {
     this.folder = folder;
     this.inside = inside;
     this.faults = faults;
     this.gitTimeoutMs = gitTimeoutMs;
+    this.onRevision = onRevision;
     this.storeDir = dir;
     this.queue = Promise.resolve();
     this.commits = 0;
@@ -351,7 +354,9 @@ export class Store {
   /**
    * Commits `groups` (`{ id, name, blob, revision, author, restoredFrom }`),
    * one commit for all, and tells the database. `keys`: the files' change keys
-   * as written, by document id. Returns the commit.
+   * as written, by document id. Returns the commit. Every write goes through
+   * here, under the lock, so `onRevision` hears the revisions in the order they
+   * were made.
    */
   async commit(subject, groups, keys) {
     const parent = this.meta("head");
@@ -359,8 +364,18 @@ export class Store {
     this.fault("commit");
     const at = new Date().toISOString();
     this.db.transaction(() => this.record(sha, groups, at, keys))();
+    for (const group of groups) this.told({ id: group.id, revision: group.revision, author: group.author, at });
     if (++this.commits % GC_EVERY === 0) await this.repo.gc();
     return sha;
+  }
+
+  /** A revision was made: said to whoever listens, and a failure of theirs is not the write's. */
+  told(revision) {
+    try {
+      this.onRevision?.(revision);
+    } catch {
+      // The listener's own: the revision is made all the same.
+    }
   }
 
   /**
@@ -460,6 +475,21 @@ export class Store {
     });
   }
 
+  /** Where a document stands: its revision, who made it and when. What someone else did to its file is taken in first. */
+  current(id) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const made = this.db.prepare("SELECT author, at FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, row.revision);
+      return { revision: row.revision, author: made?.author ?? "external", at: made?.at ?? row.updated_at };
+    });
+  }
+
+  /** What someone else did to the files since is taken in, each change as a revision (and told, with the others). */
+  refresh() {
+    return this.locked(() => this.recover());
+  }
+
   /** One document, whole: its text as `bytes`, and the revision that text is. */
   read(id) {
     return this.locked(async () => {
@@ -526,8 +556,15 @@ export class Store {
    * Saves `markdown` as the document's next revision, if `base` is the
    * revision it stands at. Otherwise nothing is written, and the answer (409)
    * carries the text and the revision it stands at now.
+   *
+   * With `merge`, a text that started from an earlier revision is not refused
+   * for that: its changes are made to the text the document has now, as long
+   * as they touch none of the lines that changed since (merge.js), and that
+   * is saved as the next revision. The answer then has `merged` and the text
+   * that was saved, which is not the one that was sent: the sender is to take
+   * it up. A change that does touch those lines is refused as before.
    */
-  save(id, { markdown, base, author = "user" }) {
+  save(id, { markdown, base, author = "user", merge = false }) {
     const bytes = Buffer.from(markdown, "utf8");
     if (bytes.length > MAX_BYTES) throw new DocError(413, "A document can be at most 1 MB");
     return this.locked(async () => {
@@ -536,11 +573,43 @@ export class Store {
       const file = this.fileOf(row);
       if (!file) throw new DocError(404, "There is no such document");
       if (base !== row.revision) {
+        const merged = merge ? await this.#merged(row, file, base, markdown, bytes, author) : null;
+        if (merged) return merged;
         throw new DocError(409, `The document changed: it is at revision ${row.revision}, not ${base}`, { revision: row.revision, markdown: file.bytes.toString("utf8") });
       }
       if (file.bytes.equals(bytes)) return { ...this.describe(row, file), changed: false };
       return this.#write(row, bytes, { author, subject: `Save ${row.name}` });
     });
+  }
+
+  /**
+   * `markdown`, which started from revision `base`, put together with the text
+   * the document has now (`file`) and saved: the save's answer, or nothing when
+   * that cannot be done (the base is not an earlier revision of this document,
+   * the texts are not all text, or the changes meet). Under the lock, after recovery.
+   */
+  async #merged(row, file, base, markdown, bytes, author) {
+    if (!Number.isInteger(base) || base < 1 || base >= row.revision) return null;
+    const found = this.db.prepare("SELECT sha FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, base);
+    if (!found) return null;
+    let was;
+    try {
+      was = await this.repo.show(found.sha, row.name);
+    } catch (e) {
+      if (e instanceof GitError) return null;
+      throw e;
+    }
+    // Bytes that are not UTF-8 would be written back as other bytes: they are not merged.
+    const [before, now] = [was, file.bytes].map((b) => b.toString("utf8"));
+    if (!Buffer.from(before, "utf8").equals(was) || !Buffer.from(now, "utf8").equals(file.bytes) || !Buffer.from(markdown, "utf8").equals(bytes)) return null;
+    const text = merge3(before, markdown, now);
+    if (text === null) return null;
+    const merged = Buffer.from(text, "utf8");
+    // What was sent is in the document already (or was nothing new): there is nothing to write.
+    if (merged.equals(file.bytes)) return { ...this.describe(row, file), changed: false, merged: true, markdown: now };
+    if (merged.length > MAX_BYTES) throw new DocError(413, "A document can be at most 1 MB");
+    const saved = await this.#write(row, merged, { author, subject: `Save ${row.name}, merged with revision ${row.revision}` });
+    return { ...saved, merged: true, markdown: text };
   }
 
   /** Writes `bytes` as the next revision of `row`'s document: file, commit, database. Under the lock, after recovery. */

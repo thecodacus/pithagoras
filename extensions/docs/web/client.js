@@ -48,6 +48,10 @@ export default function (portal) {
     "Revision {from} is back, as revision {to}.": "Revision {from} ist zurück, als Revision {to}.",
     "The document changed in the meantime and is now at revision {n}. Restore revision {from} again if you still want it.":
       "Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision {n}. Stelle Revision {from} noch einmal wieder her, wenn du sie noch willst.",
+    "The agent changed this document. It is now at revision {n}.": "Der Agent hat dieses Dokument geändert. Es steht jetzt bei Revision {n}.",
+    "This document was changed from elsewhere. It is now at revision {n}.": "Dieses Dokument wurde anderswo geändert. Es steht jetzt bei Revision {n}.",
+    "The document changed meanwhile and is now at revision {n}. Its changes were merged into your text.":
+      "Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision {n}. Die Änderungen wurden in deinen Text übernommen.",
     Close: "Schließen",
     Current: "Aktuell",
     "This is the current revision.": "Das ist die aktuelle Revision.",

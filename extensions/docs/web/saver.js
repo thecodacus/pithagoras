@@ -11,12 +11,14 @@
  *                                 until the person has chosen
  *                  \-> error      the save failed: tried again at the next change
  *
- * A save says the revision the text started from (`base`). The server refuses
- * it when the document stands somewhere else now, and says where, and with what
- * text (a 409): the editor goes on holding the person's text, and that is the
- * draft.
+ * A save says the revision the text started from (`base`). The server puts it
+ * together with what was saved since where it can: the answer then has
+ * `merged` and the text that was saved, which `onMerged(answer, sent)` is to
+ * take up (live.js). Where the changes meet it refuses it, and says where the
+ * document stands now and with what text (a 409): the editor goes on holding
+ * the person's text, and that is the draft.
  */
-export function createSaver({ read, send, onState, delay = 1000, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createSaver({ read, send, onState, onMerged, delay = 1000, setTimer = setTimeout, clearTimer = clearTimeout }) {
   // The revision the editor's text started from, and what the editor holds of it (its own way of writing the same Markdown).
   let base = 0;
   let baseline = "";
@@ -60,10 +62,12 @@ export function createSaver({ read, send, onState, delay = 1000, setTimer = setT
     }
     running = (async () => {
       set({ status: "saving", error: null });
+      let merged = null;
       try {
         const answer = await send(text, base);
         base = answer.revision;
         baseline = text;
+        if (answer.merged) merged = answer;
         if (!answer.warning) dismissed = false;
         set({ base, warning: dismissed ? null : (answer.warning ?? null) });
       } catch (e) {
@@ -80,6 +84,10 @@ export function createSaver({ read, send, onState, delay = 1000, setTimer = setT
       } finally {
         running = null;
       }
+      // The document is not the text that was sent: the editor takes up what the server made of it, and what is typed since stays.
+      if (merged) onMerged?.(merged, text);
+      // Taking it up found the person's text and the document's meet: nothing is sent until they choose.
+      if (state.status === "conflict") return;
       settle();
     })();
     return running;
@@ -106,6 +114,14 @@ export function createSaver({ read, send, onState, delay = 1000, setTimer = setT
     /** Whether the editor holds text that is not saved: asked of the text itself, since the editor says it changed a moment after it did. */
     unsaved: () => state.status !== "saved" || read() !== baseline,
 
+    /** Resolves once no save is on its way: what a change that comes from outside waits for, so that it never meets one half sent. */
+    async idle() {
+      while (running) await running;
+    },
+
+    /** What the editor held of the document at `base`: the text the person's changes are changes to. */
+    baseline: () => baseline,
+
     /** The editor's text changed. */
     changed() {
       // Nothing is sent until the person has chosen what becomes of the other version.
@@ -125,6 +141,18 @@ export function createSaver({ read, send, onState, delay = 1000, setTimer = setT
       base = revision;
       baseline = text;
       set({ status: "saved", base, error: null, conflict: null });
+    },
+
+    /**
+     * The document is at `revision` now, which is `text` as the editor writes it, and the editor holds that with the person's
+     * changes in it, or nothing more than it: what the page took up of what changed meanwhile. What is unsaved goes on from here.
+     */
+    rebase(revision, text) {
+      cancel();
+      base = revision;
+      baseline = text;
+      set({ base, conflict: null, error: null });
+      settle();
     },
 
     /** The text held was written on revision `from`, and the document stands at `conflict.revision` with `conflict.markdown`: a draft kept from earlier. */

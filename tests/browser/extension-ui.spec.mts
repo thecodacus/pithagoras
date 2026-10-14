@@ -3,11 +3,12 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, DONE, HANG } from './portal-mock';
 
 /**
- * An extension that draws in the portal: the Notes extension's own browser
- * half (extensions/notes/web), loaded into the app as the portal serves it.
+ * An extension that draws in the portal: the Notes test extension's own
+ * browser half (tests/fixtures/extensions/notes/web), loaded into the app as
+ * the portal serves it.
  */
 const NAME = 'pithagoras-notes';
-const web = (file: string) => readFileSync(new URL(`../../extensions/notes/web/${file}`, import.meta.url), 'utf8');
+const web = (file: string) => readFileSync(new URL(`../fixtures/extensions/notes/web/${file}`, import.meta.url), 'utf8');
 const address = (name: string, file: string) => `/api/extension-ui/${name}/${file}`;
 
 async function portal(page: Page, module = web('client.js'), probe?: string) {

@@ -25,7 +25,7 @@ is what there is to install, in three parts: **Comes with Pithagoras**, **Find
 packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
-(the Notes sample, the Dusk theme and [Documents](/guide/documents)), each installed from the portal's own
+(the Dusk and Warm themes and [Documents](/guide/documents)), each installed from the portal's own
 folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
@@ -70,8 +70,8 @@ card says the same in small:
 | **Pithagoras** | Something for the portal: a browser half that draws in it, or a server half that runs beside the chats. See [Building an extension](/guide/extension-ui) |
 | **Themes** | Colours for the portal, picked in Settings → This browser → Appearance |
 
-A package can be more than one: the Notes sample is both **pi** and
-**Pithagoras**.
+A package can be more than one: one with tools for the agent and a panel in
+the portal is both **pi** and **Pithagoras**.
 
 ## Switching one off
 
