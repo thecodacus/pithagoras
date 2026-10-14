@@ -84,6 +84,8 @@ const settingsBase = ({ path, method }: Ask): Answer => {
   if (path === '/api/tool-names') return { names: {} };
   if (path === '/api/packages/catalog') return { packages: [] };
   if (path === '/api/workspaces') return { root: '/w', workspaces: [] };
+  // About asks whether the portal can restart itself.
+  if (path === '/api/restart') return { possible: true, by: 'systemd', running: 0, loaded: [], keepsLogins: true };
   return undefined;
 };
 
