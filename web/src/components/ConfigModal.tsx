@@ -47,6 +47,7 @@ import { DEFAULT_TRIGGER } from "../slash-palette";
 import { PeoplePanel } from "./PeoplePanel";
 import { MediaPanel } from "./MediaPanel";
 import { PortalExtensions } from "./PortalExtensions";
+import { RestartSection } from "./RestartSection";
 import { UpdateSection } from "./UpdateSection";
 import { Modal, useUnsavedDraft } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
@@ -794,6 +795,7 @@ function AboutPanel({ onError }: { onError: (e: string) => void }) {
     <>
       <AboutDeployment onError={onError} />
       <UpdateSection />
+      <RestartSection />
     </>
   );
 }

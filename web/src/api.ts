@@ -987,6 +987,12 @@ export const api = {
   checkUpdate: () => json<UpdateCheck>("/api/update/check", { method: "POST" }),
   /** `expect` is the commit that was shown; a remote that has moved on since is refused. */
   startUpdate: (expect: string) => json<{ run: UpdateRun }>("/api/update", { method: "POST", body: JSON.stringify({ expect }) }),
+  /** Whether the portal would come back after a restart, and how many chats and routines it would stop; changes nothing. */
+  restartStatus: () => json<RestartStatus>("/api/restart"),
+  /** Ends the portal for a supervisor to start again; `boot` is the start that is ending, which the new one differs from. */
+  restartPortal: () => json<{ restarting: true; boot: string }>("/api/restart", { method: "POST", body: JSON.stringify({ confirm: true }) }),
+  /** Answers without a login while the portal is up, with the token of this start of it. */
+  health: () => json<{ ok: true; boot: string }>("/api/health"),
   toolRules: () => json<{ rules: ToolRule[] }>("/api/tool-rules"),
   addToolRule: (rule: {
     role: string;
@@ -1563,6 +1569,10 @@ export interface UpdateCommit {
   subject: string;
   date: string;
 }
+
+export type RestartStatus =
+  | { possible: true; by: "systemd" | "container" | "manager" | "copy"; running: number }
+  | { possible: false; code: "unsupervised" | "policy"; reason: string; running: number };
 
 export type UpdateStep = "fetch" | "merge" | "install" | "build" | "restart";
 

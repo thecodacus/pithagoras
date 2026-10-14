@@ -1764,6 +1764,18 @@ const de: Locale = {
     "Skipped": "Übersprungen",
     "Waiting": "Wartet",
     "The new version is built, but the portal could not restart itself. Restart it on the host.": "Die neue Version ist gebaut, aber das Portal konnte sich nicht selbst neu starten. Starte es auf dem Host neu.",
+    // components/RestartSection.tsx and restart.ts
+    "Restart": "Neustart",
+    "Stops the portal and starts it again, for a new extension or a setting that needs a fresh start. Nothing happens until you have confirmed.": "Hält das Portal an und startet es neu, etwa nach einer neuen Erweiterung oder für eine Einstellung, die einen frischen Start braucht. Nichts geschieht, bevor du bestätigt hast.",
+    "The portal restarted.": "Das Portal wurde neu gestartet.",
+    "Extensions added: {names}": "Neue Erweiterungen: {names}",
+    "Extensions removed: {names}": "Entfernte Erweiterungen: {names}",
+    "The installed extensions are as before.": "Die installierten Erweiterungen sind wie zuvor.",
+    "Nothing would start this portal again here: it was not started by systemd or in a container. Start it again on the host, or run it under systemd (Restart=on-failure) or Docker. PORTAL_UPDATE_RESTART=self lets the portal start its own copy.": "Hier würde nichts dieses Portal wieder starten: Es wurde weder von systemd noch in einem Container gestartet. Starte es auf dem Host neu, oder betreibe es unter systemd (Restart=on-failure) oder Docker. Mit PORTAL_UPDATE_RESTART=self startet das Portal selbst eine Kopie von sich.",
+    "The portal stops and starts again. It is away for a few seconds to a minute, open chats reconnect on their own, and this page loads again when the portal is back.": "Das Portal hält an und startet wieder. Es ist für einige Sekunden bis eine Minute weg, offene Chats verbinden sich von selbst neu, und diese Seite lädt sich neu, sobald das Portal wieder da ist.",
+    "Restart the portal?": "Das Portal neu starten?",
+    "Restart the portal": "Portal neu starten",
+    "The portal is already restarting.": "Das Portal startet schon neu.",
     // components/VoiceAddon.tsx
     "unavailable": "nicht verfügbar",
     "Talk naturally, interrupt anytime, and hear replies in your chosen voice.": "Sprich ganz natürlich, unterbrich jederzeit und hör die Antworten in der Stimme deiner Wahl.",
