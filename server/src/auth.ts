@@ -36,8 +36,11 @@ import {
  * cookie is signed with its hash, and the provider's settings are added to the key.
  */
 const SECRET = process.env.PORTAL_SECRET || crypto.randomBytes(32).toString("hex");
-/** Without a secret of its own every start makes a new one, and the logins that were open end with the restart. */
-export const loginsSurviveRestart = (): boolean => Boolean(process.env.PORTAL_SECRET);
+/**
+ * Without a secret of its own every start makes a new one, and the logins that were open end with the restart. A portal
+ * with no password has no logins to end.
+ */
+export const loginsSurviveRestart = (): boolean => authMode() === "open" || Boolean(process.env.PORTAL_SECRET);
 // What a .env written from the deploying guide's old example holds: nothing runs a command in that
 // file, so the secret is the command's own text, the same on every install that copied it.
 if (/^\$\(/.test(process.env.PORTAL_SECRET ?? "")) {

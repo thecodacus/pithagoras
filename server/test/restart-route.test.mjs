@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import http from "node:http";
 import express from "express";
-import { freePort, inProcessHome, serverEnv, startServer } from "./server-harness.mjs";
+import { freePort, inProcessHome, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
 /**
  * Restarting the portal from its Settings (issue #188): who may ask, what a portal with nothing to start it again
@@ -23,7 +23,7 @@ let child;
 let log;
 before(async () => {
   // PORTAL_UPDATE_RESTART=exit: run by something that restarts it, as a unit with Restart=on-failure or a container is.
-  ({ base, child, log } = await startServer(serverEnv(home, await freePort(), { PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_UPDATE_RESTART: "exit" })));
+  ({ base, child, log } = await startServer(serverEnv(home, await freePort(), { PORTAL_PASSWORD: PASSWORD, PORTAL_ALLOW_NO_PASSWORD: "", PORTAL_UPDATE_RESTART: "exit", PORTAL_SECRET: "" })));
 });
 const login = async () => (await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: PASSWORD }) })).headers.getSetCookie()[0].split(";")[0];
 const send = async (cookie, url, method = "GET", body) => {
@@ -55,12 +55,19 @@ test("the owner is told it is possible, and a request without the confirmation d
   assert.equal(status.status, 200);
   const { loaded, keepsLogins, ...rest } = status.body;
   assert.deepEqual(rest, { possible: true, by: "manager", running: 0 });
-  assert.equal(typeof keepsLogins, "boolean");
+  assert.equal(keepsLogins, false, "a password and no secret of its own: a restart ends the login");
   assert.ok(loaded === null || Array.isArray(loaded), "the extensions this start runs, once they are known");
   const bare = await send(cookie, "/api/restart", "POST", {});
   assert.equal(bare.status, 400);
   assert.equal(bare.body.code, "confirm");
   assert.equal(child.exitCode, null);
+});
+
+test("a portal with no password has no logins to end, and does not say they will", async () => {
+  const open = await startServer(serverEnv(testHome("pithagoras-restart-open-"), await freePort(), { PORTAL_SECRET: "", PORTAL_UPDATE_RESTART: "exit" }));
+  const res = await fetch(`${open.base}/api/restart`);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).keepsLogins, true);
 });
 
 test("a confirmed request is logged with the time, answers 202, and the portal ends with the status that gets it started again", async () => {

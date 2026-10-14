@@ -66,6 +66,8 @@ echo "npm $*" >> "$FAKE/ran"
 fails=$(cat "$FAKE/npm-fails" 2>/dev/null)
 case "$1" in
   ci)
+    # Held in the install step while a test looks at the portal meanwhile.
+    while [ -e "$FAKE/npm-gate" ]; do sleep 0.05; done
     rm -rf node_modules
     if [ "$fails" = ci ]; then mkdir node_modules; echo half > node_modules/half.txt; echo "npm ERR! registry down" >&2; exit 1; fi
     ln -s "$REAL_MODULES" node_modules ;;
@@ -96,7 +98,7 @@ reset();
 
 let base;
 let child;
-before(async () => {
+async function boot() {
   const port = await freePort();
   ({ base, child } = await startServer(serverEnv(home, port, {
     PORTAL_PASSWORD: PASSWORD,
@@ -107,7 +109,8 @@ before(async () => {
     REAL_MODULES: path.join(repo, "node_modules"),
     PORTAL_UPDATE_RESTART: "exit",
   }), 5, path.join(install, "server", "dist", "index.js")));
-});
+}
+before(boot);
 
 const login = async () => (await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: PASSWORD }) })).headers.getSetCookie()[0].split(";")[0];
 const send = async (cookie, url, method = "GET", body) => {
@@ -246,6 +249,32 @@ test("a build that fails puts the old server, web app and node_modules back, and
   assert.equal(child.exitCode, null, "the portal was not restarted");
 });
 
+test("a restart is refused while an update installs, and the update goes on to fail on its own", async () => {
+  const cookie = await login();
+  reset();
+  put("npm-fails", "ci");
+  put("npm-gate", "");
+  try {
+    assert.equal((await send(cookie, "/api/update", "POST", { expect: CCC })).status, 202);
+    for (let i = 0; i < 300 && !ran().includes("npm ci --prefer-offline --no-audit --no-fund"); i++) await new Promise((r) => setTimeout(r, 20));
+    // node_modules is aside and npm is at work: stopping the portal now would leave it without the files it starts from.
+    const state = await send(cookie, "/api/restart");
+    assert.equal(state.body.possible, false);
+    assert.equal(state.body.code, "update");
+    const refused = await send(cookie, "/api/restart", "POST", { confirm: true });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.code, "update");
+    assert.equal(child.exitCode, null, "the portal was not stopped");
+  } finally {
+    rmSync(path.join(fake, "npm-gate"), { force: true });
+  }
+  const run = await settled(cookie);
+  assert.equal(run.state, "failed");
+  assert.equal(child.exitCode, null);
+  assert.equal(isLink("node_modules"), true, "the old modules are back");
+  assert.equal((await send(cookie, "/api/restart")).body.possible, true, "and a restart is possible again");
+});
+
 test("an update fetches, merges, installs and builds in that order, refuses a second press meanwhile, and then the portal stops with the status that has it started again", async () => {
   const cookie = await login();
   reset();
@@ -265,6 +294,24 @@ test("an update fetches, merges, installs and builds in that order, refuses a se
   assert.equal(JSON.parse(text("server/dist/.built-from")).sha, CCC);
   for (const aside of ["node_modules", "server/dist", "web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
   // The restart: the portal stops, as it does on SIGTERM, with the status a manager starts it again from.
+  const [code] = await once(child, "exit");
+  assert.equal(code, 75);
+});
+
+test("an update is refused once a restart is on its way, and nothing is run", async () => {
+  // The last test ended with the portal's stop, and with the stand-in build in place of the server: this is a new start
+  // of the original one.
+  rmSync(path.join(install, "server", "dist"), { recursive: true, force: true });
+  cpSync(path.join(repo, "server", "dist"), path.join(install, "server", "dist"), { recursive: true });
+  await boot();
+  reset();
+  const cookie = await login();
+  const restart = await send(cookie, "/api/restart", "POST", { confirm: true });
+  assert.equal(restart.status, 202, JSON.stringify(restart.body));
+  const update = await send(cookie, "/api/update", "POST", { expect: CCC });
+  assert.equal(update.status, 409);
+  assert.equal(update.body.code, "restarting");
+  assert.deepEqual(changes(), [], "no update was started");
   const [code] = await once(child, "exit");
   assert.equal(code, 75);
 });
