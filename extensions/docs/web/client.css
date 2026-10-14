@@ -9,8 +9,71 @@
 .pd-list button:focus-visible, .pd-back:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-title { font-weight: 600; overflow-wrap: anywhere; }
 .pd-meta { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
-.pd-document { margin-top: 20px; }
-.pd-back { border: 0; border-radius: 6px; background: none; padding: 2px 6px; margin-left: -6px; color: rgb(var(--accent)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-document { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.pd-back { align-self: flex-start; border: 0; border-radius: 6px; background: none; padding: 2px 6px; margin-left: -6px; color: rgb(var(--accent)); font: inherit; font-size: 13px; cursor: pointer; }
 .pd-back:hover { background: rgb(var(--accent) / .1); }
-.pd-document > .pd-meta { margin: 8px 0 12px; }
+.pd-document > .pd-meta { margin: 0; }
 .pd-body { border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); padding: 16px 20px; overflow-wrap: anywhere; }
+.pd-call { display: flex; align-items: flex-start; gap: 10px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 8px 10px; color: rgb(var(--fg)); font-size: 13px; }
+.pd-call > svg { flex: none; width: 14px; height: 14px; margin-top: 3px; color: rgb(var(--accent)); }
+.pd-call > div { min-width: 0; flex: 1; }
+.pd-call p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.pd-call .pd-call-title { font-weight: 600; }
+.pd-by { color: rgb(var(--fg-faint)); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.pd-call button { flex: none; border: 0; border-radius: 6px; background: none; padding: 2px 6px; color: rgb(var(--accent)); font: inherit; font-size: 11px; cursor: pointer; }
+.pd-call button:hover { background: rgb(var(--accent) / .1); }
+.pd-call button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+
+/* A document in the editor: its bar (back, where it stands, history), what to do about a change made meanwhile, and the text. */
+.pd-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.pd-bar-end { display: flex; align-items: center; gap: 8px; }
+.pd-state { color: rgb(var(--fg-subtle)); font-size: 12px; }
+.pd-state[data-status="conflict"], .pd-state[data-status="error"] { color: rgb(var(--warn)); }
+.pd-conflict { border: 1px solid rgb(var(--warn) / .35); border-radius: 12px; background: rgb(var(--warn) / .1); padding: 10px 12px; }
+.pd-conflict p { margin: 0; }
+.pd-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.pd-conflict summary { cursor: pointer; color: rgb(var(--fg-muted)); font-size: 13px; }
+.pd-conflict .pd-body { margin-top: 8px; max-height: 20rem; overflow: auto; }
+.pd-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 6px 12px; font-size: 13px; }
+.pd-history { border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 10px; }
+.pd-revisions { display: flex; flex-direction: column; gap: 6px; max-height: 14rem; margin: 0 0 8px; padding: 0; overflow-y: auto; list-style: none; }
+.pd-revisions button { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 6px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pd-revisions button:hover, .pd-revisions button[aria-pressed="true"] { border-color: rgb(var(--accent) / .5); }
+.pd-revisions button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-current { margin-left: 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 500; }
+.pd-preview { margin-top: 8px; }
+.pd-preview-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pd-preview .pd-body { max-height: 20rem; overflow: auto; }
+
+/* The editor's text, drawn in the portal's colours: the portal's own reset takes the marks off lists and headings, and the editor brings no stylesheet. */
+.pd-editor { min-height: 16rem; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); padding: 12px 20px; overflow-wrap: anywhere; }
+.pd-editor:focus-within { border-color: rgb(var(--accent) / .5); }
+.pd-editor .ProseMirror { min-height: 14rem; outline: none; line-height: 1.6; white-space: pre-wrap; white-space: break-spaces; word-wrap: break-word; font-variant-ligatures: none; }
+.pd-editor .ProseMirror > * + * { margin-top: 10px; }
+.pd-editor .ProseMirror h1, .pd-editor .ProseMirror h2, .pd-editor .ProseMirror h3, .pd-editor .ProseMirror h4, .pd-editor .ProseMirror h5, .pd-editor .ProseMirror h6 { margin-top: 18px; font-weight: 600; line-height: 1.3; }
+.pd-editor .ProseMirror h1 { font-size: 1.6em; }
+.pd-editor .ProseMirror h2 { font-size: 1.35em; }
+.pd-editor .ProseMirror h3 { font-size: 1.15em; }
+.pd-editor .ProseMirror p { margin: 0; }
+.pd-editor .ProseMirror ul, .pd-editor .ProseMirror ol { margin-left: 0; padding-left: 1.5rem; }
+.pd-editor .ProseMirror ul { list-style: disc; }
+.pd-editor .ProseMirror ol { list-style: decimal; }
+.pd-editor .ProseMirror li { position: relative; margin-top: 2px; }
+.pd-editor .ProseMirror li[data-item-type="task"] { list-style: none; }
+.pd-editor .ProseMirror li[data-item-type="task"]::before { position: absolute; left: -1.4rem; content: "\2610\FE0E"; color: rgb(var(--fg-muted)); }
+.pd-editor .ProseMirror li[data-item-type="task"][data-checked="true"]::before { content: "\2611\FE0E"; color: rgb(var(--accent)); }
+.pd-editor .ProseMirror blockquote { border-left: 2px solid rgb(var(--line)); padding-left: 12px; color: rgb(var(--fg-muted)); }
+.pd-editor .ProseMirror a { color: rgb(var(--accent)); text-decoration: underline; }
+.pd-editor .ProseMirror code { border-radius: 4px; background: rgb(var(--raised)); padding: 1px 4px; font-size: .85em; }
+.pd-editor .ProseMirror pre { overflow-x: auto; border-radius: 8px; background: rgb(var(--raised)); padding: 10px 12px; white-space: pre-wrap; }
+.pd-editor .ProseMirror pre code { background: none; padding: 0; }
+.pd-editor .ProseMirror hr { border: 0; border-top: 1px solid rgb(var(--line)); }
+.pd-editor .ProseMirror .pd-picture { display: inline-block; max-width: 100%; border-radius: 4px; background: rgb(var(--raised)); padding: 0 6px; color: rgb(var(--fg-subtle)); font-size: .85em; vertical-align: bottom; }
+.pd-editor .ProseMirror table { border-collapse: collapse; }
+.pd-editor .ProseMirror th, .pd-editor .ProseMirror td { border: 1px solid rgb(var(--line)); padding: 4px 8px; text-align: left; }
+.pd-editor .ProseMirror th { background: rgb(var(--raised)); font-weight: 600; }
+.pd-editor .ProseMirror-selectednode { outline: 2px solid rgb(var(--accent) / .6); }
+.pd-editor .ProseMirror-gapcursor { position: relative; display: none; pointer-events: none; }
+.pd-editor .ProseMirror-gapcursor::after { content: ""; position: absolute; top: -2px; display: block; width: 20px; border-top: 1px solid rgb(var(--fg)); animation: pd-blink 1.1s steps(2, start) infinite; }
+.pd-editor .ProseMirror-focused .ProseMirror-gapcursor { display: block; }
+@keyframes pd-blink { to { visibility: hidden; } }

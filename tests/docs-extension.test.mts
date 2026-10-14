@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, linkSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import { ensureDependencies, missingDependencies } from '../extensions/docs/deps.js';
@@ -330,25 +330,30 @@ test('a documents folder that is a link is not one: what it leads to is neither 
 });
 
 test('every text the Documents page shows has a German one, and no German one is left over', () => {
-  const file = new URL('../extensions/docs/web/client.js', import.meta.url);
-  const src = ts.createSourceFile('client.js', readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  // The page's modules, whichever of them says a text: the built editor next to them says none.
+  const folder = new URL('../extensions/docs/web/', import.meta.url);
+  const modules = readdirSync(folder).filter((name) => name.endsWith('.js') && name !== 'editor.js');
+  assert.ok(modules.includes('client.js') && modules.includes('document-editor.js'), modules.join(', '));
   const shown = new Set<string>();
   let german: Set<string> | undefined;
-  const visit = (n: ts.Node) => {
-    if (ts.isCallExpression(n)) {
-      const callee = n.expression.getText(src);
-      const first = n.arguments[0];
-      if (callee === 't' && first && ts.isStringLiteralLike(first)) shown.add(first.text);
-      if (callee === 'portal.locale.add' && first && ts.isStringLiteralLike(first) && first.text === 'de') {
-        const table = n.arguments[1] as ts.ObjectLiteralExpression;
-        german = new Set(table.properties.map((p) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) ? p.name.text : '')));
+  for (const name of modules) {
+    const src = ts.createSourceFile(name, readFileSync(new URL(name, folder), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const visit = (n: ts.Node) => {
+      if (ts.isCallExpression(n)) {
+        const callee = n.expression.getText(src);
+        const first = n.arguments[0];
+        if (callee === 't' && first && ts.isStringLiteralLike(first)) shown.add(first.text);
+        if (callee === 'portal.locale.add' && first && ts.isStringLiteralLike(first) && first.text === 'de') {
+          const table = n.arguments[1] as ts.ObjectLiteralExpression;
+          german = new Set(table.properties.map((p) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) ? p.name.text : '')));
+        }
       }
-    }
-    // A page's title in the sidebar is shown as well.
-    if (ts.isPropertyAssignment(n) && n.name.getText(src) === 'title' && ts.isStringLiteralLike(n.initializer)) shown.add(n.initializer.text);
-    ts.forEachChild(n, visit);
-  };
-  visit(src);
+      // A page's title in the sidebar is shown as well.
+      if (ts.isPropertyAssignment(n) && n.name.getText(src) === 'title' && ts.isStringLiteralLike(n.initializer) && name === 'client.js') shown.add(n.initializer.text);
+      ts.forEachChild(n, visit);
+    };
+    visit(src);
+  }
   // The portal's own texts, which it translates itself.
   shown.delete('Loading…');
   assert.ok(german, 'German texts are added');

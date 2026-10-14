@@ -828,4 +828,5 @@ Install it from **Settings → Extensions → Discover**, where it is listed und
 **Comes with Pithagoras**. `extensions/theme-dusk` and `extensions/theme-warm`
 beside it are extensions that are only a theme, and are listed there too.
 `extensions/docs` is a larger one that is still being built: a page in the
-sidebar, fed by its server half's routes ([Documents](/guide/documents)).
+sidebar, fed by its server half's routes, and tools for the agent that share
+the server half's store ([Documents](/guide/documents)).

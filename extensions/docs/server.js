@@ -25,7 +25,9 @@ import { lstatSync } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
+import { SECRET, SECRET_WARNING } from "./secret.js";
 import { DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
+import { documentTools } from "./tools.js";
 
 /** Where a document's title is looked for: its first heading, near its top. */
 const HEAD_BYTES = 4096;
@@ -33,14 +35,6 @@ const HEAD_BYTES = 4096;
 const BODY_LIMIT = "8mb";
 
 const idOf = (folder) => createHash("sha256").update(folder).digest("hex").slice(0, 16);
-
-/**
- * Shapes that secrets have: a private key, and the tokens of the services most
- * often pasted. A save that holds one is warned about; history keeps what is
- * saved, so it is better not saved at all.
- */
-const SECRET = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[abpors]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/;
-const SECRET_WARNING = "This document looks like it holds a secret (a private key or a token). Its history keeps every revision: take it out, and see the guide on how to remove it from the history.";
 
 /**
  * How far a line, and a title, is looked at. A title is one line on the page.
@@ -394,6 +388,19 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     })();
     stores.set(folder, opening);
     return opening;
+  }
+
+  // The agent's tools, in each chat's pi, where pi runs in the portal's process: they share the store the routes use.
+  if (portal.executor === "host") {
+    portal.chats.extend((pi, chat) => documentTools(pi, chat, {
+      folder: () => portal.chats.folder(chat.id),
+      store: storeFor,
+      hasDocuments: (folder) => documentsOf(folder) !== null,
+      folderId: idOf,
+      titleOf,
+      headBytes: HEAD_BYTES,
+      log: (line) => portal.log(line),
+    }));
   }
 
   /** The folder a request names by its id, or a 404. */
