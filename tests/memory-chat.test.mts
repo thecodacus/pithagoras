@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeDocker } from "./fake-docker.mts";
 import { inProcessHome } from "./helpers.mts";
-import { applyChunk, eventReader, history, textOf, usedTools, type ChatMessage, type Turn } from "../web/src/memory-chat.ts";
+import { applyChunk, eventReader, history, textOf, usedTools, type ChatMessage, type Turn } from "../core/web/src/memory-chat.ts";
 
 const home = inProcessHome("pitha-memory-chat-");
 process.env.DOCKER_SOCKET = path.join(home, "docker.sock");
@@ -141,9 +141,9 @@ const docker = await fakeDocker(process.env.DOCKER_SOCKET!, ({ url }) => {
   return undefined;
 });
 const express = (await import("express")).default;
-const { memoryRouter, chatMessages } = await import("../server/src/api/memory.ts");
-const { understoryEntry } = await import("../server/src/features.ts");
-const { getDb } = await import("../server/src/db.js");
+const { memoryRouter, chatMessages } = await import("../core/server/src/api/memory.ts");
+const { understoryEntry } = await import("../core/server/src/features.ts");
+const { getDb } = await import("../core/server/src/db.js");
 const portal = express().use(express.json()).use("/api", memoryRouter()).listen(0, "127.0.0.1");
 await new Promise((r) => portal.once("listening", r));
 after(() => {

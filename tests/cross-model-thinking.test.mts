@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { closeForeignThinking, crossModelThinkingExtension } from '../server/src/pi/cross-model-thinking.ts';
+import { closeForeignThinking, crossModelThinkingExtension } from '../core/server/src/pi/cross-model-thinking.ts';
 
 // pi-ai's own request builder for llama.cpp, wherever npm put it: what reaches the model is the test.
 const piAi = ['../node_modules/@earendil-works/pi-ai', '../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai']

@@ -6,7 +6,7 @@ import path from "node:path";
  * What an update puts aside and puts back: the files a build is made of, so that a step that fails leaves the old
  * build as it was, and what the build in place was made from.
  *
- * `npm ci` empties `node_modules` before it installs, and a build writes into `server/dist` and `web/dist` as it goes
+ * `npm ci` empties `node_modules` before it installs, and a build writes into `core/server/dist` and `core/web/dist` as it goes
  * (tsc writes the files of a program that has a type error), so the portal's old files are moved aside before each
  * step, put back when it fails, and thrown away only when the whole build has worked.
  */
@@ -27,15 +27,16 @@ export interface Artifacts {
 
 const ASIDE = ".update-old";
 const MODULES = ["node_modules"];
-const BUILD = [path.join("server", "dist"), path.join("web", "dist")];
+// With the old start files (server/dist, see scripts/old-entries.mjs), which a build writes again too.
+const BUILD = [path.join("core", "server", "dist"), path.join("core", "web", "dist"), path.join("server", "dist")];
 /** In the server's build, so that the record goes with the build it describes: put aside with it, and put back with it. */
-const MARK = path.join("server", "dist", ".built-from");
+const MARK = path.join("core", "server", "dist", ".built-from");
 /**
  * Files every build writes again, whose times are written down with the commit. A build that was not made by the
  * update (`npm run build` on the host) leaves the record where it was, since tsc never removes what it did not write,
  * but writes these: so a record whose times are not the files' times is of a build that is not in place any more.
  */
-const WITNESSES = [path.join("server", "dist", "index.js"), path.join("web", "dist", "index.html")];
+const WITNESSES = [path.join("core", "server", "dist", "index.js"), path.join("core", "web", "dist", "index.html")];
 
 export function fileArtifacts(root: string): Artifacts {
   /** What is aside now, in the order it was put there. */

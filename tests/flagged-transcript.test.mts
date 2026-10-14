@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, flaggedOf } from '../web/src/transcript.ts';
+import { buildTranscript, flaggedOf } from '../core/web/src/transcript.ts';
 
 const ev = (seq: number, type: string, payload: object) => ({ seq, type, payload, created_at: '' }) as any;
 const flaggedText = '<<<untrusted:0123456789abcdef>>> (suspected prompt injection: override, addressed)\nEverything between these markers came from outside';

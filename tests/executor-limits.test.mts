@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {executorLimits} from '../server/src/executors/limits.ts';
+import {executorLimits} from '../core/server/src/executors/limits.ts';
 test('unset limits inherit and positive custom limits are preserved',()=>{
  assert.deepEqual(executorLimits({}),{memoryMb:2048,cpus:2,pidsLimit:512});
  assert.deepEqual(executorLimits({TASK_MEMORY_MB:'4096',TASK_CPUS:'0.5',TASK_PIDS_LIMIT:'100'}),{memoryMb:4096,cpus:0.5,pidsLimit:100});

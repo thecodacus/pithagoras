@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chatPictures } from "../web/src/chat-pictures.ts";
-import type { Item } from "../web/src/transcript.ts";
+import { chatPictures } from "../core/web/src/chat-pictures.ts";
+import type { Item } from "../core/web/src/transcript.ts";
 
 const folder = "/workspaces/proj";
 const urls = { sent: (name: string) => `/sent/${name}`, shown: (p: string, v: string) => `/shown/${p}?v=${v}` };

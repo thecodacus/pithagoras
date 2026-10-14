@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, replyStats } from '../web/src/transcript.ts';
-import { LiveEvents } from '../server/src/live-events.ts';
+import { buildTranscript, replyStats } from '../core/web/src/transcript.ts';
+import { LiveEvents } from '../core/server/src/live-events.ts';
 
 const usage = { input: 15, output: 20, cacheRead: 40, cacheWrite: 0 };
 const timings = { promptTokens: 15, cachedTokens: 40, promptMs: 250.5, promptPerSecond: 59.9, outputTokens: 20, outputMs: 556.9, outputPerSecond: 35.9, draftTokens: 19, draftAccepted: 11 };

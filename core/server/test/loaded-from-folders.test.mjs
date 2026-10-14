@@ -408,7 +408,7 @@ test("the adapter's names on the list are the ones of the version the portal ins
 });
 
 test("the page on roles names everything on the list", () => {
-  const docs = (file) => readFileSync(fileURLToPath(new URL(`../../docs/${file}`, import.meta.url)), "utf8").replace(/\s+/g, " ");
+  const docs = (file) => readFileSync(fileURLToPath(new URL(`../../../docs/${file}`, import.meta.url)), "utf8").replace(/\s+/g, " ");
   const roles = docs("people/roles.md");
   for (const entry of LOADED_IN_FOLDERS) assert.ok(roles.includes(`\`${entry.name}\``), `docs/people/roles.md names ${entry.name}`);
   for (const word of ["pi's own agent folder", "the folders that come with the portal", "channel packages", "tool servers"]) assert.ok(roles.includes(word), `docs/people/roles.md says ${word}`);

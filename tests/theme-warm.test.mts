@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { packageKinds, packageThemes } from "../server/src/extension-ui.ts";
-import { coloursOf, TOKENS } from "../web/src/theme.tsx";
+import { packageKinds, packageThemes } from "../core/server/src/extension-ui.ts";
+import { coloursOf, TOKENS } from "../core/web/src/theme.tsx";
 
 /**
  * The Warm theme, a package with nothing but colours: that the portal takes it whole, in light and in dark, and

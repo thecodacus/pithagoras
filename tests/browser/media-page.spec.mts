@@ -3,7 +3,7 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /**
- * The Media page (web/src/components/MediaPage.tsx) over a portal that makes both pictures and videos: one gallery of
+ * The Media page (core/web/src/components/MediaPage.tsx) over a portal that makes both pictures and videos: one gallery of
  * both, a filter for which, and a form for each. What each kind does alone is in media-pictures.spec.mts and
  * media-videos.spec.mts.
  */

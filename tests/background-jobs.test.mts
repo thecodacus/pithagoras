@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import {listJobs, readOutput, stopJob, MARKER} from '../server/src/background.ts';
+import {listJobs, readOutput, stopJob, MARKER} from '../core/server/src/background.ts';
 import { writeFileSync } from 'node:fs';
 import { scratch } from "./helpers.mts";
 const wait=(ms:number)=>new Promise(r=>setTimeout(r,ms));

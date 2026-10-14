@@ -5,9 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inProcessHome } from './helpers.mts';
 inProcessHome('pithagoras-canvas-test-');
-const {getDb}=await import('../server/src/db.js');
-const {CanvasTools,WriteStream,GatewayWriteStream,canvasWritePrefix}=await import('../server/src/pi/canvas-tools.js');
-const {readCanvas,editCanvas,listCanvases,persistCanvas,restoreCanvas,forgetCanvases,createCanvas,interruptCanvasWrites}=await import('../server/src/canvases.js');
+const {getDb}=await import('../core/server/src/db.js');
+const {CanvasTools,WriteStream,GatewayWriteStream,canvasWritePrefix}=await import('../core/server/src/pi/canvas-tools.js');
+const {readCanvas,editCanvas,listCanvases,persistCanvas,restoreCanvas,forgetCanvases,createCanvas,interruptCanvasWrites}=await import('../core/server/src/canvases.js');
 getDb().prepare('INSERT INTO sessions (id,title,workspace) VALUES (?,?,?)').run('s1','test','/tmp');
 getDb().prepare('INSERT INTO sessions (id,title,workspace) VALUES (?,?,?)').run('s2','other','/tmp');
 function setup(){const controller=new CanvasTools('s1');const tools:Record<string,any>={};controller.extension({registerTool:(t:any)=>tools[t.name]=t} as any);return {controller,tools};}
@@ -287,7 +287,7 @@ test('temporary canvases of a chat that is gone are let go, and nothing else is'
  controller.interrupt();
 });
 test('the restore route puts the text from before the cut-off write back',async()=>{
- const express=(await import('express')).default;const {canvasesRouter}=await import('../server/src/api/canvases.js');
+ const express=(await import('express')).default;const {canvasesRouter}=await import('../core/server/src/api/canvases.js');
  const portal=express().use(express.json()).use('/api',canvasesRouter()).listen(0,'127.0.0.1');
  await new Promise(resolve=>portal.once('listening',resolve));
  const at=`http://127.0.0.1:${(portal.address() as {port:number}).port}/api/sessions/s1/canvases`;

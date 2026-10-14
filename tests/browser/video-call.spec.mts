@@ -4,7 +4,7 @@ import { test, expect } from './portal-mock';
 
 /**
  * A clip the agent makes or shows, in the chat (VideoCall.tsx): the frame that holds its place while it is made, the
- * player once it is there, and a failure in the frame's own words. From web/tests/videos.tsx.
+ * player once it is there, and a failure in the frame's own words. From core/web/tests/videos.tsx.
  */
 
 const WEBM = readFileSync(new URL('../fixtures/clip.webm', import.meta.url));

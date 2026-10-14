@@ -2,8 +2,8 @@ import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal, DONE } from './portal-mock';
 
 /**
- * The picture viewer in the chat (web/src/components/ImageViewer.tsx) over the fixture's
- * four pictures (web/tests/chat.tsx, `phase=pictures`): one the person sent, one the agent
+ * The picture viewer in the chat (core/web/src/components/ImageViewer.tsx) over the fixture's
+ * four pictures (core/web/tests/chat.tsx, `phase=pictures`): one the person sent, one the agent
  * made, one it made from that, and one it showed without a title.
  */
 

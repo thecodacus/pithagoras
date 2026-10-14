@@ -73,7 +73,18 @@ A portal used to take its password from `PORTAL_PASSWORD`. It now keeps it, hash
 - **No `PORTAL_PASSWORD` and no password in the database** is a new install: the page that asks for one. Until it is chosen the portal answers nothing else, and whoever opens it first chooses it.
 - **Going back** to a release that reads `PORTAL_PASSWORD` needs the variable set again: that release does not look in the database.
 
-A password that is lost is removed with `npm run reset-password`, or `docker exec -it pithagoras node server/dist/reset-password.js` in a container, see [A lost password](/guide/deploying#a-lost-password).
+A password that is lost is removed with `npm run reset-password`, or `docker exec -it pithagoras node core/server/dist/reset-password.js` in a container, see [A lost password](/guide/deploying#a-lost-password).
+
+## The server and the web app moved to core/
+
+The portal's own code is in `core/server` and `core/web`, beside the
+extensions it ships in `extensions/`. In the image nothing changes for you.
+From a checkout, the start command is now `node core/server/dist/index.js`
+(`npm start` already is). A service, a script or the restart after an update
+that still runs `node server/dist/index.js` keeps working: the build writes
+that file, and `reset-password.js` and `sso-only-off.js` beside it, as small
+files that load the same ones from `core/server/dist`. Change the command when
+it suits you.
 
 ## Upgrading from the first release
 

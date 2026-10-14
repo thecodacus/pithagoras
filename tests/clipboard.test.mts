@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copyText } from "../web/src/clipboard.ts";
+import { copyText } from "../core/web/src/clipboard.ts";
 
 test("uses the clipboard API where the page is allowed to", async () => {
   const written: string[] = [];

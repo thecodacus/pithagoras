@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activity, buildTranscript } from '../web/src/transcript.ts';
-import { appendLiveEvent, appendLiveEvents } from '../web/src/live-events.ts';
+import { activity, buildTranscript } from '../core/web/src/transcript.ts';
+import { appendLiveEvent, appendLiveEvents } from '../core/web/src/live-events.ts';
 
 const delta = (seq: number, type: string, text: string, at?: number, streamId = 'reply') => ({
   seq, type: 'message_update', ...(at !== undefined ? { at } : {}), payload: { streamId, assistantMessageEvent: { type, delta: text } },

@@ -170,7 +170,7 @@ test('the test jobs have a time limit, run what a change can break, and can be c
   assert.deepEqual(Object.keys(jobs).sort(), ['browser', 'server', 'web']);
   for (const [name, body] of Object.entries(jobs)) assert.match(body, /timeout-minutes: \d+/, `${name} is bounded`);
   assert.match(jobs.server, /- run: npm test\n/, 'the server tests and the root unit tests, the i18n test among them');
-  assert.match(jobs.web, /- run: npm run build -w web\n/, 'the type check and the build of the web app');
+  assert.match(jobs.web, /- run: npm run build -w core\/web\n/, 'the type check and the build of the web app');
   assert.match(jobs.browser, /- run: npx playwright test /, 'the browser tests');
   // The checkout's token is not left in .git/config for the code under test.
   assert.equal([...text.matchAll(/actions\/checkout@v\d+\n\s+with:\n\s+persist-credentials: false/g)].length, 3);
@@ -249,17 +249,17 @@ test('the image takes what the lock says, the pi on PATH is the locked one, and 
   const text = dockerfile();
   assert.doesNotMatch(text, /npm install/, 'npm ci, which stops where the lock and a package.json disagree');
   assert.match(text, /^RUN npm ci$/m, 'the build stage');
-  assert.match(text, /RUN npm ci --omit=dev -w server --ignore-scripts \\\n\s+&& npm cache clean --force/, 'the runtime stage, with its download cache gone from the layer');
+  assert.match(text, /RUN npm ci --omit=dev -w core\/server --ignore-scripts \\\n\s+&& npm cache clean --force/, 'the runtime stage, with its download cache gone from the layer');
   assert.doesNotMatch(text, /@latest/, 'no release of pi nobody looked at');
   assert.match(text, /ln -s \/app\/node_modules\/@earendil-works\/pi-coding-agent\/dist\/cli\.js \/usr\/local\/bin\/pi/);
   // /data/bin comes after the system's folders, and the portal starts from the node of the image by its full path.
   assert.match(text, /^ENV PATH=\$PATH:\/data\/bin$/m);
-  assert.match(text, /^CMD \["\/usr\/local\/bin\/node", "server\/dist\/index\.js"\]$/m);
+  assert.match(text, /^CMD \["\/usr\/local\/bin\/node", "core\/server\/dist\/index\.js"\]$/m);
 });
 
 test('the build context leaves out local data and what the image builds itself, and nothing the Dockerfile copies', () => {
   const ignored = read('.dockerignore').split('\n').filter((l) => l && !l.startsWith('#'));
-  for (const pattern of ['**/node_modules', '**/data', '.local-data', '.git', '.env*', 'voice-runtime', 'server/dist', 'web/dist', 'web/public/voice-assets']) {
+  for (const pattern of ['**/node_modules', '**/data', '.local-data', '.git', '.env*', 'voice-runtime', 'core/server/dist', 'core/web/dist', 'core/web/public/voice-assets']) {
     assert.ok(ignored.includes(pattern), `${pattern} is left out of the context`);
   }
   const matches = (pattern: string, source: string) => {
@@ -267,7 +267,7 @@ test('the build context leaves out local data and what the image builds itself, 
     return re.test(source);
   };
   const copied = [...dockerfile().matchAll(/^COPY (?!--from)(.+) \S+$/gm)].flatMap((m) => m[1].split(/\s+/));
-  assert.ok(copied.includes('THIRD_PARTY_NOTICES.md') && copied.includes('package-lock.json') && copied.includes('server'));
+  assert.ok(copied.includes('THIRD_PARTY_NOTICES.md') && copied.includes('package-lock.json') && copied.includes('core'));
   for (const source of copied) for (const pattern of ignored) assert.ok(!matches(pattern, source), `${source} is copied but ${pattern} leaves it out`);
 });
 

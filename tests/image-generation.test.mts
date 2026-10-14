@@ -8,13 +8,13 @@ import { inProcessHome } from "./helpers.mts";
 
 const temp = inProcessHome("pitha-images-");
 
-const { getSetting, putSetting } = await import("../server/src/db.ts");
-const gen = await import("../server/src/image-generation.ts");
-const { GENERATED_PICTURE_MARK } = await import("../server/src/generated-picture.ts");
-const { GenerateImageTool, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
-const { GENERATED_DIR } = await import("../server/src/image-gallery.ts");
-const editing = await import("../server/src/image-editing.ts");
-const { EditImageTool, editedName } = await import("../server/src/pi/edit-image-tool.ts");
+const { getSetting, putSetting } = await import("../core/server/src/db.ts");
+const gen = await import("../core/server/src/image-generation.ts");
+const { GENERATED_PICTURE_MARK } = await import("../core/server/src/generated-picture.ts");
+const { GenerateImageTool, takenByAnother } = await import("../core/server/src/pi/generate-image-tool.ts");
+const { GENERATED_DIR } = await import("../core/server/src/image-gallery.ts");
+const editing = await import("../core/server/src/image-editing.ts");
+const { EditImageTool, editedName } = await import("../core/server/src/pi/edit-image-tool.ts");
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads.
 const pad = (head: number[], to = 64) => Buffer.concat([Buffer.from(head), Buffer.alloc(to)]);
@@ -516,7 +516,7 @@ test("the tool fails loudly: a bad ask, an endpoint with no picture, an add-on s
 
 test("the API holds the settings, never gives the key back, and reloads chats only when the tool comes or goes", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -557,7 +557,7 @@ test("the API holds the settings, never gives the key back, and reloads chats on
 });
 
 test("the tool menus do not offer generate_image while the add-on is off, though it is remembered for when it is on", async () => {
-  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../core/server/src/db.ts");
   // As a chat that had the tool reports it: no package of the user's brings it, and pi names its extension <inline:…>.
   rememberTools([
     remembered({ name: "generate_image", source: "image-generation", inline: true }),
@@ -591,7 +591,7 @@ test("the tool menus do not offer generate_image while the add-on is off, though
 });
 
 test("the portal's tool is not filed under an image package that was switched off to make way for it", async () => {
-  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../core/server/src/db.ts");
   const settings = path.join(process.env.PI_CODING_AGENT_DIR!, "settings.json");
   const names = () => shownTools().map((t) => t.name).filter((n) => n === "generate_image");
   try {
@@ -1510,7 +1510,7 @@ test("the setting is read at each call: a list is refused once the endpoint is n
 
 test("the API holds the edit settings, never gives a key back, and reloads chats when the edit tool comes or goes", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -1550,7 +1550,7 @@ test("the API holds the edit settings, never gives a key back, and reloads chats
 
 test("the API says whether several pictures are taken, and reloads chats when that changes the edit tool", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -1583,8 +1583,8 @@ test("the API says whether several pictures are taken, and reloads chats when th
 });
 
 test("a tool rule for edit_image is matched on each picture, whether it is named by path or by a list, never on the list's JSON", async () => {
-  const { ruleAllows, guardExtension } = await import("../server/src/pi/guard.ts");
-  const { addToolRule, deleteToolRule, listToolRules } = await import("../server/src/db.ts");
+  const { ruleAllows, guardExtension } = await import("../core/server/src/pi/guard.ts");
+  const { addToolRule, deleteToolRule, listToolRules } = await import("../core/server/src/db.ts");
   const rule = (pattern: string, more: Record<string, unknown> = {}) =>
     ({ id: `r-${pattern}`, role: "colleague", tool: "edit_image", pattern, note: "", created_at: "", person_key: null, ...more }) as Parameters<typeof ruleAllows>[0][number];
   const allows = (rules: ReturnType<typeof rule>[], input: Record<string, unknown>, role = "colleague") => ruleAllows(rules, role, "edit_image", input);
@@ -1652,10 +1652,10 @@ test("a tool rule for edit_image is matched on each picture, whether it is named
 });
 
 test("a colleague's edit_image call can be approved once or always, with the action the guard asks for, in either shape of the tool", async () => {
-  const { guardExtension, callSubject, rulePatterns } = await import("../server/src/pi/guard.ts");
-  const { deleteToolRule, listToolRules } = await import("../server/src/db.ts");
-  const { askQuestion, readAnswer } = await import("../server/src/questions.ts");
-  const { recordApproval } = await import("../server/src/approvals.ts");
+  const { guardExtension, callSubject, rulePatterns } = await import("../core/server/src/pi/guard.ts");
+  const { deleteToolRule, listToolRules } = await import("../core/server/src/db.ts");
+  const { askQuestion, readAnswer } = await import("../core/server/src/questions.ts");
+  const { recordApproval } = await import("../core/server/src/approvals.ts");
 
   // What the guard calls a call: the path, or the path of each picture, one to a line, never the prompt.
   assert.equal(callSubject("edit_image", { path: "shared/a.png", prompt: "p" }), "shared/a.png", "as it was");
@@ -1718,7 +1718,7 @@ test("a colleague's edit_image call can be approved once or always, with the act
 });
 
 test("the tool menus do not offer edit_image while editing is off, though it is remembered for when it is on", async () => {
-  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../core/server/src/db.ts");
   rememberTools([
     remembered({ name: "edit_image", source: "image-editing", inline: true }),
     remembered({ name: "generate_image", source: "image-generation", inline: true }),
@@ -1762,7 +1762,7 @@ test("an extension's edit_image is the one pi keeps, so the portal's is not coun
 
 test("the API saves the time limit and refuses one out of bounds, without reloading chats", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -1968,7 +1968,7 @@ test("a picture over the byte limits is made lighter in proportion, keeping its 
 });
 
 test("a large PNG with a tight budget is shrunk from what its lossy copy weighs, ending near the budget", async () => {
-  const { fitBytes } = await import("../server/src/picture-scale.ts");
+  const { fitBytes } = await import("../core/server/src/picture-scale.ts");
   const big = await real(2000, 1500, { noise: true });
   const budget = 350 * 1024;
   assert.ok(big.length > 20 * budget, `the original is far heavier than the budget (${big.length} bytes)`);
@@ -2043,7 +2043,7 @@ test("edit_image scales a picture beyond the maximum size down, says so in its a
 
 test("the API saves the maximum size of an edit and refuses one that is no size, without reloading chats", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));

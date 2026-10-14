@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {shellOutcome} from '../web/src/components/ChatActivity.tsx';
+import {shellOutcome} from '../core/web/src/components/ChatActivity.tsx';
 test('a shell command says how it ended',()=>{
  assert.equal(shellOutcome('running','x'),undefined);
  assert.deepEqual(shellOutcome('done','ok'),{label:'exit 0',tone:'ok'});

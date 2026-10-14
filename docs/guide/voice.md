@@ -355,7 +355,7 @@ Dates, clock times, version strings, ranges and anything with a leading zero
 keep their digits: reading them as quantities would be worse than leaving them.
 So do the digits of a name such as `v20.11` or `Qwen3.5`, which are not spoken
 as a number of their own.
-Adding a language is one entry in `server/src/voice-numbers.ts`; a language
+Adding a language is one entry in `core/server/src/voice-numbers.ts`; a language
 without a pack keeps its digits, and the add-on says so under the language.
 
 Chatterbox has no streaming mode in audio.cpp, so each phrase arrives as one

@@ -7,7 +7,7 @@ import { scratch } from "./server-harness.mjs";
 
 const home = realpathSync(scratch("pithagoras-bundled-"));
 const started = process.cwd();
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const { bundledPath } = await import("../dist/bundled.js");
 
 after(() => {

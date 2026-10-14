@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LIMITS, forPicture, nativeBlock, nativeConflict, parsePictureSettings, promptWith } from "../server/src/image-settings.ts";
+import { LIMITS, forPicture, nativeBlock, nativeConflict, parsePictureSettings, promptWith } from "../core/server/src/image-settings.ts";
 
 /** What stable-diffusion.cpp's server does with a prompt: the first block, cut out with this pattern (it does not span lines), and the rest is the prompt. */
 const cutOut = (prompt: string): { args?: unknown; prompt: string } => {

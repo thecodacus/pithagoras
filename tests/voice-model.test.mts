@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inProcessHome } from './helpers.mts';
 inProcessHome('pitha-voice-model-');
-const { SdkPiClient } = await import('../server/src/pi/sdk-client.ts');
-const { getDb, putSetting, createSession, getSession, keepChatModel } = await import('../server/src/db.ts');
+const { SdkPiClient } = await import('../core/server/src/pi/sdk-client.ts');
+const { getDb, putSetting, createSession, getSession, keepChatModel } = await import('../core/server/src/db.ts');
 test.after(() => getDb().close());
 
 const chat = { provider: 'slow', id: 'big', name: 'Big', contextWindow: 1000 };

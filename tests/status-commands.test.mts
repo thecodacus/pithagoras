@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mentionsCommand, statusParts } from "../web/src/status-commands.ts";
+import { mentionsCommand, statusParts } from "../core/web/src/status-commands.ts";
 
 test("a command named in an extension's status can be run from it, and nothing else", () => {
   const known = new Set(["bg-update", "reload"]);
@@ -18,7 +18,7 @@ test("a command named in an extension's status can be run from it, and nothing e
   assert.equal(mentionsCommand("3 running"), false);
 });
 
-import { buildTranscript } from "../web/src/transcript.ts";
+import { buildTranscript } from "../core/web/src/transcript.ts";
 
 test("each command sent is a line in the chat that says how it went", () => {
   let seq = 0;

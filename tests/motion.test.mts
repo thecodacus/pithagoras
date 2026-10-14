@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { animationsChosen, fancy, plays, switchIs } from "../web/src/motion.ts";
+import { animationsChosen, fancy, plays, switchIs } from "../core/web/src/motion.ts";
 
-const CSS = fs.readFileSync(path.resolve(import.meta.dirname, "../web/src/styles/motion.css"), "utf8");
+const CSS = fs.readFileSync(path.resolve(import.meta.dirname, "../core/web/src/styles/motion.css"), "utf8");
 
 test("the animations are on until switched off, and the system's reduced motion wins over the switch", () => {
   assert.equal(plays(true, false), true);

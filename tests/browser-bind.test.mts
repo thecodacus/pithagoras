@@ -35,9 +35,9 @@ const docker = await fakeDocker(process.env.DOCKER_SOCKET!, ({ method, url, body
   if (!box) return { status: 404, text: JSON.stringify({ message: 'No such container: pithagoras-browser' }) };
   return { json: { Id: 'browser-id', State: { Running: true }, Config: { Labels: box.labels } } };
 });
-const browser = await import('../server/src/extensions/browser-service.js');
-const { getDb } = await import('../server/src/db.js');
-const { browserRouter } = await import('../server/src/api/browser.js');
+const browser = await import('../core/server/src/extensions/browser-service.js');
+const { getDb } = await import('../core/server/src/db.js');
+const { browserRouter } = await import('../core/server/src/api/browser.js');
 after(() => getDb().close());
 
 browser.saveConfig({ password: 'secret' });

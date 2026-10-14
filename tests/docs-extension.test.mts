@@ -7,7 +7,7 @@ import path from 'node:path';
 import ts from 'typescript';
 import { ensureDependencies, missingDependencies } from '../extensions/docs/deps.js';
 import docsServer from '../extensions/docs/server.js';
-import { resolveInside } from '../server/src/workspace-files.ts';
+import { resolveInside } from '../core/server/src/workspace-files.ts';
 import { scratch } from './helpers.mts';
 
 /** The portal's data folder for the stores. */
@@ -148,7 +148,7 @@ test('a pipe named like a document is no document, and asking for one does not h
   // A document whose file is swapped for a pipe after it was listed is asked for as well.
   const asking = `
     import docsServer from ${JSON.stringify(new URL('../extensions/docs/server.js', import.meta.url).href)};
-    import { resolveInside } from ${JSON.stringify(new URL('../server/src/workspace-files.ts', import.meta.url).href)};
+    import { resolveInside } from ${JSON.stringify(new URL('../core/server/src/workspace-files.ts', import.meta.url).href)};
     import { execFileSync } from 'node:child_process';
     import { realpathSync, rmSync } from 'node:fs';
     const routes = new Map();

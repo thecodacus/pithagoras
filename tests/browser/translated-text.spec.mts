@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
-import { DEFAULT_ORB } from '../../server/src/orb-style';
+import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
 /**
  * Words the page used to show as the code had them, whatever the language: a badge, a count with its noun, a kind, a

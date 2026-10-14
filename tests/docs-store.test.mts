@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import express from 'express';
 import docsServer from '../extensions/docs/server.js';
-import { resolveInside } from '../server/src/workspace-files.ts';
+import { resolveInside } from '../core/server/src/workspace-files.ts';
 import { scratch } from './helpers.mts';
 
 /**
@@ -417,7 +417,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
     import { chownSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
     import path from 'node:path';
     import docsServer from ${JSON.stringify(new URL('../extensions/docs/server.js', import.meta.url).href)};
-    import { resolveInside } from ${JSON.stringify(new URL('../server/src/workspace-files.ts', import.meta.url).href)};
+    import { resolveInside } from ${JSON.stringify(new URL('../core/server/src/workspace-files.ts', import.meta.url).href)};
     const root = mkdtempSync(path.join(process.env.WHERE, 'docs-owner-'));
     try {
       const folder = path.join(root, 'project');
@@ -591,7 +591,7 @@ function snapshot(dir: string): string[] {
 function prepareFolder(folder: string) {
   const home = scratch('docs-store-prepare-home-');
   const script = `
-    const { prepareFolder } = await import(${JSON.stringify(new URL('../server/src/sandbox/apply.ts', import.meta.url).href)});
+    const { prepareFolder } = await import(${JSON.stringify(new URL('../core/server/src/sandbox/apply.ts', import.meta.url).href)});
     const folder = process.env.FOLDER;
     await prepareFolder({ enabled: true, rules: [{ path: folder, access: 'write' }], trusted: [] }, { available: true, ids: { tools: process.getuid(), group: process.getgid() } }, folder);
   `;

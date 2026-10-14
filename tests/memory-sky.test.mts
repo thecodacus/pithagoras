@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { roundsFor } from "../web/src/memory-graph.ts";
-import { BRAIN_COLOUR, brainOutline, colourFrom, heart, helixAt, helixOrder, intoBrain, layout3d, layout3dKept, galaxyStars, GALAXY_TURN, LOBES, lobeOf, pick, project, RESTING, ringsFrom, seeded, Shake, skyThemeFrom, turnAround, WINDING } from "../web/src/memory-sky.ts";
+import { roundsFor } from "../core/web/src/memory-graph.ts";
+import { BRAIN_COLOUR, brainOutline, colourFrom, heart, helixAt, helixOrder, intoBrain, layout3d, layout3dKept, galaxyStars, GALAXY_TURN, LOBES, lobeOf, pick, project, RESTING, ringsFrom, seeded, Shake, skyThemeFrom, turnAround, WINDING } from "../core/web/src/memory-sky.ts";
 
 const chain = (n: number) => {
   const paths = Array.from({ length: n }, (_, i) => `/n${i}.md`);

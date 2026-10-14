@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { filterSessions } from "../web/src/session-filter.ts";
+import { filterSessions } from "../core/web/src/session-filter.ts";
 
 const list = [
   { title: "Fix login", workspace: "/home/me/webapp" },

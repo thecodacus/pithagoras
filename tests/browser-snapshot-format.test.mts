@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanBrowserSnapshot, isBrowserSnapshot } from '../server/src/pi/browser-snapshot-format.js';
+import { cleanBrowserSnapshot, isBrowserSnapshot } from '../core/server/src/pi/browser-snapshot-format.js';
 test('compacts metadata while retaining deep content, refs, state and URLs', () => {
  const tree = ['- generic [ref=f11e1]:','  - main [ref=f11e2]:','    - generic [ref=f11e3]:','      - link "Post title" [ref=f11e4] [cursor=pointer]:','        - /url: https://example.com/post?x=1&y=2','      - checkbox "Subscribe" [checked] [disabled] [ref=f11e5]','      - generic [ref=f11e6]: Keep [ref=e99] and generic [cursor=pointer] in page text','      - button "Literal [ref=e88]" [ref=f11e7]'];
  const input = '### Page\n- Page URL: https://example.com\n### Snapshot\n```yaml\n'+tree.join('\n')+'\n```\n### Events\nError detail';

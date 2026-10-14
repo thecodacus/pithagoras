@@ -244,7 +244,7 @@ export async function install(requested?: VoiceChoice) {
   pending = true; error = ''; progress = 'Preparing voice setup';
   // Read before returning so a packaging error is reported immediately.
   let script: string;
-  try { script = await readFile(new URL('../../../deploy/voice/setup.sh', import.meta.url), 'utf8'); }
+  try { script = await readFile(new URL('../../../../deploy/voice/setup.sh', import.meta.url), 'utf8'); }
   catch (e) { pending = false; throw e; }
   void (async () => {
     try {

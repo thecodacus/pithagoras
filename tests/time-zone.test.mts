@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { serverTimeZone } from '../server/src/time-zone.ts';
+import { serverTimeZone } from '../core/server/src/time-zone.ts';
 
 const withTz = (tz: string | undefined, fn: () => void) => {
   const had = process.env.TZ;

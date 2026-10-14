@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { micError } from '../web/src/mic-error.ts';
+import { micError } from '../core/web/src/mic-error.ts';
 
 const named = (name: string, message: string) => Object.assign(new Error(message), { name });
 

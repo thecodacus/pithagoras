@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LiveTranscription } from '../web/src/live-transcription.js';
+import { LiveTranscription } from '../core/web/src/live-transcription.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const audio = () => new Float32Array(512);
 function begin(live: LiveTranscription) { live.frame(0.9, audio()); live.begin(); live.confirm(); }

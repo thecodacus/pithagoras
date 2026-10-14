@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { VIDEO_LIMITS, appendPage, clipSeconds, madeButNotListed, mergeTop, readFilter, readForm, sameList, secondsLabel, settingsBody, sizeParts, tiles } from "../web/src/videos-gallery.ts";
-import { VIDEO_LIMITS as portalLimits } from "../server/src/video-settings.ts";
-import type { GalleryVideo, VideoJob } from "../web/src/api.ts";
+import { VIDEO_LIMITS, appendPage, clipSeconds, madeButNotListed, mergeTop, readFilter, readForm, sameList, secondsLabel, settingsBody, sizeParts, tiles } from "../core/web/src/videos-gallery.ts";
+import { VIDEO_LIMITS as portalLimits } from "../core/server/src/video-settings.ts";
+import type { GalleryVideo, VideoJob } from "../core/web/src/api.ts";
 
 /** Every field empty, as a form that was kept nothing starts. */
 const noFields = () => readForm(null, 1).fields;

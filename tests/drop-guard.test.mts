@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { guardStrayDrops, type DragLike, type DropHost } from "../web/src/drop-guard.ts";
+import { guardStrayDrops, type DragLike, type DropHost } from "../core/web/src/drop-guard.ts";
 
 function host() {
   const listeners = new Map<string, (e: DragLike) => void>();

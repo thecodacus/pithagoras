@@ -22,13 +22,13 @@ test('every package of the repository says it is Apache-2.0, as LICENSE is', () 
   assert.match(read('LICENSE'), /Apache License\s+Version 2\.0/);
   const files = packageFiles();
   // The channels and the subagent extension are published on their own, so each carries the field.
-  for (const expected of ['package.json', 'server/package.json', 'web/package.json', 'docs/package.json', 'extensions/subagent/package.json', 'channels/discord/package.json', 'channels/signal/package.json', 'channels/slack/package.json', 'channels/telegram/package.json', 'channels/webhook/package.json']) {
+  for (const expected of ['package.json', 'core/server/package.json', 'core/web/package.json', 'packages/extension-api/package.json', 'docs/package.json', 'extensions/subagent/package.json', 'channels/discord/package.json', 'channels/signal/package.json', 'channels/slack/package.json', 'channels/telegram/package.json', 'channels/webhook/package.json']) {
     assert.ok(files.includes(expected), `${expected} is looked at`);
   }
   for (const file of files) assert.equal(json(file).license, 'Apache-2.0', file);
 });
 
-const require = createRequire(path.join(root, 'web/package.json'));
+const require = createRequire(path.join(root, 'core/web/package.json'));
 /** The package.json of an installed dependency, found through a file it exports or its main. */
 function installed(name: string): { version: string; license: string } {
   let dir = path.dirname(require.resolve(name));
@@ -38,7 +38,7 @@ function installed(name: string): { version: string; license: string } {
 
 test('the notices give the licence of every file the web build copies into voice-assets, at the version that is installed', () => {
   const notices = read('THIRD_PARTY_NOTICES.md');
-  const copied = read('web/scripts/copy-vad-assets.mjs');
+  const copied = read('core/web/scripts/copy-vad-assets.mjs');
   for (const [name, licence, file] of [
     ['@ricky0123/vad-web', 'ISC', 'silero_vad_v5.onnx'],
     ['@ricky0123/vad-web', 'ISC', 'vad.worklet.bundle.min.js'],
@@ -67,9 +67,9 @@ test('the notices name sharp at the version that is installed, and libvips, whic
 });
 
 test('the web build puts the notices next to the voice files', () => {
-  const out = path.join(root, 'web/public/voice-assets/THIRD_PARTY_NOTICES.md');
+  const out = path.join(root, 'core/web/public/voice-assets/THIRD_PARTY_NOTICES.md');
   rmSync(out, { force: true });
-  execFileSync(process.execPath, [path.join(root, 'web/scripts/copy-vad-assets.mjs')], { stdio: 'pipe' });
+  execFileSync(process.execPath, [path.join(root, 'core/web/scripts/copy-vad-assets.mjs')], { stdio: 'pipe' });
   assert.equal(readFileSync(out, 'utf8'), read('THIRD_PARTY_NOTICES.md'));
 });
 

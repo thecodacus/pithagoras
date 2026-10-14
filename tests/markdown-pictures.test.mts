@@ -4,7 +4,7 @@ import {readdirSync,readFileSync} from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {foreignPictureHost,Markdown} from '../web/src/components/Markdown.tsx';
+import {foreignPictureHost,Markdown} from '../core/web/src/components/Markdown.tsx';
 
 // What a reply, a note or a fetched page says is drawn by Markdown, and the browser fetches any picture it names
 // the moment it is drawn: only the portal's own may load.
@@ -63,7 +63,7 @@ test('which pictures are foreign, by origin and not by look',()=>{
 });
 
 test('no component draws Streamdown itself, past the guard',()=>{
- const roots=['../web/src'];
+ const roots=['../core/web/src'];
  const found:string[]=[];
  const walk=(dir:string)=>{
   for(const entry of readdirSync(new URL(dir+'/',import.meta.url),{withFileTypes:true})){

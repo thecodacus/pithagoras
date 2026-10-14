@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildTranscript, shownVideo } from "../web/src/transcript.ts";
-import { describeCall } from "../web/src/tool-activity.ts";
-import { failureReason as clipFailure, isVideoCall, videoCall } from "../web/src/video-call.ts";
-import { failureReason as pictureFailure } from "../web/src/picture-call.ts";
-import { displayName, groupTools, sourceName } from "../web/src/tool-groups.ts";
-import { GENERATED_VIDEO_MARK } from "../server/src/generated-video.ts";
+import { buildTranscript, shownVideo } from "../core/web/src/transcript.ts";
+import { describeCall } from "../core/web/src/tool-activity.ts";
+import { failureReason as clipFailure, isVideoCall, videoCall } from "../core/web/src/video-call.ts";
+import { failureReason as pictureFailure } from "../core/web/src/picture-call.ts";
+import { displayName, groupTools, sourceName } from "../core/web/src/tool-groups.ts";
+import { GENERATED_VIDEO_MARK } from "../core/server/src/generated-video.ts";
 
 // What generate_video answers with: a path in the chat's folder and a title, and the mark that it is the portal's own tool's.
 const generated = { path: "generated-videos/video-20261001-101500-a1b2c3.webm", title: "A fox in the snow", [GENERATED_VIDEO_MARK]: true };

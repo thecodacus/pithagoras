@@ -6,7 +6,7 @@ const heard: string[] = [];
 const events = new EventTarget();
 events.addEventListener('pithagoras:signed-out', () => heard.push('signed-out'));
 (globalThis as any).window = Object.assign(events, { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } });
-const { api, json, ApiError, SIGNED_OUT } = await import('../web/src/api.ts');
+const { api, json, ApiError, SIGNED_OUT } = await import('../core/web/src/api.ts');
 
 type Answer = Response | Error;
 const answer = (what: Answer) => {

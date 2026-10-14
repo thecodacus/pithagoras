@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildTranscript } from '../web/src/transcript.ts';
-import { failureReason, isPictureCall, isPictureTool, pictureCall, shapeOf, sizeRatio } from '../web/src/picture-call.ts';
-import { GENERATED_PICTURE_MARK } from '../server/src/generated-picture.ts';
+import { buildTranscript } from '../core/web/src/transcript.ts';
+import { failureReason, isPictureCall, isPictureTool, pictureCall, shapeOf, sizeRatio } from '../core/web/src/picture-call.ts';
+import { GENERATED_PICTURE_MARK } from '../core/server/src/generated-picture.ts';
 
 /** The start of a call as the portal's SDK client passes it on: a call of the portal's own picture tools has the mark, an extension's tool of that name does not. */
 const start = (toolName: string, input: any, own = true, toolCallId = 'c1') => ({ seq: 1, type: 'tool_execution_start', payload: { toolName, toolCallId, input, ...(own ? { [GENERATED_PICTURE_MARK]: true } : {}) } });
@@ -86,11 +86,11 @@ test('a call of the portal’s picture tools is a preview in every state; anothe
 });
 
 test('the look of a picture being made is still in its own sheet, and moves only in the one the animations switch', () => {
-  const css = fs.readFileSync(path.resolve(import.meta.dirname, '../web/src/styles/preview.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const css = fs.readFileSync(path.resolve(import.meta.dirname, '../core/web/src/styles/preview.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(css.includes('.image-preview-making'));
   assert.ok(css.includes('.image-preview-loading'), 'a picture on its way after the call is over has its own, still, look');
   assert.doesNotMatch(css, /animation|@keyframes/, 'with the animations off, the placeholder is still');
-  const motion = fs.readFileSync(path.resolve(import.meta.dirname, '../web/src/styles/motion.css'), 'utf8');
+  const motion = fs.readFileSync(path.resolve(import.meta.dirname, '../core/web/src/styles/motion.css'), 'utf8');
   for (const name of ['fx-preview-drift', 'fx-preview-sheen', 'fx-preview-breathe']) assert.match(motion, new RegExp(`@keyframes ${name}\\b`));
   // The wait is moved with transform and opacity, never resized, so that a long chat of them costs the compositor only.
   for (const name of ['fx-preview-drift', 'fx-preview-sheen', 'fx-preview-breathe']) {

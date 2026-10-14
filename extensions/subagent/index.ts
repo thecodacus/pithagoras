@@ -2,7 +2,7 @@
  * `subagent`: hand a task to a second pi, and let the person watch it and
  * talk to it from the portal.
  *
- * The reference for the subagent protocol (server/src/subagent-protocol.ts in
+ * The reference for the subagent protocol (core/server/src/subagent-protocol.ts in
  * the portal). The child runs `pi --mode rpc`, so it can be steered while it
  * works: what the person types for it arrives as an RPC `steer`. Every event
  * the child prints is passed on unchanged, and the portal draws it like the

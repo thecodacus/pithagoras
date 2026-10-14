@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createDrafts, withUnsent } from "../web/src/drafts.ts";
-import { guarded, type RawStorage } from "../web/src/safe-storage.ts";
+import { createDrafts, withUnsent } from "../core/web/src/drafts.ts";
+import { guarded, type RawStorage } from "../core/web/src/safe-storage.ts";
 
 const mapStorage = (): RawStorage & { map: Map<string, string> } => {
   const map = new Map<string, string>();

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { acceptPrompt } from '../server/src/pi/accept-prompt.js';
+import { acceptPrompt } from '../core/server/src/pi/accept-prompt.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 test('voice prompt resolves at preflight acceptance without waiting for generation', async () => {
   let finish!: () => void; let running = true;

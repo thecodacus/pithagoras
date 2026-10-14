@@ -3,7 +3,7 @@ import { test, expect, mockPortal } from './portal-mock';
 import { settled } from './settled';
 
 /**
- * The extra animations (web/src/motion.ts): on by default, one switch to turn
+ * The extra animations (core/web/src/motion.ts): on by default, one switch to turn
  * them off, the system's reduced motion over it, and what they do to the page —
  * which is nothing the page has to wait for. The config presets the switch to
  * off for every other spec; this one starts as a fresh browser does.

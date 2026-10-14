@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { behind, feedFilters, filterParams, horizon, joinTiles, kindOptions, readFilter, selectionKey, shownKinds, splitSelection, tileSelection } from "../web/src/media-gallery.ts";
-import { tiles as pictureTiles } from "../web/src/images-gallery.ts";
-import { tiles as videoTiles } from "../web/src/videos-gallery.ts";
-import type { GalleryPicture, GalleryVideo, PictureJob, VideoJob } from "../web/src/api.ts";
+import { behind, feedFilters, filterParams, horizon, joinTiles, kindOptions, readFilter, selectionKey, shownKinds, splitSelection, tileSelection } from "../core/web/src/media-gallery.ts";
+import { tiles as pictureTiles } from "../core/web/src/images-gallery.ts";
+import { tiles as videoTiles } from "../core/web/src/videos-gallery.ts";
+import type { GalleryPicture, GalleryVideo, PictureJob, VideoJob } from "../core/web/src/api.ts";
 
 let n = 0;
 const hex = (k: number) => k.toString(16).padStart(12, "0");

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, keepItems } from '../web/src/transcript.ts';
+import { buildTranscript, keepItems } from '../core/web/src/transcript.ts';
 
 const event = (type: string, at: number, payload: any = {}) => ({ type, at, payload, seq: at });
 const said = [

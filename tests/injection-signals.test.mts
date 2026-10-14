@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { injectionSignals } from '../server/src/pi/injection.ts';
+import { injectionSignals } from '../core/server/src/pi/injection.ts';
 
 const names = (text: string) => injectionSignals(text).map((s) => s.name);
 

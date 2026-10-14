@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inlineBrowserScreenshot } from '../server/src/pi/browser-screenshot.js';
+import { inlineBrowserScreenshot } from '../core/server/src/pi/browser-screenshot.js';
 test('direct and proxy screenshot calls request inline images, preserving capture options', () => {
   const direct = { filename: 'page.png', fullPage: true, scale: 'css', target: 'e12' };
   inlineBrowserScreenshot('browser_browser_take_screenshot', direct);

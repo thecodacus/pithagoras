@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { addLocale, labelOf, setLanguage } from '../web/src/i18n.js';
-import { shellOutcome } from '../web/src/components/ChatActivity.tsx';
-import { VoiceProfile } from '../web/src/components/VoiceProfile.tsx';
-import { speechChunks } from '../web/src/voice.js';
-import { TRACE_STATUS } from '../web/src/voice-profile.js';
+import { addLocale, labelOf, setLanguage } from '../core/web/src/i18n.js';
+import { shellOutcome } from '../core/web/src/components/ChatActivity.tsx';
+import { VoiceProfile } from '../core/web/src/components/VoiceProfile.tsx';
+import { speechChunks } from '../core/web/src/voice.js';
+import { TRACE_STATUS } from '../core/web/src/voice-profile.js';
 
 // Words the code puts on the page or into speech itself: each goes through the language the portal is in.
 // tsx draws the components' JSX the classic way, which finds React as a global; the web build does not need that.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { insideFolder, latestFileActivity } from '../web/src/file-activity.js';
+import { insideFolder, latestFileActivity } from '../core/web/src/file-activity.js';
 
 const folder = '/workspaces/proj';
 const start = (seq: number, toolName: string, args: any, toolCallId = String(seq)) => ({ seq, type: 'tool_execution_start', payload: { toolName, args, toolCallId } });

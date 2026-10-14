@@ -3,7 +3,7 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
 /**
- * The videos of the Media page (web/src/components/MediaPage.tsx) over a portal that makes videos and no pictures: the
+ * The videos of the Media page (core/web/src/components/MediaPage.tsx) over a portal that makes videos and no pictures: the
  * clips of its gallery, and the jobs that make more, which the test lets finish when it likes. The page with both kinds
  * is media-page.spec.mts.
  */

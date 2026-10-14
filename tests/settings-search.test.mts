@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SETTINGS_INDEX, fold, searchSettings } from "../web/src/settings-search.ts";
-import { ago, compactCount, packageName } from "../web/src/package-names.ts";
-import { forget, load, peek } from "../web/src/settings-cache.ts";
+import { SETTINGS_INDEX, fold, searchSettings } from "../core/web/src/settings-search.ts";
+import { ago, compactCount, packageName } from "../core/web/src/package-names.ts";
+import { forget, load, peek } from "../core/web/src/settings-cache.ts";
 
 test("a setting is found by its title first, then by what it is about", () => {
   const titles = (q: string) => searchSettings(q, SETTINGS_INDEX).map((e) => e.title);

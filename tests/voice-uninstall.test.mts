@@ -52,9 +52,9 @@ const docker = await fakeDocker(process.env.DOCKER_SOCKET!, async ({ method, url
   return undefined;
 });
 const { calls } = docker;
-const { voiceRouter } = await import('../server/src/api/voice.js');
-const { getDb } = await import('../server/src/db.js');
-const voice = await import('../server/src/extensions/voice-service.js');
+const { voiceRouter } = await import('../core/server/src/api/voice.js');
+const { getDb } = await import('../core/server/src/db.js');
+const voice = await import('../core/server/src/extensions/voice-service.js');
 voice.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8 });
 const app = express(); app.use(express.json()); app.use('/api', voiceRouter());
 const portal = app.listen(0, '127.0.0.1'); await new Promise<void>(r => portal.once('listening', r));

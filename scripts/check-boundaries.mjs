@@ -2,8 +2,8 @@
  * Keeps the portal's core and the extensions in this repository apart, so that
  * an extension that comes with the portal is an extension like any other:
  *
- *   - core (web/src, server/src) imports nothing from the extensions/ folder;
- *   - an extension imports nothing of core: not web/ or server/, by a path or
+ *   - core (core/web/src, core/server/src) imports nothing from the extensions/ folder;
+ *   - an extension imports nothing of core: not core/, by a path or
  *     by their package names.
  *
  * Both may import packages/extension-api, which is the contract between them,
@@ -50,8 +50,8 @@ const within = (target, dir) => target === dir || target.startsWith(dir + path.s
 
 /** Every import that crosses between core and the extensions, in the repository at `root`. */
 export function findCrossings(root) {
-  const core = [path.join(root, "web", "src"), path.join(root, "server", "src")];
-  const coreWorkspaces = [path.join(root, "web"), path.join(root, "server")];
+  const core = [path.join(root, "core", "web", "src"), path.join(root, "core", "server", "src")];
+  const coreFolder = path.join(root, "core");
   const extensions = path.join(root, "extensions");
   const crossings = [];
   const say = (file, line, spec, why) => crossings.push(`${path.relative(root, file)}:${line} imports "${spec}": ${why}`);
@@ -74,7 +74,7 @@ export function findCrossings(root) {
         }
         if (!spec.startsWith(".") && !path.isAbsolute(spec)) continue;
         const target = path.resolve(path.dirname(file), spec);
-        if (coreWorkspaces.some((dir) => within(target, dir))) say(file, line, spec, "an extension imports nothing of core");
+        if (within(target, coreFolder)) say(file, line, spec, "an extension imports nothing of core");
       }
     }
   }

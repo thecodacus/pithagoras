@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { keyboardInset } from '../web/src/keyboard.ts';
+import { keyboardInset } from '../core/web/src/keyboard.ts';
 
 test('the keyboard covers what the visual viewport leaves at the bottom of the page', () => {
   assert.equal(keyboardInset(780, { height: 780, offsetTop: 0, scale: 1 }), 0);

@@ -9,15 +9,15 @@ import { inProcessHome } from "./helpers.mts";
 const temp = inProcessHome("pitha-gallery-");
 
 const express = (await import("express")).default;
-const gen = await import("../server/src/image-generation.ts");
-const gallery = await import("../server/src/image-gallery.ts");
-const { imagesRouter } = await import("../server/src/api/images.ts");
-const { featuresRouter } = await import("../server/src/api/features.ts");
-const { GenerateImageTool } = await import("../server/src/pi/generate-image-tool.ts");
+const gen = await import("../core/server/src/image-generation.ts");
+const gallery = await import("../core/server/src/image-gallery.ts");
+const { imagesRouter } = await import("../core/server/src/api/images.ts");
+const { featuresRouter } = await import("../core/server/src/api/features.ts");
+const { GenerateImageTool } = await import("../core/server/src/pi/generate-image-tool.ts");
 const { GENERATED_DIR } = gallery;
-const { EditImageTool } = await import("../server/src/pi/edit-image-tool.ts");
-const { MAX_RUNNING } = await import("../server/src/image-jobs.ts");
-const { createSession, deleteSession, getDb } = await import("../server/src/db.ts");
+const { EditImageTool } = await import("../core/server/src/pi/edit-image-tool.ts");
+const { MAX_RUNNING } = await import("../core/server/src/image-jobs.ts");
+const { createSession, deleteSession, getDb } = await import("../core/server/src/db.ts");
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads. `tag` tells two apart.
 const pad = (head: number[], tag = "", to = 64) => Buffer.concat([Buffer.from(head), Buffer.from(tag), Buffer.alloc(to)]);
@@ -1125,7 +1125,7 @@ test("the sidebar is told whether the page is there: on while an address is set 
 // Pictures with real pixels: the portal decodes them to make the small copy. Random pixels do not compress, so these are well over the 48 KB below which no copy is made.
 const { default: sharp } = await import("sharp");
 const { randomBytes } = await import("node:crypto");
-const { thumbJobsPeak } = await import("../server/src/image-thumbs.ts");
+const { thumbJobsPeak } = await import("../core/server/src/image-thumbs.ts");
 const noise = (width: number, height: number, channels: 3 | 4 = 3) => sharp(randomBytes(width * height * channels), { raw: { width, height, channels } });
 const bigPng = (width: number, height: number) => noise(width, height).png().toBuffer();
 const meta = (bytes: Buffer) => sharp(bytes).metadata();

@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
-import { DEFAULT_ORB } from '../../server/src/orb-style';
+import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
 test('a tool call reads as its parameters, closed and opened, not as JSON', async ({ page }) => {
   await page.goto('/tests/chat.html?phase=args');

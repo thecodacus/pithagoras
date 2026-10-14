@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { inProcessHome } from './helpers.mts';
 const temp=inProcessHome('pitha-correctness-');
-const {SdkPiClient}=await import('../server/src/pi/sdk-client.ts');
-const {sessions}=await import('../server/src/session-manager.ts');
-const {getDb,pendingNotes,consumeNotes}=await import('../server/src/db.ts');
-const {buildTranscript}=await import('../web/src/transcript.ts');
+const {SdkPiClient}=await import('../core/server/src/pi/sdk-client.ts');
+const {sessions}=await import('../core/server/src/session-manager.ts');
+const {getDb,pendingNotes,consumeNotes}=await import('../core/server/src/db.ts');
+const {buildTranscript}=await import('../core/web/src/transcript.ts');
 test.after(()=>getDb().close());
 
 test('answered dialog clears its timer and cannot cancel a later dialog',async(t)=>{

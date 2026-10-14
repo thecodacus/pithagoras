@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canvasPictures } from '../web/src/canvas-pictures.js';
+import { canvasPictures } from '../core/web/src/canvas-pictures.js';
 
 const folder = '/workspaces/proj';
 const url = (p: string) => `/api/sessions/s/picture?path=${encodeURIComponent(p)}`;

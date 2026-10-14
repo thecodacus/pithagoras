@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readQuestions, readAnswers, describeAnswers, askQuestionTool, ASK_QUESTION_TOOL, MAX_QUESTIONS, asksQuestions } from '../server/src/pi/ask-question.ts';
-import { isDialog } from '../server/src/pi/ui-requests.ts';
+import { readQuestions, readAnswers, describeAnswers, askQuestionTool, ASK_QUESTION_TOOL, MAX_QUESTIONS, asksQuestions } from '../core/server/src/pi/ask-question.ts';
+import { isDialog } from '../core/server/src/pi/ui-requests.ts';
 
 /** The tool as pi gets it: registered on a fake pi, run with the context a test gives it. */
 function tool() {

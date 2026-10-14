@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../web/src/client-commands.ts";
-import { getBuiltinCommands } from "../server/src/pi/builtins.ts";
+import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../core/web/src/client-commands.ts";
+import { getBuiltinCommands } from "../core/server/src/pi/builtins.ts";
 
 test("the page knows the same UI commands the server lists", async () => {
   const server = (await getBuiltinCommands()).filter((c) => c.where === "client").map((c) => c.name);

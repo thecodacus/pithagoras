@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { addLocale, ENGLISH, formatDate, formatDateTime, formatsFor, formatTime, labelOf, languages, loadLanguage, offerLocale, resolve, selfName, setLanguage, t, tc, tp, tx, type Locale, type Plural } from "../web/src/i18n.ts";
+import { addLocale, ENGLISH, formatDate, formatDateTime, formatsFor, formatTime, labelOf, languages, loadLanguage, offerLocale, resolve, selfName, setLanguage, t, tc, tp, tx, type Locale, type Plural } from "../core/web/src/i18n.ts";
 
-const SRC = path.resolve(import.meta.dirname, "../web/src");
+const SRC = path.resolve(import.meta.dirname, "../core/web/src");
 const LOCALES = path.join(SRC, "locales");
 
 const sources = (dir: string): string[] =>

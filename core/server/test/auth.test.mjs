@@ -653,7 +653,7 @@ test("a secret that is a shell command, as a .env written from the old guide hol
 
 test("the example environment file ships no password for anyone to find, and none to set", () => {
   // `cp .env.example .env` and `docker compose up` is the quick start: the password is chosen in the browser.
-  const example = readFileSync(new URL("../../.env.example", import.meta.url), "utf8");
+  const example = readFileSync(new URL("../../../.env.example", import.meta.url), "utf8");
   assert.doesNotMatch(example, /PORTAL_PASSWORD/);
 });
 

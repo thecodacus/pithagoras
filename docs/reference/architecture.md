@@ -110,7 +110,7 @@ Not everything goes through pi. The agent's own browser tools (`browser/tools.ts
 drive the Chromium over its debugging port from inside the portal, not as an MCP
 server, and the image tools (`generate_image`, `edit_image`, `show_image`) and
 the video tools (`generate_video`, `show_video`) are registered by the portal the same way. The Files, Git and terminal panels talk to the
-session's folder directly (`server/src/workspace-files.ts`, `git.ts`, a pty per
+session's folder directly (`core/server/src/workspace-files.ts`, `git.ts`, a pty per
 terminal). Managed add-ons — Browser, Voice, Understory — are Docker containers
 the portal starts through the socket; voice shares the portal's network
 namespace so its services need no published ports. Opt-in pi extensions the
@@ -119,7 +119,7 @@ packages only when switched on. The server holds one socket in its data
 directory so only one portal runs on it.
 
 Two things run on a clock of their own. The routine supervisor
-(`server/src/routines/`) starts a run of a routine when its schedule says so,
+(`core/server/src/routines/`) starts a run of a routine when its schedule says so,
 and the heartbeat (`heartbeat.ts`) lets an agent look around in a session of its
 own, as the read-only role `heartbeat`, when it is its turn: a look never starts
 while a chat or a routine is working.
@@ -131,11 +131,11 @@ sessions list, the agents page, each settings tab — so deep links and the back
 button work, with an SPA fallback on the server. The first draw needs only the
 shell, the chat and the sign-in page: the other pages, Settings, the setup
 assistant, the terminal emulator and the text of the language in use are
-fetched when first needed (`lazyComponent` in `web/src/lazy.ts`).
+fetched when first needed (`lazyComponent` in `core/web/src/lazy.ts`).
 
 State is polled every five seconds and pushed over SSE for the open session.
 Text is translated in the browser: every English string goes through `t()`, and a
-language is one file in `web/src/locales/`. See [Settings → Language](/guide/settings#language).
+language is one file in `core/web/src/locales/`. See [Settings → Language](/guide/settings#language).
 
 ## Channel loading
 

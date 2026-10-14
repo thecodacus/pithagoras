@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { finishedRuns, tabTitle } from "../web/src/attention.ts";
+import { finishedRuns, tabTitle } from "../core/web/src/attention.ts";
 
 test("the tab says what the chat is doing", () => {
   assert.equal(tabTitle(null, false), "Pithagoras");

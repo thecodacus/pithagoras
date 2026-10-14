@@ -5,11 +5,11 @@ import { KEY, MATROSKA, MP4, PNG, TAKES_END_IMAGE, WEBM, completed, fakeSd, type
 
 inProcessHome("pitha-videos-");
 
-const gen = await import("../server/src/video-generation.ts");
-const { sdcppRoot } = await import("../server/src/video-sdcpp.ts");
-const { ebmlDocType, sniffVideo, videoType } = await import("../server/src/video-files.ts");
-const { VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS, forClip, framesFor, parseVideoSettings, parseVideoSize } = await import("../server/src/video-settings.ts");
-const { parseRange } = await import("../server/src/http-range.ts");
+const gen = await import("../core/server/src/video-generation.ts");
+const { sdcppRoot } = await import("../core/server/src/video-sdcpp.ts");
+const { ebmlDocType, sniffVideo, videoType } = await import("../core/server/src/video-files.ts");
+const { VIDEO_LIMITS, VIDEO_TIMEOUT_SECONDS, forClip, framesFor, parseVideoSettings, parseVideoSize } = await import("../core/server/src/video-settings.ts");
+const { parseRange } = await import("../core/server/src/http-range.ts");
 
 const config = (baseUrl: string, more: Partial<ReturnType<typeof gen.videoGenerationConfig>> = {}) => ({ ...gen.videoGenerationConfig(), enabled: true, baseUrl, apiKey: KEY, ...more });
 /** Fast polling, so that a test does not wait for the pace a real server is asked at. */
@@ -508,7 +508,7 @@ test("a change to the settings is checked, and the key is never given back", () 
 });
 
 test("a backend that is not one of the portal's is never read from the settings, whatever Object has under that name", async () => {
-  const { getSetting, putSetting } = await import("../server/src/db.ts");
+  const { getSetting, putSetting } = await import("../core/server/src/db.ts");
   const before = getSetting("video_generation") ?? "{}";
   putSetting("video_generation", JSON.stringify({ enabled: true, baseUrl: "http://one.example:1234", backend: "toString" }));
   try {

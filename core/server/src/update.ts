@@ -172,9 +172,9 @@ export function tail(output: string, lines = OUTPUT_LINES): string {
 export const runsFromSource = (url: string = import.meta.url, execArgv: string[] = process.execArgv): boolean =>
   url.endsWith(".ts") || execArgv.some((a) => a === "--watch" || a === "--watch-path" || a.startsWith("--watch-path="));
 
-/** The install's folder, found as the portal finds its own files: from the compiled (or source) file, two folders up. */
+/** The install's folder, found as the portal finds its own files: from the compiled (or source) file, three folders up (core/server/dist). */
 export function installRoot(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 }
 
 /** A container has its portal in an image; it is rebuilt there, not here. */
@@ -254,7 +254,7 @@ export class Updater {
     const { root } = this.deps;
     try {
       const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as { name?: string };
-      if (pkg.name !== "pithagoras" || !existsSync(path.join(root, "server", "package.json"))) return "none";
+      if (pkg.name !== "pithagoras" || !existsSync(path.join(root, "core", "server", "package.json"))) return "none";
     } catch {
       return "none";
     }

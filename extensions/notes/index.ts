@@ -3,7 +3,7 @@
  * conversation — and can pin one of their own, or take one off.
  *
  * The reference for an extension that draws in the portal
- * (server/src/extension-ui.ts there), in three halves:
+ * (core/server/src/extension-ui.ts there), in three halves:
  *
  * - This file is the one pi loads, one per chat: it holds the notes and keeps
  *   them with the conversation.

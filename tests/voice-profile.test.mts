@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {VoiceProfiler,replyMarks,voiceProfileSummary} from '../web/src/voice-profile.ts';
+import {VoiceProfiler,replyMarks,voiceProfileSummary} from '../core/web/src/voice-profile.ts';
 test('latency percentages partition wall time and exclude speculative STT and filler',()=>{
  let now=0;const p=new VoiceProfiler(()=>{},()=>now);const t=p.begin();
  now=100;p.mark('stt_request');now=200;p.lastSpeech();now=800;p.mark('stt_result');

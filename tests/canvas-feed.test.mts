@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canvasConnection, canvasMessage, watchCanvases, type CanvasMessage, type FeedState } from "../web/src/canvas-feed.ts";
+import { canvasConnection, canvasMessage, watchCanvases, type CanvasMessage, type FeedState } from "../core/web/src/canvas-feed.ts";
 
 function watcher() {
   const heard: CanvasMessage[] = [];

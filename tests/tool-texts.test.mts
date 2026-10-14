@@ -9,23 +9,23 @@ import { inProcessHome } from "./helpers.mts";
 // back fails here. The caps are the lengths agreed for each tool (about a quarter of a token to the character is
 // the measure, as in the review of issue #183), with a little room for a word to be changed.
 inProcessHome("pitha-tool-texts-");
-const { putSetting } = await import("../server/src/db.ts");
-const { CanvasTools } = await import("../server/src/pi/canvas-tools.ts");
-const { ToolsGateway } = await import("../server/src/pi/tools-gateway.ts");
-const { browserTools } = await import("../server/src/browser/tools.ts");
-const { askPrimaryTool } = await import("../server/src/pi/ask-primary.ts");
-const { askQuestionTool } = await import("../server/src/pi/ask-question.ts");
-const { GenerateImageTool } = await import("../server/src/pi/generate-image-tool.ts");
-const { EditImageTool } = await import("../server/src/pi/edit-image-tool.ts");
-const { GenerateVideoTool } = await import("../server/src/pi/generate-video-tool.ts");
-const { showImageTool } = await import("../server/src/pi/show-image-tool.ts");
-const { showVideoTool } = await import("../server/src/pi/show-video-tool.ts");
-const { heartbeatTool } = await import("../server/src/pi/heartbeat-tool.ts");
-const { reportTool } = await import("../server/src/pi/report-tool.ts");
-const { routineTools } = await import("../server/src/pi/routine-tools.ts");
+const { putSetting } = await import("../core/server/src/db.ts");
+const { CanvasTools } = await import("../core/server/src/pi/canvas-tools.ts");
+const { ToolsGateway } = await import("../core/server/src/pi/tools-gateway.ts");
+const { browserTools } = await import("../core/server/src/browser/tools.ts");
+const { askPrimaryTool } = await import("../core/server/src/pi/ask-primary.ts");
+const { askQuestionTool } = await import("../core/server/src/pi/ask-question.ts");
+const { GenerateImageTool } = await import("../core/server/src/pi/generate-image-tool.ts");
+const { EditImageTool } = await import("../core/server/src/pi/edit-image-tool.ts");
+const { GenerateVideoTool } = await import("../core/server/src/pi/generate-video-tool.ts");
+const { showImageTool } = await import("../core/server/src/pi/show-image-tool.ts");
+const { showVideoTool } = await import("../core/server/src/pi/show-video-tool.ts");
+const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
+const { reportTool } = await import("../core/server/src/pi/report-tool.ts");
+const { routineTools } = await import("../core/server/src/pi/routine-tools.ts");
 const { default: notes } = await import("../extensions/notes/index.ts");
 const { default: subagent } = await import("../extensions/subagent/index.ts");
-const { piDependency } = await import("../server/src/pi/package.ts");
+const { piDependency } = await import("../core/server/src/pi/package.ts");
 
 interface Registered {
   name: string;

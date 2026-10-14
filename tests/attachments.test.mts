@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createPending, fitWithin, isImage, needsShrinking, sortFiles, uploadedNote, MAX_EDGE, MAX_IMAGE_BYTES, MAX_IMAGES } from "../web/src/attachments.ts";
-import { buildTranscript } from "../web/src/transcript.ts";
-import type { PortalEvent } from "../web/src/api.ts";
+import { createPending, fitWithin, isImage, needsShrinking, sortFiles, uploadedNote, MAX_EDGE, MAX_IMAGE_BYTES, MAX_IMAGES } from "../core/web/src/attachments.ts";
+import { buildTranscript } from "../core/web/src/transcript.ts";
+import type { PortalEvent } from "../core/web/src/api.ts";
 
 test("a picture keeps its shape when it is made to fit", () => {
   assert.deepEqual(fitWithin(4032, 3024), { width: MAX_EDGE, height: 1536 });

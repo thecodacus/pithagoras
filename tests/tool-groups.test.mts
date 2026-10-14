@@ -7,7 +7,7 @@ import {
   nextOff,
   toggleOpen,
   toolTitle,
-} from "../web/src/tool-groups.ts";
+} from "../core/web/src/tool-groups.ts";
 
 const tool = (name: string, source: string, enabled = true) => ({
   name,

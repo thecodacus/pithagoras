@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDiff, unquote } from '../web/src/git-diff.ts';
+import { parseDiff, unquote } from '../core/web/src/git-diff.ts';
 
 test('a file diff is read into numbered lines: removed ones by where they were, added ones by where they are', () => {
   const [file] = parseDiff(

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { displaySpeechText, speechChunks } from '../web/src/voice.js';
-import { buildTranscript } from '../web/src/transcript.js';
+import { displaySpeechText, speechChunks } from '../core/web/src/voice.js';
+import { buildTranscript } from '../core/web/src/transcript.js';
 test('speech cues stay in TTS input but disappear from display including partial streamed tags', () => {
  const text = '(laugh) Hello. (cough) Excuse me. (clears throat) Ready. (sigh) Yes.';
  assert.equal(displaySpeechText(text, true), 'Hello. Excuse me. Ready. Yes.');

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { below, within } from '../web/src/paths.js';
+import { below, within } from '../core/web/src/paths.js';
 
 test('the folder itself and what is under it are within it', () => {
   assert.equal(within('/w/site', '/w/site'), true);

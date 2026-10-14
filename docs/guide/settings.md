@@ -167,7 +167,7 @@ written the language's way. It changes the portal's words only: what the agent
 writes is up to the agent, and messages that come from the server — an error it
 reports, a channel's own description — stay as they are.
 
-A language is one file in `web/src/locales/`, named by its language code
+A language is one file in `core/web/src/locales/`, named by its language code
 (`de.ts`), mapping each English text to its own; adding one means adding that
 file, and the tests list what it lacks. A page fetches only the file of the
 language it is in, so an English page does not carry the German text.
@@ -315,7 +315,7 @@ workspace root where each chat's folder is made, and where pi keeps its files
 ### Update
 
 A portal that runs from a git checkout of the repository, built (`npm start`,
-or a service that runs `node server/dist/index.js` in it), can update itself, so
+or a service that runs `node core/server/dist/index.js` in it), can update itself, so
 that nobody has to log in to the host. The folder is the one the portal itself
 runs from. The section shows the branch and commit that are checked out, and how
 many new commits `origin/main` has. The portal looks for them when it starts,
@@ -348,13 +348,13 @@ Update again.
 
 **A step that fails.** The update stops where it is, names the step and shows the
 last lines the program printed, and the portal goes on running its old build.
-`npm ci` empties `node_modules` and a build writes `server/dist` and `web/dist`
+`npm ci` empties `node_modules` and a build writes `core/server/dist` and `core/web/dist`
 as it goes, even a server build with a type error, so the update puts the three
-aside (`node_modules.update-old`, `server/dist.update-old`, `web/dist.update-old`)
+aside (`node_modules.update-old`, `core/server/dist.update-old`, `core/web/dist.update-old`)
 before the step that works on them, puts them back if it fails, and throws them
 away only when the whole build has worked. What a failed step wrote is removed.
 The checkout itself stays at the new commit, which the update never takes back.
-What the build was made from is written in `server/dist/.built-from`, with the
+What the build was made from is written in `core/server/dist/.built-from`, with the
 times at which the build's own files were written, and goes aside and comes back
 with the build: so after a failed build, and after any restart of the portal,
 **Update** says that the build is not of the commit that is checked out and
@@ -369,12 +369,12 @@ the `.update-old` folders, which can be moved back by hand.)
 
 **The restart.** What starts the portal again depends on how it is run.
 
-- Run by hand, with `npm start` or `node server/dist/index.js` in a terminal, tmux
+- Run by hand, with `npm start` or `node core/server/dist/index.js` in a terminal, tmux
   or `nohup`: the portal starts a copy of itself with the command line it was
   started with, detached and writing where the portal wrote, and then stops as it
   does on SIGTERM; the copy waits until the old one is gone.
 - Run as a **systemd service**, as the unit's own process (`ExecStart=/usr/bin/node
-  server/dist/index.js`): the portal stops with status 75 and leaves the start to
+  core/server/dist/index.js`): the portal stops with status 75 and leaves the start to
   systemd. It knows from its control group and from the unit's `MainPID`, which
   is the portal or its parent. A copy that the portal started itself would be in
   the service's control group and be ended with it, so it does not start one. The
@@ -383,7 +383,7 @@ the `.update-old` folders, which can be moved back by hand.)
   ```ini
   [Service]
   WorkingDirectory=/srv/pithagoras
-  ExecStart=/usr/bin/node server/dist/index.js
+  ExecStart=/usr/bin/node core/server/dist/index.js
   Restart=on-failure
   ```
 
@@ -403,7 +403,7 @@ the `.update-old` folders, which can be moved back by hand.)
   new portal turns away a second start of itself). This needs `Restart=on-failure`
   or `Restart=always` in that unit too, and the check cannot warn about a unit
   that does not have it, since it cannot tell which unit is the portal's. Better, in
-  the unit: `ExecStart=/usr/bin/node server/dist/index.js`, or `exec` in the wrapper.
+  the unit: `ExecStart=/usr/bin/node core/server/dist/index.js`, or `exec` in the wrapper.
 - Run by something else that restarts it (pm2, a container's restart policy,
   `while true`): set `PORTAL_UPDATE_RESTART=exit`. The portal then only stops, with
   status 75, and its manager starts the new build; started by itself too, it would

@@ -20,14 +20,14 @@ const bin = path.join(home, "bin");
 const fake = path.join(home, "fake");
 mkdirSync(bin);
 mkdirSync(fake);
-const repo = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
+const repo = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".."));
 const install = path.join(home, "install");
-mkdirSync(path.join(install, "server"), { recursive: true });
-mkdirSync(path.join(install, "web", "dist"), { recursive: true });
-cpSync(path.join(repo, "server", "dist"), path.join(install, "server", "dist"), { recursive: true });
+mkdirSync(path.join(install, "core", "server"), { recursive: true });
+mkdirSync(path.join(install, "core", "web", "dist"), { recursive: true });
+cpSync(path.join(repo, "core", "server", "dist"), path.join(install, "core", "server", "dist"), { recursive: true });
 cpSync(path.join(repo, "package.json"), path.join(install, "package.json"));
-cpSync(path.join(repo, "server", "package.json"), path.join(install, "server", "package.json"));
-writeFileSync(path.join(install, "web", "dist", "index.html"), "old web app");
+cpSync(path.join(repo, "core", "server", "package.json"), path.join(install, "core", "server", "package.json"));
+writeFileSync(path.join(install, "core", "web", "dist", "index.html"), "old web app");
 // What the portal loads from beside its server's folder, and its packages: the same ones, linked.
 for (const name of ["node_modules", "skills", "channels", "extensions", "deploy"]) if (existsSync(path.join(repo, name))) symlinkSync(path.join(repo, name), path.join(install, name));
 const root = realpathSync(install);
@@ -72,10 +72,10 @@ case "$1" in
     if [ "$fails" = ci ]; then mkdir node_modules; echo half > node_modules/half.txt; echo "npm ERR! registry down" >&2; exit 1; fi
     ln -s "$REAL_MODULES" node_modules ;;
   run)
-    mkdir -p server/dist web/dist
-    echo "// the new build" > server/dist/index.js
-    echo "half a build" > server/dist/partial.js
-    echo "new web app" > web/dist/index.html
+    mkdir -p core/server/dist core/web/dist
+    echo "// the new build" > core/server/dist/index.js
+    echo "half a build" > core/server/dist/partial.js
+    echo "new web app" > core/web/dist/index.html
     if [ "$fails" = run ]; then echo "npm ERR! the build is broken" >&2; exit 1; fi ;;
 esac
 exit 0`);
@@ -108,7 +108,7 @@ async function boot() {
     ROOT: root,
     REAL_MODULES: path.join(repo, "node_modules"),
     PORTAL_UPDATE_RESTART: "exit",
-  }), 5, path.join(install, "server", "dist", "index.js")));
+  }), 5, path.join(install, "core", "server", "dist", "index.js")));
 }
 before(boot);
 
@@ -219,8 +219,8 @@ test("an install that fails puts the old node_modules back, and the build was ne
   assert.match(run.failed.output, /registry down/);
   assert.equal(isLink("node_modules"), true, "the link to the packages is back, not a half-made folder");
   assert.equal(existsSync(path.join(install, "node_modules", "half.txt")), false);
-  assert.equal(text("web/dist/index.html"), "old web app");
-  assert.equal(text("server/dist/index.js"), readFileSync(path.join(repo, "server", "dist", "index.js"), "utf8"));
+  assert.equal(text("core/web/dist/index.html"), "old web app");
+  assert.equal(text("core/server/dist/index.js"), readFileSync(path.join(repo, "core", "server", "dist", "index.js"), "utf8"));
   assert.ok(!ran().includes("npm run build"));
   assert.deepEqual(readdirSync(install).filter((n) => n.endsWith(".update-old")), []);
 });
@@ -236,13 +236,13 @@ test("a build that fails puts the old server, web app and node_modules back, and
   assert.equal(run.failed.step, "build");
   assert.match(run.failed.output, /the build is broken/);
   // As the server was, with what the failed build wrote gone.
-  assert.equal(text("server/dist/index.js"), readFileSync(path.join(repo, "server", "dist", "index.js"), "utf8"));
-  assert.equal(existsSync(path.join(install, "server", "dist", "partial.js")), false);
-  assert.equal(text("web/dist/index.html"), "old web app");
+  assert.equal(text("core/server/dist/index.js"), readFileSync(path.join(repo, "core", "server", "dist", "index.js"), "utf8"));
+  assert.equal(existsSync(path.join(install, "core", "server", "dist", "partial.js")), false);
+  assert.equal(text("core/web/dist/index.html"), "old web app");
   assert.equal(isLink("node_modules"), true);
-  for (const aside of ["node_modules", "server/dist", "web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
+  for (const aside of ["node_modules", "core/server/dist", "core/web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
   // What it was made from stays with it: the checkout is at ccc now, the build is of aaa.
-  assert.equal(JSON.parse(text("server/dist/.built-from")).sha, "aaa".padEnd(40, "0"));
+  assert.equal(JSON.parse(text("core/server/dist/.built-from")).sha, "aaa".padEnd(40, "0"));
   const status = (await send(cookie, "/api/update")).body;
   assert.equal(status.rebuild, true);
   assert.equal(status.current.sha, CCC);
@@ -290,9 +290,9 @@ test("an update fetches, merges, installs and builds in that order, refuses a se
   assert.deepEqual(run.steps.map((s) => s.state), ["done", "skipped", "done", "done", "running"]);
   assert.deepEqual(changes(), ["npm ci --prefer-offline --no-audit --no-fund", "npm run build"]);
   // The new build is in place, the old one thrown away, and what it was made from written with it.
-  assert.equal(text("web/dist/index.html").trim(), "new web app");
-  assert.equal(JSON.parse(text("server/dist/.built-from")).sha, CCC);
-  for (const aside of ["node_modules", "server/dist", "web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
+  assert.equal(text("core/web/dist/index.html").trim(), "new web app");
+  assert.equal(JSON.parse(text("core/server/dist/.built-from")).sha, CCC);
+  for (const aside of ["node_modules", "core/server/dist", "core/web/dist"]) assert.equal(existsSync(path.join(install, aside + ".update-old")), false, aside);
   // The restart: the portal stops, as it does on SIGTERM, with the status a manager starts it again from.
   const [code] = await once(child, "exit");
   assert.equal(code, 75);
@@ -301,8 +301,8 @@ test("an update fetches, merges, installs and builds in that order, refuses a se
 test("an update is refused once a restart is on its way, and nothing is run", async () => {
   // The last test ended with the portal's stop, and with the stand-in build in place of the server: this is a new start
   // of the original one.
-  rmSync(path.join(install, "server", "dist"), { recursive: true, force: true });
-  cpSync(path.join(repo, "server", "dist"), path.join(install, "server", "dist"), { recursive: true });
+  rmSync(path.join(install, "core", "server", "dist"), { recursive: true, force: true });
+  cpSync(path.join(repo, "core", "server", "dist"), path.join(install, "core", "server", "dist"), { recursive: true });
   await boot();
   reset();
   const cookie = await login();

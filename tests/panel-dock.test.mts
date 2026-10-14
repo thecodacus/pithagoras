@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames } from '../web/src/panel-dock.ts';
+import { across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, fitSides, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames } from '../core/web/src/panel-dock.ts';
 
 test('a floating window placed for the first time goes to the top right, inside the chat and above the composer', () => {
   // Ending 260px above the chat's foot, where the composer is: it reached down over Send and Stop.

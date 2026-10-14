@@ -17,7 +17,7 @@ const files = (dir: string): string[] =>
 // for one that is free.
 test("no test takes a port from a range of its own", () => {
   const found: string[] = [];
-  for (const dir of ["server/test", "tests"]) {
+  for (const dir of ["core/server/test", "tests"]) {
     for (const file of files(path.join(ROOT, dir))) {
       if (file === import.meta.filename) continue;
       fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
@@ -25,5 +25,5 @@ test("no test takes a port from a range of its own", () => {
       });
     }
   }
-  assert.deepEqual(found, [], "use freePort() from server/test/server-harness.mjs");
+  assert.deepEqual(found, [], "use freePort() from core/server/test/server-harness.mjs");
 });

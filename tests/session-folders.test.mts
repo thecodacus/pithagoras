@@ -14,7 +14,7 @@ import {
   folderKeys,
   folderNameOf,
   hasMoreThanHome,
-} from "../web/src/session-folders.ts";
+} from "../core/web/src/session-folders.ts";
 
 const places = {
   home: "/data/agent",

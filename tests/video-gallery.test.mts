@@ -14,21 +14,21 @@ const root = process.env.WORKSPACE_ROOT!;
 mkdirSync(root, { recursive: true });
 
 const express = (await import("express")).default;
-const gen = await import("../server/src/video-generation.ts");
-const gallery = await import("../server/src/video-gallery.ts");
-const jobsModule = await import("../server/src/video-jobs.ts");
-const posters = await import("../server/src/video-posters.ts");
-const copies = await import("../server/src/video-copies.ts");
-const images = await import("../server/src/image-gallery.ts");
-const { videosRouter } = await import("../server/src/api/videos.ts");
-const { filesRouter } = await import("../server/src/api/files.ts");
-const { featuresRouter } = await import("../server/src/api/features.ts");
-const { GenerateVideoTool } = await import("../server/src/pi/generate-video-tool.ts");
-const { showVideoTool, videoIn } = await import("../server/src/pi/show-video-tool.ts");
-const { GENERATED_VIDEO_MARK } = await import("../server/src/generated-video.ts");
-const { MAX_RUNNING_VIDEOS } = await import("../server/src/video-settings.ts");
-const { MAX_VIDEO_BYTES } = await import("../server/src/video-files.ts");
-const { createSession, deleteSession, getDb } = await import("../server/src/db.ts");
+const gen = await import("../core/server/src/video-generation.ts");
+const gallery = await import("../core/server/src/video-gallery.ts");
+const jobsModule = await import("../core/server/src/video-jobs.ts");
+const posters = await import("../core/server/src/video-posters.ts");
+const copies = await import("../core/server/src/video-copies.ts");
+const images = await import("../core/server/src/image-gallery.ts");
+const { videosRouter } = await import("../core/server/src/api/videos.ts");
+const { filesRouter } = await import("../core/server/src/api/files.ts");
+const { featuresRouter } = await import("../core/server/src/api/features.ts");
+const { GenerateVideoTool } = await import("../core/server/src/pi/generate-video-tool.ts");
+const { showVideoTool, videoIn } = await import("../core/server/src/pi/show-video-tool.ts");
+const { GENERATED_VIDEO_MARK } = await import("../core/server/src/generated-video.ts");
+const { MAX_RUNNING_VIDEOS } = await import("../core/server/src/video-settings.ts");
+const { MAX_VIDEO_BYTES } = await import("../core/server/src/video-files.ts");
+const { createSession, deleteSession, getDb } = await import("../core/server/src/db.ts");
 const { GENERATED_VIDEOS_DIR } = gallery;
 
 const app = express()

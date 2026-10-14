@@ -4,7 +4,7 @@ import zlib from 'node:zlib';
 
 /**
  * A picture being made, made and not made (ImagePreview.tsx): in the chat, from
- * web/tests/pictures.tsx, and as the tile on a card in voice mode.
+ * core/web/tests/pictures.tsx, and as the tile on a card in voice mode.
  */
 
 /** A plain picture of this size, as the chat's folder would serve one; `shade` is its grey, from 0 (black) to 255 (white). */

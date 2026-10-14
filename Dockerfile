@@ -2,8 +2,8 @@
 FROM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-COPY server/package.json server/
-COPY web/package.json web/
+COPY core/server/package.json core/server/
+COPY core/web/package.json core/web/
 COPY packages/extension-api/package.json packages/extension-api/
 # better-sqlite3 ships a binding.gyp, and npm defaults to node-gyp for any
 # package that has one without its own install script. This stage is thrown
@@ -14,15 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 # npm ci takes exactly what package-lock.json says, and stops when it and a
 # package.json disagree, where npm install would quietly resolve the difference.
 RUN npm ci
-COPY server server
-COPY web web
+COPY core core
 # What an extension written in TypeScript is built with: @pithagoras/extension-api,
 # and the script that builds each extension that has a build of its own.
 COPY packages packages
 COPY scripts scripts
 # The extensions: `npm run build` builds each that has a build of its own, in its folder.
 COPY extensions extensions
-# The web build copies it next to the voice files it covers (web/scripts/copy-vad-assets.mjs).
+# The web build copies it next to the voice files it covers (core/web/scripts/copy-vad-assets.mjs).
 COPY THIRD_PARTY_NOTICES.md ./
 RUN npm run build
 
@@ -56,12 +55,12 @@ RUN groupadd --gid 10010 pi-sandbox \
 COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /uvx /usr/local/bin/
 
 COPY package.json package-lock.json ./
-COPY server/package.json server/
+COPY core/server/package.json core/server/
 # No toolchain here, and none needed: better-sqlite3 ships prebuilt binaries
 # and resolves them at require time. Skipping install scripts keeps the runtime
 # image slim instead of carrying a compiler for a binary that already exists.
 # The cache goes in the same layer, or its tarballs stay in the image.
-RUN npm ci --omit=dev -w server --ignore-scripts \
+RUN npm ci --omit=dev -w core/server --ignore-scripts \
     && npm cache clean --force
 
 # The pi on PATH is the one the portal's sessions run, from the lock, so that
@@ -70,8 +69,10 @@ RUN npm ci --omit=dev -w server --ignore-scripts \
 RUN ln -s /app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js /usr/local/bin/pi \
     && chmod +x /app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js
 
+COPY --from=build /app/core/server/dist core/server/dist
+COPY --from=build /app/core/web/dist core/web/dist
+# Where the portal was started from before it moved to core/: `node server/dist/reset-password.js` and the like still work.
 COPY --from=build /app/server/dist server/dist
-COPY --from=build /app/web/dist web/dist
 
 # The builtin channel packages. Loaded from here at runtime; third-party ones
 # are installed into CHANNELS_DIR on the data volume instead, so they survive
@@ -113,4 +114,4 @@ ENV NODE_ENV=production \
 RUN mkdir -p /data/home /data/bin
 EXPOSE 4100
 VOLUME /data
-CMD ["/usr/local/bin/node", "server/dist/index.js"]
+CMD ["/usr/local/bin/node", "core/server/dist/index.js"]

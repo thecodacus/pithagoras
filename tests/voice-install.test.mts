@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { BASE_IMAGE, IMAGE, containerSpec, imageFor } from '../server/src/extensions/voice-service.js';
+import { BASE_IMAGE, IMAGE, containerSpec, imageFor } from '../core/server/src/extensions/voice-service.js';
 test('voice container shares portal networking without publishing host ports',()=>{
  const spec=containerSpec('echo test', 'container:portal-id');
  assert.equal(spec.HostConfig.RestartPolicy.Name,'no');

@@ -7,7 +7,7 @@ const store = new Map<string, string>();
 const events: string[] = [];
 (globalThis as any).window = Object.assign(new EventTarget(), { localStorage: (globalThis as any).localStorage });
 (globalThis as any).window.addEventListener('command-trigger-changed', () => events.push('changed'));
-const { commandTrigger, setCommandTrigger, typedCharacter, validTrigger } = await import('../web/src/command-trigger.ts');
+const { commandTrigger, setCommandTrigger, typedCharacter, validTrigger } = await import('../core/web/src/command-trigger.ts');
 
 beforeEach(() => { store.clear(); events.length = 0; });
 

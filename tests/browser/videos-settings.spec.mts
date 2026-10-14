@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
-/** The video model of Settings → Agent → Media (web/src/components/FeatureAddons.tsx, VideosAddon) over a portal whose video settings are made up. */
+/** The video model of Settings → Agent → Media (core/web/src/components/FeatureAddons.tsx, VideosAddon) over a portal whose video settings are made up. */
 async function portal(page: Page) {
   const sent: { path: string; body: any }[] = [];
   const videos = {

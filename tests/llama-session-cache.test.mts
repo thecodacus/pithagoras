@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { LlamaSessionCache } from '../server/src/llama-session-cache.js';
+import { LlamaSessionCache } from '../core/server/src/llama-session-cache.js';
 test('save and restore stay serialized with inference, and resident sessions skip restore', async () => {
  const events: string[] = [];
  const server = http.createServer((req,res) => { req.resume(); req.on('end', () => { const url = new URL(req.url!, 'http://local'); res.setHeader('Content-Type','application/json'); if (url.pathname === '/props') return res.end(JSON.stringify({ total_slots: 1 })); events.push(url.searchParams.get('action')!); res.end(JSON.stringify({ n_saved: 100, n_restored: 100 })); }); });

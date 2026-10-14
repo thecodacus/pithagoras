@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect } from './portal-mock';
-import { HOLD } from '../../web/src/use-follow-bottom';
+import { HOLD } from '../../core/web/src/use-follow-bottom';
 
 const scroller = (page: Page) => page.locator('.chat-list').locator('..');
 /** How far the conversation is from its end, in px. */

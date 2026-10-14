@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { registerServiceWorker } from "../web/src/register-sw.ts";
+import { registerServiceWorker } from "../core/web/src/register-sw.ts";
 
-const pub = new URL("../web/public/", import.meta.url);
+const pub = new URL("../core/web/public/", import.meta.url);
 const read = (name: string) => readFileSync(new URL(name, pub));
 
 /** A PNG's width and height, from its IHDR chunk. */
@@ -24,7 +24,7 @@ test("the manifest makes the portal installable", () => {
 });
 
 test("the page links the manifest", () => {
-  const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../core/web/index.html", import.meta.url), "utf8");
   assert.match(html, /<link rel="manifest" href="\/manifest.webmanifest"/);
 });
 
@@ -57,13 +57,13 @@ test("the dev server and browsers without workers register nothing", () => {
 });
 
 test("every copy of the canvas colour matches --canvas in index.css", () => {
-  const css = readFileSync(new URL("../web/src/index.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../core/web/src/index.css", import.meta.url), "utf8");
   const canvas = (theme: string) => {
     const block = css.slice(css.indexOf(`[data-theme="${theme}"]`));
     const [r, g, b] = block.match(/--canvas:\s*(\d+) (\d+) (\d+)/)!.slice(1).map(Number);
     return "#" + [r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("");
   };
-  const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../core/web/index.html", import.meta.url), "utf8");
   assert.equal(html.match(/<meta name="theme-color" content="([^"]+)"/)![1], canvas("dark"));
   assert.equal(JSON.parse(read("manifest.webmanifest").toString()).background_color, canvas("dark"));
   assert.match(read("theme-init.js").toString(), new RegExp(`meta\\.content = "${canvas("light")}"`));

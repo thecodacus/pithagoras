@@ -1,12 +1,12 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { MAX_SOURCES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName } from "../web/src/edit-sources.ts";
-import type { GalleryPicture } from "../web/src/api.ts";
+import { MAX_SOURCES, addSources, galleryIdsIn, moveTo, moved, refusal, roomFor, sourceName } from "../core/web/src/edit-sources.ts";
+import type { GalleryPicture } from "../core/web/src/api.ts";
 import { inProcessHome } from "./helpers.mts";
 
 const temp = inProcessHome("pitha-sources-");
-const editing = await import("../server/src/image-editing.ts");
+const editing = await import("../core/server/src/image-editing.ts");
 
 let n = 0;
 const picture = (over: Partial<GalleryPicture> = {}): GalleryPicture => {

@@ -17,10 +17,10 @@ function repo(files: Record<string, string>) {
 
 test('core and the extensions may each use the contract between them, npm packages, and their own files', () => {
   const root = repo({
-    'web/src/extensions/loader.ts': 'import type { Portal } from "@pithagoras/extension-api";\nimport { register } from "./slots";\nimport * as React from "react";',
-    'web/src/extensions/slots.ts': 'export const register = 1;',
-    'server/src/extensions/browser-service.ts': 'import { x } from "../db.js";',
-    'server/src/api/extensions.ts': 'import { start } from "../extensions/browser-service.js";',
+    'core/web/src/extensions/loader.ts': 'import type { Portal } from "@pithagoras/extension-api";\nimport { register } from "./slots";\nimport * as React from "react";',
+    'core/web/src/extensions/slots.ts': 'export const register = 1;',
+    'core/server/src/extensions/browser-service.ts': 'import { x } from "../db.js";',
+    'core/server/src/api/extensions.ts': 'import { start } from "../extensions/browser-service.js";',
     'extensions/terminal/src/client.tsx': 'import { useState } from "react";\nimport type { Portal } from "@pithagoras/extension-api";\nimport { Shell } from "./shell";\nconst xterm = () => import("@xterm/xterm");',
     'extensions/terminal/src/shell.tsx': 'export const Shell = 1;',
     'extensions/terminal/server.js': 'import { spawn } from "node:child_process";',
@@ -30,25 +30,25 @@ test('core and the extensions may each use the contract between them, npm packag
 
 test('core importing an extension, or an extension importing core, is found, by path or by package name, in every form of import', () => {
   const root = repo({
-    'web/src/components/Chat.tsx': 'import { Terminal } from "../../../extensions/terminal/src/client";',
-    'server/src/server.ts': 'const half = await import("../../extensions/terminal/server.js");',
-    'extensions/terminal/src/client.tsx': 'import { api } from "../../../web/src/api";\nexport { stripAnsi } from "../../../web/src/transcript";',
-    'extensions/terminal/server.js': 'const db = require("../../server/src/db.js");\nimport "@pithagoras/server/dist/db.js";',
+    'core/web/src/components/Chat.tsx': 'import { Terminal } from "../../../../extensions/terminal/src/client";',
+    'core/server/src/server.ts': 'const half = await import("../../../extensions/terminal/server.js");',
+    'extensions/terminal/src/client.tsx': 'import { api } from "../../../core/web/src/api";\nexport { stripAnsi } from "../../../core/web/src/transcript";',
+    'extensions/terminal/server.js': 'const db = require("../../core/server/src/db.js");\nimport "@pithagoras/server/dist/db.js";',
   });
   assert.deepEqual(findCrossings(root).sort(), [
-    'extensions/terminal/server.js:1 imports "../../server/src/db.js": an extension imports nothing of core',
+    'core/server/src/server.ts:1 imports "../../../extensions/terminal/server.js": core imports nothing from extensions/',
+    'core/web/src/components/Chat.tsx:1 imports "../../../../extensions/terminal/src/client": core imports nothing from extensions/',
+    'extensions/terminal/server.js:1 imports "../../core/server/src/db.js": an extension imports nothing of core',
     'extensions/terminal/server.js:2 imports "@pithagoras/server/dist/db.js": an extension imports nothing of core',
-    'extensions/terminal/src/client.tsx:1 imports "../../../web/src/api": an extension imports nothing of core',
-    'extensions/terminal/src/client.tsx:2 imports "../../../web/src/transcript": an extension imports nothing of core',
-    'server/src/server.ts:1 imports "../../extensions/terminal/server.js": core imports nothing from extensions/',
-    'web/src/components/Chat.tsx:1 imports "../../../extensions/terminal/src/client": core imports nothing from extensions/',
+    'extensions/terminal/src/client.tsx:1 imports "../../../core/web/src/api": an extension imports nothing of core',
+    'extensions/terminal/src/client.tsx:2 imports "../../../core/web/src/transcript": an extension imports nothing of core',
   ]);
 });
 
 test('what an extension built and what it installed are not read', () => {
   const root = repo({
-    'extensions/docs/node_modules/x/index.js': 'require("../../../../server/src/db.js");',
-    'extensions/terminal/web/chunks/xterm-1.js': 'import "../../../../web/src/api";',
+    'extensions/docs/node_modules/x/index.js': 'require("../../../../core/server/src/db.js");',
+    'extensions/terminal/web/chunks/xterm-1.js': 'import "../../../../core/web/src/api";',
   });
   assert.deepEqual(findCrossings(root), []);
 });

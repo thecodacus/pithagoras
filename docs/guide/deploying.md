@@ -96,7 +96,7 @@ command removes it instead, after asking you to type `reset`:
 
 ```bash
 # Docker Compose (the container is called pithagoras in both Compose files)
-docker exec -it pithagoras node server/dist/reset-password.js
+docker exec -it pithagoras node core/server/dist/reset-password.js
 
 # Native, from the folder the portal runs from (or with the same DATA_DIR)
 npm run reset-password
@@ -199,7 +199,7 @@ back on, after asking you to type `on`:
 
 ```bash
 # Docker Compose
-docker exec -it pithagoras node server/dist/sso-only-off.js
+docker exec -it pithagoras node core/server/dist/sso-only-off.js
 
 # Native, from the folder the portal runs from (or with the same DATA_DIR)
 npm run sso-only-off
@@ -569,7 +569,7 @@ portal from a checkout and update it from the page, build it and start the build
 ```ini
 [Service]
 WorkingDirectory=/srv/pithagoras
-ExecStart=/usr/bin/node server/dist/index.js
+ExecStart=/usr/bin/node core/server/dist/index.js
 Restart=on-failure
 ```
 

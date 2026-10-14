@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, shownPicture } from '../web/src/transcript.ts';
-import { describeCall } from '../web/src/tool-activity.ts';
-import { isPictureCall, pictureCall } from '../web/src/picture-call.ts';
-import { chatPictures } from '../web/src/chat-pictures.ts';
-import { latestBrowserActivity, latestTerminalActivity } from '../web/src/voice-browser.ts';
-import { GENERATED_PICTURE_MARK } from '../server/src/generated-picture.ts';
-import { CALLED_TOOL_KEY } from '../server/src/pi/tools-gateway-names.ts';
+import { buildTranscript, shownPicture } from '../core/web/src/transcript.ts';
+import { describeCall } from '../core/web/src/tool-activity.ts';
+import { isPictureCall, pictureCall } from '../core/web/src/picture-call.ts';
+import { chatPictures } from '../core/web/src/chat-pictures.ts';
+import { latestBrowserActivity, latestTerminalActivity } from '../core/web/src/voice-browser.ts';
+import { GENERATED_PICTURE_MARK } from '../core/server/src/generated-picture.ts';
+import { CALLED_TOOL_KEY } from '../core/server/src/pi/tools-gateway-names.ts';
 
 /**
  * A lazy tool is called through the `tools` tool, and pi's events name that one: the pictures and the

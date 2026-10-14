@@ -18,10 +18,10 @@ writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR!, "models.json"), JSON.s
 // What the Providers page saved: a name that says nothing, and one that says the wrong thing.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR!, "portal-providers.json"), JSON.stringify({ "gpu-box": "llama-cpp", "swap-by-kind": "llama-swap", "llama-swap-2": "custom" }));
 
-const { isLlamaProvider } = await import("../server/src/providers.js");
-const { VoiceFirstTurn } = await import("../server/src/pi/voice-first.js");
-const { viaProgressProxy } = await import("../server/src/pi/sdk-client.js");
-const { forgetSession, startLlamaProxy } = await import("../server/src/llama-progress.js");
+const { isLlamaProvider } = await import("../core/server/src/providers.js");
+const { VoiceFirstTurn } = await import("../core/server/src/pi/voice-first.js");
+const { viaProgressProxy } = await import("../core/server/src/pi/sdk-client.js");
+const { forgetSession, startLlamaProxy } = await import("../core/server/src/llama-progress.js");
 
 test("a provider is a llama server by the kind saved for it, else by its name", () => {
   assert.equal(isLlamaProvider("gpu-box"), true, "a name that says nothing, saved as llama.cpp");

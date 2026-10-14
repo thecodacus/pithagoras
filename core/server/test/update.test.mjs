@@ -14,7 +14,7 @@ const { Updater, UpdateError, tail } = await import("../dist/update.js");
 // The steps say what they do in the log; a test looks at the steps themselves.
 console.log = console.error = () => {};
 
-const repo = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."));
+const repo = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".."));
 
 const commit = (sha, subject = `commit ${sha}`) => ({ sha: sha.padEnd(40, "0"), subject, date: "2026-10-12T09:00:00+02:00" });
 const line = (c) => `${c.sha}\x1f${c.subject}\x1f${c.date}\n`;

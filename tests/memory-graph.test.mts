@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { colours, roundsFor } from "../web/src/memory-graph.ts";
+import { colours, roundsFor } from "../core/web/src/memory-graph.ts";
 
 test("the memory's types never share a colour, the first ten of them", () => {
   const types = ["People", "Test Infrastructure", "Deployment Process", "People"];

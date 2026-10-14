@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript } from '../web/src/transcript.ts';
+import { buildTranscript } from '../core/web/src/transcript.ts';
 
 /** The agent's ask_question questions in the transcript (issue #114): open until their end comes, then their record. */
 const questions = [{ id: 'db', question: 'Which database?', kind: 'single', options: [{ label: 'SQLite' }], other: false, optional: false }];

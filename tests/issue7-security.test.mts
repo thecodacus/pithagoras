@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import express from 'express';
 import { inProcessHome } from './helpers.mts';
 const temp = inProcessHome('pitha-security-');
-const {removeChannelPackage,isPackageName,channelPackageTarget}=await import('../server/src/channels/loader.ts');
-const {guardExtension}=await import('../server/src/pi/guard.ts');
-const {skillsRouter}=await import('../server/src/api/skills.ts');
-const {bindHost,loginThrottle,portalSecurityHeaders}=await import('../server/src/http-security.ts');
-const {getDb}=await import('../server/src/db.ts');
+const {removeChannelPackage,isPackageName,channelPackageTarget}=await import('../core/server/src/channels/loader.ts');
+const {guardExtension}=await import('../core/server/src/pi/guard.ts');
+const {skillsRouter}=await import('../core/server/src/api/skills.ts');
+const {bindHost,loginThrottle,portalSecurityHeaders}=await import('../core/server/src/http-security.ts');
+const {getDb}=await import('../core/server/src/db.ts');
 test.after(()=>getDb().close());
 
 test('reject traversal and npm flags before package removal; permit scoped names',async()=>{

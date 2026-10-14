@@ -78,9 +78,9 @@ globalThis.fetch = (async (url: any) => new Response('{}', { status: unhealthy.s
 after(async () => {
   globalThis.fetch = oldFetch;
 });
-const voice = await import('../server/src/extensions/voice-service.js');
-const { DEFAULT_CHOICE } = await import('../server/src/voice-engines.js');
-const { NO_GPU_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, DRIVER_TOO_OLD_MESSAGE } = await import('../server/src/voice-gpu.js');
+const voice = await import('../core/server/src/extensions/voice-service.js');
+const { DEFAULT_CHOICE } = await import('../core/server/src/voice-engines.js');
+const { NO_GPU_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, DRIVER_TOO_OLD_MESSAGE } = await import('../core/server/src/voice-gpu.js');
 
 // What the host has to run recognition on: sixteen GiB and eight threads, unless a test says otherwise.
 const host = (patch = {}) => { voice.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8, ...patch }); };
