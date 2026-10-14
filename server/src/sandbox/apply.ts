@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, chownSync, closeSync, constants, existsSync, fchmodSync, fchownSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, closeSync, constants, existsSync, fchmodSync, fchownSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getSetting, putSetting } from "../db.js";
@@ -70,14 +70,23 @@ const DOCS_AUDITED = ".audited";
 
 /**
  * `dir` and what is in it, owned by this process and closed to group and others, through descriptors: never through a
- * link. `forget` is a name in `dir` itself that is removed once `dir` is closed (and so cannot be made again).
+ * link. `forget` is a name in `dir` itself that is unlinked once `dir` is closed (and so cannot be made again). Only
+ * unlinked, never removed with what is below it: a folder in its place is the agent's, and may be changed under a
+ * removal that walks it, so it is left (closed like the rest) and reported.
  */
 function closeTree(dir: string, uid: number, gid: number, forget?: string) {
   const fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  let left: unknown;
   try {
     fchownSync(fd, uid, gid);
     fchmodSync(fd, 0o700);
-    if (forget) rmSync(`/proc/self/fd/${fd}/${forget}`, { recursive: true, force: true });
+    if (forget) {
+      try {
+        unlinkSync(`/proc/self/fd/${fd}/${forget}`);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") left = new Error(`${forget} could not be unlinked and was left (the store is refused until it is removed): ${(e as Error).message}`);
+      }
+    }
     // Below an open folder, so a name swapped for a link in the meantime is not followed.
     const here = `/proc/self/fd/${fd}`;
     for (const entry of readdirSync(here, { withFileTypes: true })) {
@@ -92,6 +101,7 @@ function closeTree(dir: string, uid: number, gid: number, forget?: string) {
         }
       }
     }
+    if (left) throw left;
   } finally {
     closeSync(fd);
   }

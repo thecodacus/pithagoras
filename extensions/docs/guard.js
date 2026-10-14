@@ -21,7 +21,7 @@
  * without it is opened again and walked again: once per such time, not per
  * request.
  */
-import { closeSync, constants, fchmodSync, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, chmodSync, openSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, chmodSync, openSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { DocError } from "./errors.js";
@@ -33,6 +33,57 @@ const AUDITED = ".audited";
 
 /** What git trusts in a repository besides its objects, that could send it elsewhere or make it run something: gone or written new. */
 const MISTRUSTED = ["commondir", "config.worktree", "shallow", "hooks", "info/grafts", "info/attributes", "objects/info/alternates", "objects/info/http-alternates"];
+const OPEN_DIR = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+
+/**
+ * `name` in the folder `parent` taken away: a file, link or pipe by its own name (never what a link leads to), a folder
+ * after what is in it. This runs as root on what an agent of the sandbox could shape, so a folder is never removed by
+ * its path (`rmSync` with `recursive` walks by path, and on some Node versions follows a folder swapped for a link
+ * while it works): each is opened without following a link, and emptied through that descriptor.
+ */
+function removeEntry(parent, name) {
+  const place = `${parent}/${name}`;
+  let stat;
+  try {
+    stat = lstatSync(place);
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    throw e;
+  }
+  if (!stat.isDirectory()) {
+    unlinkSync(place);
+    return;
+  }
+  const fd = openSync(place, OPEN_DIR);
+  try {
+    const here = Guard.pinning ? `/proc/self/fd/${fd}` : place;
+    for (const entry of readdirSync(here)) removeEntry(here, entry);
+  } finally {
+    closeSync(fd);
+  }
+  rmdirSync(place);
+}
+
+/** `rel` (names joined by `/`) below the folder `root` taken away, each folder on the way opened without following a link. Nothing there is nothing to do. */
+function removeBelow(root, rel) {
+  const parts = rel.split("/");
+  const name = parts.pop();
+  const opened = [];
+  try {
+    let here = root;
+    for (const part of parts) {
+      const fd = openSync(`${here}/${part}`, OPEN_DIR);
+      opened.push(fd);
+      here = Guard.pinning ? `/proc/self/fd/${fd}` : `${here}/${part}`;
+    }
+    removeEntry(here, name);
+  } catch (e) {
+    if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;
+  } finally {
+    for (const fd of opened) closeSync(fd);
+  }
+}
+
 /** What `git init` makes of `config`, without the work tree it names: the one every run names itself. */
 const CONFIG = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n";
 
@@ -166,7 +217,13 @@ export class Guard {
   audit() {
     this.audited = false;
     this.#own();
-    rmSync(this.at(AUDITED), { recursive: true, force: true });
+    // By its name only: whatever else an agent put there (a folder) is not descended into, and refuses the store.
+    try {
+      unlinkSync(this.at(AUDITED));
+    } catch (e) {
+      if (e.code === "EISDIR" || e.code === "EPERM") throw new DocError(409, "The documents store holds something that is not its own");
+      if (e.code !== "ENOENT") throw e;
+    }
     writeFileSync(this.at(AUDITED), "", { flag: "wx", mode: 0o600 });
     this.#walk("", 0);
     this.#control();
@@ -180,7 +237,7 @@ export class Guard {
     } catch {
       return;
     }
-    for (const name of MISTRUSTED) rmSync(this.at(`git/${name}`), { recursive: true, force: true });
+    for (const name of MISTRUSTED) removeBelow(this.at("git"), name);
     const temp = this.at(`git/config.${randomBytes(6).toString("hex")}.tmp`);
     writeFileSync(temp, CONFIG, { flag: "wx", mode: 0o600 });
     renameSync(temp, this.at("git/config"));

@@ -675,6 +675,75 @@ test('a held store is looked over again when the sandbox has had it open, and no
   }
 });
 
+/** What an agent leaves in the place of the store's audited mark: a folder with a folder, a file and a link to a folder outside the store in it. */
+function plantMarkFolder(store: string, outside: string) {
+  const mark = path.join(store, '.audited');
+  rmSync(mark, { force: true });
+  mkdirSync(path.join(mark, 'sub'), { recursive: true });
+  writeFileSync(path.join(mark, 'sub', 'file'), 'the agent\'s');
+  symlinkSync(outside, path.join(mark, 'link'));
+  return mark;
+}
+
+test('a folder made in the place of the audited mark while the sandbox had the store open is not removed with what is in it when the sandbox closes the store, and the store is refused', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-mark-close-');
+  const outside = folderWith('docs-store-mark-close-outside-', { 'victim.txt': 'not the store' });
+  try {
+    assert.equal((await docs.call('GET', url)).status, 200);
+    const mark = plantMarkFolder(path.join(folder, '.pithagoras-docs'), outside);
+    // A removal that walks a folder an agent can change under it may be led out of the store: the folder is left where it is.
+    prepareFolder(folder);
+    assert.ok(existsSync(path.join(mark, 'sub', 'file')), 'left, not removed with what is in it');
+    assert.deepEqual(loose(folder), [], 'closed like the rest of the store');
+    const answered = await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
+    assert.equal(answered.status, 409, JSON.stringify(answered.body));
+    assert.match(answered.body.error, /not its own/);
+    assert.ok(existsSync(path.join(mark, 'sub', 'file')), 'and still, when the store was refused');
+    assert.equal(readFileSync(path.join(outside, 'victim.txt'), 'utf8'), 'not the store');
+    // Taken away by whoever owns the folder, the store is used again.
+    rmSync(mark, { recursive: true });
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a folder in the place of the audited mark is not removed with what is in it when the store is opened, and the store is refused', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-mark-open-');
+  await docs.close();
+  const outside = folderWith('docs-store-mark-open-outside-', { 'victim.txt': 'not the store' });
+  const mark = plantMarkFolder(path.join(folder, '.pithagoras-docs'), outside);
+  const again = await portal({ a: folder });
+  try {
+    const answered = await again.call('GET', url);
+    assert.equal(answered.status, 409, JSON.stringify(answered.body));
+    assert.match(answered.body.error, /not its own/);
+    assert.ok(existsSync(path.join(mark, 'sub', 'file')), 'left, not removed with what is in it');
+    assert.equal(readFileSync(path.join(outside, 'victim.txt'), 'utf8'), 'not the store');
+  } finally {
+    await again.close();
+  }
+});
+
+test('a folder git reads from that an agent filled is taken away with what is in it, through the folders opened, and nothing else', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-hooks-');
+  await docs.close();
+  const store = path.join(folder, '.pithagoras-docs');
+  const outside = folderWith('docs-store-hooks-outside-', { 'victim.txt': 'not the store' });
+  mkdirSync(path.join(store, 'git', 'hooks', 'sub', 'deep'), { recursive: true });
+  writeFileSync(path.join(store, 'git', 'hooks', 'sub', 'deep', 'pre-commit'), '#!/bin/sh\n');
+  writeFileSync(path.join(store, 'git', 'hooks', 'post-commit'), '#!/bin/sh\n');
+  const again = await portal({ a: folder });
+  try {
+    assert.equal((await again.call('GET', url)).status, 200);
+    assert.equal(existsSync(path.join(store, 'git', 'hooks')), false);
+    assert.equal(readFileSync(path.join(outside, 'victim.txt'), 'utf8'), 'not the store');
+    assert.equal(git(folder, 'show', 'HEAD:plan.md'), '# Plan\n\nOne.');
+  } finally {
+    await again.close();
+  }
+});
+
 test('a link planted in a store the portal holds while the sandbox had it open to the group is refused once it is closed again, not followed', async () => {
   const { folder, docs, url } = await withDocument('docs-store-window-link-');
   const outside = folderWith('docs-store-window-link-target-', { 'objects.txt': 'what the agent chose' });
