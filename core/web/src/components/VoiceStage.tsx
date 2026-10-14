@@ -10,7 +10,9 @@ import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuTer
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
-import { ACTIONS, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
+import { actions as actionList, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
+import { runShortcut } from "../extensions/shortcuts";
+import type { ToolCallView, VoiceWindows } from "@pithagoras/extension-api";
 import { MIN, clearOfDock, dockBox, dockSize, freeStrip, placeWindows, type Orb } from "../voice-windows";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { LuPuzzle } from "react-icons/lu";
@@ -72,6 +74,23 @@ function BroughtWindow({ entry, main, onClose, ...props }: ChatProps & { entry: 
       <ResizeHandles target={section} />
     </section>
   );
+}
+
+/**
+ * What opens an extension's window by itself (`useAutoOpen`): a count of the
+ * extension's, called as a hook while voice mode is on, that opens the window
+ * each time it grows. Where it stands when voice mode begins opens nothing.
+ */
+function AutoOpener({ entry, onGrow, ...props }: ChatProps & { entry: Registered<"voice.window">; onGrow: () => void }) {
+  const count = entry.useAutoOpen!(props);
+  const seen = useRef(count);
+  const grow = useRef(onGrow);
+  grow.current = onGrow;
+  useEffect(() => {
+    if (count > seen.current) grow.current();
+    seen.current = count;
+  }, [count]);
+  return null;
 }
 
 export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue,
@@ -136,6 +155,23 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const brought = windowEntries.filter((entry) => broughtOpen.includes(entry.key));
   const broughtShown = Object.fromEntries(brought.map((entry) => [`x:${entry.key}`, true])) as Record<`x:${string}`, boolean>;
   const closeBrought = (key: string) => setBroughtOpen((open) => open.filter((k) => k !== key));
+  const openBrought = (key: string) => { setBroughtOpen((open) => (open.includes(key) ? open : [...open, key])); onCue("focus"); };
+  /** An extension's own windows, by the ids it registered them with: for its shortcuts. */
+  const windowsOf = (extension: string): VoiceWindows => ({
+    isOpen: (id) => broughtOpen.includes(`${extension}/${id}`),
+    open: (id) => { if (windowEntries.some((entry) => entry.key === `${extension}/${id}`)) openBrought(`${extension}/${id}`); },
+    close: (id) => closeBrought(`${extension}/${id}`),
+  });
+  /** The window an extension brought for a call, when one says it is for it (`opensFor`). */
+  const windowFor = (call: ToolCallView) =>
+    windowEntries.find((entry) => {
+      try {
+        return entry.opensFor?.(call) === true;
+      } catch (e) {
+        console.error(`[extensions] ${entry.extension} failed on being asked whether its window is for a call:`, e);
+        return false;
+      }
+    });
   const chat = useMemo(() => ({ id: sessionId, title, workspace: folder }), [sessionId, title, folder]);
   useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown, pictures: picturesShown, conversation, ...broughtShown }, panel => {
     if (panel.startsWith("x:")) closeBrought(panel.slice(2)); else
@@ -154,7 +190,10 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // and Files and pictures wherever is left (see voice-windows.ts). The stage's
   // classes say whether there is a window in the middle and one at the side,
   // for where the orb goes; which window is open is the window's own `is-open`.
-  const place = placeWindows({ browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown });
+  const place = placeWindows(
+    { browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown },
+    Object.fromEntries(brought.filter((entry) => entry.place).map((entry) => [`x:${entry.key}`, entry.place])),
+  );
   const filesMain = place.main === "files", picturesMain = place.main === "pictures", conversationMain = place.main === "conversation";
   const browsing = !!place.main;
   const sideWindow = !!place.side;
@@ -199,7 +238,12 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const openTerminal = () => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); };
   const openPictures = () => { setPictureIndex(Math.max(0, pictures.length - 1)); setPicturesShown(true); onCue("focus"); };
   /** A tool card was tapped: bring up what it was about. */
-  const openCall = (call: ToolCall) => {
+  const openCall = (call: ToolCall, view: ToolCallView) => {
+    if (!call.target) {
+      const entry = windowFor(view);
+      if (entry) openBrought(entry.key);
+      return;
+    }
     if (call.target === "files" && call.path) {
       const seq = toolEvents.reduce((n, e) => Math.max(n, e.seq), fileActivity?.seq ?? 0) + 0.5;
       if (!filesUsed) { setFilesSince(seq - 1); setFilesUsed(true); }
@@ -252,7 +296,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     "voice.sounds": () => { onSounds(); },
   };
   const maximized = browserMax && shown;
-  const keys = useRef({ bindings, actions, ptt, onHold, maximized }); keys.current = { bindings, actions, ptt, onHold, maximized };
+  const keys = useRef({ bindings, actions, ptt, onHold, maximized, chat, windowsOf }); keys.current = { bindings, actions, ptt, onHold, maximized, chat, windowsOf };
   useEffect(() => {
     // In the capture phase, before a focused button: holding Space for
     // push-to-talk would otherwise also press whatever button has focus.
@@ -273,8 +317,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         if (!e.repeat) onHold(true);
         return;
       }
-      for (const action of ACTIONS) {
-        const act = actions[action.id];
+      for (const action of actionList()) {
+        const act = action.extension ? () => runShortcut(action.id, keys.current.chat, keys.current.windowsOf) : actions[action.id];
         if (!act || !matches(bindings[action.id], e)) continue;
         const b = bindings[action.id]!;
         if (typing && !(b.ctrl || b.alt || b.meta)) return;
@@ -458,7 +502,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`${t("Show browser")}${hint("voice.browser")}`} aria-label={t("Show browser")}><LuGlobe /></button>}
         {!terminalShown && <button type="button" aria-label={t("Show terminal")} title={`${t("Show terminal")}${hint("voice.terminal")}`} onClick={openTerminal}><LuTerminal /></button>}
         {windowEntries.filter((entry) => !broughtOpen.includes(entry.key)).map((entry) => (
-          <button key={entry.key} type="button" aria-label={t("Show {panel}", { panel: entry.title })} title={entry.title} onClick={() => { setBroughtOpen((open) => [...open, entry.key]); onCue("focus"); }}>
+          <button key={entry.key} type="button" aria-label={t("Show {panel}", { panel: entry.title })} title={entry.title} onClick={() => openBrought(entry.key)}>
             {entry.icon ? <entry.icon /> : <LuPuzzle />}
           </button>
         ))}
@@ -509,7 +553,12 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       <BroughtWindow key={entry.key} entry={entry} main={place.main === `x:${entry.key}`} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)}
         onClose={() => { closeBrought(entry.key); end.current?.focus({ preventScroll: true }); }} />
     ))}
-    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} />
+    {windowEntries.filter((entry) => entry.useAutoOpen).map((entry) => (
+      <ErrorBoundary key={`${entry.key}:${sessionId}`} resetKey={`${entry.key}:${sessionId}`} fallback={() => null}>
+        <AutoOpener entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} onGrow={() => openBrought(entry.key)} />
+      </ErrorBoundary>
+    ))}
+    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} opens={(view) => windowFor(view)?.title} />
     <div className="voice-presence">
       {/* With push-to-talk on, the orb can be held as well as the microphone button: it is the big target on a phone. */}
       <div className={`voice-avatar ${ptt ? "is-holdable" : ""}`} {...(ptt && !starting ? holdHandlers : {})}><VoiceOrb mode={mode} levels={levels} look={orbStyle} /></div>

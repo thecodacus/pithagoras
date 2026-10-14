@@ -17,7 +17,7 @@ import { memo, useSyncExternalStore, type ComponentType } from "react";
 import type { Entry, SlotName } from "@pithagoras/extension-api";
 export type { Channel, Chat, ChatProps, Entry, PanelHandle, PanelProps, Panels, SlotMap, SlotName, ToolCallView } from "@pithagoras/extension-api";
 
-const SLOTS: readonly SlotName[] = ["chat.panel", "chat.header.action", "chat.background", "chat.overlay", "chat.composer.above", "chat.tool", "voice.window", "nav.page", "settings.page"];
+const SLOTS: readonly SlotName[] = ["chat.panel", "chat.header.action", "chat.background", "chat.overlay", "chat.composer.above", "chat.tool", "chat.tool.action", "voice.window", "nav.page", "settings.page"];
 
 /** An entry as the portal holds it. `key` is its name among all the slot's entries. */
 export type Registered<S extends SlotName> = Entry<S> & { extension: string; key: string };

@@ -54,6 +54,7 @@ import { useSlot, type ChatProps, type PanelHandle, type Panels, type Registered
 import { channelFor } from "../extensions/channel";
 import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
 import { setPanelController, type PanelController } from "../extensions/panels";
+import { runCommand, useHasCommand } from "../extensions/commands";
 import { tabKeys } from "../tab-keys";
 import { STEP, arrowSteps } from "../resize-keys";
 
@@ -312,6 +313,10 @@ export function Chat({
     setTerminalTab("jobs");
     setTerminal(true);
   };
+  // A job in the running tray is shown where an extension says jobs are shown (`jobs.show`), and in the portal's
+  // own terminal while there is none.
+  const jobsShown = useHasCommand("jobs.show");
+  const showJob = (key: string) => (jobsShown ? void runCommand("jobs.show", { chat: session.id, job: key }) : openJob(key));
   /** A command from the chat, found in the agent terminal. */
   const showInTerminal = (callId: string) => {
     setTerminalTab("agent");
@@ -1655,10 +1660,13 @@ export function Chat({
     ));
 
   // The panels by name, for anything in the page: see extensions/panels.ts. Read as they are when asked.
+  // An extension's panel goes by its key ("<package>/<id>") or by the name it gave itself (`name`), the first
+  // loaded having a name two give; the portal's own names are the portal's while those panels are its own.
+  const panelKey = (key: string) => (panelEntries.some((entry) => entry.key === key) ? key : panelEntries.find((entry) => entry.name === key)?.key);
   const panelControl = useRef<PanelController>({ isOpen: () => false, open: () => {}, close: () => {} });
   panelControl.current = {
     isOpen: (key) =>
-      key === "files" ? files : key === "git" ? git : key === "terminal" ? terminal : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(key),
+      key === "files" ? files : key === "git" ? git : key === "terminal" ? terminal : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(panelKey(key) ?? key),
     open: (key, params) => {
       const given = (params ?? {}) as { path?: unknown; callId?: unknown; id?: unknown };
       if (key === "files") {
@@ -1669,13 +1677,16 @@ export function Chat({
       else if (key === "browser") setWatching(true);
       else if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
       else if (key === "canvas") setCanvasOpen(true);
-      else if (panelEntries.some((entry) => entry.key === key)) showExtensionPanel(key, true, params);
-      else throw new Error(`There is no panel called "${key}"`);
+      else {
+        const found = panelKey(key);
+        if (!found) throw new Error(`There is no panel called "${key}"`);
+        showExtensionPanel(found, true, params);
+      }
     },
     close: (key) => {
       if (key === "canvas") setCanvasOpen(false);
       else if (key in closeOwn) closeOwn[key as OwnPanel]();
-      else showExtensionPanel(key, false);
+      else showExtensionPanel(panelKey(key) ?? key, false);
     },
   };
   useEffect(() => {
@@ -2203,7 +2214,7 @@ export function Chat({
           statuses={background.statuses}
           commands={commandNames}
           onAgent={openAgent}
-          onJob={openJob}
+          onJob={showJob}
           onCommand={(command) => attempt(() => submit(command, false))}
         />
         <DictationStrip dictation={dictation} />

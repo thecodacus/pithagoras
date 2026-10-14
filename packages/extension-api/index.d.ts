@@ -77,11 +77,16 @@ export interface SlotMap {
    * portal's own. The chat's header has its button. `header` is drawn in its
    * head in place of its title (tabs, a count), `actions` before its close
    * button. `useButton` is a hook, called as the chat's header is drawn: how
-   * its button is for this chat.
+   * its button is for this chat. `name` is a name of its own that
+   * `portal.panels.open(name, params)` reaches it by, from anywhere: the
+   * portal's own panels go by "files", "git", "terminal", "browser", "agents"
+   * and "canvas", and while one of those is the portal's, it is the one.
+   * Of two extensions that name a panel alike, the first loaded has it.
    */
   "chat.panel": {
     entry: {
       title: string;
+      name?: string;
       icon?: ComponentType;
       header?: ComponentType<PanelProps>;
       actions?: ComponentType<PanelProps>;
@@ -99,8 +104,33 @@ export interface SlotMap {
   "chat.composer.above": { entry: {}; props: ChatProps };
   /** How a call of one tool is drawn in the conversation, in place of the portal's card for it. `card` is that card. */
   "chat.tool": { entry: { tool: string }; props: ChatProps & { call: ToolCallView; card: ReactNode } };
-  /** A window in voice mode, placed and sized like the portal's own. */
-  "voice.window": { entry: { title: string; icon?: ComponentType }; props: ChatProps & { close(): void } };
+  /**
+   * Something to do with a call of a tool, drawn on the portal's card for it
+   * when it is opened, under what the call returned: "Open in the terminal".
+   * `tool` is the tool's name, or a pattern of names; without it, every call.
+   * `cut` is whether the card shows only the end of the output. The
+   * component draws nothing for a call it has nothing for. `ui.ToolLink` is
+   * the portal's own look for it.
+   */
+  "chat.tool.action": { entry: { tool?: string | RegExp }; props: { call: ToolCallView; cut: boolean; panels: Panels } };
+  /**
+   * A window in voice mode, placed and sized like the portal's own. `place`
+   * is where it goes when it has the choice: at the side, or in the middle.
+   * `useAutoOpen` is a hook, called while voice mode is on in a chat: a count
+   * that opens the window each time it grows (the agent ran a command). A
+   * card of a call in voice mode that `opensFor` says yes to opens it when
+   * tapped. Its own shortcut is `portal.shortcuts`.
+   */
+  "voice.window": {
+    entry: {
+      title: string;
+      icon?: ComponentType;
+      place?: "side" | "middle";
+      useAutoOpen?: (props: ChatProps) => number;
+      opensFor?: (call: ToolCallView) => boolean;
+    };
+    props: ChatProps & { close(): void };
+  };
   /** A page of the portal, at /x/<extension>/<id>, with an entry in the sidebar. */
   "nav.page": { entry: { title: string; icon?: ComponentType }; props: {} };
   /** The extension's page in Settings, above the fields the portal found for it. */
@@ -264,6 +294,8 @@ export interface Ui {
   /** Draws `fallback` in place of what it holds when that fails to draw, until `resetKey` changes. */
   ErrorBoundary: ComponentType<{ resetKey: string; fallback?: (error: Error) => ReactNode; children: ReactNode }>;
   PartFailed: ComponentType<{ error: Error }>;
+  /** A link on a tool call's card, as the portal's own are drawn: for `chat.tool.action`. */
+  ToolLink: ComponentType<{ icon?: ComponentType<{ "aria-hidden"?: boolean }>; onClick: () => void; children: ReactNode }>;
   /** A question with two answers, asked over the page: resolves true for yes. */
   confirm(options: ConfirmOptions): Promise<boolean>;
   /** The look of the portal's own fields and buttons, as class names for a `className`. */
@@ -278,6 +310,40 @@ export interface Ui {
   useNow(on: boolean, every?: number): number;
   /** Arrow keys for a row of tabs: on the element with `role="tablist"`. */
   tabKeys(event: KeyboardEvent<HTMLElement>): void;
+}
+
+// --- shortcuts ---
+
+/** A key, as the keyboard has it whatever the layout (`KeyboardEvent.code`), with its modifiers. */
+export interface KeyBinding {
+  code: string;
+  ctrl?: boolean;
+  alt?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+}
+
+/** The extension's own voice windows in the chat on screen, by the id each was registered with. */
+export interface VoiceWindows {
+  isOpen(id: string): boolean;
+  open(id: string): void;
+  close(id: string): void;
+}
+
+/**
+ * A keyboard shortcut of the extension's, listed in Settings → Shortcuts with
+ * the portal's own and changed there the same way. `default` is the key it
+ * has until someone chooses another, or null for none: a key the portal or
+ * another extension has already is not taken from it. `run` returns false
+ * when it had nothing to do, and the key goes on to whatever else wants it.
+ * Voice-mode shortcuts work while voice mode is on, except while typing.
+ */
+export interface Shortcut {
+  id: string;
+  label: string;
+  scope: "voice";
+  default: KeyBinding | null;
+  run(context: { chat: Chat; windows: VoiceWindows }): boolean | void;
 }
 
 // --- the portal ---
@@ -331,6 +397,10 @@ export interface Portal {
     use<T = ChatFeed>(chatId: string, pick?: (feed: ChatFeed) => T, same?: (a: T, b: T) => boolean): T;
     /** The same outside a component: told each time the chat changes. Returns the unsubscribe. */
     on(chatId: string, handler: (feed: ChatFeed) => void): () => void;
+  };
+  shortcuts: {
+    /** A shortcut of the extension's: see `Shortcut`. Its label is translated as the extension's own texts are. */
+    register(shortcut: Shortcut): () => void;
   };
   server: {
     /** What the package's server half says to the pages open on a chat, whichever chat. */

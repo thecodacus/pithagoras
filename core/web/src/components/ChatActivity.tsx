@@ -25,6 +25,7 @@ import { formatElapsed, formatTokens, lineCount, prefillShare, promptLabel, show
 import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 import { argLabel, isBlock, isScalar } from "../tool-args";
 import { useFollowBottom } from "../use-follow-bottom";
+import { ToolActions } from "../extensions/ToolView";
 import { formatNumber, t, tp } from "../i18n";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -396,6 +397,7 @@ export function ToolCall({
           ) : (
             item.status === "running" && <div className="chat-tool-label"><Shimmer>{t("Waiting for output…")}</Shimmer></div>
           )}
+          <ToolActions item={item} cut={clipped} />
           {shell && onOpenTerminal && item.callId && (
             <button type="button" className="chat-tool-link" onClick={() => onOpenTerminal(item.callId!)}>
               <LuSquareTerminal aria-hidden />

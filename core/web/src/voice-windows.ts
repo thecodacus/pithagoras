@@ -6,15 +6,33 @@
  * fill whichever is left, the side first — beside a full orb, which moves over for it — and
  * the middle when the side is taken. At most two are open at once (see
  * use-work-panels.ts), so there is always a place. A window an extension
- * brought (`x:<extension>/<id>`) is placed as those three are, after them.
+ * brought (`x:<extension>/<id>`) is placed as those three are, after them,
+ * unless it says where it goes (`place`): then it is placed as the browser
+ * and the terminal are, at the side or in the middle, and in the other place
+ * when that one is taken.
  */
 export type VoiceWindow = "browser" | "terminal" | "files" | "pictures" | "conversation" | `x:${string}`;
 
-export function placeWindows(open: Partial<Record<VoiceWindow, boolean>>): { main?: VoiceWindow; side?: VoiceWindow } {
+export function placeWindows(
+  open: Partial<Record<VoiceWindow, boolean>>,
+  /** Where a window an extension brought goes when it has the choice (its entry's `place`). */
+  wants: Partial<Record<VoiceWindow, "side" | "middle">> = {},
+): { main?: VoiceWindow; side?: VoiceWindow } {
   let main: VoiceWindow | undefined = open.browser ? "browser" : undefined;
   let side: VoiceWindow | undefined = open.terminal ? "terminal" : undefined;
-  const brought = (Object.keys(open) as VoiceWindow[]).filter((window) => window.startsWith("x:"));
-  for (const window of ["conversation", "files", "pictures", ...brought] as const) {
+  const brought = (Object.keys(open) as VoiceWindow[]).filter((window) => window.startsWith("x:") && open[window]);
+  // One that says where it goes is placed as the browser and the terminal are, before those that take whatever is left;
+  // where its place is taken, it has the other.
+  for (const window of brought) {
+    const want = wants[window];
+    if (!want) continue;
+    if (want === "side") {
+      if (!side) side = window;
+      else if (!main) main = window;
+    } else if (!main) main = window;
+    else if (!side) side = window;
+  }
+  for (const window of ["conversation", "files", "pictures", ...brought.filter((window) => !wants[window])] as const) {
     if (!open[window]) continue;
     if (!side) side = window;
     else if (!main) main = window;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { local } from "./safe-storage";
 
 import { msg, tc } from "./i18n";
@@ -24,7 +24,10 @@ export interface Binding {
   meta?: boolean;
 }
 
-export type ActionId =
+/** The portal's own actions, and an extension's shortcut (`x:<package>/<id>`, see extensions/shortcuts.ts). */
+export type ActionId = CoreActionId | `x:${string}`;
+
+type CoreActionId =
   | "voice.toggle"
   | "voice.mute"
   | "voice.hold"
@@ -54,6 +57,8 @@ export interface Action {
   /** Works while typing in a field too; only sensible with a modifier. */
   anywhere?: boolean;
   default: Binding | null;
+  /** An extension's shortcut, by the extension's name: its label is the extension's own text. */
+  extension?: string;
 }
 
 export const ACTIONS: Action[] = [
@@ -76,6 +81,40 @@ export const ACTIONS: Action[] = [
   { id: "voice.ptt", label: msg("Turn push-to-talk on or off"), scope: "Voice mode", default: { code: "KeyH" } },
   { id: "voice.sounds", label: msg("Turn sound effects on or off"), scope: "Voice mode", default: { code: "KeyM", shift: true } },
 ];
+
+/** The extensions' shortcuts, after the portal's own, in the order they were added. */
+const added = new Map<ActionId, Action>();
+let listed: readonly Action[] = ACTIONS;
+function listChanged() {
+  listed = [...ACTIONS, ...added.values()];
+  window.dispatchEvent(new Event(CHANGED));
+}
+
+/** Every action there is now: the portal's own, then the extensions'. */
+export const actions = (): readonly Action[] => listed;
+
+/** An extension's shortcut, listed and changed with the portal's own. Returns what takes it out again. */
+export function addAction(action: Action): () => void {
+  if (listed.some((a) => a.id === action.id)) throw new Error(`There is already a shortcut called "${action.id}"`);
+  added.set(action.id, action);
+  listChanged();
+  return () => {
+    if (added.get(action.id) !== action) return;
+    added.delete(action.id);
+    listChanged();
+  };
+}
+
+/** Every action there is, drawn again when one is added or taken out. */
+export function useActions(): readonly Action[] {
+  return useSyncExternalStore(
+    (changed) => {
+      window.addEventListener(CHANGED, changed);
+      return () => window.removeEventListener(CHANGED, changed);
+    },
+    actions,
+  );
+}
 
 export interface FixedShortcut {
   label: string;
@@ -106,15 +145,20 @@ const isBinding = (v: unknown): v is Binding => !!v && typeof (v as Binding).cod
  */
 export const movesFocus = (b: { code: string; ctrl?: boolean; alt?: boolean; meta?: boolean }): boolean => b.code === "Tab" && !b.ctrl && !b.alt && !b.meta;
 
-/** What was chosen in this browser, as stored: only what differs from the defaults. */
+/**
+ * What was chosen in this browser, as stored: only what differs from the
+ * defaults. An extension's choice is kept while the extension is not in the
+ * page (switched off for a while): it has it back when it comes back.
+ */
 function stored(): Stored {
   try {
     const raw = JSON.parse(local.get(STORE) ?? "{}");
     const out: Stored = {};
-    for (const action of ACTIONS) {
-      const v = raw?.[action.id];
-      if (v === null) out[action.id] = null;
-      else if (isBinding(v) && !movesFocus(v)) out[action.id] = normalize(v);
+    const ids = new Set<string>([...ACTIONS.map((a) => a.id), ...Object.keys(raw ?? {}).filter((id) => id.startsWith("x:"))]);
+    for (const id of ids as Set<ActionId>) {
+      const v = raw?.[id];
+      if (v === null) out[id] = null;
+      else if (isBinding(v) && !movesFocus(v)) out[id] = normalize(v);
     }
     return out;
   } catch {
@@ -133,10 +177,18 @@ const normalize = (b: Binding): Binding => ({
 export const same = (a: Binding | null | undefined, b: Binding | null | undefined): boolean =>
   !!a && !!b && a.code === b.code && !!a.ctrl === !!b.ctrl && !!a.alt === !!b.alt && !!a.shift === !!b.shift && !!a.meta === !!b.meta;
 
-/** Every action's shortcut now: the chosen one, or the default. `null` is none. */
+/**
+ * Every action's shortcut now: the chosen one, or the default. `null` is none.
+ * An extension's default that another action has already is not taken from
+ * it: that shortcut has none until one is chosen for it.
+ */
 export function resolve(choice: Stored = stored()): Record<ActionId, Binding | null> {
   const out = {} as Record<ActionId, Binding | null>;
-  for (const action of ACTIONS) out[action.id] = action.id in choice ? choice[action.id]! : action.default;
+  for (const action of listed) {
+    if (action.id in choice) out[action.id] = choice[action.id]!;
+    else if (action.extension && action.default && Object.values(out).some((b) => same(b, action.default))) out[action.id] = null;
+    else out[action.id] = action.default;
+  }
   return out;
 }
 
@@ -156,11 +208,11 @@ export function assign(id: ActionId, binding: Binding | null, current: Stored = 
   const choice: Stored = { ...current };
   let took: ActionId | undefined;
   if (binding) {
-    for (const action of ACTIONS) {
+    for (const action of listed) {
       if (action.id !== id && same(resolved[action.id], binding)) { choice[action.id] = null; took = action.id; }
     }
   }
-  const def = ACTIONS.find(a => a.id === id)!.default;
+  const def = listed.find(a => a.id === id)!.default;
   if (binding ? same(binding, def) : def === null) delete choice[id];
   else choice[id] = binding ? normalize(binding) : null;
   return { choice, took };
@@ -173,7 +225,7 @@ export function setBinding(id: ActionId, binding: Binding | null): ActionId | un
 }
 
 export function resetBinding(id: ActionId): ActionId | undefined {
-  return setBinding(id, ACTIONS.find(a => a.id === id)!.default);
+  return setBinding(id, listed.find(a => a.id === id)!.default);
 }
 
 export function resetAll() {

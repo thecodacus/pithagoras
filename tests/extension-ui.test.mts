@@ -484,6 +484,17 @@ test('a package is told apart by what it brings: something for pi, something for
   assert.deepEqual(packageKinds(scratch('extension-kinds-')), []);
 });
 
+test('a window an extension brought that asks for a place has it before those that take what is left, and the other place when it is taken', () => {
+  assert.deepEqual(placeWindows({ 'x:a/w': true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: undefined });
+  assert.deepEqual(placeWindows({ 'x:a/w': true, files: true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: 'files' });
+  assert.deepEqual(placeWindows({ conversation: true, 'x:a/w': true }, { 'x:a/w': 'side' }), { main: 'conversation', side: 'x:a/w' });
+  // The browser has the middle, the terminal the side: it is given the other.
+  assert.deepEqual(placeWindows({ browser: true, 'x:a/w': true }, { 'x:a/w': 'middle' }), { main: 'browser', side: 'x:a/w' });
+  assert.deepEqual(placeWindows({ terminal: true, 'x:a/w': true }, { 'x:a/w': 'side' }), { main: 'x:a/w', side: 'terminal' });
+  // Without a place it is placed as before, after the portal's own.
+  assert.deepEqual(placeWindows({ conversation: true, 'x:a/w': true }), { main: 'x:a/w', side: 'conversation' });
+});
+
 const feedOf = (n: number) => ({ events: Array.from({ length: n }, (_, i) => ({ seq: i + 1, type: 'x', payload: {} })), items: [], running: false, loading: false });
 const quiet = async (work: () => void) => {
   const said = console.error;

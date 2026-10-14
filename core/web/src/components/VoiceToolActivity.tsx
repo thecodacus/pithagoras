@@ -8,6 +8,7 @@ import { shownPicture } from '../transcript';
 import { GENERATED_PICTURE_MARK } from '../../../server/src/generated-picture';
 import { msg, t } from "../i18n";
 import { ImagePreview } from './ImagePreview';
+import type { ToolCallView } from '@pithagoras/extension-api';
 
 /** A card for one tool call, in one of four places around the orb. */
 type Card = ToolCall & {
@@ -43,10 +44,16 @@ const TARGET: Record<ToolTarget, string> = {
  * that faded after eight seconds said nothing about the minutes after — and
  * shows how long it has been. When the call ends it says what came of it, and
  * goes a few seconds later. One that can be looked at opens it when tapped:
- * the file in Files, the terminal, the browser, the document, the picture.
+ * the file in Files, the terminal, the browser, the document, the picture,
+ * or a window an extension brought for it (`opens` names it).
  * That is a role it takes on, not another element: see the card below.
  */
-export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { events: PortalEvent[]; sessionId: string; folder: string; onOpen: (call: ToolCall) => void }) {
+export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens }: {
+  events: PortalEvent[]; sessionId: string; folder: string;
+  onOpen: (call: ToolCall, view: ToolCallView) => void;
+  /** The title of a window an extension brought for a call, when one is for it. */
+  opens?: (view: ToolCallView) => string | undefined;
+}) {
   const seen = useRef(events.reduce((n, e) => Math.max(n, e.seq), 0));
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const cards = useRef<Card[]>([]);
@@ -125,13 +132,21 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen }: { event
       // One element for the card's whole life, a button only by its role: a card that is given something to
       // open when its call ends (a generate_image's picture) would otherwise be a new element, flying out of the
       // orb again and read out again by a screen reader.
-      const open = () => onOpen(card);
-      const lead = card.target ? {
+      const view = viewOf(card);
+      const open = () => onOpen(card, view);
+      const brought = card.target ? undefined : opens?.(view);
+      const lead = card.target || brought ? {
         role: 'button', tabIndex: 0, onClick: open,
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } },
-        title: t('Show {what}', { what: card.target === 'files' && card.path ? card.path : t(TARGET[card.target]) }),
+        title: t('Show {what}', { what: card.target === 'files' && card.path ? card.path : card.target ? t(TARGET[card.target]) : brought! }),
       } : {};
       return <div key={card.id} className={className} {...lead}>{body}</div>;
     })}
   </div>;
+}
+
+/** A card's call as an extension is told of it. */
+function viewOf(card: Card): ToolCallView {
+  const { name, input } = unwrap(card.start);
+  return { name, callId: card.callId || undefined, status: card.status === 'failed' ? 'error' : card.status, input };
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LuRotateCcw } from "react-icons/lu";
-import { ACTIONS, FIXED, bindingOf, describe, movesFocus, resetAll, resetBinding, setBinding, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
+import { FIXED, bindingOf, describe, movesFocus, resetAll, resetBinding, setBinding, useActions, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
+import { actionLabel } from "../extensions/shortcuts";
 import { t } from "../i18n";
 import { useCommandTrigger } from "../command-trigger";
 
@@ -17,6 +18,8 @@ const kbdCls = "inline-flex min-w-[2rem] justify-center rounded-md border border
  */
 export function KeyboardShortcuts() {
   const bindings = useKeybindings();
+  // The portal's own, and the extensions' after them.
+  const actions = useActions();
   const layout = useKeyLabels();
   const trigger = useCommandTrigger();
   const [recording, setRecording] = useState<ActionId | null>(null);
@@ -38,17 +41,18 @@ export function KeyboardShortcuts() {
       const binding = bindingOf(e);
       if (!binding) return;
       const took = setBinding(recording, binding);
-      const label = ACTIONS.find(a => a.id === took)?.label;
-      setNote(label ? () => () => t("{keys} was used for “{action}”, which now has no shortcut.", { keys: describe(binding, layout), action: t(label) }) : null);
+      const taken = actions.find(a => a.id === took);
+      const label = taken && actionLabel(taken);
+      setNote(label ? () => () => t("{keys} was used for “{action}”, which now has no shortcut.", { keys: describe(binding, layout), action: label }) : null);
       setRecording(null);
     };
     const swallow = (e: KeyboardEvent) => { e.preventDefault(); e.stopPropagation(); };
     window.addEventListener("keydown", take, true);
     window.addEventListener("keyup", swallow, true);
     return () => { window.removeEventListener("keydown", take, true); window.removeEventListener("keyup", swallow, true); };
-  }, [recording, layout]);
+  }, [recording, layout, actions]);
 
-  const changed = ACTIONS.some(a => describe(bindings[a.id], null, false) !== describe(a.default, null, false));
+  const changed = actions.some(a => describe(bindings[a.id], null, false) !== describe(a.default, null, false));
   return <div className="xl:grid xl:grid-cols-[3fr_2fr] xl:items-start xl:gap-x-8">
     <section className="mb-6">
       <div className="flex items-start justify-between gap-3">
@@ -62,12 +66,16 @@ export function KeyboardShortcuts() {
       </div>
       {note && <p role="status" className="mt-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">{note()}</p>}
       <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Voice mode shortcuts")}>
-        {ACTIONS.map(action => {
+        {actions.map(action => {
           const binding = bindings[action.id];
           const isDefault = describe(binding, null, false) === describe(action.default, null, false);
           const listening = recording === action.id;
-          return <li key={action.id} className="flex flex-wrap items-center gap-2 px-3 py-2" aria-label={t(action.label)}>
-            <span className="min-w-0 flex-1 text-sm text-fg">{t(action.label)}</span>
+          return <li key={action.id} className="flex flex-wrap items-center gap-2 px-3 py-2" aria-label={actionLabel(action)}>
+            <span className="min-w-0 flex-1 text-sm text-fg">
+              {actionLabel(action)}
+              {/* Whose it is, for a shortcut an extension brought. */}
+              {action.extension && <span className="ml-2 text-[11px] text-fg-faint">{action.extension}</span>}
+            </span>
             {listening
               ? <span className="text-xs text-accent" role="status">{t("Press the new keys…")}</span>
               : binding ? <kbd className={kbdCls}>{describe(binding, layout)}</kbd> : <span className="text-xs text-fg-faint">{t("None")}</span>}
@@ -78,8 +86,9 @@ export function KeyboardShortcuts() {
               <button className={btnCls} disabled={listening || !binding} onClick={() => { setBinding(action.id, null); setNote(null); }}>{t("Clear")}</button>
               <button className={btnCls} disabled={listening || isDefault} title={t("Back to {keys}", { keys: describe(action.default, layout) || t("none") })} onClick={() => {
                 const took = resetBinding(action.id);
-                const label = ACTIONS.find(a => a.id === took)?.label;
-                setNote(label ? () => () => t("That was used for “{action}”, which now has no shortcut.", { action: t(label) }) : null);
+                const taken = actions.find(a => a.id === took);
+      const label = taken && actionLabel(taken);
+                setNote(label ? () => () => t("That was used for “{action}”, which now has no shortcut.", { action: label }) : null);
               }}>{t("Reset")}</button>
             </div>
           </li>;

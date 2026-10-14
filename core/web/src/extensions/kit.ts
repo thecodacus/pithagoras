@@ -14,6 +14,7 @@ import { local, session } from "../safe-storage";
 import { tabKeys } from "../tab-keys";
 import { useFollowBottom } from "../use-follow-bottom";
 import { useNow } from "../use-now";
+import { ToolLink } from "./ToolView";
 import type { Ui } from "@pithagoras/extension-api";
 export type { Ui } from "@pithagoras/extension-api";
 
@@ -45,6 +46,8 @@ export const ui: Ui = {
   SkeletonGroup,
   ErrorBoundary,
   PartFailed,
+  /** A link on a tool call's card, as the portal's own are drawn: for `chat.tool.action`. */
+  ToolLink,
   /** A question with two answers, asked over the page: resolves true for yes. */
   confirm: confirmDialog,
   /** The look of the portal's own fields and buttons, as class names for a `className`. */

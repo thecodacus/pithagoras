@@ -12,6 +12,7 @@ import { panels } from "./panels";
 import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from "./server-feed";
 import { register } from "./slots";
 import { addStrings, forgetStrings, translate } from "./strings";
+import { registerShortcut } from "./shortcuts";
 import { choose, registerTheme, themes, themesSettled } from "./themes";
 import { chosenPalette, usePalette, useResolvedTheme } from "../theme";
 
@@ -149,6 +150,7 @@ async function activate(ext: ExtensionUi): Promise<void> {
       commands: { register: (name, run) => kept(registerCommand(name, run)), run: runCommand, has: hasCommand },
       panels,
       chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)) },
+      shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },
       server: { on: (handler) => kept(onServerPush(ext.name, handler)) },
       theme: {
         register: (theme) => kept(registerTheme(ext.name, theme)),

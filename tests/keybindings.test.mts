@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 const store = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) };
 (globalThis as any).window = Object.assign(new EventTarget(), { localStorage: (globalThis as any).localStorage });
-const { ACTIONS, resolve, assign, setBinding, resetBinding, resetAll, matches, bindingOf, describe, keyName } = await import('../core/web/src/keybindings.js');
+const { ACTIONS, actions, addAction, resolve, assign, setBinding, resetBinding, resetAll, matches, bindingOf, describe, keyName } = await import('../core/web/src/keybindings.js');
 
 beforeEach(() => store.clear());
 
@@ -81,4 +81,45 @@ test('Tab is how the keyboard moves on, so no shortcut can take it, stored by an
 test('the Esc line in the fixed shortcuts does not say the message box has to be empty', async () => {
   const { FIXED } = await import('../core/web/src/keybindings.js');
   assert.equal(FIXED.find((f) => f.keys.code === 'Escape')?.label, 'Stop the run');
+});
+
+test('an extension\'s shortcut is listed after the portal\'s own, and goes with its extension', () => {
+  const off = addAction({ id: 'x:notes/pin', label: 'Pin', scope: 'Voice mode', default: { code: 'KeyN' }, extension: 'notes' });
+  assert.deepEqual(actions().slice(-1).map((a) => a.id), ['x:notes/pin']);
+  assert.equal(actions().length, ACTIONS.length + 1);
+  assert.deepEqual(resolve()['x:notes/pin'], { code: 'KeyN' });
+  assert.throws(() => addAction({ id: 'x:notes/pin', label: 'Again', scope: 'Voice mode', default: null }), /already/);
+  off();
+  assert.equal(actions().length, ACTIONS.length);
+  assert.equal('x:notes/pin' in resolve(), false);
+});
+
+test('an extension\'s default that the portal or an earlier extension has already is not taken from it', () => {
+  // M is the portal's mute; B is the first extension's.
+  const one = addAction({ id: 'x:a/one', label: 'One', scope: 'Voice mode', default: { code: 'KeyB', shift: true }, extension: 'a' });
+  const two = addAction({ id: 'x:b/two', label: 'Two', scope: 'Voice mode', default: { code: 'KeyB', shift: true }, extension: 'b' });
+  const mute = addAction({ id: 'x:c/mute', label: 'Mute', scope: 'Voice mode', default: { code: 'KeyM' }, extension: 'c' });
+  const now = resolve();
+  assert.deepEqual(now['voice.mute'], { code: 'KeyM' });
+  assert.equal(now['x:c/mute'], null);
+  assert.deepEqual(now['x:a/one'], { code: 'KeyB', shift: true });
+  assert.equal(now['x:b/two'], null);
+  // Given one by hand, it has it, and the one that had it loses it, as between the portal's own.
+  assert.equal(setBinding('x:b/two', { code: 'KeyB', shift: true }), 'x:a/one');
+  assert.deepEqual(resolve()['x:b/two'], { code: 'KeyB', shift: true });
+  assert.equal(resolve()['x:a/one'], null);
+  for (const off of [one, two, mute]) off();
+});
+
+test('what was chosen for an extension\'s shortcut is kept while the extension is not there, and is its again when it comes back', () => {
+  const off = addAction({ id: 'x:notes/pin', label: 'Pin', scope: 'Voice mode', default: { code: 'KeyN' }, extension: 'notes' });
+  setBinding('x:notes/pin', { code: 'KeyJ' });
+  off();
+  // A change to another shortcut meanwhile writes the store again, without the extension's.
+  setBinding('voice.repeat', { code: 'KeyQ' });
+  const back = addAction({ id: 'x:notes/pin', label: 'Pin', scope: 'Voice mode', default: { code: 'KeyN' }, extension: 'notes' });
+  assert.deepEqual(resolve()['x:notes/pin'], { code: 'KeyJ' });
+  assert.equal(resetBinding('x:notes/pin'), undefined);
+  assert.deepEqual(resolve()['x:notes/pin'], { code: 'KeyN' });
+  back();
 });

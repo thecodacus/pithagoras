@@ -1,5 +1,5 @@
 // Development-only fixture using the actual chat and extension dialog.
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Chat } from '../src/components/Chat';
@@ -9,6 +9,10 @@ import type { PortalEvent, Session } from '../src/api';
 import { canvasConnection, canvasMessage, type CanvasMessage } from '../src/canvas-feed';
 import '../src/styles';
 import { register } from '../src/extensions/slots';
+import { registerShortcut } from '../src/extensions/shortcuts';
+import { registerCommand } from '../src/extensions/commands';
+import { panels } from '../src/extensions/panels';
+import { ToolLink } from '../src/extensions/ToolView';
 // `?brought=1`: with a window an extension brought, as the installed ones register theirs.
 if (new URLSearchParams(location.search).has('brought')) {
   register('probe', 'voice.window', {
@@ -16,6 +20,35 @@ if (new URLSearchParams(location.search).has('brought')) {
     title: 'Probe',
     component: ({ chat, close }) => <div data-testid="probe-window" style={{ padding: 16 }}>Probe for {chat.title} <button type="button" onClick={close}>Done</button></div>,
   });
+}
+// `?hooks=1`: an extension's use of what any extension can hook into: a panel by a name of its own, an action on a
+// tool call's card, a voice window that asks for the middle and opens itself and from a card, a voice shortcut, and
+// the running tray's jobs. Registered as the loader registers an extension's, under the name "hooks".
+const hooks = new URLSearchParams(location.search).has('hooks');
+const said = (window as any).hooksSaid = [] as unknown[];
+if (hooks) {
+  const grows = new Set<() => void>();
+  (window as any).hooksGrow = () => { (window as any).hooksCount = ((window as any).hooksCount ?? 0) + 1; grows.forEach((f) => f()); };
+  register('hooks', 'chat.panel', {
+    id: 'panel', title: 'Hooks', name: 'hooks-panel',
+    component: ({ panel }) => <div data-testid="hooks-panel">Opened with {JSON.stringify(panel.params ?? null)}</div>,
+  });
+  register('hooks', 'chat.header.action', {
+    id: 'by-name',
+    component: () => <button type="button" onClick={() => panels.open('hooks-panel', { said: 'by name' })}>Open by name</button>,
+  });
+  register('hooks', 'chat.tool.action', {
+    id: 'open', tool: /^bash$/,
+    component: ({ call, cut, panels: own }) => <ToolLink onClick={() => own.open('panel', { call: call.callId, cut })}>Open in Hooks</ToolLink>,
+  });
+  register('hooks', 'voice.window', {
+    id: 'pinned', title: 'Pinned', place: 'middle',
+    useAutoOpen: () => useSyncExternalStore((f) => (grows.add(f), () => void grows.delete(f)), () => (window as any).hooksCount ?? 0),
+    opensFor: (call) => call.name === 'note',
+    component: ({ close }) => <div data-testid="pinned-window">Pinned <button type="button" onClick={close}>Done</button></div>,
+  });
+  registerShortcut('hooks', { id: 'pin', label: 'Show or hide what is pinned', scope: 'voice', default: { code: 'KeyN' }, run: ({ windows }) => (windows.isOpen('pinned') ? windows.close('pinned') : windows.open('pinned')) });
+  registerCommand('jobs.show', (asked) => said.push(asked));
 }
 const microphone = new AudioContext();
 let destination = microphone.createMediaStreamDestination();
@@ -79,6 +112,7 @@ function Fixture() {
       <button onClick={() => { setRunning(false); setEvents(previous=>[...previous,{seq:previous.length+1,type:'compaction_end',at:Date.now(),payload:{}}]); }}>End compaction</button>
       <button onClick={() => setOptions(true)}>Show options</button>
       <button onClick={() => setShortcuts(v => !v)}>Toggle shortcuts</button>
+      {hooks && <button onClick={() => setEvents(previous => [...previous, { seq: previous.length + 1, type: 'tool_execution_start', payload: { toolName: 'note', toolCallId: 'note-demo', input: { text: 'Keep this' } } }])}>Use note</button>}
       <button onClick={() => setChat('other')}>Switch chat</button>
       <button onClick={() => setEvents(previous => [...previous,
         { seq: previous.length + 1, type: 'tool_execution_start', payload: { toolName: 'show_image', toolCallId: `pic-${previous.length}`, input: { path: 'plots/chart.png', title: 'Sales by month' } } },
