@@ -15,8 +15,8 @@ import { chatFeed, forgetChatFeed, onChatFeed, publishChat, sameValue } from '..
 import { addLocale, setLanguage } from '../core/web/src/i18n.ts';
 import { settlePanels } from '../core/web/src/use-work-panels.ts';
 import { placeWindows } from '../core/web/src/voice-windows.ts';
-import notes from '../extensions/notes/index.ts';
-import notesServer from '../extensions/notes/server.js';
+import notes from './fixtures/extensions/notes/index.ts';
+import notesServer from './fixtures/extensions/notes/server.js';
 import { scratch } from './helpers.mts';
 
 const bus = () => {
@@ -467,7 +467,7 @@ test('a package may name themes in its package.json and bring nothing else', () 
 });
 
 test('a package is told apart by what it brings: something for pi, something for the portal, colours', () => {
-  assert.deepEqual(packageKinds(path.resolve('extensions/notes')), ['pi', 'pithagoras']);
+  assert.deepEqual(packageKinds(path.resolve('tests/fixtures/extensions/notes')), ['pi', 'pithagoras']);
   assert.deepEqual(packageKinds(path.resolve('extensions/theme-dusk')), ['themes'], 'no code, so nothing for pi');
   assert.deepEqual(packageKinds(path.resolve('extensions/subagent')), ['pi']);
   assert.deepEqual(packageKinds(pkg({ server: './server.js', themes: [{ id: 'a', name: 'A' }] }, ['server.js'])), ['pi', 'pithagoras', 'themes']);

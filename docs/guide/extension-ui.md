@@ -8,8 +8,9 @@ theme. It is installed, switched and removed like any other package
 compiled into the portal.
 
 This page takes you from an empty folder to a working extension, then lists
-everything the portal hands one. `extensions/notes` in the repository is the
-complete example the snippets here are taken from.
+everything the portal hands one. The snippets are taken from a complete
+example, `tests/fixtures/extensions/notes`: it is not shipped, and the portal's
+tests check the framework with it.
 
 ## The three halves
 
@@ -813,7 +814,7 @@ extension:
 
 ## The example
 
-`extensions/notes` in the repository uses most of this in three small files:
+`tests/fixtures/extensions/notes` uses most of this in three small files:
 
 - `index.ts`, the pi extension: a `note` tool, and the notes kept with the
   conversation.
@@ -824,9 +825,10 @@ extension:
 - `server.js`, the server half: a copy of each chat's notes in the chat's
   folder, a route that answers for all chats, and the count each page is told.
 
-Install it from **Settings → Extensions → Discover**, where it is listed under
-**Comes with Pithagoras**. `extensions/theme-dusk` and `extensions/theme-warm`
-beside it are extensions that are only a theme, and are listed there too.
-`extensions/docs` is a larger one that is still being built: a page in the
+It is the portal's test extension and is not shipped: copy it to start your
+own, and install your copy by its path. What the portal ships is in
+`extensions/`, under **Settings → Extensions → Discover → Comes with
+Pithagoras**: `extensions/theme-dusk` and `extensions/theme-warm` are extensions
+that are only a theme, and `extensions/docs` is a larger one that is still being built: a page in the
 sidebar, fed by its server half's routes, and tools for the agent that share
 the server half's store ([Documents](/guide/documents)).

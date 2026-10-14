@@ -23,7 +23,6 @@ const { showVideoTool } = await import("../core/server/src/pi/show-video-tool.ts
 const { heartbeatTool } = await import("../core/server/src/pi/heartbeat-tool.ts");
 const { reportTool } = await import("../core/server/src/pi/report-tool.ts");
 const { routineTools } = await import("../core/server/src/pi/routine-tools.ts");
-const { default: notes } = await import("../extensions/notes/index.ts");
 const { default: subagent } = await import("../extensions/subagent/index.ts");
 const { piDependency } = await import("../core/server/src/pi/package.ts");
 
@@ -69,7 +68,6 @@ load(showVideoTool("/nowhere"), all);
 load(heartbeatTool("a", "s"), all);
 load(reportTool(null), all);
 load(routineTools("s"), all);
-load(notes, all);
 const agentDir = process.env.PI_CODING_AGENT_DIR!;
 writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify({ subagentMode: "interrupt" }));
 load(subagent, all);
@@ -115,7 +113,6 @@ const AGREED: Record<string, number> = {
   routine_create: 209,
   routine_update: 142,
   routine_run: 41,
-  note: 49,
   subagent: 103,
   "subagent#background": 121,
 };
