@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, closeSync, constants, existsSync, fchmodSync, fchownSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { getSetting, putSetting } from "../db.js";
@@ -60,6 +60,62 @@ async function recursive(args: string[], report: ApplyReport) {
     await run(args[0], args.slice(1), { maxBuffer: 1 << 20 });
   } catch (e) {
     report.warnings.push(`${args.join(" ")}: ${(e as Error).message.split("\n")[0]}`);
+  }
+}
+
+/** The documents extension's store in a chat's folder: the portal's own, closed to everyone else (extensions/docs/guard.js holds it to that). */
+const DOCS_STORE = ".pithagoras-docs";
+
+/** `dir` and what is in it, owned by this process and closed to group and others, through descriptors: never through a link. */
+function closeTree(dir: string, uid: number, gid: number) {
+  const fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    fchownSync(fd, uid, gid);
+    fchmodSync(fd, 0o700);
+    // Below an open folder, so a name swapped for a link in the meantime is not followed.
+    const here = `/proc/self/fd/${fd}`;
+    for (const entry of readdirSync(here, { withFileTypes: true })) {
+      if (entry.isDirectory()) closeTree(`${here}/${entry.name}`, uid, gid);
+      else if (entry.isFile()) {
+        const file = openSync(`${here}/${entry.name}`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        try {
+          fchownSync(file, uid, gid);
+          fchmodSync(file, fstatSync(file).mode & 0o700);
+        } finally {
+          closeSync(file);
+        }
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The recursive chown and chmod of a folder's apply went through the documents
+ * stores in it, and made them the agents' group's: the portal runs git and
+ * SQLite as root on what is in them, so they are made the portal's alone
+ * again. Coreutils cannot be told to leave a folder out, and one that is
+ * handed a path of the agent's choosing follows a link there, so this is done
+ * by hand. (The store checks itself before it is used, too: see guard.js.)
+ */
+async function closeDocsStores(root: string, report: ApplyReport) {
+  let stores: string[];
+  try {
+    const { stdout } = await run("find", [root, "-name", DOCS_STORE, "-type", "d", "-prune", "-print0"], { maxBuffer: 1 << 24 });
+    stores = stdout.split("\0").filter(Boolean);
+  } catch (e) {
+    report.warnings.push(`${root}: could not look for documents stores: ${(e as Error).message.split("\n")[0]}`);
+    return;
+  }
+  for (const store of stores) {
+    try {
+      closeTree(store, process.getuid?.() ?? 0, process.getgid?.() ?? 0);
+    } catch (e) {
+      // Gone, or a link put in its place by then: the store refuses what is not its own.
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ELOOP" && code !== "ENOTDIR") report.warnings.push(`${store}: ${(e as Error).message}`);
+    }
   }
 }
 
@@ -142,6 +198,7 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
     if (deep && dir) {
       await recursive(["chown", "-R", "--no-dereference", ":0", rule.path], report);
       await recursive(["chmod", "-R", "go-w,o+rX", rule.path], report);
+      await closeDocsStores(rule.path, report);
     } else {
       chownSync(rule.path, statSync(rule.path).uid, 0);
       chmodSync(rule.path, (statSync(rule.path).mode & 0o7777 & ~0o022) | (dir ? 0o005 : 0o004));
@@ -152,6 +209,7 @@ async function applyRule(policy: SandboxPolicy, rule: SandboxPolicy["rules"][num
       await recursive(["chown", "-R", "--no-dereference", `:${ids.group}`, rule.path], report);
       await recursive(["chmod", "-R", "g+rwX", rule.path], report);
       await recursive(["find", rule.path, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"], report);
+      await closeDocsStores(rule.path, report);
     } else {
       chownSync(rule.path, statSync(rule.path).uid, ids.group);
       chmodSync(rule.path, (statSync(rule.path).mode & 0o7777) | (dir ? 0o2070 : 0o060));
@@ -272,6 +330,7 @@ async function applyAgent(agent: Agent, support: SandboxSupport, report: ApplyRe
     await recursive(["chown", "-R", "--no-dereference", `:${who.gid}`, agent.home], report);
     await recursive(["chmod", "-R", "g+rwX,o-rwx", agent.home], report);
     await recursive(["find", agent.home, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"], report);
+    await closeDocsStores(agent.home, report);
   }
   chownSync(agent.home, 0, who.gid);
   chmodSync(agent.home, 0o2770);
@@ -357,6 +416,7 @@ export async function prepareFolder(policy: SandboxPolicy, support: SandboxSuppo
   await recursive(["chown", "-R", "--no-dereference", `:${support.ids.group}`, folder], report);
   await recursive(["chmod", "-R", "g+rwX", folder], report);
   await recursive(["find", folder, "-type", "d", "-exec", "chmod", "g+s", "{}", "+"], report);
+  await closeDocsStores(folder, report);
   // A narrower rule inside it keeps its word: put the rules again that lie under this folder.
   const inside = policy.rules.filter((r) => r.path !== folder && r.path.startsWith(`${folder}/`));
   if (inside.length) await applyRules({ ...policy, rules: inside }, support.ids, report, true);

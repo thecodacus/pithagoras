@@ -1,18 +1,20 @@
 /**
  * The history of a folder's documents: a git repository of the extension's
- * own, in `<folder>/.pithagoras-docs/git`, whose work tree is the documents
- * folder. It is not the folder's own repository, if it has one, and nothing
- * of the folder's or the user's git configuration takes part in it.
+ * own, in `<folder>/.pithagoras-docs/git`. It is not the folder's own
+ * repository, if it has one, and nothing of the folder's or the user's git
+ * configuration takes part in it.
  *
  * Every call is the same shape: git started without a shell, its arguments an
- * array, with the git dir and the work tree named, hooks off, no signing, no
- * system or global configuration, and paths taken literally. A commit is made
- * from bytes the store hands it (or ones it checked), into an index of the
- * repository's own: only the documents named are added, never the folder.
+ * array, with the git dir and the work tree named through the store's held
+ * folder (guard.js), checked before the run, hooks off, no signing, no system
+ * or global configuration, and paths taken literally; and with a time limit,
+ * so that one that hangs cannot hold the folder's queue. A commit is made from
+ * bytes the store hands it, into an index of the repository's own: git never
+ * opens a document's file, so a link put in its place, or a file that waits at
+ * the open, is not git's to follow.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import path from "node:path";
 
 /** Who every commit is by. Who changed the document is its `Author` trailer. */
 const COMMITTER = { name: "Pithagoras Docs", email: "docs@pithagoras.invalid" };
@@ -23,22 +25,39 @@ export const blobId = (bytes) => createHash("sha1").update(`blob ${bytes.length}
 
 export class GitError extends Error {}
 
+/** How long one git run may take: a hung one is stopped. Far above what any call of the store needs. */
+const RUN_LIMIT_MS = 120_000;
+
 export class Repo {
-  /** `gitDir` and `workTree` absolute. */
-  constructor(gitDir, workTree) {
-    this.gitDir = gitDir;
-    this.workTree = workTree;
+  /** `guard`: the held store folder (guard.js), which has the git dir in it as `git`. */
+  constructor(guard, { timeoutMs = RUN_LIMIT_MS } = {}) {
+    this.guard = guard;
+    this.timeoutMs = timeoutMs;
+  }
+
+  /** `rel` in the git dir. */
+  gitPath(rel) {
+    return this.guard.at(`git/${rel}`);
   }
 
   /**
    * Runs git with `args` (and `input` on its stdin): its stdout, or a GitError
    * with what it said. Its environment is made here, not inherited: a GIT_DIR
-   * or GIT_INDEX_FILE of the portal's own would point it elsewhere.
+   * or GIT_INDEX_FILE of the portal's own would point it elsewhere. The store
+   * folder is checked first and handed to git as its descriptor 3, which the
+   * git dir and the work tree (the store folder: no document is ever read
+   * through it) are named by: a folder renamed or replaced meanwhile is not
+   * found again by its path.
    */
   run(args, { input, allowFail = false } = {}) {
+    try {
+      this.guard.check();
+    } catch (e) {
+      return Promise.reject(e);
+    }
     const argv = [
-      `--git-dir=${this.gitDir}`,
-      `--work-tree=${this.workTree}`,
+      `--git-dir=${this.guard.forGit("git")}`,
+      `--work-tree=${this.guard.forGit()}`,
       "-c", "core.hooksPath=/dev/null",
       "-c", "core.fsmonitor=false",
       "-c", "commit.gpgSign=false",
@@ -52,20 +71,36 @@ export class Repo {
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_TERMINAL_PROMPT: "0",
       GIT_LITERAL_PATHSPECS: "1",
+      GIT_NO_REPLACE_OBJECTS: "1",
       GIT_AUTHOR_NAME: COMMITTER.name,
       GIT_AUTHOR_EMAIL: COMMITTER.email,
       GIT_COMMITTER_NAME: COMMITTER.name,
       GIT_COMMITTER_EMAIL: COMMITTER.email,
     };
+    const { pinned } = this.guard;
     return new Promise((resolve, reject) => {
-      const child = spawn("git", argv, { env, cwd: path.dirname(this.gitDir), stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawn("git", argv, { env, cwd: pinned ? "/" : this.guard.dir, stdio: ["pipe", "pipe", "pipe", ...(pinned ? [this.guard.fd] : [])] });
       const out = [];
       let err = "";
+      let stopped = false;
+      const timer = setTimeout(() => {
+        stopped = true;
+        child.kill("SIGKILL");
+        // Not waited for: something git started may hold its pipes open after it is gone.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        reject(new GitError(`git ${args[0]} took longer than ${this.timeoutMs} ms and was stopped`));
+      }, this.timeoutMs);
       child.stdout.on("data", (chunk) => out.push(chunk));
       child.stderr.on("data", (chunk) => (err = (err + chunk).slice(-4000)));
-      child.on("error", (error) => reject(new GitError(`git could not be started: ${error.message}`)));
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(new GitError(`git could not be started: ${error.message}`));
+      });
       child.on("close", (code) => {
+        clearTimeout(timer);
         const stdout = Buffer.concat(out);
+        if (stopped) return;
         if (code === 0 || allowFail) resolve({ code, stdout });
         else reject(new GitError(`git ${args[0]} failed (${code}): ${err.trim()}`));
       });
@@ -134,17 +169,6 @@ export class Repo {
   }
 
   /**
-   * Stores the files at `paths` (absolute) as blobs, in one process: the id
-   * of each, in order. A file swapped or changed after it was read comes back
-   * under another id than the one the store computed: the store compares them.
-   */
-  async storeFiles(paths) {
-    if (!paths.length) return [];
-    const out = await this.text(["hash-object", "-w", "--no-filters", "--stdin-paths"], { input: paths.map((p) => `${p}\n`).join("") });
-    return out.split("\n");
-  }
-
-  /**
    * One commit on the branch, from `parent` (nothing for the first), that sets
    * each `{ name, blob }` in `entries` and leaves the other documents as they
    * were. Moves the branch only if it is still at `parent`. Returns the commit.
@@ -162,9 +186,13 @@ export class Repo {
     return commit;
   }
 
-  /** Packs the history now and then, as git judges it. */
+  /** Packs the history now and then, as git judges it. Not needed: one that cannot (or takes too long) is left for next time. */
   async gc() {
-    await this.run(["gc", "--auto", "--quiet"], { allowFail: true });
+    try {
+      await this.run(["gc", "--auto", "--quiet"], { allowFail: true });
+    } catch (e) {
+      if (!(e instanceof GitError)) throw e;
+    }
   }
 }
 

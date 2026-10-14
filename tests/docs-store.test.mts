@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -18,8 +18,12 @@ import { scratch } from './helpers.mts';
 
 type Answer = { status: number; body: any };
 
-/** The server half for chats that work in these folders. `fault` breaks the next write after that step. */
-async function portal(folders: Record<string, string>) {
+/**
+ * The server half for chats that work in these folders. `fault` breaks the next write after that step.
+ * `onStep` runs after each step of a write ("write", "commit"): a test does there what someone else could between two
+ * git runs. `gitTimeoutMs` is how long one git run may take.
+ */
+async function portal(folders: Record<string, string>, options: { onStep?: (step: string) => void; gitTimeoutMs?: number } = {}) {
   const router = express.Router();
   const logged: string[] = [];
   let armed: string | null = null;
@@ -35,8 +39,10 @@ async function portal(folders: Record<string, string>) {
     },
   }, {
     dependencies: async () => true,
+    gitTimeoutMs: options.gitTimeoutMs,
     faults: {
       after(step: string) {
+        options.onStep?.(step);
         if (step !== armed) return;
         armed = null;
         throw new Error(`injected failure after the ${step}`);
@@ -528,5 +534,239 @@ test('a store whose history was deleted while the portal runs is opened again, n
     assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: read.body.revision })).status, 200);
   } finally {
     await docs.close();
+  }
+});
+
+/** The store's folder, and what is in it, that is open to others: its own folders to anyone, what is in them to writing by group or others. */
+function loose(folder: string): string[] {
+  const found: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    for (const entry of readdirSync(dir)) {
+      const place = path.join(dir, entry);
+      const stat = lstatSync(place);
+      // A link's own mode is always open: it is what it leads to that counts.
+      if (stat.isSymbolicLink()) continue;
+      if (depth === 0 && stat.isDirectory() ? stat.mode & 0o077 : stat.mode & 0o022) found.push(`${path.relative(folder, place)} ${(stat.mode & 0o7777).toString(8)}`);
+      if (stat.isDirectory()) walk(place, depth + 1);
+    }
+  };
+  const store = path.join(folder, '.pithagoras-docs');
+  if (statSync(store).mode & 0o077) found.push(`.pithagoras-docs ${(statSync(store).mode & 0o7777).toString(8)}`);
+  walk(store, 0);
+  return found;
+}
+
+/**
+ * The sandbox's preparation of a chat's folder, run as it runs it (a recursive chown and chmod for the agents' group),
+ * for the group this user is in. Run in a process of its own: it loads the server's modules, which read the environment.
+ */
+function prepareFolder(folder: string) {
+  const home = scratch('docs-store-prepare-home-');
+  const script = `
+    const { prepareFolder } = await import(${JSON.stringify(new URL('../server/src/sandbox/apply.ts', import.meta.url).href)});
+    const folder = process.env.FOLDER;
+    await prepareFolder({ enabled: true, rules: [{ path: folder, access: 'write' }], trusted: [] }, { available: true, ids: { tools: process.getuid(), group: process.getgid() } }, folder);
+  `;
+  const env = { ...process.env, FOLDER: folder, DATA_DIR: home, AGENT_HOME: path.join(home, 'agent-home'), WORKSPACE_ROOT: path.join(home, 'ws'), SESSION_DIR: path.join(home, 'sessions'), PI_CODING_AGENT_DIR: path.join(home, 'agent'), BIN_DIR: path.join(home, 'bin'), CHANNELS_DIR: path.join(home, 'channels') };
+  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { encoding: 'utf8', timeout: 60_000, cwd: process.cwd(), env });
+  assert.equal(child.status, 0, child.stderr);
+}
+
+test('the sandbox\'s preparation of a chat\'s folder leaves the documents store closed to the group and others, as it does one in a folder below it', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-prepare-');
+  const below = path.join(folder, 'sub');
+  mkdirSync(path.join(below, 'documents'), { recursive: true });
+  const other = await portal({ b: below });
+  // What a link to somewhere else, in the store's place or inside it, must not lead the preparation to.
+  const outside = folderWith('docs-store-prepare-outside-', { 'file.txt': 'not the store' });
+  chmodSync(outside, 0o755);
+  chmodSync(path.join(outside, 'file.txt'), 0o644);
+  mkdirSync(path.join(folder, 'linked'));
+  symlinkSync(outside, path.join(folder, 'linked', '.pithagoras-docs'));
+  try {
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+    assert.equal((await other.call('POST', `/folders/${folderIdOf(below)}/documents`, { title: 'Notes', markdown: '# Notes\n' })).status, 201);
+    symlinkSync(path.join(outside, 'file.txt'), path.join(folder, '.pithagoras-docs', 'git', 'link'));
+    assert.deepEqual(loose(folder), []);
+    prepareFolder(folder);
+    // The folder's own files are the group's now, as the preparation is for; the store is not.
+    assert.ok(statSync(path.join(folder, 'documents', 'plan.md')).mode & 0o020, 'the document is group-writable');
+    assert.deepEqual(loose(folder), [], 'right after');
+    assert.deepEqual(loose(below), [], 'and the one below');
+    assert.equal(statSync(outside).mode & 0o777, 0o755, 'where a link led is as it was');
+    assert.equal(statSync(path.join(outside, 'file.txt')).mode & 0o777, 0o644);
+    rmSync(path.join(folder, '.pithagoras-docs', 'git', 'link'));
+    // And the next request, which runs git on it as the portal (root, with the sandbox) does, finds it so.
+    assert.equal((await docs.call('GET', url)).status, 200);
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nThree.\n', base: 2 })).status, 200);
+    assert.deepEqual(loose(folder), [], 'after the next requests');
+  } finally {
+    await other.close();
+    await docs.close();
+  }
+});
+
+test('a store that something opened to the group while the portal ran is closed and its git settings written new before git runs on it', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-loosened-');
+  try {
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+    const store = path.join(folder, '.pithagoras-docs');
+    // What an agent that could write there would leave: a setting, and a second place for git to read its objects from.
+    execFileSync('chmod', ['-R', 'g+rwX', store]);
+    writeFileSync(path.join(store, 'git', 'config'), '[core]\n\trepositoryformatversion = 0\n[trace2]\n\tnormalTarget = /tmp/planted\n');
+    writeFileSync(path.join(store, 'git', 'objects', 'info', 'alternates'), '/tmp\n');
+    writeFileSync(path.join(store, 'git', 'commondir'), '/tmp\n');
+    assert.notDeepEqual(loose(folder), []);
+    // The store the portal holds is not the one it was: a request is not run on it as it is.
+    assert.equal((await docs.call('GET', url)).status, 200);
+    assert.deepEqual(loose(folder), []);
+    assert.doesNotMatch(readFileSync(path.join(store, 'git', 'config'), 'utf8'), /trace2|planted/);
+    assert.equal(existsSync(path.join(store, 'git', 'objects', 'info', 'alternates')), false);
+    assert.equal(existsSync(path.join(store, 'git', 'commondir')), false);
+    assert.equal(git(folder, 'show', 'HEAD:plan.md'), '# Plan\n\nTwo.');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a store opened to others in the middle of a request is not run git on for the rest of it', async () => {
+  let opened = false;
+  const folder = folderWith('docs-store-midway-', { 'documents/.keep': '' });
+  const docs = await portal({ a: folder }, {
+    onStep: (step) => {
+      if (step === 'write' && opened) chmodSync(path.join(folder, '.pithagoras-docs'), 0o770);
+    },
+  });
+  try {
+    const f = folderIdOf(folder);
+    const made = await docs.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: '# Plan\n' });
+    assert.equal(made.status, 201);
+    opened = true;
+    const url = `/folders/${f}/documents/${made.body.id}`;
+    const saved = await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
+    assert.equal(saved.status, 409, JSON.stringify(saved.body));
+    assert.match(saved.body.error, /opened to others/);
+    assert.equal(commits(folder), 1, 'no commit made on it');
+    opened = false;
+    // The next request opens it again, and puts it right.
+    const read = await docs.call('GET', url);
+    assert.equal(read.status, 200);
+    assert.equal(read.body.revision, 2, 'the file that was written is taken in');
+    assert.deepEqual(loose(folder), []);
+  } finally {
+    await docs.close();
+  }
+});
+
+/** A `git` ahead of the real one on the portal's PATH: `before` runs (a shell script) when git is called with `when` among its arguments. */
+function wrappedGit(when: string, before: string) {
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const dir = scratch('docs-store-git-');
+  writeFileSync(path.join(dir, 'git'), `#!/bin/sh\ncase " $* " in *" ${when} "*)\n${before}\n;; esac\nexec ${real} "$@"\n`, { mode: 0o755 });
+  const was = process.env.PATH;
+  process.env.PATH = `${dir}:${was}`;
+  return () => void (process.env.PATH = was);
+}
+
+test('git is never handed a document\'s path: a file swapped for a link when git starts is not read, or stored', async () => {
+  const secret = folderWith('docs-store-secret-file-', { 'shadow': 'root:$6$a-secret-the-agent-may-not-read\n' });
+  const folder = folderWith('docs-store-swap-', { 'documents/plan.md': '# Plan\n\nWhat the agent wrote.\n' });
+  const secretId = execFileSync('git', ['hash-object', path.join(secret, 'shadow')], { encoding: 'utf8' }).trim();
+  // The agent, who owns the file, wins the race: the file is a link to what it may not read when git opens it.
+  const restore = wrappedGit('hash-object', `for f in ${JSON.stringify(path.join(folder, 'documents'))}/*.md; do rm -f "$f"; ln -s ${JSON.stringify(path.join(secret, 'shadow'))} "$f"; done`);
+  const docs = await portal({ a: folder });
+  try {
+    // Any request takes the file in; the file is a link by the time git runs, so it is no document to list any more.
+    await docs.listed();
+    assert.ok(lstatSync(path.join(folder, 'documents', 'plan.md')).isSymbolicLink(), 'the swap happened');
+    const has = spawnSync('git', [`--git-dir=${path.join(folder, '.pithagoras-docs', 'git')}`, 'cat-file', '-e', secretId]);
+    assert.notEqual(has.status, 0, 'what the link leads to is not in the store');
+    // The text that was read is what is committed.
+    assert.equal(git(folder, 'show', 'HEAD:plan.md'), '# Plan\n\nWhat the agent wrote.');
+  } finally {
+    restore();
+    await docs.close();
+  }
+});
+
+test('a git run that hangs is stopped, and the folder goes on with the next request', async () => {
+  const folder = folderWith('docs-store-hang-', { 'documents/.keep': '' });
+  const flag = path.join(scratch('docs-store-hang-flag-'), 'hang');
+  writeFileSync(flag, '');
+  const restore = wrappedGit('hash-object', `[ -e ${JSON.stringify(flag)} ] && exec sleep 60`);
+  const docs = await portal({ a: folder }, { gitTimeoutMs: 400 });
+  try {
+    const f = folderIdOf(folder);
+    const answered = await Promise.race([docs.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: '# Plan\n' }), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+    assert.ok(answered, 'answered before the hung git would have ended');
+    assert.equal(answered.status, 500);
+    rmSync(flag);
+    // The queue moved on: the document written before git hung is taken in.
+    const listed = await Promise.race([docs.listed(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+    assert.deepEqual(listed?.[0].documents.map((d: any) => d.name), ['plan.md']);
+  } finally {
+    restore();
+    await docs.close();
+  }
+});
+
+test('the store folder swapped for another between two git runs of a request is refused, and the other one is not written to', async () => {
+  let swapped = false;
+  const folder = folderWith('docs-store-swap-dir-', { 'documents/.keep': '' });
+  const store = path.join(folder, '.pithagoras-docs');
+  const docs = await portal({ a: folder }, {
+    onStep: (step) => {
+      if (step !== 'write' || !swapped) return;
+      // The agent renames the store and puts one of its own (a copy: it is its own, so only where it is does tell) in its place.
+      renameSync(store, `${store}.moved`);
+      cpSync(`${store}.moved`, store, { recursive: true });
+    },
+  });
+  try {
+    const f = folderIdOf(folder);
+    const made = await docs.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: '# Plan\n' });
+    assert.equal(made.status, 201);
+    swapped = true;
+    const saved = await docs.call('PUT', `/folders/${f}/documents/${made.body.id}`, { markdown: '# Plan\n\nTwo.\n', base: 1 });
+    swapped = false;
+    assert.equal(saved.status, 409, JSON.stringify(saved.body));
+    assert.match(saved.body.error, /replaced/);
+    const count = (dir: string) => Number(execFileSync('git', [`--git-dir=${path.join(dir, 'git')}`, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }));
+    assert.equal(count(store), 1, 'the one put in its place got no commit');
+    assert.equal(count(`${store}.moved`), 1, 'nor the one that was held');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a link, or a pipe, in the store is refused when it is opened: git does not follow or wait at it', async () => {
+  const { folder, docs, f, url } = await withDocument('docs-store-inside-');
+  await docs.close();
+  const git = path.join(folder, '.pithagoras-docs', 'git');
+  const outside = folderWith('docs-store-inside-target-', { 'config': '[core]\n\tfsmonitor = /tmp/evil\n' });
+  for (const plant of [
+    () => symlinkSync(path.join(outside, 'config'), path.join(git, 'config.link')),
+    () => execFileSync('mkfifo', [path.join(git, 'objects', 'info', 'pipe')]),
+  ]) {
+    plant();
+    const again = await portal({ a: folder });
+    try {
+      const answered = await Promise.race([again.call('GET', url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+      assert.ok(answered, 'answered, not waiting at the pipe');
+      assert.equal(answered.status, 409, JSON.stringify(answered.body));
+      assert.match(answered.body.error, /not its own/);
+      assert.equal(readFileSync(path.join(outside, 'config'), 'utf8'), '[core]\n\tfsmonitor = /tmp/evil\n');
+    } finally {
+      await again.close();
+    }
+    rmSync(path.join(git, 'config.link'), { force: true });
+    rmSync(path.join(git, 'objects', 'info', 'pipe'), { force: true });
+  }
+  const fine = await portal({ a: folder });
+  try {
+    assert.equal((await fine.call('GET', url)).status, 200, 'and fine again without them');
+    assert.ok(f);
+  } finally {
+    await fine.close();
   }
 });

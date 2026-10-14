@@ -304,7 +304,7 @@ function headingOf(text) {
 const titleOf = (bytes, name) => headingOf(bytes.subarray(0, HEAD_BYTES).toString("utf8")) || name.replace(/\.md$/i, "");
 
 
-export default function (portal, { dependencies = ensureDependencies, faults } = {}) {
+export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs } = {}) {
   // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
   // in the background: the portal does not wait for an install to start the rest. The store waits for it.
   const ready = dependencies((line) => portal.log(line));
@@ -372,7 +372,7 @@ export default function (portal, { dependencies = ensureDependencies, faults } =
         if (!(await ready)) throw new DocError(503, "The documents store's packages are not installed yet");
         Database = (await import("better-sqlite3")).default;
       }
-      return Store.open(folder, { inside: portal.files.inside, Database, faults });
+      return Store.open(folder, { inside: portal.files.inside, Database, faults, gitTimeoutMs });
     })();
     stores.set(folder, opening);
     return opening;

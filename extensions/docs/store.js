@@ -3,7 +3,7 @@
  * about them.
  *
  *   <folder>/documents/<slug>.md          the documents, ordinary files
- *   <folder>/.pithagoras-docs/            the store's own, 0700
+ *   <folder>/.pithagoras-docs/            the store's own, 0700, the portal's alone (guard.js)
  *     git/                                 the history: one commit per revision (git.js)
  *     docs.sqlite                          documents, revisions (an index of the history), threads, comments, pings
  *
@@ -28,7 +28,9 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, chownSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { DocError } from "./errors.js";
 import { blobId, messageFor, parseTrailers, Repo } from "./git.js";
+import { Guard } from "./guard.js";
 import { isAdoptable, isDocumentName, isTempName, isPlainFile, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
 
 export const DOCUMENTS = "documents";
@@ -41,14 +43,7 @@ const GC_EVERY = 100;
 
 export const isDocumentId = (id) => typeof id === "string" && /^[0-9a-f]{16}$/.test(id);
 
-/** A request the store refuses: its HTTP status, what to say, and what else the answer carries. */
-export class DocError extends Error {
-  constructor(status, message, extra = {}) {
-    super(message);
-    this.status = status;
-    this.extra = extra;
-  }
-}
+export { DocError };
 
 /** A file name from a title: lower case, letters and digits joined by dashes, at most 80 characters. */
 export function slugOf(title) {
@@ -133,47 +128,36 @@ CREATE TABLE IF NOT EXISTS pings (
 );
 `;
 
-/** A directory of the store's own at `dir`: made if missing, refused if it is a link or anything but a folder. */
-function ownDir(dir, mode) {
-  try {
-    mkdirSync(dir, { mode });
-  } catch (e) {
-    if (e.code !== "EEXIST") throw e;
-  }
-  const stat = lstatSync(dir);
-  // Only one the portal made: one someone else made could hold a git configuration that runs their commands as the portal.
-  if (!stat.isDirectory() || (process.getuid && stat.uid !== process.getuid())) throw new DocError(409, `${path.basename(dir)} in this folder is not the documents store's own`);
-  chmodSync(dir, mode);
-  return stat;
-}
-
 export class Store {
   /**
    * The store of `folder` (a chat's folder, as the portal names it), opened:
    * made where it is not there yet, then put right. `inside` is the portal's
    * files helper. `faults` lets a test break a write after one of its steps:
    * `faults.after(step)` is called after "write" and after "commit".
+   * `gitTimeoutMs` is how long one git run may take.
    */
-  static async open(folder, { inside, Database, faults }) {
-    const store = new Store(folder, inside, faults);
+  static async open(folder, { inside, Database, faults, gitTimeoutMs }) {
+    const store = new Store(folder, inside, faults, gitTimeoutMs);
     try {
       await store.#open(Database);
     } catch (e) {
-      // A store that fails to open is tried again on the next request: its database must not stay open meanwhile.
+      // A store that fails to open is tried again on the next request: its database and its folder must not stay open meanwhile.
       try {
         store.db?.close();
       } catch {
         // Closed already, or never open.
       }
+      store.guard?.close();
       throw e;
     }
     return store;
   }
 
-  constructor(folder, inside, faults) {
+  constructor(folder, inside, faults, gitTimeoutMs) {
     this.folder = folder;
     this.inside = inside;
     this.faults = faults;
+    this.gitTimeoutMs = gitTimeoutMs;
     this.storeDir = path.join(folder, STORE);
     this.queue = Promise.resolve();
     this.commits = 0;
@@ -188,25 +172,24 @@ export class Store {
     }
     // `inside` follows links: a link put in the store's place comes back under another path, and is refused.
     if (at !== this.storeDir) throw new DocError(409, `${STORE} in this folder is a link`);
-    this.storeStat = ownDir(this.storeDir, 0o700);
+    // Held from here on: everything below is done through this one open folder, never by its path again.
+    this.guard = Guard.open(this.storeDir);
     // Not part of the folder's own repository, if it has one.
-    const ignore = path.join(this.storeDir, ".gitignore");
     try {
-      writeFileSync(ignore, "*\n", { flag: "wx", mode: 0o600 });
+      writeFileSync(this.guard.at(".gitignore"), "*\n", { flag: "wx", mode: 0o600 });
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
     }
-    const gitDir = path.join(this.storeDir, "git");
-    this.repo = new Repo(gitDir, path.join(this.folder, DOCUMENTS));
+    this.repo = new Repo(this.guard, this.gitTimeoutMs ? { timeoutMs: this.gitTimeoutMs } : undefined);
     let fresh = false;
     try {
-      lstatSync(gitDir);
+      lstatSync(this.guard.at("git"));
     } catch {
       fresh = true;
     }
     if (fresh) await this.repo.init();
-    ownDir(gitDir, 0o700);
-    const file = path.join(this.storeDir, "docs.sqlite");
+    this.guard.audit();
+    const file = this.guard.at("docs.sqlite");
     // Made by hand first, with its mode and never through a link: SQLite would make it readable for everyone.
     try {
       closeSync(openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600));
@@ -229,13 +212,16 @@ export class Store {
     });
   }
 
-  /** Whether the store's folder is still the one opened, with its history and database in it: one deleted, replaced or missing a part is opened again. */
+  /**
+   * Whether the store's folder is still the one opened and the portal's alone,
+   * with its history and database in it: one deleted, replaced, opened to
+   * others or missing a part is opened again.
+   */
   stillThere() {
     try {
-      const now = lstatSync(this.storeDir);
-      if (!now.isDirectory() || now.ino !== this.storeStat.ino || now.dev !== this.storeStat.dev) return false;
+      this.guard.check();
       // Opening makes what is missing: the history again from nothing, the database again from the history.
-      return lstatSync(path.join(this.storeDir, "git")).isDirectory() && lstatSync(path.join(this.storeDir, "docs.sqlite")).isFile();
+      return lstatSync(this.guard.at("git")).isDirectory() && lstatSync(this.guard.at("docs.sqlite")).isFile();
     } catch {
       return false;
     }
@@ -244,6 +230,7 @@ export class Store {
   async close() {
     await this.queue;
     this.db?.close();
+    this.guard?.close();
   }
 
   /** Runs `work` once everything before it in this folder is done: one write at a time, and no read in the middle of one. */
@@ -309,7 +296,7 @@ export class Store {
 
   /** Puts right what a write cut off, or someone else changed, left: see the top of this file. Under the lock. */
   async recover() {
-    rmSync(path.join(this.repo.gitDir, "index.lock"), { force: true });
+    rmSync(this.repo.gitPath("index.lock"), { force: true });
     await this.replay();
     await this.takeIn();
   }
@@ -419,7 +406,11 @@ export class Store {
       if (!file) continue;
       const blob = blobId(file.bytes);
       if (blob === row.blob) this.db.prepare("UPDATE documents SET stat = ? WHERE id = ?").run(file.key, row.id);
-      else changed.push({ id: row.id, name: row.name, blob, revision: row.revision + 1, key: file.key });
+      else {
+        // Written from the bytes read here: git is never given the file's path to open again.
+        await this.repo.storeBlob(file.bytes);
+        changed.push({ id: row.id, name: row.name, blob, revision: row.revision + 1, key: file.key });
+      }
     }
     let room = MAX_DOCUMENTS - rows.length;
     const now = new Date().toISOString();
@@ -430,14 +421,12 @@ export class Store {
       if (!file) continue;
       const id = randomBytes(8).toString("hex");
       this.db.prepare("INSERT INTO documents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, now, now);
+      await this.repo.storeBlob(file.bytes);
       changed.push({ id, name, blob: blobId(file.bytes), revision: 1, key: file.key });
       room--;
     }
     if (!changed.length) return;
-    // git reads them again: one that changed since it was read here comes back under another id, and waits for the next time.
-    const stored = await this.repo.storeFiles(changed.map((c) => path.join(dir, c.name)));
-    const groups = changed.filter((c, i) => stored[i] === c.blob).map((c) => ({ ...c, author: "external" }));
-    if (!groups.length) return;
+    const groups = changed.map((c) => ({ ...c, author: "external" }));
     const subject = groups.length === 1 ? `${groups[0].revision === 1 ? "Take in" : "Recover"} ${groups[0].name}` : `Take in or recover ${groups.length} documents`;
     await this.commit(subject, groups, new Map(groups.map((g) => [g.id, g.key])));
   }

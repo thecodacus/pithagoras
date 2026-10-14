@@ -90,6 +90,13 @@ each document's owner and permissions when it saves it, so the agent can go on
 editing its files. A new document belongs to the owner of the `documents`
 folder.
 
+The portal checks the folder before it uses it, every time. It must be the
+portal's own (not a link, and nothing in it a link or a pipe), and it is closed
+to everyone else again if the sandbox's permissions for the chat's folder, or
+someone, opened it. A folder that someone else made or swapped in is refused
+("is not the documents store's own"); move or delete `.pithagoras-docs` to
+start a new history.
+
 ### A secret in a document
 
 A save whose text looks like a secret (a private key, or a token of a common
