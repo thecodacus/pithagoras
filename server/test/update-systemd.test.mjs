@@ -31,10 +31,10 @@ const script = path.join(home, "portal.mjs");
 writeFileSync(script, `
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 const [marker, dist, how] = process.argv.slice(2);
-const { restartPlan, restartPortal, restartProblem, requestedExit } = await import(dist + "/restart.js");
+const { restartPlan, restartPortal, restartProblem, restartSupport, requestedExit } = await import(dist + "/restart.js");
 const lives = existsSync(marker) ? readFileSync(marker, "utf8").trim().split("\\n").length : 0;
 const plan = await restartPlan();
-appendFileSync(marker, JSON.stringify({ life: lives + 1, mode: plan.mode, unit: plan.service?.unit ?? null, problem: await restartProblem() }) + "\\n");
+appendFileSync(marker, JSON.stringify({ life: lives + 1, mode: plan.mode, unit: plan.service?.unit ?? null, problem: await restartProblem(), support: await restartSupport() }) + "\\n");
 if (how === "plan" || lives > 0) setTimeout(() => process.exit(0), 100);
 else {
   process.on("SIGTERM", () => process.exit(requestedExit()));
@@ -85,6 +85,7 @@ test("under systemd with Restart=on-failure the portal is started again after th
   assert.equal(seen[0].mode, "exit", "told to be the service by its control group and its main process, with nothing set");
   assert.match(seen[0].unit, /^pithagoras-update-test-.*\.service$/);
   assert.equal(seen[0].problem, null, "a policy that restarts it is no problem");
+  assert.deepEqual(seen[0].support, { ok: true, mode: "exit", by: "systemd" }, "the Restart button may restart it");
 });
 
 test("under systemd with Restart=no the portal is not started again, and the check before the update says so", { skip: !manager && "no user manager of systemd" }, async () => {
@@ -97,6 +98,8 @@ test("under systemd with Restart=no the portal is not started again, and the che
   assert.equal(seen[0].mode, "exit");
   assert.match(seen[0].problem, /Restart=no/);
   assert.match(seen[0].problem, /Restart=on-failure \(or Restart=always\)/);
+  assert.equal(seen[0].support.ok, false, "and the Restart button refuses");
+  assert.equal(seen[0].support.code, "policy");
 });
 
 test("a portal that is the child of a service's main process, as under npm start, is taken for the service", { skip: !manager && "no user manager of systemd" }, async () => {
