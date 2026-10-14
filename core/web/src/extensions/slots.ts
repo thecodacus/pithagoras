@@ -49,6 +49,10 @@ const ordered = (entries: Registered<SlotName>[]) =>
 export function register<S extends SlotName>(extension: string, slot: S, entry: Entry<S>): () => void {
   if (!SLOTS.includes(slot)) throw new Error(`There is no slot called "${slot}". The slots are: ${SLOTS.join(", ")}`);
   if (typeof entry?.id !== "string" || !entry.id || !entry.component) throw new Error(`An entry in ${slot} needs an id and a component`);
+  const tool = (entry as { tool?: unknown }).tool;
+  if (slot === "chat.tool.action" && tool !== undefined && typeof tool !== "string" && !(tool instanceof RegExp)) {
+    throw new Error(`An entry in ${slot} names its tool by a name or a pattern, or leaves it out for every call`);
+  }
   const key = `${extension}/${entry.id}`;
   const before = held.get(slot) ?? NONE;
   if (before.some((e) => e.key === key)) throw new Error(`${extension} already has an entry called "${entry.id}" in ${slot}`);

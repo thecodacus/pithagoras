@@ -334,14 +334,16 @@ the conversation and wherever else the portal draws the card.
 portal.slots.register("chat.tool.action", {
   id: "open",
   tool: /^(bash|shell)$/,
-  component: ({ call, cut, panels }) =>
-    call.callId ? h(portal.ui.ToolLink, { onClick: () => panels.open("terminal", { callId: call.callId }) }, cut ? "Show all of it" : "Open in the terminal") : null,
+  component: ({ call, cut }) =>
+    call.callId ? h(portal.ui.ToolLink, { onClick: () => portal.panels.open("my-shell", { callId: call.callId }) }, cut ? "Show all of it" : "Open in My shell") : null,
 });
 ```
 
 `cut` says whether the card shows only the end of the output. `ui.ToolLink`
 is the portal's own look for a link on a card. Draw nothing for a call you
-have nothing for.
+have nothing for. The `panels` the component is given are your own, by id;
+`portal.panels` reaches any panel by name, as `my-shell` above is reached by
+the `name` its `chat.panel` entry gave it.
 
 ### A window in voice mode
 
@@ -355,15 +357,17 @@ how it behaves beside the portal's own windows:
   returns a count, and the window opens each time the count grows: the number
   of commands the agent ran, say, from `portal.chats.use`.
 - `opensFor(call)`: whether the card of a call in voice mode opens this window
-  when it is tapped.
+  when it is tapped. It is asked for the calls the portal's own windows are not
+  for: while the terminal, Files, the browser and the pictures are the
+  portal's own, a shell call's card opens the portal's terminal, and so on.
 
 ```js
 portal.slots.register("voice.window", {
   id: "shell",
   title: "Terminal",
   place: "side",
-  useAutoOpen: ({ chat }) => portal.chats.use(chat.id, (feed) => feed.events.filter((e) => e.type === "tool_execution_start" && e.payload.toolName === "bash").length),
-  opensFor: (call) => call.name === "bash",
+  useAutoOpen: ({ chat }) => portal.chats.use(chat.id, (feed) => feed.events.filter((e) => e.type === "tool_execution_start" && e.payload.toolName === "deploy").length),
+  opensFor: (call) => call.name === "deploy",
   component: Shell,
 });
 ```
@@ -677,9 +681,10 @@ With the sandbox off both are the portal's own user, and `argv` is empty.
 `portal.panels` is the panels of the chat on screen, any of them, by name:
 `isOpen(name)`, `open(name, params?)`, `close(name)`. An extension's panel is
 `<package>/<id>`, and also the `name` it gave itself, if any: that is how one
-extension's panel takes the place of another's, or of the portal's. Of two
-extensions that name a panel alike, the first loaded has the name. The
-portal's own are:
+extension's panel takes the place of another's that went by the name. The
+portal's own names are the portal's while those panels are its own. Of two
+extensions that name a panel alike, the one first in the slot's order has the
+name: a lower `order` first, then the one loaded first. The portal's own are:
 
 | Name | `open` takes |
 | --- | --- |

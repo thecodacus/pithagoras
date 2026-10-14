@@ -185,9 +185,10 @@ export const same = (a: Binding | null | undefined, b: Binding | null | undefine
 export function resolve(choice: Stored = stored()): Record<ActionId, Binding | null> {
   const out = {} as Record<ActionId, Binding | null>;
   for (const action of listed) {
-    if (action.id in choice) out[action.id] = choice[action.id]!;
-    else if (action.extension && action.default && Object.values(out).some((b) => same(b, action.default))) out[action.id] = null;
-    else out[action.id] = action.default;
+    const wanted = action.id in choice ? choice[action.id]! : action.default;
+    // An extension's gives way to an action before it that has its key, its default or a choice it was given while
+    // the extension was away: one key does one thing.
+    out[action.id] = action.extension && wanted && Object.values(out).some((b) => same(b, wanted)) ? null : wanted;
   }
   return out;
 }
@@ -203,7 +204,9 @@ function save(choice: Stored) {
  * so that the person can be told.
  */
 export function assign(id: ActionId, binding: Binding | null, current: Stored = stored()): { choice: Stored; took?: ActionId } {
-  if (binding && movesFocus(binding)) return { choice: current };
+  // An action that is not there (an extension's, taken out meanwhile) has nothing to assign.
+  const target = listed.find(a => a.id === id);
+  if (!target || (binding && movesFocus(binding))) return { choice: current };
   const resolved = resolve(current);
   const choice: Stored = { ...current };
   let took: ActionId | undefined;
@@ -212,7 +215,7 @@ export function assign(id: ActionId, binding: Binding | null, current: Stored = 
       if (action.id !== id && same(resolved[action.id], binding)) { choice[action.id] = null; took = action.id; }
     }
   }
-  const def = listed.find(a => a.id === id)!.default;
+  const def = target.default;
   if (binding ? same(binding, def) : def === null) delete choice[id];
   else choice[id] = binding ? normalize(binding) : null;
   return { choice, took };
@@ -224,8 +227,28 @@ export function setBinding(id: ActionId, binding: Binding | null): ActionId | un
   return took;
 }
 
+/**
+ * Back to its default. The portal's own takes its key back from whatever had
+ * it meanwhile; an extension's has its default only where nothing else has
+ * that key (see resolve), and takes it from nobody.
+ */
 export function resetBinding(id: ActionId): ActionId | undefined {
-  return setBinding(id, listed.find(a => a.id === id)!.default);
+  const action = listed.find(a => a.id === id);
+  if (!action) return undefined;
+  if (!action.extension) return setBinding(id, action.default);
+  const choice = { ...stored() };
+  delete choice[id];
+  save(choice);
+  return undefined;
+}
+
+/** Every action's shortcut as it would be with nothing chosen: what each row says its default is. */
+export const defaults = (): Record<ActionId, Binding | null> => resolve({});
+
+/** `value` as a shortcut, when it is one: a key with its modifiers, and not Tab. Null for none, undefined for anything else. */
+export function bindingFrom(value: unknown): Binding | null | undefined {
+  if (value === null) return null;
+  return isBinding(value) && !movesFocus(value) ? normalize(value) : undefined;
 }
 
 export function resetAll() {

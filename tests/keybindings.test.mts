@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 const store = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) };
 (globalThis as any).window = Object.assign(new EventTarget(), { localStorage: (globalThis as any).localStorage });
-const { ACTIONS, actions, addAction, resolve, assign, setBinding, resetBinding, resetAll, matches, bindingOf, describe, keyName } = await import('../core/web/src/keybindings.js');
+const { ACTIONS, actions, addAction, resolve, assign, setBinding, resetBinding, resetAll, matches, bindingOf, bindingFrom, defaults, describe, keyName } = await import('../core/web/src/keybindings.js');
 
 beforeEach(() => store.clear());
 
@@ -122,4 +122,36 @@ test('what was chosen for an extension\'s shortcut is kept while the extension i
   assert.equal(resetBinding('x:notes/pin'), undefined);
   assert.deepEqual(resolve()['x:notes/pin'], { code: 'KeyN' });
   back();
+});
+
+test('a key chosen for a portal shortcut while an extension was away is the portal\'s: the extension\'s choice of it gives way when it comes back', () => {
+  const off = addAction({ id: 'x:notes/pin', label: 'Pin', scope: 'Voice mode', default: { code: 'KeyN' }, extension: 'notes' });
+  setBinding('x:notes/pin', { code: 'KeyJ' });
+  off();
+  setBinding('voice.repeat', { code: 'KeyJ' });
+  const back = addAction({ id: 'x:notes/pin', label: 'Pin', scope: 'Voice mode', default: { code: 'KeyN' }, extension: 'notes' });
+  assert.deepEqual(resolve()['voice.repeat'], { code: 'KeyJ' });
+  assert.equal(resolve()['x:notes/pin'], null, 'one key does one thing');
+  back();
+});
+
+test('an extension\'s shortcut reset to a default another action has takes it from nobody, and that is what its row calls its default', () => {
+  const off = addAction({ id: 'x:c/mute', label: 'Mute', scope: 'Voice mode', default: { code: 'KeyM' }, extension: 'c' });
+  assert.equal(defaults()['x:c/mute'], null);
+  setBinding('x:c/mute', { code: 'KeyK' });
+  assert.equal(resetBinding('x:c/mute'), undefined);
+  assert.deepEqual(resolve()['voice.mute'], { code: 'KeyM' }, 'the portal keeps its key');
+  assert.equal(resolve()['x:c/mute'], null);
+  off();
+});
+
+test('a shortcut that is not there any more has nothing to assign or reset, and a default has to be a key', () => {
+  const before = JSON.stringify(resolve());
+  assert.deepEqual(assign('x:gone/away', { code: 'KeyZ' }).choice, {});
+  assert.equal(setBinding('x:gone/away', { code: 'KeyZ' }), undefined);
+  assert.equal(resetBinding('x:gone/away'), undefined);
+  assert.equal(JSON.stringify(resolve()), before);
+  assert.deepEqual(bindingFrom({ code: 'KeyN', shift: true, ctrl: false }), { code: 'KeyN', shift: true });
+  assert.equal(bindingFrom(null), null);
+  for (const bad of [{ code: 'Tab' }, 'KeyN', { key: 'n' }, { code: '' }, 3]) assert.equal(bindingFrom(bad), undefined, JSON.stringify(bad));
 });

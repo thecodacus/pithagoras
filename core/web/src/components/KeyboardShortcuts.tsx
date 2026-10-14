@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LuRotateCcw } from "react-icons/lu";
-import { FIXED, bindingOf, describe, movesFocus, resetAll, resetBinding, setBinding, useActions, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
+import { FIXED, bindingOf, defaults, describe, movesFocus, resetAll, resetBinding, setBinding, useActions, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
 import { actionLabel } from "../extensions/shortcuts";
 import { t } from "../i18n";
 import { useCommandTrigger } from "../command-trigger";
@@ -23,6 +23,12 @@ export function KeyboardShortcuts() {
   const layout = useKeyLabels();
   const trigger = useCommandTrigger();
   const [recording, setRecording] = useState<ActionId | null>(null);
+  // What each would have with nothing chosen: an extension's default gives way to a key another action has.
+  const plain = useMemo(() => defaults(), [actions]);
+  // An extension taken out while its shortcut listens for a key: nothing is listening for it any more.
+  useEffect(() => {
+    if (recording && !actions.some((a) => a.id === recording)) setRecording(null);
+  }, [actions, recording]);
   // Said in the language shown when it is drawn.
   const [note, setNote] = useState<(() => string) | null>(null);
 
@@ -52,7 +58,7 @@ export function KeyboardShortcuts() {
     return () => { window.removeEventListener("keydown", take, true); window.removeEventListener("keyup", swallow, true); };
   }, [recording, layout, actions]);
 
-  const changed = actions.some(a => describe(bindings[a.id], null, false) !== describe(a.default, null, false));
+  const changed = actions.some(a => describe(bindings[a.id], null, false) !== describe(plain[a.id], null, false));
   return <div className="xl:grid xl:grid-cols-[3fr_2fr] xl:items-start xl:gap-x-8">
     <section className="mb-6">
       <div className="flex items-start justify-between gap-3">
@@ -68,7 +74,7 @@ export function KeyboardShortcuts() {
       <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Voice mode shortcuts")}>
         {actions.map(action => {
           const binding = bindings[action.id];
-          const isDefault = describe(binding, null, false) === describe(action.default, null, false);
+          const isDefault = describe(binding, null, false) === describe(plain[action.id], null, false);
           const listening = recording === action.id;
           return <li key={action.id} className="flex flex-wrap items-center gap-2 px-3 py-2" aria-label={actionLabel(action)}>
             <span className="min-w-0 flex-1 text-sm text-fg">
@@ -84,7 +90,7 @@ export function KeyboardShortcuts() {
                 ? <button className={btnCls} onClick={() => setRecording(null)}>{t("Cancel")}</button>
                 : <button className={btnCls} onClick={() => { setNote(null); setRecording(action.id); }}>{t("Change")}</button>}
               <button className={btnCls} disabled={listening || !binding} onClick={() => { setBinding(action.id, null); setNote(null); }}>{t("Clear")}</button>
-              <button className={btnCls} disabled={listening || isDefault} title={t("Back to {keys}", { keys: describe(action.default, layout) || t("none") })} onClick={() => {
+              <button className={btnCls} disabled={listening || isDefault} title={t("Back to {keys}", { keys: describe(plain[action.id], layout) || t("none") })} onClick={() => {
                 const took = resetBinding(action.id);
                 const taken = actions.find(a => a.id === took);
       const label = taken && actionLabel(taken);

@@ -81,7 +81,8 @@ export interface SlotMap {
    * `portal.panels.open(name, params)` reaches it by, from anywhere: the
    * portal's own panels go by "files", "git", "terminal", "browser", "agents"
    * and "canvas", and while one of those is the portal's, it is the one.
-   * Of two extensions that name a panel alike, the first loaded has it.
+   * Of two extensions that name a panel alike, the one first in the slot's
+   * order has it (a lower `order`, then the one loaded first).
    */
   "chat.panel": {
     entry: {
@@ -119,7 +120,8 @@ export interface SlotMap {
    * `useAutoOpen` is a hook, called while voice mode is on in a chat: a count
    * that opens the window each time it grows (the agent ran a command). A
    * card of a call in voice mode that `opensFor` says yes to opens it when
-   * tapped. Its own shortcut is `portal.shortcuts`.
+   * tapped, for calls the portal's own windows are not for. Its own shortcut
+   * is `portal.shortcuts`.
    */
   "voice.window": {
     entry: {

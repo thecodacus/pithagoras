@@ -484,6 +484,22 @@ test('a package is told apart by what it brings: something for pi, something for
   assert.deepEqual(packageKinds(scratch('extension-kinds-')), []);
 });
 
+test('an action on a call\'s card names its tool by a name or a pattern, and a shortcut\'s default is a key: anything else is refused where it is registered', async () => {
+  // The shortcuts are listed on the page's window, which tells Settings when one comes or goes.
+  (globalThis as any).window ??= new EventTarget();
+  const { registerShortcut } = await import('../core/web/src/extensions/shortcuts.ts');
+  const component = () => null;
+  for (const tool of [null, ['bash'], 3, {}]) {
+    assert.throws(() => register('probe', 'chat.tool.action', { id: `bad-${JSON.stringify(tool)}`, tool, component } as any), /a name or a pattern/, JSON.stringify(tool));
+  }
+  for (const tool of [undefined, 'bash', /^sh/]) register('probe', 'chat.tool.action', { id: `good-${String(tool)}`, tool, component } as any)();
+  const run = () => {};
+  assert.throws(() => registerShortcut('probe', { id: 'tab', label: 'Tab', scope: 'voice', default: { code: 'Tab' }, run }), /a key/);
+  assert.throws(() => registerShortcut('probe', { id: 'text', label: 'Text', scope: 'voice', default: 'KeyN' as any, run }), /a key/);
+  assert.throws(() => registerShortcut('probe', { id: 'chat', label: 'Chat', scope: 'chat' as any, default: null, run }), /scope/);
+  registerShortcut('probe', { id: 'none', label: 'None', scope: 'voice', default: null, run })();
+});
+
 test('a window an extension brought that asks for a place has it before those that take what is left, and the other place when it is taken', () => {
   assert.deepEqual(placeWindows({ 'x:a/w': true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: undefined });
   assert.deepEqual(placeWindows({ 'x:a/w': true, files: true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: 'files' });

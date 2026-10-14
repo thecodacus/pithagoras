@@ -316,7 +316,18 @@ export function Chat({
   // A job in the running tray is shown where an extension says jobs are shown (`jobs.show`), and in the portal's
   // own terminal while there is none.
   const jobsShown = useHasCommand("jobs.show");
-  const showJob = (key: string) => (jobsShown ? void runCommand("jobs.show", { chat: session.id, job: key }) : openJob(key));
+  const showJob = (key: string) => {
+    if (!jobsShown) return openJob(key);
+    const failed = (e: unknown) => {
+      console.error("[extensions] jobs.show failed, so the job is shown in the portal's terminal:", e);
+      openJob(key);
+    };
+    try {
+      void Promise.resolve(runCommand("jobs.show", { chat: session.id, job: key })).catch(failed);
+    } catch (e) {
+      failed(e);
+    }
+  };
   /** A command from the chat, found in the agent terminal. */
   const showInTerminal = (callId: string) => {
     setTerminalTab("agent");

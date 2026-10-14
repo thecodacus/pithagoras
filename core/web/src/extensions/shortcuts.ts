@@ -1,5 +1,5 @@
 import type { Chat, Shortcut, VoiceWindows } from "@pithagoras/extension-api";
-import { addAction, type Action, type ActionId } from "../keybindings";
+import { addAction, bindingFrom, type Action, type ActionId } from "../keybindings";
 import { t } from "../i18n";
 import { translate } from "./strings";
 
@@ -18,8 +18,10 @@ export function registerShortcut(extension: string, shortcut: Shortcut): () => v
     throw new Error("A shortcut needs an id, a label and something to run");
   }
   if (shortcut.scope !== "voice") throw new Error(`A shortcut's scope is "voice": "${String(shortcut.scope)}" is not one`);
+  const given = bindingFrom(shortcut.default ?? null);
+  if (given === undefined) throw new Error("A shortcut's default is a key, { code } with ctrl, alt, shift or meta, and not Tab; or null for none");
   const id = `x:${extension}/${shortcut.id}` as const;
-  const off = addAction({ id, label: shortcut.label, scope: "Voice mode", default: shortcut.default ?? null, extension });
+  const off = addAction({ id, label: shortcut.label, scope: "Voice mode", default: given, extension });
   const mine: Held = { extension, run: shortcut.run };
   held.set(id, mine);
   return () => {

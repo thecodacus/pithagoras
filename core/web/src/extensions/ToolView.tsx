@@ -45,9 +45,10 @@ export function ToolLink({ icon: Icon, onClick, children }: { icon?: ComponentTy
   );
 }
 
-const forTool = (tool: string | RegExp | undefined, name: string) => {
+const forTool = (tool: unknown, name: string) => {
   if (tool === undefined) return true;
   if (typeof tool === "string") return tool === name;
+  if (!(tool instanceof RegExp)) return false;
   tool.lastIndex = 0;
   return tool.test(name);
 };
