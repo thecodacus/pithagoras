@@ -241,3 +241,19 @@ test('the lazy buttons are greyed out for a tool that is off, and for a group of
   await expect(off).toBeEnabled();
   expect(puts).toEqual([]);
 });
+
+test('an off tool whose mark is fixed is not told to switch it on to change the mark', async ({ page }) => {
+  // notes_read: an MCP server's tool, set by the server's button. heavy_read: in a set that is marked lazy as a whole.
+  await portal(page, { more: servers, off: ['notes_read', 'heavy_read'], lazy: ['pi-heavy'] });
+  await page.getByRole('button', { name: /^notes/ }).click();
+  await page.getByRole('button', { name: /^pi-heavy/ }).click();
+  const mcp = page.getByRole('button', { name: 'Lazy notes_read' });
+  await expect(mcp).toBeDisabled();
+  await expect(mcp).toHaveAttribute('title', /Set for the whole server/);
+  const set = page.getByRole('button', { name: 'Lazy heavy_read' });
+  await expect(set).toBeDisabled();
+  await expect(set).not.toHaveAttribute('title', /Switch it on here/);
+  // An off tool of a set that is not marked still says how to get at its mark.
+  await page.getByRole('button', { name: /^pi-web-access/ }).click();
+  await expect(page.getByRole('button', { name: 'Lazy web_search' })).toBeEnabled();
+});
