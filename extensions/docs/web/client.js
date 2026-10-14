@@ -2,7 +2,8 @@
  * The Documents extension's half in the portal's page: plain JavaScript,
  * loaded as it is. It puts one page into the sidebar (`nav.page`): every
  * folder chats work in that has documents, and a document read from there,
- * drawn as the portal draws Markdown.
+ * drawn as the portal draws Markdown. In a chat it draws the agent's calls of
+ * its tools for a document (`chat.tool`): which document, and what became of it.
  *
  * What is on the page comes from the server half's routes (server.js): a page
  * outside a chat has no chat's pi to ask. A document is asked for by the id
@@ -22,6 +23,16 @@ export default function (portal) {
     "All documents": "Alle Dokumente",
     "Changed {date}": "Geändert {date}",
     "This document is empty.": "Dieses Dokument ist leer.",
+    "Created a document": "Dokument erstellt",
+    "Edited a document": "Dokument bearbeitet",
+    "Read a document": "Dokument gelesen",
+    "Revision {n}": "Revision {n}",
+    "Revision {from} to {to}": "Revision {from} auf {to}",
+    "{n} edits": "{n} Änderungen",
+    "1 edit": "1 Änderung",
+    "No change": "Keine Änderung",
+    "an earlier revision, the document is at {n}": "eine frühere Revision, das Dokument steht bei {n}",
+    "Open in Documents": "In Dokumenten öffnen",
   });
 
   const icon = (path) => () =>
@@ -97,10 +108,46 @@ export default function (portal) {
     );
   }
 
+  /**
+   * A call of one of the agent's tools that names a document, in place of the
+   * portal's card: what was done to it, where it stands, and a way to read it
+   * on the page. The portal's own card says it best while the call runs, when
+   * it failed, and for a list.
+   */
+  function DocumentCall({ call, card }) {
+    portal.locale.use();
+    const d = call.details;
+    if (call.status !== "done" || typeof d?.id !== "string" || typeof d.folder !== "string") return card;
+    const heading = { create: t("Created a document"), edit: t("Edited a document"), read: t("Read a document") }[d.action];
+    if (!heading) return card;
+    const facts = [`documents/${d.name}`];
+    if (d.action === "edit") {
+      facts.push(d.changed ? t("Revision {from} to {to}", { from: d.from, to: d.revision }) : t("No change"), d.edits === 1 ? t("1 edit") : t("{n} edits", { n: d.edits }));
+    } else {
+      facts.push(t("Revision {n}", { n: d.revision }));
+      if (d.current !== undefined && d.current !== d.revision) facts.push(t("an earlier revision, the document is at {n}", { n: d.current }));
+    }
+    return h(
+      "div",
+      { className: "pd-call" },
+      h(DocumentIcon),
+      h("div", null, h("span", { className: "pd-by" }, heading), h("p", { className: "pd-call-title" }, d.title), h("p", { className: "pd-meta" }, facts.join(" · "))),
+      h("button", { type: "button", onClick: () => portal.navigate(`/x/${portal.extension}/documents?${new URLSearchParams({ folder: d.folder, doc: d.id })}`) }, t("Open in Documents")),
+    );
+  }
+
+  /** The document a link to the page names (`?folder=<id>&doc=<id>`), as the page opens it. */
+  function linked() {
+    const query = new URLSearchParams(window.location.search);
+    const folder = query.get("folder");
+    const doc = query.get("doc");
+    return folder && doc ? { folder, id: doc } : null;
+  }
+
   function DocumentsPage() {
     portal.locale.use();
     // The document open on the page, or the list of them all.
-    const [open, setOpen] = useState(null);
+    const [open, setOpen] = useState(linked);
     return h(
       "div",
       { className: "pd-page" },
@@ -110,4 +157,5 @@ export default function (portal) {
   }
 
   portal.slots.register("nav.page", { id: "documents", title: "Documents", icon: DocumentIcon, component: DocumentsPage });
+  for (const tool of ["doc_create", "doc_read", "doc_edit"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
 }

@@ -478,9 +478,11 @@ export class Store {
 
   /**
    * A new document named after `title`, holding `markdown`: revision 1.
-   * Never in place of a file: a name that is taken gets a number.
+   * Never in place of a file: a name that is taken gets a number, or with
+   * `exclusive` is refused (409, with the taken document's id as `exists`
+   * where it is one), for a caller that would rather not make a second one.
    */
-  create({ title, markdown, scope = "project", chat = null, author = "user" }) {
+  create({ title, markdown, scope = "project", chat = null, author = "user", exclusive = false }) {
     const bytes = Buffer.from(markdown, "utf8");
     if (bytes.length > MAX_BYTES) throw new DocError(413, "A document can be at most 1 MB");
     return this.locked(async () => {
@@ -492,7 +494,11 @@ export class Store {
       const now = new Date().toISOString();
       for (let n = 1; n < 1000; n++) {
         const name = `${numbered(slug, n)}.md`;
-        if (this.db.prepare("SELECT 1 FROM documents WHERE name = ?").get(name)) continue;
+        const taken = this.db.prepare("SELECT id FROM documents WHERE name = ?").get(name);
+        if (taken) {
+          if (exclusive) throw new DocError(409, `A document called ${name} exists already`, { exists: taken.id });
+          continue;
+        }
         let written;
         // The row first, without a revision: a failure after the file is written leaves a file recovery takes in under this id.
         this.db.prepare("INSERT INTO documents (id, name, scope, chat_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, name, scope, chat, now, now);
@@ -501,7 +507,10 @@ export class Store {
         } catch (e) {
           this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
           // Anything in the way (a file, a link, a second name) makes the name taken: the next number is free.
-          if (e instanceof Refused) continue;
+          if (e instanceof Refused) {
+            if (exclusive) throw new DocError(409, `A file called ${name} is in the way`, { exists: null });
+            continue;
+          }
           throw e;
         }
         this.fault("write");

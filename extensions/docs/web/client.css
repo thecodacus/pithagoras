@@ -14,3 +14,12 @@
 .pd-back:hover { background: rgb(var(--accent) / .1); }
 .pd-document > .pd-meta { margin: 8px 0 12px; }
 .pd-body { border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); padding: 16px 20px; overflow-wrap: anywhere; }
+.pd-call { display: flex; align-items: flex-start; gap: 10px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 8px 10px; color: rgb(var(--fg)); font-size: 13px; }
+.pd-call > svg { flex: none; width: 14px; height: 14px; margin-top: 3px; color: rgb(var(--accent)); }
+.pd-call > div { min-width: 0; flex: 1; }
+.pd-call p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.pd-call .pd-call-title { font-weight: 600; }
+.pd-by { color: rgb(var(--fg-faint)); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.pd-call button { flex: none; border: 0; border-radius: 6px; background: none; padding: 2px 6px; color: rgb(var(--accent)); font: inherit; font-size: 11px; cursor: pointer; }
+.pd-call button:hover { background: rgb(var(--accent) / .1); }
+.pd-call button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }

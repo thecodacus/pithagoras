@@ -181,5 +181,61 @@ tables, quotes, links and code. Two things are not drawn yet:
 - a `mermaid` diagram shows as its code
 - a picture by a path in the chat's folder (`![](images/a.png)`) is not shown
 
-The page only shows documents for now: to change one, edit it in Files or
-ask the agent. **All documents** goes back to the list.
+The page only shows documents for now: to change one, ask the agent or edit
+it in Files. **All documents** goes back to the list.
+
+## The agent's tools
+
+With the host executor (pi runs in the portal's own process) each chat's agent
+has four tools for the documents. Like any tool they can be switched off for
+a chat or by default under Settings → Tools, where they are listed in the group
+`extension-host`: the name the portal gives to what extensions add to a chat's
+pi through their server half. With `EXECUTOR=container` the agent has none:
+the runner image does not get extensions.
+
+| Tool | What it does |
+| --- | --- |
+| `doc_list` | The documents the chat sees: id, title, file, revision and whether it is the project's or the chat's own. `scope` narrows it to one of the two. |
+| `doc_read` | One document's Markdown and revision. `revision` reads an earlier one from the history; a long document is returned in parts of about 60 KB, and the end of a part says where to read on (`from_line`). |
+| `doc_create` | A new document from a title and its Markdown, at revision 1. |
+| `doc_edit` | Replaces quoted passages with new text, on the revision the agent read. |
+
+The agent names a document by its id, never by a path. A document is the
+**project's** (every chat that works in the folder sees it) unless the agent
+makes it with `scope: chat`: that one is listed and read only in its chat. The
+page lists both, whichever chat they belong to.
+
+What the tools check is what keeps the agent from overwriting you:
+
+- `doc_edit` says which revision it was made on. If you saved the document
+  since, or something changed its file (the agent's own tools, Files, an
+  editor), the edit is refused, nothing is written, and the agent reads the
+  document again before it tries again. Two edits made on one revision at the
+  same time: one is made, the other is refused.
+- Each edit is a quote and its replacement. The quote must be in the document
+  exactly once, as `doc_read` shows it. All of a call's edits are looked for in
+  the document as it was, none may overlap, and either all are made or none.
+  Each call makes one revision, by the agent.
+- `doc_create` never replaces anything: a title whose file name is taken is
+  refused. The agent has no tool to delete a document, to restore a revision
+  or to change the history.
+- A document is at most 1 MB.
+- The agent is not let to write a secret (a private key, or a token of a common
+  service) into a document, since the history keeps every revision. It can
+  still edit a document that holds one already.
+
+A refusal reaches the agent as an error that starts with its reason
+(`revision_mismatch`, `quote_not_found`, `quote_ambiguous`, `edits_overlap`,
+`exists`, `too_large`, `secret`, `not_found` or `invalid`), so that it can put
+it right.
+
+These checks are in the tools. The agent can still change a document's file
+with its own tools (it is an ordinary file in the chat's folder); that is kept
+as an outside change like any other, but it is not checked against what you are
+doing, which is why the tools' instructions tell the agent to use them.
+
+In the conversation a call of `doc_create`, `doc_read` or `doc_edit` is drawn
+as a card that names the document and says what became of it (created, read,
+edited from revision 2 to 3, with how many edits). **Open in Documents** opens
+the document on the page. A call that failed, and a list, are drawn as any
+tool call is.
