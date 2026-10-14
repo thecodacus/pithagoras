@@ -315,6 +315,28 @@ The image runs the version of pi that the portal's lock file names, built in
 with it, so a new pi arrives with a new image and not with **Update all** in
 Settings → Extensions, which updates the installed packages only.
 
+## Restarting
+
+Settings → About has a **Restart** button (see [Settings](/guide/settings#restart)).
+It ends the portal with **status 75** and leaves the start to whatever runs it,
+so that nothing needs a shell on the host. The portal first winds down what is
+running, as it does on SIGTERM; a request that is being answered gets two seconds
+to finish. What starts it again:
+
+| Run as | Restarts on 75 because |
+| --- | --- |
+| `docker compose` (`docker-compose.yml`, `docker-compose.portainer.yml`) | `restart: unless-stopped` starts a container again whatever its status, and `init: true` passes the status on |
+| a systemd service | `Restart=on-failure` (or `always`): systemd counts a status other than 0 as a failure and starts the unit after `RestartSec` |
+| pm2, `while true` and the like | set `PORTAL_UPDATE_RESTART=exit`; they start it again on any status |
+
+A container started with `docker run` and no `--restart` stays stopped; the portal
+asks Docker over its socket for the container's restart policy (by
+`PORTAL_CONTAINER_NAME`, or the hostname) and turns the button off when there is
+none. Without the socket it assumes the policy is there. A portal started by hand,
+with nothing that starts it again, says that a restart is not possible here and
+does nothing. Each request is logged: `[restart] the owner asked for a restart at
+<time> from <address>`.
+
 ## What the web app is sent
 
 The build leaves a brotli and a gzip copy beside each script, style and model
@@ -465,7 +487,7 @@ Everything here is optional except, with the Compose files, `WORKSPACES_DIR`.
 | `PORT` | `4100` | Port to listen on. |
 | `PITHAGORAS_LOG_LEVEL` | `info` | `debug` also keeps and prints the debug lines in the server's log and in Settings → Logs: so far one per tool call and approval, with the tool, the outcome and the time it took, and nothing a tool was given or returned. Both Compose files pass it. See [Settings](/guide/settings#logs). |
 | `PITHAGORAS_LOG_LINES` / `PITHAGORAS_LOG_CHARS` | `2000` / `2000000` | How many lines, and how many characters of them, Settings → Logs keeps in memory (100 to 50000 lines, 200000 to 20000000 characters). Debug lines count against the same limits, so raise the lines with `PITHAGORAS_LOG_LEVEL=debug`. Both Compose files pass them. |
-| `PORTAL_UPDATE_RESTART` | — | From source: how the **Update** button in Settings → About restarts the portal after it has built the new version. `exit` only stops it, with status 75, for a portal that something else starts again (pm2, a restart policy); `self` starts the new one itself. Unset, a portal that is a systemd service's own process exits; one that only is in a service's control group (`npm start` under dash, a wrapper script, a cron job) starts its own copy and exits with status 75 as well; any other starts its own. A systemd unit needs `Restart=on-failure` or `Restart=always`. See [Settings](/guide/settings#update). |
+| `PORTAL_UPDATE_RESTART` | — | From source: how the **Update** button in Settings → About restarts the portal after it has built the new version, and whether the **Restart** button may start a copy of it itself (`self`) or only stop it (`exit`, see [Restarting](#restarting)). `exit` only stops it, with status 75, for a portal that something else starts again (pm2, a restart policy); `self` starts the new one itself. Unset, a portal that is a systemd service's own process exits; one that only is in a service's control group (`npm start` under dash, a wrapper script, a cron job) starts its own copy and exits with status 75 as well; any other starts its own. A systemd unit needs `Restart=on-failure` or `Restart=always`. See [Settings](/guide/settings#update). |
 | `TZ` | UTC | The time zone of the portal's clock, such as `Europe/Berlin`. A container keeps UTC unless it is told one. The quiet hours of an [agent's heartbeat](/guide/agents#its-heartbeat) and the schedule of a repeating [routine](/guide/routines) are read on this clock. Both Compose files pass it from `.env` or the shell. |
 | `PORTAL_UPGRADE_BACKUP` | — | `skip` upgrades the database without the backup it is otherwise made first, for a volume with no room for the copy. Both Compose files pass it; see [Upgrading](/guide/upgrading#no-room-for-the-backup). |
 | `PORTAL_UPDATE_CHECK` | — | From source: `off` stops the portal from fetching `origin/main` by itself at the start and every six hours to see whether there is something new. The **Update** button in Settings → About still asks when it is pressed. See [Settings](/guide/settings#update). |

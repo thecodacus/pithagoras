@@ -315,6 +315,16 @@ Settings → About → Update. Whoever is signed in may use it. A portal that do
 | `POST /api/update/check` | Fetches `origin/main` and answers `{ branch, current, target, behind, ahead, changed, rebuild, problem, running }`. `problem` is `{ code, message }` with `code` `fetch`, `detached`, `dirty`, `diverged` or `restart` (a systemd service not set to start again), or `null`. `running` is the number of chats and runs the restart would stop. Changes nothing |
 | `POST /api/update` | `{ expect }` — required: the commit that was shown. Without it, or with anything but a commit id, 400 `invalid`, and nothing starts. Starts the update: 202 `{ run }`. Refused with 409 and a `code`: `busy` (one is running), `moved` (`origin/main` is not `expect` any more), `current` (nothing to update to, and the build is of the commit checked out), or the `problem` of a check |
 
+## Restarting the portal
+
+Settings → About → Restart. Whoever is signed in may use it.
+
+| | |
+| --- | --- |
+| `GET /api/restart` | `{ possible, by?, code?, reason?, running }`. `possible` is true when something would start the portal again (`by`: `systemd`, `container`, `manager` or `copy`); otherwise `code` is `unsupervised` or `policy` and `reason` says why. `running` is the number of chats and runs a restart would stop. Changes nothing |
+| `POST /api/restart` | `{ confirm: true }` — required; without it 400 `confirm`, and nothing happens. 202 `{ restarting: true, boot }`, and the portal ends with status 75 a moment later. 409 `unsupervised` or `policy` where nothing would start it again, 409 `busy` while a restart is on its way. Written to the log |
+| `GET /api/health` | `{ ok: true, boot }`, without a login, while the portal is up. `boot` changes with each start of the portal, so a client that asked for a restart waits for another one |
+
 ## Portal settings
 
 | | |
