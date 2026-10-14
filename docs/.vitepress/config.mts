@@ -53,6 +53,7 @@ export default defineConfig({
           { text: "Voice pipeline switches", link: "/guide/voice-comparison" },
           { text: "Session canvases", link: "/guide/canvases" },
           { text: "Files", link: "/guide/files" },
+          { text: "Documents", link: "/guide/documents" },
           { text: "Git", link: "/guide/git" },
           { text: "Terminal and background jobs", link: "/guide/terminal" },
           { text: "Memory and audit", link: "/guide/memory" },

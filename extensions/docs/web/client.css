@@ -1,0 +1,16 @@
+/* In the portal's own colours: its theme is a set of variables on the page, each the three numbers of a colour. */
+.pd-page { margin: 0 auto; max-width: 52rem; padding: 24px 16px; color: rgb(var(--fg)); font-size: 14px; }
+.pd-folder { margin-top: 24px; }
+.pd-folder h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.pd-path { margin: 2px 0 8px; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
+.pd-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pd-list button { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pd-list button:hover { border-color: rgb(var(--accent) / .5); }
+.pd-list button:focus-visible, .pd-back:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-title { font-weight: 600; overflow-wrap: anywhere; }
+.pd-meta { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
+.pd-document { margin-top: 20px; }
+.pd-back { border: 0; border-radius: 6px; background: none; padding: 2px 6px; margin-left: -6px; color: rgb(var(--accent)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-back:hover { background: rgb(var(--accent) / .1); }
+.pd-document > .pd-meta { margin: 8px 0 12px; }
+.pd-body { border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); padding: 16px 20px; overflow-wrap: anywhere; }

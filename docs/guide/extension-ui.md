@@ -747,3 +747,5 @@ extension:
 Install it from **Settings → Extensions → Discover**, where it is listed under
 **Comes with Pithagoras**. `extensions/theme-dusk` and `extensions/theme-warm`
 beside it are extensions that are only a theme, and are listed there too.
+`extensions/docs` is a larger one that is still being built: a page in the
+sidebar, fed by its server half's routes ([Documents](/guide/documents)).

@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 RUN npm ci
 COPY server server
 COPY web web
+# The extensions: the build makes the Documents extension's editor bundle in its folder.
+COPY extensions extensions
 # The web build copies it next to the voice files it covers (web/scripts/copy-vad-assets.mjs).
 COPY THIRD_PARTY_NOTICES.md ./
 RUN npm run build
@@ -78,6 +80,11 @@ COPY skills skills
 # them until a feature is switched on in Settings → Add-ons, which installs one
 # as a local pi package pointing here.
 COPY extensions extensions
+# The Documents extension's editor, built above and not kept in git, and what its
+# server half needs to run, so a new container does not reach for the registry.
+COPY --from=build /app/extensions/docs/web/editor.js extensions/docs/web/editor.js
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix extensions/docs \
+    && npm cache clean --force
 COPY deploy/voice deploy/voice
 
 # HOME lives on the data volume so pi packages and settings (~/.pi/agent)

@@ -25,7 +25,7 @@ is what there is to install, in three parts: **Comes with Pithagoras**, **Find
 packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
-(the Notes sample and the Dusk theme), each installed from the portal's own
+(the Notes sample, the Dusk theme and [Documents](/guide/documents)), each installed from the portal's own
 folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
@@ -125,6 +125,8 @@ A package can also bring an interface of its own to the portal (a panel beside
 the conversation, its own card for its tool's calls, a page in the sidebar) and
 a server half with routes of its own. See
 [Building an extension](/guide/extension-ui).
+[Documents](/guide/documents), which ships in the repository, is one: a page
+in the sidebar for the Markdown documents in your chats' folders.
 
 ## Built-in skills
 
