@@ -484,7 +484,7 @@ test('a store that fails to open does not keep its database open on every reques
   const { folder, docs } = await withDocument('docs-store-leak-');
   await docs.close();
   // A database of a later version cannot be opened by this store.
-  const { default: Database } = await import('../extensions/docs/node_modules/better-sqlite3/lib/index.js');
+  const { default: Database } = await import('better-sqlite3');
   const db = new Database(path.join(folder, '.pithagoras-docs', 'docs.sqlite'));
   db.prepare("UPDATE meta SET value = '9' WHERE key = 'schema'").run();
   db.close();
