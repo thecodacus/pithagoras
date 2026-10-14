@@ -16,8 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 RUN npm ci
 COPY server server
 COPY web web
-# What an extension written in TypeScript is built with: @pithagoras/extension-api.
+# What an extension written in TypeScript is built with: @pithagoras/extension-api,
+# and the script that builds each extension that has a build of its own.
 COPY packages packages
+COPY scripts scripts
 # The extensions: `npm run build` builds each that has a build of its own, in its folder.
 COPY extensions extensions
 # The web build copies it next to the voice files it covers (web/scripts/copy-vad-assets.mjs).
