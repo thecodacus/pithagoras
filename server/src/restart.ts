@@ -89,18 +89,28 @@ export async function ownService(
   show: (args: string[]) => Promise<string | undefined> = systemctl,
   pids: number[] = ownPids(),
 ): Promise<{ unit: string; user: boolean; restart: string | undefined } | undefined> {
+  const found = await serviceInfo(cgroup, show);
+  if (!found || !found.main || !pids.includes(found.main)) return undefined;
+  return { unit: found.unit, user: found.user, restart: found.restart };
+}
+
+/** The systemd service this process is in the control group of, with its main process and restart policy, whoever its main process is. */
+async function serviceInfo(
+  cgroup: string | undefined,
+  show: (args: string[]) => Promise<string | undefined>,
+): Promise<{ unit: string; user: boolean; main: number; restart: string | undefined } | undefined> {
   const service = serviceOf(cgroup);
   if (!service) return undefined;
   const out = await show([...(service.user ? ["--user"] : []), "show", "--property=MainPID,Restart", service.unit]);
-  const main = Number(/^MainPID=(\d+)$/m.exec(out ?? "")?.[1]);
-  if (!main || !pids.includes(main)) return undefined;
-  return { ...service, restart: /^Restart=(.*)$/m.exec(out ?? "")?.[1]?.trim() };
+  return { ...service, main: Number(/^MainPID=(\d+)$/m.exec(out ?? "")?.[1]), restart: /^Restart=(.*)$/m.exec(out ?? "")?.[1]?.trim() };
 }
 
 export interface RestartPlan {
   mode: RestartMode;
   /** The service the portal is the main process of, where it is. */
   service?: { unit: string; user: boolean; restart: string | undefined };
+  /** The service the portal only runs in the control group of (`both`), whose main process is something else. */
+  group?: { unit: string; user: boolean; restart: string | undefined };
 }
 
 /**
@@ -122,9 +132,13 @@ export async function restartPlan(
   pids?: number[],
 ): Promise<RestartPlan> {
   if (env.PORTAL_UPDATE_RESTART === "self") return { mode: "self" };
-  const service = await ownService(cgroup, show, pids);
+  // One question to systemd answers both: is the portal the unit's own process, and what the unit's policy is.
+  const info = await serviceInfo(cgroup, show ?? systemctl);
+  const own = info && info.main && (pids ?? ownPids()).includes(info.main);
+  const service = own ? { unit: info.unit, user: info.user, restart: info.restart } : undefined;
   if (env.PORTAL_UPDATE_RESTART === "exit" || service) return { mode: "exit", service };
-  return { mode: serviceOf(cgroup) ? "both" : "self" };
+  if (!serviceOf(cgroup)) return { mode: "self" };
+  return { mode: "both", group: info && { unit: info.unit, user: info.user, restart: info.restart } };
 }
 
 /** Restart policies that start a program again that ended with a status other than 0. */
@@ -245,7 +259,9 @@ export interface SupportDeps {
  * takes the terminal's job over, unless `PORTAL_UPDATE_RESTART=self` says that is wanted.
  *
  * - `PORTAL_UPDATE_RESTART=self`: the portal starts its own copy.
- * - a systemd service whose unit starts it again: it stops with `RESTART_EXIT`. A unit that does not is refused.
+ * - a systemd service whose unit starts it again: it stops with `RESTART_EXIT`. A unit that does not is refused, also
+ *   when the portal is only in its control group (a wrapper script, `npm start` under dash): the copy it starts there is
+ *   ended with the group when the unit stops.
  * - `PORTAL_UPDATE_RESTART=exit` (pm2, `while true`): it stops with `RESTART_EXIT`.
  * - a container: it stops with `RESTART_EXIT`, and Docker's restart policy starts it. A policy that Docker says is
  *   none is refused; where Docker cannot be asked, the compose files' `restart: unless-stopped` is taken as given.
@@ -255,12 +271,15 @@ export async function restartSupport(deps: SupportDeps = {}): Promise<RestartSup
   const env = deps.env ?? process.env;
   const cgroup = deps.cgroup ?? readCgroup() ?? "";
   if (env.PORTAL_UPDATE_RESTART === "self") return { ok: true, mode: "self", by: "copy" };
-  const { mode, service } = await restartPlan(env, cgroup, deps.show, deps.pids);
-  if (service && service.restart && !RESTARTS_ON_FAILURE.has(service.restart)) {
+  const { mode, service, group } = await restartPlan(env, cgroup, deps.show, deps.pids);
+  const unit = service ?? group;
+  if (unit && unit.restart && !RESTARTS_ON_FAILURE.has(unit.restart)) {
     return {
       ok: false,
       code: "policy",
-      message: `The portal runs as the systemd service ${service.unit}, which is set to Restart=${service.restart}, so it would not be started again. Set Restart=on-failure (or Restart=always) in the unit.`,
+      message: service
+        ? `The portal runs as the systemd service ${unit.unit}, which is set to Restart=${unit.restart}, so it would not be started again. Set Restart=on-failure (or Restart=always) in the unit.`
+        : `The portal runs in the systemd service ${unit.unit} (started by a script or by npm, not as the unit's own process), which is set to Restart=${unit.restart}, so it would not be started again. Set Restart=on-failure (or Restart=always) in the unit. For a job of a daemon that is not stopped when the job ends (cron), PORTAL_UPDATE_RESTART=self lets the portal start its own copy.`,
     };
   }
   if (mode === "exit") return { ok: true, mode, by: service ? "systemd" : "manager" };

@@ -116,6 +116,7 @@ test("a portal under shells that do not exec, as npm start has under dash, start
   assert.equal(seen[0].mode, "both", "the main process is not the portal or its parent");
   assert.equal(seen[0].unit, null);
   assert.equal(seen[0].problem, null);
+  assert.deepEqual(seen[0].support, { ok: true, mode: "both", by: "systemd" }, "a unit that starts it again: the Restart button may restart it");
 });
 
 test("a portal that a service only runs a job for is not taken for the unit's own process: it starts a copy and stops with the status, and is not told to change the unit", { skip: !manager && "no user manager of systemd" }, async () => {
@@ -125,4 +126,9 @@ test("a portal that a service only runs a job for is not taken for the unit's ow
   assert.equal(seen[0].mode, "both");
   assert.equal(seen[0].unit, null);
   assert.equal(seen[0].problem, null);
+  // The Update goes ahead (it cannot tell the job from cron's), but the Restart button looks at the unit's policy, which
+  // is no: the copy it would start is ended with the unit's control group.
+  assert.equal(seen[0].support.ok, false);
+  assert.equal(seen[0].support.code, "policy");
+  assert.match(seen[0].support.message, /Restart=no/);
 });

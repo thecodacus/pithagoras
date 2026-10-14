@@ -467,7 +467,12 @@ The portal restarts only where something is there to start it again, and says so
 where there is not (the button is off, with the reason):
 
 - as a **systemd service** whose unit has `Restart=on-failure` or `Restart=always`;
-  a unit with `Restart=no` is refused;
+  a unit with `Restart=no` (systemd's default) is refused. This holds whether the
+  portal is the unit's own process or only runs inside it, from a wrapper script or
+  `npm start`: the copy such a portal starts is ended with the unit when it stops.
+  A job of a daemon that is not stopped when the job ends (cron) is told apart
+  from that by nothing but the daemon's own unit, so with `Restart=no` there it is
+  refused too; `PORTAL_UPDATE_RESTART=self` lets the portal start its own copy;
 - in a **Docker container** run with a restart policy (`unless-stopped`, `always`
   or `on-failure`, as both Compose files have it); where Docker says the container
   has none, it is refused;

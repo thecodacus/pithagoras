@@ -207,6 +207,18 @@ test("what restarts the portal: systemd with a policy that does, a manager, a co
   assert.match(no.message, /systemd service pithagoras\.service.*Restart=no.*Restart=on-failure/);
   // In a unit's control group without being its process (npm start under dash): the portal starts a copy as well.
   assert.deepEqual(await restartSupport({ ...base, cgroup: unit, show: units(1, "on-failure") }), { ok: true, mode: "both", by: "systemd" });
+  // The same under a unit that does not start it again: the copy it starts is ended with the unit's control group.
+  for (const policy of ["no", "on-success", "on-abnormal"]) {
+    const wrapped = await restartSupport({ ...base, cgroup: unit, show: units(1, policy) });
+    assert.equal(wrapped.ok, false, policy);
+    assert.equal(wrapped.code, "policy");
+    assert.match(wrapped.message, new RegExp(`pithagoras\\.service.*not as the unit's own process.*Restart=${policy}`));
+  }
+  assert.deepEqual(await restartSupport({ ...base, cgroup: unit, show: units(1, "always") }), { ok: true, mode: "both", by: "systemd" });
+  // A systemctl that cannot be asked claims nothing.
+  assert.deepEqual(await restartSupport({ ...base, cgroup: unit, show: async () => undefined }), { ok: true, mode: "both", by: "systemd" });
+  // The owner's word for it wins: a job of cron under a unit whose policy says nothing about the job.
+  assert.deepEqual(await restartSupport({ ...base, env: { PORTAL_UPDATE_RESTART: "self" }, cgroup: unit, show: units(1, "no") }), { ok: true, mode: "self", by: "copy" });
 
   assert.deepEqual(await restartSupport({ ...base, env: { PORTAL_UPDATE_RESTART: "exit" }, cgroup: cgroup("/user.slice/session-1.scope") }), { ok: true, mode: "exit", by: "manager" });
   assert.deepEqual(await restartSupport({ ...base, env: { PORTAL_UPDATE_RESTART: "self" }, cgroup: "" }), { ok: true, mode: "self", by: "copy" });
