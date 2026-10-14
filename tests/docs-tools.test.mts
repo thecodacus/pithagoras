@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -305,6 +305,50 @@ test('a long document is read in parts that run on from each other, and the part
   }
 });
 
+test('a line longer than a part is cut into parts too, each read on from the one before, and a part is never more than a part', async () => {
+  const wide = 'x'.repeat(500_000);
+  // The cut of the second text falls between the halves of a character outside the basic plane.
+  const emoji = 'a' + '😀'.repeat(40_000);
+  for (const text of [`# Big\n\n${wide}\nAfter.\n`, `# Wide\n\n${emoji}\n\nEnd.`]) {
+    const { docs, id, agent } = await withDocument('docs-tools-wide-', text);
+    try {
+      let joined = '';
+      let from = 1;
+      let offset = 0;
+      let parts = 0;
+      for (;;) {
+        const part = done(await agent('doc_read', { id, from_line: from, char_offset: offset }));
+        parts++;
+        const body = part.text.slice(part.text.indexOf('\n\n') + 2);
+        const more = /\n\[Lines (\d+)-(\d+) of (\d+)(?:, the last one only in part)?\. Read on with from_line=(\d+)(?:, char_offset=(\d+))?\.\]$/.exec(body);
+        const piece = more ? body.slice(0, more.index) : body.replace(/\n\[Lines \d+-\d+ of \d+: the end\.\]$/, '');
+        assert.ok(piece.length <= 60_000, `a part is no more than 60000 characters, not ${piece.length}`);
+        assert.ok(piece.isWellFormed(), 'no part ends inside a character');
+        if (!more) {
+          joined += piece;
+          break;
+        }
+        // A part that stops inside a line goes on in that line; one that stops at the end of a line, at the next.
+        const inside = more[5] !== undefined;
+        joined += inside ? piece : piece + '\n';
+        from = Number(more[4]);
+        offset = inside ? Number(more[5]) : 0;
+      }
+      assert.ok(parts > 1);
+      assert.equal(joined, text);
+    } finally {
+      await docs.close();
+    }
+  }
+  const { docs, id, agent } = await withDocument('docs-tools-wide-refused-', `# Big\n\n${wide}\n`);
+  try {
+    refused(await agent('doc_read', { id, from_line: 3, char_offset: 500_001 }), 'invalid');
+    refused(await agent('doc_read', { id, from_line: 3, char_offset: -1 }), 'invalid');
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a chat\'s own document is the chat\'s: another chat in the folder is told there is none, to read or to edit', async () => {
   const folder = folderWith('docs-tools-scope-');
   const docs = await portal({ a: folder, b: folder });
@@ -465,6 +509,18 @@ test('an edit that changes nothing makes no revision, and a document written wit
     const crlf = done(await agent('doc_edit', { id, expected_revision: 2, edits: [{ quote: 'Friday.\n\nThe build', replacement: 'Monday.\n\nThe new build' }] }));
     assert.equal(crlf.details.revision, 3);
     assert.equal(fileOf(folder, 'plan.md'), dos.replace('Friday.\r\n\r\nThe build', 'Monday.\r\n\r\nThe new build'));
+    // A quote on one line, found as it is, brings line breaks of its own into the replacement: the document's kind.
+    const more = done(await agent('doc_edit', { id, expected_revision: 3, edits: [{ quote: 'The new build', replacement: 'One\nAnd a half\r\nAnd two' }] }));
+    assert.equal(more.details.revision, 4);
+    assert.equal(fileOf(folder, 'plan.md'), '# Plan\r\n\r\nShip it on Monday.\r\n\r\nOne\r\nAnd a half\r\nAnd two is green.\r\n');
+    assert.ok(!/(?<!\r)\n/.test(fileOf(folder, 'plan.md')), 'no line break of the other kind');
+    // A document of line feeds keeps them, and one of both has the kind most of it has.
+    writeFileSync(path.join(folder, 'documents', 'plan.md'), '# Plan\nOne\nTwo\r\n');
+    done(await agent('doc_edit', { id, expected_revision: 5, edits: [{ quote: 'One', replacement: 'A\nB' }] }));
+    assert.equal(fileOf(folder, 'plan.md'), '# Plan\nA\nB\nTwo\r\n');
+    writeFileSync(path.join(folder, 'documents', 'plan.md'), '# Plan\r\nOne\r\nTwo\n');
+    done(await agent('doc_edit', { id, expected_revision: 7, edits: [{ quote: 'One', replacement: 'A\nB' }] }));
+    assert.equal(fileOf(folder, 'plan.md'), '# Plan\r\nA\r\nB\r\nTwo\n');
   } finally {
     await docs.close();
   }
@@ -481,8 +537,24 @@ test('an edit that would make the document too big, or put a secret into it, is 
     assert.equal(fileOf(folder, 'plan.md'), bytes);
     assert.equal(head(folder), was);
     // A document that already holds one (the person saved it, and was warned) can still be edited elsewhere.
-    writeFileSync(path.join(folder, 'documents', 'plan.md'), `${bytes}\ntoken ghp_${'b'.repeat(36)}\n`);
+    const token = `ghp_${'b'.repeat(36)}`;
+    writeFileSync(path.join(folder, 'documents', 'plan.md'), `${bytes}\ntoken ${token}\n`);
     done(await agent('doc_edit', { id, expected_revision: 2, edits: [{ quote: 'on Friday', replacement: 'on Monday' }] }));
+    // Not one that it makes of what is there and its replacement: neither part is a secret alone.
+    const holder = done(await agent('doc_create', { title: 'Parts', markdown: '# Parts\n\nkey: sk-PLACEHOLDER\n\nghp_AAAA and more\n' }));
+    const parts = fileOf(folder, 'parts.md');
+    const edit = (expected: number, ...edits: { quote: string; replacement: string }[]) => agent('doc_edit', { id: holder.details.id, expected_revision: expected, edits });
+    refused(await edit(1, { quote: 'PLACEHOLDER', replacement: 'abcdefghijklmnopqrstuvwxyz0123' }), 'secret');
+    // Nor out of two edits that meet.
+    refused(await edit(1, { quote: 'key', replacement: 'gh' }, { quote: ': ', replacement: `p_${'A'.repeat(36)}` }), 'secret');
+    // Nor one the document holds changed into another.
+    writeFileSync(path.join(folder, 'documents', 'parts.md'), `${parts}${token}\n`);
+    refused(await edit(2, { quote: token, replacement: `${token.slice(0, -1)}c` }), 'secret');
+    refused(await edit(2, { quote: 'and more', replacement: token }), 'secret');
+    assert.equal(fileOf(folder, 'parts.md'), `${parts}${token}\n`);
+    // What it leaves as it is, or takes out, is no trouble.
+    done(await edit(2, { quote: 'and more', replacement: 'and less' }, { quote: token, replacement: 'removed' }));
+    assert.ok(!fileOf(folder, 'parts.md').includes('ghp_bbb'));
   } finally {
     await docs.close();
   }
@@ -499,6 +571,57 @@ test('a document the store cannot find is not found, and the tools of a chat who
     assert.deepEqual(readdirSync(DATA).includes(folderIdOf(folder)), false, 'no store was made for it');
     refused(await docs.agent('gone')('doc_list', {}), 'not_found');
     refused(await docs.agent('gone')('doc_create', { title: 'Plan' }), 'not_found');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('an edit made while the person saves is refused by the store when the person got in first: it never writes over their text', async () => {
+  // The two meet inside the agent's read, which takes a while: a few times over, as when they meet is the only thing not fixed.
+  for (let round = 0; round < 4; round++) {
+    const { folder, docs, url, id, agent } = await withDocument(`docs-tools-meanwhile-${round}-`);
+    try {
+      const person = '# Plan\n\nShip it on Friday, said the user.\n\nThe build is green.\n';
+      const agents = '# Plan\n\nShip it on Monday.\n\nThe build is green.\n';
+      const [edited, saved] = await Promise.all([
+        agent('doc_edit', { id, expected_revision: 1, edits: [{ quote: 'on Friday', replacement: 'on Monday' }] }),
+        docs.call('PUT', url, { markdown: person, base: 1 }),
+      ]);
+      // Both were made on revision 1: one of them is the next revision, and the other is refused.
+      assert.equal(Number(edited.ok) + Number(saved.status === 200), 1, `round ${round}: ${JSON.stringify([edited, saved.status])}`);
+      assert.equal(fileOf(folder, 'plan.md'), edited.ok ? agents : person);
+      assert.equal(git(folder, 'rev-list', '--count', 'HEAD'), '2');
+      if (!edited.ok) refused(edited, 'revision_mismatch');
+    } finally {
+      await docs.close();
+    }
+  }
+});
+
+test('a name that something else holds in the documents folder is no name for a new document: the agent is told it exists', async () => {
+  const folder = folderWith('docs-tools-way-', { 'documents/.keep': '' });
+  const elsewhere = folderWith('docs-tools-way-target-');
+  const docs = await portal({ a: folder });
+  try {
+    // A link under the name (not a file the store takes in): the document is not made under the next number instead.
+    symlinkSync(path.join(elsewhere, 'target.md'), path.join(folder, 'documents', 'plan.md'));
+    const error = refused(await docs.agent('a')('doc_create', { title: 'Plan', markdown: '# Plan\n' }), 'exists');
+    assert.match(error, /plan\.md is in the way/);
+    assert.deepEqual(readdirSync(path.join(folder, 'documents')).sort(), ['.keep', 'plan.md']);
+    assert.deepEqual(readdirSync(elsewhere), [], 'nothing was written through the link');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('what the store refuses that has no code of its own is said as refused, with its reason', async () => {
+  // `documents` is a link to another folder of the project: not where the documents are.
+  const folder = folderWith('docs-tools-link-', { 'other/.keep': '' });
+  symlinkSync(path.join(folder, 'other'), path.join(folder, 'documents'));
+  const docs = await portal({ a: folder });
+  try {
+    assert.match(refused(await docs.agent('a')('doc_create', { title: 'Plan' }), 'refused'), /documents in this folder is a link/);
+    assert.deepEqual(readdirSync(path.join(folder, 'other')), ['.keep']);
   } finally {
     await docs.close();
   }

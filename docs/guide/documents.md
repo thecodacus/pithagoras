@@ -196,7 +196,7 @@ the runner image does not get extensions.
 | Tool | What it does |
 | --- | --- |
 | `doc_list` | The documents the chat sees: id, title, file, revision and whether it is the project's or the chat's own. `scope` narrows it to one of the two. |
-| `doc_read` | One document's Markdown and revision. `revision` reads an earlier one from the history; a long document is returned in parts of about 60 KB, and the end of a part says where to read on (`from_line`). |
+| `doc_read` | One document's Markdown and revision. `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). |
 | `doc_create` | A new document from a title and its Markdown, at revision 1. |
 | `doc_edit` | Replaces quoted passages with new text, on the revision the agent read. |
 
@@ -221,13 +221,20 @@ What the tools check is what keeps the agent from overwriting you:
   or to change the history.
 - A document is at most 1 MB.
 - The agent is not let to write a secret (a private key, or a token of a common
-  service) into a document, since the history keeps every revision. It can
-  still edit a document that holds one already.
+  service) into a document, since the history keeps every revision. What
+  counts is the text the edit would write, so a token put together from the
+  document and a replacement, or from two edits, is refused too. A document
+  that holds one already can still be edited, as long as the edit does not
+  add one or change it.
+- What the agent writes into a document with CRLF line breaks (written on
+  Windows, say) gets CRLF line breaks, and a quote with line feeds still finds
+  its lines.
 
 A refusal reaches the agent as an error that starts with its reason
 (`revision_mismatch`, `quote_not_found`, `quote_ambiguous`, `edits_overlap`,
-`exists`, `too_large`, `secret`, `not_found` or `invalid`), so that it can put
-it right.
+`exists`, `too_large`, `secret`, `not_found`, `invalid` or `refused`, for
+anything else the store will not do: the folder is full, `documents` is a link,
+the store's packages are not installed yet), so that it can put it right.
 
 These checks are in the tools. The agent can still change a document's file
 with its own tools (it is an ordinary file in the chat's folder); that is kept
