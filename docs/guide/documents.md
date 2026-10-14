@@ -243,7 +243,9 @@ by the agent, by another window of the portal, by Files or by an editor. It
 does not wait for your next save to find out. The page keeps one connection
 open for the document (server-sent events), and says where the document stands
 whenever the connection starts, so a change made while it was down is found as
-soon as it is back. A revision made outside the portal (Files, an editor, or
+soon as it is back. If the text of a change cannot be fetched (the portal was
+busy, say), the page asks again after a few seconds, with longer waits, and
+meanwhile shows the document as it was. A revision made outside the portal (Files, an editor, or
 the agent's own file tools) is noticed within a couple of seconds, and only
 while some page has the document open.
 
@@ -263,19 +265,24 @@ What the page does with a change depends on what is in the editor:
 - **The change touches what you changed.** It is a real conflict, and it is not
   guessed at: see below.
 
-Merging is by lines, as git does it, on the text the editor writes (so a
-document written with `*` bullets is no different from one with `-`). Two
+Merging is by lines, as git does it. The page merges the text the editor
+writes (so a document written with `*` bullets is no different from one with
+`-`). Two
 changes are one when they touch the same line, or lines that follow each other
 without a line between them; a blank line between two paragraphs is such a
 line, so changes to two paragraphs merge. A list, which has no blank lines,
 does not: changing two neighbouring items is a conflict. A change that you and
 the agent made in the same way is made once.
 
-The same merge is made by the portal when a save arrives that started from an
-earlier revision (the page was not told in time, or the connection was down):
-the saved text is then the merged one, which becomes a revision of its own,
-by you, and the editor takes it up. Text you typed while that save was on its
-way is kept on top of it.
+The portal makes the same kind of merge when a save arrives that started from
+an earlier revision (the page was not told in time, or the connection was
+down): the saved text is then the merged one, which becomes a revision of its
+own, by you, and the editor takes it up. Text you typed while that save was on
+its way is kept on top of it. The portal has no editor, so it merges the
+files' text as it is written, not as the editor writes it: for a document
+written in another style (`*` bullets, say) a late save can be a conflict where
+the page's own merge, above, would have gone through. Nothing is lost then: you
+get the conflict message below.
 
 ### When the document changed meanwhile
 

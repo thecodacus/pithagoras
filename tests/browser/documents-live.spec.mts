@@ -138,6 +138,43 @@ test('what the agent changed is in a document that is open and untouched at once
   expect(store.puts).toEqual([{ markdown: agents().replace('Friday.', 'Friday. Or Monday.'), base: 4 }]);
 });
 
+test('what is being typed is left where it is when the change is merged, also with a space at the end of the line that the Markdown drops', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  // The line ends in a space, which the Markdown of the paragraph does not keep: it is not the paragraph its Markdown parses to.
+  await typeAfter(page, 'Ship it on Friday.', ' Or ');
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect(editorOf(page)).toContainText('Sign-off is on Tuesday.');
+  await expect(editorOf(page).locator('.pd-changed')).toHaveText('Sign-off is on Tuesday.');
+  // The caret is still after the space, in the paragraph: the word goes there.
+  await page.keyboard.type('Monday.');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(await editorOf(page).locator('p').allTextContents()).toEqual(['Ship it on Friday. Or Monday.', 'The build is green.', 'Sign-off is on Tuesday.']);
+  expect(store.puts).toEqual([{ markdown: agents().replace('Friday.', 'Friday. Or Monday.'), base: 4 }]);
+});
+
+test('a list made by typing is not replaced when the agent changes another paragraph, and the caret stays in it', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await typeAfter(page, 'Ship it on Friday.', '');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('- item one');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  store.elsewhere(agents(store.markdown));
+  await tell(page, 5);
+  await expect(editorOf(page)).toContainText('Sign-off is on Tuesday.');
+  // The list is the same list: only the paragraph the agent changed is marked.
+  await expect(editorOf(page).locator('.pd-changed')).toHaveText('Sign-off is on Tuesday.');
+  await page.keyboard.type(' more');
+  await expect(state(page)).toHaveText('Saved · Revision 6');
+  expect(await editorOf(page).locator('li').allTextContents()).toEqual(['item one more']);
+  expect(store.markdown).toContain('- item one more\n');
+  expect(store.markdown).toContain('The build is green.');
+});
+
 test('the change that came from outside is not something Ctrl+Z takes back, while what was typed still is', async ({ page }) => {
   const store = new Store();
   await open(page, store);
@@ -268,6 +305,29 @@ test('a stream that dropped is asked for again, and what the new one says is tak
   await page.evaluate(() => (window as any).streams[1].emit('revision', { revision: 4, author: 'agent', at: '2026-10-02T10:00:00.000Z' }));
   await expect(editorOf(page)).toContainText('Sign-off is on Tuesday.');
   await expect(state(page)).toHaveText('Saved · Revision 4');
+});
+
+test('a change whose text could not be fetched is fetched again after a while, with the stream saying nothing more', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  let failing = true;
+  let asked = 0;
+  await page.route(`**${DOCUMENT}`, (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    asked++;
+    return failing ? route.fulfill({ status: 503, json: { error: 'busy' } }) : route.fallback();
+  });
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect.poll(() => asked).toBe(1);
+  // The page shows the document as it was.
+  await expect(state(page)).toHaveText('Saved · Revision 3');
+  failing = false;
+  // After the wait, with no message from the stream.
+  await expect(editorOf(page)).toContainText('Sign-off is on Tuesday.', { timeout: 8000 });
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(asked).toBe(2);
 });
 
 test('the stream is let go of when the document is left', async ({ page }) => {

@@ -8,7 +8,7 @@
  * document opened and saved comes back as it was. What it cannot hold (a front
  * matter block, the line ending) is kept apart and put back (frame.js).
  */
-import { defaultValueCtx, Editor, editorViewCtx, parserCtx, remarkStringifyOptionsCtx, rootCtx, serializerCtx } from "@milkdown/core";
+import { defaultValueCtx, Editor, editorViewCtx, parserCtx, remarkStringifyOptionsCtx, rootCtx, schemaCtx, serializerCtx } from "@milkdown/core";
 import { history } from "@milkdown/plugin-history";
 import { listener, listenerCtx } from "@milkdown/plugin-listener";
 import { commonmark, imageSchema } from "@milkdown/preset-commonmark";
@@ -70,14 +70,31 @@ function starts(doc) {
  * block was changed, and what the person typed can still be undone, while the
  * change that came from outside cannot (it is not theirs to take back). The
  * blocks that changed are marked for a moment.
+ *
+ * Blocks are told apart by the Markdown they are written as, not by their nodes:
+ * what the person is typing is often not the node its own Markdown parses to (a
+ * space at the end of a line, which Markdown does not keep; a list made by
+ * typing `- `), and a block replaced for that would take the caret out of the
+ * text being typed and into the next block. A block of the editor that is not
+ * written as any new block is written once more as what its own Markdown
+ * parses to, before it is taken to differ.
  */
 function applyChanges(ctx, body, flash) {
   const view = ctx.get(editorViewCtx);
-  const doc = ctx.get(parserCtx)(body);
+  const parse = ctx.get(parserCtx);
+  const doc = parse(body);
   if (!doc) return;
   const was = view.state.doc;
-  const keyed = (parent) => Array.from({ length: parent.childCount }, (_, i) => JSON.stringify(parent.child(i).toJSON()));
-  const hunks = diff(keyed(was), keyed(doc));
+  const serialize = ctx.get(serializerCtx);
+  const top = ctx.get(schemaCtx).topNodeType;
+  const written = (block) => serialize(top.create(null, block));
+  const wanted = Array.from({ length: doc.childCount }, (_, i) => written(doc.child(i)));
+  const known = new Set(wanted);
+  const held = Array.from({ length: was.childCount }, (_, i) => {
+    const text = written(was.child(i));
+    return known.has(text) ? text : serialize(parse(text));
+  });
+  const hunks = diff(held, wanted);
   if (!hunks.length) return;
   const before = starts(was);
   const after = starts(doc);
@@ -85,7 +102,9 @@ function applyChanges(ctx, body, flash) {
   // The last first: a change does not move what comes before it.
   for (const [a0, a1, b0, b1] of [...hunks].reverse()) tr = tr.replace(before[a0], before[a1], new Slice(doc.content.cut(after[b0], after[b1]), 0, 0));
   tr.setMeta("addToHistory", false);
-  const marked = hunks.flatMap(([, , b0, b1]) => Array.from({ length: b1 - b0 }, (_, i) => [after[b0 + i], after[b0 + i + 1]]));
+  // Where the new blocks are in the document that results, which keeps the blocks that were left as they were (and their sizes).
+  const now = starts(tr.doc);
+  const marked = hunks.flatMap(([, , b0, b1]) => Array.from({ length: b1 - b0 }, (_, i) => [now[b0 + i], now[b0 + i + 1]]));
   if (marked.length) tr.setMeta(flashKey, marked);
   view.dispatch(tr);
   if (marked.length) flash();

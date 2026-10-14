@@ -76,10 +76,15 @@ function setup(markdown = PLAN) {
     clearTimer: (id: number) => void timers.delete(id),
   });
   saver.adopt(3, editor.text);
+  /** The waits before a request that failed is made again, by id and with how long each is. */
+  const retries = new Map<number, { fn: () => void; ms: number }>();
+  let retryIds = 0;
   live = createLive({
     editor,
     saver,
     revision: 3,
+    setTimer: (fn: () => void, ms: number) => (retries.set(++retryIds, { fn, ms }), retryIds),
+    clearTimer: (id: number) => void retries.delete(id),
     load: async () => {
       server.loads++;
       await server.gateLoads;
@@ -98,7 +103,14 @@ function setup(markdown = PLAN) {
     for (const fn of due) fn();
     await new Promise((resolve) => setImmediate(resolve));
   };
-  return { server, editor, saver, live, notices, sent, type, wait, timers };
+  /** Lets the waits that are on run out: what is asked for again is asked for. */
+  const retry = async () => {
+    const due = [...retries.values()];
+    retries.clear();
+    for (const { fn } of due) fn();
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  return { server, editor, saver, live, notices, sent, type, wait, timers, retries, retry };
 }
 
 test('a document with nothing of the person\'s unsaved takes the new revision as it is, and is saved at it', async () => {
@@ -300,17 +312,48 @@ test('the stream saying a page\'s own save before the answer to it comes is no r
   assert.equal(server.loads, 0);
 });
 
-test('a request that fails leaves the page as it was, and the next message asks again', async () => {
-  const { server, editor, saver, live } = setup();
+test('a request that fails leaves the page as it was, and is made again after a while, though no message comes', async () => {
+  const { server, editor, saver, live, notices, retries, retry } = setup();
   server.elsewhere(PLAN.replace('on Friday', 'on Thursday'));
   server.failLoads = true;
   await live.seen({ revision: 4, author: 'agent' });
   assert.equal(editor.text, PLAN);
   assert.equal(saver.state().base, 3);
+  // The stream is well and says nothing more: the wait is what asks again.
+  assert.deepEqual([...retries.values()].map((r) => r.ms), [2000]);
+  await retry();
+  assert.equal(editor.text, PLAN, 'still failing');
+  assert.deepEqual([...retries.values()].map((r) => r.ms), [4000], 'and the wait is longer');
+  server.failLoads = false;
+  await retry();
+  assert.equal(editor.text, PLAN.replace('on Friday', 'on Thursday'));
+  assert.equal(saver.state().base, 4);
+  assert.deepEqual(notices.map((n) => n.kind), ['updated']);
+  assert.equal(retries.size, 0, 'nothing left to wait for');
+});
+
+test('the next message asks again at once, without waiting for the wait, and the wait then finds nothing to do', async () => {
+  const { server, editor, live, retries, retry } = setup();
+  server.elsewhere(PLAN.replace('on Friday', 'on Thursday'));
+  server.failLoads = true;
+  await live.seen({ revision: 4, author: 'agent' });
+  assert.equal(retries.size, 1);
   server.failLoads = false;
   await live.seen({ revision: 4, author: 'agent' });
   assert.equal(editor.text, PLAN.replace('on Friday', 'on Thursday'));
-  assert.equal(saver.state().base, 4);
+  const loads = server.loads;
+  await retry();
+  assert.equal(server.loads, loads, 'no request for what is there already');
+});
+
+test('the waits stop with the page', async () => {
+  const { server, live, retries } = setup();
+  server.elsewhere(PLAN.replace('on Friday', 'on Thursday'));
+  server.failLoads = true;
+  await live.seen({ revision: 4, author: 'agent' });
+  assert.equal(retries.size, 1);
+  live.close();
+  assert.equal(retries.size, 0);
 });
 
 test('a text the editor cannot take up is a conflict, with the person\'s text where it was', async () => {

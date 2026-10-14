@@ -27,15 +27,20 @@ import { merge3 } from "./merge.js";
  * `editor`: `markdown()` (what it holds), `normalize(markdown)` (a text as the editor writes it) and `apply(markdown)`
  * (puts a text in its place, changing what differs and no more). `saver`: saver.js. `load()` resolves the document
  * as it is now: `{ revision, markdown }`; `revision` is the one the editor was loaded at. `notify(what)` is told what
- * was done: `{ kind: "updated" | "merged" | "conflict", revision, author }`.
+ * was done: `{ kind: "updated" | "merged" | "conflict", revision, author }`. A request that fails is made again after
+ * `retryMs`, twice as long each time (at most 30 s); `setTimer` and `clearTimer` are the clock.
  */
-export function createLive({ editor, saver, load, notify, revision = 0, merge = merge3 }) {
+export function createLive({ editor, saver, load, notify, revision = 0, merge = merge3, retryMs = 2000, setTimer = setTimeout, clearTimer = clearTimeout }) {
   // The newest revision looked at, whatever came of it (a conflict keeps the base where it was); and the one that is wanted.
   let looked = revision;
   let wanted = 0;
   let author = null;
   let running = false;
   let closed = false;
+  // The wait before a request that failed is made again: the stream is healthy then (it says nothing until the document changes), so
+  // nothing else would ask for the text.
+  let failures = 0;
+  let retry = null;
 
   const known = () => Math.max(looked, saver.state().base);
 
@@ -94,8 +99,15 @@ export function createLive({ editor, saver, load, notify, revision = 0, merge = 
         }
         incorporate(theirs, saver.baseline());
       }
+      failures = 0;
     } catch {
-      // The next message, or the stream coming back, asks again: the editor is as it was.
+      // The editor is as it was: the text is asked for again after a while (or sooner, by the next message).
+      if (!closed && retry === null) {
+        retry = setTimer(() => {
+          retry = null;
+          void catchUp();
+        }, Math.min(retryMs * 2 ** failures++, 30_000));
+      }
     } finally {
       running = false;
     }
@@ -120,6 +132,8 @@ export function createLive({ editor, saver, load, notify, revision = 0, merge = 
     /** The page is done with the document: nothing more is taken up. */
     close() {
       closed = true;
+      if (retry !== null) clearTimer(retry);
+      retry = null;
     },
   };
 }
