@@ -34,6 +34,16 @@ let exitStatus = 0;
 export const requestedExit = (): number => exitStatus;
 
 /**
+ * A restart has been asked for and is on its way. An update begun now would be cut off by the stop in the middle of its
+ * merge or install, and leave the portal without the files it starts from, so the update refuses while this is set.
+ */
+let held = false;
+export const restartPending = (): boolean => held;
+export const holdRestart = (on: boolean): void => {
+  held = on;
+};
+
+/**
  * Waits until the old portal is gone (its port and its data are free then), and runs the command in its place. A
  * minute at most: a portal that is still there after that has the new one turned away by its lock, as any second
  * start would be.

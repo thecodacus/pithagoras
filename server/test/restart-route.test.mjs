@@ -53,7 +53,10 @@ test("the owner is told it is possible, and a request without the confirmation d
   const cookie = await login();
   const status = await send(cookie, "/api/restart");
   assert.equal(status.status, 200);
-  assert.deepEqual(status.body, { possible: true, by: "manager", running: 0 });
+  const { loaded, keepsLogins, ...rest } = status.body;
+  assert.deepEqual(rest, { possible: true, by: "manager", running: 0 });
+  assert.equal(typeof keepsLogins, "boolean");
+  assert.ok(loaded === null || Array.isArray(loaded), "the extensions this start runs, once they are known");
   const bare = await send(cookie, "/api/restart", "POST", {});
   assert.equal(bare.status, 400);
   assert.equal(bare.body.code, "confirm");
@@ -78,10 +81,10 @@ test("a confirmed request is logged with the time, answers 202, and the portal e
 // --- the route with a supervisor of the test's own ---
 
 async function serve(deps) {
-  const calls = { restart: [] };
+  const calls = { restart: [], held: [] };
   const app = express();
   app.use(express.json());
-  app.use("/api", restartRouter({ running: () => 2, now: () => new Date("2026-10-14T10:00:00Z"), restart: async (s) => void calls.restart.push(s), ...deps }));
+  app.use("/api", restartRouter({ running: () => 2, now: () => new Date("2026-10-14T10:00:00Z"), updating: () => false, hold: (on) => void calls.held.push(on), loaded: () => ["web-search"], keepsLogins: () => true, restart: async (s) => void calls.restart.push(s), ...deps }));
   const server = http.createServer(app).listen(0, "127.0.0.1");
   await once(server, "listening");
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -99,13 +102,14 @@ test("a portal started by hand says that a restart is not possible here, and doe
   console.log = (...a) => lines.push(a.join(" "));
   const s = await serve({ support: async () => none });
   try {
-    assert.deepEqual(await s.get(), { possible: false, code: "unsupervised", reason: none.message, running: 2 });
+    assert.deepEqual(await s.get(), { possible: false, code: "unsupervised", reason: none.message, running: 2, loaded: ["web-search"], keepsLogins: true });
     const res = await s.post({ confirm: true });
     assert.equal(res.status, 409);
     assert.equal(res.body.code, "unsupervised");
     assert.match(res.body.error, /Nothing would start this portal again/);
     assert.deepEqual(s.calls.restart, [], "nothing was stopped");
     assert.deepEqual(lines, [], "and nothing is logged as a restart");
+    assert.deepEqual(s.calls.held, [true, false], "and the update is not kept waiting");
   } finally {
     console.log = logged;
     s.close();
@@ -120,6 +124,7 @@ test("a request is logged with who and when, counts what it stops, and starts th
   try {
     assert.equal((await s.post({ confirm: true })).status, 202);
     assert.deepEqual(s.calls.restart, [{ ok: true, mode: "exit", by: "systemd" }]);
+    assert.deepEqual(s.calls.held, [true], "an update begun now is turned away");
     assert.equal((await s.post({ confirm: true })).status, 409);
     assert.equal(s.calls.restart.length, 1);
     assert.match(lines.join("\n"), /^\[restart\] the owner asked for a restart at 2026-10-14T10:00:00\.000Z from \S+, started again by systemd; 2 running chats or routines end$/);
@@ -142,6 +147,38 @@ test("a restart that cannot be started is an error, and a later request may try 
     assert.equal((await s.post({ confirm: true })).status, 202);
   } finally {
     console.log = logged;
+    s.close();
+  }
+});
+
+test("while an update runs the portal is not restarted: it has moved its files aside, and the stop would leave it without them", async () => {
+  let updating = true;
+  const s = await serve({ support: async () => ({ ok: true, mode: "exit", by: "systemd" }), updating: () => updating });
+  try {
+    const state = await s.get();
+    assert.equal(state.possible, false);
+    assert.equal(state.code, "update");
+    assert.match(state.reason, /An update is running/);
+    const res = await s.post({ confirm: true });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.code, "update");
+    assert.deepEqual(s.calls.restart, [], "nothing was stopped");
+    assert.deepEqual(s.calls.held, [], "and nothing was held");
+    updating = false;
+    assert.equal((await s.get()).possible, true);
+    assert.equal((await s.post({ confirm: true })).status, 202);
+  } finally {
+    s.close();
+  }
+});
+
+test("it says whether a login outlives the restart, and which extensions this start runs", async () => {
+  const s = await serve({ support: async () => ({ ok: true, mode: "exit", by: "systemd" }), keepsLogins: () => false, loaded: () => null });
+  try {
+    const state = await s.get();
+    assert.equal(state.keepsLogins, false);
+    assert.equal(state.loaded, null, "not known yet");
+  } finally {
     s.close();
   }
 });

@@ -125,6 +125,8 @@ export interface UpdateDeps {
   artifacts: Artifacts;
   /** Stops this portal and starts the new one. Throws, with nothing stopped, when it cannot. */
   restart: () => Promise<void>;
+  /** A restart is on its way: an update begun now would be cut off in the middle. */
+  restartPending?: () => boolean;
   /** Why the portal would not come back after it stops, if it would not. */
   restartProblem?: () => Promise<string | null>;
   /** A portal in a container is rebuilt with its image. */
@@ -236,6 +238,11 @@ export class Updater {
   constructor(private readonly deps: UpdateDeps) {}
 
   private now = (): Date => (this.deps.now ?? (() => new Date()))();
+
+  /** An update is going on, from its start to its end or its failure; the restart waits for it. */
+  get working(): boolean {
+    return this.busy;
+  }
 
   kind(): Promise<Kind> {
     return (this.detected ??= this.detect());
@@ -391,6 +398,7 @@ export class Updater {
   async start(expect: string): Promise<RunView> {
     await this.needGit();
     if (typeof expect !== "string" || !expect) throw new UpdateError(400, "invalid", "The commit that was confirmed is needed: send it as expect.");
+    if (this.deps.restartPending?.()) throw new UpdateError(409, "restarting", "The portal is restarting.");
     // Taken before the first wait, or two presses side by side would both pass.
     if (this.busy) throw new UpdateError(409, "busy", "An update is already running.");
     this.busy = true;

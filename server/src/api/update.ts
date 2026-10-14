@@ -1,7 +1,7 @@
 import express, { type Router } from "express";
 import { runningSessionCount } from "../db.js";
 import { LOG_BOOT } from "../logs.js";
-import { restartPortal, restartProblem } from "../restart.js";
+import { restartPending, restartPortal, restartProblem } from "../restart.js";
 import { Updater, UpdateError, installRoot, realExec, type Notice } from "../update.js";
 import { fileArtifacts } from "../update-files.js";
 
@@ -15,6 +15,7 @@ export const portalUpdater = new Updater({
   artifacts: fileArtifacts(root),
   restart: () => restartPortal(),
   restartProblem: () => restartProblem(),
+  restartPending,
   onRaise: (notice: Notice) => console.log(`[update] ${notice.count} new ${notice.count === 1 ? "commit" : "commits"} on main, update available (${notice.target.sha.slice(0, 7)})`),
 });
 

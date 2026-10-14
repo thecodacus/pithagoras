@@ -230,6 +230,18 @@ test("a second press while an update runs is refused, and the first is not distu
   await refusal(u.start(w.target.sha), "busy");
 });
 
+test("an update is not begun while a restart is on its way, and nothing is run", async () => {
+  const w = world();
+  let pending = true;
+  const { u } = updater(w, { restartPending: () => pending });
+  await refusal(u.start(w.target.sha), "restarting");
+  assert.deepEqual(changesTheCheckout(w), []);
+  assert.equal(u.working, false, "and the refusal leaves no update held");
+  pending = false;
+  assert.equal((await u.start(w.target.sha)).state, "running");
+  assert.equal(u.working, true, "one that runs is working, which the restart looks at");
+});
+
 test("an update fetches, merges fast-forward only, installs, builds and restarts, in that order", async () => {
   const w = world();
   const { u, calls } = updater(w);

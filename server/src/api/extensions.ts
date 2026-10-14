@@ -178,6 +178,31 @@ function installedPackages(settings: Record<string, unknown>) {
 }
 
 /**
+ * The packages this portal had switched on when it started, which is what it runs until it starts again: not what is
+ * installed now, which an install changes at once. Asked for at the start (see server.ts), so the answer is the one of
+ * that time; null until it is known.
+ */
+let loadedAtStart: string[] | null = null;
+let loadedAsked = false;
+export const loadedExtensions = (): string[] | null => loadedAtStart;
+export async function noteLoadedExtensions(): Promise<void> {
+  if (loadedAsked) return;
+  loadedAsked = true;
+  try {
+    const settings = readPiSettings();
+    const entries = Array.isArray(settings.packages) ? settings.packages : [];
+    loadedAtStart = (await installedPackages(settings))
+      .filter((pkg) => {
+        const entry = entries.find((e) => sourceOf(e) === pkg.spec);
+        return entry === undefined || !isSwitchedOff(entry);
+      })
+      .map((pkg) => pkg.spec.replace(/^(npm:|git:)/, ""));
+  } catch {
+    loadedAsked = false;
+  }
+}
+
+/**
  * When the files a scan reads last changed, and how many there are — the
  * same files detectSettingKeys reads, only looked at, not read.
  */
