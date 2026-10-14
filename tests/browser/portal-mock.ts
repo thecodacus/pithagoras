@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { test as base, expect, type Page, type Route } from '@playwright/test';
 
 /**
@@ -44,6 +46,49 @@ export const DONE = Symbol('answered by the test');
 
 export type Answer = unknown | Reply | typeof HANG | typeof DONE;
 
+const TYPES: Record<string, string> = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
+
+/**
+ * An extension's package on disk, as the portal lists it (`/api/extension-ui`)
+ * and serves the folder of its browser half: built, where it has a build.
+ * `serve` answers a request for one of its files, and says whether it did.
+ */
+export function extensionOnDisk(dir: string) {
+  const meta = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  const declared = meta.pithagoras ?? {};
+  const client = typeof declared.client === 'string' ? path.resolve(dir, declared.client) : undefined;
+  const served = client && path.dirname(client);
+  const prefix = `/api/extension-ui/${String(meta.name).split('/').map(encodeURIComponent).join('/')}/`;
+  const listing = {
+    name: meta.name,
+    version: meta.version,
+    ...(Array.isArray(declared.themes) ? { themes: declared.themes } : {}),
+    ...(client ? { entry: `${prefix}${path.basename(client)}?v=test` } : {}),
+    ...(client && typeof declared.style === 'string' ? { style: `${prefix}${path.relative(served!, path.resolve(dir, declared.style)).split(path.sep).join('/')}?v=test` } : {}),
+    ...(typeof declared.server === 'string' ? { server: `/api/x/${meta.name}` } : {}),
+  };
+  const serve = async (urlPath: string, route: Route): Promise<boolean> => {
+    if (!served || !urlPath.startsWith(prefix)) return false;
+    const file = path.resolve(served, decodeURIComponent(urlPath.slice(prefix.length)));
+    if (!file.startsWith(served + path.sep) || !existsSync(file)) return false;
+    await route.fulfill({ path: file, contentType: TYPES[path.extname(file)] ?? 'application/octet-stream' });
+    return true;
+  };
+  return { name: meta.name as string, listing, serve };
+}
+
+/** What a fresh portal has installed: the packages extensions/defaults.json names, as their folders hold them. */
+const startsWith = (() => {
+  // This file is loaded as CommonJS (it is .ts, and the repository is not a module): its own folder is __dirname.
+  const root = path.resolve(__dirname, '../../extensions');
+  try {
+    const folders: string[] = JSON.parse(readFileSync(path.join(root, 'defaults.json'), 'utf8'));
+    return folders.map((folder) => extensionOnDisk(path.join(root, folder)));
+  } catch {
+    return [];
+  }
+})();
+
 /**
  * What every portal says unless a test says otherwise: signed in without a password, no chats, and the three things the
  * shell asks of every page (the add-on flags, the browser add-on, the voice add-on, which extensions draw in it, the places for a new chat) and of
@@ -59,7 +104,8 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
     config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
   };
   if (path === '/api/voice') return { enabled: false };
-  if (path === '/api/extension-ui') return { extensions: [] };
+  // Those a fresh portal is installed with, whose files are served below.
+  if (path === '/api/extension-ui') return { extensions: startsWith.map((ext) => ext.listing) };
   // A portal that is not run from a checkout: nothing to update, no notice.
   if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };
   if (/^\/api\/sessions\/[^/]+\/background$/.test(path)) return { supported: true, jobs: [], statuses: [], widgets: [] };
@@ -115,6 +161,7 @@ export async function mockPortal(page: Page, answer: (ask: Ask) => Answer | Prom
     let got = await answer(ask);
     if (got === undefined && settings) got = settingsBase(ask);
     if (got === undefined) got = portalBase(ask);
+    if (got === undefined && ask.method === 'GET') for (const ext of startsWith) if (await ext.serve(ask.path, route)) return;
     if (got === undefined) return route.fallback();
     if (got === HANG || got === DONE) return;
     if (got instanceof Reply) return route.fulfill({ status: got.status, json: got.body });

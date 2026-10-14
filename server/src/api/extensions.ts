@@ -177,6 +177,9 @@ function installedPackages(settings: Record<string, unknown>) {
   return listed.value;
 }
 
+/** What pi has installed: each package's spec, the folder it is in, and whose it is ("User", "Project"). */
+export const listInstalledPackages = () => installedPackages(readPiSettings());
+
 /**
  * The packages this portal had switched on when it started, which is what it runs until it starts again: not what is
  * installed now, which an install changes at once. Asked for at the start (see server.ts), so the answer is the one of

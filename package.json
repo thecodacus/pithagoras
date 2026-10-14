@@ -6,11 +6,14 @@
   "workspaces": [
     "server",
     "web",
-    "docs"
+    "docs",
+    "packages/extension-api"
   ],
   "scripts": {
-    "build": "npm run build -w server && npm run build -w web && npm run build --prefix extensions/docs",
-    "test": "npm run build -w server && npm test -w server && node --import tsx --test --test-timeout=120000 tests/*.test.mts",
+    "build": "npm run build -w server && npm run build -w web && npm run build:extensions",
+    "build:extensions": "node scripts/build-extensions.mjs",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "test": "npm run check:boundaries && npm run build -w server && npm test -w server && node --import tsx --test --test-timeout=120000 tests/*.test.mts",
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "start": "node server/dist/index.js",

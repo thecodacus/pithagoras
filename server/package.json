@@ -24,6 +24,7 @@
     "undici": "^8.11.2"
   },
   "devDependencies": {
+    "@pithagoras/extension-api": "*",
     "@types/better-sqlite3": "^7.6.12",
     "@types/cookie-parser": "^1.4.8",
     "@types/express": "^5.0.0",

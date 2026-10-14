@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
+COPY packages/extension-api/package.json packages/extension-api/
 # better-sqlite3 ships a binding.gyp, and npm defaults to node-gyp for any
 # package that has one without its own install script. This stage is thrown
 # away, so it gets a real toolchain and every dependency's install script runs
@@ -15,7 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 RUN npm ci
 COPY server server
 COPY web web
-# The extensions: the build makes the Documents extension's editor bundle in its folder.
+# What an extension written in TypeScript is built with: @pithagoras/extension-api.
+COPY packages packages
+# The extensions: `npm run build` builds each that has a build of its own, in its folder.
 COPY extensions extensions
 # The web build copies it next to the voice files it covers (web/scripts/copy-vad-assets.mjs).
 COPY THIRD_PARTY_NOTICES.md ./
@@ -76,14 +79,16 @@ COPY channels channels
 # Skills the portal ships. Loaded from here for every session; anything the
 # agent writes goes to the data volume instead.
 COPY skills skills
-# The opt-in pi extensions the portal ships (the subagent tool). Nothing loads
-# them until a feature is switched on in Settings → Add-ons, which installs one
-# as a local pi package pointing here.
-COPY extensions extensions
-# The Documents extension's editor, built above and not kept in git, and what its
-# server half needs to run, so a new container does not reach for the registry.
-COPY --from=build /app/extensions/docs/web/editor.js extensions/docs/web/editor.js
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix extensions/docs \
+# The extensions the portal ships, as the build left them: each built in its own
+# folder, where nothing of it is kept in git. Nothing loads one until it is
+# installed as a local pi package pointing here (Settings → Extensions, or
+# Settings → Add-ons for the subagent tool). One with packages of its own gets
+# what it needs to run and not what only its build did, so a new container does
+# not reach for the registry.
+COPY --from=build /app/extensions extensions
+RUN for dir in extensions/*/; do \
+      if [ -f "${dir}package-lock.json" ]; then npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix "$dir" || exit 1; fi; \
+    done \
     && npm cache clean --force
 COPY deploy/voice deploy/voice
 

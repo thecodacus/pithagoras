@@ -1,15 +1,18 @@
 import * as React from "react";
 import { useSyncExternalStore } from "react";
+import * as ReactDOM from "react-dom";
+import * as jsxRuntime from "react/jsx-runtime";
 import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi } from "../api";
 import { useLanguage } from "../i18n";
-import { onChatFeed, useChatFeed, type ChatFeed } from "./chat-feed";
+import type { Portal } from "@pithagoras/extension-api";
+import { onChatFeed, useChatFeed } from "./chat-feed";
 import { hasCommand, registerCommand, runCommand } from "./commands";
-import { ui, type Ui } from "./kit";
-import { panels, type PanelController } from "./panels";
+import { ui } from "./kit";
+import { panels } from "./panels";
 import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from "./server-feed";
-import { register, type Entry, type SlotName } from "./slots";
+import { register } from "./slots";
 import { addStrings, forgetStrings, translate } from "./strings";
-import { choose, registerTheme, themes, themesSettled, type ThemeGiven } from "./themes";
+import { choose, registerTheme, themes, themesSettled } from "./themes";
 import { chosenPalette, usePalette, useResolvedTheme } from "../theme";
 
 /**
@@ -27,70 +30,16 @@ import { chosenPalette, usePalette, useResolvedTheme } from "../theme";
  * It may return a function, called when the extension is taken out. What it
  * registered goes with it either way.
  */
-export interface Portal {
-  /** Of this interface: raised when something an extension relies on changes. */
-  version: 1;
-  /** The package's name, which its entries and its messages go by. */
-  extension: string;
-  /** The portal's own React: what a component drawn in a slot has to be made with, for its hooks to work. */
-  React: typeof React;
-  slots: { register<S extends SlotName>(slot: S, entry: Entry<S>): () => void };
-  /** Go to a page of the portal: "/s/<chat id>", "/x/<extension>/<page id>". */
-  navigate(path: string): void;
-  /** The portal's own building blocks: see kit.ts. */
-  ui: Ui;
-  api: {
-    /** A request as the portal's own are made: JSON back, an ApiError with what was said for one refused, and a login that is gone told to the page. */
-    json<T = unknown>(url: string, init?: RequestInit): Promise<T>;
-    /** The address of a route of the package's own server half: `url("/notes")`. Throws when it has none running. */
-    url(path: string): string;
-    ApiError: typeof ApiError;
-  };
-  /** A text in the language in effect: the package's own where it added one, as written otherwise. */
-  t(text: string, vars?: Record<string, string | number>): string;
-  locale: {
-    /** The package's texts in a language ("de"), each by what the code says in English. */
-    add(code: string, strings: Record<string, string>): () => void;
-    /** A hook: the language in effect, drawing the component again when it changes. */
-    use(): string;
-  };
-  commands: {
-    /** Say what can be asked of the package by name, by another extension or the portal. Start the name with the package's. */
-    register(name: string, run: (...args: any[]) => unknown): () => void;
-    /** Ask for it. Throws when nothing answers to the name. */
-    run(name: string, ...args: unknown[]): unknown;
-    has(name: string): boolean;
-  };
-  /** The panels of the chat on screen, any of them: the portal's ("files", "terminal", …) and an extension's ("<package>/<id>"). */
-  panels: PanelController;
-  chats: {
-    /**
-     * A hook: a chat as the page has it (its events, the conversation, whether
-     * the agent is at work). Give it `pick` to say what of it the component
-     * uses: a chat changes with every token, and the component is then drawn
-     * again only when what it picked has changed.
-     */
-    use<T = ChatFeed>(chatId: string, pick?: (feed: ChatFeed) => T, same?: (a: T, b: T) => boolean): T;
-    /** The same outside a component: told each time the chat changes. Returns the unsubscribe. */
-    on(chatId: string, handler: (feed: ChatFeed) => void): () => void;
-  };
-  server: {
-    /** What the package's server half says to the pages open on a chat, whichever chat. Listened for as the module is called, nothing is missed. */
-    on(handler: (chatId: string, data: unknown) => void): () => void;
-  };
-  theme: {
-    /** A theme of the package's: colours in place of the portal's own, chosen in Settings like any other. */
-    register(theme: ThemeGiven): () => void;
-    /** The themes there are, any extension's: `id` is "<package>/<id>". */
-    list(): { id: string; name: string; extension: string }[];
-    /** The theme in effect, or null for the portal's own colours. */
-    current(): string | null;
-    /** Switch to a theme by its id, or to the portal's own with null. Kept in this browser. */
-    set(id: string | null): void;
-    /** A hook: light or dark, and the theme in effect, drawn again when either changes. */
-    use(): { mode: "light" | "dark"; theme: string | null };
-  };
-}
+// What a browser half is called with is the public contract, @pithagoras/extension-api: the portal builds exactly that below.
+export type { Portal } from "@pithagoras/extension-api";
+
+/**
+ * What an extension bundled with @pithagoras/extension-api/build imports as
+ * `react`, `react/jsx-runtime` and `react-dom`: the portal's own, put where
+ * its module finds them before any extension's module is loaded. One built
+ * without it has `portal.React`, which is the same React.
+ */
+(globalThis as { __pithagoras?: unknown }).__pithagoras = { React, ReactDOM, jsxRuntime };
 
 type Loaded = { stamp: string; leave: () => void };
 

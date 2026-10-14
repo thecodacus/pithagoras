@@ -147,14 +147,62 @@ with it either way.
 ### Components
 
 A component is a function made with `portal.React`. Without a build that
-means `React.createElement`, as above. With a build of your own, write JSX and
-point it at the portal's React instead of bundling a second one: mark `react`
-as external and have your bundler alias it to a small module that hands out
-what `portal.React` holds. Two Reacts in one page do not share hooks.
+means `React.createElement`, as above. With a build, write TypeScript and JSX
+and import React as usual: see [Writing it in TypeScript](#writing-it-in-typescript).
+Either way it is the portal's React, never a second one: two Reacts in one page
+do not share hooks.
 
 The portal wraps each component so that it is drawn again only when what it is
 handed changes. The chat around it is drawn again with every token of a reply;
 your panel is not, unless it [asks for something that changed](#the-chat-s-events).
+
+### Writing it in TypeScript
+
+`@pithagoras/extension-api` is the contract between the portal and an
+extension, and what an extension written in TypeScript and JSX is built with:
+
+- its types are what the portal gives (`Portal` for the browser half,
+  `ServerPortal` from `@pithagoras/extension-api/server` for the server half),
+  and the portal itself is checked against them when it is built;
+- `@pithagoras/extension-api/build` bundles `src/client.tsx` into the module
+  the portal loads, `web/client.js`, with the stylesheet the code imports beside
+  it (`web/client.css`) and each `import()` as a chunk fetched only when it is
+  asked for.
+
+```js
+// build.mjs
+import { buildExtension } from "@pithagoras/extension-api/build";
+await buildExtension({ dir: import.meta.dirname });
+```
+
+```json
+{
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
+  "scripts": { "build": "tsc --noEmit && node build.mjs" },
+  "devDependencies": { "@pithagoras/extension-api": "*", "esbuild": "*" }
+}
+```
+
+```tsx
+// src/client.tsx
+import { useState } from "react";
+import type { Portal } from "@pithagoras/extension-api";
+import "./client.css";
+
+export default function (portal: Portal) {
+  function Counter() {
+    const [count, setCount] = useState(0);
+    return <button onClick={() => setCount(count + 1)}>Count {count}</button>;
+  }
+  portal.slots.register("chat.panel", { id: "counter", title: "Counter", component: Counter });
+}
+```
+
+The bundle has no React of its own. `react`, `react/jsx-runtime` and
+`react-dom` are the portal's: it hands them to every extension before it loads
+any extension's module, and the build points those imports there. Any other
+package the code imports is bundled into it. What the build makes is not kept
+in git: the package is built where it is installed from, or published built.
 
 ### Looking like the portal
 
@@ -713,6 +761,20 @@ again the next time a package changes, and the themes its `package.json` names
 are there to choose all the while. A component that fails to draw takes down its own panel or
 page, and a server half's handler that throws is answered as an error; the
 rest of the portal goes on.
+
+### The extensions a portal starts with
+
+The extensions in the portal's own `extensions/` folder are packages like any
+other. `extensions/defaults.json` names those a portal starts with: each is
+installed once, as Discover installs one, and is an installed package from then
+on, switched off or removed the same way. One removed stays removed, and one
+already installed under its name, from anywhere, is left as it is, so your own
+can take its place. A portal that is updated installs what the list adds, once.
+
+Nothing in the portal's own code imports them, and none of them imports the
+portal's code: `npm run check:boundaries` holds that line, and CI runs it.
+What they need of the portal they get the way your extension does, through
+the `portal` they are given.
 
 ## Keeping it fast
 

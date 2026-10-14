@@ -1,0 +1,8 @@
+{
+  "name": "bundled-sample",
+  "version": "1.0.0",
+  "description": "A browser half in TypeScript and JSX, built with @pithagoras/extension-api/build: for the browser tests",
+  "type": "module",
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
+  "license": "Apache-2.0"
+}

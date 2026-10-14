@@ -18,15 +18,8 @@ import { choosePalette, chosenPalette, coloursOf, type Colours, type Palette } f
  * a theme registered again with other colours repaints, and one whose
  * extension is gone gives way to the portal's own.
  */
-export interface ThemeGiven {
-  /** Its name among the package's themes. */
-  id: string;
-  /** What it is called where themes are chosen. */
-  name: string;
-  /** Each colour by the portal's name for it, as "#rrggbb" or as three numbers: "27 22 38". */
-  light?: Record<string, string>;
-  dark?: Record<string, string>;
-}
+import type { ThemeGiven } from "@pithagoras/extension-api";
+export type { ThemeGiven } from "@pithagoras/extension-api";
 
 export interface Theme extends Palette {
   extension: string;

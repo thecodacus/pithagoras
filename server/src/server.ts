@@ -92,6 +92,7 @@ import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
 import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter, noteLoadedExtensions, syncExtensionServers } from "./api/extensions.js";
+import { installDefaultExtensions } from "./default-extensions.js";
 import { extensionRoutes, openingFor, stopServerHalves } from "./extension-host.js";
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
@@ -1927,8 +1928,12 @@ sweepRemoved(WORKSPACE_ROOT);
 sweepRemoved(agentsRoot());
 interruptCanvasWrites();
 // The server halves of the installed extensions: see extension-host.ts.
-void noteLoadedExtensions();
 void syncExtensionServers().catch((e) => console.error("[extensions] could not start the server halves:", e));
+// What a portal starts with is installed once (extensions/defaults.json), and then loaded like anything installed by
+// hand: an install brings the server halves in line again. What the portal runs with is noted once that is done.
+void installDefaultExtensions()
+  .catch((e) => console.error("[extensions] could not install what a portal starts with:", e))
+  .finally(() => void noteLoadedExtensions());
 pinConnection();
 adoptPortalBrowser();
 // The sandbox's sudo rules live outside the data volume, so a new container needs them put back.

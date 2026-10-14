@@ -11,5 +11,6 @@ export default defineConfig({
   },
   // The dev server proxies /api to a portal. None may answer in a test: an /api call nothing mocked goes to a dead port
   // (and tests/browser/portal-mock.ts answers it first with a 501 that names it).
-  webServer: { command: 'npm run dev -w web -- --host 127.0.0.1 --port 5191 --strictPort', url: 'http://127.0.0.1:5191', reuseExistingServer: false, env: { PITHAGORAS_API: 'http://127.0.0.1:1' } },
+  // The extensions are built first: a fresh portal's (extensions/defaults.json) are in every page the specs open.
+  webServer: { command: 'npm run build:extensions && npm run dev -w web -- --host 127.0.0.1 --port 5191 --strictPort', url: 'http://127.0.0.1:5191', reuseExistingServer: false, timeout: 180_000, env: { PITHAGORAS_API: 'http://127.0.0.1:1' } },
 });

@@ -1,4 +1,4 @@
-import type { Panels } from "./slots";
+import type { PanelController, Panels } from "@pithagoras/extension-api";
 
 /**
  * The panels beside the conversation on screen, opened and closed by name
@@ -9,11 +9,7 @@ import type { Panels } from "./slots";
  * show, a tool call for the terminal to scroll to, anything an extension's
  * panel says it takes.
  */
-export interface PanelController {
-  isOpen(key: string): boolean;
-  open(key: string, params?: unknown): void;
-  close(key: string): void;
-}
+export type { PanelController } from "@pithagoras/extension-api";
 
 let current: PanelController | undefined;
 

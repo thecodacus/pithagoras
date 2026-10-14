@@ -14,13 +14,15 @@ import { local, session } from "../safe-storage";
 import { tabKeys } from "../tab-keys";
 import { useFollowBottom } from "../use-follow-bottom";
 import { useNow } from "../use-now";
+import type { Ui } from "@pithagoras/extension-api";
+export type { Ui } from "@pithagoras/extension-api";
 
 /**
  * The portal's own building blocks, handed to an extension as `portal.ui`, so
  * that what it draws is made of what the portal's pages are made of: an
  * extension is loaded as it is, with no part of the portal compiled into it.
  */
-export const ui = {
+export const ui: Ui = {
   /** Markdown as the conversation draws it: code, tables, diagrams, and no picture from another site. */
   Markdown,
   Select,
@@ -59,4 +61,4 @@ export const ui = {
   tabKeys,
 };
 
-export type Ui = typeof ui;
+
