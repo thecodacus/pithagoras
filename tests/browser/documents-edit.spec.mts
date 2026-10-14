@@ -334,6 +334,30 @@ test('text that could not be saved is still there after the page is reloaded, an
   await expect(page.locator('.pd-conflict')).toHaveCount(0);
 });
 
+test('text typed after a conflict is kept when the page is left through the portal, and is there when the document is opened again', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await page.goto('/');
+  await page.getByRole('navigation', { name: 'Destinations' }).getByRole('button', { name: 'Documents' }).click();
+  await page.getByRole('button', { name: /The plan/ }).click();
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  store.elsewhere('# The plan\n\nTheirs.\n');
+  await typeAtEnd(page, ' Mine.');
+  await expect(page.locator('.pd-conflict')).toBeVisible();
+  // More text on top of what was kept when the conflict came up: no state changes with it.
+  await typeAtEnd(page, ' Typed after the conflict.');
+  await page.waitForTimeout(400);
+  await page.goBack();
+  await expect(editorOf(page)).toHaveCount(0);
+  expect(store.puts).toHaveLength(1);
+  await page.getByRole('navigation', { name: 'Destinations' }).getByRole('button', { name: 'Documents' }).click();
+  await page.getByRole('button', { name: /The plan/ }).click();
+  await expect(editorOf(page)).toContainText('Ship it on Friday. Mine. Typed after the conflict.');
+  await expect(page.locator('.pd-conflict')).toContainText('is now at revision 4');
+  await expect(page.locator('.pd-note')).toContainText('Text you had not saved was brought back.');
+  expect(store.puts).toHaveLength(1);
+});
+
 test('a save that failed is said, kept, and tried again by the button', async ({ page }) => {
   const store = new Store();
   await open(page, store);
@@ -442,6 +466,31 @@ test('closing the page with text that cannot be saved asks first, and with text 
   await typeAtEnd(page, ' Two.');
   await expect(page.locator('.pd-conflict')).toBeVisible();
   expect(await asks()).toBe(true);
+});
+
+test('closing the page asks first when the unsaved text is too large to be sent on the way out', async ({ page }) => {
+  const paragraphs = Array.from({ length: 1100 }, (_, i) => `Paragraph ${i + 1} of a long document, with some words in it to make it long.`);
+  const store = new Store(`# Long\n\n${paragraphs.join('\n\n')}\n`);
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Paragraph 1100');
+  const asks = () => page.evaluate(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; });
+  // Saved: nothing to ask about, however large.
+  expect(await asks()).toBe(false);
+  await typeAtEnd(page, ' Last words.');
+  // A browser does not send a request this large once the page is gone (64 KiB): the person is asked, within the second before autosave.
+  expect(await asks()).toBe(true);
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(await asks()).toBe(false);
+});
+
+test('a front matter block with nothing after it is closed when the first line is typed after it', async ({ page }) => {
+  const store = new Store('---\ntitle: x\n---');
+  await open(page, store);
+  await editorOf(page).click();
+  await page.waitForTimeout(150);
+  await page.keyboard.type('Hello');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.puts).toEqual([{ markdown: '---\ntitle: x\n---\nHello\n', base: 3 }]);
 });
 
 test('a secret the server warns about is said once, and not again while it stays in the text', async ({ page }) => {

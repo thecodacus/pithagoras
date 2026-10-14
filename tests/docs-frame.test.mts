@@ -49,6 +49,21 @@ test('a document written with CRLF is shown with line feeds and written back wit
   assert.equal(frame('a\r\nb\r\nc\nd\r\n').eol, '\r\n');
 });
 
+test('a front matter block that ends the text with no line break is not glued to what is written after it', () => {
+  assert.equal(unframe(frame('---\ntitle: x\n---'), 'Hello\n'), '---\ntitle: x\n---\nHello\n');
+  // In the document's own line ending, taken from the block when there is nothing else to take it from.
+  assert.equal(unframe(frame('---\r\ntitle: x\r\n---'), 'Hello\nWorld\n'), '---\r\ntitle: x\r\n---\r\nHello\r\nWorld\r\n');
+  assert.equal(unframe(frame('\uFEFF---\ntitle: x\n---'), 'Hello\n'), '\uFEFF---\ntitle: x\n---\nHello\n');
+  // What was written is front matter and a body again when it is opened the next time.
+  const again2 = frame(unframe(frame('---\ntitle: x\n---'), 'Hello\n'));
+  assert.deepEqual([again2.head, again2.body], ['---\ntitle: x\n---\n', 'Hello\n']);
+  // Nothing is added where nothing follows, or where the block already ends in a line break, or there is only a mark.
+  assert.equal(unframe(frame('---\ntitle: x\n---'), ''), '---\ntitle: x\n---');
+  assert.equal(unframe(frame('---\ntitle: x\n---\n'), 'Hello\n'), '---\ntitle: x\n---\nHello\n');
+  assert.equal(unframe(frame('\uFEFF'), 'Hello\n'), '\uFEFFHello\n');
+  assert.equal(frame('---\r\na: 1\r\n---\r\n\r\nText\nmore\n').eol, '\n');
+});
+
 test('framing a document and putting it back is the document, in every shape', () => {
   for (const text of ['', '\n', 'Text', '---\na: 1\n---\n', '---\r\na: 1\r\n---\r\n\r\n# T\r\n', '﻿---\r\na: 1\r\n---\r\nText\r\n', '- a\n- b\n', '# T\r\n\r\ntext\r\n']) {
     assert.equal(again(text), text, JSON.stringify(text));

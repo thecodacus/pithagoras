@@ -49,14 +49,31 @@ function frontMatterEnd(text, from) {
   return from;
 }
 
-/** `markdown` as the editor takes it: `body` with line feeds only, and what is kept apart (`head`, `eol`). */
+/** How many line breaks `text` has, and how many of them are CRLF. */
+const breaks = (text) => ({ all: text.match(/\n/g)?.length ?? 0, crlf: text.match(/\r\n/g)?.length ?? 0 });
+
+/**
+ * `markdown` as the editor takes it: `body` with line feeds only, and what is
+ * kept apart (`head`, `eol`). The line ending is the body's, or the head's
+ * where the body has no line break (a front matter block and one line).
+ */
 export function frame(markdown) {
-  const bom = markdown.startsWith("﻿") ? 1 : 0;
+  const bom = markdown.startsWith("\uFEFF") ? 1 : 0;
   const end = frontMatterEnd(markdown, bom);
+  const head = markdown.slice(0, end);
   const rest = markdown.slice(end);
-  const crlf = (rest.match(/\r\n/g)?.length ?? 0) * 2 > (rest.match(/\n/g)?.length ?? 0);
-  return { head: markdown.slice(0, end), body: rest.replace(/\r\n?/g, "\n"), eol: crlf ? "\r\n" : "\n" };
+  const { all, crlf } = breaks(rest);
+  const counted = all ? { all, crlf } : breaks(head);
+  return { head, body: rest.replace(/\r\n?/g, "\n"), eol: counted.crlf * 2 > counted.all ? "\r\n" : "\n" };
 }
 
-/** What the editor wrote (`body`) with what was kept apart put back. */
-export const unframe = ({ head, eol }, body) => head + (eol === "\r\n" ? body.replace(/\n/g, "\r\n") : body);
+/**
+ * What the editor wrote (`body`) with what was kept apart put back. A front
+ * matter block that ended the text with no line break (`---` and nothing after
+ * it) is given one before what is written after it: glued to the closing
+ * marks, it would not close.
+ */
+export const unframe = ({ head, eol }, body) => {
+  const glued = body !== "" && head !== "" && !/[\n\uFEFF]$/.test(head);
+  return head + (glued ? eol : "") + (eol === "\r\n" ? body.replace(/\n/g, "\r\n") : body);
+};

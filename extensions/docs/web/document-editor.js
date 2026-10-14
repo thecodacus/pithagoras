@@ -10,6 +10,8 @@ import { createSaver } from "./saver.js";
 
 /** What the person's text was, kept while it is not saved (a conflict, a save that failed, a page that went away): per document, for the tab. */
 const DRAFT = "pithagoras-docs/draft";
+/** What a request that goes on after the page is gone may carry: the browsers allow 64 KiB, and it is kept well under. */
+const KEEPALIVE_BYTES = 60 * 1024;
 
 export function documentEditor(portal, { documentUrl, when, useAnswer }) {
   const { React, ui, t } = portal;
@@ -182,10 +184,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
       };
       const returned = () => void (leaving = false);
       const hidden = () => document.visibilityState === "hidden" && editor && save();
-      // Closing the page with text that cannot be saved asks first; text that autosave is on its way with does not.
+      // Closing the page asks first when the text cannot be saved (a conflict, an error) or cannot be sent on the way out
+      // (a request that outlives the page is small); text that autosave is on its way with, and that fits, does not.
       const ask = (e) => {
-        const { status } = saver.state();
-        if (status === "conflict" || status === "error") e.preventDefault();
+        const { status, base } = saver.state();
+        if (status === "conflict" || status === "error" || (editor && saver.unsaved() && new TextEncoder().encode(JSON.stringify({ markdown: read(), base })).length > KEEPALIVE_BYTES)) e.preventDefault();
       };
       const key = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -231,7 +234,9 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
         document.removeEventListener("visibilitychange", hidden);
         if (editor) {
           frozen = editor.markdown();
-          // Leaving the page is not a reason to lose text: it is saved now, and if it cannot be, kept (the saver's state says so).
+          // Leaving the page is not a reason to lose text: it is saved now, and kept until it is. Kept here too, not only when
+          // the saver's state changes: text typed after a conflict changed no state, and has no other way to be kept.
+          if (saver.unsaved()) keepDraft(folder, id, { base: saver.state().base, markdown: frozen });
           void saver.flush();
           void editor.destroy();
         } else saver.dispose();

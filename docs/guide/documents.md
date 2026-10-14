@@ -202,7 +202,10 @@ What the editor does not do yet:
 You do not save by hand. The text is saved a second after you stop typing, when
 the cursor leaves the text, when you go back to the list or to another page of
 the portal, when the browser tab is hidden or closed, and at Ctrl+S. Each save
-is one revision. Beside the **History** button the page says where the
+is one revision. A page that is being closed can send only a small request (the
+browsers allow 64 KiB): when the document is larger than about 60 KB and you
+closed the tab with text not yet saved, the browser asks first whether to leave.
+Beside the **History** button the page says where the
 document stands: **Saved**, **Unsaved changes**, **Saving…** or **Not saved**,
 and the revision.
 
@@ -248,7 +251,8 @@ Text that could not be saved is kept for the tab, so a reload, or a visit to
 another page of the portal, does not lose it: when you open the document again,
 the page says it brought your text back, and the same choice is there if the
 document is at another revision by then. The page asks before the tab is closed
-with text that could not be saved. **All documents** stays on the document
+with text that could not be saved, and what you typed after the document
+changed is kept as well. **All documents** stays on the document
 while there is such text.
 
 ## History
