@@ -4,6 +4,7 @@
   "description": "The terminal of a Pithagoras chat: what the agent ran, the jobs it left running, and a shell of your own in the chat's folder",
   "type": "module",
   "keywords": ["pi-package"],
+  "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
   "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
   "devDependencies": {
