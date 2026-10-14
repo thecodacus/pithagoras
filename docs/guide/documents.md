@@ -6,7 +6,8 @@ the sidebar. The page shows the Markdown documents in the folders your chats
 work in.
 
 It is under construction: documents can be listed, read, edited by you and by
-the agent, and have a history. This page describes what it does so far.
+the agent at the same time, and have a history. This page describes what it
+does so far.
 
 ## Installing it
 
@@ -60,15 +61,18 @@ every change, whoever made it. Each folder's documents have a history of their
 own: every revision is kept, and an earlier one can be brought back.
 
 A change is saved against the revision it was made on. If the document changed
-in the meantime (the agent wrote to it, say), the save is refused and nothing
-is written: you get the text as it is now, and your change is not lost.
-Bringing back an earlier revision saves its text as a new revision, so the
-history only grows and nothing in it is replaced.
+in the meantime (the agent wrote to it, say), your change is put together with
+the later one where the two do not touch the same lines
+([below](#when-the-agent-changes-the-document-while-it-is-open)). Where they do,
+the save is refused and nothing is written: you get the text as it is now, and
+your change is not lost. Bringing back an earlier revision saves its text as a
+new revision, so the history only grows and nothing in it is replaced.
 
 A change made outside the page, by the agent with its own tools, in Files or
 in an editor, is not lost either. The next time the document is listed, read
-or saved, it is kept as a revision of its own, marked as an outside change.
-The same happens to a save that the portal could not finish (it stopped in the
+or saved, or within a couple of seconds while the document is open on the
+page, it is kept as a revision of its own, marked as an outside change. The
+same happens to a save that the portal could not finish (it stopped in the
 middle, say): what reached the disk is kept as a revision.
 
 Restoring a document whose file was deleted makes the file again.
@@ -193,9 +197,6 @@ What the editor does not do yet:
   for it, whether it names a path in the chat's folder or another site. It is
   written back as it was
 - raw HTML is shown as text
-- the page does not change by itself when the agent or something else changes
-  the document while it is open: you find out when your text is saved (see
-  below)
 
 ### Saving
 
@@ -226,17 +227,60 @@ there, and a document written with Windows line breaks (CRLF), which keeps
 them. A byte order mark at the start stays too.
 
 A save goes against the revision the page started from, as the agent's edits do
-([above](#revisions-and-history)). A save that cannot be made says why
-("Could not save: …") and is tried again at your next change, or at **Try
-again**. Your text stays in the editor. A save with a secret in it (see
+([above](#revisions-and-history)); when the document has moved on since, it is
+put together with the later revision where it can be
+([below](#when-the-agent-changes-the-document-while-it-is-open)). A save that
+cannot be made says why ("Could not save: …") and is tried again at your next
+change, or at **Try again**. Your text stays in the editor. A save with a secret in it (see
 [A secret in a document](#a-secret-in-a-document)) is made, and the page warns
 about it. Once you put the warning away it is not said again with each save,
 until a save without the secret has come in between.
 
+### When the agent changes the document while it is open
+
+The page is told of each revision of the document it has open as it is made:
+by the agent, by another window of the portal, by Files or by an editor. It
+does not wait for your next save to find out. The page keeps one connection
+open for the document (server-sent events), and says where the document stands
+whenever the connection starts, so a change made while it was down is found as
+soon as it is back. A revision made outside the portal (Files, an editor, or
+the agent's own file tools) is noticed within a couple of seconds, and only
+while some page has the document open.
+
+What the page does with a change depends on what is in the editor:
+
+- **Nothing of yours is unsaved.** The change is in the editor at once, without
+  a reload. Only the paragraphs, lists and other blocks that changed are
+  replaced, and they are marked for a moment. Your caret and selection stay
+  where they were, unless the change is in the block they are in. A note says
+  who changed the document and that it is now at the new revision. The change
+  is not something Ctrl+Z undoes (it is not yours to take back); what you had
+  typed before it still can be.
+- **You have text that is not saved yet.** The change is merged into your text
+  where it does not touch what you changed, and your text is then unsaved on
+  the new revision and saved as usual. A note says so. Nothing is sent for the
+  merge itself.
+- **The change touches what you changed.** It is a real conflict, and it is not
+  guessed at: see below.
+
+Merging is by lines, as git does it, on the text the editor writes (so a
+document written with `*` bullets is no different from one with `-`). Two
+changes are one when they touch the same line, or lines that follow each other
+without a line between them; a blank line between two paragraphs is such a
+line, so changes to two paragraphs merge. A list, which has no blank lines,
+does not: changing two neighbouring items is a conflict. A change that you and
+the agent made in the same way is made once.
+
+The same merge is made by the portal when a save arrives that started from an
+earlier revision (the page was not told in time, or the connection was down):
+the saved text is then the merged one, which becomes a revision of its own,
+by you, and the editor takes it up. Text you typed while that save was on its
+way is kept on top of it.
+
 ### When the document changed meanwhile
 
-If the agent, Files or an editor changed the document while you were typing,
-the save is refused and nothing is written. The page does not take your text
+If the agent, Files or an editor changed the same lines you were typing in,
+nothing is merged and nothing is written. The page does not take your text
 away or replace it with the other version: it stays in the editor, a message
 says the document is now at a later revision, and nothing more is sent until
 you choose:
@@ -246,6 +290,9 @@ you choose:
 - **Take theirs** (after a question) drops your text and shows the other
   version. Your text is gone.
 - **Show the other version** reads it first.
+
+If the agent changes the document again while the message is shown, the other
+version it offers is the newer one.
 
 Text that could not be saved is kept for the tab, so a reload, or a visit to
 another page of the portal, does not lose it: when you open the document again,
@@ -302,7 +349,9 @@ What the tools check is what keeps the agent from overwriting you:
   since, or something changed its file (the agent's own tools, Files, an
   editor), the edit is refused, nothing is written, and the agent reads the
   document again before it tries again. Two edits made on one revision at the
-  same time: one is made, the other is refused.
+  same time: one is made, the other is refused. The agent's edits are not
+  merged with yours the way your saves are merged with its changes: it reads
+  the document as it is now, and quotes it again.
 - Each edit is a quote and its replacement. The quote must be in the document
   exactly once, as `doc_read` shows it. All of a call's edits are looked for in
   the document as it was, none may overlap, and either all are made or none.

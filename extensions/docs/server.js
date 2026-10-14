@@ -11,7 +11,8 @@
  *   GET  /api/x/pithagoras-docs/folders                                          every folder with documents, and its documents
  *   POST /api/x/pithagoras-docs/folders/:folder/documents                        a new document { title, markdown?, scope?, chat? }
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
- *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision
+ *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
+ *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/events             a stream of its revisions as they are made (server-sent events)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/history            its revisions, newest first (?before=, ?limit=)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/revisions/:revision  the text of one of them
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/restore            { revision, base? }: that text as a new revision
@@ -19,6 +20,15 @@
  * The page names a folder by an id made from its path, and a document by an
  * id the store gave it, never by a path: a folder is only one that a chat
  * works in, as the portal lists them now.
+ *
+ * A page with a document open is told of each revision of it as it is made, by
+ * the agent, by the page itself, by Files or an editor: the stream's first
+ * message is where the document stands, so that a page that was away (a
+ * reconnect, or a change between its load and its stream) finds out at once,
+ * whatever it missed. A message says which revision, who made it and when; the
+ * text is asked for from the document's own route. While a stream is open the
+ * folder is looked at every couple of seconds for what changed outside the
+ * store's own writes, which is how the changes of Files and editors get told.
  */
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
@@ -300,7 +310,12 @@ function headingOf(text) {
 const titleOf = (bytes, name) => headingOf(bytes.subarray(0, HEAD_BYTES).toString("utf8")) || name.replace(/\.md$/i, "");
 
 
-export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs } = {}) {
+/** How often an open stream is sent a comment line, so that nothing between the portal and the page (a proxy) takes it for idle. */
+const PING_MS = 25_000;
+/** How often a folder with an open stream is looked at for changes outside the store's own writes. */
+const POLL_MS = 2_000;
+
+export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pingMs = PING_MS, pollMs = POLL_MS } = {}) {
   // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
   // in the background: the portal does not wait for an install to start the rest. The store waits for it.
   const ready = dependencies((line) => portal.log(line));
@@ -358,6 +373,60 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     }
   }
 
+  /**
+   * The streams that are open, and who they are for: by folder (its path), the
+   * streams of each document, and a look at the folder that goes on for as long
+   * as one is open. A revision made in a folder is told to the streams of its
+   * document, in the order it was made.
+   */
+  const watching = new Map();
+  const live = {
+    publish(folder, change) {
+      for (const send of [...(watching.get(folder)?.documents.get(change.id) ?? [])]) send(change);
+    },
+    /** `send` is given each revision of document `id` in `folder`. Returns what stops it. */
+    watch(folder, id, send) {
+      let entry = watching.get(folder);
+      if (!entry) {
+        entry = { documents: new Map(), count: 0, timer: null, busy: false, failure: null };
+        watching.set(folder, entry);
+      }
+      const sends = entry.documents.get(id) ?? entry.documents.set(id, new Set()).get(id);
+      sends.add(send);
+      entry.count++;
+      if (!entry.timer && pollMs > 0) {
+        const watched = entry;
+        // One look at a time: a slow one is not stacked on.
+        watched.timer = setInterval(async () => {
+          if (watched.busy || stopped) return;
+          watched.busy = true;
+          try {
+            await (await storeFor(folder)).refresh();
+            watched.failure = null;
+          } catch (e) {
+            // Said once for as long as it is the same.
+            const said = e?.message ?? String(e);
+            if (said !== watched.failure) portal.log(`The documents in ${folder} could not be looked at for changes: ${said}`);
+            watched.failure = said;
+          } finally {
+            watched.busy = false;
+          }
+        }, pollMs);
+        watched.timer.unref?.();
+      }
+      return () => {
+        if (!sends.delete(send)) return;
+        if (!sends.size) entry.documents.delete(id);
+        if (--entry.count > 0) return;
+        clearInterval(entry.timer);
+        if (watching.get(folder) === entry) watching.delete(folder);
+      };
+    },
+  };
+  /** The responses of the streams that are open, ended when the extension stops. */
+  const streams = new Set();
+  let stopped = false;
+
   /** Each folder's store, opened once and kept while it is there: by the folder's path. */
   const stores = new Map();
   /** Where each store goes is settled one at a time: it looks at the others (a folder that was moved takes its store along). */
@@ -384,7 +453,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         Database = (await import("better-sqlite3")).default;
       }
       const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), inside: portal.files.inside, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
-      return Store.open(folder, { dir, inside: portal.files.inside, Database, faults, gitTimeoutMs });
+      return Store.open(folder, { dir, inside: portal.files.inside, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change) });
     })();
     stores.set(folder, opening);
     return opening;
@@ -489,8 +558,49 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const id = documentOf(req);
     const markdown = markdownOf(req.body);
     const base = revisionOf(req.body.base, "base");
-    const doc = await (await storeFor(folder.path)).save(id, { markdown, base });
+    // A text that started from an earlier revision is put together with what was saved since, where their changes do not meet.
+    const doc = await (await storeFor(folder.path)).save(id, { markdown, base, merge: true });
     res.json({ ...doc, ...warn(markdown) });
+  }));
+
+  portal.router.get("/folders/:folder/documents/:id/events", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    // The page's end of it: told by the response, which closes when the connection does.
+    let closed = false;
+    res.on("close", () => (closed = true));
+    const store = await storeFor(folder.path);
+    // Listened to before it is asked where the document stands: a revision made in between is not missed.
+    const queued = [];
+    let send = (change) => queued.push(change);
+    const unwatch = live.watch(folder.path, id, (change) => send(change));
+    let now;
+    try {
+      now = await store.current(id);
+    } catch (e) {
+      unwatch();
+      throw e;
+    }
+    if (stopped) {
+      unwatch();
+      throw new DocError(503, "The documents extension is stopping");
+    }
+    if (closed) return unwatch();
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+    // A page that lost the stream asks again after this long, with its last id: the first message tells it where things stand, so it is not needed.
+    res.write("retry: 2000\n\n");
+    const write = ({ revision, author, at }) => res.write(`id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`);
+    write(now);
+    for (const change of queued) if (change.revision > now.revision) write(change);
+    send = write;
+    const ping = setInterval(() => res.write(": ping\n\n"), pingMs);
+    ping.unref?.();
+    streams.add(res);
+    res.on("close", () => {
+      clearInterval(ping);
+      streams.delete(res);
+      unwatch();
+    });
   }));
 
   portal.router.get("/folders/:folder/documents/:id/history", route(async (req, res) => {
@@ -517,6 +627,9 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   }));
 
   return async () => {
+    stopped = true;
+    for (const entry of watching.values()) clearInterval(entry.timer);
+    for (const res of [...streams]) res.end();
     const open = [...stores.values()];
     stores.clear();
     for (const pending of open) await pending.then((store) => store.close(), () => {});

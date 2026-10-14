@@ -1,11 +1,13 @@
 /**
  * A document on the Documents page, edited: the editor (editor.js, loaded when
- * a document is first opened), saved as it is edited (saver.js), and the
+ * a document is first opened), saved as it is edited (saver.js), kept up to
+ * date with what the agent and others change meanwhile (live.js), and the
  * document's history with a way back to an earlier revision.
  *
  * Plain JavaScript like the rest of the browser half, made with the portal's
  * React and building blocks (`portal.ui`).
  */
+import { createLive } from "./live.js";
 import { createSaver } from "./saver.js";
 
 /** What the person's text was, kept while it is not saved (a conflict, a save that failed, a page that went away): per document, for the tab. */
@@ -164,10 +166,16 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
       let frozen = null;
       // The page is being closed: a save then has to outlive it.
       let leaving = false;
+      // What changed meanwhile, taken into the editor, and the stream that tells of it: once the editor is drawn.
+      let live = null;
+      let stream = null;
+      let retry = null;
+      let failed = 0;
       const read = () => frozen ?? editor.markdown();
       const saver = createSaver({
         read,
         send: (markdown, base) => portal.api.json(url, { method: "PUT", body: JSON.stringify({ markdown, base }), keepalive: leaving }),
+        onMerged: (answer, sent) => live?.merged(answer, sent),
         onState: (state) => {
           // Kept while it cannot be saved, and let go once it is, also when the page is gone by then.
           if (state.status === "conflict" || state.status === "error") keepDraft(folder, id, { base: state.base, markdown: read() });
@@ -223,11 +231,41 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
           setNotice({ kind: "draft" });
         }
         parts.current = { editor, saver, url };
+        live = createLive({
+          editor,
+          saver,
+          revision: doc.revision,
+          load: () => portal.api.json(url),
+          notify: ({ kind, revision, author }) => kind !== "conflict" && setNotice({ kind, revision, author }),
+        });
+        // Told where the document stands as it opens, which is how a change between its load and now is found, and after each revision.
+        const listen = () => {
+          const source = new EventSource(`${url}/events`);
+          stream = source;
+          source.addEventListener("revision", (e) => {
+            failed = 0;
+            try {
+              void live.seen(JSON.parse(e.data));
+            } catch {
+              // A message that is not one of ours: nothing to take from it.
+            }
+          });
+          // One that dropped is asked for again after a while, longer each time, as the chat's own stream is: the first message of a new one
+          // says where the document stands, so nothing that happened meanwhile is missed. (The browser would not ask again for one a proxy refused.)
+          source.addEventListener("error", () => {
+            source.close();
+            if (!gone) retry = setTimeout(listen, Math.min(2000 * 2 ** failed++, 30_000));
+          });
+        };
+        if (typeof EventSource !== "undefined") listen();
         setReady(true);
       })();
 
       return () => {
         gone = true;
+        clearTimeout(retry);
+        stream?.close();
+        live?.close();
         window.removeEventListener("pagehide", hide);
         window.removeEventListener("pageshow", returned);
         window.removeEventListener("beforeunload", ask);
@@ -340,6 +378,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
               draft: () => t("Text you had not saved was brought back."),
               restored: () => t("Revision {from} is back, as revision {to}.", { from: notice.from, to: notice.to }),
               moved: () => t("The document changed in the meantime and is now at revision {n}. Restore revision {from} again if you still want it.", { n: notice.revision, from: notice.from }),
+              updated: () => (notice.author === "agent" ? t("The agent changed this document. It is now at revision {n}.", { n: notice.revision }) : t("This document was changed from elsewhere. It is now at revision {n}.", { n: notice.revision })),
+              merged: () => t("The document changed meanwhile and is now at revision {n}. Its changes were merged into your text.", { n: notice.revision }),
             }[notice.kind](),
           ),
           h("button", { type: "button", className: ui.classes.ghost, onClick: () => setNotice(null) }, t("Close")),
