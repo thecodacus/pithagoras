@@ -193,11 +193,23 @@ test('what the page does not draw as a heading is no title, and what it draws as
     'documents/html.md': '<div align="center">\n\n# Centered title\n\n</div>\n',
     'documents/html-block.md': '<div>\n# not a heading in the block\n</div>\n\n# After the block\n',
     'documents/script.md': '<script>\n\n# in a script\n\n</script>\n\n# After the script\n',
+    // A tab before a line reaches the fourth column: code, or more of the paragraph above, not a heading.
+    'documents/tab-code.md': 'Install:\n\n\t# install the tools first\n\tnpm ci\n\n# Setup steps\n',
+    'documents/tab-top.md': '\t# a comment in code\n\n# Real title\n',
+    'documents/tab-paragraph.md': 'Some text\n\t# still the paragraph\n\n# After the paragraph\n',
+    'documents/tab-quote.md': '>\t# Heading in a quote, after a tab\n',
+    // A heading underlined in a quote, or in a list item, is drawn as one; a rule under an item is a rule.
+    'documents/quote-setext.md': '> Quoted title\n> ===\n\n# Later\n',
+    'documents/item-setext.md': '- Item title\n  ---\n\n# Later\n',
+    'documents/item-rule.md': '- an item\n---\n\n# After the rule\n',
     // A byte order mark is not text.
     'documents/bom.md': '﻿# Release plan\n',
     // Inline code with backticks is no fence.
     'documents/inline-fence.md': '``` not a fence ```\n\n# Title after inline code\n',
     // Marks of links, pictures and footnotes are not drawn.
+    // Emphasis loses its marks however long it is; a lone star and a word with underscores keep theirs.
+    'documents/long-emphasis.md': '# **Project Phoenix: moving the billing service onto the new platform**\n',
+    'documents/stars.md': '# 5 * 3 * 2 in my_file_name, and *one* __two__ ~~three~~\n',
     'documents/marks.md': '# The [release plan][plan], [![CI](https://example.com/ci.svg)](https://example.com/ci) and <https://example.com> [^1]\n\n[plan]: ./plan.md\n[^1]: A note.\n',
   });
   const docs = server({ a: site });
@@ -214,6 +226,15 @@ test('what the page does not draw as a heading is no title, and what it draws as
     'html.md': 'Centered title',
     'html-block.md': 'After the block',
     'script.md': 'After the script',
+    'tab-code.md': 'Setup steps',
+    'tab-top.md': 'Real title',
+    'tab-paragraph.md': 'After the paragraph',
+    'tab-quote.md': 'Heading in a quote, after a tab',
+    'quote-setext.md': 'Quoted title',
+    'item-setext.md': 'Item title',
+    'item-rule.md': 'After the rule',
+    'long-emphasis.md': 'Project Phoenix: moving the billing service onto the new platform',
+    'stars.md': '5 * 3 * 2 in my_file_name, and one two three',
     'bom.md': 'Release plan',
     'inline-fence.md': 'Title after inline code',
     'marks.md': 'The release plan, CI and https://example.com',
@@ -221,21 +242,44 @@ test('what the page does not draw as a heading is no title, and what it draws as
   for (const [name, title] of Object.entries(listed)) assert.equal(docs.read(folder.id, name).body.title, title, name);
 });
 
+/** 4 KB of `line`, line after line: as much as is looked at for a title. */
+const fill = (line: string) => `${line}\n`.repeat(Math.floor(4096 / (line.length + 1)));
+
+/**
+ * Documents made to be slow to title, each kind what one rule took longest
+ * over: a heading with a long run of blanks; runs of emphasis marks; a long
+ * underlined paragraph; a paragraph of many short lines; headings whose text is
+ * all taken off (so the next line is looked at too) made of unclosed brackets,
+ * pictures and footnote marks, links and references; long quotes and lists.
+ */
+const SLOW: Record<string, string> = {
+  blanks: `# a${' '.repeat(4090)}b`,
+  strong: `# ${'**a '.repeat(1000)}`,
+  emphasis: `# ${'*a '.repeat(1300)}`,
+  underlined: `${'_a '.repeat(1300)}\n===\n`,
+  lines: fill('a'),
+  brackets: fill(`# <a ${'['.repeat(1017)}>`),
+  pictures: fill(`# <a ${'![^'.repeat(339)}>`),
+  links: fill(`# <a ${'[a]('.repeat(250)}>`),
+  references: fill(`# <a ${'[a]['.repeat(250)}>`),
+  tags: fill(`# ${'<a '.repeat(330)}`),
+  quotes: fill('> a'),
+  items: fill('- a\n  b'),
+};
+
 test('documents made to be slow to title do not hold the portal while they are listed', () => {
-  const site = folderWith('docs-slow-', { 'documents/.keep': '' });
-  // Each is what a backtracking rule takes longest over: a heading with a long run of blanks, a long run of marks.
-  for (let i = 0; i < 300; i++) {
-    writeFileSync(path.join(site, 'documents', `blanks-${i}.md`), `# a${' '.repeat(4090)}b`);
-    writeFileSync(path.join(site, 'documents', `marks-${i}.md`), `# ${'**a '.repeat(1000)}`);
-    writeFileSync(path.join(site, 'documents', `paragraph-${i}.md`), `${'_a '.repeat(1300)}\n===\n`);
+  for (const [kind, text] of Object.entries(SLOW)) {
+    // As many as a folder lists, in a folder of their own.
+    const site = folderWith(`docs-slow-${kind}-`, { 'documents/.keep': '' });
+    for (let i = 0; i < 1000; i++) writeFileSync(path.join(site, 'documents', `${kind}-${i}.md`), text);
+    const docs = server({ a: site });
+    const started = performance.now();
+    const [folder] = docs.folders();
+    const took = performance.now() - started;
+    assert.equal(folder.documents.length, 1000, kind);
+    // Before, these took from one and a half seconds (brackets) to twelve (blanks); an ordinary folder of this size takes a few dozen milliseconds.
+    assert.ok(took < 1000, `${kind}: listing took ${Math.round(took)} ms`);
   }
-  const docs = server({ a: site });
-  const started = performance.now();
-  const [folder] = docs.folders();
-  const took = performance.now() - started;
-  assert.equal(folder.documents.length, 900);
-  // Listing them took over ten seconds before; an ordinary folder of this size takes a few dozen milliseconds.
-  assert.ok(took < 2000, `listing took ${Math.round(took)} ms`);
 });
 
 test('a documents folder that is a link is not one: what it leads to is neither listed nor read', () => {

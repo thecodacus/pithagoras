@@ -55,11 +55,12 @@ The page has one section for each folder that has documents. Several chats can
 work in one folder, and that folder is shown once. A document is listed by its
 title. The title is its first heading in its first 4 KB: a `#` line, or a line
 underlined with `=` or `-`, also inside a quote or a list. A heading-like line
-in a code block, in an HTML comment or in a block of HTML is not a heading.
+in a code block (fenced, or indented by four spaces or a tab), in an HTML
+comment or in a block of HTML is not a heading.
 
 The title is shown as plain text. Links and pictures are shown by their text,
-emphasis, code and HTML tags lose their marks, and footnote marks are left
-out. A title longer than 256 characters is cut. A document with no heading in
+emphasis, code and HTML tags lose their marks however long they are, and
+footnote marks are left out. A title longer than 256 characters is cut. A document with no heading in
 its first 4 KB is listed by its file name. The list also shows when the
 document last changed.
 
