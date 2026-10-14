@@ -1,6 +1,7 @@
 /**
  * The history of a folder's documents: a git repository of the extension's
- * own, in `<folder>/.pithagoras-docs/git`. It is not the folder's own
+ * own, in the `git` folder of the store (place.js), which is in the portal's
+ * data folder. It is not the folder's own
  * repository, if it has one, and nothing of the folder's or the user's git
  * configuration takes part in it.
  *

@@ -1,10 +1,13 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdirSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
+import { join, resolve as resolvePath } from "node:path";
 import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent } from "./agents.js";
+import { DATA_DIR } from "./data-dir.js";
 import { getSession, listSessions, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import type { ServerHalf } from "./extension-ui.js";
@@ -22,8 +25,9 @@ import { watchStream } from "./login-streams.js";
  * the chat is left alone, and not there at all where pi runs in a container.
  * What has to outlive that is here: the package's own routes, the processes
  * it starts, and what it tells the pages open on a chat. What it keeps for a
- * chat it keeps where the chat's pi works, in the chat's folder: there is no
- * folder of the portal's for it.
+ * chat it keeps where the chat's pi works, in the chat's folder; what the
+ * portal itself must run on, and no agent may change, it keeps in a folder of
+ * the portal's data folder (`dataDir`).
  * It is what the portal's own Files, Terminal and Canvases have, each written
  * into the server; a package gets it by naming a module:
  *
@@ -112,6 +116,15 @@ export interface ServerPortal {
     /** `rel` inside `base`, checked: throws for `..`, an absolute path, or a link that leads out. */
     inside(base: string, rel: string): string;
   };
+  /**
+   * A folder of the package's own in the portal's data folder, made (closed to
+   * everyone but the portal, 0700) when it is asked for. It is not in a chat's
+   * folder, so with the sandbox on the agents' group has no access to it: for
+   * what the portal runs as itself on, and an agent must not shape, such as a
+   * git repository or a database. It lives and goes with the portal's data,
+   * not with a project.
+   */
+  dataDir(): string;
 }
 
 interface Running {
@@ -274,6 +287,12 @@ function portalFor(ext: Running): ServerPortal {
       },
     },
     files: { inside: (base, rel) => resolveInside(base, rel) },
+    dataDir: () => {
+      // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
+      const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      return dir;
+    },
   };
 }
 

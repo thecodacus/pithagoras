@@ -4,7 +4,8 @@
  * A document is a Markdown file in the `documents` folder of a folder chats
  * work in, where Files lists it and the agent can read it. Each folder's
  * documents have a store (store.js): their history in a git repository of its
- * own, and a database for what is said about them. This half serves them to
+ * own, and a database for what is said about them, kept in the portal's data
+ * folder (place.js), where no agent can change it. This half serves them to
  * the page, which has no chat of its own to ask:
  *
  *   GET  /api/x/pithagoras-docs/folders                                          every folder with documents, and its documents
@@ -23,7 +24,8 @@ import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
-import { DocError, DOCUMENTS, isDocumentId, STORE, Store } from "./store.js";
+import { LEGACY_STORE, placeStore } from "./place.js";
+import { DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
 
 /** Where a document's title is looked for: its first heading, near its top. */
 const HEAD_BYTES = 4096;
@@ -329,23 +331,34 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   }
 
   /**
-   * Whether a folder has a `documents` folder. Only a folder of that name
-   * itself: a link called `documents` leads to another folder of the
-   * project, which is not the documents' to be listed or written.
+   * A folder's `documents` folder, or nothing when it has none. Only a folder
+   * of that name itself: a link called `documents` leads to another folder of
+   * the project, which is not the documents' to be listed or written.
    */
-  function hasDocuments(folder) {
+  function documentsOf(folder) {
     try {
       const dir = portal.files.inside(folder, DOCUMENTS);
       // `inside` follows links: one that was followed comes back under another path.
-      return dir === path.join(folder, DOCUMENTS) && lstatSync(dir).isDirectory();
+      return dir === path.join(folder, DOCUMENTS) && lstatSync(dir).isDirectory() ? dir : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
-  function hasStore(folder) {
+  /** Where the stores are kept: a folder of the portal's own, made when first asked for. */
+  let dataFolder;
+  const data = () => (dataFolder ??= portal.dataDir());
+
+  /** Whether a folder has a store already, in the data folder or, as an earlier version kept it, in the folder itself (to be moved). */
+  function hasStore(id, folder) {
     try {
-      return lstatSync(path.join(folder, STORE)).isDirectory();
+      if (lstatSync(path.join(data(), id)).isDirectory()) return true;
+    } catch {
+      // None there: the folder's own is the other place.
+    }
+    try {
+      lstatSync(path.join(folder, LEGACY_STORE));
+      return true;
     } catch {
       return false;
     }
@@ -353,6 +366,9 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
 
   /** Each folder's store, opened once and kept while it is there: by the folder's path. */
   const stores = new Map();
+  /** Where each store goes is settled one at a time: it looks at the others (a folder that was moved takes its store along). */
+  let placing = Promise.resolve();
+  const placed = (work) => (placing = placing.then(work, work));
   /** `make`: a folder without a store yet gets one. Otherwise it has no documents to read: a request names none that is there. */
   async function storeFor(folder, { make = false } = {}) {
     for (;;) {
@@ -366,13 +382,15 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         store?.close().catch(() => {});
       }
     }
-    if (!make && !hasStore(folder)) throw new DocError(404, "There is no such document");
+    const id = idOf(folder);
+    if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document");
     const opening = (async () => {
       if (!Database) {
         if (!(await ready)) throw new DocError(503, "The documents store's packages are not installed yet");
         Database = (await import("better-sqlite3")).default;
       }
-      return Store.open(folder, { inside: portal.files.inside, Database, faults, gitTimeoutMs });
+      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), inside: portal.files.inside, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
+      return Store.open(folder, { dir, inside: portal.files.inside, Database, faults, gitTimeoutMs });
     })();
     stores.set(folder, opening);
     return opening;
@@ -421,7 +439,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   portal.router.get("/folders", route(async (_req, res) => {
     const list = [];
     for (const folder of folders().values()) {
-      if (!hasDocuments(folder.path)) continue;
+      if (!documentsOf(folder.path)) continue;
       let documents;
       try {
         const store = await storeFor(folder.path, { make: true });

@@ -2,10 +2,14 @@
  * The documents of one folder: their files, their history and what is said
  * about them.
  *
- *   <folder>/documents/<slug>.md          the documents, ordinary files
- *   <folder>/.pithagoras-docs/            the store's own, 0700, the portal's alone (guard.js)
+ *   <folder>/documents/<slug>.md          the documents, ordinary files, in the folder
+ *   <data>/<folder id>/                   the store's own, 0700, the portal's alone (guard.js, place.js)
  *     git/                                 the history: one commit per revision (git.js)
  *     docs.sqlite                          documents, revisions (an index of the history), threads, comments, pings
+ *     folder.json                          the folder it was made for
+ *
+ * The store is in the portal's data folder, out of reach of the agents'
+ * group; the documents stay where the agent and Files can read them.
  *
  * A write (save, create, restore) goes in three steps, under the folder's
  * lock: the file is written in place (files.js), the change is committed with
@@ -26,15 +30,15 @@
  * (a slug of the title) or found on disk by it.
  */
 import { randomBytes } from "node:crypto";
-import { chmodSync, chownSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DocError } from "./errors.js";
 import { blobId, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
+import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
 import { isAdoptable, isDocumentName, isTempName, isPlainFile, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
 
 export const DOCUMENTS = "documents";
-export const STORE = ".pithagoras-docs";
 /** As many documents as a folder lists: the store takes in no more than that. */
 export const MAX_DOCUMENTS = 1000;
 const SCHEMA = 1;
@@ -130,14 +134,15 @@ CREATE TABLE IF NOT EXISTS pings (
 
 export class Store {
   /**
-   * The store of `folder` (a chat's folder, as the portal names it), opened:
-   * made where it is not there yet, then put right. `inside` is the portal's
-   * files helper. `faults` lets a test break a write after one of its steps:
+   * The store of `folder` (a chat's folder, as the portal names it), opened
+   * in `dir` (place.js has seen to which one it is): made where it is not
+   * there yet, then put right. `inside` is the portal's files helper.
+   * `faults` lets a test break a write after one of its steps:
    * `faults.after(step)` is called after "write" and after "commit".
    * `gitTimeoutMs` is how long one git run may take.
    */
-  static async open(folder, { inside, Database, faults, gitTimeoutMs }) {
-    const store = new Store(folder, inside, faults, gitTimeoutMs);
+  static async open(folder, { dir, inside, Database, faults, gitTimeoutMs }) {
+    const store = new Store(folder, dir, inside, faults, gitTimeoutMs);
     try {
       await store.#open(Database);
     } catch (e) {
@@ -153,33 +158,19 @@ export class Store {
     return store;
   }
 
-  constructor(folder, inside, faults, gitTimeoutMs) {
+  constructor(folder, dir, inside, faults, gitTimeoutMs) {
     this.folder = folder;
     this.inside = inside;
     this.faults = faults;
     this.gitTimeoutMs = gitTimeoutMs;
-    this.storeDir = path.join(folder, STORE);
+    this.storeDir = dir;
     this.queue = Promise.resolve();
     this.commits = 0;
   }
 
   async #open(Database) {
-    let at;
-    try {
-      at = this.inside(this.folder, STORE);
-    } catch {
-      at = null;
-    }
-    // `inside` follows links: a link put in the store's place comes back under another path, and is refused.
-    if (at !== this.storeDir) throw new DocError(409, `${STORE} in this folder is a link`);
     // Held from here on: everything below is done through this one open folder, never by its path again.
     this.guard = Guard.open(this.storeDir);
-    // Not part of the folder's own repository, if it has one.
-    try {
-      writeFileSync(this.guard.at(".gitignore"), "*\n", { flag: "wx", mode: 0o600 });
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-    }
     this.repo = new Repo(this.guard, this.gitTimeoutMs ? { timeoutMs: this.gitTimeoutMs } : undefined);
     let fresh = false;
     try {
@@ -189,6 +180,9 @@ export class Store {
     }
     if (fresh) await this.repo.init();
     this.guard.audit();
+    // Which folder it is for: told once, and again when the folder has moved or been restored (place.js decided it is the same).
+    this.bound = bindingFor(this.folder);
+    if (!sameBinding(readBinding(this.guard.at()), this.bound)) writeBinding(this.guard.at(), this.bound);
     const file = this.guard.at("docs.sqlite");
     // Made by hand first, with its mode and never through a link: SQLite would make it readable for everyone.
     try {
@@ -214,13 +208,15 @@ export class Store {
 
   /**
    * Whether the store's folder is still the one opened and the portal's alone,
-   * with its history and database in it: one deleted, replaced, opened to
-   * others, missing a part, or closed again after the sandbox had it open to
-   * others (guard.js) is opened again.
+   * with its history and database in it, and the folder it is for still the
+   * folder at its path: one deleted, replaced, opened to others or missing a
+   * part, or for a folder that was deleted and made again, is opened again
+   * (place.js looks at which store it is).
    */
   stillThere() {
     try {
       this.guard.check();
+      if (!sameBinding(bindingFor(this.folder), this.bound)) return false;
       // Opening makes what is missing: the history again from nothing, the database again from the history.
       return lstatSync(this.guard.at("git")).isDirectory() && lstatSync(this.guard.at("docs.sqlite")).isFile();
     } catch {

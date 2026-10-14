@@ -439,6 +439,7 @@ restart the portal.
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
+| `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
 ### Routes
@@ -470,16 +471,33 @@ ended when the portal's password changes, as the portal's own streams are.
 ### Where it keeps things
 
 What a server half keeps for a chat it keeps where the chat's pi works: in the
-chat's folder, `portal.chats.folder(id)`. There is no folder of the portal's
-for it. The agent can read what is there, it moves with the project, and it is
-gone when the folder is. Give it a folder or a name of your own, and check
-every path that came from outside with `portal.files.inside`.
+chat's folder, `portal.chats.folder(id)`. The agent can read what is there, it
+moves with the project, and it is gone when the folder is. Give it a folder or
+a name of your own, and check every path that came from outside with
+`portal.files.inside`.
 
 ```js
 const file = portal.files.inside(portal.chats.folder(chatId), `.my-extension/${chatId}.json`);
 ```
 
 Several chats can work in one folder, so name what is one chat's by the chat.
+
+What the portal itself must run on, and an agent must not be able to change, is
+kept elsewhere: `portal.dataDir()` is a folder of the package's own in the
+portal's data folder (`extension-data/<package>`, made when it is first asked
+for, mode 0700). With the [sandbox](/guide/sandbox) on, the portal runs as
+root and the agents run as users of their own: a git repository or a database
+in a chat's folder is one an agent could change (a setting git reads, a file
+SQLite opens) under the portal's rights, and one in this folder is not. It is
+not part of the project: it is not copied with it and not deleted with it, so a
+package that keeps something for a project here also has to know which project
+that is (a folder can be moved, or deleted and made again).
+
+```js
+const store = path.join(portal.dataDir(), folderId);   // the portal's alone: nobody else can read or change it
+```
+
+[Documents](/guide/documents#where-the-history-is-kept) keeps its history there.
 
 ### Telling the pages open on a chat
 

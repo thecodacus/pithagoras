@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { inProcessHome } from "./server-harness.mjs";
@@ -236,7 +236,28 @@ test("a command is run for a chat in the folder the chat works in, which is wher
   const kept = portal.files.inside(portal.chats.folder("a"), ".notes/kept.json");
   await portal.sandbox.run("a", ["sh", "-c", 'mkdir -p .notes && printf "%s" "$0" > .notes/kept.json', '{"n":1}']);
   assert.equal(readFileSync(kept, "utf8"), '{"n":1}');
-  assert.equal(portal.data, undefined, "no folder of the portal's for it");
+});
+
+test("a server half has a folder of the portal's own in the data folder, closed to everyone else, one for each package", async () => {
+  const { portal } = seen();
+  const data = path.join(path.resolve(process.env.DATA_DIR), "extension-data");
+  assert.equal(existsSync(data), false, "not made until a package asks");
+  const dir = portal.dataDir();
+  assert.equal(dir, path.join(data, "%40codacus%2Fnotes"), "its name as one part of a path");
+  assert.equal(statSync(dir).mode & 0o777, 0o700);
+  assert.equal(statSync(data).mode & 0o777, 0o700);
+  assert.equal(portal.dataDir(), dir, "the same each time, and made once");
+  writeFileSync(path.join(dir, "kept"), "still here");
+  assert.equal(readFileSync(path.join(portal.dataDir(), "kept"), "utf8"), "still here");
+  // A package named as a step up, or as the folder itself, has a folder of its own too, below the data folder.
+  for (const name of ["..", ".", ".hidden"]) {
+    const file = path.join(pkg, "named.js");
+    writeFileSync(file, `export default async function (portal) { globalThis.seenDir = portal.dataDir(); }\n`);
+    await host.syncServerHalves([{ name, version: "1.0.0", file, rev: `named-${name}` }]);
+    assert.equal(path.dirname(globalThis.seenDir), data, name);
+    assert.ok(statSync(globalThis.seenDir).isDirectory(), name);
+  }
+  await host.syncServerHalves([write(MODULE)]);
 });
 
 test("a server half changed is stopped and started anew, one gone is stopped, and one that fails says why", async () => {

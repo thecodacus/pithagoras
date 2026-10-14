@@ -19,11 +19,19 @@ import { scratch } from './helpers.mts';
 type Answer = { status: number; body: any };
 
 /**
- * The server half for chats that work in these folders. `fault` breaks the next write after that step.
- * `onStep` runs after each step of a write ("write", "commit"): a test does there what someone else could between two
- * git runs. `gitTimeoutMs` is how long one git run may take.
+ * The portal's data folder for the store, the same for every portal of this file: a store is found by its folder's id,
+ * so a portal started again over the same folder finds its store. A test that wants a data folder of its own passes one.
  */
-async function portal(folders: Record<string, string>, options: { onStep?: (step: string) => void; gitTimeoutMs?: number } = {}) {
+const DATA = scratch('docs-store-data-');
+
+/**
+ * The server half for chats that work in these folders. `fault` breaks the next write after that step.
+ * `onStep` runs after each step of a write ("write", "commit"), and before a store of an earlier version is moved
+ * ("move"): a test does there what someone else could between two git runs, or what makes a move fail.
+ * `gitTimeoutMs` is how long one git run may take. `data` is the portal's data folder for the store, `sandbox` whether
+ * agents run as users of their own.
+ */
+async function portal(folders: Record<string, string>, options: { onStep?: (step: string) => void; gitTimeoutMs?: number; data?: string; sandbox?: boolean } = {}) {
   const router = express.Router();
   const logged: string[] = [];
   let armed: string | null = null;
@@ -33,6 +41,8 @@ async function portal(folders: Record<string, string>, options: { onStep?: (step
     router,
     http: { json: express.json },
     files: { inside: resolveInside },
+    sandbox: { on: () => options.sandbox ?? false },
+    dataDir: () => options.data ?? DATA,
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
@@ -81,9 +91,12 @@ function folderWith(prefix: string, files: Record<string, string> = {}) {
   return folder;
 }
 
+/** Where a folder's store is: in the data folder, by the id the page knows the folder by. */
+const storeOf = (folder: string, data = DATA) => path.join(data, folderIdOf(folder));
+
 /** git, on the store's own repository. */
 const git = (folder: string, ...args: string[]) =>
-  execFileSync('git', [`--git-dir=${path.join(folder, '.pithagoras-docs', 'git')}`, ...args], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
+  execFileSync('git', [`--git-dir=${path.join(storeOf(folder), 'git')}`, ...args], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 const head = (folder: string) => git(folder, 'rev-parse', 'HEAD');
 const trailers = (folder: string, rev = 'HEAD') => git(folder, 'show', '-s', '--format=%(trailers:only,unfold)', rev);
 const commits = (folder: string) => Number(git(folder, 'rev-list', '--count', 'HEAD'));
@@ -137,10 +150,11 @@ test('a document is made, read, saved revision after revision, and each save is 
     assert.equal(readFileSync(path.join(folder, 'documents', 'ssh-authorized-keys.md'), 'utf8'), '# ../../.ssh/Authorized Keys\n');
     assert.deepEqual(readdirSync(path.join(folder, 'documents')).sort(), ['.keep', 'plan-2.md', 'plan.md', 'ssh-authorized-keys.md']);
 
-    // The store keeps itself to itself.
-    assert.equal(statSync(path.join(folder, '.pithagoras-docs')).mode & 0o777, 0o700);
-    assert.equal(statSync(path.join(folder, '.pithagoras-docs', 'git')).mode & 0o777, 0o700);
-    assert.equal(statSync(path.join(folder, '.pithagoras-docs', 'docs.sqlite')).mode & 0o777, 0o600);
+    // The store keeps itself to itself, in the portal's data folder, and nothing of it is in the folder.
+    assert.equal(statSync(storeOf(folder)).mode & 0o777, 0o700);
+    assert.equal(statSync(path.join(storeOf(folder), 'git')).mode & 0o777, 0o700);
+    assert.equal(statSync(path.join(storeOf(folder), 'docs.sqlite')).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(folder), ['documents']);
   } finally {
     await docs.close();
   }
@@ -197,7 +211,7 @@ test('a document is named by its id: a path, a name or ../ in its place is refus
     const other = await portal({ b: empty });
     try {
       assert.equal((await other.call('GET', `/folders/${folderIdOf(empty)}/documents/0123456789abcdef`)).status, 404);
-      assert.equal(existsSync(path.join(empty, '.pithagoras-docs')), false);
+      assert.equal(existsSync(storeOf(empty)), false);
     } finally {
       await other.close();
     }
@@ -269,12 +283,12 @@ test('what a crash leaves (a temporary file, a stale index.lock) is cleared, and
   try {
     const temp = path.join(folder, 'documents', '.plan.md.0123456789ab.tmp');
     writeFileSync(temp, 'half a document');
-    writeFileSync(path.join(folder, '.pithagoras-docs', 'git', 'index.lock'), '');
+    writeFileSync(path.join(storeOf(folder), 'git', 'index.lock'), '');
     // Not the store's: kept.
     writeFileSync(path.join(folder, 'documents', '.notes.tmp'), 'the agent\'s');
     assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).body.revision, 2);
     assert.equal(existsSync(temp), false);
-    assert.equal(existsSync(path.join(folder, '.pithagoras-docs', 'git', 'index.lock')), false);
+    assert.equal(existsSync(path.join(storeOf(folder), 'git', 'index.lock')), false);
     assert.equal(existsSync(path.join(folder, 'documents', '.notes.tmp')), true);
 
     // The agent (or Files, or an editor) writes the file itself.
@@ -297,7 +311,7 @@ test('the revisions are told again from the commits when the database is lost', 
   const { folder, docs, f, doc, url } = await withDocument('docs-store-rebuild-');
   await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
   await docs.close();
-  for (const file of readdirSync(path.join(folder, '.pithagoras-docs'))) if (file.startsWith('docs.sqlite')) rmSync(path.join(folder, '.pithagoras-docs', file));
+  for (const file of readdirSync(storeOf(folder))) if (file.startsWith('docs.sqlite')) rmSync(path.join(storeOf(folder), file));
   const again = await portal({ a: folder });
   try {
     const read = await again.call('GET', `/folders/${f}/documents/${doc}`);
@@ -415,8 +429,11 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       chmodSync(path.join(folder, 'documents'), 0o2775);
       chownSync(path.join(folder, 'documents', 'plan.md'), 1234, 1235);
       chmodSync(path.join(folder, 'documents', 'plan.md'), 0o660);
+      // The portal's data folder is the portal's own (root here), closed to the agent's user.
+      const data = path.join(root, 'data');
+      mkdirSync(data, { mode: 0o700 });
       const router = express.Router();
-      const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: { inside: resolveInside },
+      const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: { inside: resolveInside }, sandbox: { on: () => true }, dataDir: () => data,
         chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => folder } }, { dependencies: async () => true });
       const app = express(); app.use(router);
       const server = app.listen(0, '127.0.0.1'); await new Promise((r) => server.once('listening', r));
@@ -427,7 +444,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       const saved = await call('PUT', '/folders/' + listed.id + '/documents/' + doc.id, { markdown: '# Plan\\n\\nSaved by the portal.\\n', base: doc.revision });
       const made = await call('POST', '/folders/' + listed.id + '/documents', { title: 'Notes' });
       const own = (name) => { const s = statSync(path.join(folder, 'documents', name)); return [s.uid, s.gid, (s.mode & 0o777).toString(8)]; };
-      const store = statSync(path.join(folder, '.pithagoras-docs'));
+      const store = statSync(path.join(data, listed.id));
       console.log(JSON.stringify({ saved: saved.revision, made: made.name, plan: own('plan.md'), notes: own('notes.md'), store: [store.uid, (store.mode & 0o777).toString(8)] }));
       await stop(); server.close();
     } finally {
@@ -474,7 +491,7 @@ test('a document whose name starts with a space keeps its id and history when th
   } finally {
     await first.close();
   }
-  for (const file of readdirSync(path.join(folder, '.pithagoras-docs'))) if (file.startsWith('docs.sqlite')) rmSync(path.join(folder, '.pithagoras-docs', file));
+  for (const file of readdirSync(storeOf(folder))) if (file.startsWith('docs.sqlite')) rmSync(path.join(storeOf(folder), file));
   const again = await portal({ a: folder });
   try {
     const read = await again.call('GET', `/folders/${folderIdOf(folder)}/documents/${doc.id}`);
@@ -491,7 +508,7 @@ test('a store that fails to open does not keep its database open on every reques
   await docs.close();
   // A database of a later version cannot be opened by this store.
   const { default: Database } = await import('better-sqlite3');
-  const db = new Database(path.join(folder, '.pithagoras-docs', 'docs.sqlite'));
+  const db = new Database(path.join(storeOf(folder), 'docs.sqlite'));
   db.prepare("UPDATE meta SET value = '9' WHERE key = 'schema'").run();
   db.close();
   const again = await portal({ a: folder });
@@ -525,7 +542,7 @@ test('a document an outside change pushed past 1 MB is restored over, not refuse
 test('a store whose history was deleted while the portal runs is opened again, not failed on every request', async () => {
   const { folder, docs, f, doc, url } = await withDocument('docs-store-nogit-');
   try {
-    rmSync(path.join(folder, '.pithagoras-docs', 'git'), { recursive: true, force: true });
+    rmSync(path.join(storeOf(folder), 'git'), { recursive: true, force: true });
     const read = await docs.call('GET', url);
     assert.equal(read.status, 200, JSON.stringify(read.body));
     assert.equal(read.body.id, doc);
@@ -537,8 +554,8 @@ test('a store whose history was deleted while the portal runs is opened again, n
   }
 });
 
-/** The store's folder, and what is in it, that is open to others: its own folders to anyone, what is in them to writing by group or others. */
-function loose(folder: string): string[] {
+/** The store folder `store` and what is in it that is open to others: its own folders to anyone, what is in them to writing by group or others. */
+function loose(store: string): string[] {
   const found: string[] = [];
   const walk = (dir: string, depth: number) => {
     for (const entry of readdirSync(dir)) {
@@ -546,14 +563,25 @@ function loose(folder: string): string[] {
       const stat = lstatSync(place);
       // A link's own mode is always open: it is what it leads to that counts.
       if (stat.isSymbolicLink()) continue;
-      if (depth === 0 && stat.isDirectory() ? stat.mode & 0o077 : stat.mode & 0o022) found.push(`${path.relative(folder, place)} ${(stat.mode & 0o7777).toString(8)}`);
+      if (depth === 0 && stat.isDirectory() ? stat.mode & 0o077 : stat.mode & 0o022) found.push(`${path.relative(store, place)} ${(stat.mode & 0o7777).toString(8)}`);
       if (stat.isDirectory()) walk(place, depth + 1);
     }
   };
-  const store = path.join(folder, '.pithagoras-docs');
-  if (statSync(store).mode & 0o077) found.push(`.pithagoras-docs ${(statSync(store).mode & 0o7777).toString(8)}`);
+  if (statSync(store).mode & 0o077) found.push(`. ${(statSync(store).mode & 0o7777).toString(8)}`);
   walk(store, 0);
   return found;
+}
+
+/** Mode, owner and change time of `dir` and everything in it: what a chmod or a chown, even to what a file has, would show. */
+function snapshot(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (place: string) => {
+    const stat = lstatSync(place);
+    out.push(`${path.relative(dir, place) || '.'} ${(stat.mode & 0o7777).toString(8)} ${stat.uid}:${stat.gid} ${stat.ctimeMs}`);
+    if (stat.isDirectory()) for (const entry of readdirSync(place).sort()) walk(path.join(place, entry));
+  };
+  walk(dir);
+  return out;
 }
 
 /**
@@ -572,54 +600,461 @@ function prepareFolder(folder: string) {
   assert.equal(child.status, 0, child.stderr);
 }
 
-test('the sandbox\'s preparation of a chat\'s folder leaves the documents store closed to the group and others, as it does one in a folder below it', async () => {
+test('the sandbox\'s preparation of a chat\'s folder does not touch the store, which is in the portal\'s data folder: not its own, nor one for a folder below it', async () => {
   const { folder, docs, url } = await withDocument('docs-store-prepare-');
   const below = path.join(folder, 'sub');
   mkdirSync(path.join(below, 'documents'), { recursive: true });
   const other = await portal({ b: below });
-  // What a link to somewhere else, in the store's place or inside it, must not lead the preparation to.
-  const outside = folderWith('docs-store-prepare-outside-', { 'file.txt': 'not the store' });
-  chmodSync(outside, 0o755);
-  chmodSync(path.join(outside, 'file.txt'), 0o644);
-  mkdirSync(path.join(folder, 'linked'));
-  symlinkSync(outside, path.join(folder, 'linked', '.pithagoras-docs'));
   try {
     assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
     assert.equal((await other.call('POST', `/folders/${folderIdOf(below)}/documents`, { title: 'Notes', markdown: '# Notes\n' })).status, 201);
-    symlinkSync(path.join(outside, 'file.txt'), path.join(folder, '.pithagoras-docs', 'git', 'link'));
-    assert.deepEqual(loose(folder), []);
+    const stores = [storeOf(folder), storeOf(below)];
+    const before = stores.map(snapshot);
     prepareFolder(folder);
-    // The folder's own files are the group's now, as the preparation is for; the store is not.
+    // The folder's own files are the group's now, as the preparation is for; the stores are not in it.
     assert.ok(statSync(path.join(folder, 'documents', 'plan.md')).mode & 0o020, 'the document is group-writable');
-    assert.deepEqual(loose(folder), [], 'right after');
-    assert.deepEqual(loose(below), [], 'and the one below');
-    assert.equal(statSync(outside).mode & 0o777, 0o755, 'where a link led is as it was');
-    assert.equal(statSync(path.join(outside, 'file.txt')).mode & 0o777, 0o644);
-    rmSync(path.join(folder, '.pithagoras-docs', 'git', 'link'));
-    // And the next request, which runs git on it as the portal (root, with the sandbox) does, finds it so.
-    assert.equal((await docs.call('GET', url)).status, 200);
+    assert.deepEqual(readdirSync(folder).sort(), ['documents', 'sub']);
+    assert.deepEqual(readdirSync(below), ['documents']);
+    assert.deepEqual(stores.map(snapshot), before, 'not a mode, owner or change time of the stores');
+    assert.deepEqual(stores.flatMap(loose), []);
+    // And the requests go on as before.
     assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nThree.\n', base: 2 })).status, 200);
-    assert.deepEqual(loose(folder), [], 'after the next requests');
+    assert.equal((await other.listed()).length, 1);
   } finally {
     await other.close();
     await docs.close();
   }
 });
 
-test('a store that something opened to the group while the portal ran is closed and its git settings written new before git runs on it', async () => {
+test('the store is made in the portal\'s data folder on first use, by the folder\'s id, and says which folder it is for', async () => {
+  const folder = folderWith('docs-store-place-', { 'documents/plan.md': '# Plan\n' });
+  const data = scratch('docs-store-place-data-');
+  const docs = await portal({ a: folder }, { data });
+  try {
+    assert.deepEqual(readdirSync(data), [], 'nothing is made before a folder\'s documents are asked for');
+    const id = folderIdOf(folder);
+    assert.deepEqual((await docs.listed()).map((f: any) => f.id), [id]);
+    assert.deepEqual(readdirSync(data), [id]);
+    assert.deepEqual(readdirSync(path.join(data, id)).sort(), ['docs.sqlite', 'docs.sqlite-shm', 'docs.sqlite-wal', 'folder.json', 'git']);
+    const stat = statSync(folder);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(data, id, 'folder.json'), 'utf8')), { path: folder, dev: String(stat.dev), ino: String(stat.ino) });
+    assert.equal(statSync(path.join(data, id, 'folder.json')).mode & 0o777, 0o600);
+    // Nothing is made in the folder, and a store is not made for a folder that has no documents folder.
+    assert.deepEqual(readdirSync(folder), ['documents']);
+    const bare = folderWith('docs-store-place-bare-');
+    const other = await portal({ b: bare }, { data });
+    try {
+      assert.deepEqual(await other.listed(), []);
+      assert.deepEqual(readdirSync(data), [id]);
+    } finally {
+      await other.close();
+    }
+  } finally {
+    await docs.close();
+  }
+  // A portal started again over the same data folder finds it by the folder's id: the same document ids, and the history.
+  const first = await portal({ a: folder }, { data });
+  let doc: any;
+  try {
+    doc = (await first.listed())[0].documents[0];
+  } finally {
+    await first.close();
+  }
+  const again = await portal({ a: folder }, { data });
+  try {
+    const [listed] = await again.listed();
+    assert.deepEqual(listed.documents.map((d: any) => [d.id, d.revision]), [[doc.id, 1]]);
+    assert.deepEqual((await again.call('GET', `/folders/${listed.id}/documents/${doc.id}/history`)).body.revisions.map((r: any) => r.kind), ['adopted']);
+  } finally {
+    await again.close();
+  }
+});
+
+test('the data folder the stores are in is closed to others when it is found open, and one that is a link is refused', async () => {
+  const folder = folderWith('docs-store-data-mode-', { 'documents/plan.md': '# Plan\n' });
+  const data = scratch('docs-store-data-mode-data-');
+  chmodSync(data, 0o775);
+  const docs = await portal({ a: folder }, { data });
+  try {
+    assert.equal((await docs.listed()).length, 1);
+    assert.equal(statSync(data).mode & 0o777, 0o700);
+  } finally {
+    await docs.close();
+  }
+  const real = scratch('docs-store-data-link-real-');
+  const link = path.join(scratch('docs-store-data-link-'), 'data');
+  symlinkSync(real, link);
+  const linked = await portal({ a: folder }, { data: link });
+  try {
+    assert.equal((await linked.call('POST', `/folders/${folderIdOf(folder)}/documents`, { title: 'Notes' })).status, 500);
+    assert.deepEqual(readdirSync(real), [], 'nothing was made where the link leads');
+  } finally {
+    await linked.close();
+  }
+});
+
+/** Takes a folder out of the way, with its inode kept, and puts a new one at its path: no inode of the new one can be the old one's. */
+function replaceFolder(folder: string, files: Record<string, string>) {
+  renameSync(folder, `${folder}.was`);
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
+    writeFileSync(path.join(folder, name), text);
+  }
+}
+
+test('a folder deleted and made again at the same path does not get the old folder\'s history and comments: the old store is kept aside', async () => {
+  const { folder, docs, f, doc, url } = await withDocument('docs-store-reused-');
+  assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+  await docs.close();
+  replaceFolder(folder, { 'documents/other.md': '# Other\n' });
+  const again = await portal({ a: folder });
+  try {
+    const [listed] = await again.listed();
+    assert.equal(listed.id, f, 'the same folder id: it is made from the path');
+    assert.deepEqual(listed.documents.map((d: any) => [d.name, d.revision]), [['other.md', 1]]);
+    assert.equal((await again.call('GET', url)).status, 404, 'the old document is not this folder\'s');
+    assert.equal(commits(folder), 1);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(storeOf(folder), 'folder.json'), 'utf8')), { path: folder, dev: String(statSync(folder).dev), ino: String(statSync(folder).ino) });
+    // Kept, not deleted: it is somebody's history.
+    const aside = readdirSync(DATA).filter((name) => name.startsWith(`${f}.replaced-`));
+    assert.equal(aside.length, 1);
+    assert.equal(execFileSync('git', [`--git-dir=${path.join(DATA, aside[0], 'git')}`, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim(), '2');
+    assert.match(again.logged.join('\n'), /kept as .*replaced/);
+  } finally {
+    await again.close();
+  }
+});
+
+test('a folder deleted and made again while the portal runs is noticed by the next request, not served with the old store', async () => {
+  const { folder, docs, f, doc, url } = await withDocument('docs-store-reused-live-');
+  try {
+    assert.equal((await docs.call('GET', url)).status, 200, 'held now');
+    replaceFolder(folder, { 'documents/other.md': '# Other\n' });
+    assert.equal((await docs.call('GET', url)).status, 404, 'the old document is not this folder\'s');
+    const [listed] = await docs.listed();
+    assert.deepEqual(listed.documents.map((d: any) => [d.name, d.revision]), [['other.md', 1]]);
+    assert.equal(commits(folder), 1, 'a history of its own');
+    assert.equal(readdirSync(DATA).filter((name) => name.startsWith(`${f}.replaced-`)).length, 1);
+    assert.ok(doc);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a folder restored from a backup (other inodes, the same documents) keeps its history, and the store follows it', async () => {
+  const { folder, docs, f, doc, url } = await withDocument('docs-store-restored-');
+  assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+  await docs.close();
+  // The backup holds the document as it was at its first revision: it is one of the store's.
+  replaceFolder(folder, { 'documents/plan.md': '# Plan\n\nOne.\n' });
+  const again = await portal({ a: folder });
+  try {
+    const [listed] = await again.listed();
+    const [restored] = listed.documents;
+    assert.equal(restored.id, doc, 'the same document');
+    // The file is not the text of the last revision: taken in as an outside change, on top of the history.
+    assert.equal(restored.revision, 3);
+    assert.deepEqual((await again.call('GET', `${url}/history`)).body.revisions.map((r: any) => r.revision), [3, 2, 1]);
+    assert.deepEqual(readdirSync(DATA).filter((name) => name.startsWith(`${f}.replaced-`)), []);
+    // And it is told which folder it is for now.
+    assert.equal(JSON.parse(readFileSync(path.join(storeOf(folder), 'folder.json'), 'utf8')).ino, String(statSync(folder).ino));
+  } finally {
+    await again.close();
+  }
+});
+
+test('a folder that was moved takes its store along, and a folder made at its old path does not get it', async () => {
+  const { folder, docs, f, doc, url } = await withDocument('docs-store-moved-');
+  assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+  await docs.close();
+  const moved = `${folder}-moved`;
+  renameSync(folder, moved);
+  // A chat works in the new place, and a folder is made at the old one.
+  const fresh = folderWith('docs-store-moved-fresh-', { 'documents/other.md': '# Other\n' });
+  const again = await portal({ a: moved });
+  try {
+    const [listed] = await again.listed();
+    assert.notEqual(listed.id, f, 'another path, another id');
+    assert.deepEqual(listed.documents.map((d: any) => [d.id, d.revision]), [[doc, 2]]);
+    const newUrl = `/folders/${listed.id}/documents/${doc}`;
+    assert.deepEqual((await again.call('GET', `${newUrl}/history`)).body.revisions.map((r: any) => r.revision), [2, 1]);
+    assert.equal((await again.call('GET', `${newUrl}/revisions/1`)).body.markdown, '# Plan\n\nOne.\n');
+    assert.equal(existsSync(storeOf(folder)), false, 'gone from the old id');
+    assert.equal(commits(moved), 2);
+    assert.equal(JSON.parse(readFileSync(path.join(storeOf(moved), 'folder.json'), 'utf8')).path, moved);
+    assert.match(again.logged.join('\n'), /followed it/);
+    // Another folder at the old path (here: its own) starts its own.
+    renameSync(fresh, folder);
+    const next = await portal({ a: folder, b: moved });
+    try {
+      const found = await next.listed();
+      assert.deepEqual(found.map((x: any) => x.documents.map((d: any) => d.name)).sort(), [['other.md'], ['plan.md']]);
+      assert.equal(commits(folder), 1);
+      assert.equal(commits(moved), 2);
+    } finally {
+      await next.close();
+    }
+  } finally {
+    await again.close();
+  }
+});
+
+test('a second path to a folder (a mount, a link) does not take the store made for the first', async () => {
+  const folder = folderWith('docs-store-alias-', { 'documents/plan.md': '# Plan\n' });
+  const stat = statSync(folder);
+  // A store made for this very folder, which is still there at the path it names (here a link to it).
+  const alias = path.join(scratch('docs-store-alias-link-'), 'alias');
+  symlinkSync(folder, alias);
+  const other = path.join(DATA, '0123456789abcdef');
+  mkdirSync(other, { mode: 0o700 });
+  writeFileSync(path.join(other, 'folder.json'), JSON.stringify({ path: alias, dev: String(stat.dev), ino: String(stat.ino) }));
+  const docs = await portal({ a: folder });
+  try {
+    assert.equal((await docs.listed()).length, 1);
+    assert.ok(existsSync(path.join(other, 'folder.json')), 'left where it was');
+    assert.ok(existsSync(path.join(storeOf(folder), 'git')), 'this folder has a store of its own');
+    assert.equal(JSON.parse(readFileSync(path.join(storeOf(folder), 'folder.json'), 'utf8')).path, folder);
+  } finally {
+    await docs.close();
+  }
+});
+
+/**
+ * A folder with a store as an earlier version kept it: its history in `.pithagoras-docs` in the folder, with what
+ * that version left there, and no word of which folder it is for. Nothing is in the data folder for it.
+ */
+async function withEarlierStore(prefix: string) {
+  const { folder, docs, f, doc, url } = await withDocument(prefix);
+  assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+  await docs.close();
+  const old = path.join(folder, '.pithagoras-docs');
+  renameSync(storeOf(folder), old);
+  rmSync(path.join(old, 'folder.json'));
+  writeFileSync(path.join(old, '.gitignore'), '*\n');
+  writeFileSync(path.join(old, '.audited'), '');
+  return { folder, f, doc, url, old };
+}
+
+/** What a folder's documents and history are once its store has been moved in: the same as before, in the data folder only. */
+async function assertMoved(docs: Awaited<ReturnType<typeof portal>>, folder: string, f: string, doc: string, url: string, old: string) {
+  const [listed] = await docs.listed();
+  assert.equal(listed.id, f);
+  assert.deepEqual(listed.documents.map((d: any) => [d.id, d.revision]), [[doc, 2]]);
+  assert.deepEqual((await docs.call('GET', `${url}/history`)).body.revisions.map((r: any) => [r.revision, r.kind]), [[2, 'save'], [1, 'create']]);
+  assert.equal((await docs.call('GET', `${url}/revisions/1`)).body.markdown, '# Plan\n\nOne.\n');
+  assert.equal(existsSync(old), false, 'moved, not copied: it is not in the folder any more');
+  assert.deepEqual(readdirSync(folder), ['documents']);
+  assert.equal(commits(folder), 2);
+  assert.deepEqual(readdirSync(DATA).filter((name) => name.startsWith('.moving')), []);
+  assert.equal(statSync(storeOf(folder)).mode & 0o777, 0o700);
+  assert.deepEqual(loose(storeOf(folder)), []);
+  assert.equal(JSON.parse(readFileSync(path.join(storeOf(folder), 'folder.json'), 'utf8')).path, folder);
+  // It takes saves, as it did.
+  assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nThree.\n', base: 2 })).body.revision, 3);
+}
+
+test('a store of an earlier version in the folder is moved into the data folder, history and all, the first time the folder is opened', async () => {
+  const { folder, f, doc, url, old } = await withEarlierStore('docs-store-legacy-');
+  const database = statSync(path.join(old, 'docs.sqlite')).ino;
+  const steps: string[] = [];
+  const docs = await portal({ a: folder }, { onStep: (step) => steps.push(step) });
+  try {
+    await assertMoved(docs, folder, f, doc, url, old);
+    assert.ok(steps.includes('move'));
+    // One store before and after, on this file system: renamed.
+    assert.equal(statSync(path.join(storeOf(folder), 'docs.sqlite')).ino, database);
+    assert.match(docs.logged.join('\n'), /was moved from \.pithagoras-docs into the portal's data folder/);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('across file systems the store of an earlier version is written anew in the data folder and the old one removed', async () => {
+  const { folder, f, doc, url, old } = await withEarlierStore('docs-store-legacy-copy-');
+  const database = statSync(path.join(old, 'docs.sqlite')).ino;
+  const docs = await portal({ a: folder }, { onStep: (step) => { if (step === 'move') throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' }); } });
+  try {
+    await assertMoved(docs, folder, f, doc, url, old);
+    assert.notEqual(statSync(path.join(storeOf(folder), 'docs.sqlite')).ino, database, 'written anew');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('with the sandbox on the store of an earlier version is written anew even where it could be renamed: an agent may hold its files open', async () => {
+  const { folder, f, doc, url, old } = await withEarlierStore('docs-store-legacy-sandbox-');
+  const database = statSync(path.join(old, 'docs.sqlite')).ino;
+  const steps: string[] = [];
+  const docs = await portal({ a: folder }, { sandbox: true, onStep: (step) => steps.push(step) });
+  try {
+    await assertMoved(docs, folder, f, doc, url, old);
+    assert.notEqual(statSync(path.join(storeOf(folder), 'docs.sqlite')).ino, database, 'not the file an agent could hold');
+    assert.ok(!steps.includes('move'), 'no rename was tried');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('what an agent could have left in an earlier version\'s store is not honoured once it is moved in', async () => {
+  const { folder, f, doc, url, old } = await withEarlierStore('docs-store-legacy-planted-');
+  const elsewhere = folderWith('docs-store-legacy-planted-objects-');
+  // A setting that makes every commit carry another encoding, a second place for git to read objects from, and hooks.
+  writeFileSync(path.join(old, 'git', 'config'), '[core]\n\trepositoryformatversion = 0\n[i18n]\n\tcommitEncoding = ISO-8859-1\n');
+  writeFileSync(path.join(old, 'git', 'objects', 'info', 'alternates'), `${path.join(elsewhere, 'objects')}\n`);
+  mkdirSync(path.join(old, 'git', 'hooks'));
+  writeFileSync(path.join(old, 'git', 'hooks', 'pre-commit'), '#!/bin/sh\n');
+  const docs = await portal({ a: folder });
+  try {
+    const saved = await docs.call('PUT', url, { markdown: '# Plan\n\nThree.\n', base: 2 });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    const store = storeOf(folder);
+    assert.equal(existsSync(path.join(store, 'git', 'objects', 'info', 'alternates')), false);
+    assert.equal(existsSync(path.join(store, 'git', 'hooks')), false);
+    assert.doesNotMatch(readFileSync(path.join(store, 'git', 'config'), 'utf8'), /i18n|ISO-8859-1/);
+    assert.doesNotMatch(git(folder, 'cat-file', 'commit', 'HEAD'), /^encoding /m);
+    assert.ok(f && doc);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a store of an earlier version that holds a link is moved, then refused when opened, and a link is never followed', async () => {
+  const { folder, f, url, old } = await withEarlierStore('docs-store-legacy-link-');
+  const outside = folderWith('docs-store-legacy-link-target-', { 'config': 'not the store\'s' });
+  symlinkSync(path.join(outside, 'config'), path.join(old, 'git', 'config.link'));
+  for (const across of [false, true]) {
+    const docs = await portal({ a: folder }, { onStep: (step) => { if (across && step === 'move') throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' }); } });
+    try {
+      const answered = await docs.call('GET', url);
+      assert.equal(answered.status, 409, JSON.stringify(answered.body));
+      assert.equal(readFileSync(path.join(outside, 'config'), 'utf8'), 'not the store\'s');
+      if (across) {
+        assert.match(answered.body.error, /could not be moved/);
+        assert.ok(existsSync(path.join(old, 'git', 'config.link')), 'a copy that refuses leaves the old one as it was');
+        assert.equal(existsSync(storeOf(folder)), false);
+        rmSync(path.join(old, 'git', 'config.link'));
+      } else {
+        assert.match(answered.body.error, /not its own/);
+        // Moved already; whoever made the link (or an administrator) takes it out, and the store is used again.
+        rmSync(path.join(storeOf(folder), 'git', 'config.link'));
+        assert.equal((await docs.call('GET', url)).status, 200);
+      }
+    } finally {
+      await docs.close();
+    }
+    if (!across) {
+      // The second round: the same, written anew.
+      renameSync(storeOf(folder), old);
+      rmSync(path.join(old, 'folder.json'));
+      symlinkSync(path.join(outside, 'config'), path.join(old, 'git', 'config.link'));
+    }
+  }
+  assert.ok(f);
+});
+
+test('a store of an earlier version that cannot be moved is refused with the reason, not used, and nothing is changed', async () => {
+  const { folder, f, doc, url, old } = await withEarlierStore('docs-store-legacy-refused-');
+  const before = snapshot(old);
+  let failure: string | null = null;
+  const docs = await portal({ a: folder }, { onStep: (step) => { if (step === 'move' && failure) throw Object.assign(new Error('refused by the system'), { code: failure }); } });
+  try {
+    // The rename fails.
+    failure = 'EACCES';
+    const answered = await docs.call('POST', `/folders/${f}/documents`, { title: 'Notes' });
+    assert.equal(answered.status, 409, JSON.stringify(answered.body));
+    assert.match(answered.body.error, /\.pithagoras-docs in this folder is the documents store of an earlier version/);
+    assert.match(answered.body.error, /could not be moved into the portal's data folder \(EACCES\)/);
+    assert.match(answered.body.error, /It is not used: move or delete it/);
+    assert.equal((await docs.call('GET', url)).status, 409);
+    assert.deepEqual(snapshot(old), before, 'the old store is as it was');
+    assert.equal(existsSync(storeOf(folder)), false, 'and no new one was made beside it');
+    assert.deepEqual(readdirSync(folder).sort(), ['.pithagoras-docs', 'documents'], 'no document was made either');
+    // Listed, a folder whose store is refused says why in the portal's log and is left out.
+    assert.deepEqual(await docs.listed(), []);
+    assert.match(docs.logged.join('\n'), /could not be listed: .*could not be moved/);
+    // Whatever stopped it is gone: the same store is moved in.
+    failure = null;
+    await assertMoved(docs, folder, f, doc, url, old);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a store of an earlier version that is a link, a file or not the portal\'s own is refused, and what a link leads to is left alone', async () => {
+  const folder = folderWith('docs-store-legacy-linked-', { 'documents/plan.md': '# Plan\n' });
+  const real = folderWith('docs-store-legacy-linked-real-', { 'git/HEAD': 'ref: refs/heads/main\n' });
+  const docs = await portal({ a: folder });
+  const f = folderIdOf(folder);
+  try {
+    for (const [what, make] of [
+      ['a link to a folder', () => symlinkSync(real, path.join(folder, '.pithagoras-docs'))],
+      ['a file', () => writeFileSync(path.join(folder, '.pithagoras-docs'), 'not a store')],
+    ] as const) {
+      make();
+      const answered = await docs.call('POST', `/folders/${f}/documents`, { title: 'Notes' });
+      assert.equal(answered.status, 409, `${what}: ${JSON.stringify(answered.body)}`);
+      assert.match(answered.body.error, /could not be moved into the portal's data folder \(it is a link or a file, not a folder\)/);
+      assert.equal(existsSync(storeOf(folder)), false, what);
+      assert.deepEqual(readdirSync(real), ['git'], 'what the link leads to is as it was');
+      assert.equal(readFileSync(path.join(real, 'git', 'HEAD'), 'utf8'), 'ref: refs/heads/main\n');
+      rmSync(path.join(folder, '.pithagoras-docs'));
+    }
+    // Taken away, the folder gets a store of its own.
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'Notes' })).status, 201);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a store of an earlier version that cannot be written anew leaves the old one whole and no leftover in the data folder, and is moved when it can', async () => {
+  const { folder, f, doc, url, old } = await withEarlierStore('docs-store-legacy-pipe-');
+  // Something in it that is no file: a pipe (and nothing waits at it).
+  execFileSync('mkfifo', [path.join(old, 'git', 'objects', 'info', 'pipe')]);
+  const before = snapshot(old);
+  const docs = await portal({ a: folder }, { sandbox: true });
+  try {
+    const answered = await Promise.race([docs.call('GET', url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
+    assert.ok(answered, 'answered, not waiting at the pipe');
+    assert.equal(answered.status, 409, JSON.stringify(answered.body));
+    assert.match(answered.body.error, /could not be moved into the portal's data folder \(pipe is a link or something that is not a file\)/);
+    assert.deepEqual(snapshot(old), before, 'the old one is whole');
+    assert.deepEqual(readdirSync(DATA).filter((name) => name.startsWith('.moving') || name === f), [], 'nothing left in the data folder');
+    rmSync(path.join(old, 'git', 'objects', 'info', 'pipe'));
+    await assertMoved(docs, folder, f, doc, url, old);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a store in the data folder wins over a leftover `.pithagoras-docs`, which is not touched', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-legacy-both-');
+  try {
+    mkdirSync(path.join(folder, '.pithagoras-docs'));
+    writeFileSync(path.join(folder, '.pithagoras-docs', 'left'), 'a copy somebody kept');
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+    assert.equal((await docs.listed()).length, 1);
+    assert.equal(readFileSync(path.join(folder, '.pithagoras-docs', 'left'), 'utf8'), 'a copy somebody kept');
+    assert.equal(commits(folder), 2);
+  } finally {
+    await docs.close();
+  }
+});
+
+
+test('a store that something opened to the group while the portal ran (a recursive chmod, a restore) is closed and its git settings written new before git runs on it', async () => {
   const { folder, docs, url } = await withDocument('docs-store-loosened-');
   try {
     assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
-    const store = path.join(folder, '.pithagoras-docs');
+    const store = storeOf(folder);
     // What an agent that could write there would leave: a setting, and a second place for git to read its objects from.
     execFileSync('chmod', ['-R', 'g+rwX', store]);
     writeFileSync(path.join(store, 'git', 'config'), '[core]\n\trepositoryformatversion = 0\n[trace2]\n\tnormalTarget = /tmp/planted\n');
     writeFileSync(path.join(store, 'git', 'objects', 'info', 'alternates'), '/tmp\n');
     writeFileSync(path.join(store, 'git', 'commondir'), '/tmp\n');
-    assert.notDeepEqual(loose(folder), []);
+    assert.notDeepEqual(loose(store), []);
     // The store the portal holds is not the one it was: a request is not run on it as it is.
     assert.equal((await docs.call('GET', url)).status, 200);
-    assert.deepEqual(loose(folder), []);
+    assert.deepEqual(loose(store), []);
     assert.doesNotMatch(readFileSync(path.join(store, 'git', 'config'), 'utf8'), /trace2|planted/);
     assert.equal(existsSync(path.join(store, 'git', 'objects', 'info', 'alternates')), false);
     assert.equal(existsSync(path.join(store, 'git', 'commondir')), false);
@@ -629,106 +1064,10 @@ test('a store that something opened to the group while the portal ran is closed 
   }
 });
 
-test('git control files planted in a store the portal holds while the sandbox had it open to the group are not honoured once it is closed again', async () => {
-  const { folder, docs, url } = await withDocument('docs-store-window-');
-  const elsewhere = folderWith('docs-store-window-objects-');
-  const store = path.join(folder, '.pithagoras-docs');
-  try {
-    // The store is held now: opened and put right by the first request.
-    assert.equal((await docs.call('GET', url)).status, 200);
-    // What an agent of the sandbox's group writes in the time the recursive chmod of a chat's start has the store open to it:
-    // a setting that makes every commit carry another encoding, and a second place for git to read its objects from.
-    writeFileSync(path.join(store, 'git', 'config'), '[core]\n\trepositoryformatversion = 0\n[i18n]\n\tcommitEncoding = ISO-8859-1\n');
-    writeFileSync(path.join(store, 'git', 'objects', 'info', 'alternates'), `${path.join(elsewhere, 'objects')}\n`);
-    prepareFolder(folder);
-    // Closed again, as the preparation leaves it: by mode, and by owner, a held store looks as it was.
-    assert.deepEqual(loose(folder), []);
-    const saved = await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
-    assert.equal(saved.status, 200, JSON.stringify(saved.body));
-    assert.equal(existsSync(path.join(store, 'git', 'objects', 'info', 'alternates')), false, 'no second object store');
-    assert.doesNotMatch(readFileSync(path.join(store, 'git', 'config'), 'utf8'), /i18n|ISO-8859-1/);
-    assert.doesNotMatch(git(folder, 'cat-file', 'commit', 'HEAD'), /^encoding /m, 'the commit git made was not made under the planted setting');
-    assert.equal(git(folder, 'show', 'HEAD:plan.md'), '# Plan\n\nTwo.');
-  } finally {
-    await docs.close();
-  }
-});
-
-test('a held store is looked over again when the sandbox has had it open, and not by the requests that find it as it was', async () => {
-  const { folder, docs, url } = await withDocument('docs-store-window-once-');
-  const store = path.join(folder, '.pithagoras-docs');
-  try {
-    assert.equal((await docs.call('GET', url)).status, 200);
-    // What the walk over the store leaves when it is done, and the sandbox's closing of the store takes away.
-    const looked = statSync(path.join(store, '.audited')).ino;
-    // Something in it that a walk would take away: it is not there to be looked at by requests, which would cost a walk over every object.
-    writeFileSync(path.join(store, 'git', 'info', 'grafts'), '');
-    for (let i = 0; i < 3; i++) assert.equal((await docs.call('GET', url)).status, 200);
-    assert.equal(statSync(path.join(store, '.audited')).ino, looked);
-    assert.ok(existsSync(path.join(store, 'git', 'info', 'grafts')), 'not walked by a request that has nothing to look for');
-    prepareFolder(folder);
-    assert.equal((await docs.call('GET', url)).status, 200);
-    assert.notEqual(statSync(path.join(store, '.audited')).ino, looked, 'looked over again');
-    assert.equal(existsSync(path.join(store, 'git', 'info', 'grafts')), false);
-  } finally {
-    await docs.close();
-  }
-});
-
-/** What an agent leaves in the place of the store's audited mark: a folder with a folder, a file and a link to a folder outside the store in it. */
-function plantMarkFolder(store: string, outside: string) {
-  const mark = path.join(store, '.audited');
-  rmSync(mark, { force: true });
-  mkdirSync(path.join(mark, 'sub'), { recursive: true });
-  writeFileSync(path.join(mark, 'sub', 'file'), 'the agent\'s');
-  symlinkSync(outside, path.join(mark, 'link'));
-  return mark;
-}
-
-test('a folder made in the place of the audited mark while the sandbox had the store open is not removed with what is in it when the sandbox closes the store, and the store is refused', async () => {
-  const { folder, docs, url } = await withDocument('docs-store-mark-close-');
-  const outside = folderWith('docs-store-mark-close-outside-', { 'victim.txt': 'not the store' });
-  try {
-    assert.equal((await docs.call('GET', url)).status, 200);
-    const mark = plantMarkFolder(path.join(folder, '.pithagoras-docs'), outside);
-    // A removal that walks a folder an agent can change under it may be led out of the store: the folder is left where it is.
-    prepareFolder(folder);
-    assert.ok(existsSync(path.join(mark, 'sub', 'file')), 'left, not removed with what is in it');
-    assert.deepEqual(loose(folder), [], 'closed like the rest of the store');
-    const answered = await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
-    assert.equal(answered.status, 409, JSON.stringify(answered.body));
-    assert.match(answered.body.error, /not its own/);
-    assert.ok(existsSync(path.join(mark, 'sub', 'file')), 'and still, when the store was refused');
-    assert.equal(readFileSync(path.join(outside, 'victim.txt'), 'utf8'), 'not the store');
-    // Taken away by whoever owns the folder, the store is used again.
-    rmSync(mark, { recursive: true });
-    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
-  } finally {
-    await docs.close();
-  }
-});
-
-test('a folder in the place of the audited mark is not removed with what is in it when the store is opened, and the store is refused', async () => {
-  const { folder, docs, url } = await withDocument('docs-store-mark-open-');
-  await docs.close();
-  const outside = folderWith('docs-store-mark-open-outside-', { 'victim.txt': 'not the store' });
-  const mark = plantMarkFolder(path.join(folder, '.pithagoras-docs'), outside);
-  const again = await portal({ a: folder });
-  try {
-    const answered = await again.call('GET', url);
-    assert.equal(answered.status, 409, JSON.stringify(answered.body));
-    assert.match(answered.body.error, /not its own/);
-    assert.ok(existsSync(path.join(mark, 'sub', 'file')), 'left, not removed with what is in it');
-    assert.equal(readFileSync(path.join(outside, 'victim.txt'), 'utf8'), 'not the store');
-  } finally {
-    await again.close();
-  }
-});
-
 test('a folder git reads from that an agent filled is taken away with what is in it, through the folders opened, and nothing else', async () => {
   const { folder, docs, url } = await withDocument('docs-store-hooks-');
   await docs.close();
-  const store = path.join(folder, '.pithagoras-docs');
+  const store = storeOf(folder);
   const outside = folderWith('docs-store-hooks-outside-', { 'victim.txt': 'not the store' });
   mkdirSync(path.join(store, 'git', 'hooks', 'sub', 'deep'), { recursive: true });
   writeFileSync(path.join(store, 'git', 'hooks', 'sub', 'deep', 'pre-commit'), '#!/bin/sh\n');
@@ -744,36 +1083,12 @@ test('a folder git reads from that an agent filled is taken away with what is in
   }
 });
 
-test('a link planted in a store the portal holds while the sandbox had it open to the group is refused once it is closed again, not followed', async () => {
-  const { folder, docs, url } = await withDocument('docs-store-window-link-');
-  const outside = folderWith('docs-store-window-link-target-', { 'objects.txt': 'what the agent chose' });
-  const store = path.join(folder, '.pithagoras-docs');
-  try {
-    assert.equal((await docs.call('GET', url)).status, 200);
-    // The objects folder's place taken by a link: git, as the portal's user, would read its objects from where it leads.
-    renameSync(path.join(store, 'git', 'objects'), path.join(store, 'git', 'objects.real'));
-    symlinkSync(outside, path.join(store, 'git', 'objects'));
-    prepareFolder(folder);
-    assert.deepEqual(loose(folder), []);
-    const answered = await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
-    assert.equal(answered.status, 409, JSON.stringify(answered.body));
-    assert.match(answered.body.error, /not its own/);
-    assert.deepEqual(readdirSync(outside), ['objects.txt'], 'nothing was written where the link leads');
-    // Put right by whoever planted it (or an administrator), it is used again.
-    rmSync(path.join(store, 'git', 'objects'));
-    renameSync(path.join(store, 'git', 'objects.real'), path.join(store, 'git', 'objects'));
-    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
-  } finally {
-    await docs.close();
-  }
-});
-
 test('a store opened to others in the middle of a request is not run git on for the rest of it', async () => {
   let opened = false;
   const folder = folderWith('docs-store-midway-', { 'documents/.keep': '' });
   const docs = await portal({ a: folder }, {
     onStep: (step) => {
-      if (step === 'write' && opened) chmodSync(path.join(folder, '.pithagoras-docs'), 0o770);
+      if (step === 'write' && opened) chmodSync(storeOf(folder), 0o770);
     },
   });
   try {
@@ -791,7 +1106,7 @@ test('a store opened to others in the middle of a request is not run git on for 
     const read = await docs.call('GET', url);
     assert.equal(read.status, 200);
     assert.equal(read.body.revision, 2, 'the file that was written is taken in');
-    assert.deepEqual(loose(folder), []);
+    assert.deepEqual(loose(storeOf(folder)), []);
   } finally {
     await docs.close();
   }
@@ -818,7 +1133,7 @@ test('git is never handed a document\'s path: a file swapped for a link when git
     // Any request takes the file in; the file is a link by the time git runs, so it is no document to list any more.
     await docs.listed();
     assert.ok(lstatSync(path.join(folder, 'documents', 'plan.md')).isSymbolicLink(), 'the swap happened');
-    const has = spawnSync('git', [`--git-dir=${path.join(folder, '.pithagoras-docs', 'git')}`, 'cat-file', '-e', secretId]);
+    const has = spawnSync('git', [`--git-dir=${path.join(storeOf(folder), 'git')}`, 'cat-file', '-e', secretId]);
     assert.notEqual(has.status, 0, 'what the link leads to is not in the store');
     // The text that was read is what is committed.
     assert.equal(git(folder, 'show', 'HEAD:plan.md'), '# Plan\n\nWhat the agent wrote.');
@@ -852,7 +1167,7 @@ test('a git run that hangs is stopped, and the folder goes on with the next requ
 test('the store folder swapped for another between two git runs of a request is refused, and the other one is not written to', async () => {
   let swapped = false;
   const folder = folderWith('docs-store-swap-dir-', { 'documents/.keep': '' });
-  const store = path.join(folder, '.pithagoras-docs');
+  const store = storeOf(folder);
   const docs = await portal({ a: folder }, {
     onStep: (step) => {
       if (step !== 'write' || !swapped) return;
@@ -881,7 +1196,7 @@ test('the store folder swapped for another between two git runs of a request is 
 test('a link, or a pipe, in the store is refused when it is opened: git does not follow or wait at it', async () => {
   const { folder, docs, f, url } = await withDocument('docs-store-inside-');
   await docs.close();
-  const git = path.join(folder, '.pithagoras-docs', 'git');
+  const git = path.join(storeOf(folder), 'git');
   const outside = folderWith('docs-store-inside-target-', { 'config': '[core]\n\tfsmonitor = /tmp/evil\n' });
   for (const plant of [
     () => symlinkSync(path.join(outside, 'config'), path.join(git, 'config.link')),

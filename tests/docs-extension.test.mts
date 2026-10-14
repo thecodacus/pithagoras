@@ -10,6 +10,9 @@ import docsServer from '../extensions/docs/server.js';
 import { resolveInside } from '../server/src/workspace-files.ts';
 import { scratch } from './helpers.mts';
 
+/** The portal's data folder for the stores. */
+const DATA = scratch('docs-ext-data-');
+
 type Res = { status(code: number): Res; json(body: unknown): void };
 type Handler = (req: { params: Record<string, string>; query: Record<string, string>; method: string; path: string }, res: Res) => unknown;
 
@@ -23,6 +26,9 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     router: { get: add('GET'), post: add('POST'), put: add('PUT') },
     http: { json: () => () => {} },
     files: { inside: resolveInside },
+    sandbox: { on: () => false },
+    // The portal's data folder for the stores: one for the file, the stores are told apart by their folders' ids.
+    dataDir: () => DATA,
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
@@ -152,6 +158,8 @@ test('a pipe named like a document is no document, and asking for one does not h
       router: { get: add('GET'), post: add('POST'), put: add('PUT') },
       http: { json: () => () => {} },
       files: { inside: resolveInside },
+      sandbox: { on: () => false },
+      dataDir: () => process.env.DATA,
       chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
     }, { dependencies: async () => true });
     const ask = async (route, params) => { const answer = {}; const res = { status: (code) => ((answer.status = code), res), json: (body) => (answer.body = body) }; await routes.get('GET ' + route)({ params, query: {} }, res); return answer; };
@@ -163,7 +171,7 @@ test('a pipe named like a document is no document, and asking for one does not h
     const [again] = (await ask('/folders', {})).body.folders;
     console.log(JSON.stringify({ listed: folder.documents.map((d) => d.name), status: read.status, again: again.documents.map((d) => d.name) }));
   `;
-  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', asking], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, SITE: site } });
+  const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', asking], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, SITE: site, DATA } });
   assert.equal(child.signal, null, 'held by the pipe until it was killed');
   assert.equal(child.status, 0, child.stderr);
   assert.deepEqual(JSON.parse(child.stdout), { listed: ['other.md', 'plan.md'], status: 404, again: ['plan.md'] });

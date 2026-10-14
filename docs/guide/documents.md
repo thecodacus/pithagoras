@@ -32,10 +32,9 @@ in a chat's folder:
 
 ```
 <the chat's folder>/
-├── documents/
-│   ├── plan.md
-│   └── release-notes.md
-└── .pithagoras-docs/      the history and the comments (the extension's own)
+└── documents/
+    ├── plan.md
+    └── release-notes.md
 ```
 
 These are ordinary files. [Files](/guide/files) lists them, and the agent can
@@ -75,38 +74,78 @@ Restoring a document whose file was deleted makes the file again.
 
 ### Where the history is kept
 
-The history and what is said about the documents are in
-`.pithagoras-docs` in the chat's folder:
+The history and what is said about the documents are in the portal's data
+folder, not in your project: in `extension-data/pithagoras-docs/<id>`, where
+`<id>` is the id of the folder the documents are in (in the image,
+`/data/extension-data/pithagoras-docs/<id>`). The folder is made the first time
+the page lists a folder's documents. It holds:
 
-- `git/` is a git repository of the extension's own, with one commit per
+- `git/`, a git repository of the extension's own, with one commit per
   revision. It is not your project's repository and does not change it; it
-  holds only the documents. A `.gitignore` in `.pithagoras-docs` tells your
-  project's git to leave the folder out.
-- `docs.sqlite` holds the comments and an index of the revisions.
+  holds only the documents.
+- `docs.sqlite`, the comments and an index of the revisions.
+- `folder.json`, which folder it is for: its path, and which folder that is on
+  this system (its device and inode).
 
-Only the portal can read the folder (mode 0700). With the
-[sandbox](/guide/sandbox) on, the agent cannot read it, but the portal keeps
-each document's owner and permissions when it saves it, so the agent can go on
-editing its files. A new document belongs to the owner of the `documents`
-folder.
+Only the portal can read it (mode 0700). It is not in the chat's folder, so
+with the [sandbox](/guide/sandbox) on the agent can neither read nor change it,
+and nothing of it is in your project: there is nothing to leave out of your
+project's git, and copying or deleting the project does not copy or delete its
+history. The portal keeps each document's owner and permissions when it saves
+it, so the agent can go on editing its files. A new document belongs to the
+owner of the `documents` folder.
 
-The portal checks the folder before it uses it, every time. It must be the
+The portal checks the store before it uses it, every time. It must be the
 portal's own (not a link, and nothing in it a link or a pipe), and it is closed
-to everyone else again if the sandbox's permissions for the chat's folder, or
-someone, opened it; after the sandbox had it open, the portal also looks over
-what is in it again before it uses it (git's settings are written new, and a
-link or a pipe is refused). A folder that someone else made or swapped in is refused
-("is not the documents store's own"); move or delete `.pithagoras-docs` to
-start a new history.
+to everyone else again if something opened it (a `chmod -R`, a restore made as
+another user). A store that someone else made or swapped in is refused ("is not
+the portal's own"): fix its owner, or delete the folder to start a new history.
+
+The store is for the folder it was made for, not only for a path:
+
+- A folder that was **deleted and made again** at the same path is another
+  folder. It starts a new history, and the old one is kept beside it as
+  `<id>.replaced-<time>`, to look at or to delete. The exception is a folder
+  **restored from a backup**: it has other inodes, but its documents are the
+  ones the store knows (some document is there with the text of one of its
+  revisions), so the history stays with it.
+- A folder that was **moved or renamed** on the same disk takes its store along
+  the next time a chat works in it and the page lists it. A folder that was
+  copied elsewhere is a new folder: it starts a history of its own, and the
+  history of the old path stays where it was.
+- A folder's store is **not deleted** with the folder. Delete the store's
+  folder in the data folder to free the room (`folder.json` in each says which
+  folder it was for).
+
+### A store from an earlier version
+
+The first versions of Documents kept the store in `.pithagoras-docs` in the
+chat's folder. The first time the page lists such a folder, the portal moves it
+into the data folder: the history, the comments and the revisions stay as they
+were, and `.pithagoras-docs` is gone from the folder. It is renamed where that
+is possible. Where the data folder and your projects are on different disks (a
+container's two volumes), or with the sandbox on, where an agent may have files
+of it open, it is written anew in the data folder and the old one removed; what
+is in it is checked as it is written, and a link or a pipe stops it.
+
+When it cannot be moved, the folder's documents are left out of the page (the
+portal's log says why, as "could not be moved into the portal's data folder"),
+a request for them is answered with the reason, nothing is changed, and the old
+store is not used: move it into the data folder by hand (as the folder named by
+the folder's id: the first 16 characters of the SHA-256 of the folder's path),
+or delete `.pithagoras-docs` to start a new history. A
+`.pithagoras-docs` that is still there beside a store in the data folder is left
+alone: the store in the data folder is the one used.
 
 ### A secret in a document
 
 A save whose text looks like a secret (a private key, or a token of a common
 service) is saved, with a warning: the history keeps every revision, so take
 the secret out and change it where it was issued. To remove it from the
-history as well, delete the folder's `.pithagoras-docs`. That removes the
-history and the comments of every document in that folder; the documents
-themselves stay, and start again at revision 1.
+history as well, delete the folder's store in the data folder (and any
+`<id>.replaced-…` beside it). That removes the history and the comments of every
+document in that folder; the documents themselves stay, and start again at
+revision 1.
 
 ## The page
 

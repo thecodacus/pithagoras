@@ -1,39 +1,30 @@
 /**
- * The store's own folder (`<folder>/.pithagoras-docs`), held and watched: the
- * portal, which with the sandbox on runs as root, runs git and SQLite on what
- * is in it, so nothing else may change it.
+ * The store's own folder, held and watched: the portal, which with the sandbox
+ * on runs as root, runs git and SQLite on what is in it, so nothing else may
+ * change it.
  *
- * It lies in a folder the agents' group may write to, and a folder that may be
- * written to can have its entries renamed, so the folder is opened once, here
- * (never through a link), and every later step goes through that open
- * descriptor, not through the path again: git is given `/proc/self/fd/<n>` and
- * the descriptor itself (Linux; elsewhere the path, checked before each use).
- * The store must be the portal's own and closed to everyone else (0700); that
- * is checked before every git run, so a store that was replaced, or that
- * something (a recursive chmod of the sandbox, an administrator) opened to
- * others, is refused until it is opened again, which puts it right.
- *
- * A store that was open to others for a while and is closed again looks as it
- * did (owner, mode), and whoever could write in it meanwhile may have left
- * what git reads and the portal's root must not follow. So the walk over it
- * (`audit`) leaves a file that only the sandbox's closing of the store takes
- * away (server/src/sandbox/apply.ts, closeDocsStores), and a held store
- * without it is opened again and walked again: once per such time, not per
- * request.
+ * It lies in the portal's data folder, which the agents' group cannot reach,
+ * so nothing but the portal can rename or write there. This holds it to that
+ * all the same, for a data folder that is not what it should be (opened to
+ * others by hand, or by a restore) and for a store that was copied there
+ * from somewhere else (a backup, an earlier version's folder in a chat's
+ * folder, where an agent could write): the folder is opened once, here (never
+ * through a link), and every later step goes through that open descriptor, not
+ * through the path again: git is given `/proc/self/fd/<n>` and the descriptor
+ * itself (Linux; elsewhere the path, checked before each use). The store must
+ * be the portal's own and closed to everyone else (0700); that is checked
+ * before every git run, so a store that was replaced, or that something opened
+ * to others, is refused until it is opened again, which puts it right.
  */
 import { closeSync, constants, fchmodSync, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, chmodSync, openSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import path from "node:path";
 import { DocError } from "./errors.js";
 
-const isOurs = (stat) => !process.getuid || stat.uid === process.getuid();
-
-/** The file in the store that says it has been walked over since it was last open to others (the sandbox's closing of it removes it). */
-const AUDITED = ".audited";
+export const isOurs = (stat) => !process.getuid || stat.uid === process.getuid();
 
 /** What git trusts in a repository besides its objects, that could send it elsewhere or make it run something: gone or written new. */
 const MISTRUSTED = ["commondir", "config.worktree", "shallow", "hooks", "info/grafts", "info/attributes", "objects/info/alternates", "objects/info/http-alternates"];
-const OPEN_DIR = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+export const OPEN_DIR = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 
 /**
  * `name` in the folder `parent` taken away: a file, link or pipe by its own name (never what a link leads to), a folder
@@ -41,7 +32,7 @@ const OPEN_DIR = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLL
  * its path (`rmSync` with `recursive` walks by path, and on some Node versions follows a folder swapped for a link
  * while it works): each is opened without following a link, and emptied through that descriptor.
  */
-function removeEntry(parent, name) {
+export function removeEntry(parent, name) {
   const place = `${parent}/${name}`;
   let stat;
   try {
@@ -106,7 +97,7 @@ export class Guard {
     try {
       fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     } catch {
-      throw new DocError(409, `${path.basename(dir)} in this folder is not the documents store's own`);
+      throw new DocError(409, "The documents store is not the portal's own (a link, or not a folder)");
     }
     const guard = new Guard(dir, fd);
     try {
@@ -121,8 +112,6 @@ export class Guard {
   constructor(dir, fd) {
     this.dir = dir;
     this.fd = fd;
-    /** Whether `audit` has been through it, so that `check` looks for what it left. */
-    this.audited = false;
   }
 
   /** Whether git is given the held descriptor (in its stdio, at 3), not the path. */
@@ -153,12 +142,12 @@ export class Guard {
   /** The held folder is the portal's own, and closed to everyone else: before anything else is looked at, so what is below it is out of reach. */
   #own() {
     const stat = fstatSync(this.fd);
-    if (!stat.isDirectory() || !isOurs(stat)) throw new DocError(409, `${path.basename(this.dir)} in this folder is not the documents store's own`);
+    if (!stat.isDirectory() || !isOurs(stat)) throw new DocError(409, "The documents store is not the portal's own (someone else made it)");
     if (stat.mode & 0o077) fchmodSync(this.fd, 0o700);
     this.#group(this.fd, stat);
   }
 
-  /** The group of what is ours back to the portal's, where that can be (root): a recursive chown of the sandbox had made it the agents'. */
+  /** The group of what is ours back to the portal's, where that can be (root): a recursive chown (of a restore, say) may have made it another's. */
   #group(fd, stat) {
     if (process.getgid && stat.gid !== process.getgid()) {
       try {
@@ -185,16 +174,6 @@ export class Guard {
     const held = fstatSync(this.fd);
     if (!now.isDirectory() || now.ino !== held.ino || now.dev !== held.dev) throw new DocError(409, "The documents store was replaced while it was in use");
     if (!isOurs(held) || held.mode & 0o077) throw new DocError(409, "The documents store was opened to others while it was in use");
-    if (this.audited) {
-      let mark = null;
-      try {
-        mark = lstatSync(this.at(AUDITED));
-      } catch {
-        // Taken away: see below.
-      }
-      // Gone, or not the portal's own: the sandbox had the store open to others since it was walked over, and it is closed again now.
-      if (!mark?.isFile() || !isOurs(mark)) throw new DocError(409, "The documents store was open to others for a while and is looked over again");
-    }
   }
 
   /**
@@ -202,32 +181,19 @@ export class Guard {
    * plain files and folders of the portal's own (anything else is refused:
    * git must not follow a link or wait at a pipe in there), none writable by
    * group or others, with the portal's group. What git would read besides its
-   * objects is put back as the store made it: a store that was open to others
-   * for a while (the sandbox's recursive chown and chmod of a chat's folder
-   * is such a time) may have had it changed.
+   * objects is put back as the store made it: a store that came from
+   * somewhere an agent could write (a folder of a chat, as an earlier version
+   * kept it) or was copied in by hand may have had it changed.
    *
-   * The file that `check` wants to find is made first, so that a closing of
-   * the store by the sandbox while this walk is still on takes it away too,
-   * and what was planted after the walk passed it is walked over next time.
    * It takes the whole walk, not only the control files: a link put in the
-   * place of the objects folder, or a pipe, leads git elsewhere as well. That
-   * is why it is done once for each time the store was open to others, not
-   * on every request, when the objects are too many to walk over.
+   * place of the objects folder, or a pipe, leads git elsewhere as well. It is
+   * done once when a store is opened, not on every request, when the objects
+   * are too many to walk over.
    */
   audit() {
-    this.audited = false;
     this.#own();
-    // By its name only: whatever else an agent put there (a folder) is not descended into, and refuses the store.
-    try {
-      unlinkSync(this.at(AUDITED));
-    } catch (e) {
-      if (e.code === "EISDIR" || e.code === "EPERM") throw new DocError(409, "The documents store holds something that is not its own");
-      if (e.code !== "ENOENT") throw e;
-    }
-    writeFileSync(this.at(AUDITED), "", { flag: "wx", mode: 0o600 });
     this.#walk("", 0);
     this.#control();
-    this.audited = true;
   }
 
   /** What git reads besides its objects, gone or written new. */
