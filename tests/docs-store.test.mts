@@ -384,12 +384,14 @@ test('a save that looks like it holds a secret is kept, with a warning', async (
  * other ids mapped, where the system allows one.
  */
 test('with the sandbox on, a saved document keeps its owner, and a new one gets the documents folder\'s', async (t) => {
-  // Checked with the very chown the test needs: a namespace that starts can still
-  // refuse to give a file to another id (no subordinate ids mapped, no CAP_CHOWN).
+  // Probed with the same binary and call the test makes (node, chownSync): a namespace that
+  // starts can still refuse to give a file to another id (no subordinate ids mapped, no
+  // CAP_CHOWN, AppArmor rules that differ by binary).
   const probeDir = scratch('docs-owner-probe-');
-  const probe = spawnSync('unshare', ['--map-auto', '--map-root-user', 'sh', '-c', 'touch "$1" && chown 1234:1235 "$1"', 'sh', path.join(probeDir, 'probe')], { encoding: 'utf8' });
+  const probeScript = "const f = process.argv[1]; require('node:fs').writeFileSync(f, ''); require('node:fs').chownSync(f, 1234, 1235);";
+  const probe = spawnSync('unshare', ['--map-auto', '--map-root-user', process.execPath, '-e', probeScript, path.join(probeDir, 'probe')], { encoding: 'utf8' });
   rmSync(probeDir, { recursive: true, force: true });
-  if (probe.status !== 0) return t.skip(`cannot chown to other ids in a user namespace here: ${probe.stderr?.trim() || probe.error?.message || `exit ${probe.status}`}`);
+  if (probe.status !== 0) return t.skip(`cannot chown to other ids in a user namespace here: ${probe.stderr?.trim().split('\n')[0] || probe.error?.message || `exit ${probe.status}`}`);
   const script = `
     import express from 'express';
     import { chownSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -438,4 +440,62 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
     notes: [1234, 1234, '664'],
     store: [0, '700'],
   });
+});
+
+test('a name a link holds is skipped when a document is made, not a failure', async () => {
+  const folder = folderWith('docs-store-taken-', { 'README.md': '# Read me\n', 'documents/.keep': '' });
+  symlinkSync('../README.md', path.join(folder, 'documents', 'notes.md'));
+  const docs = await portal({ a: folder });
+  try {
+    const made = await docs.call('POST', `/folders/${folderIdOf(folder)}/documents`, { title: 'Notes' });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(made.body.name, 'notes-2.md');
+    assert.equal(readFileSync(path.join(folder, 'README.md'), 'utf8'), '# Read me\n');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a document whose name starts with a space keeps its id and history when the database is lost', async () => {
+  const folder = folderWith('docs-store-space-', { 'documents/ notes.md': '# Notes\n' });
+  const first = await portal({ a: folder });
+  let doc: any;
+  try {
+    doc = (await first.listed())[0].documents[0];
+    assert.equal(doc.name, ' notes.md');
+    const url = `/folders/${folderIdOf(folder)}/documents/${doc.id}`;
+    assert.equal((await first.call('PUT', url, { markdown: '# Notes\n\nTwo.\n', base: doc.revision })).status, 200);
+  } finally {
+    await first.close();
+  }
+  for (const file of readdirSync(path.join(folder, '.pithagoras-docs'))) if (file.startsWith('docs.sqlite')) rmSync(path.join(folder, '.pithagoras-docs', file));
+  const again = await portal({ a: folder });
+  try {
+    const read = await again.call('GET', `/folders/${folderIdOf(folder)}/documents/${doc.id}`);
+    assert.equal(read.status, 200, 'the same id');
+    assert.equal(read.body.revision, doc.revision + 1);
+  } finally {
+    await again.close();
+  }
+});
+
+test('a store that fails to open does not keep its database open on every request', async (t) => {
+  if (!existsSync('/proc/self/fd')) return t.skip('no /proc/self/fd to count descriptors in');
+  const { folder, docs } = await withDocument('docs-store-leak-');
+  await docs.close();
+  // A database of a later version cannot be opened by this store.
+  const { default: Database } = await import('../extensions/docs/node_modules/better-sqlite3/lib/index.js');
+  const db = new Database(path.join(folder, '.pithagoras-docs', 'docs.sqlite'));
+  db.prepare("UPDATE meta SET value = '9' WHERE key = 'schema'").run();
+  db.close();
+  const again = await portal({ a: folder });
+  try {
+    await again.call('GET', '/folders');
+    const open = () => readdirSync('/proc/self/fd').length;
+    const before = open();
+    for (let i = 0; i < 20; i++) await again.call('GET', '/folders');
+    assert.ok(open() - before < 10, `${open() - before} descriptors more after 20 requests`);
+  } finally {
+    await again.close();
+  }
 });

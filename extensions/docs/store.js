@@ -156,7 +156,17 @@ export class Store {
    */
   static async open(folder, { inside, Database, faults }) {
     const store = new Store(folder, inside, faults);
-    await store.#open(Database);
+    try {
+      await store.#open(Database);
+    } catch (e) {
+      // A store that fails to open is tried again on the next request: its database must not stay open meanwhile.
+      try {
+        store.db?.close();
+      } catch {
+        // Closed already, or never open.
+      }
+      throw e;
+    }
     return store;
   }
 
@@ -502,7 +512,8 @@ export class Store {
           written = writeDocument(this.inside, dir, name, bytes, { create: true });
         } catch (e) {
           this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
-          if (e instanceof Refused && e.message === "exists") continue;
+          // Anything in the way (a file, a link, a second name) makes the name taken: the next number is free.
+          if (e instanceof Refused) continue;
           throw e;
         }
         this.fault("write");

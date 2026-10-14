@@ -188,7 +188,8 @@ export function parseTrailers(message) {
     const at = line.indexOf(": ");
     const key = line.slice(0, at);
     if (at === -1 || !KEYS.includes(key)) continue;
-    const value = line.slice(at + 2).trim();
+    // Not trimmed: a name may start with a space, and an id never has one to lose.
+    const value = line.slice(at + 2).replace(/\r$/, "");
     if (key === "Doc-Id") groups.push({ id: value });
     const group = groups.at(-1);
     if (!group) continue;
