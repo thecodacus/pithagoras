@@ -215,7 +215,8 @@ export class Store {
   /**
    * Whether the store's folder is still the one opened and the portal's alone,
    * with its history and database in it: one deleted, replaced, opened to
-   * others or missing a part is opened again.
+   * others, missing a part, or closed again after the sandbox had it open to
+   * others (guard.js) is opened again.
    */
   stillThere() {
     try {

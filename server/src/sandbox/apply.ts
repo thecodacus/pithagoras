@@ -65,13 +65,19 @@ async function recursive(args: string[], report: ApplyReport) {
 
 /** The documents extension's store in a chat's folder: the portal's own, closed to everyone else (extensions/docs/guard.js holds it to that). */
 const DOCS_STORE = ".pithagoras-docs";
+/** What the store leaves in itself when it has walked over what is in it (guard.js): taken away here, so that the portal walks over it again. */
+const DOCS_AUDITED = ".audited";
 
-/** `dir` and what is in it, owned by this process and closed to group and others, through descriptors: never through a link. */
-function closeTree(dir: string, uid: number, gid: number) {
+/**
+ * `dir` and what is in it, owned by this process and closed to group and others, through descriptors: never through a
+ * link. `forget` is a name in `dir` itself that is removed once `dir` is closed (and so cannot be made again).
+ */
+function closeTree(dir: string, uid: number, gid: number, forget?: string) {
   const fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     fchownSync(fd, uid, gid);
     fchmodSync(fd, 0o700);
+    if (forget) rmSync(`/proc/self/fd/${fd}/${forget}`, { recursive: true, force: true });
     // Below an open folder, so a name swapped for a link in the meantime is not followed.
     const here = `/proc/self/fd/${fd}`;
     for (const entry of readdirSync(here, { withFileTypes: true })) {
@@ -98,6 +104,13 @@ function closeTree(dir: string, uid: number, gid: number) {
  * again. Coreutils cannot be told to leave a folder out, and one that is
  * handed a path of the agent's choosing follows a link there, so this is done
  * by hand. (The store checks itself before it is used, too: see guard.js.)
+ *
+ * What the agent's group wrote in a store while it was open to it stays there
+ * once it is closed, and a store the portal holds looks as it did by owner and
+ * mode, so the portal would go on running git on it as it is. Each store's
+ * mark that it was walked over is taken away, once the store is closed and
+ * nobody can make it again, and a held store without it is opened and walked
+ * over again before git runs on it.
  */
 async function closeDocsStores(root: string, report: ApplyReport) {
   let stores: string[];
@@ -110,7 +123,7 @@ async function closeDocsStores(root: string, report: ApplyReport) {
   }
   for (const store of stores) {
     try {
-      closeTree(store, process.getuid?.() ?? 0, process.getgid?.() ?? 0);
+      closeTree(store, process.getuid?.() ?? 0, process.getgid?.() ?? 0, DOCS_AUDITED);
     } catch (e) {
       // Gone, or a link put in its place by then: the store refuses what is not its own.
       const code = (e as NodeJS.ErrnoException).code;

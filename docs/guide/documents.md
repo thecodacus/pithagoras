@@ -93,7 +93,9 @@ folder.
 The portal checks the folder before it uses it, every time. It must be the
 portal's own (not a link, and nothing in it a link or a pipe), and it is closed
 to everyone else again if the sandbox's permissions for the chat's folder, or
-someone, opened it. A folder that someone else made or swapped in is refused
+someone, opened it; after the sandbox had it open, the portal also looks over
+what is in it again before it uses it (git's settings are written new, and a
+link or a pipe is refused). A folder that someone else made or swapped in is refused
 ("is not the documents store's own"); move or delete `.pithagoras-docs` to
 start a new history.
 

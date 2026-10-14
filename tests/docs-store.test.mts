@@ -629,6 +629,76 @@ test('a store that something opened to the group while the portal ran is closed 
   }
 });
 
+test('git control files planted in a store the portal holds while the sandbox had it open to the group are not honoured once it is closed again', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-window-');
+  const elsewhere = folderWith('docs-store-window-objects-');
+  const store = path.join(folder, '.pithagoras-docs');
+  try {
+    // The store is held now: opened and put right by the first request.
+    assert.equal((await docs.call('GET', url)).status, 200);
+    // What an agent of the sandbox's group writes in the time the recursive chmod of a chat's start has the store open to it:
+    // a setting that makes every commit carry another encoding, and a second place for git to read its objects from.
+    writeFileSync(path.join(store, 'git', 'config'), '[core]\n\trepositoryformatversion = 0\n[i18n]\n\tcommitEncoding = ISO-8859-1\n');
+    writeFileSync(path.join(store, 'git', 'objects', 'info', 'alternates'), `${path.join(elsewhere, 'objects')}\n`);
+    prepareFolder(folder);
+    // Closed again, as the preparation leaves it: by mode, and by owner, a held store looks as it was.
+    assert.deepEqual(loose(folder), []);
+    const saved = await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(existsSync(path.join(store, 'git', 'objects', 'info', 'alternates')), false, 'no second object store');
+    assert.doesNotMatch(readFileSync(path.join(store, 'git', 'config'), 'utf8'), /i18n|ISO-8859-1/);
+    assert.doesNotMatch(git(folder, 'cat-file', 'commit', 'HEAD'), /^encoding /m, 'the commit git made was not made under the planted setting');
+    assert.equal(git(folder, 'show', 'HEAD:plan.md'), '# Plan\n\nTwo.');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a held store is looked over again when the sandbox has had it open, and not by the requests that find it as it was', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-window-once-');
+  const store = path.join(folder, '.pithagoras-docs');
+  try {
+    assert.equal((await docs.call('GET', url)).status, 200);
+    // What the walk over the store leaves when it is done, and the sandbox's closing of the store takes away.
+    const looked = statSync(path.join(store, '.audited')).ino;
+    // Something in it that a walk would take away: it is not there to be looked at by requests, which would cost a walk over every object.
+    writeFileSync(path.join(store, 'git', 'info', 'grafts'), '');
+    for (let i = 0; i < 3; i++) assert.equal((await docs.call('GET', url)).status, 200);
+    assert.equal(statSync(path.join(store, '.audited')).ino, looked);
+    assert.ok(existsSync(path.join(store, 'git', 'info', 'grafts')), 'not walked by a request that has nothing to look for');
+    prepareFolder(folder);
+    assert.equal((await docs.call('GET', url)).status, 200);
+    assert.notEqual(statSync(path.join(store, '.audited')).ino, looked, 'looked over again');
+    assert.equal(existsSync(path.join(store, 'git', 'info', 'grafts')), false);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a link planted in a store the portal holds while the sandbox had it open to the group is refused once it is closed again, not followed', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-window-link-');
+  const outside = folderWith('docs-store-window-link-target-', { 'objects.txt': 'what the agent chose' });
+  const store = path.join(folder, '.pithagoras-docs');
+  try {
+    assert.equal((await docs.call('GET', url)).status, 200);
+    // The objects folder's place taken by a link: git, as the portal's user, would read its objects from where it leads.
+    renameSync(path.join(store, 'git', 'objects'), path.join(store, 'git', 'objects.real'));
+    symlinkSync(outside, path.join(store, 'git', 'objects'));
+    prepareFolder(folder);
+    assert.deepEqual(loose(folder), []);
+    const answered = await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 });
+    assert.equal(answered.status, 409, JSON.stringify(answered.body));
+    assert.match(answered.body.error, /not its own/);
+    assert.deepEqual(readdirSync(outside), ['objects.txt'], 'nothing was written where the link leads');
+    // Put right by whoever planted it (or an administrator), it is used again.
+    rmSync(path.join(store, 'git', 'objects'));
+    renameSync(path.join(store, 'git', 'objects.real'), path.join(store, 'git', 'objects'));
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a store opened to others in the middle of a request is not run git on for the rest of it', async () => {
   let opened = false;
   const folder = folderWith('docs-store-midway-', { 'documents/.keep': '' });

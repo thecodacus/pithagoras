@@ -12,6 +12,14 @@
  * is checked before every git run, so a store that was replaced, or that
  * something (a recursive chmod of the sandbox, an administrator) opened to
  * others, is refused until it is opened again, which puts it right.
+ *
+ * A store that was open to others for a while and is closed again looks as it
+ * did (owner, mode), and whoever could write in it meanwhile may have left
+ * what git reads and the portal's root must not follow. So the walk over it
+ * (`audit`) leaves a file that only the sandbox's closing of the store takes
+ * away (server/src/sandbox/apply.ts, closeDocsStores), and a held store
+ * without it is opened again and walked again: once per such time, not per
+ * request.
  */
 import { closeSync, constants, fchmodSync, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, chmodSync, openSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -19,6 +27,9 @@ import path from "node:path";
 import { DocError } from "./errors.js";
 
 const isOurs = (stat) => !process.getuid || stat.uid === process.getuid();
+
+/** The file in the store that says it has been walked over since it was last open to others (the sandbox's closing of it removes it). */
+const AUDITED = ".audited";
 
 /** What git trusts in a repository besides its objects, that could send it elsewhere or make it run something: gone or written new. */
 const MISTRUSTED = ["commondir", "config.worktree", "shallow", "hooks", "info/grafts", "info/attributes", "objects/info/alternates", "objects/info/http-alternates"];
@@ -59,6 +70,8 @@ export class Guard {
   constructor(dir, fd) {
     this.dir = dir;
     this.fd = fd;
+    /** Whether `audit` has been through it, so that `check` looks for what it left. */
+    this.audited = false;
   }
 
   /** Whether git is given the held descriptor (in its stdio, at 3), not the path. */
@@ -121,20 +134,47 @@ export class Guard {
     const held = fstatSync(this.fd);
     if (!now.isDirectory() || now.ino !== held.ino || now.dev !== held.dev) throw new DocError(409, "The documents store was replaced while it was in use");
     if (!isOurs(held) || held.mode & 0o077) throw new DocError(409, "The documents store was opened to others while it was in use");
+    if (this.audited) {
+      let mark = null;
+      try {
+        mark = lstatSync(this.at(AUDITED));
+      } catch {
+        // Taken away: see below.
+      }
+      // Gone, or not the portal's own: the sandbox had the store open to others since it was walked over, and it is closed again now.
+      if (!mark?.isFile() || !isOurs(mark)) throw new DocError(409, "The documents store was open to others for a while and is looked over again");
+    }
   }
 
   /**
-   * Looks the whole store over, once, when it is opened: nothing in it but
+   * Looks the whole store over, when it is opened: nothing in it but
    * plain files and folders of the portal's own (anything else is refused:
    * git must not follow a link or wait at a pipe in there), none writable by
    * group or others, with the portal's group. What git would read besides its
    * objects is put back as the store made it: a store that was open to others
    * for a while (the sandbox's recursive chown and chmod of a chat's folder
-   * once were such a time) may have had it changed.
+   * is such a time) may have had it changed.
+   *
+   * The file that `check` wants to find is made first, so that a closing of
+   * the store by the sandbox while this walk is still on takes it away too,
+   * and what was planted after the walk passed it is walked over next time.
+   * It takes the whole walk, not only the control files: a link put in the
+   * place of the objects folder, or a pipe, leads git elsewhere as well. That
+   * is why it is done once for each time the store was open to others, not
+   * on every request, when the objects are too many to walk over.
    */
   audit() {
+    this.audited = false;
     this.#own();
+    rmSync(this.at(AUDITED), { recursive: true, force: true });
+    writeFileSync(this.at(AUDITED), "", { flag: "wx", mode: 0o600 });
     this.#walk("", 0);
+    this.#control();
+    this.audited = true;
+  }
+
+  /** What git reads besides its objects, gone or written new. */
+  #control() {
     try {
       lstatSync(this.at("git"));
     } catch {
