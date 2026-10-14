@@ -111,7 +111,7 @@ export function ToolGroupList({
                             e.preventDefault();
                             onLazy(tool);
                           }}
-                          title={!tool.enabled ? t("This tool is off, so it is not offered to the model, lazy or not. Switch it on to change its lazy mark.") : tool.mcp ? t("Set for the whole server, with the lazy button of its group: it is the server's \"Register tools directly\", turned off. A lazy tool is not in the model's list one by one; the model finds and calls it through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
+                          title={!tool.enabled ? t("This tool is off by default, so it is not offered to the model, lazy or not, except where an agent, project, routine or chat switches it on. Switch it on here to change its lazy mark.") : tool.mcp ? t("Set for the whole server, with the lazy button of its group: it is the server's \"Register tools directly\", turned off. A lazy tool is not in the model's list one by one; the model finds and calls it through the `mcp` tool.") : t("Not in the model's list one by one: it finds and calls this tool through the `tools` tool.")}
                           className={`shrink-0 rounded border px-1 text-[10px] disabled:cursor-not-allowed ${tool.enabled ? "disabled:opacity-60" : "disabled:opacity-40"} ${
                             tool.lazy ? "border-accent/40 bg-accent/15 text-accent" : "border-transparent text-fg-faint hover:text-fg"
                           }`}

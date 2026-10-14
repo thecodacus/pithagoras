@@ -264,7 +264,7 @@ export function ToolDefaults({ onError }: { onError: (e: string) => void }) {
                       onClick={() => (server !== undefined ? flipMcp(server, pressed) : flipLazy(group.source))}
                       title={
                         idle
-                          ? t("All of its tools are off, so none is offered to the model, lazy or not. Switch one on to change the lazy mark.")
+                          ? t("All of its tools are off by default, so none is offered to the model, lazy or not, except where an agent, project, routine or chat switches them on. Switch one on here to change the lazy mark.")
                           : server !== undefined
                           ? t("Lazy: the server's tools are not in the model's list one by one; the model finds and calls them through the `mcp` tool. It is the server's \"Register tools directly\", turned off, and it applies to chats that start from now on. They stay on or off as they are.")
                           : t("Lazy: its tools are not in the model's list one by one; the model finds and calls them through the `tools` tool, so nothing in the set is lost to it. They stay on or off as they are; an off tool is not reachable that way. Tools that turn up later start lazy too.")
