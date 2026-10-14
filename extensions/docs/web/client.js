@@ -5,7 +5,8 @@
  * drawn as the portal draws Markdown.
  *
  * What is on the page comes from the server half's routes (server.js): a page
- * outside a chat has no chat's pi to ask.
+ * outside a chat has no chat's pi to ask. A document is asked for by the id
+ * the listing gives it, never by its file's name.
  */
 export default function (portal) {
   const { React, ui, t } = portal;
@@ -28,7 +29,7 @@ export default function (portal) {
   const DocumentIcon = icon("M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5ZM14 3v5h5M9 13h6M9 17h6M9 9h1");
 
   const when = (iso) => new Intl.DateTimeFormat(document.documentElement.lang || undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
-  const documentUrl = (folder, name) => portal.api.url(`/folders/${encodeURIComponent(folder)}/documents/${encodeURIComponent(name)}`);
+  const documentUrl = (folder, id) => portal.api.url(`/folders/${encodeURIComponent(folder)}/documents/${encodeURIComponent(id)}`);
 
   /** Asks a route of the server half, again on `retry`: what it answered, or why it could not. */
   function useAnswer(url) {
@@ -63,10 +64,10 @@ export default function (portal) {
           folder.documents.map((doc) =>
             h(
               "li",
-              { key: doc.name },
+              { key: doc.id },
               h(
                 "button",
-                { type: "button", onClick: () => onOpen({ folder: folder.id, name: doc.name }) },
+                { type: "button", onClick: () => onOpen({ folder: folder.id, id: doc.id }) },
                 h("span", { className: "pd-title" }, doc.title),
                 h("span", { className: "pd-meta" }, `${doc.name} · ${t("Changed {date}", { date: when(doc.modified) })}`),
               ),
@@ -77,8 +78,8 @@ export default function (portal) {
     );
   }
 
-  function DocumentView({ folder, name, onBack }) {
-    const { body, error, retry } = useAnswer(documentUrl(folder, name));
+  function DocumentView({ folder, id, onBack }) {
+    const { body, error, retry } = useAnswer(documentUrl(folder, id));
     return h(
       "article",
       { className: "pd-document" },
@@ -104,7 +105,7 @@ export default function (portal) {
       "div",
       { className: "pd-page" },
       h(ui.PageHeader, { icon: h(DocumentIcon), title: t("Documents"), description: t("The Markdown files in the documents folder of each folder your chats work in.") }),
-      open ? h(DocumentView, { ...open, key: `${open.folder}/${open.name}`, onBack: () => setOpen(null) }) : h(FolderList, { onOpen: setOpen }),
+      open ? h(DocumentView, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }) : h(FolderList, { onOpen: setOpen }),
     );
   }
 

@@ -11,15 +11,17 @@ import { resolveInside } from '../server/src/workspace-files.ts';
 import { scratch } from './helpers.mts';
 
 type Res = { status(code: number): Res; json(body: unknown): void };
-type Handler = (req: { params: Record<string, string> }, res: Res) => void;
+type Handler = (req: { params: Record<string, string>; query: Record<string, string>; method: string; path: string }, res: Res) => unknown;
 
 /** The Documents extension's server half, given chats that work in these folders, as the portal gives it them. */
 function server(folders: Record<string, string>, logged: string[] = []) {
   const routes = new Map<string, Handler>();
+  const add = (method: string) => (route: string, ...handlers: Handler[]) => routes.set(`${method} ${route}`, handlers.at(-1)!);
   docsServer({
     extension: 'pithagoras-docs',
     log: (line: string) => logged.push(line),
-    router: { get: (route: string, handler: Handler) => routes.set(route, handler) },
+    router: { get: add('GET'), post: add('POST'), put: add('PUT') },
+    http: { json: () => () => {} },
     files: { inside: resolveInside },
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
@@ -29,20 +31,23 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     // What it needs to run is there: the test does not install anything.
     dependencies: (log: (line: string) => void) => (log('dependencies checked'), Promise.resolve(true)),
   });
-  const ask = (route: string, params: Record<string, string> = {}) => {
+  const ask = async (route: string, params: Record<string, string> = {}) => {
     let answer: { status: number; body: any } = { status: 200, body: undefined };
     const res: Res = {
       status: (code) => ((answer.status = code), res),
       json: (body) => void (answer.body = body),
     };
-    routes.get(route)!({ params }, res);
+    await routes.get(`GET ${route}`)!({ params, query: {}, method: 'GET', path: route }, res);
     return answer;
   };
   return {
-    folders: () => ask('/folders').body.folders,
-    read: (folder: string, name: string) => ask('/folders/:folder/documents/:name', { folder, name }),
+    folders: async () => (await ask('/folders')).body.folders,
+    read: (folder: string, id: string) => ask('/folders/:folder/documents/:id', { folder, id }),
   };
 }
+
+/** The id of the document `name` in a listed folder. */
+const idOf = (folder: any, name: string) => folder.documents.find((d: any) => d.name === name).id as string;
 
 function folderWith(prefix: string, files: Record<string, string>) {
   const folder = scratch(prefix);
@@ -53,7 +58,7 @@ function folderWith(prefix: string, files: Record<string, string>) {
   return folder;
 }
 
-test('the Documents page is told every folder chats work in that has documents, each once, with its documents by title', () => {
+test('the Documents page is told every folder chats work in that has documents, each once, with its documents by title', async () => {
   const site = folderWith('docs-site-', {
     'documents/plan.md': '# The plan\n\nShip it.\n',
     // A `#` in a code block is a comment: the title is the heading after it.
@@ -69,7 +74,7 @@ test('the Documents page is told every folder chats work in that has documents, 
   const logged: string[] = [];
   const docs = server({ a: site, b: site, c: empty }, logged);
   assert.deepEqual(logged, ['dependencies checked'], 'it sees to its dependencies as it starts, in the portal\'s log');
-  const [only, ...more] = docs.folders();
+  const [only, ...more] = await docs.folders();
   assert.deepEqual(more, [], 'a folder without documents is left out');
   assert.equal(only.path, realpathSync(site));
   assert.equal(only.name, path.basename(site));
@@ -82,15 +87,21 @@ test('the Documents page is told every folder chats work in that has documents, 
   ]);
   assert.equal(only.documents[1].size, Buffer.byteLength('# The plan\n\nShip it.\n'));
   assert.ok(!Number.isNaN(Date.parse(only.documents[1].modified)));
+  // Each is a document of the folder's store from now on: named by an id, at its first revision.
+  for (const doc of only.documents) {
+    assert.match(doc.id, /^[0-9a-f]{16}$/);
+    assert.equal(doc.revision, 1);
+  }
+  assert.deepEqual((await docs.folders())[0].documents.map((d: any) => d.id), only.documents.map((d: any) => d.id), 'the same ids the next time');
 });
 
-test('a chat whose folder is gone has no documents, and the others are still listed', () => {
+test('a chat whose folder is gone has no documents, and the others are still listed', async () => {
   const site = folderWith('docs-gone-', { 'documents/plan.md': '# Plan' });
   const docs = server({ a: site, gone: path.join(site, 'no-such-folder') });
-  assert.deepEqual(docs.folders().map((f: any) => f.chats.map((c: any) => c.id)), [['a']]);
+  assert.deepEqual((await docs.folders()).map((f: any) => f.chats.map((c: any) => c.id)), [['a']]);
 });
 
-test('a document is read by its folder\'s id and its name, and nothing else is', () => {
+test('a document is read by its folder\'s id and its own, and nothing else is', async () => {
   const site = folderWith('docs-read-', {
     'documents/plan.md': '# The plan\n\nShip it.\n',
     'documents/other.md': '# Other',
@@ -103,53 +114,62 @@ test('a document is read by its folder\'s id and its name, and nothing else is',
   symlinkSync('other.md', path.join(site, 'documents', 'alias.md'));
   linkSync(path.join(outside, 'private.md'), path.join(site, 'documents', 'hard.md'));
   const docs = server({ a: site });
-  const [folder] = docs.folders();
+  const [folder] = await docs.folders();
   assert.deepEqual(folder.documents.map((d: any) => d.name), ['other.md', 'plan.md'], 'neither links nor a file too big are listed');
-
-  const plan = docs.read(folder.id, 'plan.md');
+  const plan = await docs.read(folder.id, idOf(folder, 'plan.md'));
   assert.equal(plan.status, 200);
   assert.equal(plan.body.markdown, '# The plan\n\nShip it.\n');
   assert.equal(plan.body.title, 'The plan');
   assert.equal(plan.body.name, 'plan.md');
 
-  for (const name of ['../secret.md', 'link.md', 'alias.md', 'hard.md', 'big.md', 'missing.md', '.', '', 'documents/plan.md', 'plan.md\0']) {
-    const refused = docs.read(folder.id, name);
+  // A document is named by its id: a name, a path, or an id the store did not give is none.
+  for (const name of ['plan.md', '../secret.md', 'link.md', 'alias.md', 'hard.md', 'big.md', '.', '', 'documents/plan.md', 'plan.md\0', '0123456789abcdef']) {
+    const refused = await docs.read(folder.id, name);
     assert.equal(refused.status, 404, name);
     assert.deepEqual(refused.body, { error: 'There is no such document' }, name);
   }
   // A folder is only one a chat works in: an id the portal does not list, or a path, is no folder.
-  assert.equal(docs.read('0123456789abcdef', 'plan.md').status, 404);
-  assert.equal(docs.read(realpathSync(site), 'plan.md').status, 404);
-  assert.equal(server({ b: outside }).read(folder.id, 'plan.md').status, 404, 'the chat that worked there is gone');
+  const id = idOf(folder, 'plan.md');
+  assert.equal((await docs.read('0123456789abcdef', id)).status, 404);
+  assert.equal((await docs.read(realpathSync(site), id)).status, 404);
+  assert.equal((await server({ b: outside }).read(folder.id, id)).status, 404, 'the chat that worked there is gone');
 });
 
 test('a pipe named like a document is no document, and asking for one does not hold the portal', () => {
-  const site = folderWith('docs-pipe-', { 'documents/plan.md': '# Plan' });
+  const site = folderWith('docs-pipe-', { 'documents/plan.md': '# Plan', 'documents/other.md': '# Other' });
   execFileSync('mkfifo', [path.join(site, 'documents', 'pipe.md')]);
   // Asked in a process of its own: a server half that waits for the pipe's writer waits for good, and so would this test.
+  // A document whose file is swapped for a pipe after it was listed is asked for as well.
   const asking = `
     import docsServer from ${JSON.stringify(new URL('../extensions/docs/server.js', import.meta.url).href)};
     import { resolveInside } from ${JSON.stringify(new URL('../server/src/workspace-files.ts', import.meta.url).href)};
-    import { realpathSync } from 'node:fs';
+    import { execFileSync } from 'node:child_process';
+    import { realpathSync, rmSync } from 'node:fs';
     const routes = new Map();
+    const add = (method) => (route, ...handlers) => routes.set(method + ' ' + route, handlers.at(-1));
     docsServer({
       log: () => {},
-      router: { get: (route, handler) => routes.set(route, handler) },
+      router: { get: add('GET'), post: add('POST'), put: add('PUT') },
+      http: { json: () => () => {} },
       files: { inside: resolveInside },
       chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
     }, { dependencies: async () => true });
-    const ask = (route, params) => { const answer = {}; const res = { status: (code) => ((answer.status = code), res), json: (body) => (answer.body = body) }; routes.get(route)({ params }, res); return answer; };
-    const [folder] = ask('/folders', {}).body.folders;
-    const read = ask('/folders/:folder/documents/:name', { folder: folder.id, name: 'pipe.md' });
-    console.log(JSON.stringify({ listed: folder.documents.map((d) => d.name), status: read.status }));
+    const ask = async (route, params) => { const answer = {}; const res = { status: (code) => ((answer.status = code), res), json: (body) => (answer.body = body) }; await routes.get('GET ' + route)({ params, query: {} }, res); return answer; };
+    const [folder] = (await ask('/folders', {})).body.folders;
+    const other = folder.documents.find((d) => d.name === 'other.md');
+    rmSync(process.env.SITE + '/documents/other.md');
+    execFileSync('mkfifo', [process.env.SITE + '/documents/other.md']);
+    const read = await ask('/folders/:folder/documents/:id', { folder: folder.id, id: other.id });
+    const [again] = (await ask('/folders', {})).body.folders;
+    console.log(JSON.stringify({ listed: folder.documents.map((d) => d.name), status: read.status, again: again.documents.map((d) => d.name) }));
   `;
   const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', asking], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, SITE: site } });
   assert.equal(child.signal, null, 'held by the pipe until it was killed');
   assert.equal(child.status, 0, child.stderr);
-  assert.deepEqual(JSON.parse(child.stdout), { listed: ['plan.md'], status: 404 });
+  assert.deepEqual(JSON.parse(child.stdout), { listed: ['other.md', 'plan.md'], status: 404, again: ['plan.md'] });
 });
 
-test('a document\'s title is its first heading as the page draws it, the same in the list and when it is read', () => {
+test('a document\'s title is its first heading as the page draws it, the same in the list and when it is read', async () => {
   const site = folderWith('docs-titles-', {
     // A heading underlined is a heading.
     'documents/setext.md': 'The plan\n========\n\nShip it.\n\n## Details\n',
@@ -164,7 +184,7 @@ test('a document\'s title is its first heading as the page draws it, the same in
     'documents/late.md': `${'Text before the heading. '.repeat(200)}\n\n# Late heading\n`,
   });
   const docs = server({ a: site });
-  const [folder] = docs.folders();
+  const [folder] = await docs.folders();
   const listed = Object.fromEntries(folder.documents.map((d: any) => [d.name, d.title]));
   assert.deepEqual(listed, {
     'setext.md': 'The plan',
@@ -174,10 +194,10 @@ test('a document\'s title is its first heading as the page draws it, the same in
     'inline.md': 'The plan for v2, with a link and care',
     'late.md': 'late',
   });
-  for (const [name, title] of Object.entries(listed)) assert.equal(docs.read(folder.id, name).body.title, title, name);
+  for (const [name, title] of Object.entries(listed)) assert.equal((await docs.read(folder.id, idOf(folder, name))).body.title, title, name);
 });
 
-test('what the page does not draw as a heading is no title, and what it draws as one is', () => {
+test('what the page does not draw as a heading is no title, and what it draws as one is', async () => {
   const site = folderWith('docs-blocks-', {
     // A code block that opens on a list item's line is a code block all the same.
     'documents/list-fence.md': 'Steps:\n\n1. ```sh\n   # install the tools first\n   npm ci\n   ```\n\n# Setup steps\n',
@@ -213,7 +233,7 @@ test('what the page does not draw as a heading is no title, and what it draws as
     'documents/marks.md': '# The [release plan][plan], [![CI](https://example.com/ci.svg)](https://example.com/ci) and <https://example.com> [^1]\n\n[plan]: ./plan.md\n[^1]: A note.\n',
   });
   const docs = server({ a: site });
-  const [folder] = docs.folders();
+  const [folder] = await docs.folders();
   const listed = Object.fromEntries(folder.documents.map((d: any) => [d.name, d.title]));
   assert.deepEqual(listed, {
     'list-fence.md': 'Setup steps',
@@ -239,7 +259,7 @@ test('what the page does not draw as a heading is no title, and what it draws as
     'inline-fence.md': 'Title after inline code',
     'marks.md': 'The release plan, CI and https://example.com',
   });
-  for (const [name, title] of Object.entries(listed)) assert.equal(docs.read(folder.id, name).body.title, title, name);
+  for (const [name, title] of Object.entries(listed)) assert.equal((await docs.read(folder.id, idOf(folder, name))).body.title, title, name);
 });
 
 /** 4 KB of `line`, line after line: as much as is looked at for a title. */
@@ -267,14 +287,16 @@ const SLOW: Record<string, string> = {
   items: fill('- a\n  b'),
 };
 
-test('documents made to be slow to title do not hold the portal while they are listed', () => {
+test('documents made to be slow to title do not hold the portal while they are listed', async () => {
   for (const [kind, text] of Object.entries(SLOW)) {
     // As many as a folder lists, in a folder of their own.
     const site = folderWith(`docs-slow-${kind}-`, { 'documents/.keep': '' });
     for (let i = 0; i < 1000; i++) writeFileSync(path.join(site, 'documents', `${kind}-${i}.md`), text);
     const docs = server({ a: site });
+    // The first listing takes them into the folder's store (and its history), once: it is what comes after that is timed.
+    await docs.folders();
     const started = performance.now();
-    const [folder] = docs.folders();
+    const [folder] = await docs.folders();
     const took = performance.now() - started;
     assert.equal(folder.documents.length, 1000, kind);
     // Before, these took from one and a half seconds (brackets) to twelve (blanks); an ordinary folder of this size takes a few dozen milliseconds.
@@ -282,20 +304,21 @@ test('documents made to be slow to title do not hold the portal while they are l
   }
 });
 
-test('a documents folder that is a link is not one: what it leads to is neither listed nor read', () => {
+test('a documents folder that is a link is not one: what it leads to is neither listed nor read', async () => {
   const site = folderWith('docs-linked-', { 'src/code.md': '# Code' });
   symlinkSync('src', path.join(site, 'documents'));
   const docs = server({ a: site });
-  assert.deepEqual(docs.folders(), []);
+  assert.deepEqual(await docs.folders(), []);
   // Asked for all the same, by the id the page would know the folder by.
   const id = createHash('sha256').update(realpathSync(site)).digest('hex').slice(0, 16);
-  assert.equal(docs.read(id, 'code.md').status, 404);
+  assert.equal((await docs.read(id, '0123456789abcdef')).status, 404);
   // The same folder with a real documents folder: listed and read by that id.
   rmSync(path.join(site, 'documents'));
   mkdirSync(path.join(site, 'documents'));
   writeFileSync(path.join(site, 'documents', 'code.md'), '# Code');
-  assert.equal(docs.folders()[0].id, id);
-  assert.equal(docs.read(id, 'code.md').status, 200);
+  const [folder] = await docs.folders();
+  assert.equal(folder.id, id);
+  assert.equal((await docs.read(id, idOf(folder, 'code.md'))).status, 200);
 });
 
 test('every text the Documents page shows has a German one, and no German one is left over', () => {

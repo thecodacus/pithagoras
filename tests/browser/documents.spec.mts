@@ -30,11 +30,11 @@ const FOLDERS = [
   {
     id: '0123456789abcdef', name: 'site', path: '/w/site', chats: [{ id: 'a', title: 'First chat' }],
     documents: [
-      { name: 'plan.md', title: 'The plan', size: PLAN.length, modified: '2026-10-01T09:30:00.000Z' },
-      { name: 'release notes.md', title: 'Release notes', size: 40, modified: '2026-10-02T09:30:00.000Z' },
+      { id: '1111111111111111', name: 'plan.md', title: 'The plan', revision: 3, size: PLAN.length, modified: '2026-10-01T09:30:00.000Z' },
+      { id: '2222222222222222', name: 'release notes.md', title: 'Release notes', revision: 1, size: 40, modified: '2026-10-02T09:30:00.000Z' },
     ],
   },
-  { id: 'fedcba9876543210', name: 'tools', path: '/w/tools', chats: [{ id: 'b', title: 'Second chat' }], documents: [{ name: 'setup.md', title: 'Setting up', size: 20, modified: '2026-10-03T09:30:00.000Z' }] },
+  { id: 'fedcba9876543210', name: 'tools', path: '/w/tools', chats: [{ id: 'b', title: 'Second chat' }], documents: [{ id: '3333333333333333', name: 'setup.md', title: 'Setting up', revision: 1, size: 20, modified: '2026-10-03T09:30:00.000Z' }] },
 ];
 
 async function portal(page: Page, folders: unknown[] = FOLDERS) {
@@ -49,7 +49,7 @@ async function portal(page: Page, folders: unknown[] = FOLDERS) {
     if (p === `/api/x/${NAME}/folders`) return { folders };
     if (p.startsWith(`/api/x/${NAME}/folders/`)) {
       asked.push(p);
-      if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents/plan.md`) return { name: 'plan.md', title: 'The plan', markdown: PLAN, modified: '2026-10-01T09:30:00.000Z' };
+      if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents/1111111111111111`) return { id: '1111111111111111', name: 'plan.md', title: 'The plan', revision: 3, markdown: PLAN, modified: '2026-10-01T09:30:00.000Z' };
       return reply(404, { error: 'There is no such document' });
     }
     if (p === '/api/sessions') return { sessions, executor: 'host' };
@@ -83,11 +83,11 @@ test('the Documents page is in the sidebar and lists each folder\'s documents, a
 
   await page.getByRole('button', { name: /All documents/ }).click();
   await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
-  // A name with a space in it is asked for as one part of the address.
+  // A document is asked for by its id, never by its file's name; one that is gone says so.
   await page.getByRole('region', { name: 'site' }).getByRole('button', { name: /Release notes/ }).click();
   await expect(page.getByRole('alert')).toContainText('There is no such document');
   // Development React runs each effect twice, and each asks.
-  expect([...new Set(asked)]).toEqual([`/api/x/${NAME}/folders/0123456789abcdef/documents/plan.md`, `/api/x/${NAME}/folders/0123456789abcdef/documents/release%20notes.md`]);
+  expect([...new Set(asked)]).toEqual([`/api/x/${NAME}/folders/0123456789abcdef/documents/1111111111111111`, `/api/x/${NAME}/folders/0123456789abcdef/documents/2222222222222222`]);
 });
 
 test('the Documents page says when no folder has documents', async ({ page }) => {
