@@ -118,8 +118,11 @@ test('the four tools are put into each chat\'s pi where pi runs in the portal, a
     assert.deepEqual([...host.pi('a').keys()].sort(), ['doc_create', 'doc_edit', 'doc_list', 'doc_read']);
     for (const tool of host.pi('a').values()) {
       assert.ok(tool.description.length > 40 && tool.label && tool.promptSnippet, `${tool.name} says what it is for`);
+      // A part is counted in characters, and so is said to be.
+      assert.ok(!/\bKB\b/.test(tool.description), `${tool.name} does not count in bytes`);
       assert.equal(tool.parameters.type, 'object');
     }
+    assert.match(host.pi('a').get('doc_read').description, /parts of about 60,000 characters/);
     assert.deepEqual(container.factories, [], 'with pi in a container there is no pi extension of the portal\'s to add to');
   } finally {
     await host.close();
@@ -347,6 +350,19 @@ test('a line longer than a part is cut into parts too, each read on from the one
   } finally {
     await docs.close();
   }
+  // An offset the agent counted itself may fall inside a character: it is told, and no part starts with half of one.
+  const pairs = await withDocument('docs-tools-wide-pairs-', `# W\n\na${'😀'.repeat(100)}\n`);
+  try {
+    // 'a' is 0, the first character after it is 1 and 2, the next 3 and 4.
+    assert.match(refused(await pairs.agent('doc_read', { id: pairs.id, from_line: 3, char_offset: 2 }), 'invalid'), /char_offset 2 is inside a character of line 3: use 1 or 3/);
+    refused(await pairs.agent('doc_read', { id: pairs.id, from_line: 3, char_offset: 4 }), 'invalid');
+    for (const offset of [0, 1, 3, 201]) {
+      const part = done(await pairs.agent('doc_read', { id: pairs.id, from_line: 3, char_offset: offset }));
+      assert.ok(part.text.isWellFormed(), `from ${offset}`);
+    }
+  } finally {
+    await pairs.docs.close();
+  }
 });
 
 test('a chat\'s own document is the chat\'s: another chat in the folder is told there is none, to read or to edit', async () => {
@@ -514,12 +530,20 @@ test('an edit that changes nothing makes no revision, and a document written wit
     assert.equal(more.details.revision, 4);
     assert.equal(fileOf(folder, 'plan.md'), '# Plan\r\n\r\nShip it on Monday.\r\n\r\nOne\r\nAnd a half\r\nAnd two is green.\r\n');
     assert.ok(!/(?<!\r)\n/.test(fileOf(folder, 'plan.md')), 'no line break of the other kind');
+    // A quote that starts with a line break matches the line feed of a CRLF break: the carriage return before it goes with it.
+    writeFileSync(path.join(folder, 'documents', 'plan.md'), '# Plan\r\n\r\nOne\r\nTwo\r\n');
+    done(await agent('doc_edit', { id, expected_revision: 5, edits: [{ quote: '\nTwo', replacement: '\nOne and a half\nTwo' }] }));
+    assert.equal(fileOf(folder, 'plan.md'), '# Plan\r\n\r\nOne\r\nOne and a half\r\nTwo\r\n');
+    // Also when the replacement takes the line break away: no carriage return is left alone.
+    done(await agent('doc_edit', { id, expected_revision: 6, edits: [{ quote: '\nTwo', replacement: ' and Two' }] }));
+    assert.equal(fileOf(folder, 'plan.md'), '# Plan\r\n\r\nOne\r\nOne and a half and Two\r\n');
+    assert.ok(!/\r(?!\n)/.test(fileOf(folder, 'plan.md')), 'no carriage return without its line feed');
     // A document of line feeds keeps them, and one of both has the kind most of it has.
     writeFileSync(path.join(folder, 'documents', 'plan.md'), '# Plan\nOne\nTwo\r\n');
-    done(await agent('doc_edit', { id, expected_revision: 5, edits: [{ quote: 'One', replacement: 'A\nB' }] }));
+    done(await agent('doc_edit', { id, expected_revision: 8, edits: [{ quote: 'One', replacement: 'A\nB' }] }));
     assert.equal(fileOf(folder, 'plan.md'), '# Plan\nA\nB\nTwo\r\n');
     writeFileSync(path.join(folder, 'documents', 'plan.md'), '# Plan\r\nOne\r\nTwo\n');
-    done(await agent('doc_edit', { id, expected_revision: 7, edits: [{ quote: 'One', replacement: 'A\nB' }] }));
+    done(await agent('doc_edit', { id, expected_revision: 10, edits: [{ quote: 'One', replacement: 'A\nB' }] }));
     assert.equal(fileOf(folder, 'plan.md'), '# Plan\r\nA\r\nB\r\nTwo\n');
   } finally {
     await docs.close();

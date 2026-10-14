@@ -61,8 +61,13 @@ function excerpt(markdown, from, offset) {
   // A text that ends in a line break has no last line after it.
   const total = markdown.endsWith("\n") ? lines.length - 1 : lines.length;
   if (from > total) throw new Refusal("invalid", `from_line is past the end: the document has ${total} line${total === 1 ? "" : "s"}`);
-  if (offset > lines[from - 1].length) throw new Refusal("invalid", `char_offset is past the end of line ${from}, which has ${lines[from - 1].length} characters`);
-  const first = lines[from - 1].slice(offset);
+  const line = lines[from - 1];
+  if (offset > line.length) throw new Refusal("invalid", `char_offset is past the end of line ${from}, which has ${line.length} characters`);
+  // An offset the agent counted itself may fall between the two halves of a character outside the basic plane.
+  if (offset > 0 && /[\uD800-\uDBFF]/.test(line[offset - 1]) && /[\uDC00-\uDFFF]/.test(line[offset] ?? "")) {
+    throw new Refusal("invalid", `char_offset ${offset} is inside a character of line ${from}: use ${offset - 1} or ${offset + 1}`);
+  }
+  const first = line.slice(offset);
   if (first.length > READ_CHARS) {
     let cut = READ_CHARS;
     // Not between the two halves of a character outside the basic plane.
@@ -171,7 +176,7 @@ export function documentTools(pi, chat, deps) {
   pi.registerTool({
     name: "doc_read",
     label: "Read a document",
-    description: `Read a shared document by its id: its Markdown and its revision. Read a document before you edit it: doc_edit needs the revision you read. revision reads an earlier revision of it, from its history. A long document is returned in parts of about ${READ_CHARS / 1000} KB: the end of one says where to read on (from_line, and char_offset inside a line that is longer than a part).`,
+    description: `Read a shared document by its id: its Markdown and its revision. Read a document before you edit it: doc_edit needs the revision you read. revision reads an earlier revision of it, from its history. A long document is returned in parts of about ${READ_CHARS.toLocaleString("en-US")} characters: the end of one says where to read on (from_line, and char_offset inside a line that is longer than a part).`,
     promptSnippet: "Read a shared document by id: its Markdown and revision",
     parameters: {
       type: "object",
@@ -292,11 +297,18 @@ export function documentTools(pi, chat, deps) {
           place = find(current, crlf(quote));
           if (place.first !== -1) quote = crlf(quote);
         }
+        // A quote that starts with the line feed of a CRLF break has the carriage return in front of it: it is replaced with it,
+        // or it would be left with nothing after it, or in front of the replacement's own line break.
+        let at = place.first;
+        if (at > 0 && quote.startsWith("\n") && current[at - 1] === "\r") {
+          at--;
+          quote = `\r${quote}`;
+        }
         if (dos || quote.includes("\r\n")) replacement = crlf(replacement);
         const which = edits.length > 1 ? `edit ${i + 1}: ` : "";
         if (place.first === -1) throw new Refusal("quote_not_found", `${which}the quote is not in "${title}" at revision ${doc.revision}. Quote it exactly as doc_read shows it, with its Markdown marks. Nothing was written.`);
         if (place.more) throw new Refusal("quote_ambiguous", `${which}the quote appears more than once in "${title}". Take more of the text around it, so that it appears once. Nothing was written.`);
-        return { at: place.first, end: place.first + quote.length, replacement, n: i + 1 };
+        return { at, end: at + quote.length, replacement, n: i + 1 };
       });
       found.sort((a, b) => a.at - b.at);
       for (let i = 1; i < found.length; i++) {
