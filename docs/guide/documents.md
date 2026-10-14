@@ -140,13 +140,14 @@ run git on it or remove it. Delete `.pithagoras-docs` to start a new history (th
 documents stay), or, if you trust what is in it, copy it (do not rename it: a
 file an agent holds open would then be in the data folder) into the data folder
 as the folder named by the folder's id, the first 16 characters of the SHA-256
-of the folder's path.
+of the folder's path, and then delete `.pithagoras-docs`.
 
 When it cannot be moved, the folder's documents are left out of the page (the
 portal's log says why, as "could not be moved into the portal's data folder"),
 a request for them is answered with the reason, nothing is changed, and the old
 store is not used. A `.pithagoras-docs` that is still there beside a store in
-the data folder is left alone: the store in the data folder is the one used. If
+the data folder is left alone, also when the folder is moved: the store in the
+data folder (for this folder) is the one used, and the log says to remove it. If
 the old one could not be removed after it was copied, the log says so: remove it.
 
 ### A secret in a document

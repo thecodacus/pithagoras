@@ -799,6 +799,30 @@ test('a folder that was moved takes its store along, and a folder made at its ol
   }
 });
 
+test('a leftover `.pithagoras-docs` beside the store does not take the folder\'s history when the folder is moved, with the sandbox on or off', async () => {
+  for (const sandbox of [false, true]) {
+    const { folder, docs, doc, url } = await withDocument(`docs-store-leftover-${sandbox}-`);
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+    // A copy somebody kept by hand, as it was then; the history goes on in the store in the data folder.
+    cpSync(storeOf(folder), path.join(folder, '.pithagoras-docs'), { recursive: true });
+    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nThree.\n', base: 2 })).status, 200);
+    await docs.close();
+    const moved = `${folder}-moved`;
+    renameSync(folder, moved);
+    const again = await portal({ a: moved }, { sandbox });
+    try {
+      const [listed] = await again.listed();
+      assert.deepEqual(listed.documents.map((d: any) => [d.id, d.revision]), [[doc, 3]], `sandbox ${sandbox}`);
+      assert.deepEqual((await again.call('GET', `/folders/${listed.id}/documents/${doc}/history`)).body.revisions.map((r: any) => [r.revision, r.kind]), [[3, 'save'], [2, 'save'], [1, 'create']]);
+      assert.equal(commits(moved), 3);
+      assert.ok(existsSync(path.join(moved, '.pithagoras-docs')), 'the leftover is not touched');
+      assert.match(again.logged.join('\n'), /\.pithagoras-docs in .* is not used/);
+    } finally {
+      await again.close();
+    }
+  }
+});
+
 test('a moved folder finds its store again when the folder made at its old path is placed before it', async () => {
   const { folder, docs, f, doc, url } = await withDocument('docs-store-moved-late-');
   assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);

@@ -323,11 +323,14 @@ export async function placeStore({ data, id, folder, documents, inside, Database
     }
     putAside(dir, log);
   }
-  if (await moveLegacy({ folder, data, id, dir, sandbox, faults, log })) return dir;
+  // The folder's own store, where it was moved from, before an old one in the folder: that is a leftover then (a copy kept by hand).
   const moved = movedStore(data, id, here, documents, inside, Database);
   if (moved) {
     renameSync(moved, dir);
     log(`The documents store of ${folder} followed it from ${readBinding(dir)?.path ?? path.basename(moved)}`);
+    if (exists(path.join(folder, LEGACY_STORE))) log(`${LEGACY_STORE} in ${folder} is not used, as the store in the portal's data folder is: remove it`);
+    return dir;
   }
+  await moveLegacy({ folder, data, id, dir, sandbox, faults, log });
   return dir;
 }
