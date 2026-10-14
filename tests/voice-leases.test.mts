@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {VoiceLeases} from '../server/src/extensions/voice-leases.js';
+import {VoiceLeases} from '../core/server/src/extensions/voice-leases.js';
 test('two tabs share a model until the last one disconnects',async()=>{
  const calls:string[]=[];const leases=new VoiceLeases(async()=>{calls.push('load')},async()=>{calls.push('unload')});
  await leases.acquire('a');await leases.acquire('b');await leases.release('a');assert.equal(calls.includes('unload'),false);

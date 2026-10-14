@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { serialSaver } from '../web/src/serial-saver.ts';
+import { serialSaver } from '../core/web/src/serial-saver.ts';
 
 /** A save whose completion the test decides, so that moves can be made while it is out. */
 function held() {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reconcile } from '../web/src/reconcile.ts';
+import { reconcile } from '../core/web/src/reconcile.ts';
 
 const row = (id: string, status = 'idle') => ({ id, title: `Chat ${id}`, status, tags: ['a', 'b'] });
 

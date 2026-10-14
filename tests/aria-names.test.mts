@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
-const SRC = path.resolve(import.meta.dirname, "../web/src");
+const SRC = path.resolve(import.meta.dirname, "../core/web/src");
 
 const sources = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

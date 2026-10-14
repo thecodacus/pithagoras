@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SpeechPipeline, type PreparedSpeech } from '../web/src/speech-pipeline.js';
+import { SpeechPipeline, type PreparedSpeech } from '../core/web/src/speech-pipeline.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 

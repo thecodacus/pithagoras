@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activity, buildTranscript } from '../web/src/transcript.ts';
-import { appendLiveEvent, resetLiveEvents } from '../web/src/live-events.ts';
+import { activity, buildTranscript } from '../core/web/src/transcript.ts';
+import { appendLiveEvent, resetLiveEvents } from '../core/web/src/live-events.ts';
 const done = { seq: 12, type: 'message_end', payload: { streamId: 'reply', message: { role: 'assistant', content: [{type: 'thinking', thinking: 'Plan'}, {type: 'text', text: 'Hello world'}] } } };
 const update = {seq: -1, type: 'message_update', payload: {streamId: 'reply', assistantMessageEvent: {type: 'text_delta', delta: 'Hello'}}};
 test('completed messages replay without saved deltas', () => {
@@ -216,7 +216,7 @@ test('tool calls keep their arguments, output and timing; compaction shows where
   assert.deepEqual(items[1], { kind: 'compaction', id: 'c4', status: 'done', since: 2000, until: 3000, tokensBefore: 90000, summary: 'S' });
 });
 test('a finished reply keeps how long it thought, though the deltas that timed it are gone', async () => {
- const { LiveEvents } = await import('../server/src/live-events.ts');
+ const { LiveEvents } = await import('../core/server/src/live-events.ts');
  let stored: any;
  const live = new LiveEvents((session, type, payload) => (stored = { seq: 1, session_id: session, type, payload: JSON.stringify(payload), created_at: '' }));
  const t0 = Date.now();

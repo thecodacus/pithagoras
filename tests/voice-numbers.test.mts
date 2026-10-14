@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spokenNumbers, NUMBER_PACK_LANGUAGES } from '../server/src/voice-numbers.js';
+import { spokenNumbers, NUMBER_PACK_LANGUAGES } from '../core/server/src/voice-numbers.js';
 
 test('numbers are written out per language, identifiers are left alone', () => {
   assert.equal(spokenNumbers('Die RTX 4070 hat 12 GB.', 'de'), 'Die RTX viertausendsiebzig hat zwölf GB.');

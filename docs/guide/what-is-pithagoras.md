@@ -35,7 +35,7 @@ its own on a schedule, wears an avatar that is the orb in voice mode, and is
 reachable from outside the portal through channels. Where sessions are per-task,
 an agent is continuous. See [Agents](/guide/agents).
 
-**Channels** are two-way links into an agent — Telegram, a webhook, whatever you
+**Channels** are two-way links into an agent — Telegram, Signal, a webhook, whatever you
 write. Messages arrive through a channel and replies go back the same way, and
 every conversation on a channel gets a session of its own. Channel types are
 packages, so adding one is installing a repo rather than patching the portal.
@@ -62,8 +62,8 @@ portal's slash command palette, interactive menus included, and
 **Models** are set up from Settings, without editing files — see
 [Models and providers](/guide/models). **Voice** talks to the agent with local
 speech recognition and synthesis ([Voice control](/guide/voice)). The agent's
-own [browser](/guide/browser), an [Understory memory](/guide/memory) and
-[image generation and editing](/guide/images) are optional add-ons. The portal
+own [browser](/guide/browser), an [Understory memory](/guide/memory),
+image generation and editing and video generation ([Media](/guide/media)) are optional add-ons. The portal
 installs as an app and speaks English and German — see
 [The interface](/guide/interface).
 
@@ -78,12 +78,13 @@ Honest state of things, so you know what you are getting:
 | Slash commands — builtin, extension, prompt, skill | Working |
 | Agents, heartbeat, routines, people and the guard | Working |
 | Files, Git, terminal, canvases, voice, images, model providers | Working |
+| Video generation (stable-diffusion.cpp's server) | Working; the one backend there is |
 | Settings, extension config, package management | Working |
 | Channel packages: loading, installing, configuring | Working |
 | The channel supervisor — starting them, routing replies | Working |
-| The builtin packages against real Telegram/Slack/Discord | Untested |
+| The builtin packages against real Telegram/Slack/Discord/Signal | Untested |
 
 Channels start, resolve each conversation to its own session, and carry the
-reply back. What has not happened is a connection to a real Telegram, Slack or
-Discord account — that needs credentials I could not test with, so treat the
+reply back. What has not happened is a connection to a real Telegram, Slack,
+Discord or Signal account — that needs credentials I could not test with, so treat the
 first one you configure as the real trial.

@@ -1,0 +1,34 @@
+/* In the portal's own colours: its theme is a set of variables on the page, each the three numbers of a colour. */
+.pn-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 12px; padding: 12px; color: rgb(var(--fg)); font-size: 13px; }
+.pn-add { display: flex; gap: 8px; }
+.pn-add input { min-width: 0; flex: 1; border: 1px solid rgb(var(--line)); border-radius: 8px; background: rgb(var(--canvas)); padding: 6px 10px; color: inherit; font: inherit; }
+.pn-add input:focus-visible, .pn-add button:focus-visible, .pn-pin:focus-visible, .pn-list button:focus-visible, .pn-chats button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pn-add button { border: 0; border-radius: 8px; background: rgb(var(--accent)); padding: 6px 12px; color: rgb(var(--accent-fg)); font: inherit; font-weight: 600; cursor: pointer; }
+.pn-add button:disabled { opacity: .4; cursor: default; }
+.pn-empty { margin: 0; padding: 12px; color: rgb(var(--fg-subtle)); font-size: 13px; }
+.pn-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pn-list li { position: relative; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 30px 8px 10px; }
+.pn-list p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pn-by { color: rgb(var(--fg-faint)); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.pn-list button { position: absolute; top: 6px; right: 6px; border: 0; border-radius: 6px; background: none; padding: 2px 6px; color: rgb(var(--fg-faint)); font-size: 11px; cursor: pointer; }
+.pn-list button:hover { color: rgb(var(--fg)); }
+
+/* Like the header's own panel buttons. */
+.pn-pin { border: 1px solid rgb(var(--line)); border-radius: 8px; background: none; padding: 4px 8px; color: rgb(var(--fg-muted)); line-height: 0; cursor: pointer; }
+.pn-pin:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
+.pn-pin svg { width: 14px; height: 14px; }
+
+/* A call of the note tool in the conversation: the note it pinned, where the portal's card for the call would be. */
+.pn-call { display: flex; align-items: flex-start; gap: 10px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 8px 10px; color: rgb(var(--fg)); font-size: 13px; }
+.pn-call > svg { flex: none; width: 14px; height: 14px; margin-top: 3px; color: rgb(var(--accent)); }
+.pn-call > div { min-width: 0; flex: 1; }
+.pn-call p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pn-call button { flex: none; border: 0; border-radius: 6px; background: none; padding: 2px 6px; color: rgb(var(--accent)); font: inherit; font-size: 11px; cursor: pointer; }
+.pn-call button:hover { background: rgb(var(--accent) / .1); }
+
+.pn-page { margin: 0 auto; max-width: 48rem; padding: 24px 16px; color: rgb(var(--fg)); font-size: 14px; }
+.pn-chat { margin-top: 20px; }
+.pn-chat > button { border: 0; background: none; padding: 0 0 6px; color: rgb(var(--fg)); font: inherit; font-weight: 600; cursor: pointer; }
+.pn-chat > button:hover { color: rgb(var(--accent)); }
+.pn-chat > button:focus-visible, .pn-call button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pn-chat .pn-list li { padding-right: 10px; }

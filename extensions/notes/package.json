@@ -1,0 +1,10 @@
+{
+  "name": "pithagoras-notes",
+  "version": "0.2.0",
+  "description": "Notes pinned to a chat, by the agent or by you: the reference for an extension that draws in the Pithagoras portal",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./index.ts"] },
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
+  "license": "Apache-2.0"
+}

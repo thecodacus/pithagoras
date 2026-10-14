@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { orderedInput } from '../web/src/ordered-input.ts';
+import { orderedInput } from '../core/web/src/ordered-input.ts';
 
 /** A send whose completion the test decides, so that keys can be typed while one is out. */
 function held() {

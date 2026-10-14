@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../web/src/slash-palette.ts";
+import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../core/web/src/slash-palette.ts";
 
 const c = (...names: string[]) => names.map((name) => ({ name }));
 

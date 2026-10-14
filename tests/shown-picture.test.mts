@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, shownPicture } from '../web/src/transcript.ts';
-import { describeCall } from '../web/src/tool-activity.ts';
+import { buildTranscript, shownPicture } from '../core/web/src/transcript.ts';
+import { describeCall } from '../core/web/src/tool-activity.ts';
 
-import { GENERATED_PICTURE_MARK } from '../server/src/generated-picture.ts';
+import { GENERATED_PICTURE_MARK } from '../core/server/src/generated-picture.ts';
 
 // What generate_image answers with: the same details show_image's answer has, so one path draws both, and the mark that it is the portal's tool's.
 const generated = { path: 'generated-images/image-20261001-101500-a1b2c3.png', title: 'A lighthouse at dusk', [GENERATED_PICTURE_MARK]: true };

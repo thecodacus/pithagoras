@@ -23,7 +23,7 @@ test('managed networking automatically migrates running containers, preserves st
  const{calls}=docker;
  const oldFetch=globalThis.fetch;globalThis.fetch=async()=>new Response('{}');
  try {
-  const voice=await import('../server/src/extensions/voice-service.ts');
+  const voice=await import('../core/server/src/extensions/voice-service.ts');
   assert.equal((await voice.status()).state,'installing');
   for(let n=0;n<100&&container?.HostConfig?.NetworkMode!=='container:portal-one';n++)await new Promise(r=>setTimeout(r,10));
   for(let n=0;n<100&&(await voice.status()).busy;n++)await new Promise(r=>setTimeout(r,10));

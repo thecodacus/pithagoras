@@ -22,7 +22,7 @@ test('package-lock.json lists the dependencies each package.json does, with the 
 });
 
 test('what the server needs to start is not recorded as a development dependency', () => {
-  for (const name of Object.keys(json('server/package.json').dependencies)) {
+  for (const name of Object.keys(json('core/server/package.json').dependencies)) {
     const entry = lock.packages[`node_modules/${name}`];
     assert.ok(entry, `${name} is in the lock`);
     assert.notEqual(entry.dev, true, `${name} is installed with --omit=dev`);

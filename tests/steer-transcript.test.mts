@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activity, buildTranscript } from '../web/src/transcript.ts';
+import { activity, buildTranscript } from '../core/web/src/transcript.ts';
 
 const delta = (seq: number, text: string) => ({ seq, type: 'message_update', payload: { streamId: 'r', assistantMessageEvent: { type: 'text_delta', delta: text } } });
 const first = { seq: 1, type: 'portal_prompt', payload: { message: 'fix the build' } };

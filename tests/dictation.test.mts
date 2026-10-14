@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cleanTranscript, insertAtCaret } from "../web/src/dictation.ts";
+import { cleanTranscript, insertAtCaret } from "../core/web/src/dictation.ts";
 
 test("silence notes from Whisper are not text", () => {
   for (const note of ["[BLANK_AUDIO]", " (silence) ", "[Music]", "[BLANK_AUDIO] [BLANK_AUDIO]", "(laughs) [applause]"]) {

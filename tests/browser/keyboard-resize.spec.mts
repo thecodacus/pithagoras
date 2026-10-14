@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
-import { DEFAULT_ORB } from '../../server/src/orb-style';
+import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
 /**
  * What a keyboard can do that a pointer does: go through a list of tabs with the arrow keys, and size the panels, the

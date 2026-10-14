@@ -4,10 +4,10 @@
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_VAD } from '../web/src/api.ts';
-import { FRAME_MS, TurnEnd, type SmartTurnSettings } from '../web/src/smart-turn.ts';
-import { smartTurnModel } from '../web/src/smart-turn-model.ts';
-import { downloadSmartTurn } from '../web/scripts/smart-turn-model.mjs';
+import { DEFAULT_VAD } from '../core/web/src/api.ts';
+import { FRAME_MS, TurnEnd, type SmartTurnSettings } from '../core/web/src/smart-turn.ts';
+import { smartTurnModel } from '../core/web/src/smart-turn-model.ts';
+import { downloadSmartTurn } from '../core/web/scripts/smart-turn-model.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const require = createRequire(path.join(root, 'web/package.json'));
@@ -46,7 +46,7 @@ export function join(...parts: Float32Array[]): Float32Array {
 let model: Promise<(window: Float32Array) => Promise<number>> | undefined;
 /** Smart Turn, the file the web build serves, on the same runtime the browser uses. */
 export function smartTurn() {
-  return model ??= downloadSmartTurn(path.join(root, 'web/public/voice-assets')).then(file => smartTurnModel(readFileSync(file), `${ortDir}/`));
+  return model ??= downloadSmartTurn(path.join(root, 'core/web/public/voice-assets')).then(file => smartTurnModel(readFileSync(file), `${ortDir}/`));
 }
 
 export interface Run {

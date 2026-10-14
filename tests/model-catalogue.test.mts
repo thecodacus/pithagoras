@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 const store = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) };
-const { CATALOGUE_TTL_MS, cacheModels, cachedModels, catalogueFresh, forgetModels } = await import('../web/src/model-catalogue.ts');
+const { CATALOGUE_TTL_MS, cacheModels, cachedModels, catalogueFresh, forgetModels } = await import('../core/web/src/model-catalogue.ts');
 
 const models = [{ id: 'qwen', name: 'Qwen', provider: 'llama-swap' }] as any[];
 

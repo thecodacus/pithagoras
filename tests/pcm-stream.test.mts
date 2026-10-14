@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { preparePcmSpeech, readPcmStream } from '../web/src/pcm-stream.js';
-import { stretch } from '../web/src/time-stretch.js';
-import { addLocale, setLanguage } from '../web/src/i18n.js';
+import { preparePcmSpeech, readPcmStream } from '../core/web/src/pcm-stream.js';
+import { stretch } from '../core/web/src/time-stretch.js';
+import { addLocale, setLanguage } from '../core/web/src/i18n.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function audio() {
   const sources: any[] = [];

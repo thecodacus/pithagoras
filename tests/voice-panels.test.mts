@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { latestBrowserActivity, latestTerminalActivity } from '../web/src/voice-browser.js';
-import { terminalRuns } from '../web/src/components/VoiceTerminal.js';
+import { latestBrowserActivity, latestTerminalActivity } from '../core/web/src/voice-browser.js';
+import { terminalRuns } from '../core/web/src/components/VoiceTerminal.js';
 
 test('only browser tool calls activate the browser; plain mentions and old text do not', () => {
   const events = [
@@ -37,7 +37,7 @@ test('a shell tool called through MCP is a run, and one its run left open is set
 });
 
 test('files and pictures take the side first, and the middle when the side is taken', async () => {
-  const { placeWindows } = await import('../web/src/voice-windows.js');
+  const { placeWindows } = await import('../core/web/src/voice-windows.js');
   const none = { browser: false, terminal: false, files: false, pictures: false };
   assert.deepEqual(placeWindows({ ...none, pictures: true }), { main: undefined, side: 'pictures' });
   assert.deepEqual(placeWindows({ ...none, files: true, terminal: true }), { main: 'files', side: 'terminal' });
@@ -51,7 +51,7 @@ test('files and pictures take the side first, and the middle when the side is ta
 });
 
 test('the orb stands in the widest gap the windows leave, when it fits', async () => {
-  const { freeStrip } = await import('../web/src/voice-windows.ts');
+  const { freeStrip } = await import('../core/web/src/voice-windows.ts');
   const stage = { left: 100, right: 1100 };
   // Two windows with 400px between them: the orb goes in the middle of it.
   assert.deepEqual(freeStrip(stage, [{ left: 100, right: 400 }, { left: 800, right: 1100 }]), { center: 600, width: 400 });
@@ -64,7 +64,7 @@ test('the orb stands in the widest gap the windows leave, when it fits', async (
 });
 
 test('a window the orb comes back to its dock under is made to end above the dock', async () => {
-  const { clearOfDock, dockBox } = await import('../web/src/voice-windows.ts');
+  const { clearOfDock, dockBox } = await import('../core/web/src/voice-windows.ts');
   const size = { width: 520, height: 80, middle: 50, inset: 16 };
   const dock = dockBox({ left: 0, top: 0, right: 1000, bottom: 800 }, size);
   // 520px wide in the middle, its top 90px above the stage's bottom.
@@ -82,7 +82,7 @@ test('a window the orb comes back to its dock under is made to end above the doc
 });
 
 test('a window dragged by a corner stops at a window off that corner, by the edge that gives up less', async () => {
-  const { clear } = await import('../web/src/components/ResizeHandles.tsx');
+  const { clear } = await import('../core/web/src/components/ResizeHandles.tsx');
   const a = { left: 0, top: 0, right: 300, bottom: 300 };
   const b = { left: 400, top: 420, right: 700, bottom: 700 };
   const overlaps = (x: typeof a, y: typeof a) => x.left < y.right && x.right > y.left && x.top < y.bottom && x.bottom > y.top;

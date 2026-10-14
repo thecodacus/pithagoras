@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COMPACTION_PHRASES, HandsFreeVoice, THINKING_PHRASES, type VoiceIO } from '../web/src/hands-free.js';
-import { addLocale, setLanguage } from '../web/src/i18n.js';
-import { samplesWav } from '../web/src/voice.js';
+import { COMPACTION_PHRASES, HandsFreeVoice, THINKING_PHRASES, type VoiceIO } from '../core/web/src/hands-free.js';
+import { addLocale, setLanguage } from '../core/web/src/i18n.js';
+import { samplesWav } from '../core/web/src/voice.js';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 const reply = (id: string, done = true) => ({ kind: 'assistant' as const, id, text: 'A spoken answer.', thinking: '', done });

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript } from '../web/src/transcript.ts';
-import { argLabel, argsSummary } from '../web/src/tool-args.ts';
-import { argsSummary as serverSummary, describeToolCall } from '../server/src/tool-summary.ts';
+import { buildTranscript } from '../core/web/src/transcript.ts';
+import { argLabel, argsSummary } from '../core/web/src/tool-args.ts';
+import { argsSummary as serverSummary, describeToolCall } from '../core/server/src/tool-summary.ts';
 
 const call = (toolName: string, args: unknown) => ({ seq: 1, type: 'tool_execution_start', payload: { toolCallId: 't', toolName, args } });
 const detail = (toolName: string, args: unknown) => (buildTranscript([call(toolName, args)])[0] as any).detail;
@@ -49,7 +49,22 @@ test('a channel says a call the way the chat does', () => {
 test('nothing in the page is written in a way older Safari cannot read', async () => {
   // A regex lookbehind is a syntax error in Safari before 16.4, where the whole bundle then failed to load.
   const { readdirSync, readFileSync } = await import('node:fs');
-  const files = (readdirSync('web/src', { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
-  const found = files.filter((f) => /\(\?<[!=]/.test(readFileSync(`web/src/${f}`, 'utf8')));
+  const files = (readdirSync('core/web/src', { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
+  const found = files.filter((f) => /\(\?<[!=]/.test(readFileSync(`core/web/src/${f}`, 'utf8')));
   assert.deepEqual(found, []);
+});
+
+test('a channel says a call through the tools tool as the tool it calls, and a search of the lazy tools as it is', () => {
+  // The lazy tools are reached through `tools`: the line is the tool and what it was given, as for a direct call.
+  assert.deepEqual(
+    describeToolCall({ toolName: 'tools', args: { action: 'call', name: 'browser_navigate', args: { url: 'https://example.com' } } }),
+    describeToolCall({ toolName: 'browser_navigate', args: { url: 'https://example.com' } }),
+  );
+  assert.deepEqual(
+    describeToolCall({ toolName: 'tools', args: { action: 'call', name: 'browser_navigate', args: '{"url":"https://example.com"}' } }),
+    { name: 'browser_navigate', detail: 'https://example.com' },
+  );
+  assert.deepEqual(describeToolCall({ toolName: 'tools', args: { action: 'call', name: 'browser_back' } }), { name: 'browser_back', detail: undefined });
+  // A search calls nothing, so it stays a line of `tools`.
+  assert.equal(describeToolCall({ toolName: 'tools', args: { action: 'search', query: 'pdf' } }).name, 'tools');
 });

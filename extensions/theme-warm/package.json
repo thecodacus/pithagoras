@@ -1,0 +1,47 @@
+{
+  "name": "pithagoras-theme-warm",
+  "version": "0.1.0",
+  "description": "Warm: warm greys, browns and an orange accent for the Pithagoras portal, in light and dark. Only a theme: no code",
+  "keywords": ["pi-package"],
+  "pithagoras": {
+    "themes": [
+      {
+        "id": "warm",
+        "name": "Warm",
+        "dark": {
+          "canvas": "#161412",
+          "surface": "#1e1b19",
+          "raised": "#292623",
+          "line": "#3a3632",
+          "fg": "#f3efe9",
+          "fg-muted": "#c4b9aa",
+          "fg-subtle": "#aea394",
+          "fg-faint": "#a5998d",
+          "accent": "#d97757",
+          "accent-fg": "#161412",
+          "ok": "#86c48f",
+          "warn": "#e5b567",
+          "danger": "#f58b7e",
+          "terminal": "#100e0d",
+          "terminal-fg": "#e6e0d6"
+        },
+        "light": {
+          "canvas": "#faf9f5",
+          "surface": "#ffffff",
+          "raised": "#f0eee6",
+          "line": "#e0dcd0",
+          "fg": "#29261f",
+          "fg-muted": "#52493e",
+          "fg-subtle": "#5f564a",
+          "fg-faint": "#6a6155",
+          "accent": "#a8441c",
+          "accent-fg": "#ffffff",
+          "ok": "#1f7340",
+          "warn": "#8c5806",
+          "danger": "#b3301f"
+        }
+      }
+    ]
+  },
+  "license": "Apache-2.0"
+}

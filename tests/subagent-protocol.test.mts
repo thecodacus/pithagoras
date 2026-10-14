@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {bridgeSubagents} from '../server/src/subagent-protocol.ts';
+import {bridgeSubagents} from '../core/server/src/subagent-protocol.ts';
 const bus=()=>{const h=new Map<string,((d:unknown)=>void)[]>();return{emit:(c:string,d:unknown)=>h.get(c)?.forEach(f=>f(d)),on:(c:string,f:(d:unknown)=>void)=>{h.set(c,[...(h.get(c)??[]),f]);return()=>h.set(c,(h.get(c)??[]).filter(x=>x!==f));}};};
 test('a subagent an extension announces reaches the portal as session events',()=>{
  const b=bus();const out:any[]=[];const off=bridgeSubagents(b,e=>out.push(e));

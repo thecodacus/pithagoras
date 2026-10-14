@@ -1,0 +1,23 @@
+{
+  "name": "pithagoras-docs",
+  "version": "0.1.0",
+  "description": "Documents in a chat's folder, on a page of their own in the Pithagoras portal",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@milkdown/core": "7.22.3",
+    "@milkdown/ctx": "7.22.3",
+    "@milkdown/plugin-history": "7.22.3",
+    "@milkdown/plugin-listener": "7.22.3",
+    "@milkdown/preset-commonmark": "7.22.3",
+    "@milkdown/preset-gfm": "7.22.3",
+    "@milkdown/prose": "7.22.3",
+    "@milkdown/utils": "7.22.3"
+  },
+  "license": "Apache-2.0"
+}

@@ -1,6 +1,6 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import { pollWhileVisible, reconnectDelay, type Visibility } from "../web/src/poll.ts";
+import { pollWhileVisible, reconnectDelay, type Visibility } from "../core/web/src/poll.ts";
 
 function fakeDocument() {
   const listeners = new Set<() => void>();

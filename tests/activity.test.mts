@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {activity,shownFrom} from '../web/src/transcript.ts';
+import {activity,shownFrom} from '../core/web/src/transcript.ts';
 const event=(type:string,at:number,payload:any={})=>({type,at,payload,seq:at});
 test('empty assistant events retain prefill percentage and stable elapsed start',()=>{
  const events=[event('portal_prompt',100),event('message_start',110,{message:{role:'assistant'}}),event('portal_prefill',120,{total:10000,processed:3000,cache:1000}),event('message_update',130,{assistantMessageEvent:{type:'start'}})];

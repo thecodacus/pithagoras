@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inProcessHome } from './helpers.mts';
 inProcessHome('voice-presets-');
-const {addVoice,readVoice,listVoices,updateVoice,deleteVoice,VoiceNotFound}=await import('../server/src/voice-presets.js');
-const {getDb}=await import('../server/src/db.js');
-const {validateConfig}=await import('../server/src/api/voice.js');
-const {samplesWav}=await import('../web/src/voice.ts');
+const {addVoice,readVoice,listVoices,updateVoice,deleteVoice,VoiceNotFound}=await import('../core/server/src/voice-presets.js');
+const {getDb}=await import('../core/server/src/db.js');
+const {validateConfig}=await import('../core/server/src/api/voice.js');
+const {samplesWav}=await import('../core/web/src/voice.ts');
 test('reference voices persist audio privately and can be selected for synthesis',async()=>{
  const audio=Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
  const voice=addVoice({name:'Test clone',kind:'clone',instruction:'Warm delivery',transcript:'A reference line',audio});

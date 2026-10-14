@@ -8,9 +8,10 @@
 .git
 .env*
 voice-runtime
+core/server/dist
+core/web/dist
+core/web/public/voice-assets
 server/dist
-web/dist
-web/public/voice-assets
 docs/.vitepress/dist
 docs/.vitepress/cache
 playwright-report

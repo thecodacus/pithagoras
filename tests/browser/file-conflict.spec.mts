@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply } from './portal-mock';
-import { DEFAULT_ORB } from '../../server/src/orb-style';
+import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
 /**
  * The agent writes MEMORY.md and a project's AGENTS.md while their pages are

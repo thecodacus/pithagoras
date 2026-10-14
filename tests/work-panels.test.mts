@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { settlePanels } from '../web/src/use-work-panels.js';
+import { settlePanels } from '../core/web/src/use-work-panels.js';
 
 test('two panels stay open as they are', () => {
   assert.deepEqual(settlePanels([], ['terminal', 'files']), { order: ['terminal', 'files'], close: [] });

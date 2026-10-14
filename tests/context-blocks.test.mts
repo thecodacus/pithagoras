@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CONTEXT_BLOCKS, splitContext } from "../web/src/context-blocks.ts";
+import { CONTEXT_BLOCKS, splitContext } from "../core/web/src/context-blocks.ts";
 
 const speaker = "<speaker>\nThis message is from Kim, who is not Sam.\n</speaker>";
 const notes = "<sent-since-you-last-spoke>\nThey were sent while idle.\n</sent-since-you-last-spoke>";

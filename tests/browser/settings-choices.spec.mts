@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
-import { DEFAULT_ORB } from '../../server/src/orb-style';
+import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
 /**
  * What the Settings pages and the audit page say to a screen reader about their

@@ -47,8 +47,8 @@ const oldFetch = globalThis.fetch;
 // The voice processes answer their health checks.
 globalThis.fetch = (async () => new Response('{}')) as typeof fetch;
 after(() => { globalThis.fetch = oldFetch; });
-const voice = await import('../server/src/extensions/voice-service.js');
-const { parseGpus, askedCard, holds, deviceId, cardOf } = await import('../server/src/voice-gpu.js');
+const voice = await import('../core/server/src/extensions/voice-service.js');
+const { parseGpus, askedCard, holds, deviceId, cardOf } = await import('../core/server/src/voice-gpu.js');
 voice.hostReader.read = () => ({ totalMiB: 16384, freeMiB: 12000, threads: 8 });
 
 const reset = () => { container = null; reading = SMI; docker.reset(); voice.useGpu(''); delete process.env.VOICE_GPU; };
@@ -297,8 +297,8 @@ test('a service pinned to a card that was taken out is made again on one that is
 
 test('PUT /api/voice/gpu is how a card is chosen: it stores the UUID, moves a running service, and refuses a card that is not there', async () => {
   reset();
-  const { voiceRouter } = await import('../server/src/api/voice.js');
-  const { getDb } = await import('../server/src/db.js');
+  const { voiceRouter } = await import('../core/server/src/api/voice.js');
+  const { getDb } = await import('../core/server/src/db.js');
   const app = express(); app.use(express.json()); app.use('/api', voiceRouter());
   const api = app.listen(0, '127.0.0.1'); await new Promise<void>(r => api.once('listening', r));
   const base = `http://127.0.0.1:${(api.address() as any).port}/api`;

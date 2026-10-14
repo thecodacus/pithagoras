@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TimeStretch, stretch, stretchInSteps } from '../web/src/time-stretch.js';
+import { TimeStretch, stretch, stretchInSteps } from '../core/web/src/time-stretch.js';
 
 const RATE = 24000;
 const tone = (seconds: number, hz: number) => Float32Array.from({ length: Math.round(seconds * RATE) }, (_, i) => 0.5 * Math.sin(2 * Math.PI * hz * i / RATE));

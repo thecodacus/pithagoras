@@ -20,13 +20,13 @@ const {
   understoryIn,
   understoryOn,
   understoryTokenOf,
-} = await import("../server/src/features.ts");
-const { extraContextFiles } = await import("../server/src/pi/sdk-client.ts");
+} = await import("../core/server/src/features.ts");
+const { extraContextFiles } = await import("../core/server/src/pi/sdk-client.ts");
 
 test("a stranger at the memory's model route is turned away, and no key is made for the asking", async () => {
   const express = (await import("express")).default;
-  const llm = await import("../server/src/memory-llm.ts");
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const llm = await import("../core/server/src/memory-llm.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   assert.equal(service.existingLlmToken(), undefined, "none made yet");
   const app = express().use(llm.memoryLlmRouter(async () => undefined));
   const portal = app.listen(0, "127.0.0.1");
@@ -120,7 +120,7 @@ test("while Understory is the memory, MEMORY.md is not read; switched off, it is
 test("the memory is read through the portal: only Understory's read API, with its token, and only while it is on", async () => {
   const { createServer } = await import("node:http");
   const express = (await import("express")).default;
-  const { memoryRouter } = await import("../server/src/api/memory.ts");
+  const { memoryRouter } = await import("../core/server/src/api/memory.ts");
   const asked: { url: string; auth?: string }[] = [];
   const understory = createServer((req, res) => {
     asked.push({ url: req.url!, auth: req.headers.authorization });
@@ -169,7 +169,7 @@ test("the memory is read through the portal: only Understory's read API, with it
 });
 
 test("the Understory the portal runs: its model from a provider or an address of its own, its tidying up, a token of its own", async () => {
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   assert.equal(service.intervalMs("6h"), 6 * 3_600_000);
   assert.equal(service.intervalMs("sometimes"), null);
   assert.equal(service.validInterval(""), true, "never is an interval too");
@@ -224,7 +224,7 @@ test("the portal's own Understory is written with its token; one run elsewhere n
 });
 
 test("tidying up at a set time: the next time it comes round, Understory's own timer off, the report read from what the pass printed", async () => {
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   assert.equal(service.validTime("03:00"), true);
   assert.equal(service.validTime(""), true);
   assert.equal(service.validTime("3am"), false);
@@ -252,8 +252,8 @@ test("tidying up at a set time: the next time it comes round, Understory's own t
 test("Understory thinking with the chat's model: the chat whose memory tool runs, its model, its key, the answer streamed back", async () => {
   const { createServer } = await import("node:http");
   const express = (await import("express")).default;
-  const llm = await import("../server/src/memory-llm.ts");
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const llm = await import("../core/server/src/memory-llm.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
 
   llm.forgetAsking();
   llm.noteToolCall("chat-a", "r1", "read", "start");
@@ -356,7 +356,7 @@ test("Understory thinking with the chat's model: the chat whose memory tool runs
 });
 
 test("a note changed by hand is one of its own: absolute, markdown, not Understory's index or log, and not outside the bundle", async () => {
-  const { notePath } = await import("../server/src/api/memory.ts");
+  const { notePath } = await import("../core/server/src/api/memory.ts");
   assert.equal(notePath("/people/owner.md"), "/people/owner.md");
   assert.equal(notePath("people/owner.md"), undefined);
   assert.equal(notePath("/people/owner.txt"), undefined);
@@ -367,7 +367,7 @@ test("a note changed by hand is one of its own: absolute, markdown, not Understo
 });
 
 test("what a model says it did is kept to one plain line: its first sentence, without the markdown", async () => {
-  const { firstLine } = await import("../server/src/extensions/understory-service.ts");
+  const { firstLine } = await import("../core/server/src/extensions/understory-service.ts");
   assert.equal(firstLine("The orphan is resolved — the graph is now healthy (4 concepts).\n\n## What changed\n\n- a"), "The orphan is resolved — the graph is now healthy (4 concepts).");
   assert.equal(firstLine("**Fixed** the link from [branches](/deployment/branches.md). More."), "Fixed the link from branches.");
   assert.equal(firstLine("x".repeat(300)).length, 160);
@@ -375,7 +375,7 @@ test("what a model says it did is kept to one plain line: its first sentence, wi
 });
 
 test("what is handed to Understory is measured as it travels: UTF-8, base64, in one variable of at most 128 KiB", async () => {
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   const note = (body: string) => ({ path: "/a.md", frontmatter: { type: "T", title: "A" }, body, summary: "x" });
   assert.equal(service.fitsInEnv(note("a".repeat(90_000))), true);
   assert.equal(service.fitsInEnv(note("a".repeat(99_000))), false, "under 100 000 characters, over the limit once base64'd");
@@ -384,8 +384,8 @@ test("what is handed to Understory is measured as it travels: UTF-8, base64, in 
 });
 
 test("background subagents the last server left running are found by their start without an end", async () => {
-  const { appendEvent, openDetachedSubagents } = await import("../server/src/db.ts");
-  const { createSession } = await import("../server/src/db.ts");
+  const { appendEvent, openDetachedSubagents } = await import("../core/server/src/db.ts");
+  const { createSession } = await import("../core/server/src/db.ts");
   createSession({ id: "bg-chat", title: "t", workspace: "/w", executor: "host", kind: "task" });
   appendEvent("bg-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "done-one", detached: true });
   appendEvent("bg-chat", "portal_subagent", { type: "portal_subagent", op: "end", id: "done-one", detached: true, status: "done" });
@@ -395,7 +395,7 @@ test("background subagents the last server left running are found by their start
 });
 
 test("a saved key goes with the same address only, and what was saved before can be put back as it was", async () => {
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://a/v1", model: "m", format: "openai", apiKey: "sk-a" }, dreamInterval: "", dreamAt: "" });
   assert.equal((service.withSavedKey({ source: "custom", baseUrl: "https://a/v1", model: "n", format: "openai" }) as any).apiKey, "sk-a");
   assert.equal((service.withSavedKey({ source: "custom", baseUrl: "https://b/v1", model: "n", format: "openai" }) as any).apiKey, undefined);
@@ -406,8 +406,8 @@ test("a saved key goes with the same address only, and what was saved before can
 });
 
 test("the page is shown the three defaults it edits, and nothing else the settings table keeps", async () => {
-  const { setSettings, shownStoredSettings } = await import("../server/src/db.ts");
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const { setSettings, shownStoredSettings } = await import("../core/server/src/db.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   service.token();
   service.llmToken();
   service.saveConfig({ llm: { source: "custom", baseUrl: "https://a/v1", model: "m", format: "openai", apiKey: "sk-secret" }, dreamInterval: "", dreamAt: "" });
@@ -418,7 +418,7 @@ test("the page is shown the three defaults it edits, and nothing else the settin
 });
 
 test("the chat's model for the memory is off only when the portal really serves its own TLS: both files named, and there", async () => {
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   const cert = path.join(temp, "cert.pem");
   const key = path.join(temp, "key.pem");
   process.env.PORTAL_TLS_CERT = cert;
@@ -435,14 +435,14 @@ test("the chat's model for the memory is off only when the portal really serves 
 });
 
 test("the portal's Understory shares the portal's network and says it is the portal's", async () => {
-  const service = await import("../server/src/extensions/understory-service.ts");
+  const service = await import("../core/server/src/extensions/understory-service.ts");
   const made = service.spec({ llm: { source: "custom", baseUrl: "http://gpu/v1", model: "m", format: "openai" }, dreamInterval: "", dreamAt: "" }, "t", "container:abc");
   assert.equal(made.HostConfig.NetworkMode, "container:abc");
   assert.deepEqual(made.Labels, { [service.LABEL]: "understory" });
 });
 
 test("a package pi lists by its folder is found as a full path, ~ for home included", async () => {
-  const { localPackagePath } = await import("../server/src/features.ts");
+  const { localPackagePath } = await import("../core/server/src/features.ts");
   const home = process.env.HOME;
   process.env.HOME = "/home/someone";
   try {
@@ -455,7 +455,7 @@ test("a package pi lists by its folder is found as a full path, ~ for home inclu
 });
 
 test("background subagents open in a chat are kept in step with their starts and ends, and dropped with the chat", async () => {
-  const { appendEvent, openSubagentsIn, createSession, deleteSession } = await import("../server/src/db.ts");
+  const { appendEvent, openSubagentsIn, createSession, deleteSession } = await import("../core/server/src/db.ts");
   createSession({ id: "open-chat", title: "t", workspace: "/w", executor: "host", kind: "task" });
   appendEvent("open-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "a", detached: true });
   appendEvent("open-chat", "portal_subagent", { type: "portal_subagent", op: "start", id: "b", detached: true });

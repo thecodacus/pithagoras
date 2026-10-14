@@ -8,13 +8,13 @@ import { inProcessHome } from "./helpers.mts";
 
 const temp = inProcessHome("pitha-images-");
 
-const { getSetting, putSetting } = await import("../server/src/db.ts");
-const gen = await import("../server/src/image-generation.ts");
-const { GENERATED_PICTURE_MARK } = await import("../server/src/generated-picture.ts");
-const { GenerateImageTool, takenByAnother } = await import("../server/src/pi/generate-image-tool.ts");
-const { GENERATED_DIR } = await import("../server/src/image-gallery.ts");
-const editing = await import("../server/src/image-editing.ts");
-const { EditImageTool, editedName } = await import("../server/src/pi/edit-image-tool.ts");
+const { getSetting, putSetting } = await import("../core/server/src/db.ts");
+const gen = await import("../core/server/src/image-generation.ts");
+const { GENERATED_PICTURE_MARK } = await import("../core/server/src/generated-picture.ts");
+const { GenerateImageTool, takenByAnother } = await import("../core/server/src/pi/generate-image-tool.ts");
+const { GENERATED_DIR } = await import("../core/server/src/image-gallery.ts");
+const editing = await import("../core/server/src/image-editing.ts");
+const { EditImageTool, editedName } = await import("../core/server/src/pi/edit-image-tool.ts");
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads.
 const pad = (head: number[], to = 64) => Buffer.concat([Buffer.from(head), Buffer.alloc(to)]);
@@ -88,7 +88,7 @@ test("a request is checked: the address is a base with no secret in it, the size
     assert.equal(typeof parse({ baseUrl: bad }), "string", bad);
   }
   assert.equal(typeof parse({ size: "huge" }), "string");
-  // A default size is one the Images page takes as well: each side from 64 to 8192, or auto.
+  // A default size is one the Media page takes as well: each side from 64 to 8192, or auto.
   for (const bad of ["16x16", "99999x99999", "63x64", "1024x8193"]) assert.match(String(parse({ size: bad })), /each side from 64 to 8192/, bad);
   for (const good of ["auto", "64x64", "8192x8192", " 1024x768 "]) assert.equal((parse({ size: good }) as { size: string }).size, good.trim(), good);
   assert.equal((parse({ size: "  " }) as { size: string }).size, "", "emptied is the way back to none");
@@ -516,7 +516,7 @@ test("the tool fails loudly: a bad ask, an endpoint with no picture, an add-on s
 
 test("the API holds the settings, never gives the key back, and reloads chats only when the tool comes or goes", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -557,7 +557,7 @@ test("the API holds the settings, never gives the key back, and reloads chats on
 });
 
 test("the tool menus do not offer generate_image while the add-on is off, though it is remembered for when it is on", async () => {
-  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../core/server/src/db.ts");
   // As a chat that had the tool reports it: no package of the user's brings it, and pi names its extension <inline:…>.
   rememberTools([
     remembered({ name: "generate_image", source: "image-generation", inline: true }),
@@ -591,7 +591,7 @@ test("the tool menus do not offer generate_image while the add-on is off, though
 });
 
 test("the portal's tool is not filed under an image package that was switched off to make way for it", async () => {
-  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../core/server/src/db.ts");
   const settings = path.join(process.env.PI_CODING_AGENT_DIR!, "settings.json");
   const names = () => shownTools().map((t) => t.name).filter((n) => n === "generate_image");
   try {
@@ -934,12 +934,12 @@ test("a picture that takes longer than the old limit is waited for, one past the
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 1 }), { prompt: "p" }), (e: Error) => {
       assert.ok(e instanceof gen.ImageGenerationError);
       assert.match(e.message, /did not answer within 1 seconds/, "it names the limit");
-      assert.match(e.message, /time limit in Settings → Agent → Images/, "and where to change it");
+      assert.match(e.message, /time limit in Settings → Agent → Media/, "and where to change it");
       return true;
     });
     // Editing has the same limit, from its target.
     assert.equal((await editing.editImage(target(origin, { timeoutSeconds: 3 }), { prompt: "p", image: PNG })).ext, "png");
-    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Images/);
+    await assert.rejects(editing.editImage(target(origin, { timeoutSeconds: 1 }), { prompt: "p", image: PNG }), /did not answer within 1 seconds.*time limit in Settings → Agent → Media/);
     // An explicit limit of the call still wins, as the tests above use it.
     await assert.rejects(gen.generateImage(config(origin, { timeoutSeconds: 3 }), { prompt: "p" }, { timeoutMs: 150 }), /did not answer within 0 seconds/);
   } finally {
@@ -1336,8 +1336,8 @@ test("an endpoint that takes one picture gets a tool with one path, and one that
   const one = loadEdit(folder).registered[0];
   assert.deepEqual(Object.keys(one.parameters.properties).sort(), ["path", "prompt", "title"], "off: the tool is as it was");
   assert.deepEqual(one.parameters.required.sort(), ["path", "prompt"]);
-  assert.doesNotMatch(one.description, /order of the list|\bpaths\b/);
-  assert.match(one.description, /reference for a new picture/, "one picture can be the reference for a new one");
+  assert.doesNotMatch(one.description, /place in the list|\bpaths\b/);
+  assert.match(one.description, /make a new one from it as reference/, "one picture can be the reference for a new one");
 
   gen.saveImageGeneration({ editMultiple: true });
   const many = loadEdit(folder).registered[0];
@@ -1348,9 +1348,9 @@ test("an endpoint that takes one picture gets a tool with one path, and one that
   assert.equal(many.parameters.properties.paths.items.type, "string");
   assert.equal(many.parameters.properties.paths.minItems, 1);
   assert.equal(many.parameters.properties.paths.maxItems, editing.MAX_EDIT_PICTURES);
-  assert.match(many.description, /order of the list/, "the model is told how it says which is which");
-  assert.match(many.description, /by place/);
-  assert.match(many.description, /if one is refused, none is sent/);
+  assert.match(many.description, /only by their place in the list/, "the model is told how it says which is which");
+  assert.match(many.description, /"the first picture", "the second picture"/);
+  assert.match(many.description, /refused by name, and then none is sent/);
   assert.ok(!JSON.stringify(many).includes("sk-"));
 
   // Several with editing off is no tool at all.
@@ -1364,20 +1364,22 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   const folder = chatWith();
   gen.saveImageGeneration({ baseUrl: "https://images.example.com/v1", editEnabled: true });
   const one = loadEdit(folder).registered[0];
-  assert.match(one.description, /set up to take ONE picture per edit/, "the limit is said, not left out");
-  assert.match(one.description, /do not make the edit with one of them as if it were all/, "no picture is dropped without a word");
-  assert.match(one.description, /Settings → Agent → Images \(Several pictures per edit\)/, "and where several are switched on");
-  assert.match(one.description, /reference for a new picture/, "one reference picture is still what it can be given");
-  const attached = /attached to a message is not a file in the chat's folder, so it cannot be given here[^]*Files panel[^]*Images page/;
+  assert.match(one.description, /takes ONE picture per edit/, "the limit is said, not left out");
+  assert.match(one.description, /do not edit with one of them; say so/, "no picture is dropped without a word");
+  assert.match(one.description, /Settings → Agent → Media \(Several pictures per edit\)/, "and where several are switched on");
+  assert.match(one.description, /make a new one from it as reference/, "one reference picture is still what it can be given");
+  const attached = /only attached to a message is not in the folder and cannot be used[^]*Files panel[^]*Media page[^]*never guess a path/;
   assert.match(one.description, attached, "a picture only attached to a message has no path: the agent says so rather than guess one");
 
   // With several taken, the same sentence is not there, and the limits are: the count and the weight.
   gen.saveImageGeneration({ editMultiple: true });
   const many = loadEdit(folder).registered[0];
-  assert.doesNotMatch(many.description, /ONE picture|as if it were all/);
-  assert.match(many.description, new RegExp(`one to ${editing.MAX_EDIT_PICTURES} pictures`));
+  assert.doesNotMatch(many.description, /ONE picture|do not edit with one of them/);
+  assert.match(many.description, new RegExp(`1 to ${editing.MAX_EDIT_PICTURES} pictures`));
   assert.match(many.description, new RegExp(`at most ${editing.MAX_EDIT_TOTAL_BYTES / 1024 / 1024} MB`));
-  assert.match(many.description, /size limit set for edits, or too heavy, is scaled down to fit.*one that cannot be made to fit is refused, and the error names it/);
+  assert.match(many.description, /cannot be scaled to fit is refused by name, and then none is sent/);
+  // The scaling is said once, for both shapes, with what the model is to do about it.
+  for (const description of [one.description, many.description]) assert.match(description, /over the limits is scaled down first and the result says so: tell the person/);
   assert.match(many.description, attached, "and the same for a list: attached pictures cannot be named in it");
   reset();
 });
@@ -1391,7 +1393,7 @@ test("a list of pictures for an endpoint that takes one is refused before anythi
     // A call that was loaded when several were on, or by a model that sends a list anyway: asked of the setting as it is now.
     await assert.rejects(
       loadEdit(folder).call({ paths: ["a.png", "b.jpg", "c.gif"], prompt: "p" }),
-      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Images/,
+      /not set up to take several pictures, so none was sent \(3 were given\)\. .*"Several pictures per edit" can be switched on in Settings → Agent → Media/,
     );
     assert.equal(seen.length, 0, "nothing reached the endpoint");
     assert.deepEqual(readdirSync(folder).sort(), ["a.png", "b.jpg", "c.gif"], "and nothing was written");
@@ -1508,7 +1510,7 @@ test("the setting is read at each call: a list is refused once the endpoint is n
 
 test("the API holds the edit settings, never gives a key back, and reloads chats when the edit tool comes or goes", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -1548,7 +1550,7 @@ test("the API holds the edit settings, never gives a key back, and reloads chats
 
 test("the API says whether several pictures are taken, and reloads chats when that changes the edit tool", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -1581,8 +1583,8 @@ test("the API says whether several pictures are taken, and reloads chats when th
 });
 
 test("a tool rule for edit_image is matched on each picture, whether it is named by path or by a list, never on the list's JSON", async () => {
-  const { ruleAllows, guardExtension } = await import("../server/src/pi/guard.ts");
-  const { addToolRule, deleteToolRule, listToolRules } = await import("../server/src/db.ts");
+  const { ruleAllows, guardExtension } = await import("../core/server/src/pi/guard.ts");
+  const { addToolRule, deleteToolRule, listToolRules } = await import("../core/server/src/db.ts");
   const rule = (pattern: string, more: Record<string, unknown> = {}) =>
     ({ id: `r-${pattern}`, role: "colleague", tool: "edit_image", pattern, note: "", created_at: "", person_key: null, ...more }) as Parameters<typeof ruleAllows>[0][number];
   const allows = (rules: ReturnType<typeof rule>[], input: Record<string, unknown>, role = "colleague") => ruleAllows(rules, role, "edit_image", input);
@@ -1650,10 +1652,10 @@ test("a tool rule for edit_image is matched on each picture, whether it is named
 });
 
 test("a colleague's edit_image call can be approved once or always, with the action the guard asks for, in either shape of the tool", async () => {
-  const { guardExtension, callSubject, rulePatterns } = await import("../server/src/pi/guard.ts");
-  const { deleteToolRule, listToolRules } = await import("../server/src/db.ts");
-  const { askQuestion, readAnswer } = await import("../server/src/questions.ts");
-  const { recordApproval } = await import("../server/src/approvals.ts");
+  const { guardExtension, callSubject, rulePatterns } = await import("../core/server/src/pi/guard.ts");
+  const { deleteToolRule, listToolRules } = await import("../core/server/src/db.ts");
+  const { askQuestion, readAnswer } = await import("../core/server/src/questions.ts");
+  const { recordApproval } = await import("../core/server/src/approvals.ts");
 
   // What the guard calls a call: the path, or the path of each picture, one to a line, never the prompt.
   assert.equal(callSubject("edit_image", { path: "shared/a.png", prompt: "p" }), "shared/a.png", "as it was");
@@ -1716,7 +1718,7 @@ test("a colleague's edit_image call can be approved once or always, with the act
 });
 
 test("the tool menus do not offer edit_image while editing is off, though it is remembered for when it is on", async () => {
-  const { remembered, rememberTools, shownTools, knownTools } = await import("../server/src/db.ts");
+  const { remembered, rememberTools, shownTools, knownTools } = await import("../core/server/src/db.ts");
   rememberTools([
     remembered({ name: "edit_image", source: "image-editing", inline: true }),
     remembered({ name: "generate_image", source: "image-generation", inline: true }),
@@ -1760,7 +1762,7 @@ test("an extension's edit_image is the one pi keeps, so the portal's is not coun
 
 test("the API saves the time limit and refuses one out of bounds, without reloading chats", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));
@@ -1966,7 +1968,7 @@ test("a picture over the byte limits is made lighter in proportion, keeping its 
 });
 
 test("a large PNG with a tight budget is shrunk from what its lossy copy weighs, ending near the budget", async () => {
-  const { fitBytes } = await import("../server/src/picture-scale.ts");
+  const { fitBytes } = await import("../core/server/src/picture-scale.ts");
   const big = await real(2000, 1500, { noise: true });
   const budget = 350 * 1024;
   assert.ok(big.length > 20 * budget, `the original is far heavier than the budget (${big.length} bytes)`);
@@ -1993,7 +1995,7 @@ test("a picture that cannot be made to fit is refused with a message, and nothin
     await refused({ prompt: "p", image: [await real(600, 400, { noise: true }), await real(600, 400, { noise: true })] }, /^Picture 1 cannot be made to fit an edit/, { maxTotalBytes: 300 });
     // Over the maximum size but no picture that can be read; one with no size to read at all.
     await refused({ prompt: "p", image: pngOf(3000, 3000) }, /^The image cannot be made to fit an edit: it cannot be read as a picture/);
-    await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024.*Settings → Agent → Images/);
+    await refused({ prompt: "p", image: PNG }, /^The image has a size that cannot be read.*maximum of 2048x1024.*Settings → Agent → Media/);
     await refused({ prompt: "p", image: Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xff, 0xe0]) }, /^The image has a size that cannot be read/);
     // One refused refuses all, with its place.
     await refused({ prompt: "p", image: [await real(100, 100), await real(5000, 500), PNG] }, /^Picture 3 has a size that cannot be read/);
@@ -2041,7 +2043,7 @@ test("edit_image scales a picture beyond the maximum size down, says so in its a
 
 test("the API saves the maximum size of an edit and refuses one that is no size, without reloading chats", async () => {
   const express = (await import("express")).default;
-  const { featuresRouter } = await import("../server/src/api/features.ts");
+  const { featuresRouter } = await import("../core/server/src/api/features.ts");
   const app = express().use(express.json()).use("/api", featuresRouter());
   const portal = app.listen(0, "127.0.0.1");
   await new Promise((r) => portal.once("listening", r));

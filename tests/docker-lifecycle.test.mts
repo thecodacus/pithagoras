@@ -61,11 +61,11 @@ const docker = await fakeDocker(process.env.DOCKER_SOCKET!, async ({ method, url
   }
   return undefined;
 });
-const browser = await import('../server/src/extensions/browser-service.js');
-const understory = await import('../server/src/extensions/understory-service.js');
-const voice = await import('../server/src/extensions/voice-service.js');
-const { getDb, portalBrowserOn, portalBrowserState, setPortalBrowser } = await import('../server/src/db.js');
-const { browserRouter } = await import('../server/src/api/browser.js');
+const browser = await import('../core/server/src/extensions/browser-service.js');
+const understory = await import('../core/server/src/extensions/understory-service.js');
+const voice = await import('../core/server/src/extensions/voice-service.js');
+const { getDb, portalBrowserOn, portalBrowserState, setPortalBrowser } = await import('../core/server/src/db.js');
+const { browserRouter } = await import('../core/server/src/api/browser.js');
 after(() => getDb().close());
 
 const reset = () => { boxes = new Map(); images = new Set(); docker.reset(); refuse = {}; pullGate = null; pullError = null; };

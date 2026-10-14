@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { skillsLine } from "../server/src/agent-skills.js";
+import { skillsLine } from "../core/server/src/agent-skills.js";
 
 // The built-in skill-creator tells the agent where to write a skill: the agent's own skills folder, which the
 // portal names in its instructions and hands to pi as a skill path. Under the sandbox the agent's HOME is one of

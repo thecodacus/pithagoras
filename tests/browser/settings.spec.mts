@@ -21,12 +21,15 @@ interface Portal {
   /** What the server says came of saving a provider, besides. */
   providerNote?: string;
   /** A portal with a password, and what its status says of it. */
-  login?: { shortPassword?: boolean };
+  login?: { shortPassword?: boolean; sso?: boolean; endSession?: string };
+  /** The password the portal takes as the current one when it is changed. */
+  currentPassword?: string;
 }
 
 /** The portal with no server: Settings, its search, and the setup assistant, over canned answers. */
-async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, stored = {}, probe, probeDelay, homepage, openRouterFromEnv = false, installBringsModels = false, plainModel = false, settingsSaveDelay, providerNote, login }: Portal = {}) {
+async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, stored = {}, probe, probeDelay, homepage, openRouterFromEnv = false, installBringsModels = false, plainModel = false, settingsSaveDelay, providerNote, login, currentPassword = 'the current one' }: Portal = {}) {
   const calls: string[] = [];
+  const passwordChanges: unknown[] = [];
   const providerSaves: { id: string; body: any }[] = [];
   const settingsSaves: unknown[] = [];
   const extensionSaves: unknown[] = [];
@@ -41,7 +44,16 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
   await mockPortal(page, async ({ path: p, method, json }) => {
     calls.push(`${method} ${p}`);
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    if (p === '/api/auth/status') return { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}) };
+    if (p === '/api/auth/status') return { authed: true, authRequired: Boolean(login), ...(login?.shortPassword ? { shortPassword: true } : {}), ...(login?.sso ? { oidc: { name: 'Example ID', only: true } } : {}) };
+    if (p === '/api/auth/logout') return { ok: true, ...(login?.endSession ? { endSession: login.endSession } : {}) };
+    if (p === '/api/auth/sso' && method === 'GET') return { mode: login ? 'password' : 'open', callbackPath: '/api/auth/oidc/callback', settings: null, only: false };
+    if (p === '/api/auth/password' && method === 'POST') {
+      const sent = json();
+      if (sent.current !== currentPassword) return reply(403, { error: 'The current password is wrong.' });
+      if (sent.password === 'change-me') return reply(400, { error: 'That is the example password, which everybody knows. Choose another.' });
+      passwordChanges.push(sent);
+      return { ok: true };
+    }
     if (p === '/api/sessions' && method === 'POST') return { id: 'new', title: 'New', workspace: '/w', status: 'idle', kind: 'task', pinned: false };
     if (p === '/api/settings' && method === 'PUT') {
       const sent = json();
@@ -95,7 +107,7 @@ async function portal(page: Page, { models = true, slow = 0, slowSettings = 0, s
     if (p.startsWith('/api/providers/') && method === 'PUT') { providerSaves.push({ id: decodeURIComponent(p.split('/').pop()!), body: json() }); return { ok: true, ...(providerNote ? { note: providerNote } : {}) }; }
     if (p === '/api/providers/probe') return reply(502, { error: 'Nothing answered at 127.0.0.1:8080 — is the server running, and reachable from here?' });
   }, { setup: 'fresh', settings: true });
-  return { calls, saved: () => saved, installed: () => installed, providerSaves, settingsSaves, extensionSaves, savingMost: () => savingMost };
+  return { calls, passwordChanges, saved: () => saved, installed: () => installed, providerSaves, settingsSaves, extensionSaves, savingMost: () => savingMost };
 }
 
 test('search finds a setting on another page and lights it up', async ({ page }) => {
@@ -196,7 +208,8 @@ test('with models, the assistant saves the model and effort, then offers package
   await expect(setup.getByText('pi-subagents')).toBeVisible();
   await setup.getByRole('button', { name: 'Install pi-subagents' }).click();
   await page.getByRole('button', { name: 'Install', exact: true }).click();
-  await expect(setup.getByText('Installed')).toBeVisible();
+  // Its own row: pi-web-access above it is installed already and says the same.
+  await expect(setup.getByRole('listitem').filter({ hasText: 'pi-subagents' }).getByText('Installed')).toBeVisible();
   await expect.poll(() => api.installed()).toEqual(['npm:pi-subagents']);
   await setup.getByRole('button', { name: 'Done' }).click();
   await expect(setup).toBeHidden();
@@ -417,6 +430,89 @@ test('a password of the right length says nothing about it', async ({ page }) =>
   const signedIn = page.getByRole('dialog').locator('section', { hasText: 'Signed in' });
   await expect(signedIn.getByRole('button', { name: 'Sign out' })).toBeVisible();
   await expect(signedIn.getByRole('note')).toHaveCount(0);
+});
+
+test('signing out of a portal set up to end the session at the provider goes on to the provider', async ({ page }) => {
+  const endSession = 'https://id.example.test/logout?client_id=portal';
+  await portal(page, { login: { sso: true, endSession } });
+  await page.route('https://id.example.test/**', (route) => route.fulfill({ contentType: 'text/html', body: '<h1>Signed out at the provider</h1>' }));
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/browser');
+  const signedIn = page.getByRole('dialog').locator('section', { hasText: 'Signed in' });
+  await expect(signedIn).toContainText('Signing out asks you to sign in here again.');
+  await signedIn.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('heading', { name: 'Signed out at the provider' })).toBeVisible();
+  expect(page.url()).toBe(endSession);
+});
+
+test('the password is changed under Settings → Authentication: the current one once, the new one twice, and the form is clear afterwards', async ({ page }) => {
+  const api = await portal(page, { login: {} });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/authentication');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  // The password's part of the page: single sign-on, beside it, has a current password and messages of its own.
+  const pane = dialog.locator('[data-setting="Change password"]');
+  const change = pane.getByRole('button', { name: 'Change password' });
+  const current = pane.getByLabel('Current password');
+  const fresh = pane.getByLabel(/^New password/);
+  const repeat = pane.getByLabel('Repeat the new password');
+  await expect(current).toBeVisible();
+  await expect(change).toBeDisabled();
+
+  // Typed twice, differently, or too short: said in the page, and nothing is sent.
+  await current.fill('the current one');
+  await fresh.fill('a new password');
+  await repeat.fill('another password');
+  await change.click();
+  await expect(pane.getByRole('alert')).toHaveText('The two passwords are not the same.');
+  await fresh.fill('short');
+  await repeat.fill('short');
+  await change.click();
+  await expect(pane.getByRole('alert')).toHaveText('The password has to be at least 8 characters.');
+  expect(api.passwordChanges).toEqual([]);
+
+  // The server's own refusal of a password the page cannot tell is bad.
+  await fresh.fill('change-me');
+  await repeat.fill('change-me');
+  await change.click();
+  await expect(pane.getByRole('alert')).toContainText('example password');
+
+  // A wrong current password is told as that, and what was typed stays to be corrected.
+  await current.fill('not it');
+  await fresh.fill('a new password');
+  await repeat.fill('a new password');
+  await change.click();
+  await expect(pane.getByRole('alert')).toHaveText('The current password is wrong.');
+  await expect(fresh).toHaveValue('a new password');
+  expect(api.passwordChanges).toEqual([]);
+
+  await current.fill('the current one');
+  await change.click();
+  await expect(pane.getByRole('status')).toHaveText('The password is changed.');
+  expect(api.passwordChanges).toEqual([{ current: 'the current one', password: 'a new password' }]);
+  await expect(pane.getByRole('alert')).toHaveCount(0);
+  await expect(current).toHaveValue('');
+  await expect(fresh).toHaveValue('');
+  await expect(repeat).toHaveValue('');
+});
+
+test('a portal that runs without a login has no password to change, and says why', async ({ page }) => {
+  await portal(page);
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/authentication');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog.getByText('runs without a login')).toBeVisible();
+  await expect(dialog.getByLabel('Current password')).toHaveCount(0);
+});
+
+test('search finds the password page, by its English word or the German one', async ({ page }) => {
+  await portal(page, { login: {} });
+  await page.addInitScript(() => localStorage.setItem('pithagoras.setup', 'done'));
+  await page.goto('/settings/general');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByLabel('Search settings').fill('passwort');
+  await dialog.getByRole('option', { name: /Change password/ }).click();
+  await expect(dialog.locator('[data-setting="Change password"]').getByLabel('Current password')).toBeVisible();
 });
 
 test('About draws from what Settings already has', async ({ page }) => {

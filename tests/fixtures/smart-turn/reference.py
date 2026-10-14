@@ -1,13 +1,13 @@
 """What Smart Turn's reference preprocessing makes of pieces of jfk.wav, for tests/smart-turn.test.mts.
 
-The browser works out the model's input itself (web/src/smart-turn.ts). This writes what the reference
+The browser works out the model's input itself (core/web/src/smart-turn.ts). This writes what the reference
 implementation (pipecat-ai/smart-turn, inference.py) gives for the same audio, so the test can compare:
 a sample of the features, their statistics, and the model's probability.
 
     pip install numpy onnxruntime transformers
     python tests/fixtures/smart-turn/reference.py path/to/smart-turn-v3.2-cpu.onnx > tests/fixtures/smart-turn/jfk.json
 
-The model is the one web/scripts/copy-vad-assets.mjs puts into web/public/voice-assets.
+The model is the one core/web/scripts/copy-vad-assets.mjs puts into core/web/public/voice-assets.
 """
 import json
 import sys

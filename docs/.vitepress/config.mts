@@ -40,6 +40,7 @@ export default defineConfig({
           { text: "Settings", link: "/guide/settings" },
           { text: "Models and providers", link: "/guide/models" },
           { text: "Extensions", link: "/guide/extensions" },
+          { text: "Building an extension", link: "/guide/extension-ui" },
           { text: "Skills", link: "/guide/skills" },
           { text: "Prompt injection", link: "/guide/security" },
           { text: "Sandbox", link: "/guide/sandbox" },
@@ -52,10 +53,11 @@ export default defineConfig({
           { text: "Voice pipeline switches", link: "/guide/voice-comparison" },
           { text: "Session canvases", link: "/guide/canvases" },
           { text: "Files", link: "/guide/files" },
+          { text: "Documents", link: "/guide/documents" },
           { text: "Git", link: "/guide/git" },
           { text: "Terminal and background jobs", link: "/guide/terminal" },
           { text: "Memory and audit", link: "/guide/memory" },
-          { text: "Images", link: "/guide/images" },
+          { text: "Media", link: "/guide/media" },
         ],
       },
       {
@@ -73,6 +75,7 @@ export default defineConfig({
         text: "The agent",
         items: [
           { text: "Agent and channels", link: "/channels/" },
+          { text: "Signal", link: "/channels/signal" },
           { text: "Writing a channel", link: "/channels/writing-a-channel" },
         ],
       },

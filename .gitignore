@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# What the Update button puts aside while it installs and builds (core/server/src/update-files.ts)
+*.update-old
 data/
 .env
 .env.local
@@ -14,11 +16,11 @@ docs/.vitepress/cache
 voice-runtime/
 
 # Generated, version-matched VAD model and WebAssembly assets
-web/public/voice-assets/
+core/web/public/voice-assets/
 
 playwright-report/
 test-results/
 
 # What a read-only open of a database leaves beside it (the upgrade fixtures are kept without a journal, so nothing should)
-server/test/fixtures/*.db-shm
-server/test/fixtures/*.db-wal
+core/server/test/fixtures/*.db-shm
+core/server/test/fixtures/*.db-wal

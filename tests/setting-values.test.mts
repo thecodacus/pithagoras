@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { typed } from "../web/src/setting-values.ts";
-import { looksComplete } from "../web/src/provider-address.ts";
+import { typed } from "../core/web/src/setting-values.ts";
+import { looksComplete } from "../core/web/src/provider-address.ts";
 
 test("a setting not set before is stored as what its text is", () => {
   assert.equal(typed(undefined, "false", "enableX"), false, 'as text, "false" is on to `if (settings.x)`');

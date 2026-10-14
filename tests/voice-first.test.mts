@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AudioRule, VoiceFirstTurn, DEFAULT_SKIP_THINKING_PROVIDERS, listsProvider, AUDIO_SYSTEM_RULE, DEFAULT_VOICE_INSTRUCTIONS, audioSystemRule, voiceInstructions, voiceRulesOn, audioMessage, spokenIn } from '../server/src/pi/voice-first.js';
+import { AudioRule, VoiceFirstTurn, DEFAULT_SKIP_THINKING_PROVIDERS, listsProvider, AUDIO_SYSTEM_RULE, DEFAULT_VOICE_INSTRUCTIONS, audioSystemRule, voiceInstructions, voiceRulesOn, audioMessage, spokenIn } from '../core/server/src/pi/voice-first.js';
 function setup() {
  const turn = new VoiceFirstTurn(), handlers = new Map<string, (...args: any[]) => any>();
  turn.extension({ on: (name: string, fn: any) => handlers.set(name, fn) });

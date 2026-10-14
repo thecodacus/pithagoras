@@ -7,13 +7,13 @@ import { inProcessHome } from './helpers.mts';
 
 const temp = inProcessHome('pitha-heartbeat-');
 
-const { inQuietHours, heartbeatDue, setHeartbeat, heartbeat, WATCH_FILE } = await import('../server/src/heartbeat.ts');
-const { createAgent, getAgent } = await import('../server/src/agents.ts');
-const { addNote } = await import('../server/src/activity.ts');
-const { agentsRouter } = await import('../server/src/api/agents.ts');
-const { guardExtension } = await import('../server/src/pi/guard.ts');
-const { HEARTBEAT_ROLE, NOTE_TOOL } = await import('../server/src/pi/heartbeat-names.ts');
-const { addToolRule, createSession, getDb } = await import('../server/src/db.ts');
+const { inQuietHours, heartbeatDue, setHeartbeat, heartbeat, WATCH_FILE } = await import('../core/server/src/heartbeat.ts');
+const { createAgent, getAgent } = await import('../core/server/src/agents.ts');
+const { addNote } = await import('../core/server/src/activity.ts');
+const { agentsRouter } = await import('../core/server/src/api/agents.ts');
+const { guardExtension } = await import('../core/server/src/pi/guard.ts');
+const { HEARTBEAT_ROLE, NOTE_TOOL } = await import('../core/server/src/pi/heartbeat-names.ts');
+const { addToolRule, createSession, getDb } = await import('../core/server/src/db.ts');
 test.after(() => getDb().close());
 
 const at = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return new Date(2026, 9, 2, h, m); };

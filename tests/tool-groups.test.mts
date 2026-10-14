@@ -6,7 +6,8 @@ import {
   groupTools,
   nextOff,
   toggleOpen,
-} from "../web/src/tool-groups.ts";
+  toolTitle,
+} from "../core/web/src/tool-groups.ts";
 
 const tool = (name: string, source: string, enabled = true) => ({
   name,
@@ -124,4 +125,22 @@ test("a name that was given wins over the one derived", () => {
 
 test("a name of nothing but spaces is not a name", () => {
   assert.equal(displayName("@a/b", { "@a/b": "   " }), "b");
+});
+
+test("the portal's code mode is a group of its own called Code mode, after what is installed and before what is built in", () => {
+  const groups = groupTools([
+    { ...tool("codemode", "codemode", false), inline: true as const, description: "Raw JavaScript, at length" },
+    tool("bash", "built in"),
+    tool("web_search", "pi-web-access"),
+  ]);
+  assert.deepEqual(groups.map((g) => displayName(g.source)), ["pi-web-access", "Code mode", "built in"]);
+  assert.equal(groupSummary(groups[1]), "1 off");
+  // What a person is told about it, not the model's instructions for writing a script.
+  assert.match(toolTitle(groups[1].tools[0]) ?? "", /^Lets the model write a script that calls the other tools/);
+});
+
+test("an extension's tool called codemode stays with its extension", () => {
+  const [group] = groupTools([{ ...tool("codemode", "my-codemode"), description: "Mine" }]);
+  assert.equal(displayName(group.source), "my-codemode");
+  assert.equal(toolTitle(group.tools[0]), "Mine");
 });

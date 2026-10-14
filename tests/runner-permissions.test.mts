@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import {ContainerExecutor,HostExecutor} from '../server/src/executors/index.ts';
+import {ContainerExecutor,HostExecutor} from '../core/server/src/executors/index.ts';
 import { scratch } from './helpers.mts';
 test('runner uses the portal uid/gid and a pre-created private session directory',async()=>{
  const temp=scratch('pitha-runner-');const saved=process.env.PATH;const prior=process.env.ARG_FILE;

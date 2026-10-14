@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWindow } from '../web/src/context-window.ts';
+import { parseWindow } from '../core/web/src/context-window.ts';
 
 test('a typed window is read the way it is written, grouping and all', () => {
   assert.deepEqual(parseWindow('131072'), { kind: 'ok', tokens: 131072 });

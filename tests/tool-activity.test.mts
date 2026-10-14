@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { describeCall, describeOutcome, elapsed } from '../web/src/tool-activity.js';
+import { describeCall, describeOutcome, elapsed } from '../core/web/src/tool-activity.js';
 
 const folder = '/work/proj';
 const start = (toolName: string, args: any) => ({ toolName, args, toolCallId: 'c' });

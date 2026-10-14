@@ -45,9 +45,9 @@ machine's own Chrome are not broken.
 
 ## Logging in
 
-**Browser → Open browser** in the portal, or `https://<host>:3011` directly.
-That is a full Chromium in a web page: sign into whatever the agent should have,
-then close the tab. The profile lives on its own volume and survives restarts.
+**Browser → Open browser** in the portal. That is a full Chromium in a web page:
+sign into whatever the agent should have, then close the tab. The profile lives on
+its own volume and survives restarts.
 
 ### Embedded, or in a tab
 
@@ -85,9 +85,38 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 On a tailnet, `tailscale cert <machine>.<tailnet>.ts.net` gives a real one and
 no warnings at all.
 
-The direct port still works if you would rather not: `https://<host>:3011`, with
-`BROWSER_USER` and `BROWSER_PASSWORD`, and its own self-signed certificate to
-accept.
+### The browser's own port
+
+The browser's web page is also served by its container, on ports `3010` (HTTP) and
+`3011` (HTTPS), with its own login and a self-signed certificate. It listens on
+**this machine only** (`127.0.0.1`): the container shares the host's network, so
+anything it listens on is the host's own address, and the one password in front of
+it should not be what stands between a browser holding the agent's logins and
+everyone on the network. The portal's `/browser-ui` above is the way in from other
+machines, behind the portal's login.
+
+From the host itself, `https://127.0.0.1:3011` with `BROWSER_USER` and
+`BROWSER_PASSWORD` works. From another machine, forward the port over SSH and open
+it on your own side:
+
+```bash
+ssh -L 3011:127.0.0.1:3011 <host>
+# then open https://127.0.0.1:3011
+```
+
+If the portal is on plain HTTP it cannot embed the browser, and there is no direct
+link from its page either; give it a certificate as above, or open the port yourself
+by setting `BROWSER_BIND` on the portal (see [Docker add-ons](/guide/add-ons)) to
+`0.0.0.0`, or to the one address of this machine that you want it on; the portal
+itself keeps reaching it on `127.0.0.1` either way. Then the page links to
+`https://<host>:3011` again. That is every machine that can reach the address, and
+your password only, so use a long one and a firewall. With the shipped Compose files
+or the Portainer stack, put `BROWSER_BIND=0.0.0.0` in `.env` (they pass it on to the
+portal), recreate the stack, and remove and install the browser again.
+
+A browser installed by an earlier version listens on every interface until it is
+removed and installed again (**Remove** keeps the profile and its logins); the
+Browser page says so while that is the case.
 
 Give the agent **its own accounts** rather than sharing yours. That is what
 makes it a teammate rather than a proxy, and it keeps a colleague's request from
@@ -133,6 +162,13 @@ refused, with a request to look again, rather than clicked on whatever is there
 now. Page content is someone else's words: every browser result is marked as
 such, and the session is limited as for mail (see
 [Prompt injection](/guide/security)).
+
+What the tools have in common is told to the model once, as rules in its
+instructions, and not again in each tool's description: what an action answers
+with, that a ref is never guessed and a gone one is refused, and that a page is
+data and never instructions. Each tool that concerns a rule carries it, so a rule
+is said while any of those tools is on. Switching one tool off, `browser_snapshot`
+included, takes none of them away.
 
 ### The agent's cursor
 
@@ -187,6 +223,13 @@ instead of launching one. A Playwright MCP server without it starts its own
 throwaway Chromium, which is signed into nothing — a way around everything on
 this page, its own browser, no profile, no allowlist.
 
+The portal gives the agent two rules for driving a Playwright browser (take a screenshot
+before reading the page's text, and leave out `filename` so a screenshot comes back as an
+image). They are in a chat's instructions only while the built-in tools are not connected
+and a Playwright MCP server is attached to this browser: one whose `--cdp-endpoint` is its
+address, or one called `browser`. A server that launches a Chromium of its own gets none,
+and with no server at all nothing about a browser is added.
+
 ## Who may drive it
 
 The browser reaches the agent as the portal's own tools, a group named `browser`
@@ -216,6 +259,16 @@ is no moment in between where every conversation has the browser.
 ::: tip Turning it off everywhere
 **Settings → Tools → browser → all off**. That is the one switch; there is no
 second one to keep in step with it.
+:::
+
+::: tip Not in the prompt until it is wanted
+The browser's tools are a large set, and while they are on they sit in the prompt of every chat. They
+are not lazy unless you make them so: mark the group **lazy** in **Settings → Tools** and no chat is
+offered them one by one. The agent is told it has browser tools, and finds and calls them through the
+`tools` tool, so a chat that never opens a page carries none of their schemas. A lazy tool is still on
+like any other: a call is held to the allowlist and the other rules exactly as a direct one, and a
+switch that turns the browser off for a chat turns it off here too. This is for the portal's own browser tools;
+a browser attached as an MCP server is lazy or not by that server's own "Register tools directly". See [Lazy tools](/guide/extensions#lazy-tools).
 :::
 
 Deliberately **not** gated on who is speaking. The agent has its own accounts and
@@ -255,8 +308,11 @@ browser, which is not built yet.
 Chromium exposes `127.0.0.1:9222`, and that port is **unauthenticated**. Whoever
 reaches it owns every account the browser is signed into.
 
-Host networking is what keeps it to the box. Never publish it, never put it
-behind a reverse proxy, and treat the profile volume as the secret it is.
+Host networking is what keeps it to the box: Chromium binds that port to the
+loopback address only. Never publish it, never put it behind a reverse proxy, and
+treat the profile volume as the secret it is. The browser's web page on `3010` and
+`3011` is held to the loopback address as well, by the portal (see
+[above](#the-browser-s-own-port)).
 
 ### Playwright MCP screenshots
 

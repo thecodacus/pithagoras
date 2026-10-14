@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { FRAME_MS, TurnEnd, WINDOW_SAMPLES, turnWindow, whisperFeatures, type SmartTurnSettings } from '../web/src/smart-turn.ts';
-import { DEFAULT_SMART_TURN, DEFAULT_VAD } from '../web/src/api.ts';
+import { FRAME_MS, TurnEnd, WINDOW_SAMPLES, turnWindow, whisperFeatures, type SmartTurnSettings } from '../core/web/src/smart-turn.ts';
+import { DEFAULT_SMART_TURN, DEFAULT_VAD } from '../core/web/src/api.ts';
 import { RATE, join, readWav, silence, simulate, smartTurn } from './smart-turn-simulation.mts';
 
 const jfk = readWav(new URL('./fixtures/jfk.wav', import.meta.url).pathname);

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { MAX_ZOOM, clampView, fitScale, fitted, isFitted, linked, stepped, toggled, zoomAt, type ViewerPicture } from "../web/src/image-viewer.ts";
+import { MAX_ZOOM, clampView, fitScale, fitted, isFitted, linked, stepped, toggled, zoomAt, type ViewerPicture } from "../core/web/src/image-viewer.ts";
 
 const stage = { w: 1000, h: 600 };
 const big = { w: 2000, h: 1200 };
@@ -76,7 +76,7 @@ test("a picture and the one it was edited from reach each other, where both are 
 });
 
 test("the viewer's own motion steps aside for reduced motion, and the flourish waits for the Animations switch", () => {
-  const css = fs.readFileSync(path.resolve(import.meta.dirname, "../web/src/styles/viewer.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = fs.readFileSync(path.resolve(import.meta.dirname, "../core/web/src/styles/viewer.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const reduced = css.match(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\}\s*$/)?.[1] ?? "";
   assert.match(reduced, /\.image-viewer-frame\s*\{\s*animation:\s*none/);
   // Every rule that starts an `fx-` animation is under the page's own say-so.

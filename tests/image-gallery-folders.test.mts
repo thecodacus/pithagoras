@@ -34,10 +34,10 @@ legacy.prepare("INSERT INTO images (id, origin, path, kind, prompt, bytes, creat
 legacy.close();
 
 const express = (await import("express")).default;
-const gallery = await import("../server/src/image-gallery.ts");
-const { imagesRouter } = await import("../server/src/api/images.ts");
-const { createSession, deleteSession, getDb } = await import("../server/src/db.ts");
-const { createAgent, deleteAgent } = await import("../server/src/agents.ts");
+const gallery = await import("../core/server/src/image-gallery.ts");
+const { imagesRouter } = await import("../core/server/src/api/images.ts");
+const { createSession, deleteSession, getDb } = await import("../core/server/src/db.ts");
+const { createAgent, deleteAgent } = await import("../core/server/src/agents.ts");
 const { GENERATED_DIR } = gallery;
 
 const app = express().use(express.json({ limit: "2mb" })).use("/api", imagesRouter());

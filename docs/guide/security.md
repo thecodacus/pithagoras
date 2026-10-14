@@ -32,11 +32,24 @@ reaches the model to be reasoned about.
 
 The browser's tools read a page after nearly every click, so their results carry
 a shorter envelope: the same random closing id, with the warning above said once
-in the agent's instructions instead of on every result.
+in the agent's instructions instead of on every result. Every browser tool carries
+that warning, so it is said while any of them is on, whichever of the others are
+switched off, and by the `tools` tool while they are lazy.
 
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, and the browser. The
 agent's own tools, a subagent's answer and a routine's are not.
+
+A [code mode](/guide/extensions#code-mode) script calls tools one at a time
+through the same guard, so each of its calls is checked by the rules below as the
+model's own would be, and a tool switched off in the chat is refused to a script
+too. What a script's calls read goes to the script, not to the model. So the
+script's own result is wrapped whenever one of its calls read something from
+outside, and flagged with the signs those calls carried, even when the script
+keeps what it read to itself, and also when the call reached a lazy tool through
+the `tools` tool. Until the script ends, what its calls read holds the
+conversation back as a flagged result would. A call that is still running when
+the script ends is read by nobody, and holds nothing back.
 
 ## Suspected prompt injection
 
@@ -150,6 +163,51 @@ agent is doing in it) is shown there live. The page and its websocket therefore 
 behind the portal's login like every other route: without it they answer 401, and a
 websocket opened from another site is refused. The portal does not hand its own
 login cookie, or the visitor's `Authorization` header, on to the browser.
+
+The browser's own ports (`3010` and `3011`) are not the way in: they listen on the
+loopback address only, so that the one password in front of them is not all that
+stands between a signed-in browser and the network. See
+[the browser's own port](/guide/browser#the-browser-s-own-port).
+
+## Signing in through a provider
+
+With [single sign-on](/guide/deploying#single-sign-on) set up, the provider
+decides who someone is, and whether they may come in: the portal keeps no list of
+its own, so every account the provider signs in gets a login, and limiting that
+to your people is done at the provider. The sign-in fails closed: anything that is
+not exactly right gives no login.
+
+- The authorization code flow, with PKCE (`S256`), `state` and `nonce`. What the
+  answer must match is kept in a short-lived cookie for that browser, sealed so
+  that only the portal can read or make one. It lasts ten minutes and is used
+  once: the same answer brought back again is refused, also from a copy of the
+  cookie, and an answer brought to a browser that did not start the sign-in is
+  refused too.
+- The ID token must be signed with one of the provider's published keys (never
+  `none`, never the client secret), and its issuer, audience, expiry, age and
+  nonce must match, with a minute of leeway for the clocks. When the provider
+  changes its keys, the portal fetches them again.
+- The provider's address is `https` only, the redirect URL is the configured one
+  and is never taken from a request's `Host` header, and the page a sign-in goes
+  on to is a path of the portal's own, never another site.
+- A failed sign-in counts against the same limit as a wrong password. The client
+  secret is kept in the portal's database and never sent to the page; the
+  provider's tokens are not logged or kept, and a refresh token is never stored.
+- Saving the settings asks for the portal's password, and the login cookie is signed
+  with the password's hash as well as the provider's settings.
+
+What it does not do:
+
+- It does not tell people apart. Everyone the provider signs in is the same single
+  user, with the same rights.
+- It does not follow the provider's session. A login lasts 30 days, as with the
+  password. To end the login of someone the provider no longer lets in, change the
+  password (which ends every login made before); blocking the account at the
+  provider is not enough.
+- It does not replace the password. Unless **OIDC only** is on, the password login
+  stays open beside it, and anyone who can reach the port can try passwords.
+- It is only as strong as the provider: whoever controls an account the provider
+  signs in, or the provider itself, can sign in.
 
 ## People are a separate layer
 

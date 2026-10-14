@@ -6,8 +6,8 @@ import {
   CPU_PORT, ASR_MODELS, speechCpuSeconds, speechSlow, ttsDevices, DEFAULT_CHOICE, LEAN_CHOICE, TTS_ENGINES, asrDevice, asrDevices, choiceFromKey, choiceKey, choiceLabel, cpuRealtime, cpuServerConfig, cpuSlow, cpuThreads, endpoints, fitOn, fitRam, healthUrls, isManagedUrl, parseChoice, pickGpu,
   ramNeeded, sameChoice, serverConfig, suggestChoice, suggestCpuChoice, ttsModel, usesGpu, vramNeeded,
   type Gpu, type Host, type VoiceChoice,
-} from '../server/src/voice-engines.js';
-import { DRIVER_TOO_OLD_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../server/src/voice-gpu.js';
+} from '../core/server/src/voice-engines.js';
+import { DRIVER_TOO_OLD_MESSAGE, NO_GPU_FOR_SPEECH, NO_GPU_FOR_SPEECH_UNUSABLE, NO_GPU_MESSAGE, NoGpu, decide, detectGpus, explain, isNoGpu, parseGpus, readHost, type Probe } from '../core/server/src/voice-gpu.js';
 
 // Neutral cards: only the sizes matter.
 const card = (totalMiB: number | null, freeMiB: number | null = totalMiB, index = 0): Gpu => ({ index, name: `Test GPU ${index}`, totalMiB, freeMiB });
@@ -402,7 +402,7 @@ test('the host is read as it is: the memory and the CPUs of the machine, not the
   assert.ok(host.freeMiB! >= 0 && host.freeMiB! <= host.totalMiB!, JSON.stringify(host));
   assert.equal(host.threads, os.cpus().length);
   assert.ok(Number.isInteger(host.threads) && host.threads >= 1);
-  assert.equal(readFileSync('server/src/voice-gpu.ts', 'utf8').includes('/sys/fs/cgroup'), false, 'no cgroup of the portal is read');
+  assert.equal(readFileSync('core/server/src/voice-gpu.ts', 'utf8').includes('/sys/fs/cgroup'), false, 'no cgroup of the portal is read');
 });
 
 test('an address is the managed service\'s when it leads to a port the managed container listens on, however it is written', () => {

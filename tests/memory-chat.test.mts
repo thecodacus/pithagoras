@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fakeDocker } from "./fake-docker.mts";
 import { inProcessHome } from "./helpers.mts";
-import { applyChunk, eventReader, history, textOf, usedTools, type ChatMessage, type Turn } from "../web/src/memory-chat.ts";
+import { applyChunk, eventReader, history, textOf, usedTools, type ChatMessage, type Turn } from "../core/web/src/memory-chat.ts";
 
 const home = inProcessHome("pitha-memory-chat-");
 process.env.DOCKER_SOCKET = path.join(home, "docker.sock");
@@ -112,6 +112,12 @@ const upstream = createServer(async (req: IncomingMessage, res) => {
   let raw = "";
   for await (const c of req) raw += c;
   understory.seen.push({ url: req.url!, auth: req.headers.authorization, body: raw ? JSON.parse(raw) : undefined });
+  // Its read of one run: the steps with the full paths of the notes each touched, or 404.
+  if (req.url?.startsWith("/api/trace?")) {
+    const id = new URL(req.url, "http://understory").searchParams.get("id");
+    if (id !== "run-1") return res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "trace not found" }));
+    return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id, kind: "query", notation: "read owner.md → ✓", steps: [{ seq: 1, tool: "read_concept", summary: "/people/owner.md", paths: ["/people/owner.md"], write: false }] }));
+  }
   if (understory.mode === "refuse") return res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: "no model" }));
   res.on("close", () => (understory.closed = !res.writableFinished));
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -135,9 +141,9 @@ const docker = await fakeDocker(process.env.DOCKER_SOCKET!, ({ url }) => {
   return undefined;
 });
 const express = (await import("express")).default;
-const { memoryRouter, chatMessages } = await import("../server/src/api/memory.ts");
-const { understoryEntry } = await import("../server/src/features.ts");
-const { getDb } = await import("../server/src/db.js");
+const { memoryRouter, chatMessages } = await import("../core/server/src/api/memory.ts");
+const { understoryEntry } = await import("../core/server/src/features.ts");
+const { getDb } = await import("../core/server/src/db.js");
 const portal = express().use(express.json()).use("/api", memoryRouter()).listen(0, "127.0.0.1");
 await new Promise((r) => portal.once("listening", r));
 after(() => {
@@ -253,4 +259,23 @@ test("an answer cut off by Understory failing ends in an error chunk, so the pag
   // The page's own reading of the stream ends with the error shown.
   assert.match(run(sse({ type: "start" }) + 'data: {"type":"text-del\n\n' + sse(last)).error!, /Understory stopped answering/);
   understory.mode = "answer";
+});
+
+test("one run's steps are read from Understory through the portal, with its token, by the id asked for", async () => {
+  process.env.MEMORY_UNDERSTORY_AUTH_TOKEN = "s3cret";
+  mcp(upstreamPort);
+  const trace = (query: string) => fetch(`${at.replace("/chat", "/trace")}${query}`);
+  const run = await trace("?id=run-1");
+  assert.equal(run.status, 200);
+  assert.deepEqual((await run.json()).steps[0].paths, ["/people/owner.md"], "the full path of the note the step touched");
+  assert.deepEqual(understory.seen.at(-1), { url: "/api/trace?id=run-1", auth: "Bearer s3cret", body: undefined });
+  // An id Understory does not know is the page's to say; none asked for is refused here, before Understory hears of it.
+  assert.equal((await trace("?id=gone")).status, 404);
+  const before = understory.seen.length;
+  assert.equal((await trace("")).status, 400);
+  assert.equal(understory.seen.length, before);
+  // And only while Understory is the memory.
+  writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
+  assert.equal((await trace("?id=run-1")).status, 409);
+  delete process.env.MEMORY_UNDERSTORY_AUTH_TOKEN;
 });

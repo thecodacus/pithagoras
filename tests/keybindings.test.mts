@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 const store = new Map<string, string>();
 (globalThis as any).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) };
 (globalThis as any).window = Object.assign(new EventTarget(), { localStorage: (globalThis as any).localStorage });
-const { ACTIONS, resolve, assign, setBinding, resetBinding, resetAll, matches, bindingOf, describe, keyName } = await import('../web/src/keybindings.js');
+const { ACTIONS, resolve, assign, setBinding, resetBinding, resetAll, matches, bindingOf, describe, keyName } = await import('../core/web/src/keybindings.js');
 
 beforeEach(() => store.clear());
 
@@ -79,6 +79,6 @@ test('Tab is how the keyboard moves on, so no shortcut can take it, stored by an
 });
 
 test('the Esc line in the fixed shortcuts does not say the message box has to be empty', async () => {
-  const { FIXED } = await import('../web/src/keybindings.js');
+  const { FIXED } = await import('../core/web/src/keybindings.js');
   assert.equal(FIXED.find((f) => f.keys.code === 'Escape')?.label, 'Stop the run');
 });

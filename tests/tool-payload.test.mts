@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toolArgsOf, toolNameOf } from '../web/src/tool-payload.js';
-import { describeCall } from '../web/src/tool-activity.js';
-import { latestFileActivity } from '../web/src/file-activity.js';
-import { latestBrowserActivity, latestTerminalActivity } from '../web/src/voice-browser.js';
+import { toolArgsOf, toolNameOf } from '../core/web/src/tool-payload.js';
+import { describeCall } from '../core/web/src/tool-activity.js';
+import { latestFileActivity } from '../core/web/src/file-activity.js';
+import { latestBrowserActivity, latestTerminalActivity } from '../core/web/src/voice-browser.js';
 
 /** A tool event of pi's names the tool `toolName` or `name`, and its arguments `args`, `input` or `parameters`. */
 const spellings = (name: string, args: unknown) => [

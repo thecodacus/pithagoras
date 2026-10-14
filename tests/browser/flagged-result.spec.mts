@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-test('a result flagged as a suspected prompt injection says why, and can be trusted or have its turn removed', async ({ page }) => {
+// The same read by a bash command and by a lazy tool, which the model calls through the `tools` tool: the chat's row is the outer call.
+for (const phase of ['flagged', 'flagged-lazy']) test(`a result flagged as a suspected prompt injection says why, and can be trusted or have its turn removed (${phase})`, async ({ page }) => {
   const trusted: string[] = [];
   await page.route('**/api/sessions/preview/flagged/*/trust', (route) => { trusted.push(route.request().url()); return route.fulfill({ json: { ok: true } }); });
-  await page.goto('/tests/chat.html?phase=flagged');
+  await page.goto(`/tests/chat.html?phase=${phase}`);
   const notice = page.getByRole('alert').filter({ hasText: 'This result looks like a prompt injection' });
   await expect(notice).toBeVisible();
   await expect(notice).toContainText('tells the reader to ignore its instructions; speaks to an AI reading it');

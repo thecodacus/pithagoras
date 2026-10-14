@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import { writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express from 'express';
-import { speechChunks, samplesWav } from '../web/src/voice.js';
+import { speechChunks, samplesWav } from '../core/web/src/voice.js';
 import { inProcessHome } from "./helpers.mts";
 const dir = inProcessHome('pithagoras-voice-');
 // No Docker here, whatever this machine has: the managed service is tested on its own.
 process.env.DOCKER_SOCKET = join(dir, 'no-docker.sock');
-const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice, errorLineRetry } = await import('../server/src/api/voice.js');
-const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../server/src/voice-languages.js');
-const { getDb, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel } = await import('../server/src/db.js');
-const { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS } = await import('../server/src/pi/voice-first.js');
+const { voiceRouter, pcmWav, wavPcm, validateConfig, connectManagedVoice, errorLineRetry } = await import('../core/server/src/api/voice.js');
+const { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } = await import('../core/server/src/voice-languages.js');
+const { getDb, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel } = await import('../core/server/src/db.js');
+const { DEFAULT_SKIP_THINKING_PROVIDERS, DEFAULT_VOICE_INSTRUCTIONS } = await import('../core/server/src/pi/voice-first.js');
 const upstream = express();
 let calls = 0;
 let busyAttempts = 0;
@@ -76,7 +76,7 @@ const settings = { enabled: true, whisperUrl: `http://127.0.0.1:${port}/inferenc
 let clone: string | undefined;
 const cloneVoice = async () => {
   if (clone) return clone;
-  const { addVoice } = await import('../server/src/voice-presets.js');
+  const { addVoice } = await import('../core/server/src/voice-presets.js');
   const audio = Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
   return (clone = addVoice({ name: 'Reference', kind: 'clone', instruction: 'A calm English voice.', transcript: 'Reference voice.', audio }).id);
 };
@@ -211,12 +211,12 @@ test('audio.cpp receives cloning context and exposes incremental playback', asyn
 
 
 test('voice mode speaks with the voice of the agent the chat is with', async () => {
-  const { createAgent, setVoice } = await import('../server/src/agents.js');
-  const { createSession } = await import('../server/src/db.js');
+  const { createAgent, setVoice } = await import('../core/server/src/agents.js');
+  const { createSession } = await import('../core/server/src/db.js');
   const saved = await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, runtime: 'audio-cpp', voice: 'design' }) });
   assert.equal(saved.status, 200);
-  const { addVoice } = await import('../server/src/voice-presets.js');
-  const { samplesWav } = await import('../web/src/voice.js');
+  const { addVoice } = await import('../core/server/src/voice-presets.js');
+  const { samplesWav } = await import('../core/web/src/voice.js');
   const audio = Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
   const clone = addVoice({ name: 'Herald voice', kind: 'clone', instruction: 'Warm.', transcript: 'Herald reference.', audio });
   const agent = createAgent({ name: 'Herald' });
@@ -240,8 +240,8 @@ test('voice mode speaks with the voice of the agent the chat is with', async () 
 });
 
 test('custom clone sends its saved recording, transcript and description to audio.cpp', async () => {
-  const { addVoice } = await import('../server/src/voice-presets.js');
-  const { samplesWav } = await import('../web/src/voice.js');
+  const { addVoice } = await import('../core/server/src/voice-presets.js');
+  const { samplesWav } = await import('../core/web/src/voice.js');
   const audio = Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
   const preset = addVoice({ name: 'Custom narrator', kind: 'clone', instruction: 'Warm narrator.', transcript: 'My reference words.', audio });
   const saved = await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, runtime: 'audio-cpp', voice: preset.id }) });
@@ -255,8 +255,8 @@ test('custom clone sends its saved recording, transcript and description to audi
 });
 
 test('a changed voice description reaches the next phrase on both Breeze runtimes, and the recording stays', async () => {
-  const { addVoice } = await import('../server/src/voice-presets.js');
-  const { samplesWav } = await import('../web/src/voice.js');
+  const { addVoice } = await import('../core/server/src/voice-presets.js');
+  const { samplesWav } = await import('../core/web/src/voice.js');
   const audio = Buffer.from(await samplesWav(new Float32Array(16000)).arrayBuffer()).toString('base64');
   const preset = addVoice({ name: 'Edited narrator', kind: 'clone', instruction: 'Warm narrator.', transcript: 'Words on the tape.', audio });
   const patch = (id: string, body: unknown) => fetch(`${base}/voice/presets/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -321,8 +321,8 @@ test('Chatterbox clones a reference, writes numbers out and returns one buffered
 });
 
 test('Kokoro speaks with a voice of its own, at the speed chosen, and an agent can have one of its voices', async () => {
-  const { createAgent, setVoice } = await import('../server/src/agents.js');
-  const { createSession } = await import('../server/src/db.js');
+  const { createAgent, setVoice } = await import('../core/server/src/agents.js');
+  const { createSession } = await import('../core/server/src/db.js');
   const kokoro = { ...settings, runtime: 'kokoro', voice: await cloneVoice(), kokoroVoice: 'bf_emma', speed: 1.15 };
   assert.equal((await fetch(`${base}/voice`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(kokoro) })).status, 200);
   const speak = (session: string) => fetch(`${base}/sessions/${session}/voice/speech`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'audio/pcm' }, body: JSON.stringify({ text: 'It costs 12 dollars.' }) });
@@ -689,7 +689,7 @@ test('the hardware check reports the GPUs and what it would suggest, and degrade
   chmodSync(smi, 0o755);
   process.env.NVIDIA_SMI = smi;
   // What the host has is told, not read from the machine the tests run on.
-  (await import('../server/src/extensions/voice-service.js')).hostReader.read = () => ({ totalMiB: 16384, freeMiB: 8192, threads: 8 });
+  (await import('../core/server/src/extensions/voice-service.js')).hostReader.read = () => ({ totalMiB: 16384, freeMiB: 8192, threads: 8 });
   const found = await (await fetch(`${base}/voice/hardware`)).json();
   assert.deepEqual(found.gpus.map((g: any) => [g.index, g.name, g.totalMiB, g.freeMiB]), [[0, 'Test GPU A', 12288, 11000], [1, 'Test GPU B', 24576, 24000]]);
   assert.deepEqual([found.source, found.selected, found.reserveMiB], ['host', 1, 0]);

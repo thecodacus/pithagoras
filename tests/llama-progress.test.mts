@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {once} from 'node:events';
-import {startLlamaProxy,proxyBaseUrl,forgetSession,modelLoaded} from '../server/src/llama-progress.ts';
+import {startLlamaProxy,proxyBaseUrl,forgetSession,modelLoaded} from '../core/server/src/llama-progress.ts';
 test('progress survives split SSE packets while response is forwarded unchanged',async()=>{
  const frames='data: {"prompt_progress":{"total":100,"processed":40,"cache":10,"time_ms":200}}\n\ndata: [DONE]\n\n';
  const upstream=http.createServer((req,res)=>{if(req.method==='GET'){res.writeHead(404).end();return;}let body='';req.on('data',c=>body+=c);req.on('end',()=>{assert.equal(JSON.parse(body).return_progress,true);res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(frames.slice(0,35));setTimeout(()=>res.end(frames.slice(35)),30);});});

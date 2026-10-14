@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { pictureSize } = await import("../server/src/picture-size.ts");
+const { pictureSize } = await import("../core/server/src/picture-size.ts");
 
 /** Headers as the encoders write them, with as little else as the reader looks at. */
 const be = (n: number, bytes = 4) => Buffer.from(Array.from({ length: bytes }, (_, i) => (n >>> (8 * (bytes - 1 - i))) & 0xff));

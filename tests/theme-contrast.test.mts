@@ -8,7 +8,7 @@ import path from "node:path";
  * WCAG asks 4.5:1 of text and 3:1 of the mark that shows where the focus is.
  */
 
-const css = fs.readFileSync(path.resolve(import.meta.dirname, "../web/src/index.css"), "utf8");
+const css = fs.readFileSync(path.resolve(import.meta.dirname, "../core/web/src/index.css"), "utf8");
 
 /** The tokens of one theme: `--name: r g b;` inside the block that starts at `open`. */
 function tokens(open: RegExp): Record<string, [number, number, number]> {

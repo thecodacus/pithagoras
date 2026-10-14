@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { agentSkillsDir, listAgentSkills, readAgentSkill, skillFrontmatter, skillsLine } from '../server/src/agent-skills.js';
+import { agentSkillsDir, listAgentSkills, readAgentSkill, skillFrontmatter, skillsLine } from '../core/server/src/agent-skills.js';
 
 const home = mkdtempSync(path.join(tmpdir(), 'agent-skills-'));
 const agent = { home };

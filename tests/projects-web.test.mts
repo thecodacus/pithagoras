@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bytesLabel, slugify } from '../web/src/projects.js';
-import { slugify as serverSlugify } from '../server/src/slug.js';
+import { bytesLabel, slugify } from '../core/web/src/projects.js';
+import { slugify as serverSlugify } from '../core/server/src/slug.js';
 
 test('the New project preview is made by the server\'s own slugify, not a copy that can drift', () => {
   assert.equal(slugify, serverSlugify);

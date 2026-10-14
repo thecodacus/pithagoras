@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asksToRepeat, couldAskToRepeat } from '../web/src/voice-commands.js';
+import { asksToRepeat, couldAskToRepeat } from '../core/web/src/voice-commands.js';
 
 test('asking to hear it again, in English or German, is recognised', () => {
   for (const said of ['Say that again.', 'Could you repeat that, please?', 'Repeat.', 'What did you just say?', 'Pardon?', 'Once more',

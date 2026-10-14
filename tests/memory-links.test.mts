@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { insidePath, linkNotes } from "../web/src/memory-links.ts";
+import { insidePath, linkNotes } from "../core/web/src/memory-links.ts";
 
 test("a link inside the memory is read from the note it is in; a folder's is to its index", () => {
   assert.equal(insidePath("../people/owner.md", "/deployment/branches.md"), "/people/owner.md");

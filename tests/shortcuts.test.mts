@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../web/src/shortcuts.ts";
+import { isComposing, isEnter, isEscape, opensComposer, stopsRun } from "../core/web/src/shortcuts.ts";
 
 test("a slash on the bare page opens the message box", () => {
   assert.equal(opensComposer({ key: "/", target: { tagName: "BODY" } }), true);

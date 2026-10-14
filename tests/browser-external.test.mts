@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import * as browser from '../server/src/extensions/browser-service.js';
+import * as browser from '../core/server/src/extensions/browser-service.js';
 
 test('external browser discovery works without Docker access and cannot manage its lifecycle',async()=>{
  const old=process.env.BROWSER_EXTERNAL,oldUrl=process.env.BROWSER_CDP_URL,original=globalThis.fetch;

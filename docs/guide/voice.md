@@ -131,7 +131,10 @@ has `generate_image`, which makes a new picture from a description and shows it
 the same way, and, with image editing switched on, `edit_image`, which changes a
 picture in the chat's folder into a new one; the voice instructions mention each
 only while it is there. Canvases can include pictures from the folder too (see
-[Canvases](/guide/canvases)).
+[Canvases](/guide/canvases)). Videos have no window here: the video tools
+(`generate_video` and `show_video`, with [video generation](/guide/features#video-generation) on)
+make or show a video in the chat. While the agent has `generate_video` the voice instructions tell it that a video is not
+shown in a spoken conversation, only in the chat, and to make one only when asked.
 
 **Tool cards.** The cards that fly out of the orb say what the agent is doing
 in words — "Editing app.ts", "Searching for “retry”", "Opening a page ·
@@ -389,7 +392,7 @@ Dates, clock times, version strings, ranges and anything with a leading zero
 keep their digits: reading them as quantities would be worse than leaving them.
 So do the digits of a name such as `v20.11` or `Qwen3.5`, which are not spoken
 as a number of their own.
-Adding a language is one entry in `server/src/voice-numbers.ts`; a language
+Adding a language is one entry in `core/server/src/voice-numbers.ts`; a language
 without a pack keeps its digits, and the add-on says so under the language.
 
 Chatterbox has no streaming mode in audio.cpp, so each phrase arrives as one
