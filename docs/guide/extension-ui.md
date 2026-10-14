@@ -664,8 +664,8 @@ portal.slots.register("chat.header.action", { id: "theme", component: () => {
 } });
 ```
 
-`extensions/theme-dusk` in the repository is a whole theme in one
-`package.json`.
+`extensions/theme-dusk` and `extensions/theme-warm` in the repository are each
+a whole theme in one `package.json`.
 
 ## What is loaded, and when
 
@@ -745,7 +745,7 @@ extension:
   folder, a route that answers for all chats, and the count each page is told.
 
 Install it from **Settings → Extensions → Discover**, where it is listed under
-**Comes with Pithagoras**. `extensions/theme-dusk` beside it is an extension
-that is only a theme, and is listed there too. `extensions/docs` is a larger
-one that is still being built: a page in the sidebar, fed by its server half's
-routes ([Documents](/guide/documents)).
+**Comes with Pithagoras**. `extensions/theme-dusk` and `extensions/theme-warm`
+beside it are extensions that are only a theme, and are listed there too.
+`extensions/docs` is a larger one that is still being built: a page in the
+sidebar, fed by its server half's routes ([Documents](/guide/documents)).
