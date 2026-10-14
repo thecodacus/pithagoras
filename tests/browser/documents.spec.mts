@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
@@ -10,6 +12,11 @@ import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 const NAME = 'pithagoras-docs';
 const web = (file: string) => readFileSync(new URL(`../../extensions/docs/web/${file}`, import.meta.url), 'utf8');
 const address = (file: string) => `/api/extension-ui/${NAME}/${file}`;
+
+// A document opens in the editor, which `npm run build` builds (extensions/docs/build.mjs).
+test.beforeAll(() => {
+  execFileSync(process.execPath, [fileURLToPath(new URL('../../extensions/docs/build.mjs', import.meta.url))], { stdio: 'ignore' });
+});
 
 const PLAN = [
   '# The plan',
@@ -44,8 +51,8 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
   const asked: string[] = [];
   await mockPortal(page, async ({ path: p, route }) => {
     if (p === '/api/extension-ui') return { extensions: [{ name: NAME, version: '0.1.0', entry: address('client.js') + '?v=1', style: address('client.css') + '?v=1', server: `/api/x/${NAME}` }] };
-    if (p === address('client.js')) { await route.fulfill({ contentType: 'text/javascript', body: web('client.js') }); return DONE; }
-    if (p === address('client.css')) { await route.fulfill({ contentType: 'text/css', body: web('client.css') }); return DONE; }
+    // The folder the portal serves of the package: its modules, the editor among them, and its stylesheet.
+    if (p.startsWith(address(''))) { await route.fulfill({ contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: web(p.slice(address('').length)) }); return DONE; }
     if (p === `/api/x/${NAME}/folders`) return { folders };
     if (p.startsWith(`/api/x/${NAME}/folders/`)) {
       asked.push(p);
@@ -77,7 +84,7 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
 
 const sidebar = (page: Page) => page.getByRole('navigation', { name: 'Destinations' });
 
-test('the Documents page is in the sidebar and lists each folder\'s documents, and a document opens as the portal draws Markdown', async ({ page }) => {
+test('the Documents page is in the sidebar and lists each folder\'s documents, and a document opens in the editor', async ({ page }) => {
   const { asked } = await portal(page);
   await page.goto(`/x/${NAME}/documents`);
   await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
@@ -90,12 +97,12 @@ test('the Documents page is in the sidebar and lists each folder\'s documents, a
   await expect(page.getByRole('region', { name: 'tools' }).getByRole('listitem')).toHaveText([/^Setting up\s*setup\.md/]);
 
   await site.getByRole('button', { name: /The plan/ }).click();
-  // Rendered, not shown as its source.
+  // Drawn as it reads, not shown as its source.
   await expect(page.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
   await expect(page.getByText('Ship it on Friday.', { exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Agent' })).toBeVisible();
   await expect(page.getByText('npm run build')).toBeVisible();
-  await expect(page.getByText(/^documents\/plan\.md · Changed /)).toBeVisible();
+  await expect(page.getByText('documents/plan.md', { exact: true })).toBeVisible();
   await expect(page.getByText('**Friday**')).toHaveCount(0);
 
   await page.getByRole('button', { name: /All documents/ }).click();

@@ -1,14 +1,17 @@
 /**
  * The Documents extension's half in the portal's page: plain JavaScript,
  * loaded as it is. It puts one page into the sidebar (`nav.page`): every
- * folder chats work in that has documents, and a document read from there,
- * drawn as the portal draws Markdown. In a chat it draws the agent's calls of
- * its tools for a document (`chat.tool`): which document, and what became of it.
+ * folder chats work in that has documents, and a document opened from there
+ * in an editor, with its history (document-editor.js). In a chat it draws the
+ * agent's calls of its tools for a document (`chat.tool`): which document,
+ * and what became of it.
  *
  * What is on the page comes from the server half's routes (server.js): a page
  * outside a chat has no chat's pi to ask. A document is asked for by the id
  * the listing gives it, never by its file's name.
  */
+import { documentEditor } from "./document-editor.js";
+
 export default function (portal) {
   const { React, ui, t } = portal;
   const { useEffect, useState } = React;
@@ -23,6 +26,39 @@ export default function (portal) {
     "All documents": "Alle Dokumente",
     "Changed {date}": "Geändert {date}",
     "This document is empty.": "Dieses Dokument ist leer.",
+    Saved: "Gespeichert",
+    "Saving…": "Wird gespeichert…",
+    "Unsaved changes": "Nicht gespeicherte Änderungen",
+    "Not saved": "Nicht gespeichert",
+    History: "Verlauf",
+    "Hide history": "Verlauf ausblenden",
+    "This document changed while you were editing it, and is now at revision {n}. Your text is kept here and has not been saved.":
+      "Dieses Dokument wurde geändert, während du es bearbeitet hast, und steht jetzt bei Revision {n}. Dein Text bleibt hier erhalten und ist nicht gespeichert.",
+    "Keep mine as a new revision": "Meine als neue Revision behalten",
+    "Take theirs": "Die andere übernehmen",
+    "Show the other version": "Die andere Version anzeigen",
+    "Take the other version?": "Die andere Version übernehmen?",
+    "The text you have not saved is discarded, and the version that was saved meanwhile is shown instead.":
+      "Der nicht gespeicherte Text wird verworfen, stattdessen wird die Version gezeigt, die in der Zwischenzeit gespeichert wurde.",
+    "Could not save: {error}": "Speichern fehlgeschlagen: {error}",
+    "Try again": "Erneut versuchen",
+    "Could not restore: {error}": "Wiederherstellen fehlgeschlagen: {error}",
+    "The editor could not be loaded: {error}": "Der Editor konnte nicht geladen werden: {error}",
+    "Text you had not saved was brought back.": "Text, den du nicht gespeichert hattest, wurde zurückgeholt.",
+    "Revision {from} is back, as revision {to}.": "Revision {from} ist zurück, als Revision {to}.",
+    "The document changed in the meantime and is now at revision {n}. Restore revision {from} again if you still want it.":
+      "Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision {n}. Stelle Revision {from} noch einmal wieder her, wenn du sie noch willst.",
+    Close: "Schließen",
+    Current: "Aktuell",
+    "This is the current revision.": "Das ist die aktuelle Revision.",
+    "Restore this revision": "Diese Revision wiederherstellen",
+    "Show older revisions": "Ältere Revisionen anzeigen",
+    You: "Du",
+    "The agent": "Der Agent",
+    "Outside the page": "Außerhalb der Seite",
+    "Restored from revision {n}": "Wiederhergestellt aus Revision {n}",
+    Created: "Erstellt",
+    "Existing file": "Vorhandene Datei",
     "Created a document": "Dokument erstellt",
     "Edited a document": "Dokument bearbeitet",
     "Read a document": "Dokument gelesen",
@@ -89,24 +125,7 @@ export default function (portal) {
     );
   }
 
-  function DocumentView({ folder, id, onBack }) {
-    const { body, error, retry } = useAnswer(documentUrl(folder, id));
-    return h(
-      "article",
-      { className: "pd-document" },
-      h("button", { type: "button", className: "pd-back", onClick: onBack }, `← ${t("All documents")}`),
-      error
-        ? h(ui.LoadFailed, { error, onRetry: retry })
-        : !body
-          ? h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") })
-          : h(
-              React.Fragment,
-              null,
-              h("p", { className: "pd-meta" }, `documents/${body.name} · ${t("Changed {date}", { date: when(body.modified) })}`),
-              body.markdown.trim() ? h("div", { className: "pd-body" }, h(ui.Markdown, null, body.markdown)) : h(ui.Empty, null, t("This document is empty.")),
-            ),
-    );
-  }
+  const DocumentEditor = documentEditor(portal, { documentUrl, when, useAnswer });
 
   /**
    * A call of one of the agent's tools that names a document, in place of the
@@ -152,7 +171,7 @@ export default function (portal) {
       "div",
       { className: "pd-page" },
       h(ui.PageHeader, { icon: h(DocumentIcon), title: t("Documents"), description: t("The Markdown files in the documents folder of each folder your chats work in.") }),
-      open ? h(DocumentView, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }) : h(FolderList, { onOpen: setOpen }),
+      open ? h(DocumentEditor, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }) : h(FolderList, { onOpen: setOpen }),
     );
   }
 

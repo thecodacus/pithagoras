@@ -5,7 +5,8 @@
 the sidebar. The page shows the Markdown documents in the folders your chats
 work in.
 
-It is under construction. This page describes what it does so far.
+It is under construction: documents can be listed, read, edited by you and by
+the agent, and have a history. This page describes what it does so far.
 
 ## Installing it
 
@@ -175,14 +176,100 @@ footnote marks are left out. A title longer than 256 characters is cut. A docume
 its first 4 KB is listed by its file name. The list also shows when the
 document last changed.
 
-Click a document to read it. The page draws its text, headings, lists,
-tables, quotes, links and code. Two things are not drawn yet:
+**All documents** goes back to the list.
+
+## Editing a document
+
+Click a document to open it in the editor. You edit the text as it will look:
+headings, lists, task lists, tables, quotes, links and code. What you write is
+saved as Markdown, in the document's file. The usual Markdown shortcuts work as
+you type (`#` and a space for a heading, `-` for a list, `>` for a quote,
+three backticks for code), and so do Ctrl+B and Ctrl+I.
+
+What the editor does not do yet:
 
 - a `mermaid` diagram shows as its code
-- a picture by a path in the chat's folder (`![](images/a.png)`) is not shown
+- a picture (`![](images/a.png)`) is drawn as its text, and nothing is fetched
+  for it, whether it names a path in the chat's folder or another site. It is
+  written back as it was
+- raw HTML is shown as text
+- the page does not change by itself when the agent or something else changes
+  the document while it is open: you find out when your text is saved (see
+  below)
 
-The page only shows documents for now: to change one, ask the agent or edit
-it in Files. **All documents** goes back to the list.
+### Saving
+
+You do not save by hand. The text is saved a second after you stop typing, when
+the cursor leaves the text, when you go back to the list or to another page of
+the portal, when the browser tab is hidden or closed, and at Ctrl+S. Each save
+is one revision. Beside the **History** button the page says where the
+document stands: **Saved**, **Unsaved changes**, **Saving…** or **Not saved**,
+and the revision.
+
+Opening a document does not change it, and neither does clicking in the text
+and out again: nothing is saved until the text is different. The editor writes
+Markdown the way most of it is written by hand, so when you do change
+something, the rest of the document may be written in that style as well:
+
+- bullets as `-`, rules as `---`, and numbered lists as `1.`
+- a hard line break as a backslash at the end of the line
+- tables not padded, and their rule under the head as short as can be
+- a link written by reference (`[a][1]`) written in the line
+- several blank lines as one
+
+Two things the editor keeps as they were: a front matter block at the top
+(`---`, `title: …`, `---`), which is not shown in the text and is not edited
+there, and a document written with Windows line breaks (CRLF), which keeps
+them. A byte order mark at the start stays too.
+
+A save goes against the revision the page started from, as the agent's edits do
+([above](#revisions-and-history)). A save that cannot be made says why
+("Could not save: …") and is tried again at your next change, or at **Try
+again**. Your text stays in the editor. A save with a secret in it (see
+[A secret in a document](#a-secret-in-a-document)) is made, and the page warns
+about it. Once you put the warning away it is not said again with each save,
+until a save without the secret has come in between.
+
+### When the document changed meanwhile
+
+If the agent, Files or an editor changed the document while you were typing,
+the save is refused and nothing is written. The page does not take your text
+away or replace it with the other version: it stays in the editor, a message
+says the document is now at a later revision, and nothing more is sent until
+you choose:
+
+- **Keep mine as a new revision** saves your text after the other one. The
+  other version is not lost: it is in the history, and can be brought back.
+- **Take theirs** (after a question) drops your text and shows the other
+  version. Your text is gone.
+- **Show the other version** reads it first.
+
+Text that could not be saved is kept for the tab, so a reload, or a visit to
+another page of the portal, does not lose it: when you open the document again,
+the page says it brought your text back, and the same choice is there if the
+document is at another revision by then. The page asks before the tab is closed
+with text that could not be saved. **All documents** stays on the document
+while there is such text.
+
+## History
+
+**History** shows the document's revisions, newest first, with who made each
+(you, the agent, or an outside change: Files, an editor, or a save the portal
+could not finish) and when. A revision that restored an earlier one says which.
+Click a revision to read its text.
+
+**Restore this revision** saves its text as a new revision, so the history only
+grows. Text you have not saved yet is saved first, as a revision of its own, so
+the restore does not take it away. If it cannot be saved (a change meanwhile
+that you have not chosen about, or an error), nothing is restored until it is
+dealt with. If the document changed since the page last saved or loaded it, the
+restore is not made: the page shows the document as it is now and says so, and
+you can restore again. The history shows the 50 newest revisions, and **Show
+older revisions** the next ones.
+
+If the editor cannot be loaded (its file is missing from a checkout that was
+not built), the document is shown read-only, drawn as the portal draws
+Markdown, with the reason and **Try again**.
 
 ## The agent's tools
 
