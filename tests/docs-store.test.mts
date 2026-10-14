@@ -799,6 +799,32 @@ test('a folder that was moved takes its store along, and a folder made at its ol
   }
 });
 
+test('a moved folder finds its store again when the folder made at its old path is placed before it', async () => {
+  const { folder, docs, f, doc, url } = await withDocument('docs-store-moved-late-');
+  assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+  await docs.close();
+  const moved = `${folder}-moved`;
+  renameSync(folder, moved);
+  mkdirSync(path.join(folder, 'documents'), { recursive: true });
+  writeFileSync(path.join(folder, 'documents', 'other.md'), '# Other\n');
+  // The old path is first: its folder is another one, so the old store is put aside before the moved folder asks for it.
+  const again = await portal({ a: folder, b: moved });
+  try {
+    const found = await again.listed();
+    const byPath = Object.fromEntries(found.map((x: any) => [x.path, x]));
+    assert.deepEqual(byPath[folder].documents.map((d: any) => [d.name, d.revision]), [['other.md', 1]]);
+    assert.deepEqual(byPath[moved].documents.map((d: any) => [d.id, d.revision]), [[doc, 2]], 'its own document, with its history');
+    const newUrl = `/folders/${byPath[moved].id}/documents/${doc}`;
+    assert.deepEqual((await again.call('GET', `${newUrl}/history`)).body.revisions.map((r: any) => r.revision), [2, 1]);
+    assert.equal(commits(moved), 2);
+    assert.equal(commits(folder), 1);
+    assert.deepEqual(readdirSync(DATA).filter((name) => name.startsWith(`${f}.replaced-`)), [], 'the one put aside is the moved folder\'s again');
+    assert.equal(JSON.parse(readFileSync(path.join(storeOf(moved), 'folder.json'), 'utf8')).path, moved);
+  } finally {
+    await again.close();
+  }
+});
+
 test('a second path to a folder (a mount, a link) does not take the store made for the first', async () => {
   const folder = folderWith('docs-store-alias-', { 'documents/plan.md': '# Plan\n' });
   const stat = statSync(folder);
@@ -881,17 +907,31 @@ test('across file systems the store of an earlier version is written anew in the
   }
 });
 
-test('with the sandbox on the store of an earlier version is written anew even where it could be renamed: an agent may hold its files open', async () => {
+test('with the sandbox on a store of an earlier version is not moved or used, whatever the sandbox\'s preparation made of it, and nothing is changed', async () => {
   const { folder, f, doc, url, old } = await withEarlierStore('docs-store-legacy-sandbox-');
-  const database = statSync(path.join(old, 'docs.sqlite')).ino;
+  // The sandbox's preparation of the folder gives all of it, the old store too, to the agents' group.
+  prepareFolder(folder);
+  assert.ok(statSync(path.join(old, 'docs.sqlite')).mode & 0o060, 'the preparation opened it to the group');
+  const before = snapshot(old);
   const steps: string[] = [];
   const docs = await portal({ a: folder }, { sandbox: true, onStep: (step) => steps.push(step) });
   try {
-    await assertMoved(docs, folder, f, doc, url, old);
-    assert.notEqual(statSync(path.join(storeOf(folder), 'docs.sqlite')).ino, database, 'not the file an agent could hold');
+    const answered = await docs.call('GET', url);
+    assert.equal(answered.status, 409, JSON.stringify(answered.body));
+    assert.match(answered.body.error, /could not be moved into the portal's data folder \(the sandbox is on, and an agent could have changed what is in it\)/);
+    assert.deepEqual(snapshot(old), before, 'as it was');
+    assert.equal(existsSync(storeOf(folder)), false, 'nothing made beside it');
     assert.ok(!steps.includes('move'), 'no rename was tried');
+    assert.deepEqual(await docs.listed(), []);
   } finally {
     await docs.close();
+  }
+  // Without the sandbox (or with the old store taken away) the folder is served: it moves as for any other.
+  const plain = await portal({ a: folder });
+  try {
+    await assertMoved(plain, folder, f, doc, url, old);
+  } finally {
+    await plain.close();
   }
 });
 
@@ -1011,7 +1051,7 @@ test('a store of an earlier version that cannot be written anew leaves the old o
   // Something in it that is no file: a pipe (and nothing waits at it).
   execFileSync('mkfifo', [path.join(old, 'git', 'objects', 'info', 'pipe')]);
   const before = snapshot(old);
-  const docs = await portal({ a: folder }, { sandbox: true });
+  const docs = await portal({ a: folder }, { onStep: (step) => { if (step === 'move') throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' }); } });
   try {
     const answered = await Promise.race([docs.call('GET', url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000))]);
     assert.ok(answered, 'answered, not waiting at the pipe');

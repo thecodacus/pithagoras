@@ -110,9 +110,14 @@ The store is for the folder it was made for, not only for a path:
   ones the store knows (some document is there with the text of one of its
   revisions), so the history stays with it.
 - A folder that was **moved or renamed** on the same disk takes its store along
-  the next time a chat works in it and the page lists it. A folder that was
-  copied elsewhere is a new folder: it starts a history of its own, and the
-  history of the old path stays where it was.
+  the next time a chat works in it and the page lists it, as long as some
+  document in it still has the text of one of the store's revisions (the same
+  check as for a restore). If another folder was made at the old path
+  meanwhile, the store is put aside for it and found again from there. A folder
+  that was copied elsewhere is a new folder: it starts a history of its own, and
+  the history of the old path stays where it was.
+- Two paths to one folder (a link, a mount) have a history each, over the same
+  files: each takes the other's saves in as outside changes.
 - A folder's store is **not deleted** with the folder. Delete the store's
   folder in the data folder to free the room (`folder.json` in each says which
   folder it was for).
@@ -124,18 +129,25 @@ chat's folder. The first time the page lists such a folder, the portal moves it
 into the data folder: the history, the comments and the revisions stay as they
 were, and `.pithagoras-docs` is gone from the folder. It is renamed where that
 is possible. Where the data folder and your projects are on different disks (a
-container's two volumes), or with the sandbox on, where an agent may have files
-of it open, it is written anew in the data folder and the old one removed; what
-is in it is checked as it is written, and a link or a pipe stops it.
+container's two volumes), it is written anew in the data folder and the old one
+removed; what is in it is checked as it is written, and a link or a pipe stops
+it.
+
+**With the [sandbox](/guide/sandbox) on it is not moved.** The sandbox gives
+everything in a chat's folder to the agents' group, so an agent could have
+changed what is in the old store, and the portal, which runs as root, does not
+run git on it or remove it. Delete `.pithagoras-docs` to start a new history (the
+documents stay), or, if you trust what is in it, copy it (do not rename it: a
+file an agent holds open would then be in the data folder) into the data folder
+as the folder named by the folder's id, the first 16 characters of the SHA-256
+of the folder's path.
 
 When it cannot be moved, the folder's documents are left out of the page (the
 portal's log says why, as "could not be moved into the portal's data folder"),
 a request for them is answered with the reason, nothing is changed, and the old
-store is not used: move it into the data folder by hand (as the folder named by
-the folder's id: the first 16 characters of the SHA-256 of the folder's path),
-or delete `.pithagoras-docs` to start a new history. A
-`.pithagoras-docs` that is still there beside a store in the data folder is left
-alone: the store in the data folder is the one used.
+store is not used. A `.pithagoras-docs` that is still there beside a store in
+the data folder is left alone: the store in the data folder is the one used. If
+the old one could not be removed after it was copied, the log says so: remove it.
 
 ### A secret in a document
 

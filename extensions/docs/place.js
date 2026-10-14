@@ -20,7 +20,8 @@
  *     very folder, at a path that is not this folder any more): that store
  *     follows it
  *   - none there, and the folder has `.pithagoras-docs`, as an earlier
- *     version kept the store: moved here, or refused with the reason
+ *     version kept the store: moved here (not with the sandbox on: an agent
+ *     could have changed it), or refused with the reason
  */
 import { randomBytes } from "node:crypto";
 import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -33,7 +34,8 @@ import { Guard, isOurs, OPEN_DIR, removeEntry } from "./guard.js";
 /** Where an earlier version kept the store: in the folder itself. */
 export const LEGACY_STORE = ".pithagoras-docs";
 const BINDING = "folder.json";
-const ID = /^[0-9a-f]{16}$/;
+/** A store's folder in the data folder: its folder's id, or the same put aside (a moved folder finds its own again there). */
+const STORE_NAME = /^[0-9a-f]{16}(\.replaced-.+)?$/;
 /** Deeper than a store goes: what is deeper is not one. */
 const MAX_DEPTH = 16;
 /** How many documents are compared to tell a restored folder from another one. */
@@ -143,7 +145,8 @@ function leadsTo(place, here) {
 
 /**
  * The store made for this very folder at a path it has left: the folder was
- * moved. Not one whose folder still answers at its path (a second path to one
+ * moved. It may have been put aside meanwhile, by a new folder made at its old
+ * path that was placed first. Not one whose folder still answers at its path (a second path to one
  * folder, through a mount or a link, does not take its store), and not unless
  * the folder's documents are the ones it knows: an inode is reused when a
  * folder is deleted and another made.
@@ -156,7 +159,7 @@ function movedStore(data, id, here, documents, inside, Database) {
     return null;
   }
   for (const name of names) {
-    if (name === id || !ID.test(name)) continue;
+    if (name === id || !STORE_NAME.test(name)) continue;
     const dir = path.join(data, name);
     const bound = readBinding(dir);
     if (!bound || bound.dev !== here.dev || bound.ino !== here.ino || leadsTo(bound.path, here)) continue;
@@ -167,8 +170,8 @@ function movedStore(data, id, here, documents, inside, Database) {
 
 const refused = (why) => new DocError(409, `${LEGACY_STORE} in this folder is the documents store of an earlier version, and could not be moved into the portal's data folder (${why}). It is not used: move or delete it.`);
 
-/** `from` into `to`, a file at a time, not following a link and not letting the event loop wait for a big one. */
-function copyFile(from, to) {
+/** `from` into `to`, a chunk at a time with the event loop let go between, not following a link. */
+async function copyFile(from, to) {
   const out = openSync(to, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
     const buffer = Buffer.allocUnsafe(1 << 20);
@@ -177,6 +180,7 @@ function copyFile(from, to) {
       if (!got) break;
       let at = 0;
       while (at < got) at += writeSync(out, buffer, at, got - at);
+      await new Promise((resolve) => setImmediate(resolve));
     }
     fsyncSync(out);
   } finally {
@@ -187,9 +191,9 @@ function copyFile(from, to) {
 /**
  * The folder held open as `fd` (at `src`), and what is in it, written anew
  * into the folder `dst`: through descriptors, a link or anything that is not a
- * plain file or a folder of the portal's own refused. The old one is an agent's
- * to change while this runs, so nothing is copied that was not looked at after
- * it was opened.
+ * plain file or a folder of the portal's own refused. Nothing is copied that
+ * was not looked at after it was opened, whatever else changes the old one
+ * while this runs.
  */
 async function copyTree(src, fd, dst, depth) {
   if (depth > MAX_DEPTH) throw new Error("it is nested deeper than a store is");
@@ -212,11 +216,10 @@ async function copyTree(src, fd, dst, depth) {
       try {
         const stat = fstatSync(file);
         if (!stat.isFile() || !isOurs(stat)) throw new Error(`${entry.name} is not the portal's own`);
-        copyFile(file, to);
+        await copyFile(file, to);
       } finally {
         closeSync(file);
       }
-      await new Promise((resolve) => setImmediate(resolve));
     } else {
       throw new Error(`${entry.name} is a link or something that is not a file`);
     }
@@ -226,10 +229,12 @@ async function copyTree(src, fd, dst, depth) {
 /**
  * Moves the earlier version's store of `folder` into `dir`. Where it can it
  * is renamed, so that it is one store before and after; across file systems
- * (a container's data and workspaces are two volumes), or with the sandbox on
- * (an agent may hold files of it open: the portal's must be new ones), it is
- * written anew and the old one removed. Nothing is changed where it is
- * refused. False where there is none.
+ * (a container's data and workspaces are two volumes) it is written anew and
+ * the old one removed. Not with the sandbox on: the sandbox's preparation of a
+ * chat's folder gives everything in it to the agents' group, so what is in an
+ * old store is not the portal's to trust, and the portal does not run git on
+ * it, or remove it as root. Nothing is changed where it is refused. False
+ * where there is none.
  */
 async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
   const old = path.join(folder, LEGACY_STORE);
@@ -240,6 +245,7 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
     if (e.code === "ENOENT") return false;
     throw refused(e.code ?? e.message);
   }
+  if (sandbox) throw refused("the sandbox is on, and an agent could have changed what is in it");
   if (!stat.isDirectory()) throw refused("it is a link or a file, not a folder");
   let fd;
   try {
@@ -249,22 +255,19 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
   }
   try {
     if (!isOurs(fstatSync(fd))) throw refused("it was not made by the portal");
-    let copy = sandbox;
-    if (!copy) {
-      try {
-        faults?.after("move");
-        renameSync(old, dir);
-        // Where it is now only the portal reaches; what an agent swapped in for it meanwhile (a link) is not kept.
-        const moved = lstatSync(dir);
-        if (!moved.isDirectory() || !isOurs(moved)) {
-          removeEntry(data, id);
-          throw refused("it was replaced while it was moved");
-        }
-      } catch (e) {
-        if (e instanceof DocError) throw e;
-        if (e.code !== "EXDEV") throw refused(e.code ?? e.message);
-        copy = true;
+    let copy = false;
+    try {
+      faults?.after("move");
+      renameSync(old, dir);
+      const moved = lstatSync(dir);
+      if (!moved.isDirectory() || !isOurs(moved)) {
+        removeEntry(data, id);
+        throw refused("it was replaced while it was moved");
       }
+    } catch (e) {
+      if (e instanceof DocError) throw e;
+      if (e.code !== "EXDEV") throw refused(e.code ?? e.message);
+      copy = true;
     }
     if (copy) {
       // What an earlier try that was cut off left.
@@ -304,7 +307,7 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
  * The store folder to open for `folder`, whose id is `id`: it is there to be
  * used, or it is not there and is made by the store. `documents` is the
  * folder's documents folder (or nothing), `sandbox` whether agents run as users
- * of their own.
+ * of their own (a store of an earlier version is then not moved).
  */
 export async function placeStore({ data, id, folder, documents, inside, Database, sandbox = false, faults, log }) {
   closedData(data);

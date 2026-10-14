@@ -8,7 +8,7 @@
  * all the same, for a data folder that is not what it should be (opened to
  * others by hand, or by a restore) and for a store that was copied there
  * from somewhere else (a backup, an earlier version's folder in a chat's
- * folder, where an agent could write): the folder is opened once, here (never
+ * folder): the folder is opened once, here (never
  * through a link), and every later step goes through that open descriptor, not
  * through the path again: git is given `/proc/self/fd/<n>` and the descriptor
  * itself (Linux; elsewhere the path, checked before each use). The store must
