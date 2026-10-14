@@ -1090,20 +1090,23 @@ test('a store of an earlier version that cannot be written anew leaves the old o
   }
 });
 
-test('a store in the data folder wins over a leftover `.pithagoras-docs`, which is not touched', async () => {
+test('a store in the data folder wins over a leftover `.pithagoras-docs`, which is not touched, and the log says to remove it', async () => {
   const { folder, docs, url } = await withDocument('docs-store-legacy-both-');
+  await docs.close();
+  mkdirSync(path.join(folder, '.pithagoras-docs'));
+  writeFileSync(path.join(folder, '.pithagoras-docs', 'left'), 'a copy somebody kept');
+  // Opened again, as when the portal starts: the store is there, and the leftover is said.
+  const again = await portal({ a: folder });
   try {
-    mkdirSync(path.join(folder, '.pithagoras-docs'));
-    writeFileSync(path.join(folder, '.pithagoras-docs', 'left'), 'a copy somebody kept');
-    assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
-    assert.equal((await docs.listed()).length, 1);
+    assert.equal((await again.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).status, 200);
+    assert.equal((await again.listed()).length, 1);
     assert.equal(readFileSync(path.join(folder, '.pithagoras-docs', 'left'), 'utf8'), 'a copy somebody kept');
     assert.equal(commits(folder), 2);
+    assert.match(again.logged.join('\n'), /\.pithagoras-docs in .* is not used, as the store in the portal's data folder is: remove it/);
   } finally {
-    await docs.close();
+    await again.close();
   }
 });
-
 
 test('a store that something opened to the group while the portal ran (a recursive chmod, a restore) is closed and its git settings written new before git runs on it', async () => {
   const { folder, docs, url } = await withDocument('docs-store-loosened-');

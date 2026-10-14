@@ -313,13 +313,18 @@ export async function placeStore({ data, id, folder, documents, inside, Database
   closedData(data);
   const dir = path.join(data, id);
   const here = identityOf(folder);
+  // An old store beside the folder's own is not used, and not removed: it is said, once, when the store is opened.
+  const leftover = () => {
+    if (exists(path.join(folder, LEGACY_STORE))) log(`${LEGACY_STORE} in ${folder} is not used, as the store in the portal's data folder is: remove it`);
+    return dir;
+  };
   if (exists(dir)) {
     const bound = readBinding(dir);
     // Made by hand, or by a version before the binding: this folder's, as its id says.
-    if (!bound || (bound.dev === here.dev && bound.ino === here.ino)) return dir;
+    if (!bound || (bound.dev === here.dev && bound.ino === here.ino)) return leftover();
     if (knows(Database, dir, documents, inside)) {
       log(`The documents store of ${folder} was made for another folder with the same documents (a restore, say): it is this folder's now`);
-      return dir;
+      return leftover();
     }
     putAside(dir, log);
   }
@@ -328,8 +333,7 @@ export async function placeStore({ data, id, folder, documents, inside, Database
   if (moved) {
     renameSync(moved, dir);
     log(`The documents store of ${folder} followed it from ${readBinding(dir)?.path ?? path.basename(moved)}`);
-    if (exists(path.join(folder, LEGACY_STORE))) log(`${LEGACY_STORE} in ${folder} is not used, as the store in the portal's data folder is: remove it`);
-    return dir;
+    return leftover();
   }
   await moveLegacy({ folder, data, id, dir, sandbox, faults, log });
   return dir;
