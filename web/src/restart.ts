@@ -1,4 +1,4 @@
-import { api, ApiError, type ExtensionInfo, type RestartStatus } from "./api";
+import { api, ApiError, type RestartStatus } from "./api";
 import { confirmDialog } from "./components/ConfirmDialog";
 import { local } from "./safe-storage";
 import { t, tp } from "./i18n";
@@ -16,23 +16,19 @@ const LOST_AFTER_MS = 3 * 60_000;
 
 /** What the portal said it cannot do, in the page's words; the portal's own text where the page has none. */
 export const restartRefusal = (s: Extract<RestartStatus, { possible: false }>): string =>
-  s.code === "unsupervised"
+  s.code === "update"
+    ? updatingText()
+    : s.code === "unsupervised"
     ? t("Nothing would start this portal again here: it was not started by systemd or in a container. Start it again on the host, or run it under systemd (Restart=on-failure) or Docker. PORTAL_UPDATE_RESTART=self lets the portal start its own copy.")
     : s.reason;
+
+/** Why a restart waits while an update runs. */
+export const updatingText = (): string => t("An update is running. Restarting now would cut it off and could leave the portal without its files. Wait until it has finished.");
 
 export type RestartOutcome =
   | { kind: "cancelled" }
   /** Said in the page's words, and not as an error that something broke. */
   | { kind: "stopped"; text: string };
-
-/** The installed extensions, as they are before the restart; nothing if they cannot be listed. */
-async function installed(): Promise<string[] | undefined> {
-  try {
-    return (await api.extensions()).extensions.map((e: ExtensionInfo) => e.name);
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * The Restart button: looks whether the portal would come back, asks, and ends it. Nothing is stopped before the
@@ -57,13 +53,14 @@ export async function restartPortal(): Promise<RestartOutcome | { kind: "started
       ),
     );
   }
+  // Logins are signed with a secret that is new at each start unless PORTAL_SECRET is set.
+  if (!status.keepsLogins) parts.push(t("The portal's logins end with a restart, because no PORTAL_SECRET is set. You will have to sign in again."));
   if (!(await confirmDialog({ title: t("Restart the portal?"), message: parts.join("\n\n"), confirmLabel: t("Restart the portal") }))) return { kind: "cancelled" };
 
-  // What is installed now, to say what a restart brought once the page is back.
-  const before = await installed();
   try {
     const { boot } = await api.restartPortal();
-    if (before) local.set(KEPT, JSON.stringify({ extensions: before }));
+    // What this start of the portal runs, to say what the next one brought: not what is installed, which an install changes at once.
+    if (status.loaded) local.set(KEPT, JSON.stringify({ loaded: status.loaded, at: Date.now() }));
     return { kind: "started", boot };
   } catch (e) {
     return { kind: "stopped", text: e instanceof ApiError && e.status === 409 && e.body.code === "busy" ? t("The portal is already restarting.") : (e as Error).message };
@@ -92,26 +89,39 @@ export async function waitForPortal(boot: string, { every = POLL_MS, giveUpMs = 
   return "lost";
 }
 
-let brought: Promise<{ added: string[]; removed: string[] } | null> | undefined;
+export interface Brought {
+  /** Whether the extensions of the new start were known; if not, only the restart is told. */
+  known: boolean;
+  added: string[];
+  removed: string[];
+}
+let brought: Promise<Brought | null> | undefined;
+/** A restart that is older than this was not the one that loaded this page. */
+const FRESH_MS = 10 * 60_000;
 
 /**
  * What the restart brought, for the page that loads after it: read once and forgotten in storage, and the same answer
  * for every ask of this page (a component drawn twice must not find it gone the second time). Nothing where the page
  * was not loaded by a restart.
  */
-export function whatRestartBrought(): Promise<{ added: string[]; removed: string[] } | null> {
+export function whatRestartBrought(): Promise<Brought | null> {
   return (brought ??= (async () => {
     let before: string[] | undefined;
     try {
       const kept = JSON.parse(local.get(KEPT) ?? "null");
-      before = Array.isArray(kept?.extensions) ? kept.extensions : undefined;
+      if (Array.isArray(kept?.loaded) && typeof kept.at === "number" && Date.now() - kept.at < FRESH_MS) before = kept.loaded;
     } catch {
       before = undefined;
     }
     local.remove(KEPT);
     if (!before) return null;
-    const now = await installed();
-    if (!now) return null;
-    return { added: now.filter((n) => !before!.includes(n)), removed: before.filter((n) => !now.includes(n)) };
+    let now: string[] | null = null;
+    try {
+      now = (await api.restartStatus()).loaded;
+    } catch {
+      // Told only that it restarted.
+    }
+    if (!now) return { known: false, added: [], removed: [] };
+    return { known: true, added: now.filter((n) => !before!.includes(n)), removed: before.filter((n) => !now!.includes(n)) };
   })());
 }

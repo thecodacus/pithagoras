@@ -1571,8 +1571,8 @@ export interface UpdateCommit {
 }
 
 export type RestartStatus =
-  | { possible: true; by: "systemd" | "container" | "manager" | "copy"; running: number }
-  | { possible: false; code: "unsupervised" | "policy"; reason: string; running: number };
+  | { possible: true; by: "systemd" | "container" | "manager" | "copy"; running: number; loaded: string[] | null; keepsLogins: boolean }
+  | { possible: false; code: "unsupervised" | "policy" | "update"; reason: string; running: number; loaded: string[] | null; keepsLogins: boolean };
 
 export type UpdateStep = "fetch" | "merge" | "install" | "build" | "restart";
 

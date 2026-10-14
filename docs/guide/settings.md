@@ -447,8 +447,21 @@ chats and routines are stopped (their number is in the question; a chat carries 
 when you send it a message). After you confirm, the page waits, asks the portal
 whether it is back, and loads again when a new start of it answers. If it has not
 come back after three minutes, the page says so, and the log on the host says why.
-The page that loads after a restart says what it brought: the extensions that
-were added or removed meanwhile.
+The page that loads after a restart says what it brought: the extensions the
+new start runs that the old one did not, and the ones it no longer runs. This is
+compared with what the portal had loaded when it started, not with what is
+installed, so an extension you installed just before pressing Restart is told as
+added.
+
+**While an update runs** the button is off, and a restart request is refused: the
+update has moved `node_modules` and the builds aside, and stopping the portal then
+would leave it without the files it starts from. An update is likewise refused for
+the moment a restart is on its way.
+
+**Logins.** The logins that were open end with a restart unless `PORTAL_SECRET`
+is set (see [Deploying](/guide/deploying#environment)). Without it, the question
+says so, and the login page is what you see when the portal is back; the note about
+what the restart brought is shown when you open About after signing in.
 
 The portal restarts only where something is there to start it again, and says so
 where there is not (the button is off, with the reason):

@@ -172,6 +172,8 @@ const refusal = (e: ApiError): string => {
       return t("The portal is up to date.");
     case "invalid":
       return e.message;
+    case "restarting":
+      return t("The portal is already restarting.");
     case "unavailable":
       return t("This portal does not run from a git checkout, so it cannot update itself.");
     default:

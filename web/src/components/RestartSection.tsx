@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type RestartStatus } from "../api";
-import { restartPortal, restartRefusal, waitForPortal, whatRestartBrought } from "../restart";
+import { restartPortal, restartRefusal, updatingText, waitForPortal, whatRestartBrought, type Brought } from "../restart";
+import { useUpdate } from "../update";
 import { t } from "../i18n";
 import { ErrorBanner, Section, WarnBanner, primaryCls } from "./SettingsUi";
 
@@ -16,7 +17,7 @@ export function RestartSection() {
   const [failed, setFailed] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [said, setSaid] = useState<string | null>(null);
-  const [brought, setBrought] = useState<{ added: string[]; removed: string[] } | null | undefined>(undefined);
+  const [brought, setBrought] = useState<Brought | null | undefined>(undefined);
 
   useEffect(() => {
     let live = true;
@@ -27,7 +28,10 @@ export function RestartSection() {
     };
   }, []);
 
-  const busy = phase !== "idle";
+  // The update has moved the files the portal starts from aside: a stop now would leave it without them.
+  const { status: update } = useUpdate();
+  const updating = update?.run?.state === "running" || update?.run?.state === "restarting";
+  const busy = phase !== "idle" || updating;
   return (
     <Section title={t("Restart")} hint={t("Stops the portal and starts it again, for a new extension or a setting that needs a fresh start. Nothing happens until you have confirmed.")}>
       {brought !== undefined && brought !== null && (
@@ -35,7 +39,7 @@ export function RestartSection() {
           {t("The portal restarted.")}{" "}
           {brought.added.length > 0 && <>{t("Extensions added: {names}", { names: brought.added.join(", ") })} </>}
           {brought.removed.length > 0 && <>{t("Extensions removed: {names}", { names: brought.removed.join(", ") })} </>}
-          {brought.added.length === 0 && brought.removed.length === 0 && t("The installed extensions are as before.")}
+          {brought.known && brought.added.length === 0 && brought.removed.length === 0 && t("The extensions it runs are as before.")}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -62,7 +66,8 @@ export function RestartSection() {
         </button>
       </div>
       {failed && <ErrorBanner className="mt-3">{failed}</ErrorBanner>}
-      {status && !status.possible && <WarnBanner className="mt-3">{restartRefusal(status)}</WarnBanner>}
+      {status && !status.possible && !updating && <WarnBanner className="mt-3">{restartRefusal(status)}</WarnBanner>}
+      {updating && <WarnBanner className="mt-3">{updatingText()}</WarnBanner>}
       {said && <WarnBanner className="mt-3">{said}</WarnBanner>}
       {phase === "waiting" && <p role="status" className="mt-3 text-sm text-fg-muted">{t("The portal is restarting. This page loads again when it is back.")}</p>}
       {phase === "lost" && <ErrorBanner className="mt-3">{t("The portal has not come back after three minutes. Look at its log on the host.")}</ErrorBanner>}

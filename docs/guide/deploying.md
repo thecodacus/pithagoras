@@ -329,13 +329,17 @@ to finish. What starts it again:
 | a systemd service | `Restart=on-failure` (or `always`): systemd counts a status other than 0 as a failure and starts the unit after `RestartSec` |
 | pm2, `while true` and the like | set `PORTAL_UPDATE_RESTART=exit`; they start it again on any status |
 
-A container started with `docker run` and no `--restart` stays stopped; the portal
+A container started with `docker run` and no `--restart` stays stopped. The portal
 asks Docker over its socket for the container's restart policy (by
-`PORTAL_CONTAINER_NAME`, or the hostname) and turns the button off when there is
-none. Without the socket it assumes the policy is there. A portal started by hand,
-with nothing that starts it again, says that a restart is not possible here and
-does nothing. Each request is logged: `[restart] the owner asked for a restart at
-<time> from <address>`.
+`PORTAL_CONTAINER_NAME`, or the hostname) and turns the button off when Docker says
+there is none. Where Docker cannot be asked (no socket, the daemon does not answer)
+or does not know the container (a `--hostname` that is not its name, with no
+`PORTAL_CONTAINER_NAME`), it assumes the policy is there, so set
+`PORTAL_CONTAINER_NAME` for a container that was not started from the Compose files.
+A portal started by hand, with nothing that starts it again, says that a restart is
+not possible here and does nothing. Each restart that is started is logged:
+`[restart] the owner asked for a restart at <time> from <address>`; a request that
+is refused writes nothing. A restart is refused while an update runs.
 
 ## What the web app is sent
 

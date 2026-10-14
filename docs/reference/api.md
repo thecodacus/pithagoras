@@ -321,8 +321,8 @@ Settings → About → Restart. Whoever is signed in may use it.
 
 | | |
 | --- | --- |
-| `GET /api/restart` | `{ possible, by?, code?, reason?, running }`. `possible` is true when something would start the portal again (`by`: `systemd`, `container`, `manager` or `copy`); otherwise `code` is `unsupervised` or `policy` and `reason` says why. `running` is the number of chats and runs a restart would stop. Changes nothing |
-| `POST /api/restart` | `{ confirm: true }` — required; without it 400 `confirm`, and nothing happens. 202 `{ restarting: true, boot }`, and the portal ends with status 75 a moment later. 409 `unsupervised` or `policy` where nothing would start it again, 409 `busy` while a restart is on its way. Written to the log |
+| `GET /api/restart` | `{ possible, by?, code?, reason?, running, loaded, keepsLogins }`. `possible` is true when something would start the portal again (`by`: `systemd`, `container`, `manager` or `copy`); otherwise `code` is `unsupervised`, `policy` or `update` (an update is running) and `reason` says why. `loaded` is the list of extensions this start of the portal runs (null until known), `keepsLogins` whether a login outlives the restart (`PORTAL_SECRET` is set). `running` is the number of chats and runs a restart would stop. Changes nothing |
+| `POST /api/restart` | `{ confirm: true }` — required; without it 400 `confirm`, and nothing happens. 202 `{ restarting: true, boot }`, and the portal ends with status 75 a moment later. 409 `unsupervised` or `policy` where nothing would start it again, 409 `update` while an update runs, 409 `busy` while a restart is on its way (`POST /api/update` answers 409 `restarting` then). Written to the log |
 | `GET /api/health` | `{ ok: true, boot }`, without a login, while the portal is up. `boot` changes with each start of the portal, so a client that asked for a restart waits for another one |
 
 ## Portal settings
