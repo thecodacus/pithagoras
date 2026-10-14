@@ -32,15 +32,17 @@ in a chat's folder:
 
 ```
 <the chat's folder>/
-└── documents/
-    ├── plan.md
-    └── release-notes.md
+├── documents/
+│   ├── plan.md
+│   └── release-notes.md
+└── .pithagoras-docs/      the history and the comments (the extension's own)
 ```
 
 These are ordinary files. [Files](/guide/files) lists them, and the agent can
 read and write them like any other file in its folder.
 
-The page leaves out:
+A Markdown file you or the agent put into `documents` becomes a document the
+next time the page lists the folder. Left out are:
 
 - names that start with a dot
 - files in folders below `documents`
@@ -48,6 +50,54 @@ The page leaves out:
 - everything in a `documents` that is itself a link to another folder
 - files bigger than 1 MB
 - anything that is not a plain file, such as a pipe
+- names with control characters in them
+- documents past the first 1000 in a folder
+
+## Revisions and history
+
+Each document has a revision number. It starts at 1 and goes up by one with
+every change, whoever made it. Each folder's documents have a history of their
+own: every revision is kept, and an earlier one can be brought back.
+
+A change is saved against the revision it was made on. If the document changed
+in the meantime (the agent wrote to it, say), the save is refused and nothing
+is written: you get the text as it is now, and your change is not lost.
+Bringing back an earlier revision saves its text as a new revision, so the
+history only grows and nothing in it is replaced.
+
+A change made outside the page, by the agent with its own tools, in Files or
+in an editor, is not lost either. The next time the document is listed, read
+or saved, it is kept as a revision of its own, marked as an outside change.
+The same happens to a save that the portal could not finish (it stopped in the
+middle, say): what reached the disk is kept as a revision.
+
+Restoring a document whose file was deleted makes the file again.
+
+### Where the history is kept
+
+The history and what is said about the documents are in
+`.pithagoras-docs` in the chat's folder:
+
+- `git/` is a git repository of the extension's own, with one commit per
+  revision. It is not your project's repository and does not change it; it
+  holds only the documents. A `.gitignore` in `.pithagoras-docs` tells your
+  project's git to leave the folder out.
+- `docs.sqlite` holds the comments and an index of the revisions.
+
+Only the portal can read the folder (mode 0700). With the
+[sandbox](/guide/sandbox) on, the agent cannot read it, but the portal keeps
+each document's owner and permissions when it saves it, so the agent can go on
+editing its files. A new document belongs to the owner of the `documents`
+folder.
+
+### A secret in a document
+
+A save whose text looks like a secret (a private key, or a token of a common
+service) is saved, with a warning: the history keeps every revision, so take
+the secret out and change it where it was issued. To remove it from the
+history as well, delete the folder's `.pithagoras-docs`. That removes the
+history and the comments of every document in that folder; the documents
+themselves stay, and start again at revision 1.
 
 ## The page
 
@@ -70,5 +120,5 @@ tables, quotes, links and code. Two things are not drawn yet:
 - a `mermaid` diagram shows as its code
 - a picture by a path in the chat's folder (`![](images/a.png)`) is not shown
 
-The page only shows documents: to change one, edit it in Files or ask the
-agent. **All documents** goes back to the list.
+The page only shows documents for now: to change one, edit it in Files or
+ask the agent. **All documents** goes back to the list.
