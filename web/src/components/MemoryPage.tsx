@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Markdown } from "./Markdown";
 import {
@@ -8,14 +8,12 @@ import {
   LuChevronRight,
   LuCircleCheck,
   LuEraser,
+  LuFilter,
   LuFileText,
   LuFolder,
   LuHistory,
-  LuLocateFixed,
   LuMessageCircle,
-  LuMinus,
   LuPencil,
-  LuPlus,
   LuRefreshCw,
   LuSearch,
   LuSquare,
@@ -34,9 +32,17 @@ import {
   type MemoryHit,
   type MemoryNode,
   type MemoryTrace,
+  type MemoryTraceRun,
   type MemoryValidation,
 } from "../api";
-import { bounds, colours, layoutKept } from "../memory-graph";
+import { colours } from "../memory-graph";
+import { colourFrom, SKY_THEMES, skyThemeFrom, type SkyTheme } from "../memory-sky";
+import { local } from "../safe-storage";
+import { MemorySky } from "./MemorySky";
+import { pathOf, type TracePath } from "../memory-trace";
+import { Select } from "./Select";
+import { ColourPicker } from "./ColourPicker";
+import { useDismiss } from "../use-dismiss";
 import { applyChunk, eventReader, history, textOf, toolName, usedTools, type ChatMessage, type ToolPart, type Turn } from "../memory-chat";
 import { NOTE_LINK, linkNotes } from "../memory-links";
 import { forgetNoteDraft, forgetNoteDrafts, keepNoteDraft, readNoteDraft, type NoteDraft } from "../note-drafts";
@@ -218,6 +224,13 @@ export function MemoryPage() {
   }, [asked]);
 
   const palette = useMemo(() => colours(typesIn(tree)), [tree]);
+  // The graph's own state, kept while a note is open: the note last opened is the one it lights, and what its filter hides stays hidden.
+  const [chosen, setChosen] = useState<string | null>(note);
+  useEffect(() => {
+    if (note) setChosen(note);
+  }, [note]);
+  const [hiddenTypes, setHiddenTypes] = useState<Hidden>(() => new Set());
+  const found = useMemo(() => (hits ? new Set(hits.map((h) => h.path)) : null), [hits]);
 
   if (failed && !tree) {
     return (
@@ -344,7 +357,7 @@ export function MemoryPage() {
           ) : view === "log" ? (
             <LogView key={round} writable={writable} onOpen={openNote} onBack={close} onCleared={refresh} />
           ) : view === "graph" ? (
-            <GraphView key={round} onOpen={openNote} onBack={close} />
+            <GraphView key={round} onOpen={openNote} onBack={close} selected={chosen} onSelect={setChosen} hidden={hiddenTypes} onHide={setHiddenTypes} found={found} />
           ) : view === "chat" && writable ? (
             <LibrarianView chat={librarian} onOpen={openNote} onBack={close} />
           ) : view === "issues" ? (
@@ -1281,7 +1294,159 @@ function Issues({ validation, onOpen, onBack }: { validation: MemoryValidation |
 /** Tokens as the chat writes them (9.7k, 2k), or a ? where the trace kept none. */
 const tokens = (n?: number) => (n === undefined ? "?" : formatTokens(n));
 
-function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack: () => void }) {
+/** The key the filter hides notes nothing links to by, beside their types; no type is called this. */
+const ORPHANS = "\u0000orphans";
+
+/** What the graph's filter hides, by type ("" for notes without one) and `ORPHANS`. */
+export type Hidden = ReadonlySet<string>;
+
+const THEME_KEY = "memoryGraph.theme";
+const OUTLINE_KEY = "memoryGraph.outline";
+
+/**
+ * The routes Understory's own runs took, a row each: a button that keeps the run
+ * lit (its question, the tokens it cost, and a dot that is warm when it changed
+ * the memory) and a toggle that opens its steps below, drawn as a path, a note a
+ * step names marked with a glow in its type's colour. Pointing at a run (or
+ * reaching it with Tab) lights its notes and the links between them in the
+ * graph, shut or open; a click on its button keeps it lit. A run that lights
+ * nothing says why in the button's tooltip and description, and has a hollow dot.
+ */
+function TracePaths({
+  traces,
+  paths,
+  types,
+  colourOf,
+  opened,
+  pinned,
+  onOpen,
+  onPoint,
+  onPin,
+}: {
+  traces: MemoryTrace[];
+  /** What the graph shows of each run, by the run's id. */
+  paths: Map<string, TracePath>;
+  /** The type of each note of the graph, by path. */
+  types: Map<string, string | undefined>;
+  colourOf: (type: string | undefined) => string;
+  /** The runs the person has opened with their toggles. */
+  opened: ReadonlySet<string>;
+  /** The run kept lit. */
+  pinned: string | null;
+  /** A run's toggle was used: it opens if it was shut, and shuts if it was open. */
+  onOpen: (id: string) => void;
+  /** The run being pointed at or reached with Tab, or null: lit in the graph, closed or open. */
+  onPoint: (id: string | null) => void;
+  onPin: (id: string | null) => void;
+}) {
+  const base = useId();
+  // A run is a row of its question, its cost and a toggle for its steps. Shut to begin with, so that a long list is short, and opened only with its toggle: pointing at a run, reaching it with Tab or keeping it lit lights its notes in the graph and leaves the row as it is.
+  return (
+    <ul aria-label={t("Query paths")} className="-mx-1 max-h-[50vh] space-y-0.5 overflow-y-auto px-1">
+      {traces.slice(0, 30).map((trace) => {
+        const path = paths.get(trace.id);
+        const steps = path?.steps ?? [];
+        const kept = pinned === trace.id;
+        const open = opened.has(trace.id);
+        const change = path?.changed ?? trace.kind === "mutation";
+        // Why a run that is known to light nothing does: said on its row too, shut, where pointing at it would otherwise seem to do nothing.
+        const nothing = path?.known && path.notes.length === 0 ? (path.touched === 0 ? t("This run touched no note") : t("No note of this path is in the graph")) : undefined;
+        const id = `${base}-${trace.id}`;
+        return (
+          <li
+            key={trace.id}
+            onPointerEnter={() => onPoint(trace.id)}
+            onPointerLeave={() => onPoint(null)}
+            onFocus={() => onPoint(trace.id)}
+            onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && onPoint(null)}
+            className={`rounded-lg border transition ${kept ? "border-accent/50 bg-accent/10" : "border-transparent"}`}
+          >
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                aria-pressed={kept}
+                aria-description={nothing}
+                title={nothing ? `${trace.input}\n${nothing}` : trace.input}
+                onClick={() => onPin(kept ? null : trace.id)}
+                className={`flex min-w-0 flex-1 gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-fg/5 focus-visible:bg-fg/5 ${open ? "items-start" : "items-center"}`}
+              >
+                <span
+                  data-run-dot={nothing ? "dark" : "lit"}
+                  className={`h-2 w-2 shrink-0 rounded-full ${nothing ? "border-[1.5px] border-current" : "bg-current shadow-[0_0_8px_currentColor]"} ${open ? "mt-1.5" : ""} ${change ? "text-warn" : "text-accent"}`}
+                  aria-hidden
+                />
+                <span id={`${id}-question`} className={`min-w-0 flex-1 text-sm text-fg ${open ? "line-clamp-3 break-words" : "truncate"}`}>{trace.input}</span>
+                <span className="shrink-0 font-mono text-sm text-fg-muted">
+                  {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={open ? `${id}-steps` : undefined}
+                aria-labelledby={`${id}-toggle ${id}-question`}
+                onClick={() => onOpen(trace.id)}
+                className="shrink-0 rounded-md p-1.5 text-fg-muted transition hover:bg-fg/5 hover:text-fg"
+              >
+                <span id={`${id}-toggle`} className="sr-only">{open ? t("Hide the steps") : t("Show the steps")}</span>
+                <LuChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+              </button>
+            </div>
+            {open && (
+              <div id={`${id}-steps`} className="pb-2 pl-7 pr-2">
+                {steps.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1.5">
+                    {steps.map((step, k) => (
+                      <span key={k} className="inline-flex min-w-0 max-w-full items-center gap-0.5">
+                        {k > 0 && <LuChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-faint" aria-hidden />}
+                        {step.end ? (
+                          <span className="inline-flex items-center gap-1 text-sm text-fg">
+                            <span className={`h-2 w-2 rounded-full bg-current ${step.end === "ok" ? "text-ok" : step.end === "partial" ? "text-warn" : "text-danger"}`} aria-hidden />
+                            {step.text}
+                          </span>
+                        ) : (
+                          <span className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-sm ${step.notes.length ? "border-line bg-surface text-fg" : "border-line/60 text-fg-muted"}`}>
+                            {step.notes.map((note) => (
+                              <span key={note} className="h-2 w-2 shrink-0 rounded-full" style={{ background: colourOf(types.get(note)), boxShadow: `0 0 6px ${colourOf(types.get(note))}` }} aria-hidden />
+                            ))}
+                            <span className="shrink-0 text-fg-faint">{step.verb}</span>
+                            {step.target && <span className="truncate font-mono">{step.target}</span>}
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {/* Said only once the run's own steps are known: before, there is nothing yet to say of its notes. */}
+                {nothing && <p className="mt-1 text-sm text-fg-faint">{nothing}</p>}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function GraphView({
+  onOpen,
+  onBack,
+  selected,
+  onSelect,
+  hidden,
+  onHide,
+  found,
+}: {
+  onOpen: (path: string) => void;
+  onBack: () => void;
+  /** The note last opened: lit in the graph, and what its look flies to. */
+  selected: string | null;
+  onSelect: (path: string | null) => void;
+  hidden: Hidden;
+  onHide: (hidden: Hidden) => void;
+  /** What the search found, or null while nothing is searched for. */
+  found: ReadonlySet<string> | null;
+}) {
   const colourOf = useContext(Colours);
   const [graph, setGraph] = useState<MemoryGraph | null>(null);
   const [traces, setTraces] = useState<MemoryTrace[]>([]);
@@ -1291,175 +1456,181 @@ function GraphView({ onOpen, onBack }: { onOpen: (path: string) => void; onBack:
     api.memoryTraces().then(setTraces, () => {});
   }, []);
 
-  const placed = useMemo(() => (graph ? layoutKept(graph.nodes.map((n) => n.path), graph.edges) : []), [graph]);
-  const where = useMemo(() => new Map(placed.map((p) => [p.path, p])), [placed]);
-  const fit = useMemo(() => bounds(placed), [placed]);
-  const [box, setBox] = useState(fit);
-  useEffect(() => setBox(fit), [fit]);
+  // The look, and the brain's colour: kept in this browser.
+  const [theme, setThemeNow] = useState<SkyTheme>(() => skyThemeFrom(local.get(THEME_KEY)));
+  const [outline, setOutlineNow] = useState(() => colourFrom(local.get(OUTLINE_KEY)));
+  const setTheme = (s: SkyTheme) => (setThemeNow(s), local.set(THEME_KEY, s));
+  const setOutline = (c: string) => (setOutlineNow(colourFrom(c)), local.set(OUTLINE_KEY, colourFrom(c)));
+
   const types = useMemo(() => [...new Set((graph?.nodes ?? []).map((n) => n.type).filter((t): t is string => !!t))].sort(), [graph]);
-
-  // The notes and links, kept as they are drawn while the view moves: a pan or a zoom changes the box many times a second, and a thousand notes drawn again each time stutters.
-  const drawn = useMemo(
-    () =>
-      graph && (
-        <>
-          {graph.edges.map((e, i) => {
-            const a = where.get(e.source);
-            const b = where.get(e.target);
-            return a && b ? <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="currentColor" className="text-fg/20" strokeWidth={1.2} /> : null;
-          })}
-          {graph.nodes.map((n) => {
-            const p = where.get(n.path)!;
-            const r = 6 + Math.min(n.links, 10) * 0.8;
-            const title = n.title || n.path;
-            return (
-              <g
-                key={n.path}
-                data-note
-                role="button"
-                tabIndex={0}
-                aria-label={title}
-                onClick={() => onOpen(n.path)}
-                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(n.path))}
-                className="cursor-pointer outline-none [&:focus-visible_circle]:stroke-accent"
-              >
-                <title>{n.description ? `${title} — ${n.description}` : title}</title>
-                {n.links === 0 && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" className="stroke-danger" strokeWidth={1.5} />}
-                <circle cx={p.x} cy={p.y} r={r} fill={colourOf(n.type)} stroke="transparent" strokeWidth={3} />
-                <text x={p.x} y={p.y + r + 13} textAnchor="middle" className="fill-fg text-[11px]">
-                  {title.length > 32 ? `${title.slice(0, 31)}…` : title}
-                </text>
-              </g>
-            );
-          })}
-        </>
-      ),
-    [graph, where, colourOf, onOpen],
+  const untyped = useMemo(() => (graph?.nodes ?? []).some((n) => !n.type), [graph]);
+  const orphans = useMemo(() => (graph?.nodes ?? []).some((n) => n.links === 0), [graph]);
+  const shown = useMemo(
+    () => new Set((graph?.nodes ?? []).filter((n) => !hidden.has(n.type ?? "") && !(n.links === 0 && hidden.has(ORPHANS))).map((n) => n.path)),
+    [graph, hidden],
   );
+  const shownEdges = useMemo(() => (graph?.edges ?? []).filter((e) => shown.has(e.source) && shown.has(e.target)), [graph, shown]);
+  const foundShown = useMemo(() => (found ? new Set([...found].filter((p) => shown.has(p))) : null), [found, shown]);
+  const toggle = (key: string) => {
+    const next = new Set(hidden);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onHide(next);
+  };
 
-  const svg = useRef<SVGSVGElement>(null);
-  /** Zoom by `factor` around a point in the drawing's own units. */
-  const zoom = (factor: number, cx = box.x + box.width / 2, cy = box.y + box.height / 2) =>
-    setBox((b) => ({ x: cx - (cx - b.x) * factor, y: cy - (cy - b.y) * factor, width: b.width * factor, height: b.height * factor }));
-  // Not passive: a wheel over the graph zooms it rather than scrolling the page.
+  // The filter and the query paths are popovers, as the composer's are: shut by a press outside them or Escape.
+  const [filtering, setFiltering] = useState(false);
+  const filterButton = useRef<HTMLButtonElement>(null);
+  const filterMenu = useRef<HTMLDivElement>(null);
+  useDismiss(filtering, [filterMenu, filterButton], () => setFiltering(false), filterButton);
+  const [tracing, setTracing] = useState(false);
+  const traceButton = useRef<HTMLButtonElement>(null);
+  const traceMenu = useRef<HTMLDivElement>(null);
+  useDismiss(tracing, [traceMenu, traceButton], () => setTracing(false), traceButton);
+
+  // The run pointed at, or else the one kept lit: its notes and the links between them are lit in the graph, the rest steps back. A path kept lit stays when the list is shut.
+  const [pointed, setPointed] = useState<string | null>(null);
+  const [kept, setKept] = useState<string | null>(null);
+  // The runs the person opened: they stay open, with the list shut and opened again, and the others stay shut.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    const el = svg.current;
-    if (!el) return;
-    const wheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const r = el.getBoundingClientRect();
-      setBox((b) => {
-        const scale = Math.max(b.width / r.width, b.height / r.height);
-        const cx = b.x + b.width / 2 + (e.clientX - r.left - r.width / 2) * scale;
-        const cy = b.y + b.height / 2 + (e.clientY - r.top - r.height / 2) * scale;
-        const f = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-        return { x: cx - (cx - b.x) * f, y: cy - (cy - b.y) * f, width: b.width * f, height: b.height * f };
-      });
-    };
-    el.addEventListener("wheel", wheel, { passive: false });
-    return () => el.removeEventListener("wheel", wheel);
-  }, [graph]);
+    if (!tracing) setPointed(null);
+  }, [tracing]);
+  // What each run did, step by step, as Understory keeps it: asked when the list is first opened, for the notes a step touched are in these and not in the notation.
+  const [runs, setRuns] = useState<Map<string, MemoryTraceRun | "failed">>(new Map());
+  const askedRuns = useRef(new Set<string>());
+  useEffect(() => {
+    if (!tracing) return;
+    for (const trace of traces.slice(0, 30)) {
+      if (askedRuns.current.has(trace.id)) continue;
+      askedRuns.current.add(trace.id);
+      api.memoryTrace(trace.id).then(
+        (run) => setRuns((was) => new Map(was).set(trace.id, run)),
+        () => setRuns((was) => new Map(was).set(trace.id, "failed")),
+      );
+    }
+  }, [tracing, traces]);
+  const inGraph = useMemo(() => new Set((graph?.nodes ?? []).map((n) => n.path)), [graph]);
+  const paths = useMemo(
+    () =>
+      new Map(
+        traces.map((trace) => {
+          const run = runs.get(trace.id);
+          return [trace.id, pathOf(trace, run && run !== "failed" ? run : undefined, inGraph)] as const;
+        }),
+      ),
+    [traces, runs, inGraph],
+  );
+  const typeOf = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.path, n.type])), [graph]);
+  const lit = pointed ?? kept;
+  const trail = useMemo(() => {
+    const path = lit ? paths.get(lit) : undefined;
+    return path ? new Set(path.notes) : null;
+  }, [lit, paths]);
 
-  const drag = useRef<{ x: number; y: number } | null>(null);
-  const down = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if ((e.target as Element).closest("[data-note]")) return;
-    drag.current = { x: e.clientX, y: e.clientY };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  const move = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (!drag.current || !svg.current) return;
-    const r = svg.current.getBoundingClientRect();
-    const dx = e.clientX - drag.current.x;
-    const dy = e.clientY - drag.current.y;
-    drag.current = { x: e.clientX, y: e.clientY };
-    setBox((b) => {
-      const scale = Math.max(b.width / r.width, b.height / r.height);
-      return { ...b, x: b.x - dx * scale, y: b.y - dy * scale };
-    });
-  };
-  const up = () => (drag.current = null);
+  const label = graph ? t("The memory's notes and their links: {notes}, {links}", { notes: tp(shown.size, "{n} note", "{n} notes"), links: tp(shownEdges.length, "{n} link", "{n} links") }) : "";
+
+  /** The types as switches: what the colours are, and which of them are shown. */
+  const legend = graph && (types.length > 0 || orphans) && (
+    <ul aria-label={t("What the colours are")} className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+      {[...types.map((ty) => ({ key: ty, name: ty, colour: colourOf(ty) })), ...(untyped && types.length ? [{ key: "", name: t("no type"), colour: colourOf(undefined) }] : [])].map((c) => (
+        <li key={c.key}>
+          <button
+            type="button"
+            onClick={() => toggle(c.key)}
+            aria-pressed={!hidden.has(c.key)}
+            title={hidden.has(c.key) ? t("Show these notes") : t("Hide these notes")}
+            className={`inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${hidden.has(c.key) ? "border-line text-fg-faint line-through" : "border-line bg-surface/80 text-fg-muted hover:text-fg"}`}
+          >
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: hidden.has(c.key) ? "transparent" : c.colour, boxShadow: hidden.has(c.key) ? `inset 0 0 0 1.5px ${c.colour}` : `0 0 8px ${c.colour}` }} />
+            <span className="truncate">{c.name}</span>
+          </button>
+        </li>
+      ))}
+      {orphans && (
+        <li>
+          <button
+            type="button"
+            onClick={() => toggle(ORPHANS)}
+            aria-pressed={!hidden.has(ORPHANS)}
+            title={hidden.has(ORPHANS) ? t("Show these notes") : t("Hide these notes")}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition ${hidden.has(ORPHANS) ? "border-line text-fg-faint line-through" : "border-line bg-surface/80 text-fg-muted hover:text-fg"}`}
+          >
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-fg-muted" />
+            {t("orphan (unlinked)")}
+          </button>
+        </li>
+      )}
+    </ul>
+  );
 
   return (
     <>
-      <Bar title={t("Graph")} onBack={onBack} />
-      <div className="relative min-h-0 flex-1 overflow-hidden">
-        {failed ? (
-          <p role="alert" className="p-4 text-sm text-warn">{failed}</p>
-        ) : !graph ? (
-          <div className="skeleton m-4 h-64" role="status"><span className="sr-only">{t("Loading the graph")}</span></div>
-        ) : (
-          <>
-            <svg
-              ref={svg}
-              // A group, not a picture: the notes in it are links, which a picture would hide from a screen reader while Tab still lands on them.
-              role="group"
-              aria-label={t("The memory's notes and their links: {notes}, {links}", { notes: tp(graph.nodes.length, "{n} note", "{n} notes"), links: tp(graph.edges.length, "{n} link", "{n} links") })}
-              viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
-              className="h-full w-full cursor-grab touch-none select-none active:cursor-grabbing"
-              onPointerDown={down}
-              onPointerMove={move}
-              onPointerUp={up}
-              onPointerCancel={up}
+      <Bar title={t("Graph")} onBack={onBack}>
+        {legend && (
+          <div className="relative">
+            <button
+              ref={filterButton}
+              type="button"
+              onClick={() => setFiltering(!filtering)}
+              aria-label={t("Which notes are shown")}
+              title={t("Which notes are shown")}
+              aria-expanded={filtering}
+              className={`ui-select ui-select-sm ${filtering ? "is-open" : ""} ${hidden.size ? "text-accent" : ""}`}
             >
-              {drawn}
-            </svg>
-
-            {(types.length > 0 || graph.nodes.some((n) => n.links === 0)) && (
-              <ul aria-label={t("What the colours are")} className="absolute left-3 top-3 max-w-[45%] space-y-1 rounded-lg border border-line bg-surface/90 px-3 py-2 text-[11px] text-fg-muted">
-                {types.map((t) => (
-                  <li key={t} className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colourOf(t) }} />
-                    <span className="truncate">{t}</span>
-                  </li>
-                ))}
-                {graph.nodes.some((n) => n.links === 0) && (
-                  <li className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-danger" />
-                    {t("orphan (unlinked)")}
-                  </li>
-                )}
-              </ul>
+              <LuFilter className="h-3.5 w-3.5" />
+              <LuChevronDown className="ui-select-chevron" aria-hidden />
+            </button>
+            {filtering && (
+              <div ref={filterMenu} className="float-in-down absolute right-0 top-full z-20 mt-1.5 w-72 rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto">
+                <p className="mb-2 text-sm text-fg-muted">{t("Which notes are shown")}</p>
+                {legend}
+              </div>
             )}
-
-            {traces.length > 0 && (
-              <details className="absolute right-3 top-3 w-72 max-w-[calc(100%-1.5rem)] rounded-lg border border-line bg-surface/90 text-[11px] max-md:hidden">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-fg">{t("Query paths")}</summary>
-                <ul className="max-h-72 space-y-2 overflow-y-auto px-3 pb-3">
-                  {traces.slice(0, 30).map((trace) => (
-                    <li key={trace.id} title={trace.input}>
-                      <p className="flex items-center gap-1.5 text-fg">
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${trace.kind === "mutation" ? "bg-warn" : "bg-accent"}`} />
-                        <span className="truncate">{trace.input}</span>
-                      </p>
-                      <p className="mt-0.5 flex gap-2 font-mono text-[10px] text-fg-faint">
-                        <span className="min-w-0 flex-1 truncate">{trace.notation}</span>
-                        <span className="shrink-0">
-                          {tokens(trace.usage?.inputTokens)}→{tokens(trace.usage?.outputTokens)} {t("tok")}
-                        </span>
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-
-            <div className="absolute bottom-10 right-3 flex flex-col overflow-hidden rounded-lg border border-line bg-surface/90">
-              <button type="button" onClick={() => zoom(1 / 1.3)} aria-label={t("Zoom in")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
-                <LuPlus className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={() => zoom(1.3)} aria-label={t("Zoom out")} className="border-y border-line p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
-                <LuMinus className="h-3.5 w-3.5" />
-              </button>
-              <button type="button" onClick={() => setBox(fit)} aria-label={t("Show all of it")} className="p-2 text-fg-muted hover:bg-fg/5 hover:text-fg">
-                <LuLocateFixed className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <p className="absolute bottom-3 left-3 text-[11px] text-fg-faint">
-              {tp(graph.nodes.length, "{n} note", "{n} notes")} · {tp(graph.edges.length, "{n} link", "{n} links")} {t("— drag to move · scroll to zoom · click to open")}
-            </p>
-          </>
+          </div>
         )}
-      </div>
+        {traces.length > 0 && graph && (
+          <div className="relative">
+            <button
+              ref={traceButton}
+              type="button"
+              onClick={() => setTracing(!tracing)}
+              aria-label={t("Query paths")}
+              title={t("Query paths")}
+              aria-expanded={tracing}
+              className={`ui-select ui-select-sm ${tracing ? "is-open" : ""} ${kept ? "text-accent" : ""}`}
+            >
+              <LuWaypoints className="h-3.5 w-3.5" />
+              <span className="max-sm:hidden">{t("Query paths")}</span>
+              <LuChevronDown className="ui-select-chevron" aria-hidden />
+            </button>
+            {tracing && (
+              <div ref={traceMenu} className="float-in-down absolute right-0 top-full z-20 mt-1.5 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-surface p-3 shadow-pop max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:mt-3 max-sm:w-auto max-sm:max-w-none">
+                <p className="mb-2 text-sm text-fg-muted">{t("Point at a path to light it in the graph; click to keep it lit")}</p>
+                <TracePaths traces={traces} paths={paths} types={typeOf} colourOf={colourOf} opened={opened} pinned={kept} onOpen={(id) => setOpened((was) => (was.has(id) ? new Set([...was].filter((x) => x !== id)) : new Set(was).add(id)))} onPoint={setPointed} onPin={setKept} />
+              </div>
+            )}
+          </div>
+        )}
+        <Select
+          size="sm"
+          aria-label={t("Look of the 3D view")}
+          value={theme}
+          onChange={setTheme}
+          options={SKY_THEMES.map((s) => ({
+            value: s,
+            label: s === "stellar" ? t("Constellation") : s === "galaxy" ? t("Galaxy") : s === "brain" ? t("Brain") : s === "fireflies" ? t("Fireflies") : t("Double helix"),
+          }))}
+        />
+        {theme === "brain" && <ColourPicker value={outline} onChange={setOutline} label={t("Colour of the brain's outline")} />}
+      </Bar>
+      {failed ? (
+        <p role="alert" className="p-4 text-sm text-warn">{failed}</p>
+      ) : !graph ? (
+        <div className="skeleton m-4 h-64" role="status"><span className="sr-only">{t("Loading the graph")}</span></div>
+      ) : (
+        <MemorySky notes={graph.nodes} edges={graph.edges} shown={shown} colourOf={colourOf} found={foundShown} trail={trail} selected={selected} theme={theme} outline={outline} label={label} onOpen={onOpen} onSelect={onSelect} />
+      )}
     </>
   );
 }

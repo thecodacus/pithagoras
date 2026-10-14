@@ -846,6 +846,8 @@ export const api = {
   memoryLog: () => json<MemoryChange[]>("/api/memory/log"),
   memoryGraph: () => json<MemoryGraph>("/api/memory/graph"),
   memoryTraces: () => json<MemoryTrace[]>("/api/memory/traces"),
+  /** One run with its steps, and the full paths of the notes each touched. */
+  memoryTrace: (id: string) => json<MemoryTraceRun>(`/api/memory/trace?${new URLSearchParams({ id })}`),
   memoryValidate: () => json<MemoryValidation>("/api/memory/validate"),
   /** Whether notes can be changed here: only in the Understory the portal runs. */
   memoryHealth: () => json<{ writable: boolean; health?: MemoryHealth }>("/api/memory/health"),
@@ -2025,7 +2027,7 @@ export interface MemoryGraph {
   edges: { source: string; target: string }[];
 }
 
-/** A run of Understory's own agent over the memory: a query, or a change. */
+/** A run of Understory's own agent over the memory: a question, a change it was asked for, or a chat. */
 export interface MemoryTrace {
   id: string;
   kind: string;
@@ -2034,6 +2036,22 @@ export interface MemoryTrace {
   durationMs?: number;
   notation?: string;
   usage?: { inputTokens?: number; outputTokens?: number };
+}
+
+/** One tool the agent used in a run: what it was (`search_knowledge`, `read_concept`, `write_concept`, …), and the full paths of the notes it found, read or wrote. */
+export interface MemoryTraceStep {
+  seq: number;
+  tool: string;
+  summary: string;
+  paths: string[];
+  /** A step that changed the memory. */
+  write?: boolean;
+}
+
+/** A run with its steps, which the list of runs leaves out. */
+export interface MemoryTraceRun extends MemoryTrace {
+  steps: MemoryTraceStep[];
+  outcome?: string;
 }
 
 /** What a change may have left behind in the memory: links to nowhere, notes nothing links to, what the format says. */

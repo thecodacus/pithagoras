@@ -94,6 +94,13 @@
   40% { clip-path: inset(-48px round 12px); }
   to { translate: 0 0; scale: 1; clip-path: inset(-48px round 12px); }
 }
+/* A popover that opens downwards unrolls from its top edge, the side its button is on. */
+[data-motion="fancy"] .float-in-down { transform-origin: 50% 0; animation: fx-float-in-down .46s var(--spring) both; }
+@keyframes fx-float-in-down {
+  from { translate: 0 -14px; scale: .9; clip-path: inset(-48px -48px 100% -48px round 12px); }
+  40% { clip-path: inset(-48px round 12px); }
+  to { translate: 0 0; scale: 1; clip-path: inset(-48px round 12px); }
+}
 [data-motion="fancy"] .composer-menu > * { animation: fx-item-in .42s var(--ease-out) .08s backwards; }
 [data-motion="fancy"] .composer-menu > :nth-child(2) { animation-delay: .12s; }
 [data-motion="fancy"] .composer-menu > :nth-child(3) { animation-delay: .16s; }

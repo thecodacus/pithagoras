@@ -76,6 +76,12 @@
   from { translate: 0 6px; clip-path: inset(100% -48px -48px -48px round 12px); }
   to { translate: 0 0; clip-path: inset(-48px round 12px); }
 }
+/* The same for a popover that opens downwards, from a button above it: it unrolls from its top edge, where the button is, and not from the bottom. */
+.float-in-down { animation: float-in-down .24s var(--ease-out) both; }
+@keyframes float-in-down {
+  from { translate: 0 -6px; clip-path: inset(-48px -48px 100% -48px round 12px); }
+  to { translate: 0 0; clip-path: inset(-48px round 12px); }
+}
 
 /* ── Settings: what a page shows rises into place as it arrives ──
  * Each part of the page, not the page: a page is often a placeholder first,
@@ -136,7 +142,7 @@ button:hover > .theme-swatch { border-color: rgb(var(--fg) / .2); }
 @media (prefers-reduced-motion: reduce) {
   .settings-page > *, .setting-flash, .setup-pane, .provider-status i, .provider-status i::after,
   .ui-backdrop, .ui-dialog, .ui-dialog.is-alert, .mobile-drawer, .app-main > :last-child, .sidebar-rail, .sidebar-content,
-  .skeleton-group, .pop-in, .float-in, .stagger-in > * { animation: none; }
+  .skeleton-group, .pop-in, .float-in, .float-in-down, .stagger-in > * { animation: none; }
   .skeleton::after { animation: none; display: none; }
   .setup-step::before { transition: none; }
 }
