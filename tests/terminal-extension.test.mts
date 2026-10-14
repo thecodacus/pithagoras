@@ -3,26 +3,43 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { inProcessHome } from "./server-harness.mjs";
+import express from "express";
+import terminal from "../extensions/terminal/server.js";
+import { personsEnv } from "../core/server/src/background.ts";
+import { scratch } from "./helpers.mts";
 
-const home = inProcessHome("pithagoras-term-");
+/**
+ * The terminal extension's server half: a shell of the person's own, over a
+ * pty, its output streamed and its input posted. Given a portal as the portal
+ * gives it one: its routes on a router, the person's environment, and the
+ * folder of a chat, where the chat "gone" has a folder that is not there.
+ * The pty is util-linux's `script`, and the shell's processes are found in
+ * /proc: Linux's, as where the portal runs.
+ */
+const home = scratch("pithagoras-term-");
 // `script` runs its command through $SHELL, so it has to be a lone path.
 process.env.SHELL = "/bin/sh";
-mkdirSync(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+mkdirSync(path.join(home, "work"));
 
-const { default: express } = await import("express");
-const { terminalRouter } = await import("../dist/api/terminal.js");
-const { createSession } = await import("../dist/db.js");
-
+const router = express.Router();
+const stop = terminal({
+  router,
+  http: { json: express.json, endWithLogin: () => () => {} },
+  sandbox: { personEnv: personsEnv },
+  chats: { folder: (id: string) => (id === "gone" ? path.join(home, "no-such-folder") : path.join(home, "work")) },
+} as any);
 const app = express();
-app.use(express.json());
-app.use("/api", terminalRouter());
+app.use("/api", router);
 const server = app.listen(0);
-const base = `http://127.0.0.1:${server.address().port}/api`;
+const base = `http://127.0.0.1:${(server.address() as any).port}/api`;
 // A failed assertion ends a test where it stands, and a server left open would keep the whole run waiting for it.
-after(() => { server.closeAllConnections(); server.close(); });
-const post = (url, body) =>
-  fetch(base + url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) }).then((r) => r.json());
+after(async () => {
+  await stop();
+  server.closeAllConnections();
+  server.close();
+});
+const post = (url: string, body?: unknown) =>
+  fetch(base + url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) }).then((r) => r.json() as Promise<any>);
 
 /** A terminal that is closed when the test ends, however it ends. */
 async function openTerminal(t, body) {
@@ -95,8 +112,7 @@ async function read(id, until) {
 }
 
 test("a shell that cannot start says so instead of taking the portal down", async (t) => {
-  createSession({ id: "gone", title: "gone", workspace: path.join(home, "no-such-folder"), executor: "host" });
-  const id = await openTerminal(t, { sessionId: "gone" });
+  const id = await openTerminal(t, { chat: "gone" });
   const text = await read(id, /Could not start a shell/);
   assert.match(text, /Could not start a shell/);
 });
@@ -113,7 +129,7 @@ test("a resize reaches the shell without being typed into it", async (t) => {
 });
 
 test("what the person starts in their terminal is not marked as the agent's", async (t) => {
-  // The portal marks everything it starts, for the background list to find.
+  // The portal marks everything it starts, for the background list to find; the shell is started with the person's environment.
   process.env.PITHAGORAS_AGENT = "1";
   const id = await openShell(t);
   await post(`/terminal/${id}/input`, { data: 'echo "mark:[${PITHAGORAS_AGENT:-none}]"\n' });

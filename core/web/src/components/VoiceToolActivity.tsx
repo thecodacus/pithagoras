@@ -30,7 +30,6 @@ const SLOT_IDS = Array.from({ length: SLOTS }, (_, i) => i);
 
 /** Where a card leads, as its title names it. */
 const TARGET: Record<ToolTarget, string> = {
-  terminal: msg("the terminal"),
   files: msg("the files"),
   browser: msg("the browser"),
   canvas: msg("the document"),
@@ -44,8 +43,8 @@ const TARGET: Record<ToolTarget, string> = {
  * that faded after eight seconds said nothing about the minutes after — and
  * shows how long it has been. When the call ends it says what came of it, and
  * goes a few seconds later. One that can be looked at opens it when tapped:
- * the file in Files, the terminal, the browser, the document, the picture,
- * or a window an extension brought for it (`opens` names it).
+ * the file in Files, the browser, the document, the picture, or a window an
+ * extension brought for it (`opens` names it).
  * That is a role it takes on, not another element: see the card below.
  */
 export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens }: {

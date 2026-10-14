@@ -6,7 +6,7 @@
  *
  * See docs/guide/extension-ui.md, "Building an extension".
  */
-import type { ComponentType, KeyboardEvent, ReactNode } from "react";
+import type { ComponentType, KeyboardEvent, LazyExoticComponent, ReactNode } from "react";
 import type * as ReactNamespace from "react";
 
 // --- the chat, and what is drawn in it ---
@@ -79,8 +79,8 @@ export interface SlotMap {
    * button. `useButton` is a hook, called as the chat's header is drawn: how
    * its button is for this chat. `name` is a name of its own that
    * `portal.panels.open(name, params)` reaches it by, from anywhere: the
-   * portal's own panels go by "files", "git", "terminal", "browser", "agents"
-   * and "canvas", and while one of those is the portal's, it is the one.
+   * portal's own panels go by "files", "git", "browser", "agents" and
+   * "canvas", and while one of those is the portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one loaded first).
    */
@@ -109,11 +109,12 @@ export interface SlotMap {
    * Something to do with a call of a tool, drawn on the portal's card for it
    * when it is opened, under what the call returned: "Open in the terminal".
    * `tool` is the tool's name, or a pattern of names; without it, every call.
-   * `cut` is whether the card shows only the end of the output. The
-   * component draws nothing for a call it has nothing for. `ui.ToolLink` is
-   * the portal's own look for it.
+   * `cut` is whether the card shows only the end of the output. `chat` is
+   * the chat whose conversation the card is in; a card elsewhere, such as a
+   * subagent's run, has none. The component draws nothing for a call it has
+   * nothing for. `ui.ToolLink` is the portal's own look for it.
    */
-  "chat.tool.action": { entry: { tool?: string | RegExp }; props: { call: ToolCallView; cut: boolean; panels: Panels } };
+  "chat.tool.action": { entry: { tool?: string | RegExp }; props: { call: ToolCallView; cut: boolean; panels: Panels; chat?: Chat } };
   /**
    * A window in voice mode, placed and sized like the portal's own. `place`
    * is where it goes when it has the choice: at the side, or in the middle.
@@ -159,6 +160,30 @@ export interface PortalEvent {
   payload: any;
 }
 
+/** A command the agent left running in a chat (`nohup`, `&`, a dev server), as the portal follows it. */
+export interface BackgroundJob {
+  key: string;
+  sid: number;
+  pids: number[];
+  command: string;
+  startedAt: number;
+  state: "running" | "stopped" | "exited";
+  exitedAt?: number;
+  /** Its output goes to a file the portal can follow: `GET /api/sessions/<chat>/background/<key>/output?from=`. */
+  hasOutput: boolean;
+  /** A tool call the conversation is showing already. */
+  attached: boolean;
+}
+
+/** What runs in a chat besides the conversation, and what its pi extensions say of themselves in pi's footer. */
+export interface BackgroundState {
+  /** Jobs can be followed: pi runs on the host. */
+  supported: boolean;
+  jobs: BackgroundJob[];
+  statuses: { key: string; text: string }[];
+  widgets: { key: string; lines: string[] }[];
+}
+
 /** A chat as the page has it. */
 export interface ChatFeed {
   events: readonly PortalEvent[];
@@ -166,8 +191,14 @@ export interface ChatFeed {
   items: readonly { kind: string; [key: string]: unknown }[];
   /** The agent is at work. */
   running: boolean;
+  /** How the chat stands: at work, waiting, or stopped by an error or by hand. After those two, a call that has not ended will not. */
+  status: "idle" | "running" | "error" | "interrupted";
   /** The conversation is still being fetched. */
   loading: boolean;
+  /** Its background jobs and what extensions say of themselves, asked of the portal while the chat is on screen. */
+  background: BackgroundState;
+  /** Asks for `background` again at once: after a job was stopped, or the finished ones cleared. */
+  refreshBackground(): void;
 }
 
 /** The panels of the chat on screen, any of them, by name. */
@@ -296,6 +327,14 @@ export interface Ui {
   /** Draws `fallback` in place of what it holds when that fails to draw, until `resetKey` changes. */
   ErrorBoundary: ComponentType<{ resetKey: string; fallback?: (error: Error) => ReactNode; children: ReactNode }>;
   PartFailed: ComponentType<{ error: Error }>;
+  /**
+   * A component fetched when it is first drawn, from a chunk of the
+   * extension's own that exports it by name: `ui.lazy(() => import("./Shell"),
+   * "Shell")`, drawn in `Suspense`. A chunk that cannot be fetched (the
+   * extension was updated after the page was opened) is said so by
+   * `PartFailed` with a way to reload, as the portal's own parts are.
+   */
+  lazy<M extends Record<K, ComponentType<any>>, K extends keyof M>(load: () => Promise<M>, name: K): LazyExoticComponent<M[K]>;
   /** A link on a tool call's card, as the portal's own are drawn: for `chat.tool.action`. */
   ToolLink: ComponentType<{ icon?: ComponentType<{ "aria-hidden"?: boolean }>; onClick: () => void; children: ReactNode }>;
   /** A question with two answers, asked over the page: resolves true for yes. */
@@ -388,7 +427,7 @@ export interface Portal {
     run(name: string, ...args: unknown[]): unknown;
     has(name: string): boolean;
   };
-  /** The panels of the chat on screen, any of them: the portal's ("files", "terminal", …) and an extension's ("<package>/<id>"). */
+  /** The panels of the chat on screen, any of them: the portal's ("files", "git", …) and an extension's ("<package>/<id>", or the name it gave itself). */
   panels: PanelController;
   chats: {
     /**

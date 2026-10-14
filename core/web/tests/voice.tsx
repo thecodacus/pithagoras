@@ -13,6 +13,7 @@ import { registerShortcut } from '../src/extensions/shortcuts';
 import { registerCommand } from '../src/extensions/commands';
 import { panels } from '../src/extensions/panels';
 import { ToolLink } from '../src/extensions/ToolView';
+import { startExtensions } from '../src/extensions/loader';
 // `?brought=1`: with a window an extension brought, as the installed ones register theirs.
 if (new URLSearchParams(location.search).has('brought')) {
   register('probe', 'voice.window', {
@@ -49,6 +50,10 @@ if (hooks) {
   });
   registerShortcut('hooks', { id: 'pin', label: 'Show or hide what is pinned', scope: 'voice', default: { code: 'KeyN' }, run: ({ windows }) => (windows.isOpen('pinned') ? windows.close('pinned') : windows.open('pinned')) });
   registerCommand('jobs.show', (asked) => said.push(asked));
+} else {
+  // The installed extensions, loaded as the app loads them: those a fresh portal has (the terminal), which the browser
+  // tests serve. Not beside the one above, which stands in for them.
+  startExtensions();
 }
 const microphone = new AudioContext();
 let destination = microphone.createMediaStreamDestination();

@@ -8,6 +8,16 @@ left, right or at the bottom, or floated, by dragging its header. In
 
 ## Terminal
 
+The terminal is an [extension](/guide/extensions), `pithagoras-terminal`, in the
+repository's `extensions/terminal`. A fresh portal installs it, once; after that
+it is listed under Settings → Extensions → Installed like any other, and can be
+switched off or removed there. Without it a chat has no terminal panel, no
+terminal window in voice mode and no way into one from a command's card, and a
+job in the running tray is listed but opens nothing. Another extension can take
+its place: everything it does is open to any extension (see
+[Extensions in the portal's interface](/guide/extension-ui)), and its source is
+an example of each part.
+
 The terminal panel has three tabs.
 
 | Tab | What it is |
@@ -17,7 +27,9 @@ The terminal panel has three tabs.
 | **Your shell** | A real shell of your own, in this chat's workspace. |
 
 A command in the conversation can be shown in the Agent tab from its own card, and
-a background job opens the Background tab on that job.
+a background job in the running tray opens the Background tab on that job. In
+voice mode the Agent tab is a window at the side, which opens each time the agent
+starts a command, and from the card of one; <kbd>T</kbd> shows and hides it.
 
 ### Your shell
 
@@ -109,8 +121,8 @@ so.
 
 ## HTTP
 
-The terminal is `POST /api/terminal` (optionally with the session, to start in its
-workspace), a stream at `/api/terminal/:id/stream`, and `input`, `resize` and
-`DELETE` on the same id. Background jobs and subagents are under
+The terminal is the extension's server half, under `/api/x/pithagoras-terminal`:
+`POST /terminal` (optionally with the chat, to start in its folder), a stream at
+`/terminal/:id/stream`, and `input`, `resize` and `DELETE` on the same id. Background jobs and subagents are under
 `/api/sessions/:id/background` and `/api/sessions/:id/subagents/:agent`. See the
 [HTTP API](/reference/api#terminal-background-jobs-and-subagents).

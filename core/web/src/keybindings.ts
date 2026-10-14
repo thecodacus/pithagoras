@@ -38,7 +38,6 @@ type CoreActionId =
   | "voice.canvas"
   | "voice.files"
   | "voice.pictures"
-  | "voice.terminal"
   | "voice.browser"
   | "voice.settings"
   | "voice.faster"
@@ -72,7 +71,6 @@ export const ACTIONS: Action[] = [
   { id: "voice.canvas", label: msg("Show or hide canvases"), scope: "Voice mode", default: { code: "KeyD" } },
   { id: "voice.files", label: msg("Show or hide files"), scope: "Voice mode", default: { code: "KeyF" } },
   { id: "voice.pictures", label: msg("Show or hide pictures"), scope: "Voice mode", default: { code: "KeyI" } },
-  { id: "voice.terminal", label: msg("Show or hide the terminal"), scope: "Voice mode", default: { code: "KeyT" } },
   { id: "voice.browser", label: msg("Show or hide the browser"), scope: "Voice mode", default: { code: "KeyB" } },
   { id: "voice.settings", label: msg("Open or close voice settings"), scope: "Voice mode", default: { code: "KeyO" } },
   { id: "voice.faster", label: msg("Speak faster"), scope: "Voice mode", default: { code: "Period" } },

@@ -50,7 +50,6 @@ function ContextChip({ label, body }: { label: string; body: string }) {
 /** What a row can do, for the chat to answer: one object that stays the same, so that a row is not told it has changed (see useStableActions). */
 export type RowActions = {
   openPicture: (id: string) => void;
-  showInTerminal: (callId: string) => void;
   openAgent: (id: string) => void;
   edit: (seq: number) => void;
   cancelEdit: () => void;
@@ -417,7 +416,7 @@ export const TranscriptRow = memo(function TranscriptRow({
       <div data-key={item.id} className={`tool-row${enter}`}>
       {/* The card for it, or what an extension draws for its own tool: see extensions/ToolView.tsx. */}
       <ToolView item={item} chat={chat}>
-        <ToolCall item={item} onOpenTerminal={act.showInTerminal} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
+        <ToolCall item={item} chat={chat} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
       </ToolView>
       {item.flagged && <FlaggedNotice flag={item.flagged} act={act} />}
       {item.picture && (

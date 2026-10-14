@@ -3,9 +3,9 @@ import { test, expect, mockPortal } from './portal-mock';
 
 /**
  * What the first draw has to fetch: the shell and the chat, not the other
- * pages, the shell's terminal emulator, or the dialogs that open over it. (The
- * dev server serves each module as a file of its own, so what was asked for
- * says what the entry reached.)
+ * pages, the terminal extension's emulator (its Shell tab, a chunk of its
+ * own), or the dialogs that open over it. (The dev server serves each module
+ * as a file of its own, so what was asked for says what the entry reached.)
  */
 const at = new Date().toISOString();
 const chat = { id: 'a', title: 'Chat A', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, created_at: at, provider: null, model: null, thinking_level: null };
@@ -26,13 +26,17 @@ async function portal(page: Page, more: (path: string) => unknown = () => undefi
   return files;
 }
 
-const PAGES = /\/components\/(SessionsPage|ProjectsPage|AgentPage|RoutinesPage|AuditPanel|BrowserPage|MemoryPage|MediaPage|SetupAssistant|TerminalPanel)\.tsx$/;
+const PAGES = /\/components\/(SessionsPage|ProjectsPage|AgentPage|RoutinesPage|AuditPanel|BrowserPage|MemoryPage|MediaPage|SetupAssistant)\.tsx$/;
+/** The terminal extension's shell, which brings the terminal emulator: built into a chunk of its own. */
+const SHELL = /\/api\/extension-ui\/pithagoras-terminal\/chunks\/Shell-[^/]+\.js$/;
 
 test('the first draw does not fetch the other pages or the terminal emulator, and a page is fetched when it is opened', async ({ page }) => {
   const files = await portal(page);
   await page.goto('/s/a');
   await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByText('Chat A')).toBeVisible();
-  expect(files.filter((f) => PAGES.test(f) || /@xterm/.test(f))).toEqual([]);
+  // The terminal is there, and its shell is not fetched.
+  await expect(page.getByRole('button', { name: 'Terminal', exact: true })).toBeVisible();
+  expect(files.filter((f) => PAGES.test(f) || SHELL.test(f) || /@xterm/.test(f))).toEqual([]);
 
   await page.getByRole('button', { name: 'Sessions', exact: true }).first().click();
   await expect(page).toHaveURL(/\/sessions$/);
@@ -60,7 +64,7 @@ test('a dialog whose file cannot be fetched is said so over the portal, which st
 
 test("a terminal whose file cannot be fetched is said so in its own tab, and the chat stays", async ({ page }) => {
   await portal(page);
-  await page.route(/\/components\/TerminalPanel\.tsx/, (route) => route.fulfill({ status: 404, body: 'not found' }));
+  await page.route(SHELL, (route) => route.fulfill({ status: 404, body: 'not found' }));
   await page.goto('/s/a');
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
   await page.getByRole('tab', { name: 'Your shell' }).click();

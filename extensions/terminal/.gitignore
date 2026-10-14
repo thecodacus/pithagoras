@@ -1,0 +1,3 @@
+# Built by build.mjs (the portal's npm run build), not kept in git.
+web/
+node_modules/

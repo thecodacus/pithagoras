@@ -87,7 +87,7 @@ test.describe('the panels beside the conversation', () => {
     await expect(page.locator('.sub-head')).toContainText('Deploy audit');
     await expect.poll(async () => (await drawn(page)).ChildItem ?? 0).toBeGreaterThan(0);
     await tray.getByRole('button', { name: /npm run dev/ }).click();
-    await expect(page.locator('.bg-job-output')).toContainText('VITE');
+    await expect(page.locator('.terminal-job-output')).toContainText('VITE');
     await expect.poll(async () => (await drawn(page)).JobOutput ?? 0).toBeGreaterThan(0);
     // Settled: the clock stands still until it is run.
     await page.clock.runFor(200);

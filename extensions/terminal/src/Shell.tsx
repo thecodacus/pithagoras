@@ -1,20 +1,20 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
-import { orderedInput } from "../ordered-input";
-import { api } from "../api";
-
-import { t } from "../i18n";
+import { portal, t } from "./portal";
+import { orderedInput } from "./text";
 
 /**
- * A shell in the workspace of the session you are looking at.
+ * A shell of the person's own, in the folder of the chat it was opened from.
+ * Its own chunk: the terminal emulator is large, and only a chat whose Shell
+ * tab is opened needs it.
  *
- * Output arrives over SSE and keystrokes go back as POSTs — the same shape the
- * transcript already uses, and no websocket to add. The scrollback is replayed
- * on connect, so collapsing the panel and opening it again keeps the screen.
+ * Output arrives over SSE and keystrokes go back as POSTs, the same shape the
+ * conversation already uses, and no websocket to add. The scrollback is
+ * replayed on connect, so closing the panel and opening it again keeps the
+ * screen.
  */
-export function TerminalPanel({ sessionId }: { sessionId: string }) {
+export function Shell({ chatId }: { chatId: string }) {
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,7 +25,7 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
     const term = new Terminal({
       fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      // The portal's own colours for a terminal (see index.css), which a theme may set.
+      // The portal's colours for a terminal, which a theme may set.
       theme: terminalColours(),
       cursorBlink: true,
       scrollback: 5000,
@@ -37,6 +37,10 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
     term.open(host.current);
     fit.fit();
 
+    const route = (path = "") => portal.api.url(`/terminal${path}`);
+    const post = (path: string, body: unknown) => portal.api.json(route(path), { method: "POST", body: JSON.stringify(body) });
+    const close = (termId: string) => portal.api.json(route(`/${termId}`), { method: "DELETE" }).catch(() => {});
+
     let id: string | null = null;
     let source: EventSource | null = null;
     let closed = false;
@@ -47,27 +51,27 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
       const size = `${term.rows}x${term.cols}`;
       if (!id || size === sent) return;
       sent = size;
-      api.terminalResize(id, term.rows, term.cols).catch(() => {});
+      post(`/${id}/resize`, { rows: term.rows, cols: term.cols }).catch(() => {});
     };
 
-    api
-      .openTerminal(sessionId)
+    Promise.resolve()
+      .then(() => post("", { chat: chatId }) as Promise<{ id: string; cwd: string }>)
       .then(({ id: termId }) => {
-        if (closed) return void api.closeTerminal(termId).catch(() => {});
+        if (closed) return void close(termId);
         id = termId;
-        // Keystrokes that go nowhere — the shell has exited, or the portal has
-        // restarted — used to vanish, and the panel looked merely unresponsive.
-        // Said once, not on every key — and again after the stream has come back:
+        // Keystrokes that go nowhere (the shell has exited, or the portal has
+        // restarted) would vanish, and the panel look merely unresponsive.
+        // Said once, not on every key, and again after the stream has come back:
         // what it replays starts with a reset, which clears the screen of the notice.
         let told = false;
-        source = new EventSource(`/api/terminal/${termId}/stream`);
+        source = new EventSource(route(`/${termId}/stream`));
         source.onmessage = (m) => term.write(JSON.parse(m.data));
         source.onopen = () => {
           told = false;
         };
         term.onData(
           orderedInput(
-            (data) => api.terminalInput(termId, data),
+            (data) => post(`/${termId}/input`, { data }),
             () => {
               if (told || closed) return;
               told = true;
@@ -77,7 +81,7 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
         );
         resize();
       })
-      .catch((e) => term.write(`\r\n${t("Could not open a shell: {error}", { error: e.message })}\r\n`));
+      .catch((e) => term.write(`\r\n${t("Could not open a shell: {error}", { error: (e as Error).message })}\r\n`));
 
     // The panel is resizable, so the pty has to be told when it changes.
     const observer = new ResizeObserver(() => {
@@ -95,15 +99,15 @@ export function TerminalPanel({ sessionId }: { sessionId: string }) {
       observer.disconnect();
       themed.disconnect();
       source?.close();
-      if (id) api.closeTerminal(id).catch(() => {});
+      if (id) void close(id);
       term.dispose();
     };
-  }, [sessionId]);
+  }, [chatId]);
 
-  return <div ref={host} className="h-full w-full bg-[rgb(var(--terminal))] p-1" />;
+  return <div ref={host} className="terminal-shell" />;
 }
 
-/** The terminal's colours as the page has them now, in the form xterm takes. */
+/** The terminal's colours as the page has them now (the portal's `--terminal` and `--terminal-fg`), in the form xterm takes. */
 function terminalColours() {
   const style = getComputedStyle(document.documentElement);
   const colour = (token: string) => `rgb(${style.getPropertyValue(token).trim().split(/\s+/).join(", ")})`;

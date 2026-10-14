@@ -468,14 +468,22 @@ test("changing the password ends every event and terminal stream that was open u
     const mine = cookieOf(await login(PASSWORD, p.base));
     const other = cookieOf(await login(PASSWORD, p.base));
     const chat = (await (await post(p.base, "/api/sessions", {}, mine)).json()).id;
-    const shell = (await (await post(p.base, "/api/terminal", {}, other)).json()).id;
+    // The terminal is an extension a fresh portal installs: its stream is ended through the portal's endWithLogin.
+    const TERMINAL = "/api/x/pithagoras-terminal/terminal";
+    let opened;
+    for (const end = Date.now() + 30_000; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 200))) {
+      opened = await post(p.base, TERMINAL, {}, other);
+      if (opened.ok) break;
+    }
+    assert.equal(opened?.status, 200, "the terminal's server half is running");
+    const shell = (await opened.json()).id;
     const streams = {
       // Two streams on one cookie: the browser's own, and one whoever copied the cookie opened. A cookie is a string, so
       // there is nothing to tell them apart by, and neither may outlive the password it was opened under.
       myEvents: await openStream(p.base, mine, `/api/sessions/${chat}/events`),
       copiedEvents: await openStream(p.base, mine, `/api/sessions/${chat}/events`),
       theirEvents: await openStream(p.base, other, `/api/sessions/${chat}/events`),
-      theirTerminal: await openStream(p.base, other, `/api/terminal/${shell}/stream`),
+      theirTerminal: await openStream(p.base, other, `${TERMINAL}/${shell}/stream`),
     };
     const changed = await post(p.base, "/api/auth/password", { current: PASSWORD, password: "the brand new one" }, mine);
     assert.equal(changed.status, 200);
@@ -484,7 +492,7 @@ test("changing the password ends every event and terminal stream that was open u
     const again = await openStream(p.base, cookieOf(changed), `/api/sessions/${chat}/events`);
     await staysOpen(again, "a stream opened after the change");
     assert.equal((await fetch(`${p.base}/api/sessions/${chat}/events`, { headers: { Cookie: mine } })).status, 401);
-    await fetch(`${p.base}/api/terminal/${shell}`, { method: "DELETE", headers: { Cookie: cookieOf(changed) } });
+    await fetch(`${p.base}${TERMINAL}/${shell}`, { method: "DELETE", headers: { Cookie: cookieOf(changed) } });
   } finally {
     await p.stop();
   }

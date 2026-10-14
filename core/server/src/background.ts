@@ -23,6 +23,12 @@ import { EXECUTOR_KIND } from "./executor-kind.js";
  */
 export const MARKER = "PITHAGORAS_AGENT=1";
 
+/** The portal's environment less MARKER, which everything else it starts carries: for what a person starts (a shell of their own). */
+export function personsEnv(): NodeJS.ProcessEnv {
+  const { [MARKER.split("=")[0]]: _mark, ...env } = process.env;
+  return env;
+}
+
 /** Whether this portal can see the agent's processes at all: not a container's, and not off Linux. */
 export const BACKGROUND_SUPPORTED = EXECUTOR_KIND !== "container" && process.platform === "linux";
 

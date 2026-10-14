@@ -56,9 +56,10 @@ const forTool = (tool: unknown, name: string) => {
 /**
  * What the installed extensions offer to do with a call (`chat.tool.action`),
  * under what it returned on the portal's card. `cut` is whether the card shows
- * only the end of the output. One that fails to draw is left out, alone.
+ * only the end of the output, and `chat` the chat whose conversation the card
+ * is in (none for a subagent's). One that fails to draw is left out, alone.
  */
-export function ToolActions({ item, cut }: { item: ToolItem; cut: boolean }) {
+export function ToolActions({ item, cut, chat }: { item: ToolItem; cut: boolean; chat?: Chat }) {
   const entries = useSlot("chat.tool.action");
   const call = useCallView(item);
   const offered = entries.filter((entry) => forTool(entry.tool, call.name));
@@ -67,7 +68,7 @@ export function ToolActions({ item, cut }: { item: ToolItem; cut: boolean }) {
     <>
       {offered.map((entry) => (
         <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${item.id}`} fallback={() => null}>
-          <entry.component call={call} cut={cut} panels={panelsFor(entry.extension)} />
+          <entry.component call={call} cut={cut} chat={chat} panels={panelsFor(entry.extension)} />
         </ErrorBoundary>
       ))}
     </>

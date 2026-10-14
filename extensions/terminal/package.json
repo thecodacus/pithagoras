@@ -1,0 +1,15 @@
+{
+  "name": "pithagoras-terminal",
+  "version": "0.1.0",
+  "description": "The terminal of a Pithagoras chat: what the agent ran, the jobs it left running, and a shell of your own in the chat's folder",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "devDependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}

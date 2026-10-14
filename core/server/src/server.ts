@@ -111,7 +111,6 @@ import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
 import { adoptPortalBrowser, browserRouter, pinConnection } from "./api/browser.js";
-import { endAllTerminals, terminalRouter } from "./api/terminal.js";
 import { BACKGROUND_SUPPORTED, MARKER, clearFinished, listJobs, readOutput, stopJob, stopJobsIn } from "./background.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
@@ -1786,7 +1785,6 @@ app.use("/api", logsRouter());
 app.use("/api", updateRouter());
 app.use("/api", restartRouter());
 app.use("/api", voiceRouter());
-app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());
 // The routes of the installed extensions' server halves, each under its package's name.
 app.use("/api/x", extensionRoutes);
@@ -1964,13 +1962,10 @@ async function stop(signal: string) {
   // However long the rest takes, and no longer than docker waits before it kills.
   setTimeout(() => process.exit(requestedExit()), 10_000).unref();
   routineSupervisor.stop();
-  // Alongside the rest: their shells are given a moment to wind down.
-  const shells = endAllTerminals();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
   // After the chats: a chat's pi may still be using what a server half holds.
   await stopServerHalves();
-  await shells;
   server.close(() => process.exit(requestedExit()));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds

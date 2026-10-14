@@ -142,15 +142,15 @@ test('a command shown in the terminal stays in view while its output grows', asy
   await page.goto('/tests/chat.html?phase=tools');
   await page.locator('.chat-tool-head', { hasText: 'seq 1 40' }).click();
   await page.getByRole('button', { name: /in the agent terminal/ }).last().click();
-  const run = page.locator('.voice-terminal-run').last();
+  const run = page.locator('.terminal-run').last();
   await expect(run).toBeVisible();
   await expect(run).toContainText('seq 1 40');
   // Much more output, at once, while it is being shown.
   await page.evaluate(() => (window as any).bashOut(Array.from({ length: 120 }, (_, i) => `step ${i + 1}`).join('\n')));
   await frames(page);
-  const box = (await page.locator('.voice-terminal-output').first().boundingBox())!;
+  const box = (await page.locator('.terminal-output').first().boundingBox())!;
   // Its command line, at the top of it: the output grew under it, not over it.
-  const command = (await run.locator('.voice-terminal-command').boundingBox())!;
+  const command = (await run.locator('.terminal-command').boundingBox())!;
   expect(command.y).toBeGreaterThanOrEqual(box.y - 1);
 });
 
@@ -173,8 +173,8 @@ test('the terminal moved up a little to show a command follows its output again 
   await page.locator('.chat-tool-head', { hasText: 'seq 1 40' }).click();
   const link = page.getByRole('button', { name: /in the agent terminal/ }).last();
   await link.click();
-  const output = page.locator('.voice-terminal-output').first();
-  const run = page.locator('.voice-terminal-run').last();
+  const output = page.locator('.terminal-output').first();
+  const run = page.locator('.terminal-run').last();
   await expect(run).toBeVisible();
   // The command's output a little taller than the terminal: shown from its top, the terminal is a little short of its end.
   const out = (n: number) => page.evaluate((n) => (window as any).bashOut(Array.from({ length: n }, (_, i) => `step ${i + 1}`).join('\n')), n);

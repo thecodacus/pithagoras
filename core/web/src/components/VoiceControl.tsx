@@ -29,7 +29,7 @@ const REPEAT_SECONDS = 120;
 type KeptPhrase = { samples: Float32Array[]; sampleRate: number; stretched?: { rate: number; samples: Promise<Float32Array>; signal: AbortSignal; ready?: boolean } };
 const seconds = (phrase: KeptPhrase) => phrase.samples.reduce((n, s) => n + s.length, 0) / phrase.sampleRate;
 
-export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, folder, items, running, work, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
+export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, folder, items, running, work, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, toolEvents }: {
   sessionId: string;
   /** The folder the chat works in, for the Files window. */
   folder: string;
@@ -37,7 +37,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   stageTarget: HTMLElement | null;
   onModeChange: (active: boolean) => void;
   title: string;
-  browserAvailable: boolean; browserActivity: number; terminalActivity: number; toolEvents: PortalEvent[];
+  browserAvailable: boolean; browserActivity: number; toolEvents: PortalEvent[];
   items: Item[];
   running: boolean;
   /** What the agent is doing now (the chat works it out once, from the same events), or null when it is not running. */
@@ -658,7 +658,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
 
     {(starting || enabled) && stageTarget && createPortal(
       <VoiceStage sessionId={sessionId} folder={folder} workPhase={work} canvasOpen={canvasOpen} onCanvasMinimize={onCanvasMinimize} onCanvasToggle={onCanvasToggle} title={sequentialMode ? `${title} · ${sentenceMode ? (prefetchMode ? t("Sentence pipeline · buffered audio") : t("Sentence chunks · buffered audio")) : t("Sequential baseline")}` : comparison ? `${title} · ${t("Streaming pipeline")}` : title} phase={phase} starting={starting} muted={muted} speaking={speaking}
-        browserAvailable={browserAvailable} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
+        browserAvailable={browserAvailable} browserActivity={browserActivity} toolEvents={toolEvents} sounds={sounds} onSounds={toggleSounds} onCue={cue}
         levels={levels} transcript={transcript} error={error} onMute={toggleMute} onEnd={endMode} waitingForTap={waitingForTap}
         items={items} errorsAfter={errorsAfter} running={running} onStop={() => { void latest.current.onAbort().catch(e => setError((e as Error).message)); }}
         attachments={attachments} onAddPictures={files => { void addPictures(files); }} onRemovePicture={id => pending.set(sessionId, pending.get(sessionId).filter(a => a.id !== id))}

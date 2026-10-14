@@ -4,26 +4,24 @@ import { useStableActions } from "../use-stable-actions";
 import { useStable } from "../use-stable";
 import { splitContext } from "../context-blocks";
 import { workingText } from "./StatusDot";
-import { VoiceTerminal } from "./VoiceTerminal";
 import { RunningTray } from "./RunningTray";
 import { mentionsCommand } from "../status-commands";
 import { SubagentPanel } from "./SubagentPanel";
-import { BackgroundJobs } from "./BackgroundJobs";
 import { stableSubagents, subagents, type Subagent } from "../subagents";
 import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
-import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
+import { latestBrowserActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
 import { useDictation } from "../use-dictation";
 import { createPortal } from "react-dom";
-import { Fragment, Suspense, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -36,7 +34,6 @@ import { confirmDialog } from "./ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
-import { lazyComponent } from "../lazy";
 import { forgetFileDraft } from "../file-drafts";
 import { FilesPanel } from "./FilesPanel";
 import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
@@ -57,9 +54,6 @@ import { setPanelController, type PanelController } from "../extensions/panels";
 import { runCommand, useHasCommand } from "../extensions/commands";
 import { tabKeys } from "../tab-keys";
 import { STEP, arrowSteps } from "../resize-keys";
-
-// The terminal emulator is large and only a chat that opens a shell needs it.
-const TerminalPanel = lazyComponent(() => import("./TerminalPanel"), "TerminalPanel");
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
 const PAGE = 40;
@@ -83,7 +77,7 @@ const ASIDE: Record<Dock, string> = {
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
 
-type OwnPanel = "browser" | "agents" | "files" | "git" | "terminal";
+type OwnPanel = "browser" | "agents" | "files" | "git";
 /** A panel an extension brought (the `chat.panel` slot), by its entry's key: `x:<extension>/<id>`. */
 type ExtensionPanel = `x:${string}`;
 /** The panels that sit beside the conversation, each in a place of its own. */
@@ -95,7 +89,6 @@ const PANEL: Record<OwnPanel, { label: string; close: string }> = {
   agents: { label: msg("Subagents"), close: msg("Close the subagents") },
   files: { label: msg("Files"), close: msg("Close the files") },
   git: { label: msg("Git"), close: msg("Close the git panel") },
-  terminal: { label: msg("Terminal"), close: msg("Close the terminal") },
 };
 
 /** Where a slash command comes from; one a newer portal adds is shown as it is named. */
@@ -124,7 +117,7 @@ const moveInto = (parent: HTMLElement, box: HTMLElement) => {
 /*
  * Each panel is drawn once, into a box of its own that goes into whichever
  * place it is in: carried elsewhere, it is the same panel — Files keeps an
- * edit not saved, the terminal its lines — rather than one made anew there.
+ * edit not saved, a list its scroll — rather than one made anew there.
  *
  * A box taken off the page and put back loses what the page held for it: the
  * browser's page loads again, and a list is scrolled back to its top. So
@@ -289,50 +282,22 @@ export function Chat({
   // once — the answer only changes when somebody installs or removes one.
   const [browserUp, setBrowserUp] = useState(false);
   const [watching, setWatching] = useState(false);
-  const [terminal, setTerminal] = useState(false);
-  // The terminal panel holds two: what the agent ran, and a shell of your own.
-  // The shell is only started once asked for, and kept while the panel is open.
-  const [terminalTab, setTerminalTab] = useState<"agent" | "jobs" | "shell">("agent");
-  const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [shellStarted, setShellStarted] = useState(false);
-  const [terminalFocus, setTerminalFocus] = useState<{ id: string; at: number } | null>(null);
-  useEffect(() => {
-    if (!terminal) setShellStarted(false);
-  }, [terminal]);
-  useEffect(() => {
-    if (terminalTab === "shell" && terminal) setShellStarted(true);
-  }, [terminalTab, terminal]);
   const openAgent = (id: string) => {
     setSelectedAgent(id);
     setAgentsOpen(true);
   };
-  const openJob = (key: string) => {
-    setSelectedJob(key);
-    setTerminalTab("jobs");
-    setTerminal(true);
-  };
-  // A job in the running tray is shown where an extension says jobs are shown (`jobs.show`), and in the portal's
-  // own terminal while there is none.
+  // A job in the running tray is shown where an extension says jobs are shown (`jobs.show`); while none does, a job
+  // there is only listed.
   const jobsShown = useHasCommand("jobs.show");
   const showJob = (key: string) => {
-    if (!jobsShown) return openJob(key);
-    const failed = (e: unknown) => {
-      console.error("[extensions] jobs.show failed, so the job is shown in the portal's terminal:", e);
-      openJob(key);
-    };
+    const failed = (e: unknown) => console.error("[extensions] jobs.show failed:", e);
     try {
       void Promise.resolve(runCommand("jobs.show", { chat: session.id, job: key })).catch(failed);
     } catch (e) {
       failed(e);
     }
-  };
-  /** A command from the chat, found in the agent terminal. */
-  const showInTerminal = (callId: string) => {
-    setTerminalTab("agent");
-    setTerminal(true);
-    setTerminalFocus({ id: callId, at: Date.now() });
   };
   const [files, setFiles] = useState(false);
   // Whether Files has an edit that is not saved: closing it would lose it.
@@ -457,10 +422,10 @@ export function Chat({
   const toggleExtensionPanel = useStable((key: string, open: boolean) => (open ? void closeExtensionPanel(key) : showExtensionPanel(key, true)));
   useWorkPanels(
     {
-      browser: !voiceMode && watching, terminal: !voiceMode && terminal, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen,
+      browser: !voiceMode && watching, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen,
       ...Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
     },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "terminal") setTerminal(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); else setCanvasOpen(false); },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
     // An edit not saved outweighs keeping Git in view: with both kept nothing
     // could go, and the fallback closed Files — edit and all — unasked.
@@ -479,7 +444,7 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", terminal && "terminal", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1095,7 +1060,6 @@ export function Chat({
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
   // Scans of every event, for the voice view: with the box's text in this component, they would run for each key typed.
   const browserActivity = useMemo(() => latestBrowserActivity(events), [events]);
-  const terminalActivity = useMemo(() => latestTerminalActivity(events), [events]);
   // Beside the conversation: subagents, jobs left running, extension statuses.
   // The same entry for a subagent whose own events have not changed: an open
   // panel draws its transcript again only when there is more of it, not on
@@ -1421,7 +1385,6 @@ export function Chat({
   const trustedHere = useRef(new Set<string>());
   const rowActions = useStableActions<RowActions>({
     openPicture: pictures.open,
-    showInTerminal,
     openAgent,
     edit: setEditing,
     cancelEdit: () => setEditing(null),
@@ -1621,7 +1584,6 @@ export function Chat({
     agents: () => setAgentsOpen(false),
     files: () => void closeFiles(),
     git: () => setGit(false),
-    terminal: () => setTerminal(false),
   };
   const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : void closeExtensionPanel(kind.slice(2)));
   /** The entry an extension's panel is drawn from. */
@@ -1677,14 +1639,13 @@ export function Chat({
   const panelControl = useRef<PanelController>({ isOpen: () => false, open: () => {}, close: () => {} });
   panelControl.current = {
     isOpen: (key) =>
-      key === "files" ? files : key === "git" ? git : key === "terminal" ? terminal : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(panelKey(key) ?? key),
+      key === "files" ? files : key === "git" ? git : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(panelKey(key) ?? key),
     open: (key, params) => {
-      const given = (params ?? {}) as { path?: unknown; callId?: unknown; id?: unknown };
+      const given = (params ?? {}) as { path?: unknown; id?: unknown };
       if (key === "files") {
         setFiles(true);
         if (typeof given.path === "string") setFileAsked({ path: given.path, seq: Date.now() });
       } else if (key === "git") setGit(true);
-      else if (key === "terminal") typeof given.callId === "string" ? showInTerminal(given.callId) : setTerminal(true);
       else if (key === "browser") setWatching(true);
       else if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
       else if (key === "canvas") setCanvasOpen(true);
@@ -1705,7 +1666,10 @@ export function Chat({
     return () => setPanelController(undefined);
   }, []);
   // The chat as it is now, for what the extensions drew: see extensions/chat-feed.ts.
-  useEffect(() => publishChat(session.id, { events, items, running, loading: loading === true }), [session.id, events, items, running, loading]);
+  useEffect(
+    () => publishChat(session.id, { events, items, running, status: session.status, loading: loading === true, background, refreshBackground }),
+    [session.id, events, items, running, session.status, loading, background, refreshBackground],
+  );
   useEffect(() => () => forgetChatFeed(session.id), [session.id]);
 
   /** What is in a panel: its header, which carries it, and what it shows. */
@@ -1719,21 +1683,7 @@ export function Chat({
         <span title={t("Drag to an edge to dock this panel there, anywhere else to float it")} className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
           <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
         </span>
-        {kind === "terminal" ? (
-          <div className="chat-tabs" role="tablist" aria-label={t("Terminals")} onKeyDown={tabKeys}>
-            <button type="button" role="tab" aria-selected={terminalTab === "agent"} tabIndex={terminalTab === "agent" ? 0 : -1} onClick={() => setTerminalTab("agent")}>
-              {t("Agent")}
-              {running && <i className="chat-tab-live" role="img" aria-label={t("Running")} />}
-            </button>
-            <button type="button" role="tab" aria-selected={terminalTab === "jobs"} tabIndex={terminalTab === "jobs" ? 0 : -1} onClick={() => setTerminalTab("jobs")}>
-              {t("Background")}
-              {background.jobs.some((j) => j.state === "running" && !j.attached) && <i className="chat-tab-live" role="img" aria-label={t("Running")} />}
-            </button>
-            <button type="button" role="tab" aria-selected={terminalTab === "shell"} tabIndex={terminalTab === "shell" ? 0 : -1} onClick={() => setTerminalTab("shell")}>
-              {t("Your shell")}
-            </button>
-          </div>
-        ) : kind === "git" ? (
+        {kind === "git" ? (
           <div className="chat-tabs" role="tablist" aria-label={t("Git")} onKeyDown={tabKeys}>
             {GIT_TABS.map((tab) => (
               <button key={tab.id} type="button" role="tab" aria-selected={gitTab === tab.id} tabIndex={gitTab === tab.id ? 0 : -1} onClick={() => setGitTab(tab.id)}>
@@ -1750,7 +1700,7 @@ export function Chat({
           {kind === "browser" && (
             <button
               // The browser's own box is what goes fullscreen, not the place
-              // it shares: the terminal or Files beside it stays where it is,
+              // it shares: Files or Git beside it stays where it is,
               // and closed, the box leaves the page, and fullscreen with it.
               onClick={() => boxes.box("browser").requestFullscreen?.()}
               className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
@@ -1790,28 +1740,6 @@ export function Chat({
       {kind === "git" && (
         <div className="min-h-0 flex-1 bg-surface">
           <GitPanel key={session.id} sessionId={session.id} tab={gitTab} onTab={setGitTab} activity={fileActivity?.seq} running={running} onOpenFile={showInFiles} onCount={setGitCount} />
-        </div>
-      )}
-      {kind === "terminal" && (
-        <div className="relative min-h-0 flex-1 bg-[rgb(var(--terminal))]">
-          <div className={terminalTab === "agent" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-            <VoiceTerminal events={events} limit={500} maxOutput={200_000} ended={ended} hidden={terminalTab !== "agent"} focus={terminalFocus} onFocused={() => setTerminalFocus(null)} />
-          </div>
-          <div className={terminalTab === "jobs" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-            {terminalTab === "jobs" && (
-              <BackgroundJobs sessionId={session.id} state={background} selected={selectedJob} onSelect={setSelectedJob} onChanged={refreshBackground} />
-            )}
-          </div>
-          {shellStarted && (
-            <div className={terminalTab === "shell" ? "chat-terminal-pane" : "chat-terminal-pane is-hidden"}>
-              {/* Its code is fetched when the tab is first opened: a file that is gone must not take the chat with it. */}
-              <ErrorBoundary resetKey={session.id} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
-                <Suspense fallback={null}>
-                  <TerminalPanel sessionId={session.id} />
-                </Suspense>
-              </ErrorBoundary>
-            </div>
-          )}
         </div>
       )}
       {extensionBody(kind)}
@@ -1982,14 +1910,6 @@ export function Chat({
               <LuGlobe />
             </PanelToggle>
           )}
-          <PanelToggle
-            open={terminal}
-            onClick={() => setTerminal((v) => !v)}
-            label={t("Terminal")}
-            title={terminal ? t("Hide the terminal") : t("The agent's terminal, and a shell of your own in this workspace")}
-          >
-            <LuSquareTerminal />
-          </PanelToggle>
           <PanelToggle
             open={files}
             onClick={() => (files ? void closeFiles() : setFiles(true))}
@@ -2225,7 +2145,7 @@ export function Chat({
           statuses={background.statuses}
           commands={commandNames}
           onAgent={openAgent}
-          onJob={showJob}
+          onJob={jobsShown ? showJob : undefined}
           onCommand={(command) => attempt(() => submit(command, false))}
         />
         <DictationStrip dictation={dictation} />
@@ -2394,7 +2314,7 @@ export function Chat({
                 <LuPaperclip aria-hidden className="h-4 w-4" />
               </button>
               <DictationButton dictation={dictation} />
-              <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={browserActivity} terminalActivity={terminalActivity} toolEvents={events} />
+              <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={browserActivity} toolEvents={events} />
               {/* Mid-run, Stop stays while a message is written: it is the
                   moment the agent is seen going the wrong way, and whether to
                   steer it or stop it is still open. */}

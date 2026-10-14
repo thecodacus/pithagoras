@@ -4,7 +4,8 @@ import { buildTranscript, shownPicture } from '../core/web/src/transcript.ts';
 import { describeCall } from '../core/web/src/tool-activity.ts';
 import { isPictureCall, pictureCall } from '../core/web/src/picture-call.ts';
 import { chatPictures } from '../core/web/src/chat-pictures.ts';
-import { latestBrowserActivity, latestTerminalActivity } from '../core/web/src/voice-browser.ts';
+import { latestBrowserActivity } from '../core/web/src/voice-browser.ts';
+import { latestCommand } from '../extensions/terminal/src/runs.ts';
 import { GENERATED_PICTURE_MARK } from '../core/server/src/generated-picture.ts';
 import { CALLED_TOOL_KEY } from '../core/server/src/pi/tools-gateway-names.ts';
 
@@ -98,7 +99,7 @@ test('a lazy browser tool called through tools is browser activity, and a search
   assert.equal(latestBrowserActivity([at(8, { action: 'search', query: 'browser' })]), 0);
   assert.equal(latestBrowserActivity([at(9, { action: 'describe', name: 'browser_navigate' })]), 0);
   assert.equal(latestBrowserActivity([at(10, via('docs_open', { id: 'browser' }))]), 0);
-  // The same for a shell tool that is lazy.
-  assert.equal(latestTerminalActivity([at(11, via('exec_command', { cmd: 'ls' }))]), 11);
-  assert.equal(latestTerminalActivity([at(12, { action: 'search', query: 'exec_command' })]), 0);
+  // The same for a shell tool that is lazy, in the terminal extension.
+  assert.equal(latestCommand([at(11, via('exec_command', { cmd: 'ls' }))]), 11);
+  assert.equal(latestCommand([at(12, { action: 'search', query: 'exec_command' })]), 0);
 });

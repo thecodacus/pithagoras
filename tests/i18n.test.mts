@@ -15,15 +15,15 @@ const sources = (dir: string): string[] =>
     return /\.tsx?$/.test(e.name) && !e.name.endsWith(".d.ts") ? [p] : [];
   });
 
-/** Every text the code shows, as it is written there, and whether it is a count's. */
-function texts(): Map<string, { plural: boolean; where: string }> {
+/** Every text the code in `dir` shows, as it is written there, and whether it is a count's. */
+function texts(dir = SRC): Map<string, { plural: boolean; where: string }> {
   const found = new Map<string, { plural: boolean; where: string }>();
-  for (const file of sources(SRC)) {
+  for (const file of sources(dir)) {
     const src = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const literal = (e: ts.Expression | undefined) => (e && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : undefined);
     const visit = (n: ts.Node) => {
       if (ts.isCallExpression(n) && ts.isIdentifier(n.expression)) {
-        const where = `${path.relative(SRC, file)}:${src.getLineAndCharacterOfPosition(n.getStart(src)).line + 1}`;
+        const where = `${path.relative(dir, file)}:${src.getLineAndCharacterOfPosition(n.getStart(src)).line + 1}`;
         const name = n.expression.text;
         if (name === "t" || name === "tx" || name === "msg") {
           const key = literal(n.arguments[0]);
@@ -65,6 +65,22 @@ test("every language has every text the code shows, and nothing it no longer doe
     const stale = Object.keys(locale.strings).filter((k) => !want.has(k));
     assert.deepEqual(missing.map((k) => `${want.get(k)!.where}: ${k}`), [], `${file} lacks these`);
     assert.deepEqual(stale, [], `${file} has these the code no longer shows`);
+  }
+});
+
+test("an extension of the portal's own that speaks German has every text it shows, and nothing it no longer does", async () => {
+  // Its texts are its own (`portal.locale.add`), kept in its src/de.ts, and shown by its `t`, or marked with `msg` for later.
+  const root = path.resolve(import.meta.dirname, "../extensions");
+  const speaking = fs.readdirSync(root).filter((name) => fs.existsSync(path.join(root, name, "src", "de.ts")));
+  assert.ok(speaking.includes("terminal"));
+  for (const name of speaking) {
+    const want = texts(path.join(root, name, "src"));
+    const { de } = (await import(path.join(root, name, "src", "de.ts"))) as { de: Record<string, string> };
+    const missing = [...want.keys()].filter((k) => !(k in de));
+    const stale = Object.keys(de).filter((k) => !want.has(k));
+    assert.deepEqual(missing.map((k) => `${want.get(k)!.where}: ${k}`), [], `${name} lacks these`);
+    assert.deepEqual(stale, [], `${name} has these its code no longer shows`);
+    for (const [key, text] of Object.entries(de)) assert.deepEqual(words(text), words(key), `${name}: ${key}`);
   }
 });
 

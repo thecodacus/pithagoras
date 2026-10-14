@@ -26,6 +26,7 @@ import { SHELL_TOOL, unwrapCall } from "../tool-activity";
 import { argLabel, isBlock, isScalar } from "../tool-args";
 import { useFollowBottom } from "../use-follow-bottom";
 import { ToolActions } from "../extensions/ToolView";
+import type { Chat } from "../extensions/slots";
 import { formatNumber, t, tp } from "../i18n";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -271,21 +272,22 @@ export function shellOutcome(status: ToolItem["status"], output: string, interru
   return { label: t("failed"), tone: "error" };
 }
 
-/** Past this, the output shown in the chat is the end of it; the terminal has the rest. */
+/** Past this, the output shown in the chat is the end of it. */
 const INLINE_OUTPUT = 6000;
 
 /**
  * One tool call: its name, and folded away what it was called with and what
- * came back. A shell command shows whole, with its output, and a way into the
- * agent terminal for all of it.
+ * came back. A shell command shows whole, with its output. Under it, what the
+ * installed extensions offer to do with the call.
  */
 export function ToolCall({
   item,
-  onOpenTerminal,
+  chat,
   onOpenAgent,
 }: {
   item: ToolItem;
-  onOpenTerminal?: (callId: string) => void;
+  /** The chat whose conversation the card is in: none for a subagent's run. */
+  chat?: Chat;
   /** The tool runs an agent of its own, which has a window: a way into it. */
   onOpenAgent?: () => void;
 }) {
@@ -397,13 +399,7 @@ export function ToolCall({
           ) : (
             item.status === "running" && <div className="chat-tool-label"><Shimmer>{t("Waiting for output…")}</Shimmer></div>
           )}
-          <ToolActions item={item} cut={clipped} />
-          {shell && onOpenTerminal && item.callId && (
-            <button type="button" className="chat-tool-link" onClick={() => onOpenTerminal(item.callId!)}>
-              <LuSquareTerminal aria-hidden />
-              {clipped ? t("Show the whole output in the agent terminal") : t("Open in the agent terminal")}
-            </button>
-          )}
+          <ToolActions item={item} cut={clipped} chat={chat} />
         </div>
       </Collapse>
     </div>

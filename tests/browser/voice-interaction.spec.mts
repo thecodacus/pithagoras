@@ -328,7 +328,7 @@ test('everything in voice mode has a key, and the keys can be changed', async ({
 test('windows can be resized by their edges, until the windows are arranged anew', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Show terminal' }).click();
-  const terminal = page.locator('.voice-terminal-window');
+  const terminal = page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]');
   await settled(page);
   const before = (await terminal.boundingBox())!;
   const grip = (await terminal.locator('.resize-sw').boundingBox())!;
@@ -350,7 +350,7 @@ test('windows can be resized by their edges, until the windows are arranged anew
 test('a window is sized from its corner with the arrow keys, and Home hands it back to the layout', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Show terminal' }).click();
-  const terminal = page.locator('.voice-terminal-window');
+  const terminal = page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]');
   await settled(page);
   const before = (await terminal.boundingBox())!;
   // One grip of the five is reached with Tab: the corner.

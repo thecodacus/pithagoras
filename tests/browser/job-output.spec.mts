@@ -15,7 +15,7 @@ test('a read that fails keeps what was read, says so, and goes on when the porta
     return route.fulfill({ json: { text, from: 0, size } });
   });
   await page.goto('/tests/jobs.html');
-  const pane = page.locator('.bg-job-output');
+  const pane = page.locator('.terminal-job-output');
   await expect(pane).toContainText('ready');
   fail = true;
   await expect(page.getByRole('alert')).toContainText('The output could not be read — trying again: The portal is restarting');

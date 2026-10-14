@@ -259,7 +259,7 @@
 @keyframes fx-controls-in { from { scale: .3; opacity: 0; } to { scale: 1; opacity: 1; } }
 [data-motion="fancy"] .voice-stage-header { animation: fx-item-in .6s var(--ease-out) .5s backwards; }
 /* The windows that open on the stage overshoot into place; where they sit still moves as it did. */
-[data-motion="fancy"] .voice-browser-window, [data-motion="fancy"] .voice-terminal-window, [data-motion="fancy"] .voice-files-window {
+[data-motion="fancy"] .voice-browser-window, [data-motion="fancy"] .voice-files-window {
   transition-timing-function: var(--spring), cubic-bezier(.22, 1, .36, 1), cubic-bezier(.22, 1, .36, 1), cubic-bezier(.22, 1, .36, 1), cubic-bezier(.22, 1, .36, 1), ease, ease;
 }
-[data-motion="fancy"] .voice-browser-window.is-open, [data-motion="fancy"] .voice-terminal-window.is-open, [data-motion="fancy"] .voice-files-window.is-open { box-shadow: 0 40px 80px -24px #000d, 0 0 0 1px rgb(var(--voice-hue) / .3), 0 2px 6px #0003; }
+[data-motion="fancy"] .voice-browser-window.is-open, [data-motion="fancy"] .voice-files-window.is-open { box-shadow: 0 40px 80px -24px #000d, 0 0 0 1px rgb(var(--voice-hue) / .3), 0 2px 6px #0003; }

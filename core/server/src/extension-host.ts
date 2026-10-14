@@ -14,6 +14,7 @@ import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
 import { baseDir, resolveInside } from "./workspace-files.js";
 import { watchStream } from "./login-streams.js";
+import { personsEnv } from "./background.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -161,6 +162,7 @@ function portalFor(ext: Running): ServerPortal {
       upgrade: (handler) => {
         ext.upgrade = handler;
       },
+      endWithLogin: watchStream,
     },
     chats: {
       get: (id) => {
@@ -192,6 +194,7 @@ function portalFor(ext: Running): ServerPortal {
     },
     sandbox: {
       on: sandboxOn,
+      personEnv: personsEnv,
       spawnAs: (chatId) => {
         if (!sandboxOn()) return { argv: [], env: { ...process.env } };
         const { who } = whoOf(chatId);

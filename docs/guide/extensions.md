@@ -52,7 +52,7 @@ started from then on have the package; open ones pick it up with `/reload`.
 ## What a portal starts with
 
 A fresh portal installs the extensions its own `extensions/defaults.json` names,
-once. They are ordinary packages from then on: listed under **Installed**,
+once: today the [terminal](/guide/terminal). They are ordinary packages from then on: listed under **Installed**,
 switched off or removed like any other, and one you removed is not put back
 when the portal starts again. To use your own in place of one of them, remove
 it and install yours.

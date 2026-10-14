@@ -1,17 +1,17 @@
 /**
  * Where the windows go in voice mode: one in the middle, one at the side.
  *
- * The browser is always the middle one and the terminal always the side one,
- * since that is what their shapes suit. The conversation, Files and pictures
- * fill whichever is left, the side first — beside a full orb, which moves over for it — and
- * the middle when the side is taken. At most two are open at once (see
- * use-work-panels.ts), so there is always a place. A window an extension
- * brought (`x:<extension>/<id>`) is placed as those three are, after them,
- * unless it says where it goes (`place`): then it is placed as the browser
- * and the terminal are, at the side or in the middle, and in the other place
- * when that one is taken.
+ * The browser is always the middle one, since that is what its shape suits.
+ * A window an extension brought (`x:<extension>/<id>`) that says where it
+ * goes (`place`) is placed next, at the side or in the middle, and in the
+ * other place when that one is taken: the terminal's asks for the side. The
+ * conversation, Files and pictures fill whichever is left, the side first —
+ * beside a full orb, which moves over for it — and the middle when the side
+ * is taken, and an extension's window that does not say where it goes after
+ * them. At most two are open at once (see use-work-panels.ts), so there is
+ * always a place.
  */
-export type VoiceWindow = "browser" | "terminal" | "files" | "pictures" | "conversation" | `x:${string}`;
+export type VoiceWindow = "browser" | "files" | "pictures" | "conversation" | `x:${string}`;
 
 export function placeWindows(
   open: Partial<Record<VoiceWindow, boolean>>,
@@ -19,9 +19,9 @@ export function placeWindows(
   wants: Partial<Record<VoiceWindow, "side" | "middle">> = {},
 ): { main?: VoiceWindow; side?: VoiceWindow } {
   let main: VoiceWindow | undefined = open.browser ? "browser" : undefined;
-  let side: VoiceWindow | undefined = open.terminal ? "terminal" : undefined;
+  let side: VoiceWindow | undefined;
   const brought = (Object.keys(open) as VoiceWindow[]).filter((window) => window.startsWith("x:") && open[window]);
-  // One that says where it goes is placed as the browser and the terminal are, before those that take whatever is left;
+  // One that says where it goes is placed as the browser is, before those that take whatever is left;
   // where its place is taken, it has the other.
   for (const window of brought) {
     const want = wants[window];

@@ -2,13 +2,13 @@ import type { PanelController, Panels } from "@pithagoras/extension-api";
 
 /**
  * The panels beside the conversation on screen, opened and closed by name
- * from anywhere in the page: the portal's own ("files", "git", "terminal",
- * "browser", "agents", "canvas") and an extension's ("<package>/<id>", or the
- * `name` its entry gave it: the chat resolves it, see Chat.tsx).
+ * from anywhere in the page: the portal's own ("files", "git", "browser",
+ * "agents", "canvas") and an extension's ("<package>/<id>", or the `name` its
+ * entry gave it, as the terminal's is "terminal": the chat resolves it, see
+ * Chat.tsx).
  *
  * What is handed over with `open` is the panel's to read: a path for Files to
- * show, a tool call for the terminal to scroll to, anything an extension's
- * panel says it takes.
+ * show, anything an extension's panel says it takes.
  */
 export type { PanelController } from "@pithagoras/extension-api";
 

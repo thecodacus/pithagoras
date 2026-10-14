@@ -232,12 +232,12 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await expect(page.locator('.voice-stage')).toHaveClass(/is-browsing/);
   await settled(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Live terminal', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Terminal', exact: true })).toBeVisible();
   await expect(page.getByLabel('Agent terminal output')).toContainText('42 modules transformed');
   await expect(page.getByLabel('Tool activity')).toContainText('Running a command');
   await settled(page);
   const browser = await page.locator('.voice-browser-window').boundingBox();
-  const terminal = await page.locator('.voice-terminal-window').boundingBox();
+  const terminal = await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
   expect(browser!.width).toBeGreaterThan(terminal!.width * 1.8);
   expect(browser!.x + browser!.width).toBeLessThan(terminal!.x);
   await page.evaluate(() => (window as any).canvasFeed.message({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the terminal.',revision:1,status:'writing',active_call:'draft',updated_at:''}}));
@@ -246,7 +246,7 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
   await settled(page);
   const canvasBox=await page.getByLabel('Session canvas workspace').boundingBox();
-  const terminalBox=await page.locator('.voice-terminal-window').boundingBox();
+  const terminalBox=await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
   expect(canvasBox!.width).toBeGreaterThan(terminalBox!.width);
   expect(terminalBox!.x+terminalBox!.width).toBeLessThan(canvasBox!.x);
   await expect(page.locator('.voice-presence')).toHaveCSS('height','80px');
@@ -265,7 +265,7 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await page.getByRole('button', { name: 'Minimize browser' }).click();
   await settled(page);
   const orb = await page.locator('.voice-presence').boundingBox();
-  const right = await page.locator('.voice-terminal-window').boundingBox();
+  const right = await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
   const stage = await page.locator(".voice-stage").boundingBox();
   expect(orb!.x + orb!.width).toBeLessThan(right!.x);
   expect(orb!.height).toBeGreaterThan(150);
@@ -278,7 +278,7 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await page.setViewportSize({ width: 390, height: 844 });
   await settled(page);
   const mobileBrowser = await page.locator('.voice-browser-window').boundingBox();
-  const mobileTerminal = await page.locator('.voice-terminal-window').boundingBox();
+  const mobileTerminal = await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
   expect(mobileBrowser!.y + mobileBrowser!.height).toBeLessThan(mobileTerminal!.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   await page.getByRole('button', { name: 'End voice mode' }).click();

@@ -39,8 +39,6 @@ test('a job in the running tray is shown by whatever answers to jobs.show, told 
   await fixture(page, { jobs: [{ key: 'j1', sid: 1, pids: [1], command: 'npm run dev', startedAt: Date.now() - 5000, state: 'running', hasOutput: true, attached: false }] });
   await page.getByRole('button', { name: /npm run dev/ }).click();
   await expect.poll(() => page.evaluate(() => (window as any).hooksSaid)).toEqual([{ chat: 'test', job: 'j1' }]);
-  // The portal's own terminal was not opened for it: the job went where the extension said jobs are shown.
-  await expect(page.getByRole('tablist', { name: 'Terminals' })).toHaveCount(0);
 });
 
 test('in voice mode an extension\'s window goes where it asks, opens itself and from the card of a call, and has a shortcut of its own', async ({ page }) => {

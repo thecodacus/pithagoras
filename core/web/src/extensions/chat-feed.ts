@@ -1,5 +1,5 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import type { PortalEvent } from "../api";
+import type { BackgroundState, PortalEvent, SessionStatus } from "../api";
 import type { Item } from "../transcript";
 
 /**
@@ -18,11 +18,25 @@ export interface ChatFeed {
   items: readonly Item[];
   /** The agent is at work. */
   running: boolean;
+  /** How the chat stands: at work, waiting, or stopped by an error or by hand. After those two, a call that has not ended will not. */
+  status: SessionStatus;
   /** The conversation is still being fetched. */
   loading: boolean;
+  /** Its background jobs and what extensions say of themselves, asked of the portal while the chat is on screen. */
+  background: BackgroundState;
+  /** Asks for `background` again at once: after a job was stopped, or the finished ones cleared. */
+  refreshBackground(): void;
 }
 
-const NOTHING: ChatFeed = { events: [], items: [], running: false, loading: true };
+const NOTHING: ChatFeed = {
+  events: [],
+  items: [],
+  running: false,
+  status: "idle",
+  loading: true,
+  background: { supported: false, jobs: [], statuses: [], widgets: [] },
+  refreshBackground: () => undefined,
+};
 const feeds = new Map<string, ChatFeed>();
 const watchers = new Map<string, Set<() => void>>();
 

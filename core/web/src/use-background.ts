@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type BackgroundState, type PortalEvent } from "./api";
 import { stripAnsi } from "./transcript";
 import { piRunning } from "./drafts";
@@ -110,7 +110,9 @@ export function useBackground(sessionId: string, busy: boolean, events: PortalEv
   // chat's would take this one's statuses for ones its answer already had.
   const since = held.sessionId === sessionId ? held.since : NOWHERE;
   const shown = useMemo(() => withLiveUi(state, events, since), [state, since, events]);
-  return [shown, () => setTick((n) => n + 1)];
+  // The same function every time: it is handed to extensions with the chat, and a new one would be a change to tell them of.
+  const refresh = useCallback(() => setTick((n) => n + 1), []);
+  return [shown, refresh];
 }
 
 /**

@@ -30,7 +30,7 @@ export function clearSize(el: HTMLElement | null) {
 }
 
 /** Every window a voice stage or a chat can have open, the canvas included. */
-export const WINDOWS = ".voice-browser-window.is-open, .voice-terminal-window.is-open, .voice-files-window.is-open, .session-canvases.is-open .canvas-panel";
+export const WINDOWS = ".voice-browser-window.is-open, .voice-files-window.is-open, .session-canvases.is-open .canvas-panel";
 /** Kept clear at the edges of the area a window lives in. */
 const EDGE = 8;
 

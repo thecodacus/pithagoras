@@ -238,10 +238,10 @@ the folder is not a repository, except `init`. See [Git](/guide/git).
 
 | | |
 | --- | --- |
-| `POST /api/terminal` | `{ sessionId? }` → opens a shell in that session's folder (home otherwise); answers `{ id, cwd }` |
-| `GET /api/terminal/:id/stream` | Server-sent events: its output |
-| `POST /api/terminal/:id/input` · `/resize` | Keystrokes; the size of the panel |
-| `DELETE /api/terminal/:id` | Ends the shell |
+| `POST /api/x/pithagoras-terminal/terminal` | `{ chat? }` → opens a shell in that chat's folder (home otherwise); answers `{ id, cwd }`. The terminal extension's, while it is installed |
+| `GET /api/x/pithagoras-terminal/terminal/:id/stream` | Server-sent events: its output |
+| `POST /api/x/pithagoras-terminal/terminal/:id/input` · `/resize` | Keystrokes; the size of the panel |
+| `DELETE /api/x/pithagoras-terminal/terminal/:id` | Ends the shell |
 | `GET /api/sessions/:id/background` | `{ supported, jobs, …extension status, piRunning }` — background jobs are listed on the host executor on Linux only |
 | `GET /api/sessions/:id/background/:key/output` | A job's output; 404 when it is not in a file the portal can follow |
 | `POST /api/sessions/:id/background/:key/stop` · `/background/clear` | Stop one; clear the finished ones |

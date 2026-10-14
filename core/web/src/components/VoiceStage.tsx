@@ -6,7 +6,7 @@ import { keepFileActivity, latestFileActivity, type FileActivity } from "../file
 import { VoiceToolActivity } from "./VoiceToolActivity";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { Item } from "../transcript";
-import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuTerminal, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
+import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuFileText, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
@@ -22,7 +22,6 @@ import { panelsFor } from "../extensions/panels";
 import { ResizeHandles, WINDOWS, areaFor, clearSize, openWindows, workspaceOf } from "./ResizeHandles";
 import { IMAGE_TYPES, isImage, type Attachment } from "../attachments";
 import type { ToolCall } from "../tool-activity";
-import { VoiceTerminal } from "./VoiceTerminal";
 import { api, type PortalEvent } from "../api";
 import type { VoiceCue } from "../voice-cues";
 import type { VoicePhase } from "../hands-free";
@@ -93,14 +92,14 @@ function AutoOpener({ entry, onGrow, ...props }: ChatProps & { entry: Registered
   return null;
 }
 
-export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, terminalActivity, toolEvents, sounds, onSounds, onCue,
+export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasMinimize, onCanvasToggle, title, phase, starting, muted, speaking, levels, error, transcript, onMute, onEnd, browserAvailable, browserActivity, toolEvents, sounds, onSounds, onCue,
   waitingForTap, items, errorsAfter, running, onStop, attachments, onAddPictures, onRemovePicture, canRepeat, onRepeat, rate, onRate, steer, onSteer, ptt, onPtt, holding, onHold }: {
   sessionId: string; folder: string;
   workPhase?: Activity | null;
   canvasOpen: boolean; onCanvasMinimize: () => void; onCanvasToggle: () => void;
   title: string; phase: VoicePhase; starting: boolean; muted: boolean; speaking: boolean;
   levels: MutableRefObject<VoiceLevels>; transcript: string; error: string; onMute: () => void; onEnd: () => void;
-  browserAvailable: boolean; browserActivity: number; terminalActivity: number; toolEvents: PortalEvent[]; sounds: boolean; onSounds: () => void; onCue: (kind: VoiceCue) => void;
+  browserAvailable: boolean; browserActivity: number; toolEvents: PortalEvent[]; sounds: boolean; onSounds: () => void; onCue: (kind: VoiceCue) => void;
   /** Back after a reload, and waiting for a tap before audio may start. */
   waitingForTap?: boolean;
   items: Item[];
@@ -123,9 +122,8 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // they were in then — and for no other: see `presence` below.
   const [placed, setPlaced] = useState<{ for: string; at: "free" | "dock" | null }>({ for: "", at: null });
   const wide = useSyncExternalStore(watchWide, () => matchMedia(WIDE).matches);
-  const activity = useRef(browserActivity), terminalSeen = useRef(terminalActivity);
-  const terminal = useRef<HTMLElement>(null);
-  const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
+  const activity = useRef(browserActivity);
+  const [shown, setShown] = useState(false);
   const [filesShown, setFilesShown] = useState(false), [filesUsed, setFilesUsed] = useState(false), [filesSince, setFilesSince] = useState<number | undefined>(undefined);
   const filesWindow = useRef<HTMLElement>(null), picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
   // Pictures the agent showed with show_image or made with generate_image or edit_image. A new one opens the window on it.
@@ -173,12 +171,12 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       }
     });
   const chat = useMemo(() => ({ id: sessionId, title, workspace: folder }), [sessionId, title, folder]);
-  useWorkPanels({ browser: shown, terminal: terminalShown, canvas: canvasOpen, files: filesShown, pictures: picturesShown, conversation, ...broughtShown }, panel => {
+  useWorkPanels({ browser: shown, canvas: canvasOpen, files: filesShown, pictures: picturesShown, conversation, ...broughtShown }, panel => {
     if (panel.startsWith("x:")) closeBrought(panel.slice(2)); else
-    if (panel === "browser") setShown(false); else if (panel === "terminal") setTerminalShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else if (panel === "conversation") setConversation(false); else onCanvasMinimize();
+    if (panel === "browser") setShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else if (panel === "conversation") setConversation(false); else onCanvasMinimize();
   });
   // What the agent reads or changes in the chat's folder. Files opens on it as
-  // the browser and terminal do, and follows it from there. A file opened from
+  // the browser does, and follows it from there. A file opened from
   // a tool card is put after everything that has happened, so that the panel
   // takes it, and the agent's next file after that again.
   const lastFile = useRef<FileActivity | null>(null);
@@ -186,19 +184,18 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const [openedFile, setOpenedFile] = useState<FileActivity | null>(null);
   const fileActivity = openedFile && openedFile.seq > (agentFile?.seq ?? 0) ? openedFile : agentFile;
   const filesSeen = useRef(agentFile?.seq ?? 0);
-  // Where the windows go: the browser in the middle, the terminal at the side,
-  // and Files and pictures wherever is left (see voice-windows.ts). The stage's
+  // Where the windows go: the browser in the middle, an extension's where it
+  // asks, and Files and pictures wherever is left (see voice-windows.ts). The stage's
   // classes say whether there is a window in the middle and one at the side,
   // for where the orb goes; which window is open is the window's own `is-open`.
   const place = placeWindows(
-    { browser: shown, terminal: terminalShown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown },
+    { browser: shown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown },
     Object.fromEntries(brought.filter((entry) => entry.place).map((entry) => [`x:${entry.key}`, entry.place])),
   );
   const filesMain = place.main === "files", picturesMain = place.main === "pictures", conversationMain = place.main === "conversation";
   const browsing = !!place.main;
   const sideWindow = !!place.side;
   const [loaded, setLoaded] = useState(false);
-  const [terminalUsed, setTerminalUsed] = useState(false);
   const [browserError, setBrowserError] = useState('');
   const thoughtViewport = useRef<HTMLDivElement>(null);
   const thought = useMemo(() => {
@@ -213,15 +210,14 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     const observer = new ResizeObserver(follow);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [thought, shown, terminalShown, filesShown, picturesShown, conversation]);
+  }, [thought, shown, filesShown, picturesShown, conversation]);
   useEffect(() => { end.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     if (browser.current) browser.current.inert = !shown;
-    if (terminal.current) terminal.current.inert = !terminalShown;
     if (filesWindow.current) filesWindow.current.inert = !filesShown;
     if (picturesWindow.current) picturesWindow.current.inert = !picturesShown;
     if (conversationWindow.current) conversationWindow.current.inert = !conversation;
-  }, [shown, terminalShown, filesShown, picturesShown, conversation]);
+  }, [shown, filesShown, picturesShown, conversation]);
   useEffect(() => {
     if (!agentFile || agentFile.seq <= filesSeen.current) return;
     filesSeen.current = agentFile.seq;
@@ -235,7 +231,6 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     picturesSeen.current = last.seq;
     setPictureIndex(pictures.length - 1); setPicturesShown(true); onCue("focus");
   }, [pictures, onCue]);
-  const openTerminal = () => { setTerminalUsed(true); setTerminalShown(true); onCue("focus"); };
   const openPictures = () => { setPictureIndex(Math.max(0, pictures.length - 1)); setPicturesShown(true); onCue("focus"); };
   /** A tool card was tapped: bring up what it was about. */
   const openCall = (call: ToolCall, view: ToolCallView) => {
@@ -248,8 +243,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       const seq = toolEvents.reduce((n, e) => Math.max(n, e.seq), fileActivity?.seq ?? 0) + 0.5;
       if (!filesUsed) { setFilesSince(seq - 1); setFilesUsed(true); }
       setOpenedFile({ seq, path: call.path, tool: "read" }); setFilesShown(true); onCue("focus");
-    } else if (call.target === "terminal") openTerminal();
-    else if (call.target === "browser") open();
+    } else if (call.target === "browser") open();
     else if (call.target === "canvas") { if (!canvasOpen) onCanvasToggle(); }
     else if (call.target === "pictures") openPictures();
   };
@@ -286,7 +280,6 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     "voice.canvas": () => { onCanvasToggle(); },
     "voice.files": () => { if (filesShown) setFilesShown(false); else openFiles(); },
     "voice.pictures": () => { if (picturesShown) setPicturesShown(false); else if (pictures.length) openPictures(); else return false; },
-    "voice.terminal": () => { if (terminalShown) setTerminalShown(false); else openTerminal(); },
     "voice.browser": () => { if (shown) minimize(); else if (browserAvailable || loaded) open(); else return false; },
     "voice.settings": () => { setSettings(v => !v); },
     "voice.faster": () => step(1),
@@ -340,11 +333,6 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     setFilesUsed(true); setFilesShown(true); onCue("focus");
   };
   useEffect(() => {
-    if (terminalActivity <= terminalSeen.current) return;
-    terminalSeen.current = terminalActivity;
-    openTerminal();
-  }, [terminalActivity, onCue]);
-  useEffect(() => {
     if (browserActivity <= activity.current) return;
     activity.current = browserActivity;
     let cancelled = false;
@@ -363,12 +351,18 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // A window opening — by the person or for what the agent does — is there
   // to be seen, and would open under the browser: it gives its place back.
   // Each window by itself: one opening can close another for room.
-  const others = [terminalShown, filesShown, picturesShown, conversation, canvasOpen];
+  const others = [filesShown, picturesShown, conversation, canvasOpen];
   const othersBefore = useRef(others);
   useEffect(() => {
     if (others.some((open, i) => open && !othersBefore.current[i])) setBrowserMax(false);
     othersBefore.current = others;
   }, others);
+  // An extension's window the same: one not open before.
+  const broughtBefore = useRef(broughtOpen);
+  useEffect(() => {
+    if (broughtOpen.some((key) => !broughtBefore.current.includes(key))) setBrowserMax(false);
+    broughtBefore.current = broughtOpen;
+  }, [broughtOpen]);
   // Escape restores the browser from inside it too, as it left fullscreen:
   // once the page in it has focus, the key is that page's and never reaches
   // the stage. Heard before the viewer, which would pass it on to the page.
@@ -398,7 +392,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   const orbStyle = useOrbStyle(sessionId);
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
   const status = waitingForTap ? (touch ? t("Tap to continue voice mode") : t("Click or press a key to continue voice mode")) : starting ? t("Connecting") : input || holding ? t("Hearing you") : speaking ? t("Speaking") : phase === "Speaking" ? t("Preparing your reply") : phase === "Thinking" ? t("Thinking") : phase === "Transcribing" ? t("Transcribing") : muted ? t("Microphone muted") : ptt ? (touch || !bindings["voice.hold"] ? t("Hold the microphone to talk") : t("Hold {keys} to talk", { keys: describe(bindings["voice.hold"], layout) })) : t("Listening");
-  const anyPanel = shown || terminalShown || filesShown || picturesShown || conversation;
+  const anyPanel = shown || filesShown || picturesShown || conversation || brought.length > 0;
   // A window sized by hand keeps its size until the windows are arranged
   // differently — one opens or closes — and then the layout places it again.
   // Before it is drawn, so that no frame shows the new arrangement with the
@@ -410,7 +404,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     if (arranged.current === arrangement) return;
     arranged.current = arrangement;
     const canvas = stage.current && workspaceOf(stage.current)?.querySelector<HTMLElement>(".canvas-panel");
-    for (const el of [browser.current, terminal.current, filesWindow.current, picturesWindow.current, conversationWindow.current, canvas ?? null]) clearSize(el);
+    for (const el of [browser.current, filesWindow.current, picturesWindow.current, conversationWindow.current, canvas ?? null]) clearSize(el);
     for (const el of stage.current?.querySelectorAll<HTMLElement>(".voice-extension-window") ?? []) clearSize(el);
   }, [arrangement]);
   // What the orb's place was measured for. Anything else — a window opened or
@@ -476,7 +470,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
     e.preventDefault(); e.stopPropagation(); setDropping(false);
     add.current([...e.dataTransfer.files]);
   };
-  const panels = Number(shown) + Number(terminalShown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen) + brought.length;
+  const panels = Number(shown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + Number(canvasOpen) + brought.length;
   // Where the orb is, said once for the stage's styles and for the windows
   // being resized (see Orb). In its dock under a maximized browser, or when
   // the windows sized by hand leave no gap wide enough; in the gap when they
@@ -500,7 +494,6 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
         {!filesShown && <button type="button" onClick={openFiles} title={`${t("Show files")}${hint("voice.files")}`} aria-label={t("Show files")}><LuFolderOpen /></button>}
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`${t("Show pictures")}${hint("voice.pictures")}`} aria-label={t("Show pictures")}><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`${t("Show browser")}${hint("voice.browser")}`} aria-label={t("Show browser")}><LuGlobe /></button>}
-        {!terminalShown && <button type="button" aria-label={t("Show terminal")} title={`${t("Show terminal")}${hint("voice.terminal")}`} onClick={openTerminal}><LuTerminal /></button>}
         {windowEntries.filter((entry) => !broughtOpen.includes(entry.key)).map((entry) => (
           <button key={entry.key} type="button" aria-label={t("Show {panel}", { panel: entry.title })} title={entry.title} onClick={() => openBrought(entry.key)}>
             {entry.icon ? <entry.icon /> : <LuPuzzle />}
@@ -528,11 +521,6 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
       </div></header>
       {loaded && <iframe onLoad={e => frameKeys(e.currentTarget)} src="/browser-ui/" title={t("The agent's browser")} allow="clipboard-read; clipboard-write; fullscreen" />}
       <ResizeHandles target={browser} />
-    </section>
-    <section ref={terminal} className={`voice-terminal-window ${terminalShown ? 'is-open' : ''}`} aria-label={t("Live terminal")} aria-hidden={!terminalShown}>
-      <header><span><LuTerminal />{t("Terminal")}</span><div><button type="button" aria-label={t("Minimize terminal")} title={t("Minimize terminal")} onClick={() => { setTerminalShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
-      {terminalUsed && <VoiceTerminal events={toolEvents} />}
-      <ResizeHandles target={terminal} />
     </section>
     <section ref={filesWindow} className={`voice-files-window ${filesMain ? 'as-main' : 'as-side'} ${filesShown ? 'is-open' : ''}`} aria-label={t("Files")} aria-hidden={!filesShown}>
       <header><span><LuFolderOpen />{t("Files")}</span><div><button type="button" aria-label={t("Minimize files")} title={t("Minimize files")} onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>

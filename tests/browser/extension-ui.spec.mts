@@ -171,7 +171,7 @@ test('an extension\'s panel is opened from the chat\'s header, talks to its exte
   await expect(panel(page).getByRole('listitem')).toHaveCount(1);
 
   // Two panels beside the conversation is what fits: a third closes the one open longest, whoever brought it.
-  await header(page).getByRole('button', { name: 'Terminal', exact: true }).click();
+  await header(page).getByRole('button', { name: 'Git', exact: true }).click();
   await header(page).getByRole('button', { name: 'Files', exact: true }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -320,12 +320,12 @@ test('a panel says more of itself: tabs in its head, a button that follows the c
   await expect(page.getByRole('alertdialog')).toContainText('Discard the note you were writing?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
   await expect(panel(page).getByRole('textbox', { name: 'New note' })).toHaveValue('Half a thought');
-  // And it is not the one closed to make room for a third: the terminal, opened after it, goes instead.
-  const terminal = header(page).getByRole('button', { name: 'Terminal', exact: true });
-  await terminal.click();
+  // And it is not the one closed to make room for a third: Git, opened after it, goes instead.
+  const git = header(page).getByRole('button', { name: 'Git', exact: true });
+  await git.click();
   await header(page).getByRole('button', { name: 'Files', exact: true }).click();
   await expect(panel(page)).toBeVisible();
-  await expect(terminal).toHaveAttribute('aria-expanded', 'false');
+  await expect(git).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
   await expect(panel(page)).toHaveCount(0);
@@ -429,12 +429,12 @@ test('a window an extension brought to voice mode opens from its button, is plac
   await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
 
   await page.getByRole('button', { name: 'Show Probe' }).click();
-  const brought = page.locator('.voice-extension-window');
+  const brought = page.locator('.voice-extension-window[data-extension="probe"]');
   await expect(brought).toHaveClass(/is-open/);
   await expect(brought).toHaveClass(/as-side/);
   await expect(page.getByTestId('probe-window')).toContainText('Probe for A little room to think');
   await expect(page.getByRole('button', { name: 'Show Probe' })).toHaveCount(0);
-  // The terminal's place is the side: the extension's window moves to the middle, as Files would.
+  // The terminal asks for the side: the window that did not ask moves to the middle, as Files would.
   await page.getByRole('button', { name: 'Show terminal' }).click();
   await expect(brought).toHaveClass(/as-main/);
   // Counted with the portal's own: two windows open are laid out as two, not each as the only one.

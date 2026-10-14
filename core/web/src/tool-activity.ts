@@ -11,13 +11,14 @@ import { GATEWAY_TOOL, calledThrough } from "../../server/src/pi/tools-gateway-n
  * starts, and given its outcome when it ends: how many lines an edit changed,
  * how many files a search found, the first line of what went wrong. And each
  * card knows where the thing it is about can be seen, so that tapping it
- * opens that: the file, the terminal, the browser, the document, the picture.
+ * opens that: the file, the browser, the document, the picture, or a window
+ * an extension brought for it (a command, in the terminal's).
  *
  * Tolerant like the transcript: pi's payloads vary by tool and version, and
  * anything unrecognised is described by its name rather than not at all.
  */
 
-export type ToolTarget = "terminal" | "files" | "browser" | "canvas" | "pictures";
+export type ToolTarget = "files" | "browser" | "canvas" | "pictures";
 
 export interface ToolCall {
   label: string;
@@ -107,7 +108,8 @@ export function describeCall(payload: any, folder: string): ToolCall {
   });
 
   if (SHELL_TOOL.test(name)) {
-    return { label: t("Running a command"), detail: flat(text(input.description) || text(input.command) || text(input.cmd)), target: "terminal" };
+    // No target of the portal's: the window it opens is an extension's that says it is for commands.
+    return { label: t("Running a command"), detail: flat(text(input.description) || text(input.command) || text(input.cmd)) };
   }
   if (name === "read") {
     const call = file((f) => t("Reading {file}", { file: f }));

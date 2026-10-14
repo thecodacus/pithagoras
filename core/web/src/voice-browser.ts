@@ -1,5 +1,5 @@
 import type { PortalEvent } from './api';
-import { SHELL_TOOL, lazyCall } from './tool-activity';
+import { lazyCall } from './tool-activity';
 import { toolArgsOf, toolNameOf } from './tool-payload';
 /** A call as it is made of a tool: one through the `tools` tool, to a lazy tool, is a call of that tool. */
 function calledTool(payload: any): { name: string; input: any } {
@@ -18,10 +18,3 @@ export function latestBrowserActivity(events: PortalEvent[]): number {
   return 0;
 }
 
-export function latestTerminalActivity(events: PortalEvent[]): number {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event.type === 'tool_execution_start' && SHELL_TOOL.test(calledTool(event.payload).name)) return event.seq;
-  }
-  return 0;
-}

@@ -15,8 +15,8 @@ async function portal(page: Page, sessions: ReturnType<typeof chat>[]) {
     if (p === '/api/projects') {
       return { root: '/w', home: HOME, projects: [{ name: 'site', path: '/w/site', isGit: false, hasInstructions: false, hasTools: false, sessions: 1, lastActive: null }] };
     }
-    if (p === '/api/terminal' && method === 'POST') return { id: 't1', cwd: '/w/site' };
-    if (p === '/api/terminal/t1/resize' || p === '/api/terminal/t1') return { ok: true };
+    if (p === '/api/x/pithagoras-terminal/terminal' && method === 'POST') return { id: 't1', cwd: '/w/site' };
+    if (p === '/api/x/pithagoras-terminal/terminal/t1/resize' || p === '/api/x/pithagoras-terminal/terminal/t1') return { ok: true };
     if (p.endsWith('/canvases')) return [];
     if (p.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
     if (p === '/api/models') return { models: [], providers: {} };

@@ -205,6 +205,20 @@ any extension's module, and the build points those imports there. Any other
 package the code imports is bundled into it. What the build makes is not kept
 in git: the package is built where it is installed from, or published built.
 
+A part that is large and not always needed goes in a chunk of its own, fetched
+when it is first drawn. Load it with `portal.ui.lazy`, not React's `lazy`: a
+chunk that cannot be fetched (the extension was updated after the page was
+opened) is then said so by `ui.PartFailed` with a way to reload, as the
+portal's own parts are.
+
+```tsx
+// In the module's default export: the terminal's Shell tab and its emulator.
+const Shell = portal.ui.lazy(() => import("./Shell"), "Shell");
+// Drawn in Suspense, inside ui.ErrorBoundary with ui.PartFailed as its fallback.
+```
+
+`extensions/terminal` in the repository is an extension written this way.
+
 ### Looking like the portal
 
 The page's colours are variables holding the three numbers of a colour, so
@@ -340,9 +354,11 @@ portal.slots.register("chat.tool.action", {
 });
 ```
 
-`cut` says whether the card shows only the end of the output. `ui.ToolLink`
-is the portal's own look for a link on a card. Draw nothing for a call you
-have nothing for. The `panels` the component is given are your own, by id;
+`cut` says whether the card shows only the end of the output, and `chat` is
+the chat whose conversation the card is in: a card elsewhere, such as in a
+subagent's run, has none, for an action that is only about the chat's own
+calls. `ui.ToolLink` is the portal's own look for a link on a card. Draw
+nothing for a call you have nothing for. The `panels` the component is given are your own, by id;
 `portal.panels` reaches any panel by name, as `my-shell` above is reached by
 the `name` its `chat.panel` entry gave it.
 
@@ -352,15 +368,16 @@ A `voice.window` has a button in voice mode's toolbar. Three more fields say
 how it behaves beside the portal's own windows:
 
 - `place`: `"side"` or `"middle"`, where it goes when it has the choice, as the
-  terminal always goes to the side and the browser to the middle. Without it,
+  terminal's window goes to the side and the browser to the middle. Without it,
   it takes whichever place is left, as Files does.
 - `useAutoOpen(props)`: a hook, called while voice mode is on in a chat. It
   returns a count, and the window opens each time the count grows: the number
   of commands the agent ran, say, from `portal.chats.use`.
 - `opensFor(call)`: whether the card of a call in voice mode opens this window
   when it is tapped. It is asked for the calls the portal's own windows are not
-  for: while the terminal, Files, the browser and the pictures are the
-  portal's own, a shell call's card opens the portal's terminal, and so on.
+  for: a file's card opens Files, a page's the browser, and a shell call's,
+  which has none of the portal's, the window that says it is for it (the
+  terminal's).
 
 ```js
 portal.slots.register("voice.window", {
@@ -397,7 +414,10 @@ the page has it:
 | `events` | The chat's own events as they came: pi's (a message as it streams, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `agent_start`, `agent_end`) and the portal's (`portal_*`). Each is `{ seq, type, at, payload }` |
 | `items` | The conversation made of them, as the portal draws it: messages, tool calls with their output, notices |
 | `running` | The agent is at work |
+| `status` | How the chat stands: `"idle"`, `"running"`, or stopped by `"error"` or by hand (`"interrupted"`). After those two, a call that has not ended will not |
 | `loading` | The conversation is still being fetched |
+| `background` | What runs in the chat besides the conversation, asked of the portal while the chat is on screen: `{ supported, jobs, statuses, widgets }`. `jobs` are the commands the agent left running, each `{ key, command, state, startedAt, pids, hasOutput, attached }`; `statuses` and `widgets` are what pi's extensions show in its footer |
+| `refreshBackground()` | Asks for `background` again at once: after a job was stopped (`POST /api/sessions/<chat>/background/<key>/stop`) or the finished ones cleared (`…/background/clear`) |
 
 A tool call among `items` is `{ kind: "tool", id, name, callId, status, args,
 output, details }`, with `status` going from `"running"` to `"done"` or
@@ -528,6 +548,7 @@ restart the portal.
 | `router` | An Express router: the package's routes, at `/api/x/<package>/…`, behind the portal's login |
 | `http.json()`, `http.raw()`, `http.text()` | Body parsers, for the routes that want one |
 | `http.upgrade(handler)` | WebSocket upgrades under the package's routes |
+| `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status }` |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
@@ -537,6 +558,7 @@ restart the portal.
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
+| `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
@@ -690,9 +712,12 @@ name: a lower `order` first, then the one loaded first. The portal's own are:
 | Name | `open` takes |
 | --- | --- |
 | `files` | `{ path }`: a file to show |
-| `terminal` | `{ callId }`: a shell call to scroll to |
 | `agents` | `{ id }`: a subagent to show |
 | `git`, `browser`, `canvas` | |
+
+The terminal, an extension a fresh portal installs, goes by `terminal` and
+takes `{ callId }`, a command of the agent's to bring into view, or `{ job }`,
+a background job to follow.
 
 A command is something an extension says it can be asked to do, for another
 extension or the portal to ask by name. Start the name with your package's.
@@ -712,8 +737,8 @@ name any extension can register, and offers the click only while one does:
 | --- | --- | --- |
 | `jobs.show` | `{ chat, job }`: the chat's id and the job's key | A job in the running tray above the message box is clicked |
 
-Until an extension registers one, the portal does what it did before: a job
-opens in its own terminal.
+While none does, a job in the tray is listed and opens nothing. The terminal
+extension registers it, and shows the job on its Background tab.
 
 ## Keyboard shortcuts
 
@@ -881,14 +906,14 @@ the `portal` they are given.
 
 ## What the portal's own apps use
 
-The portal's Files, Terminal, Git and Canvases are written into it today. This
-is what each of them takes from the portal, and what gives the same to an
-extension:
+The terminal is an extension (`extensions/terminal`); the portal's Files, Git
+and Canvases are written into it today. This is what each of them takes from
+the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
 | --- | --- |
 | Routes that work with no agent running: listing, saving, uploads, downloads | `portal.router`, `chats.folder`, `files.inside` |
-| A shell and its stream; cleanup when a chat goes | The server half, `http.upgrade` or a stream route, `chats.on("deleted")` |
+| A shell and its stream, ended with the login it was opened under; cleanup when a chat goes | The server half, `http.upgrade` or a stream route, `http.endWithLogin`, `sandbox.personEnv`, `chats.on("deleted")` |
 | What the agent read, wrote and ran, as it happens | `portal.chats.use(chat.id, pick)` |
 | Tools that write to what the pages show (canvases, pictures) | `chats.extend`, `chats.send`, `chats.onOpen`, `chats.onEvent` |
 | Tabs and a count in a panel's head, a fullscreen button | `header`, `actions`, `panel.state` |
@@ -902,7 +927,8 @@ extension:
 | "Open in the agent terminal" on the card of a shell call | `chat.tool.action` |
 | A key in voice mode (T for the terminal) | `portal.shortcuts.register` |
 | Being opened by name from anywhere (`terminal`) | `name` on its `chat.panel` |
-| The running tray's jobs opening its Jobs tab | The `jobs.show` command |
+| The running tray's jobs opening its Jobs tab, and the jobs themselves | The `jobs.show` command; `background` in `portal.chats.use` |
+| An emulator fetched only when its tab is opened | `ui.lazy` |
 | A page in the sidebar; a page in Settings | `nav.page`, `settings.page` |
 | A slash command | `pi.registerCommand` in the pi extension, and the channel for what it does in the page |
 | The colours of everything | [A theme](#themes) |
@@ -927,3 +953,18 @@ Pithagoras**: `extensions/theme-dusk` and `extensions/theme-warm` are extensions
 that are only a theme, and `extensions/docs` is a larger one that is still being built: a page in the
 sidebar, fed by its server half's routes, and tools for the agent that share
 the server half's store ([Documents](/guide/documents)).
+
+`extensions/terminal`, the [terminal](/guide/terminal) a fresh portal installs,
+is the one written in TypeScript and JSX:
+
+- `src/client.tsx` registers a panel by the name `terminal` with tabs in its
+  head and a dot on them while something runs, a window in voice mode that
+  asks for the side and opens on each command, an action on a shell call's
+  card, a voice shortcut, and the `jobs.show` command.
+- `src/AgentTerminal.tsx` and `src/Jobs.tsx` read the chat with
+  `portal.chats.use`; `src/Shell.tsx` is the emulator, in a chunk of its own
+  loaded with `ui.lazy`.
+- `server.js` is its shell: routes, a stream ended with the login, and a
+  stopper that ends every shell as the portal stops.
+- `src/de.ts` is its German, which the portal's tests hold to every text it
+  shows.

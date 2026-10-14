@@ -14,11 +14,14 @@ import { installTooltips } from '../src/tooltips';
 import { installMotion } from '../src/motion';
 import { mockFetch } from './mock-fetch';
 import { setLanguage } from '../src/i18n';
+import { startExtensions } from '../src/extensions/loader';
 // Offers the languages, as the app does: `setLang('de')` fetches German.
 import '../src/locales';
 installTooltips();
 // As the app does: the Animations switch and reduced motion are read from the page, for what moves with them.
 installMotion();
+// The installed extensions, loaded as the app loads them: those a fresh portal has (the terminal), which the browser tests serve.
+startExtensions();
 
 const phase = new URLSearchParams(location.search).get('phase') ?? 'tools';
 const now = Date.now();

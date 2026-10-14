@@ -11,8 +11,9 @@ import { t } from "../i18n";
 /**
  * What is running beside the conversation, just above the box: subagents,
  * jobs the agent left running, and the status lines extensions set. Each opens
- * its window; the tray itself says only that it is going and for how long. A
- * status that names one of the chat's commands runs it when clicked.
+ * its window (a job, where an extension shows jobs); the tray itself says only
+ * that it is going and for how long. A status that names one of the chat's
+ * commands runs it when clicked.
  */
 export function RunningTray({
   agents,
@@ -29,7 +30,8 @@ export function RunningTray({
   /** The chat's commands, by name without the slash. */
   commands?: ReadonlySet<string>;
   onAgent: (id: string) => void;
-  onJob: (key: string) => void;
+  /** Where a job is shown. Without it, a job is only listed. */
+  onJob?: (key: string) => void;
   onCommand?: (command: string) => Promise<void>;
 }) {
   const [runningCommand, setRunningCommand] = useState<string | null>(null);
@@ -60,14 +62,25 @@ export function RunningTray({
           <span className="running-chip-time">{since(a.since)}</span>
         </button>
       ))}
-      {runningJobs.map((j) => (
-        <button key={j.key} type="button" className="running-chip is-job" onClick={() => onJob(j.key)} title={j.command}>
-          <span className="running-chip-icon"><i className="running-dot" /></span>
-          <LuSquareTerminal className="running-chip-kind" aria-hidden />
-          <span className="running-chip-label is-mono">{j.command}</span>
-          <span className="running-chip-time">{j.state === "stopped" ? t("paused") : since(j.startedAt)}</span>
-        </button>
-      ))}
+      {runningJobs.map((j) => {
+        const chip = (
+          <>
+            <span className="running-chip-icon"><i className="running-dot" /></span>
+            <LuSquareTerminal className="running-chip-kind" aria-hidden />
+            <span className="running-chip-label is-mono">{j.command}</span>
+            <span className="running-chip-time">{j.state === "stopped" ? t("paused") : since(j.startedAt)}</span>
+          </>
+        );
+        return onJob ? (
+          <button key={j.key} type="button" className="running-chip is-job" onClick={() => onJob(j.key)} title={j.command}>
+            {chip}
+          </button>
+        ) : (
+          <span key={j.key} className="running-chip is-job" title={j.command}>
+            {chip}
+          </span>
+        );
+      })}
       {statuses.map((s) => {
         const parts = onCommand ? statusParts(s.text, commands) : [{ text: s.text }];
         const named = parts.flatMap((p) => ("command" in p ? [p.command] : []));

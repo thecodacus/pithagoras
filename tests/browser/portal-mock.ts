@@ -7,14 +7,20 @@ import { test as base, expect, type Page, type Route } from '@playwright/test';
  *
  * `test` is Playwright's, with one addition: before a test starts, every `/api` request is answered 501 with its own
  * name, so a call that no test mocked fails where it is made, with the URL in the message. Nothing reaches the dev
- * server's proxy, and so no portal that runs on this machine. A test's own `page.route` is registered after it and
- * wins; what it does not answer falls back to this one.
+ * server's proxy, and so no portal that runs on this machine. The extensions a fresh portal has are the exception:
+ * they are listed and their files served (see `startsWith`), for the app and for a fixture page that loads them as
+ * the app does. A test's own `page.route` is registered after it and wins; what it does not answer falls back to
+ * this one.
  */
 export const test = base.extend<{ unmocked: string[] }>({
   unmocked: [async ({ page }, use, testInfo) => {
     const asked: string[] = [];
-    await page.route('**/api/**', (route) => {
+    await page.route('**/api/**', async (route) => {
       const { pathname, search } = new URL(route.request().url());
+      if (route.request().method() === 'GET') {
+        if (pathname === '/api/extension-ui') return route.fulfill({ json: { extensions: startsWith.map((ext) => ext.listing) } });
+        for (const ext of startsWith) if (await ext.serve(pathname, route)) return;
+      }
       const what = `${route.request().method()} ${pathname}${search}`;
       asked.push(what);
       return route.fulfill({ status: 501, json: { error: `Not mocked: ${what}` } });
@@ -104,8 +110,6 @@ const portalBase = ({ path, method, url }: Ask): Answer => {
     config: { user: '', hasPassword: false }, version: null, pages: [], uiPort: '', uiExposed: false, uiOutdated: false, cursor: true, allowlist: '', configured: false, byDefault: true, sessions: [], routines: [],
   };
   if (path === '/api/voice') return { enabled: false };
-  // Those a fresh portal is installed with, whose files are served below.
-  if (path === '/api/extension-ui') return { extensions: startsWith.map((ext) => ext.listing) };
   // A portal that is not run from a checkout: nothing to update, no notice.
   if (path === '/api/update') return { kind: 'none', boot: 'boot-a' };
   if (/^\/api\/sessions\/[^/]+\/background$/.test(path)) return { supported: true, jobs: [], statuses: [], widgets: [] };
@@ -161,7 +165,6 @@ export async function mockPortal(page: Page, answer: (ask: Ask) => Answer | Prom
     let got = await answer(ask);
     if (got === undefined && settings) got = settingsBase(ask);
     if (got === undefined) got = portalBase(ask);
-    if (got === undefined && ask.method === 'GET') for (const ext of startsWith) if (await ext.serve(ask.path, route)) return;
     if (got === undefined) return route.fallback();
     if (got === HANG || got === DONE) return;
     if (got instanceof Reply) return route.fulfill({ status: got.status, json: got.body });

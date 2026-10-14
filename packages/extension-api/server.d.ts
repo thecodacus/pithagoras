@@ -42,6 +42,13 @@ export interface ServerPortal {
     text: typeof text;
     /** WebSocket upgrades under /api/x/<package>/…, already checked for the login and for the page they come from. */
     upgrade(handler: Upgrade): void;
+    /**
+     * Ends a long response, such as a stream, when the login it was opened
+     * under ends: the password changes, or single sign-on is set up anew.
+     * What it showed is not shown to whoever signs in next. Returns what
+     * stops the watching, for a response that ended by itself.
+     */
+    endWithLogin(end: () => void): () => void;
   };
   chats: {
     get(id: string): Chat | undefined;
@@ -78,6 +85,13 @@ export interface ServerPortal {
     spawnAs(chatId: string): { argv: string[]; env: NodeJS.ProcessEnv };
     /** Runs a command as a chat's agent, in the chat's folder unless told otherwise. Never throws for a non-zero exit. */
     run(chatId: string, argv: string[], options?: { input?: Buffer | string; cwd?: string; signal?: AbortSignal }): Promise<Ran>;
+    /**
+     * The portal's environment as a process the person starts should have
+     * it: without the mark the agent's processes carry, so that what someone
+     * starts by hand (a shell, a server under it) is not listed as a job the
+     * agent left running.
+     */
+    personEnv(): NodeJS.ProcessEnv;
   };
   files: {
     /** `rel` inside `base`, checked: throws for `..`, an absolute path, or a link that leads out. */

@@ -598,7 +598,7 @@ test('each floating panel has a window of its own, put where it was let go, carr
   const z = (panel: Panel) => floating(page, panel).evaluate((e) => Number(getComputedStyle(e).zIndex));
   expect(await z('Files')).toBeGreaterThan(await z('Terminal'));
   // Pressed anywhere in it, not only by its header: in what the terminal shows.
-  await floating(page, 'Terminal').locator('.chat-terminal-pane').first().click({ position: { x: 20, y: 20 } });
+  await floating(page, 'Terminal').locator('.terminal-pane').first().click({ position: { x: 20, y: 20 } });
   expect(await z('Terminal')).toBeGreaterThan(await z('Files'));
   await floating(page, 'Files').click({ position: { x: 60, y: 120 } });
   expect(await z('Files')).toBeGreaterThan(await z('Terminal'));

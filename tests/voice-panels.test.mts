@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { latestBrowserActivity, latestTerminalActivity } from '../core/web/src/voice-browser.js';
-import { terminalRuns } from '../core/web/src/components/VoiceTerminal.js';
+import { latestBrowserActivity } from '../core/web/src/voice-browser.js';
+import { latestCommand, terminalRuns } from '../extensions/terminal/src/runs.ts';
 
 test('only browser tool calls activate the browser; plain mentions and old text do not', () => {
   const events = [
@@ -11,7 +11,8 @@ test('only browser tool calls activate the browser; plain mentions and old text 
   ];
   assert.equal(latestBrowserActivity(events.slice(0, 2)), 0);
   assert.equal(latestBrowserActivity(events), 3);
-  assert.equal(latestTerminalActivity(events), 2);
+  // The terminal extension opens on a command the same way.
+  assert.equal(latestCommand(events), 2);
 });
 test('terminal follows cumulative streamed output and final tool errors by call id', () => {
   const events = [
@@ -38,15 +39,17 @@ test('a shell tool called through MCP is a run, and one its run left open is set
 
 test('files and pictures take the side first, and the middle when the side is taken', async () => {
   const { placeWindows } = await import('../core/web/src/voice-windows.js');
-  const none = { browser: false, terminal: false, files: false, pictures: false };
+  const none = { browser: false, files: false, pictures: false };
+  // The terminal's window, an extension's that asks for the side.
+  const terminal = 'x:pithagoras-terminal/terminal' as const, side = { [terminal]: 'side' as const };
   assert.deepEqual(placeWindows({ ...none, pictures: true }), { main: undefined, side: 'pictures' });
-  assert.deepEqual(placeWindows({ ...none, files: true, terminal: true }), { main: 'files', side: 'terminal' });
+  assert.deepEqual(placeWindows({ ...none, files: true, [terminal]: true }, side), { main: 'files', side: terminal });
   assert.deepEqual(placeWindows({ ...none, pictures: true, browser: true }), { main: 'browser', side: 'pictures' });
   assert.deepEqual(placeWindows({ ...none, pictures: true, files: true }), { main: 'pictures', side: 'files' });
-  assert.deepEqual(placeWindows({ ...none, browser: true, terminal: true }), { main: 'browser', side: 'terminal' });
+  assert.deepEqual(placeWindows({ ...none, browser: true, [terminal]: true }, side), { main: 'browser', side: terminal });
   // The conversation is a window like them, not something drawn over them.
   assert.deepEqual(placeWindows({ ...none, conversation: true }), { main: undefined, side: 'conversation' });
-  assert.deepEqual(placeWindows({ ...none, conversation: true, terminal: true }), { main: 'conversation', side: 'terminal' });
+  assert.deepEqual(placeWindows({ ...none, conversation: true, [terminal]: true }, side), { main: 'conversation', side: terminal });
   assert.deepEqual(placeWindows({ ...none, conversation: true, pictures: true }), { main: 'pictures', side: 'conversation' });
 });
 

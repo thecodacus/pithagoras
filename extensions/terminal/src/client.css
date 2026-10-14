@@ -1,0 +1,76 @@
+/* The terminal. Its colours are the portal's for a terminal (--terminal, --terminal-fg), dark in either mode unless a theme says otherwise. */
+@import "@xterm/xterm/css/xterm.css";
+
+/* ── The tabs in the panel's head ── */
+.terminal-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgb(var(--fg) / .05); }
+.terminal-tabs button { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 6px; font-size: 11px; color: rgb(var(--fg-subtle)); transition: background .2s, color .2s, box-shadow .2s; }
+.terminal-tabs button:hover { color: rgb(var(--fg)); }
+.terminal-tabs button[aria-selected="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 3px #0000001f, 0 0 0 1px rgb(var(--line)); }
+.terminal-tab-live { width: 5px; height: 5px; border-radius: 50%; background: #3fe1c6; animation: terminal-pulse 1s ease-in-out infinite alternate; }
+
+/* ── The panel: one pane per tab, the ones not shown kept as they were ── */
+.terminal-panel { position: relative; flex: 1; min-height: 0; background: rgb(var(--terminal)); }
+.terminal-pane { position: absolute; inset: 0; display: flex; flex-direction: column; animation: terminal-pane-in .3s cubic-bezier(.22, 1, .36, 1) both; }
+.terminal-pane.is-hidden { visibility: hidden; pointer-events: none; animation: none; }
+.terminal-failed { padding: 16px; }
+.terminal-shell { height: 100%; width: 100%; padding: 4px; background: rgb(var(--terminal)); }
+
+/* ── What the agent ran ── */
+.terminal-window { display: flex; flex-direction: column; flex: 1; min-height: 0; background: rgb(var(--terminal)); }
+.terminal-output { min-height: 0; flex: 1; overflow: auto; padding: 20px; color: rgb(var(--terminal-fg) / .9); font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.terminal-empty { color: #8f9bb0; font-family: system-ui, sans-serif; }
+.terminal-run + .terminal-run { margin-top: 24px; }
+.terminal-run.is-focused { animation: terminal-run-focus 1.8s ease-out; border-radius: 8px; }
+.terminal-command { display: flex; gap: 10px; align-items: baseline; color: rgb(var(--terminal-fg)); }
+.terminal-command > span { color: #3fe1c6; }
+.terminal-command code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.terminal-command i { flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%; background: #3fe1c6; animation: terminal-pulse 1s ease-in-out infinite alternate; }
+.terminal-command small { flex-shrink: 0; margin-left: auto; font-size: 11px; color: #e8c07a; }
+.terminal-output pre { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; color: rgb(var(--terminal-fg)); }
+.terminal-output pre.is-error { color: #eda6a6; }
+
+/* ── Background jobs ── */
+.terminal-jobs { display: flex; flex-direction: column; min-height: 0; flex: 1; color: #c4c8d2; font-size: 12px; }
+.terminal-jobs-empty { padding: 20px; color: #8a91a0; font-size: 12px; line-height: 1.6; }
+.terminal-jobs-error { padding: 6px 14px; color: #eda6a6; font-size: 11.5px; }
+.terminal-ext { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #ffffff14; }
+.terminal-ext-status { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: #c4c8d2; }
+.terminal-ext-status span { margin-right: 8px; color: #6f7684; }
+.terminal-ext-widget { margin: 0; white-space: pre-wrap; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a6adbc; }
+.terminal-jobs-list { display: flex; flex-direction: column; gap: 2px; padding: 8px; border-bottom: 1px solid #ffffff14; max-height: 40%; overflow-y: auto; flex-shrink: 0; }
+.terminal-jobs-options { display: contents; }
+.terminal-job { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 8px; text-align: left; color: #c4c8d2; transition: background .15s; }
+.terminal-job:hover { background: #ffffff0d; }
+.terminal-job[aria-selected="true"] { background: #ffffff14; color: #fff; }
+.terminal-job-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #6f7684; }
+.terminal-job.is-running .terminal-job-dot { background: #3fe1c6; animation: terminal-ping 1.6s ease-out infinite; }
+.terminal-job.is-stopped .terminal-job-dot { background: #f5c451; }
+.terminal-job-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.terminal-job-meta { flex-shrink: 0; font-size: 11px; color: #8a91a0; font-variant-numeric: tabular-nums; }
+.terminal-jobs-clear { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; margin: 4px 0 0 6px; padding: 3px 8px; border-radius: 6px; font-size: 11px; color: #8a91a0; }
+.terminal-jobs-clear:hover { color: #fff; background: #ffffff0d; }
+.terminal-jobs-clear svg { width: 12px; height: 12px; }
+.terminal-job-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.terminal-job-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #ffffff0f; }
+.terminal-job-head code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: #e6e9ef; }
+.terminal-job-state { flex-shrink: 0; padding: 1px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 500; }
+.terminal-job-state.is-running { color: #3fe1c6; background: rgb(63 225 198 / .12); }
+.terminal-job-state.is-stopped { color: #f5c451; background: rgb(245 196 81 / .12); }
+.terminal-job-state.is-exited { color: #a6adbc; background: #ffffff10; }
+.terminal-job-pid { flex-shrink: 0; font-size: 10.5px; color: #6f7684; font-variant-numeric: tabular-nums; }
+.terminal-job-stop { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 7px; font-size: 11px; color: #f0b4b4; background: rgb(239 134 134 / .1); border: 1px solid rgb(239 134 134 / .25); transition: background .15s; }
+.terminal-job-stop:hover { background: rgb(239 134 134 / .2); }
+.terminal-job-stop svg { width: 9px; height: 9px; }
+.terminal-job-output { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a6adbc; }
+
+@keyframes terminal-pulse { to { opacity: .25; } }
+@keyframes terminal-ping { 0% { box-shadow: 0 0 0 0 rgb(63 225 198 / .55); } 80%, 100% { box-shadow: 0 0 0 6px rgb(63 225 198 / 0); } }
+@keyframes terminal-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes terminal-run-focus { 0%, 30% { background: rgb(63 225 198 / .12); box-shadow: 0 0 0 6px rgb(63 225 198 / .12); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
+
+@media (max-width: 600px) {
+  .terminal-output { font-size: 11px; padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-pane, .terminal-run.is-focused, .terminal-command i { animation: none; }
+}

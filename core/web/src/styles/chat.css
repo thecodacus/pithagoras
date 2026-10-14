@@ -167,20 +167,14 @@ button.chat-compaction-pill:disabled { cursor: default; }
 .chat-compaction-summary :is(h1, h2, h3, h4) { font-size: 12.5px; color: rgb(var(--fg)); }
 .chat-compaction-summary > :first-child :first-child { margin-top: 0; }
 
-/* ── Terminal tabs beside the chat ── */
+/* ── Tabs in a panel's head (Git's) ── */
 .chat-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgb(var(--fg) / .05); }
 .chat-tabs button { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 6px; font-size: 11px; color: rgb(var(--fg-subtle)); transition: background .2s, color .2s, box-shadow .2s; }
 .chat-tabs button:hover { color: rgb(var(--fg)); }
 .chat-tabs button[aria-selected="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 3px #0000001f, 0 0 0 1px rgb(var(--line)); }
-.chat-tab-live { width: 5px; height: 5px; border-radius: 50%; background: #3fe1c6; animation: voice-pulse 1s ease-in-out infinite alternate; }
-.chat-terminal-pane { position: absolute; inset: 0; display: flex; flex-direction: column; animation: chat-pane-in .3s var(--ease-out) both; }
-.chat-terminal-pane.is-hidden { visibility: hidden; pointer-events: none; animation: none; }
-@keyframes chat-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.voice-terminal-run.is-focused { animation: chat-run-focus 1.8s ease-out; border-radius: 8px; }
-@keyframes chat-run-focus { 0%, 30% { background: rgb(63 225 198 / .12); box-shadow: 0 0 0 6px rgb(63 225 198 / .12); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-enter, .chat-status-pill, .chat-status-swap, .chat-tool.is-done .chat-tool-icon > svg, .chat-compaction-pill, .chat-terminal-pane, .voice-terminal-run.is-focused { animation: none; }
+  .chat-enter, .chat-status-pill, .chat-status-swap, .chat-tool.is-done .chat-tool-icon > svg, .chat-compaction-pill { animation: none; }
   .chat-shimmer { animation: none; color: rgb(var(--fg-muted)); background: none; }
   .chat-ring.is-spinning, .chat-orbit, .chat-model-load i, .chat-squeeze i, .chat-compaction-rule, .chat-thinking-icon svg, .chat-thinking-icon::before { animation: none !important; }
   .chat-collapse, .chat-chevron, .chat-thinking-stream { transition: none; }
@@ -221,39 +215,15 @@ button.running-chip-command:hover { text-decoration: underline; }
 .chat-tool-agent:hover { background: rgb(var(--accent) / .16); }
 .chat-tool-agent svg { width: 12px; height: 12px; }
 
-/* ── Background jobs, in the terminal panel ── */
-.bg-jobs { display: flex; flex-direction: column; min-height: 0; flex: 1; color: #c4c8d2; font-size: 12px; }
+/* ── The subagents panel: a line of text, a dot for each agent, a stop button ── */
 .bg-jobs-empty { padding: 20px; color: #8a91a0; font-size: 12px; line-height: 1.6; }
 .bg-jobs-error { padding: 6px 14px; color: #eda6a6; font-size: 11.5px; }
-.bg-ext { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #ffffff14; }
-.bg-ext-status { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: #c4c8d2; }
-.bg-ext-status span { margin-right: 8px; color: #6f7684; }
-.bg-ext-widget { margin: 0; white-space: pre-wrap; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a6adbc; }
-.bg-jobs-list { display: flex; flex-direction: column; gap: 2px; padding: 8px; border-bottom: 1px solid #ffffff14; max-height: 40%; overflow-y: auto; flex-shrink: 0; }
-.bg-job { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 8px; text-align: left; color: #c4c8d2; transition: background .15s; }
-.bg-job:hover { background: #ffffff0d; }
-.bg-job[aria-selected="true"] { background: #ffffff14; color: #fff; }
 .bg-job-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #6f7684; }
-.bg-job.is-running .bg-job-dot, .sub-tab.is-running .bg-job-dot { background: #3fe1c6; animation: running-ping 1.6s ease-out infinite; }
-.bg-job.is-stopped .bg-job-dot { background: #f5c451; }
+.sub-tab.is-running .bg-job-dot { background: #3fe1c6; animation: running-ping 1.6s ease-out infinite; }
 .sub-tab.is-error .bg-job-dot { background: #ef8686; }
-.bg-job-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.bg-job-meta { flex-shrink: 0; font-size: 11px; color: #8a91a0; font-variant-numeric: tabular-nums; }
-.bg-jobs-clear { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; margin: 4px 0 0 6px; padding: 3px 8px; border-radius: 6px; font-size: 11px; color: #8a91a0; }
-.bg-jobs-clear:hover { color: #fff; background: #ffffff0d; }
-.bg-jobs-clear svg { width: 12px; height: 12px; }
-.bg-job-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-.bg-job-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #ffffff0f; }
-.bg-job-head code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: #e6e9ef; }
-.bg-job-state { flex-shrink: 0; padding: 1px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 500; }
-.bg-job-state.is-running { color: #3fe1c6; background: rgb(63 225 198 / .12); }
-.bg-job-state.is-stopped { color: #f5c451; background: rgb(245 196 81 / .12); }
-.bg-job-state.is-exited { color: #a6adbc; background: #ffffff10; }
-.bg-job-pid { flex-shrink: 0; font-size: 10.5px; color: #6f7684; font-variant-numeric: tabular-nums; }
 .bg-job-stop { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 7px; font-size: 11px; color: #f0b4b4; background: rgb(239 134 134 / .1); border: 1px solid rgb(239 134 134 / .25); transition: background .15s; }
 .bg-job-stop:hover { background: rgb(239 134 134 / .2); }
 .bg-job-stop svg { width: 9px; height: 9px; }
-.bg-job-output { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #a6adbc; }
 
 /* ── Subagents panel ── */
 .sub-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }

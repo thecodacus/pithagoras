@@ -311,7 +311,7 @@ test('a panel drops away when it is closed, and a carried one flies to its new p
   expect((await played(page)).filter((p) => p.ghost)).toEqual([]);
   await settled(page);
 
-  await page.getByRole('button', { name: 'Close the terminal' }).click();
+  await page.getByRole('button', { name: 'Close Terminal' }).click();
   await expect(page.locator('aside[data-dock]')).toHaveCount(0);
   expect((await played(page)).some((p) => p.ghost && p.keys.includes('opacity'))).toBe(true);
 });
@@ -360,7 +360,7 @@ test('closing one of two places plays that place, not the other that stays', asy
   await expect(page.locator('aside[data-dock="left"]')).toBeVisible();
   await settled(page);
 
-  await page.getByRole('button', { name: 'Close the terminal' }).click();
+  await page.getByRole('button', { name: 'Close Terminal' }).click();
   await expect(page.locator('aside[data-dock="right"]')).toHaveCount(0);
   // What went was the terminal's place; the files stay where they are.
   await expect.poll(async () => (await pictures(page)).map((p) => p.dock)).toEqual(['right']);
@@ -859,7 +859,7 @@ test('a menu that opens Settings as it closes drops away under the dialog', asyn
 
 test('a conversation that is left is under the floating window that lies over it', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 760 });
-  await portal(page, { places: { terminal: 'float' } });
+  await portal(page, { places: { 'x:pithagoras-terminal/terminal': 'float' } });
   await page.goto('/s/a');
   await expect(page.getByText('A answer 5')).toBeVisible();
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
@@ -897,7 +897,7 @@ test('deleting a message with many rows in its turn still breaks the message its
 
 test('closing the window at the back of two does not bring it in front of the other', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 760 });
-  await portal(page, { places: { terminal: 'float', files: 'float' } });
+  await portal(page, { places: { 'x:pithagoras-terminal/terminal': 'float', files: 'float' } });
   await page.goto('/s/a');
   await expect(page.getByText('A answer 5')).toBeVisible();
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();

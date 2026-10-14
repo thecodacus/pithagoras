@@ -1,9 +1,11 @@
 <!doctype html><html data-theme="dark"><head><meta name="viewport" content="width=device-width, initial-scale=1" />
 <script>
 // With `&count=1`: React tells a hook of this name about every commit (as its devtools are told), and this one counts how often each
-// component named in `window.watched` ran, by the name of its function. `window.drawn` has the counts.
+// component named in `window.watched` ran, by the name of its function. `window.drawn` has the counts. One of an
+// extension's, whose bundle is minified, is known instead by the class of the first element it draws: `window.drawsClass`.
 if (location.search.includes('count=1')) {
-  window.watched = ['CopyAction', 'GitPanel', 'ChildItem', 'JobOutput'];
+  window.watched = ['CopyAction', 'GitPanel', 'ChildItem'];
+  window.drawsClass = { JobOutput: 'terminal-job-output' };
   window.drawn = {};
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
     supportsFiber: true, isDisabled: false, renderers: new Map(),
@@ -17,6 +19,12 @@ if (location.search.includes('count=1')) {
         const name = own && own.replace(/\d+$/, '');
         // Bit 1 is "performed work": the component ran, rather than being skipped as unchanged.
         if (fiber.flags & 1 && window.watched.includes(name)) window.drawn[name] = (window.drawn[name] || 0) + 1;
+        if (fiber.flags & 1 && (typeof type === 'function' || (type && typeof type.type === 'function'))) {
+          let host = fiber.child;
+          while (host && typeof host.type !== 'string') host = host.child;
+          const classes = (host && host.memoizedProps && host.memoizedProps.className) || '';
+          for (const [as, cls] of Object.entries(window.drawsClass)) if (classes.split(' ').includes(cls)) window.drawn[as] = (window.drawn[as] || 0) + 1;
+        }
         if (was && fiber.child === was.child) return;
         for (let child = fiber.child; child; child = child.sibling) walk(child, child.alternate);
       };

@@ -136,7 +136,7 @@ test('what cannot be drawn is refused where it is registered, with why', () => {
 test('an extension\'s panel counts like the portal\'s own: a third closes the one open longest', () => {
   const two = settlePanels([], ['files', 'x:notes/notes']);
   assert.deepEqual(settlePanels(two.order, ['files', 'x:notes/notes', 'git']), { order: ['x:notes/notes', 'git'], close: ['files'] });
-  assert.deepEqual(settlePanels(['git', 'x:notes/notes'], ['git', 'x:notes/notes', 'terminal']), { order: ['x:notes/notes', 'terminal'], close: ['git'] });
+  assert.deepEqual(settlePanels(['git', 'x:notes/notes'], ['git', 'x:notes/notes', 'files']), { order: ['x:notes/notes', 'files'], close: ['git'] });
 });
 
 /** The Notes extension's pi half, loaded into a pi that is only what it uses. */
@@ -306,7 +306,7 @@ test('a chat is said as the page has it, to whoever listens to that chat', () =>
 
 test('a window an extension brought to voice mode is placed as Files is: at the side, or in the middle when the side is taken', () => {
   assert.deepEqual(placeWindows({ 'x:notes/notes': true }), { main: undefined, side: 'x:notes/notes' });
-  assert.deepEqual(placeWindows({ terminal: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'terminal' });
+  assert.deepEqual(placeWindows({ conversation: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'conversation' });
   assert.deepEqual(placeWindows({ browser: true, 'x:notes/notes': true }), { main: 'browser', side: 'x:notes/notes' });
   assert.deepEqual(placeWindows({ files: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'files' }, 'after the portal\'s own');
   assert.deepEqual(placeWindows({ files: true, 'x:notes/notes': false }), { main: undefined, side: 'files' });
@@ -504,9 +504,9 @@ test('a window an extension brought that asks for a place has it before those th
   assert.deepEqual(placeWindows({ 'x:a/w': true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: undefined });
   assert.deepEqual(placeWindows({ 'x:a/w': true, files: true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: 'files' });
   assert.deepEqual(placeWindows({ conversation: true, 'x:a/w': true }, { 'x:a/w': 'side' }), { main: 'conversation', side: 'x:a/w' });
-  // The browser has the middle, the terminal the side: it is given the other.
+  // The browser has the middle, another that asked first the side: it is given the other.
   assert.deepEqual(placeWindows({ browser: true, 'x:a/w': true }, { 'x:a/w': 'middle' }), { main: 'browser', side: 'x:a/w' });
-  assert.deepEqual(placeWindows({ terminal: true, 'x:a/w': true }, { 'x:a/w': 'side' }), { main: 'x:a/w', side: 'terminal' });
+  assert.deepEqual(placeWindows({ 'x:t/t': true, 'x:a/w': true }, { 'x:t/t': 'side', 'x:a/w': 'side' }), { main: 'x:a/w', side: 'x:t/t' });
   // Without a place it is placed as before, after the portal's own.
   assert.deepEqual(placeWindows({ conversation: true, 'x:a/w': true }), { main: 'x:a/w', side: 'conversation' });
 });

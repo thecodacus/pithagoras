@@ -14,9 +14,9 @@ async function shell(page: Page, fails: (n: number, route: import('@playwright/t
     if (path === '/api/sessions') return { sessions: [chat], executor: 'host' };
     if (/^\/api\/sessions\/\w+$/.test(path)) return chat;
     if (path.endsWith('/canvases')) return [];
-    if (path === '/api/terminal' && method === 'POST') return { id: 't1', cwd: '/w/site' };
-    if (path === '/api/terminal/t1/input') return fails(++inputs, route);
-    if (path === '/api/terminal/t1/resize' || path === '/api/terminal/t1') return { ok: true };
+    if (path === '/api/x/pithagoras-terminal/terminal' && method === 'POST') return { id: 't1', cwd: '/w/site' };
+    if (path === '/api/x/pithagoras-terminal/terminal/t1/input') return fails(++inputs, route);
+    if (path === '/api/x/pithagoras-terminal/terminal/t1/resize' || path === '/api/x/pithagoras-terminal/terminal/t1') return { ok: true };
     if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
   }, { streams: 'open', settings: true });
   await page.setViewportSize({ width: 1300, height: 800 });
@@ -25,13 +25,13 @@ async function shell(page: Page, fails: (n: number, route: import('@playwright/t
   await page.getByRole('tab', { name: 'Shell' }).click();
   await expect(page.locator('.xterm')).toBeVisible();
   // The shell's own stream, as the page keeps it.
-  const stream = () => page.evaluate(() => (window as any).streams.filter((s: any) => /\/api\/terminal\/t1\/stream/.test(s.url)).length);
+  const stream = () => page.evaluate(() => (window as any).streams.filter((s: any) => /\/api\/x\/pithagoras-terminal\/terminal\/t1\/stream/.test(s.url)).length);
   await expect.poll(stream).toBe(1);
   return {
     /** What the server sends on a connection, as the page would get it. */
-    send: (text: string) => page.evaluate((data) => (window as any).streams.find((s: any) => /\/api\/terminal\//.test(s.url)).emit('message', data), text),
+    send: (text: string) => page.evaluate((data) => (window as any).streams.find((s: any) => /\/api\/x\/pithagoras-terminal\/terminal\//.test(s.url)).emit('message', data), text),
     /** The stream coming back after a break: EventSource reconnects by itself and says it is open. */
-    reopened: () => page.evaluate(() => (window as any).streams.find((s: any) => /\/api\/terminal\//.test(s.url)).onopen?.()),
+    reopened: () => page.evaluate(() => (window as any).streams.find((s: any) => /\/api\/x\/pithagoras-terminal\/terminal\//.test(s.url)).onopen?.()),
     type: async (keys: string) => {
       await page.locator('.xterm').click();
       await page.keyboard.type(keys);

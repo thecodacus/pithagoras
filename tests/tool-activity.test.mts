@@ -15,7 +15,8 @@ test('file tools name the file, and open it in Files when it is in the folder', 
 
 test('other tools say what they are doing and where it can be seen', () => {
   assert.equal(describeCall(start('bash', { command: 'npm   test' }), folder).detail, 'npm test');
-  assert.equal(describeCall(start('bash', { command: 'x' }), folder).target, 'terminal');
+  // No window of the portal's own: the terminal extension's says it is for commands (`opensFor`).
+  assert.equal(describeCall(start('bash', { command: 'x' }), folder).target, undefined);
   assert.equal(describeCall(start('grep', { pattern: 'retry', glob: '*.ts' }), folder).label, 'Searching for “retry”');
   assert.deepEqual(describeCall(start('browser_navigate', { url: 'https://example.com/a?b' }), folder), { label: 'Opening a page', detail: 'example.com', target: 'browser' });
   assert.deepEqual(describeCall(start('mcp', { tool: 'browser_take_screenshot', args: {} }), folder), { label: 'Taking a screenshot', detail: '', target: 'browser' });
