@@ -120,8 +120,11 @@ import { trustFlagged } from "./pi/guard.js";
 import { sandboxPolicy, sandboxSupport } from "./sandbox/policy.js";
 import { sandboxRouter } from "./api/sandbox.js";
 import { logsRouter } from "./api/logs.js";
+import { restartRouter } from "./api/restart.js";
 import { startUpdateChecks, updateRouter } from "./api/update.js";
 import { requestedExit } from "./restart.js";
+import { LOG_BOOT } from "./logs.js";
+import { closeConnections } from "./close-connections.js";
 import { scheduleDreams } from "./extensions/understory-service.js";
 import { routineSupervisor } from "./routines/supervisor.js";
 import { channelSupervisor } from "./channels/supervisor.js";
@@ -179,6 +182,12 @@ app.use((req, res, next) => {
 app.use(cookieParser());
 
 // --- auth ---
+
+// Whether the portal is up, and which start of it answers: a page that asked for a restart waits for another one.
+// Open to anyone, as the login page is; the start's token says nothing a visitor could use.
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, boot: LOG_BOOT });
+});
 
 app.get("/api/auth/status", (req, res) => {
   const authed = isAuthed(req);
@@ -1774,6 +1783,7 @@ app.use("/api", browserRouter());
 app.use("/api", sandboxRouter(sessions));
 app.use("/api", logsRouter());
 app.use("/api", updateRouter());
+app.use("/api", restartRouter());
 app.use("/api", voiceRouter());
 app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());
@@ -1958,8 +1968,8 @@ async function stop(signal: string) {
   server.close(() => process.exit(requestedExit()));
   // Every open page holds an event stream that never ends by itself, and
   // close() waits for them — so a restart always sat out the full ten seconds
-  // of the timer above.
-  server.closeAllConnections();
+  // of the timer above. A request that is being answered gets a moment first.
+  closeConnections(server, 2000);
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
