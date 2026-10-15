@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Warm: warm greys, browns and an orange accent for the Pithagoras portal, in light and dark. Only a theme: no code",
   "keywords": ["pi-package"],
+  "pi": {},
   "pithagoras": {
     "themes": [
       {

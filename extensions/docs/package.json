@@ -4,6 +4,7 @@
   "description": "Documents in a chat's folder, on a page of their own in the Pithagoras portal",
   "type": "module",
   "keywords": ["pi-package"],
+  "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
   "scripts": { "build": "node build.mjs" },
   "dependencies": {

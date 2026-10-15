@@ -47,6 +47,7 @@ hello/
   "version": "0.1.0",
   "type": "module",
   "keywords": ["pi-package"],
+  "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" }
 }
 ```
@@ -108,6 +109,12 @@ While you work on it:
 - **`name`** is what everything goes by: the entries it registers, its
   messages, its addresses (`/api/x/<name>/…`, `/x/<name>/<page>`). An npm name,
   with or without a scope.
+- **`pi`** is what the package brings pi: its extensions, skills, prompts and
+  themes, as any pi package names them. A Pithagoras extension is a pi package,
+  installed with `pi install`, so it always has the key, empty when it brings
+  pi nothing (`"pi": {}`). Without the key and without pi's own folders
+  (`extensions/`, `skills/`, `prompts/`, `themes/`), pi takes the package's
+  folder for an extension, cannot load it, and does not start.
 - **`client`** is a JavaScript module for the browser. The folder it is in is
   the package's web folder: the portal serves that folder, and nothing else of
   the package, to whoever is signed in. So the module has a folder of its own;
@@ -178,6 +185,7 @@ await buildExtension({ dir: import.meta.dirname });
 
 ```json
 {
+  "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
   "scripts": { "build": "tsc --noEmit && node build.mjs" },
   "devDependencies": { "@pithagoras/extension-api": "*", "esbuild": "*" }
@@ -792,6 +800,7 @@ there is no code to write.
 {
   "name": "my-theme",
   "keywords": ["pi-package"],
+  "pi": {},
   "pithagoras": {
     "themes": [
       {

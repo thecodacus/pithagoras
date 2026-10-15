@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Dusk: a purple theme for the Pithagoras portal, in light and dark. The reference for an extension that is only a theme: no code",
   "keywords": ["pi-package"],
+  "pi": {},
   "pithagoras": {
     "themes": [
       {
