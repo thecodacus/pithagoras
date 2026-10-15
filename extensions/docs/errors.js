@@ -37,12 +37,17 @@ export function explained(e, dir = null) {
     // git is a child process: what the disk said reaches it as words, not as an error code.
     if (/No space left on device|Disk quota exceeded/i.test(e.message)) return noRoom;
     if (/Read-only file system/i.test(e.message)) return readOnly;
-    if (/Permission denied/i.test(e.message)) return denied;
+    // Its own words, not the system's, for an object it may not write: `insufficient permission for adding an object to repository database`.
+    if (/Permission denied|insufficient permission/i.test(e.message)) return denied;
     return forThePerson(500, `The history of the documents could not be used: ${brief(e.message)}${dir ? ` (the store is ${dir}: if the history there is damaged, remove its git folder to start it again; the documents and their comments stay)` : ""}`);
   }
   if (typeof e?.code === "string" && e.code.startsWith("SQLITE_")) {
     if (e.code.startsWith("SQLITE_FULL")) return noRoom;
-    if (e.code.startsWith("SQLITE_READONLY")) return readOnly;
+    // SQLite opens a database it may not write read-only, and then says so on the first write: the file is as likely not the portal's to write
+    // as its file system is read-only. (A file moved or deleted under an open connection says READONLY_DBMOVED too: that is not this.)
+    if (e.code.startsWith("SQLITE_READONLY") && e.code !== "SQLITE_READONLY_DBMOVED") {
+      return forThePerson(403, `The documents database cannot be written: the portal may not write the docs.sqlite files${dir ? ` in ${dir}` : ""}, or their file system is read-only (${brief(e.message)})`);
+    }
     if (e.code.startsWith("SQLITE_PERM")) return denied;
     if (["SQLITE_NOTADB", "SQLITE_CORRUPT"].includes(e.code)) return forThePerson(500, `The database of the documents is damaged: ${brief(e.message)}${dir ? ` (remove the docs.sqlite files in ${dir} to build it again from the history; the comments are lost)` : ""}`);
     return forThePerson(500, `The database of the documents could not be used: ${brief(e.message)}${dir ? ` (the store is ${dir})` : ""}`);

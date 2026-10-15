@@ -452,10 +452,18 @@ test('a full disk, a read-only file system, a missing right, git and the databas
   assert.deepEqual(reasons(new GitError('git update-ref failed (128): error: could not write: Read-only file system')), [403, "The documents folder, or the portal's data folder, is on a read-only file system"]);
   assert.deepEqual(reasons(new GitError("git read-tree failed (128): fatal: Unable to create '/x/index.lock': Permission denied")), [403, 'The portal is not allowed to use the documents store in /data/store (permission denied)']);
   assert.deepEqual(reasons(Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL' })), [507, 'There is no room left on the disk for this document']);
-  assert.deepEqual(reasons(Object.assign(new Error('attempt to write a readonly database'), { code: 'SQLITE_READONLY_DBMOVED' })), [403, "The documents folder, or the portal's data folder, is on a read-only file system"]);
+  const forThePerson = (e: unknown) => Boolean((explained(e, '/data/store') as any).operator);
+  // git's own words for an object it may not write, which is what a store left to another user (the portal once run as root) gives.
+  assert.deepEqual(reasons(new GitError('git hash-object failed (128): error: insufficient permission for adding an object to repository database /proc/self/fd/3/git/objects')), [403, 'The portal is not allowed to use the documents store in /data/store (permission denied)']);
+  // A database the portal may not write is opened read-only by SQLite and says so on the first write: said as that, naming the store and
+  // the message, and not as a read-only file system alone. One moved or deleted under an open connection is not that.
+  const [roStatus, roWhy] = reasons(Object.assign(new Error('attempt to write a readonly database'), { code: 'SQLITE_READONLY' }));
+  assert.equal(roStatus, 403);
+  assert.equal(roWhy, 'The documents database cannot be written: the portal may not write the docs.sqlite files in /data/store, or their file system is read-only (attempt to write a readonly database)');
+  assert.equal(forThePerson(Object.assign(new Error('x'), { code: 'SQLITE_READONLY_CANTINIT' })), true);
+  assert.deepEqual(reasons(Object.assign(new Error('attempt to write a readonly database'), { code: 'SQLITE_READONLY_DBMOVED' })), [500, 'The database of the documents could not be used: attempt to write a readonly database (the store is /data/store)']);
   assert.deepEqual(reasons(Object.assign(new Error('access permission denied'), { code: 'SQLITE_PERM' })), [403, 'The portal is not allowed to use the documents store in /data/store (permission denied)']);
   // What names the store or a way to mend it is for the person alone: marked, so that the agent is not given it.
-  const forThePerson = (e: unknown) => Boolean((explained(e, '/data/store') as any).operator);
   assert.equal(forThePerson(new GitError('git cat-file failed (128): fatal: bad object')), true);
   assert.equal(forThePerson(new GitError('git could not be started', { spawn: 'ENOENT' })), true);
   assert.equal(forThePerson(Object.assign(new Error('x'), { code: 'SQLITE_CORRUPT' })), true);
@@ -601,6 +609,42 @@ test('a database that is not one is said, with what to do, and without it the do
     assert.deepEqual((await mended.call('GET', `/folders/${folderIdOf(folder)}/documents/${id}/history`)).body.revisions.map((r: any) => r.revision), [2, 1]);
   } finally {
     await mended.close();
+  }
+});
+
+test('a store left to another user, which git and SQLite may not write, is said as a permission problem naming the store, with nothing to delete and the reason in the log', { skip: !unprivileged }, async () => {
+  const { folder, id } = await stored('docs-hard-owner-');
+  const store = storeOf(folder);
+  // As after a start of the portal as root: what it may not write.
+  const objects = path.join(store, 'git', 'objects');
+  const closed = [objects, ...readdirSync(objects).map((name) => path.join(objects, name))].filter((x) => statSync(x).isDirectory());
+  closed.forEach((x) => chmodSync(x, 0o555));
+  const docs = await portal({ a: folder });
+  try {
+    const url = `/folders/${folderIdOf(folder)}/documents/${id}`;
+    const saved = await docs.call('PUT', url, { markdown: `${PLAN}\nMore, more.\n`, base: 2 });
+    assert.equal(saved.status, 403, JSON.stringify(saved.body));
+    assert.equal(saved.body.error, `The portal is not allowed to use the documents store in ${store} (permission denied)`);
+    assert.ok(!/remove/.test(saved.body.error));
+    assert.ok(docs.logged.some((line) => line.includes(`not allowed to use the documents store in ${store}`)), docs.logged.join('\n'));
+    assert.equal((await docs.agent('a')('doc_create', { title: 'Another' })).error, AGENT_TOLD);
+  } finally {
+    closed.forEach((x) => chmodSync(x, 0o755));
+    await docs.close();
+  }
+  // The database file, the same way: the portal's user may not write it, and the reason is neither a disk nor something to delete.
+  chmodSync(path.join(store, 'docs.sqlite'), 0o444);
+  const readonly = await portal({ a: folder });
+  try {
+    const saved = await readonly.call('PUT', `/folders/${folderIdOf(folder)}/documents/${id}`, { markdown: `${PLAN}\nMore, more, more.\n`, base: 2 });
+    const said = saved.body.error ?? (await readonly.call('GET', '/folders')).body.problems?.[0]?.error;
+    assert.match(said, /^The documents database cannot be written: the portal may not write the docs\.sqlite files in /, JSON.stringify(saved.body));
+    assert.ok(said.includes(store) && /readonly database/.test(said), said);
+    assert.ok(readonly.logged.some((line) => /readonly database/.test(line)), `the reason is in the log: ${readonly.logged.join('\n')}`);
+    assert.equal((await readonly.agent('a')('doc_list', {})).error, AGENT_TOLD);
+  } finally {
+    chmodSync(path.join(store, 'docs.sqlite'), 0o644);
+    await readonly.close();
   }
 });
 

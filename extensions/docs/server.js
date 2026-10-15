@@ -684,7 +684,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     } catch (e) {
       if (e instanceof DocError) {
         // A refusal the person caused is theirs to read; one of the store's own (git, the database) is also for the log.
-        if (e.status === 500) portal.log(`${req.method} ${req.path} failed: ${e.message}`);
+        if (e.status === 500 || e.operator) portal.log(`${req.method} ${req.path} failed: ${e.message}`);
         return res.status(e.status).json({ error: e.message, ...e.extra });
       }
       portal.log(`${req.method} ${req.path} failed: ${e?.stack ?? e}`);
