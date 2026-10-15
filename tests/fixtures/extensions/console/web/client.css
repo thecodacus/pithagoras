@@ -1,0 +1,4 @@
+.console-tabs { display: flex; gap: 2px; }
+.console-tabs button { padding: 2px 8px; font-size: 11px; border-radius: 6px; color: rgb(var(--fg-subtle)); }
+.console-tabs button[aria-selected="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); }
+.console-pane { flex: 1; min-height: 0; overflow: auto; padding: 8px; font: 12px/1.5 ui-monospace, monospace; background: rgb(var(--terminal)); color: rgb(var(--terminal-fg)); }

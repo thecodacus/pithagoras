@@ -1,17 +1,20 @@
 import { test, expect } from './portal-mock';
 
+// A panel of an extension's beside the browser: the portal's tests' stand-in for one.
+test.use({ installed: ['tests/fixtures/extensions/console'] });
+
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/browser', route => route.fulfill({ json: { install: { container: 'running' } } }));
   await page.route('**/browser-ui/', route => route.fulfill({ contentType: 'text/html', body: '<body style="background:#171a20;color:#d1d8e3">A browser, in view.</body>' }));
   await page.goto('/tests/chat.html?phase=model');
   await page.getByRole('button', { name: 'Browser', exact: true }).click();
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Console', exact: true }).click();
   await page.getByRole('button', { name: 'Fullscreen' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement?.querySelector('iframe') ? 'browser' : document.fullscreenElement?.tagName ?? null)).toBe('browser');
 });
 
-test('only the browser goes fullscreen, not the terminal beside it', async ({ page }) => {
-  expect(await page.evaluate(() => !!document.fullscreenElement?.querySelector('[role=tablist][aria-label=Terminals]'))).toBe(false);
+test('only the browser goes fullscreen, not the panel beside it', async ({ page }) => {
+  expect(await page.evaluate(() => !!document.fullscreenElement?.querySelector('[role=tablist][aria-label=Consoles]'))).toBe(false);
   await page.getByRole('button', { name: 'Close the browser' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
 });

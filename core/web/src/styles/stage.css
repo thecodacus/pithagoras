@@ -37,7 +37,7 @@
 .voice-browser-window iframe { width: 100%; flex: 1; min-height: 0; border: 0; background: #0b0b0d; }
 .voice-browser-window.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
 @keyframes voice-pulse { to { opacity: .25; } }
-.is-browsing.is-terminal .voice-browser-window { left: 35%; width: calc(70% - 42px); }
+.is-browsing.has-side .voice-browser-window { left: 35%; width: calc(70% - 42px); }
 @media (max-height: 650px) and (min-width: 601px) { .voice-presence { width: 310px; } }
 @media (max-width: 600px) {
   .prompt-shell { padding: 10px; border-radius: 20px; }
@@ -50,7 +50,7 @@
   .voice-browser-window.is-open { transform: translateY(0) scale(1); }
 }
 @media (max-width: 600px) {
-  .is-browsing.is-terminal .voice-browser-window { left: 12px; width: auto; height: var(--window-upper); }
+  .is-browsing.has-side .voice-browser-window { left: 12px; width: auto; height: var(--window-upper); }
 }
 @media (prefers-reduced-motion: reduce) {
   .voice-presence, .voice-avatar, .voice-status, .voice-stage-controls, .voice-stage-action, .voice-browser-window, .prompt-action { transition: none; }
@@ -257,13 +257,13 @@
 .voice-files-window.as-main.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
 .voice-files-window.as-side { right: 24px; top: var(--window-middle); width: calc(67% - 36px); height: var(--window-room); transform: translate(60px, -50%) scale(.97); }
 .voice-files-window.as-side.is-open { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(0, -50%) scale(1); }
-.is-browsing.is-terminal .voice-files-window.as-main { left: 35%; width: calc(70% - 42px); }
-.is-browsing.is-terminal .voice-files-window.as-side { right: 20px; top: var(--window-middle); width: calc(30% - 18px); height: var(--window-room); }
+.is-browsing.has-side .voice-files-window.as-main { left: 35%; width: calc(70% - 42px); }
+.is-browsing.has-side .voice-files-window.as-side { right: 20px; top: var(--window-middle); width: calc(30% - 18px); height: var(--window-room); }
 @media (max-width: 600px) {
   .voice-files-window.as-main, .voice-files-window.as-side { left: 12px; right: 12px; top: var(--window-top); width: auto; height: var(--window-room); transform: translateY(24px) scale(.96); }
   .voice-files-window.as-main.is-open, .voice-files-window.as-side.is-open { transform: translateY(0) scale(1); }
-  .is-browsing.is-terminal .voice-files-window.as-main { left: 12px; width: auto; height: var(--window-upper); }
-  .is-browsing.is-terminal .voice-files-window.as-side { left: 12px; right: 12px; top: var(--window-lower-top); width: auto; height: var(--window-lower); }
+  .is-browsing.has-side .voice-files-window.as-main { left: 12px; width: auto; height: var(--window-upper); }
+  .is-browsing.has-side .voice-files-window.as-side { left: 12px; right: 12px; top: var(--window-lower-top); width: auto; height: var(--window-lower); }
 }
 @media (prefers-reduced-motion: reduce) { .voice-files-window { transition: none; } }
 

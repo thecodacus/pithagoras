@@ -415,33 +415,38 @@ test("an extension's own page in Settings, and why its server half is not runnin
   await expect(dialog.getByRole('listitem').filter({ hasText: 'probe' }).getByRole('alert')).toHaveText('Its server half could not be started: cannot start here');
 });
 
-test('a window an extension brought to voice mode opens from its button, is placed like the portal\'s own, and closes', async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as any).EventSource = class { onmessage: any; onopen: any; addEventListener() {} close() {} };
-  });
-  await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
-  await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
-  await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
-  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
-  await page.setViewportSize({ width: 1400, height: 860 });
-  await page.goto('/tests/voice.html?brought=1');
-  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
-  await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+test.describe('beside a window that asks for the side', () => {
+  // The portal's tests' stand-in for an extension whose window asks for the side.
+  test.use({ installed: ['tests/fixtures/extensions/console'] });
 
-  await page.getByRole('button', { name: 'Show Probe' }).click();
-  const brought = page.locator('.voice-extension-window[data-extension="probe"]');
-  await expect(brought).toHaveClass(/is-open/);
-  await expect(brought).toHaveClass(/as-side/);
-  await expect(page.getByTestId('probe-window')).toContainText('Probe for A little room to think');
-  await expect(page.getByRole('button', { name: 'Show Probe' })).toHaveCount(0);
-  // The terminal asks for the side: the window that did not ask moves to the middle, as Files would.
-  await page.getByRole('button', { name: 'Show terminal' }).click();
-  await expect(brought).toHaveClass(/as-main/);
-  // Counted with the portal's own: two windows open are laid out as two, not each as the only one.
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels', '2');
-  await page.getByTestId('probe-window').getByRole('button', { name: 'Done' }).click();
-  await expect(brought).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Show Probe' })).toBeVisible();
+  test('a window an extension brought to voice mode opens from its button, is placed like the portal\'s own, and closes', async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as any).EventSource = class { onmessage: any; onopen: any; addEventListener() {} close() {} };
+    });
+    await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
+    await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
+    await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
+    await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
+    await page.setViewportSize({ width: 1400, height: 860 });
+    await page.goto('/tests/voice.html?brought=1');
+    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+    await expect(page.getByRole('status')).toHaveText('Listening', { timeout: 25000 });
+
+    await page.getByRole('button', { name: 'Show Probe' }).click();
+    const brought = page.locator('.voice-extension-window[data-extension="probe"]');
+    await expect(brought).toHaveClass(/is-open/);
+    await expect(brought).toHaveClass(/as-side/);
+    await expect(page.getByTestId('probe-window')).toContainText('Probe for A little room to think');
+    await expect(page.getByRole('button', { name: 'Show Probe' })).toHaveCount(0);
+    // The console asks for the side: the window that did not ask moves to the middle, as Files would.
+    await page.getByRole('button', { name: 'Show console' }).click();
+    await expect(brought).toHaveClass(/as-main/);
+    // Counted with the portal's own: two windows open are laid out as two, not each as the only one.
+    await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels', '2');
+    await page.getByTestId('probe-window').getByRole('button', { name: 'Done' }).click();
+    await expect(brought).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Show Probe' })).toBeVisible();
+  });
 });
 
 test('a theme an extension brought is chosen in Settings or switched to by an extension, painted before anything is loaded, and gone with its package', async ({ page }) => {

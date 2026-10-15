@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, mockPortal } from '../../../../tests/browser/portal-mock';
 
+test.use({ installed: ['extensions/themes'] });
+
 /**
  * The theme pack a fresh portal installs (extensions/themes): its five themes are offered in Settings beside the
  * portal's own colours, and the one chosen paints the page, in dark and in light.
@@ -11,7 +13,7 @@ const triplet = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 
 test('a fresh portal offers Forest, Ocean, Rose, Amber and Mono, and the one chosen paints the page', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.addInitScript(() => localStorage.setItem('pithagoras.theme', 'dark'));
-  // What is installed is what a fresh portal has: the base answer, not this test's.
+  // What is installed is the pack, as a fresh portal has it: the base answer, not this test's.
   await mockPortal(page);
   const colour = (token: string) => page.evaluate((token) => getComputedStyle(document.documentElement).getPropertyValue(token).trim(), token);
   await page.goto('/settings/browser');

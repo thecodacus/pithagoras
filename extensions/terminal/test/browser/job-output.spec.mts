@@ -1,5 +1,7 @@
 import { test, expect } from '../../../../tests/browser/portal-mock';
 
+test.use({ installed: ['extensions/terminal'] });
+
 /**
  * A background job's output is followed once a second. One read that failed,
  * with the portal restarting, ended it for good and replaced what had been read

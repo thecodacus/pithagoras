@@ -20,7 +20,8 @@ import '../src/locales';
 installTooltips();
 // As the app does: the Animations switch and reduced motion are read from the page, for what moves with them.
 installMotion();
-// The installed extensions, loaded as the app loads them: those a fresh portal has (the terminal), which the browser tests serve.
+// The installed extensions, loaded as the app loads them: those the browser test says are installed (`installed` in
+// tests/browser/portal-mock.ts).
 startExtensions();
 
 const phase = new URLSearchParams(location.search).get('phase') ?? 'tools';
@@ -214,19 +215,12 @@ if (phase === 'switch') {
   });
 }
 
-// The Git panel, Files and the tools list of a chat that has not started: `?phase=git`. What the page sent is in window.sentTools.
-if (phase === 'git') {
+// Files and the tools list of a chat that has not started: `?phase=files`. What the page sent is in window.sentTools.
+// What an extension's panel beside them asks of its server half is the test's to answer.
+if (phase === 'files') {
   (window as any).sentTools = [];
-  // How often the Git panel read its state: it does once when it opens, and again when it is done with the file activity it was opened with.
-  (window as any).gitAsked = 0;
   let off: string[] = [];
   mockFetch((u, init) => {
-    // The Git extension's routes, for this chat: /api/x/pithagoras-git/chats/<chat>/….
-    if (/\/api\/x\/pithagoras-git\/chats\/[^/?]+\/gh(\?|$)/.test(u)) return { installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install gh' };
-    if (/\/api\/x\/pithagoras-git\/chats\/[^/?]+(\?|$)/.test(u)) {
-      (window as any).gitAsked++;
-      return { repo: true, root: '/workspaces/pithagoras', prefix: '', branch: 'main', head: 'a'.repeat(40), upstream: 'origin/main', ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'README.md', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }, { path: 'notes.txt', x: '?', y: '?', kind: 'untracked' }] };
-    }
     if (u.includes('/files?')) return { path: '', entries: [{ name: 'README.md', type: 'file', size: 12, mtime: 1 }], truncated: false };
     if (u.includes('/file?')) return { content: '# Pithagoras\n', binary: false, size: 13, mtime: 1 };
     if (u.endsWith('/tools') && init?.method === 'PUT') {

@@ -482,7 +482,7 @@ export function VoiceStage({ sessionId, folder, workPhase, canvasOpen, onCanvasM
   // is-docked: the compact chrome that goes with a window open — the dock's
   // styles, and the pictures and cards out of the windows' way — over which
   // the orb standing on its own has its own.
-  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'is-terminal' : ''} ${stageWindows || orb === "dock" ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label={t("Voice conversation")} data-panels={panels} data-orb={orb} data-mode={mode}
+  return <section ref={stage} className={`voice-stage ${browsing ? 'is-browsing' : ''} ${sideWindow ? 'has-side' : ''} ${stageWindows || orb === "dock" ? 'is-docked' : ''} ${dropping ? 'is-dropping' : ''}`} aria-label={t("Voice conversation")} data-panels={panels} data-orb={orb} data-mode={mode}
     onDragOver={e => { if (e.defaultPrevented || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); }}
     onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
     onDrop={drop}>

@@ -2,6 +2,9 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 import { settled } from './settled';
 
+// An extension's panel beside the portal's own: the portal's tests' stand-in for one.
+test.use({ installed: ['tests/fixtures/extensions/console'] });
+
 /**
  * The extra animations (core/web/src/motion.ts): on by default, one switch to turn
  * them off, the system's reduced motion over it, and what they do to the page —
@@ -292,7 +295,7 @@ test('a panel drops away when it is closed, and a carried one flies to its new p
   await page.setViewportSize({ width: 1300, height: 760 });
   await portal(page);
   await page.goto('/s/a');
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Console', exact: true }).click();
   const aside = page.locator('aside[data-dock="right"]');
   await expect(aside).toBeVisible();
   await settled(page);
@@ -311,7 +314,7 @@ test('a panel drops away when it is closed, and a carried one flies to its new p
   expect((await played(page)).filter((p) => p.ghost)).toEqual([]);
   await settled(page);
 
-  await page.getByRole('button', { name: 'Close Terminal' }).click();
+  await page.getByRole('button', { name: 'Close Console' }).click();
   await expect(page.locator('aside[data-dock]')).toHaveCount(0);
   expect((await played(page)).some((p) => p.ghost && p.keys.includes('opacity'))).toBe(true);
 });
@@ -351,18 +354,18 @@ test('with the switch off none of it is made: no doors, no pictures, no animatio
 
 test('closing one of two places plays that place, not the other that stays', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 800 });
-  // Files at the left, the terminal at the right.
+  // Files at the left, the console at the right.
   await portal(page, { places: { files: 'left' } });
   await page.goto('/s/a');
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Console', exact: true }).click();
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await expect(page.locator('aside[data-dock="right"]')).toBeVisible();
   await expect(page.locator('aside[data-dock="left"]')).toBeVisible();
   await settled(page);
 
-  await page.getByRole('button', { name: 'Close Terminal' }).click();
+  await page.getByRole('button', { name: 'Close Console' }).click();
   await expect(page.locator('aside[data-dock="right"]')).toHaveCount(0);
-  // What went was the terminal's place; the files stay where they are.
+  // What went was the console's place; the files stay where they are.
   await expect.poll(async () => (await pictures(page)).map((p) => p.dock)).toEqual(['right']);
   await expect(page.locator('aside[data-dock="left"]')).toBeVisible();
   await settled(page);
@@ -501,7 +504,7 @@ test('a panel that has flown to its place does not come in again', async ({ page
   await page.setViewportSize({ width: 1300, height: 760 });
   await portal(page);
   await page.goto('/s/a');
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Console', exact: true }).click();
   const aside = page.locator('aside[data-dock="right"]');
   await expect(aside).toBeVisible();
   await settled(page);
@@ -859,10 +862,10 @@ test('a menu that opens Settings as it closes drops away under the dialog', asyn
 
 test('a conversation that is left is under the floating window that lies over it', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 760 });
-  await portal(page, { places: { 'x:pithagoras-terminal/terminal': 'float' } });
+  await portal(page, { places: { 'x:test-console/console': 'float' } });
   await page.goto('/s/a');
   await expect(page.getByText('A answer 5')).toBeVisible();
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Console', exact: true }).click();
   await expect(page.locator('aside[data-dock="float"]')).toBeVisible();
   await settled(page);
 
@@ -897,10 +900,10 @@ test('deleting a message with many rows in its turn still breaks the message its
 
 test('closing the window at the back of two does not bring it in front of the other', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 760 });
-  await portal(page, { places: { 'x:pithagoras-terminal/terminal': 'float', files: 'float' } });
+  await portal(page, { places: { 'x:test-console/console': 'float', files: 'float' } });
   await page.goto('/s/a');
   await expect(page.getByText('A answer 5')).toBeVisible();
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Console', exact: true }).click();
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await expect(page.locator('aside[data-dock="float"]')).toHaveCount(2);
   await settled(page);

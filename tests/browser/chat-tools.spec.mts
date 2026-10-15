@@ -2,8 +2,8 @@ import { test, expect } from './portal-mock';
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  // A chat that has not started (with Files, and an answer for the Git panel, beside it).
-  await page.goto('/tests/chat.html?phase=git');
+  // A chat that has not started, with Files beside it.
+  await page.goto('/tests/chat.html?phase=files');
 });
 
 test('before the first message the tools are listed and can be switched for this chat alone', async ({ page }) => {

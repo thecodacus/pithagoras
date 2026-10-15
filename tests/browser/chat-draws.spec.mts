@@ -50,35 +50,32 @@ test('the rows, which are not drawn for the chat\'s other draws, are drawn for a
 });
 
 test.describe('the panels beside the conversation', () => {
-  test('Git is not drawn again for what is typed in the box', async ({ page }) => {
+  // An extension's panel: the portal's tests' stand-in for one.
+  test.use({ installed: ['tests/fixtures/extensions/console'] });
+
+  test('an extension\'s panel is not drawn again for what is typed in the box', async ({ page }) => {
     await page.setViewportSize({ width: 1300, height: 800 });
-    await page.goto('/tests/chat.html?phase=git&count=1');
-    await page.getByRole('button', { name: 'Git', exact: true }).click();
-    const panels = page.getByRole('complementary', { name: 'Panels' });
-    await expect(panels.getByText('notes.txt')).toBeVisible();
-    await expect.poll(async () => (await drawn(page)).GitPanel ?? 0).toBeGreaterThan(0);
-    // Let what it asks for arrive, so that what is counted next is only what typing does. It reads its state when it
-    // opens, and once more 600 ms later for the file activity the chat already has: a fixed wait is short of that on a
-    // slow machine, and the second read then lands in the middle of the typing.
-    await expect.poll(() => page.evaluate(() => (window as any).gitAsked)).toBeGreaterThanOrEqual(2);
-    // And drawn, which is a moment after it is read: nothing is left to come when two looks agree.
+    await page.goto('/tests/chat.html?phase=stream&count=1');
+    await page.getByRole('button', { name: 'Console', exact: true }).click();
+    await expect(page.getByRole('complementary', { name: 'Panels' }).getByRole('tablist', { name: 'Consoles' })).toBeVisible();
+    await expect.poll(async () => (await drawn(page)).ConsolePanel ?? 0).toBeGreaterThan(0);
+    // Settled: nothing is left to come when two looks agree.
     let last = -1;
     await expect
       .poll(async () => {
-        const now = (await drawn(page)).GitPanel;
+        const now = (await drawn(page)).ConsolePanel;
         const same = now === last;
         last = now;
         return same;
       }, { intervals: [150] })
       .toBe(true);
-    const before = (await drawn(page)).GitPanel;
-    // The message box, which comes before the panels in the page: Git has boxes of its own.
+    const before = (await drawn(page)).ConsolePanel;
     await page.getByRole('textbox').first().pressSequentially('hello there', { delay: 5 });
     await expect(page.getByRole('textbox').first()).toHaveValue('hello there');
-    expect((await drawn(page)).GitPanel).toBe(before);
+    expect((await drawn(page)).ConsolePanel).toBe(before);
   });
 
-  test('a subagent and a job that are timed are not drawn again for each second', async ({ page }) => {
+  test('a subagent that is timed is not drawn again for each second', async ({ page }) => {
     await page.setViewportSize({ width: 1300, height: 800 });
     await page.clock.install();
     await page.goto('/tests/chat.html?phase=agents&count=1');
@@ -86,15 +83,10 @@ test.describe('the panels beside the conversation', () => {
     await tray.getByRole('button', { name: /Deploy audit/ }).click();
     await expect(page.locator('.sub-head')).toContainText('Deploy audit');
     await expect.poll(async () => (await drawn(page)).ChildItem ?? 0).toBeGreaterThan(0);
-    await tray.getByRole('button', { name: /npm run dev/ }).click();
-    await expect(page.locator('.terminal-job-output')).toContainText('VITE');
-    await expect.poll(async () => (await drawn(page)).JobOutput ?? 0).toBeGreaterThan(0);
     // Settled: the clock stands still until it is run.
     await page.clock.runFor(200);
     const before = await drawn(page);
     await page.clock.runFor(3500);
-    const after = await drawn(page);
-    expect(after.ChildItem).toBe(before.ChildItem);
-    expect(after.JobOutput).toBe(before.JobOutput);
+    expect((await drawn(page)).ChildItem).toBe(before.ChildItem);
   });
 });

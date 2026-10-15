@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import type { BackgroundJob } from '../../../../core/web/src/api';
 import { publishChat } from '../../../../core/web/src/extensions/chat-feed';
 import { startExtensions } from '../../../../core/web/src/extensions/loader';
-import { TerminalPanel } from '../../../../core/web/tests/terminal-panel';
+import { TerminalPanel } from './terminal-panel';
 import '../../../../core/web/src/styles';
 
 const job: BackgroundJob = { key: 'j1', sid: 1, pids: [], command: 'npm run dev', startedAt: 1, state: 'running', hasOutput: true, attached: false };

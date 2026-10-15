@@ -15,8 +15,6 @@ async function portal(page: Page, sessions: ReturnType<typeof chat>[]) {
     if (p === '/api/projects') {
       return { root: '/w', home: HOME, projects: [{ name: 'site', path: '/w/site', isGit: false, hasInstructions: false, hasTools: false, sessions: 1, lastActive: null }] };
     }
-    if (p === '/api/x/pithagoras-terminal/terminal' && method === 'POST') return { id: 't1', cwd: '/w/site' };
-    if (p === '/api/x/pithagoras-terminal/terminal/t1/resize' || p === '/api/x/pithagoras-terminal/terminal/t1') return { ok: true };
     if (p.endsWith('/canvases')) return [];
     if (p.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
     if (p === '/api/models') return { models: [], providers: {} };
@@ -91,14 +89,4 @@ test('a pinned chat is not found by its folder\'s name, which the sidebar does n
   // Its title still does.
   await search.fill('quarterly');
   await expect(side.getByText('Quarterly numbers')).toBeVisible();
-});
-
-test('the shell tab of the terminal panel does not draw the chat\'s path', async ({ page }) => {
-  await portal(page, [chat('s1', 'Fix login', '/w/site', 5)]);
-  await page.goto('/s/s1');
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  await page.getByRole('tab', { name: 'Shell' }).click();
-  await expect(page.locator('.xterm')).toBeVisible();
-  await expect(page.locator('.chat-aside-head')).not.toContainText('/w/site');
-  await expect(page.getByText('/w/site')).toHaveCount(0);
 });

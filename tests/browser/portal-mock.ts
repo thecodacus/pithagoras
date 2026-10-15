@@ -7,19 +7,25 @@ import { test as base, expect, type Page, type Route } from '@playwright/test';
  *
  * `test` is Playwright's, with one addition: before a test starts, every `/api` request is answered 501 with its own
  * name, so a call that no test mocked fails where it is made, with the URL in the message. Nothing reaches the dev
- * server's proxy, and so no portal that runs on this machine. The extensions a fresh portal has are the exception:
- * they are listed and their files served (see `startsWith`), for the app and for a fixture page that loads them as
- * the app does. A test's own `page.route` is registered after it and wins; what it does not answer falls back to
- * this one.
+ * server's proxy, and so no portal that runs on this machine. The extensions the portal has installed are the
+ * exception: they are listed and their files served, for the app and for a fixture page that loads them as the app
+ * does. A test's own `page.route` is registered after it and wins; what it does not answer falls back to this one.
+ *
+ * `installed` is those extensions, by their folders from the repository's root, and is none unless a spec says:
+ * `test.use({ installed: ['extensions/git'] })`. The portal's own specs install a stand-in where they need an
+ * extension's panel or window (tests/fixtures/extensions/console), so that none of them needs one the portal
+ * ships, which can be removed.
  */
-export const test = base.extend<{ unmocked: string[] }>({
-  unmocked: [async ({ page }, use, testInfo) => {
+export const test = base.extend<{ unmocked: string[]; installed: string[] }>({
+  installed: [[], { option: true }],
+  unmocked: [async ({ page, installed }, use, testInfo) => {
     const asked: string[] = [];
+    const extensions = installed.map((folder) => extensionOnDisk(path.join(ROOT, folder)));
     await page.route('**/api/**', async (route) => {
       const { pathname, search } = new URL(route.request().url());
       if (route.request().method() === 'GET') {
-        if (pathname === '/api/extension-ui') return route.fulfill({ json: { extensions: startsWith.map((ext) => ext.listing) } });
-        for (const ext of startsWith) if (await ext.serve(pathname, route)) return;
+        if (pathname === '/api/extension-ui') return route.fulfill({ json: { extensions: extensions.map((ext) => ext.listing) } });
+        for (const ext of extensions) if (await ext.serve(pathname, route)) return;
       }
       const what = `${route.request().method()} ${pathname}${search}`;
       asked.push(what);
@@ -52,6 +58,9 @@ export const DONE = Symbol('answered by the test');
 
 export type Answer = unknown | Reply | typeof HANG | typeof DONE;
 
+// This file is loaded as CommonJS (it is .ts, and the repository is not a module): its own folder is __dirname.
+const ROOT = path.resolve(__dirname, '../..');
+
 const TYPES: Record<string, string> = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
 
 /**
@@ -83,17 +92,6 @@ export function extensionOnDisk(dir: string) {
   return { name: meta.name as string, listing, serve };
 }
 
-/** What a fresh portal has installed: the packages extensions/defaults.json names, as their folders hold them. */
-const startsWith = (() => {
-  // This file is loaded as CommonJS (it is .ts, and the repository is not a module): its own folder is __dirname.
-  const root = path.resolve(__dirname, '../../extensions');
-  try {
-    const folders: string[] = JSON.parse(readFileSync(path.join(root, 'defaults.json'), 'utf8'));
-    return folders.map((folder) => extensionOnDisk(path.join(root, folder)));
-  } catch {
-    return [];
-  }
-})();
 
 /**
  * What every portal says unless a test says otherwise: signed in without a password, no chats, and the three things the

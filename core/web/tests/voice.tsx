@@ -51,8 +51,8 @@ if (hooks) {
   registerShortcut('hooks', { id: 'pin', label: 'Show or hide what is pinned', scope: 'voice', default: { code: 'KeyN' }, run: ({ windows }) => (windows.isOpen('pinned') ? windows.close('pinned') : windows.open('pinned')) });
   registerCommand('jobs.show', (asked) => said.push(asked));
 } else {
-  // The installed extensions, loaded as the app loads them: those a fresh portal has (the terminal), which the browser
-  // tests serve. Not beside the one above, which stands in for them.
+  // The installed extensions, loaded as the app loads them: those the browser test says are installed (`installed`
+  // in tests/browser/portal-mock.ts). Not beside the one above, which stands in for them.
   startExtensions();
 }
 const microphone = new AudioContext();

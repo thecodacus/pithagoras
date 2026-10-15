@@ -985,7 +985,12 @@ them with it, and the image leaves them out:
 
 A test may reach into the portal's code and its test helpers
 (`tests/helpers.mts`, `tests/browser/portal-mock.ts`); the extension's own code
-may not.
+may not. A browser spec says what the portal has installed, which is nothing
+unless it does: `test.use({ installed: ['extensions/git'] })`, by folder from
+the repository's root. The portal's own specs never install one of these: where
+they need an extension's panel or window, they install a stand-in,
+`tests/fixtures/extensions/console`, so that any extension that comes with the
+portal can be removed without a spec of the portal's failing.
 
 ## Keeping it fast
 

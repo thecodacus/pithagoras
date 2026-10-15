@@ -3,10 +3,11 @@
 // With `&count=1`: React tells a hook of this name about every commit (as its devtools are told), and this one counts how often each
 // component named in `window.watched` ran, by the name of its function. `window.drawn` has the counts. One of an
 // extension's, whose bundle is minified, is known instead by the first element it draws: by a class it has, or an
-// attribute (`window.drawsWith`).
+// attribute (`window.drawsWith`), which an extension's spec sets before the page loads (`page.addInitScript`).
 if (location.search.includes('count=1')) {
-  window.watched = ['CopyAction', 'ChildItem'];
-  window.drawsWith = { JobOutput: { className: 'terminal-job-output' }, GitPanel: { attribute: 'data-git-tab' } };
+  // The portal's tests' stand-in for an extension (tests/fixtures/extensions/console) is not minified: its name is its own.
+  window.watched = ['CopyAction', 'ChildItem', 'ConsolePanel'];
+  window.drawsWith = window.drawsWith || {};
   window.drawn = {};
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
     supportsFiber: true, isDisabled: false, renderers: new Map(),
@@ -16,7 +17,7 @@ if (location.search.includes('count=1')) {
       // flags it carries then are from a draw long ago.
       const walk = (fiber, was) => {
         const type = fiber.type, own = typeof type === 'function' ? type.name : type && type.type && type.type.name;
-        // The bundler numbers a function that shares its name with the memo around it ("GitPanel2").
+        // The bundler numbers a function that shares its name with the memo around it ("JobOutput2").
         const name = own && own.replace(/\d+$/, '');
         // Bit 1 is "performed work": the component ran, rather than being skipped as unchanged.
         if (fiber.flags & 1 && window.watched.includes(name)) window.drawn[name] = (window.drawn[name] || 0) + 1;

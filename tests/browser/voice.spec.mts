@@ -1,6 +1,9 @@
 import { test, expect } from './portal-mock';
 import { settled } from './settled';
 import { readFileSync } from 'node:fs';
+
+// An extension's window at the side: the portal's tests' stand-in for one, opening on each command the agent runs.
+test.use({ installed: ['tests/fixtures/extensions/console'] });
 const sample = readFileSync(new URL('../fixtures/jfk.wav', import.meta.url));
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/browser', route => route.fulfill({ json: { running: false, sessions: [], install: { container: 'stopped' } } }));
@@ -211,9 +214,9 @@ test('live transcription begins before turn completion and previews recognized w
 });
 
 
-test('voice panels animate into browser, terminal and simultaneous layouts', async ({ page }) => {
+test('voice panels animate into browser, side window and simultaneous layouts', async ({ page }) => {
   await page.addInitScript(() => {
-    // The terminal's stream, which has no server behind it here.
+    // Streams, which have no server behind them here.
     (window as any).EventSource=class { onmessage:any; onopen:any; close(){} };
   });
   const failures: string[] = []; page.on('pageerror', e => failures.push(e.message));
@@ -232,23 +235,23 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await expect(page.locator('.voice-stage')).toHaveClass(/is-browsing/);
   await settled(page);
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Terminal', exact: true })).toBeVisible();
-  await expect(page.getByLabel('Agent terminal output')).toContainText('42 modules transformed');
+  await expect(page.getByRole('region', { name: 'Console', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Console output')).toContainText('42 modules transformed');
   await expect(page.getByLabel('Tool activity')).toContainText('Running a command');
   await settled(page);
   const browser = await page.locator('.voice-browser-window').boundingBox();
-  const terminal = await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
-  expect(browser!.width).toBeGreaterThan(terminal!.width * 1.8);
-  expect(browser!.x + browser!.width).toBeLessThan(terminal!.x);
-  await page.evaluate(() => (window as any).canvasFeed.message({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the terminal.',revision:1,status:'writing',active_call:'draft',updated_at:''}}));
+  const consoleWindow = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
+  expect(browser!.width).toBeGreaterThan(consoleWindow!.width * 1.8);
+  expect(browser!.x + browser!.width).toBeLessThan(consoleWindow!.x);
+  await page.evaluate(() => (window as any).canvasFeed.message({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the consoleWindow.',revision:1,status:'writing',active_call:'draft',updated_at:''}}));
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels','2');
   await expect(page.locator('.voice-stage')).not.toHaveClass(/is-browsing/);
   await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
   await settled(page);
   const canvasBox=await page.getByLabel('Session canvas workspace').boundingBox();
-  const terminalBox=await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
-  expect(canvasBox!.width).toBeGreaterThan(terminalBox!.width);
-  expect(terminalBox!.x+terminalBox!.width).toBeLessThan(canvasBox!.x);
+  const consoleBox=await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
+  expect(canvasBox!.width).toBeGreaterThan(consoleBox!.width);
+  expect(consoleBox!.x+consoleBox!.width).toBeLessThan(canvasBox!.x);
   await expect(page.locator('.voice-presence')).toHaveCSS('height','80px');
   await page.getByLabel('Show browser').click();
   await settled(page);
@@ -258,19 +261,19 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   expect(sideCanvas!.x-sideBrowser!.x-sideBrowser!.width).toBeGreaterThan(0);
   expect(sideCanvas!.x-sideBrowser!.x-sideBrowser!.width).toBeLessThanOrEqual(20);
   await page.getByLabel('Minimize browser').click();
-  await page.getByLabel('Show terminal').click();
+  await page.getByLabel('Show console').click();
   await page.getByLabel('Close canvas').click();
   await page.getByLabel('Show browser').click();
 
   await page.getByRole('button', { name: 'Minimize browser' }).click();
   await settled(page);
   const orb = await page.locator('.voice-presence').boundingBox();
-  const right = await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
+  const right = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
   const stage = await page.locator(".voice-stage").boundingBox();
   expect(orb!.x + orb!.width).toBeLessThan(right!.x);
   expect(orb!.height).toBeGreaterThan(150);
   await page.getByRole('button', { name: 'Finish terminal', exact: true }).click();
-  await expect(page.getByLabel('Agent terminal output')).toContainText('Build completed successfully');
+  await expect(page.getByLabel('Console output')).toContainText('Build completed successfully');
   await page.getByRole('button', { name: 'Show browser', exact: true }).click();
   await page.getByRole('button', { name: 'Stream thinking', exact: true }).click();
   await expect(page.getByLabel('Live model thinking')).toContainText('verify the page layout');
@@ -278,8 +281,8 @@ test('voice panels animate into browser, terminal and simultaneous layouts', asy
   await page.setViewportSize({ width: 390, height: 844 });
   await settled(page);
   const mobileBrowser = await page.locator('.voice-browser-window').boundingBox();
-  const mobileTerminal = await page.locator('.voice-extension-window[data-extension="pithagoras-terminal"]').boundingBox();
-  expect(mobileBrowser!.y + mobileBrowser!.height).toBeLessThan(mobileTerminal!.y);
+  const mobileConsole = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
+  expect(mobileBrowser!.y + mobileBrowser!.height).toBeLessThan(mobileConsole!.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   await page.getByRole('button', { name: 'End voice mode' }).click();
   await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
@@ -448,7 +451,7 @@ test('the orb is never painted empty while it glides beside a window and into it
   await settled(page);
   const first = await page.evaluate(() => ({ ...(window as any).orbSteps }));
   expect(first.steps).toBeGreaterThan(5);
-  await page.getByRole('button', { name: 'Show terminal' }).click();
+  await page.getByRole('button', { name: 'Show console' }).click();
   await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
   await settled(page);
   const second = await page.evaluate(() => ({ ...(window as any).orbSteps }));

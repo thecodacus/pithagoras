@@ -2,6 +2,9 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
+// A second panel beside Files: the portal's tests' stand-in for an extension's.
+test.use({ installed: ['tests/fixtures/extensions/console'] });
+
 /**
  * What a keyboard can do that a pointer does: go through a list of tabs with the arrow keys, and size the panels, the
  * edge between two of them and a floating window from its grip.
@@ -13,7 +16,7 @@ const bounds = async (page: Page, selector = '.chat-aside') => (await page.locat
 const settled = (page: Page) =>
   page.evaluate(() => Promise.all([...document.querySelectorAll('.chat-aside')].flatMap((e) => e.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished))));
 /** The chat with the panels open, in the place the browser last had them. */
-async function chat(page: Page, stored: Record<string, string> = {}, open: ('Terminal' | 'Files')[] = ['Terminal', 'Files']) {
+async function chat(page: Page, stored: Record<string, string> = {}, open: ('Console' | 'Files')[] = ['Console', 'Files']) {
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.goto('/tests/chat.html?phase=tools');
   await page.evaluate((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, stored);
@@ -41,7 +44,7 @@ test('the edge between the conversation and the panels is sized with the arrow k
   // The edge is still the one with the focus, so that the next key goes on from here.
   await expect(edge).toBeFocused();
   await page.reload();
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Console', exact: true }).click();
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await settled(page);
   expect((await bounds(page)).width).toBeCloseTo(first + 96, 0);
@@ -94,8 +97,8 @@ test('the edge between two panels moves with the arrow keys, stops short of the 
 });
 
 test('a floating window is sized from its grip with the arrow keys, and Home gives it its first size back', async ({ page }) => {
-  await chat(page, { panelDock: 'float' }, ['Terminal']);
-  const grip = page.getByRole('button', { name: 'Resize Terminal' });
+  await chat(page, { panelDock: 'float' }, ['Console']);
+  const grip = page.getByRole('button', { name: 'Resize Console' });
   const first = await bounds(page);
   await grip.focus();
   // First placed against the right edge of the chat, where it has no room to grow: made smaller first.
@@ -112,32 +115,6 @@ test('a floating window is sized from its grip with the arrow keys, and Home giv
   await page.keyboard.press('Home');
   await expect.poll(async () => (await bounds(page)).width).toBeCloseTo(first.width, 0);
   await expect.poll(async () => (await bounds(page)).height).toBeCloseTo(first.height, 0);
-});
-
-test('the tabs of the terminals are one stop for Tab, and the arrow keys, Home and End go through them', async ({ page }) => {
-  await chat(page, {}, ['Terminal']);
-  const tabs = page.getByRole('tablist', { name: 'Terminals' });
-  const agent = tabs.getByRole('tab', { name: 'Agent' }), background = tabs.getByRole('tab', { name: 'Background' }), shell = tabs.getByRole('tab', { name: 'Your shell' });
-  await expect(agent).toHaveAttribute('tabindex', '0');
-  await expect(background).toHaveAttribute('tabindex', '-1');
-  await agent.focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(background).toBeFocused();
-  await expect(background).toHaveAttribute('aria-selected', 'true');
-  await expect(background).toHaveAttribute('tabindex', '0');
-  await page.keyboard.press('End');
-  await expect(shell).toBeFocused();
-  await expect(shell).toHaveAttribute('aria-selected', 'true');
-  // Round the end.
-  await page.keyboard.press('ArrowRight');
-  await expect(agent).toBeFocused();
-  await page.keyboard.press('ArrowLeft');
-  await expect(shell).toBeFocused();
-  await page.keyboard.press('Home');
-  await expect(agent).toBeFocused();
-  // Tab leaves the list rather than going on to the next tab.
-  await page.keyboard.press('Tab');
-  await expect(tabs.getByRole('tab').and(page.locator(':focus'))).toHaveCount(0);
 });
 
 test('the sections of an agent and the add-ons take the arrow keys the same way', async ({ page }) => {

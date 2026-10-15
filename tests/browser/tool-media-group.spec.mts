@@ -94,7 +94,7 @@ test('Projects → Tools shows them in the same one box', async ({ page }) => {
 
 test("a chat's tools control shows them in the same one box", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  await page.goto('/tests/chat.html?phase=git');
+  await page.goto('/tests/chat.html?phase=files');
   await page.getByRole('button', { name: 'Which tools this conversation may use' }).click();
   const menu = page.locator('.composer-menu');
   const media = menu.getByRole('button', { name: /^Media/ });

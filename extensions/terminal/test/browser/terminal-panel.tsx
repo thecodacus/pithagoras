@@ -1,7 +1,7 @@
 // For a fixture: the panel the installed extensions named "terminal" (`chat.panel`), drawn as the chat draws it, on a tab of its own.
-import { useSlot } from '../src/extensions/slots';
-import { channelFor } from '../src/extensions/channel';
-import { panelsFor } from '../src/extensions/panels';
+import { useSlot } from '../../../../core/web/src/extensions/slots';
+import { channelFor } from '../../../../core/web/src/extensions/channel';
+import { panelsFor } from '../../../../core/web/src/extensions/panels';
 
 export function TerminalPanel({ chat, tab }: { chat: string; tab: string }) {
   const entry = useSlot('chat.panel').find((e) => e.name === 'terminal');

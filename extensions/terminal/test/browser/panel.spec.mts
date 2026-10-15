@@ -1,6 +1,8 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
 
+test.use({ installed: ['extensions/terminal'] });
+
 /**
  * The shell tab of the terminal panel, over a stream the test drives: what it says when keystrokes go nowhere.
  */

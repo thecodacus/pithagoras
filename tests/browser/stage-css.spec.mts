@@ -47,5 +47,5 @@ test('with any window open the orb is the dock: one row with small buttons, whic
       return { direction: style('.voice-presence').flexDirection, height: style('.voice-presence').height, avatar: style('.voice-avatar').width, button: style('.voice-stage-action').width, dot: style('.voice-status > span').display };
     }, classes);
   const expected = { direction: 'row', height: '80px', avatar: '100px', button: '32px', dot: 'none' };
-  for (const classes of ['is-docked', 'is-docked is-browsing', 'is-docked is-terminal', 'is-docked is-browsing is-terminal']) expect(await dock(classes), classes).toEqual(expected);
+  for (const classes of ['is-docked', 'is-docked is-browsing', 'is-docked has-side', 'is-docked is-browsing has-side']) expect(await dock(classes), classes).toEqual(expected);
 });
