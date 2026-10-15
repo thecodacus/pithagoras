@@ -247,6 +247,26 @@ test('a start that is not a place in the text is not taken for one', () => {
   assert.equal(locate('# Plan\n', { quote: '# Plan', start: -3 })?.start, 0);
 });
 
+test('a passage deleted in one change and the same words written in a later one, taken as one step, is gone, and a long passage that moved, or words kept where the walk put them, is not', () => {
+  const t = (name: string, before: string, quote: string, after: string) => [name, words(before, after, anchorOf(before, quote))];
+  assert.deepEqual([
+    t('a word in a sentence that was deleted, and a new sentence with it', '# Plan\n\nWhy we meet on Friday matters.\n\nThe build is green.\n', 'Friday', '# Plan\n\nThe build is green.\n\nThank God it is Friday, said nobody.\n'),
+    t('a paragraph deleted and another like it written below', '# Plan\n\nShip it on Friday.\n\nThen sign off.\n', 'Friday', '# Plan\n\nThen sign off.\n\nThank God it is Friday, said nobody.\n'),
+    t('a short answer deleted and written again after another line', '# Plan\n\nYes.\n\nThen we ship.\n', 'Yes.', '# Plan\n\nThen we ship.\n\nDo we stop?\n\nYes.\n'),
+    t('a short paragraph cut and pasted lower', '# Plan\n\nThe build is green.\n\nShip it on Friday.\n\nSign.\n\nMore.\n', 'The build is green.', '# Plan\n\nShip it on Friday.\n\nSign.\n\nMore.\n\nThe build is green.\n'),
+  ], [
+    ['a word in a sentence that was deleted, and a new sentence with it', [null]],
+    ['a paragraph deleted and another like it written below', [null]],
+    ['a short answer deleted and written again after another line', [null]],
+    ['a short paragraph cut and pasted lower', [null]],
+  ]);
+  // A sentence moved, which is in the text once and is not a word or a phrase, is the same sentence.
+  const sentence = 'First we agree on the scope of the release.';
+  assert.deepEqual(words(`# Plan\n\n${sentence}\n\nShip it on Friday.\n\nSign.\n`, `# Plan\n\nShip it on Friday.\n\nSign.\n\n${sentence}\n`, anchorOf(`# Plan\n\n${sentence}\n\nShip it on Friday.\n\nSign.\n`, sentence)), [sentence]);
+  // The words, as short as they are, still where the walk put the passage (a letter put in front of the word).
+  assert.deepEqual(words('alpha beta gamma\n', 'alpha NEWbeta gamma\n', anchorOf('alpha beta gamma\n', 'beta')), ['beta']);
+});
+
 test('a passage that has no place is looked for by its words alone, and found when they are one place only', () => {
   const orphan: Anchor = { ...anchorOf(PLAN, 'The build is green.'), start: null, end: null };
   assert.deepEqual(words(PLAN, PLAN, orphan), ['The build is green.']);

@@ -337,11 +337,18 @@ test('a passage in text whose Markdown the editor writes differently with a mark
   expect(notes.heading).toBe('Plan');
   expect(['Treffen mit', '']).toContain(notes.date);
   expect(['at the start', '']).toContain(notes.tag);
-  // Several in a long document: the blocks that cannot be marked are found among the others, not one run for all.
-  const many = Array.from({ length: 40 }, (_, i) => (i % 13 === 5 ? `\\- escaped ${i}` : `Paragraph number ${i} of the document.`)).join('\n\n');
-  const quotes = Object.fromEntries([0, 4, 6, 12, 20, 30, 39].map((i) => [`p${i}`, `number ${i} of`]));
-  const long = await markedOn(page, `${many}\n`, quotes);
-  for (const i of [0, 4, 6, 12, 20, 30, 39]) expect(long[`p${i}`], `paragraph ${i}`).toBe(`number ${i} of`);
+  // Meeting notes with a dated paragraph for each meeting, as many as there are meetings: the ones that cannot be marked are found one by one on
+  // their own and left out, and all the others are marked, however many there are and wherever they are.
+  const notesOf = (count: number, every: number) => Array.from({ length: count }, (_, i) => (i % every === 0 ? `${i + 1}\\. März: Treffen mit dem Team.` : `Paragraph number ${i} of the document.`)).join('\n\n');
+  for (const [count, every, picked] of [[40, 4, [1, 5, 10, 21, 30, 38]], [200, 5, [1, 2, 49, 101, 151, 197, 199]]] as const) {
+    const quotes = Object.fromEntries(picked.map((i) => [`p${i}`, `number ${i} of`]));
+    const long = await markedOn(page, `${notesOf(count, every)}\n`, quotes);
+    for (const i of picked) expect(long[`p${i}`], `paragraph ${i} of ${count}`).toBe(`number ${i} of`);
+  }
+  // And a numbered heading among them, which is not one of them.
+  const heading = await markedOn(page, `# 1. The plan\n\n${notesOf(12, 3)}\n`, { plan: 'plan', last: 'number 10 of' });
+  expect(['plan', '1. The plan']).toContain(heading.plan);
+  expect(heading.last).toBe('number 10 of');
 });
 
 test('a passage in a block whose Markdown is not the same on its own as in the document is marked on the whole of it, or on the right words', async ({ page }) => {

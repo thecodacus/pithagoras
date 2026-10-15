@@ -38,8 +38,8 @@ const MOST_FOLLOWED = 20000;
 const MIN_LOOSE = 4;
 /** How many letters and digits of the text around a passage a place must match, when its words do not tell it from another place. */
 const MIN_CONTEXT = 8;
-/** How many letters and digits the words of a passage that has lost its place must have, for them to be found again anywhere without the text around them. */
-const LONG_QUOTE = 60;
+/** How many letters and digits the words of a passage must have for a place that reads the same, and is the only one, to be taken for it without the text around it being like the old: a sentence, not a word or a phrase. */
+const LONG_QUOTE = 30;
 /** How much of an edited passage's letters must still be there for it to be the same passage, unless what was replaced lay wholly inside it. */
 const MIN_KEPT = 0.5;
 /** How alike, by its words, the new text of a passage that was a whole paragraph must be to it. */
@@ -330,14 +330,17 @@ const placed = (anchor, length) => Number.isInteger(anchor.start) && Number.isIn
  */
 export function carry(before, after, anchors) {
   const cache = {};
-  const looked = (anchor, hint, lost = false) => {
+  const looked = (anchor, hint, lost = false, around = null) => {
     const found = locate(after, { ...anchor, start: hint }, cache);
     if (!found) return null;
     if (found.score < MIN_CONTEXT) {
-      // Words that were in one place only are those words wherever they are now. Words that read the same in several places (a short
-      // phrase) are not told from the others unless the text around them is like the old: else a deleted passage would turn up in another.
-      // A passage that has no place to have moved from is told from other words by nothing but the text around it, or by being long.
-      if (lost ? letters(anchor.quote) < LONG_QUOTE || places(after, anchor.quote).length !== 1 : places(before, anchor.quote).length !== 1) return null;
+      // Words that read the same in several places, or are a short phrase, are not told from other words by the text round them unless
+      // it is like the old: else a passage deleted, and the same words written in a later change (and any number of changes are
+      // one step here, when the threads were not looked at between), would be taken for a passage that moved. A long passage that
+      // is in one place only is that passage wherever it stands. A passage with no place to have moved from is looked for in the new text only.
+      // Words that stand within what the passage became (the walk put it there, and the words are still in it) are where it is.
+      const there = around && found.start >= around.start && found.end <= around.end;
+      if (!there && (letters(anchor.quote) < LONG_QUOTE || places(lost ? after : before, anchor.quote).length !== 1)) return null;
     }
     return trimmed(after, found.start, found.end);
   };
@@ -363,11 +366,12 @@ export function carry(before, after, anchors) {
     }
     let moved = null;
     let hint = start;
+    let range = null;
     if (followable) {
       const s = through(steps, start, "start");
       const e = through(steps, end, "end");
       hint = s;
-      const range = e > s && e - s <= MAX_PASSAGE ? trimmed(after, s, e) : null;
+      range = e > s && e - s <= MAX_PASSAGE ? trimmed(after, s, e) : null;
       if (range) {
         const text = after.slice(range.start, range.end);
         // Where nothing touched it, it reads the same. One that was edited is the edit, unless its words are still as many in the text
@@ -378,6 +382,6 @@ export function carry(before, after, anchors) {
         if (text === anchor.quote || (places(after, anchor.quote).length < places(before, anchor.quote).length && edited(before, steps, start, end, text) && !stretched)) moved = whole(after, range.start, range.end);
       }
     }
-    return moved ?? looked(anchor, hint);
+    return moved ?? looked(anchor, hint, false, range);
   });
 }

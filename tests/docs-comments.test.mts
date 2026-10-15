@@ -447,6 +447,21 @@ test('a passage that is gone does not turn up on other words that read the same,
     assert.equal(listed.find((t: any) => t.id === first.id).orphaned, true, 'in the next revision');
     assert.equal(listed.find((t: any) => t.id === first.id).start, null);
     assert.equal(listed.find((t: any) => t.id === second.id).start, later.indexOf('Yes.'));
+    // The same with no look at the threads between the deletion and the new words: what the agent's edits of a document nobody has
+    // open, or a page's autosave, do. Two changes are one step for the threads.
+    const { docs: d3, comment: c3, threads: t3, save: s3 } = await withDocument('docs-comments-lost-blind-', '# Plan\n\nShip it on Friday.\n\nYes.\n\nThen sign off.\n');
+    try {
+      const was = '# Plan\n\nShip it on Friday.\n\nYes.\n\nThen sign off.\n';
+      const friday = (await c3('Friday', 'Why Friday?', 1, was)).body;
+      const yes = (await c3('Yes.', 'Why yes?', 1, was)).body;
+      await s3('# Plan\n\nThen sign off.\n', 1);
+      await s3('# Plan\n\nThen sign off.\n\nThank God it is Friday, said nobody.\n\nDo we stop?\n\nYes.\n', 2);
+      const listed = (await t3()).threads;
+      assert.equal(listed.find((t: any) => t.id === friday.id).orphaned, true, 'a new "Friday" is not the old one');
+      assert.equal(listed.find((t: any) => t.id === yes.id).orphaned, true, 'a new "Yes." is not the old one');
+    } finally {
+      await d3.close();
+    }
     // Words of a paragraph that is gone, and another that has them in it, with none of what was round them.
     const { docs: d2, comment: c2, threads: t2, save: s2 } = await withDocument('docs-comments-lost-friday-', '# Plan\n\nShip it on Friday.\n\nThen sign off.\n');
     try {

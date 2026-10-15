@@ -80,14 +80,37 @@ export function selected(ctx, kept) {
   return { start: null, end: null, quote: text.trim(), prefix: "", suffix: "", text };
 }
 
-/** The most runs made to find the blocks that the marks change. */
-const MOST_RUNS = 30;
+/** The most runs of the whole document made to put marks at the blocks' edges. */
+const MOST_RUNS = 32;
+
+/**
+ * Whether marks at the two edges of the top-level block `block` change what the editor writes of it on its own: a paragraph that
+ * starts with a character the editor escapes at the start of a line (`15\. März`, `\#hashtag`). A block on its own is written
+ * the way it is written in the document (at the start of a line, after a blank one), so this is found without a run of the whole
+ * document, and it is not asked of a block in a list, a quote or a table, which has markup in front of it that the escape does
+ * not depend on.
+ */
+function changesWithMarks(ctx, block) {
+  if (!block.top || block.node.type.spec.code) return false;
+  try {
+    const schema = ctx.get(schemaCtx);
+    const write = ctx.get(serializerCtx);
+    const { node } = block;
+    const alone = (content) => write(schema.topNodeType.create(null, node.type.create(node.attrs, content)));
+    const mark = Fragment.from(schema.text(MARK));
+    return alone(mark.append(node.content).append(mark)).replaceAll(MARK, "") !== alone(node.content);
+  } catch {
+    // A block that cannot be written on its own: left to the run of the document to say.
+    return false;
+  }
+}
 
 /**
  * Where the inline text of each of `blocks` starts and ends in the Markdown (`at`, by block, and the Markdown as `text`),
- * found with a mark at each block's edges in one run. A block whose Markdown the marks change (a paragraph that starts with
- * a character the editor escapes at the start of a line) spoils a run it is in: the blocks are then halved until the runs that
- * hold up are found, and that block is the only one with nothing.
+ * found with a mark at each block's edges in one run. A block whose Markdown the marks change spoils a run it is in. Those
+ * are found one by one on their own (`changesWithMarks`) and left out, and the rest are put in one run: a document with a
+ * paragraph for each date has as many of them as it likes. A block that only changes where it stands is looked for by halving
+ * the rest, which has a limit; a block with nothing is left without a place, and so are the passages in it.
  */
 function blockTable(ctx, kept, doc, blocks) {
   const at = blocks.map(() => null);
@@ -101,13 +124,17 @@ function blockTable(ctx, kept, doc, blocks) {
     which.forEach((i, k) => (at[i] = [got.offsets[2 * k], got.offsets[2 * k + 1]]));
     return true;
   };
+  // A set that did not hold up is halved, and each half halved in turn if it does not hold up either.
   const halve = (which) => {
-    if (!which.length || run(which) || which.length === 1) return;
+    if (which.length < 2) return;
     const half = which.length >> 1;
-    halve(which.slice(0, half));
-    halve(which.slice(half));
+    for (const part of [which.slice(0, half), which.slice(half)]) if (!run(part)) halve(part);
   };
-  halve(blocks.map((_, i) => i));
+  const all = blocks.map((_, i) => i);
+  if (run(all)) return { at, text };
+  const clean = all.filter((i) => !changesWithMarks(ctx, blocks[i]));
+  if (clean.length && clean.length < all.length && run(clean)) return { at, text };
+  halve(clean);
   return text === null ? null : { at, text };
 }
 
@@ -116,7 +143,7 @@ function textblocks(doc) {
   const found = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
-    found.push({ node, from: pos + 1, to: pos + 1 + node.content.size });
+    found.push({ node, from: pos + 1, to: pos + 1 + node.content.size, top: doc.resolve(pos).depth === 0 });
     return false;
   });
   return found;

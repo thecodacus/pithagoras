@@ -390,13 +390,19 @@ lines that changed. It guesses as little as it can:
   be answered and resolved. If the words come back (a restored revision, an undo)
   the passage is found again, but only where the text around it is like what was
   around it (letters and digits: the blank lines and full stops that set off every
-  paragraph do not count), or where the words are long (60 letters and digits or
-  more) and stand in the text once. A "Friday" in a new paragraph is not the
-  "Friday" of a comment on a sentence that was deleted.
-- Words that read the same in two places (a short phrase, "Yes.") are not taken
-  for the passage unless the text around them is like what was around it: a
-  passage deleted from a document where another has the same words is gone, and
-  the comment does not move to the other.
+  paragraph do not count).
+- Words that read the same in two places (a short phrase, "Yes."), or that are
+  short, are not taken for the passage unless the text around them is like what
+  was around it: a passage deleted from a document where another has the same
+  words is gone, and the comment does not move to the other. Nor does a comment
+  on a word whose sentence was deleted move to the same word in a sentence written
+  later, however many changes there were in between (the portal sees the
+  document's changes in steps, one for every time the comments were asked for).
+  A passage of 30 letters and digits or more (a sentence) that stands in the text
+  once is the same passage wherever it is, so a sentence moved to another place in
+  the document keeps its comment, and a short paragraph cut and pasted does not.
+  Words the comparison put at the place where the passage was, and that are still
+  in it, are the passage.
 
 A passage is marked in the editor by finding its words in the text the editor
 writes. A document written in another style than the editor's (`*` bullets,
@@ -406,8 +412,8 @@ text**, and works all the same. Editing the document once writes it in the
 editor's style. The same is said of a passage in a paragraph that the editor
 cannot put a mark in without changing what it writes (a paragraph that starts
 with a character the editor writes escaped at the start of a line, such as
-`15\. März` or `\#hashtag`): the passages in the other paragraphs are marked as
-usual.
+`15\. März` or `\#hashtag`): the passages in all the other paragraphs are marked
+as usual, however many of those there are.
 
 Limits: a passage is at most 5000 characters, a comment at most 4096 bytes, a
 thread at most 100 comments and a document at most 1000 threads.
