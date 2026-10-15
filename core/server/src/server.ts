@@ -1929,7 +1929,9 @@ interruptCanvasWrites();
 void syncExtensionServers().catch((e) => console.error("[extensions] could not start the server halves:", e));
 // What a portal starts with is installed once (extensions/defaults.json), and then loaded like anything installed by
 // hand: an install brings the server halves in line again. What the portal runs with is noted once that is done.
-void installDefaultExtensions()
+// A portal that stops while it goes on lets it finish (see stop): pi is writing its settings, and with the portal gone
+// it would go on writing them alone.
+const startingWith = installDefaultExtensions()
   .catch((e) => console.error("[extensions] could not install what a portal starts with:", e))
   .finally(() => void noteLoadedExtensions());
 pinConnection();
@@ -1964,6 +1966,7 @@ async function stop(signal: string) {
   routineSupervisor.stop();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
+  await startingWith;
   // After the chats: a chat's pi may still be using what a server half holds.
   await stopServerHalves();
   server.close(() => process.exit(requestedExit()));
