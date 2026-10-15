@@ -36,12 +36,16 @@ const MOST_PLACES = 200;
 const MOST_FOLLOWED = 20000;
 /** The fewest letters and digits a passage must have to be looked for with the marks left out. */
 const MIN_LOOSE = 4;
-/** What a place that reads the same must match of the text around the passage, when it is not the only one. */
+/** How many letters and digits of the text around a passage a place must match, when its words do not tell it from another place. */
 const MIN_CONTEXT = 8;
+/** How many letters and digits the words of a passage that has lost its place must have, for them to be found again anywhere without the text around them. */
+const LONG_QUOTE = 60;
 /** How much of an edited passage's letters must still be there for it to be the same passage, unless what was replaced lay wholly inside it. */
 const MIN_KEPT = 0.5;
 /** How alike, by its words, the new text of a passage that was a whole paragraph must be to it. */
 const MIN_ALIKE = 0.3;
+/** How much of the rest of its sentence can be changed for a passage of which nothing is left to be taken for the words that replaced it. */
+const MIN_AROUND = 0.5;
 
 const WORD = /[\p{L}\p{N}]/u;
 const WHITE = /\s/;
@@ -86,17 +90,20 @@ export function passage(text, start, end) {
   return { start: s, end: e, quote: text.slice(s, e), ...around(text, s, e) };
 }
 
-/** How many characters of the end of `a` and of `b` are the same. */
+/**
+ * How many letters and digits are in the run of characters that the ends of `a` and `b` have in common: the white space and marks
+ * that nearly every paragraph is set off by (a blank line, a full stop) are the same everywhere, and tell no place from another.
+ */
 function commonSuffix(a, b) {
   let n = 0;
-  while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++;
+  for (let i = 1; i <= a.length && i <= b.length && a[a.length - i] === b[b.length - i]; i++) if (WORD.test(a[a.length - i])) n++;
   return n;
 }
 
-/** How many characters of the start of `a` and of `b` are the same. */
+/** The same for the starts of `a` and `b`. */
 function commonPrefix(a, b) {
   let n = 0;
-  while (n < a.length && n < b.length && a[n] === b[n]) n++;
+  for (let i = 0; i < a.length && i < b.length && a[i] === b[i]; i++) if (WORD.test(a[i])) n++;
   return n;
 }
 
@@ -147,13 +154,14 @@ function best(candidates, score, hint, where = (at) => at) {
  * Its words are looked for as they were written, then without the marks
  * between them (so that a text written in another style still has it). Where
  * they read the same in several places, the place with the same words around
- * it wins, and then the one nearest `start`. `score` is how many characters
- * around it match. `cache` is kept by the caller for as long as `text` is
+ * it wins, and then the one nearest `start`. `score` is how many letters and
+ * digits of the text around it match. `cache` is kept by the caller for as long as `text` is
  * the same, to look for many.
  */
 export function locate(text, { quote, prefix = "", suffix = "", start = null }, cache = {}) {
   if (typeof quote !== "string" || !quote) return null;
-  const hint = Number.isInteger(start) ? start : null;
+  // Where it was is a place in the text, or nothing: a number outside it would pick words by where they are not.
+  const hint = Number.isInteger(start) && start >= 0 && start <= text.length ? start : null;
   const found = places(text, quote);
   // The place it was, when it still reads the same, is weighed with the others even past the limit.
   if (hint !== null && !found.includes(hint) && text.startsWith(quote, hint)) found.push(hint);
@@ -265,6 +273,15 @@ function alike(a, b) {
   return (2 * shared) / (x.length + y.length);
 }
 
+/** The sentence `[start, end)` of `text` is in, within the line `[lineStart, lineEnd)`: as far as the full stops (and question and exclamation marks) go. */
+function sentence(text, start, end, lineStart, lineEnd) {
+  let from = lineStart;
+  for (const m of text.slice(lineStart, start).matchAll(/[.!?]\s+/g)) from = lineStart + m.index + m[0].length;
+  const stop = /[.!?](?=\s|$)/.exec(text.slice(end, lineEnd));
+  const to = /[.!?]$/.test(text.slice(start, end)) ? end : stop ? end + stop.index + 1 : lineEnd;
+  return [Math.min(from, start), Math.max(to, end)];
+}
+
 /**
  * Whether the passage `[start, end)` of `before`, which reads `now` in the new text, was edited, as opposed to taken
  * out and something else put in the place of the line it was in (which is all a walk by lines can say of a deleted
@@ -284,9 +301,21 @@ function edited(before, steps, start, end, now) {
   }
   const total = letters(before.slice(start, end));
   const lineStart = before.lastIndexOf("\n", start - 1) + 1;
-  const lineEnd = before.indexOf("\n", end);
-  const paragraph = !before.slice(lineStart, start).trim() && !before.slice(end, lineEnd < 0 ? before.length : lineEnd).trim();
+  const lineEnd = before.indexOf("\n", end) < 0 ? before.length : before.indexOf("\n", end);
+  const paragraph = !before.slice(lineStart, start).trim() && !before.slice(end, lineEnd).trim();
   if (paragraph && changed > 0 && alike(before.slice(start, end), now) < MIN_ALIKE) return false;
+  // A passage that nothing of is left is the new words only where the rest of its sentence is mostly still there: where the whole
+  // sentence was written again, a word of it paired with a word of the new one by the walk is no more than a pairing.
+  if (total > 0 && (total - changed) / total < MIN_KEPT) {
+    const [from, to] = sentence(before, start, end, lineStart, lineEnd);
+    const rest = letters(before.slice(from, start)) + letters(before.slice(end, to));
+    let gone = 0;
+    for (const [b0, b1] of steps) {
+      const [lo, hi] = [Math.max(b0, from), Math.min(b1, to)];
+      if (hi > lo) gone += letters(before.slice(lo, Math.min(hi, start))) + letters(before.slice(Math.max(lo, end), hi));
+    }
+    if (rest > 0 && gone / rest >= MIN_AROUND) return false;
+  }
   return inside || total === 0 || (total - changed) / total >= MIN_KEPT;
 }
 
@@ -301,12 +330,15 @@ const placed = (anchor, length) => Number.isInteger(anchor.start) && Number.isIn
  */
 export function carry(before, after, anchors) {
   const cache = {};
-  const looked = (anchor, hint) => {
+  const looked = (anchor, hint, lost = false) => {
     const found = locate(after, { ...anchor, start: hint }, cache);
     if (!found) return null;
-    // Words that were in one place only are those words wherever they are now. Words that read the same in several places (a short
-    // phrase) are not told from the others unless the text around them is like the old: else a deleted passage would turn up in another.
-    if (found.score < MIN_CONTEXT && places(before, anchor.quote).length !== 1) return null;
+    if (found.score < MIN_CONTEXT) {
+      // Words that were in one place only are those words wherever they are now. Words that read the same in several places (a short
+      // phrase) are not told from the others unless the text around them is like the old: else a deleted passage would turn up in another.
+      // A passage that has no place to have moved from is told from other words by nothing but the text around it, or by being long.
+      if (lost ? letters(anchor.quote) < LONG_QUOTE || places(after, anchor.quote).length !== 1 : places(before, anchor.quote).length !== 1) return null;
+    }
     return trimmed(after, found.start, found.end);
   };
   const hunks = before === after ? [] : lineHunks(before, after);
@@ -317,7 +349,7 @@ export function carry(before, after, anchors) {
     return fine.get(hunk);
   };
   return anchors.map((anchor) => {
-    if (!placed(anchor, before.length)) return looked(anchor, null);
+    if (!placed(anchor, before.length)) return looked(anchor, null, true);
     const { start, end } = anchor;
     // A change the passage is in or at the edge of is followed word by word: only those can change where it is.
     const steps = [];

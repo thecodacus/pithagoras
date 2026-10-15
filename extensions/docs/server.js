@@ -648,7 +648,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const id = documentOf(req);
     const body = req.body ?? {};
     const base = revisionOf(body.base, "base");
-    const start = Number.isInteger(body.start) ? body.start : null;
+    const start = Number.isInteger(body.start) && body.start >= 0 ? body.start : null;
     // The author is the person: the agent has its own tools, and a request cannot say it is someone else.
     const thread = await (await storeFor(folder.path)).addThread(id, { base, quote: body.quote, prefix: body.prefix ?? "", suffix: body.suffix ?? "", start, body: body.body, author: "user" });
     res.status(201).json(thread);

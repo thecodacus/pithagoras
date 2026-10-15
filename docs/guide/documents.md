@@ -377,22 +377,37 @@ lines that changed. It guesses as little as it can:
 
 - A passage that was a whole paragraph, and is replaced by words that have next
   to nothing in common with it, is gone: nothing can tell a paragraph rewritten
-  from one deleted and another written. The agent's `doc_edit` with a `thread`
+  from one deleted and another written. So is a passage in a sentence that was
+  written again round it (most of the rest of the sentence changed too, and none
+  of the passage is left): a word of the new sentence that the comparison pairs
+  with the old one is no more than a pairing. A word of a sentence replaced by
+  another, or a sentence of a paragraph rewritten while the rest is as it was,
+  is the passage. The agent's `doc_edit` with a `thread`
   ([below](#the-agents-tools)) is how a passage is rewritten and stays: it knows
   which words stand there now.
 - A passage that is deleted, or cannot be followed, is **no longer in the
   document**. Its thread stays in the list, with the words it had, and can still
   be answered and resolved. If the words come back (a restored revision, an undo)
-  the passage is found again.
-- Words that read the same in two places (a short phrase) are not taken for
-  the passage unless the text around them is like what was around it.
+  the passage is found again, but only where the text around it is like what was
+  around it (letters and digits: the blank lines and full stops that set off every
+  paragraph do not count), or where the words are long (60 letters and digits or
+  more) and stand in the text once. A "Friday" in a new paragraph is not the
+  "Friday" of a comment on a sentence that was deleted.
+- Words that read the same in two places (a short phrase, "Yes.") are not taken
+  for the passage unless the text around them is like what was around it: a
+  passage deleted from a document where another has the same words is gone, and
+  the comment does not move to the other.
 
 A passage is marked in the editor by finding its words in the text the editor
 writes. A document written in another style than the editor's (`*` bullets,
 padded tables) is found by its letters and digits, with the marks left out; if
 that is not enough, the thread says **The passage could not be marked in the
 text**, and works all the same. Editing the document once writes it in the
-editor's style.
+editor's style. The same is said of a passage in a paragraph that the editor
+cannot put a mark in without changing what it writes (a paragraph that starts
+with a character the editor writes escaped at the start of a line, such as
+`15\. März` or `\#hashtag`): the passages in the other paragraphs are marked as
+usual.
 
 Limits: a passage is at most 5000 characters, a comment at most 4096 bytes, a
 thread at most 100 comments and a document at most 1000 threads.

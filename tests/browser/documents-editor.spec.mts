@@ -321,14 +321,27 @@ async function markedOn(page: Page, markdown: string, quotes: Record<string, str
   }, [markdown, quotes] as const);
 }
 
-test('a passage in text whose Markdown the editor writes differently with a mark in it is not marked on the wrong words', async ({ page }) => {
+test('a passage in text whose Markdown the editor writes differently with a mark in it is not marked on the wrong words, and the rest of the document is marked', async ({ page }) => {
   await editorPage(page);
   // A paragraph that starts like a list item is written with an escape that a mark in front of it takes away.
   const marked = await markedOn(page, '\\- not a list\n\nSecond one.\n', { escaped: 'not a list', second: 'Second one.' });
-  // Marked on the right words, or not marked: not on some others. (A document with a paragraph like the first has none of its
-  // passages put on the words they hold: where the marks change what is written, they are not trusted.)
+  // Marked on the right words, or not marked: not on some others. Only the paragraph the marks change is left out.
   expect(['not a list', '']).toContain(marked.escaped);
-  expect(['Second one.', '']).toContain(marked.second);
+  expect(marked.second).toBe('Second one.');
+  // Meeting notes, as a German user writes them: a date at the start of a paragraph, which the editor writes as `15\. März`, and a hashtag.
+  const notes = await markedOn(page, '# Plan\n\nShip it on Friday.\n\n15\\. März: Treffen mit dem Team.\n\n\\#hashtag at the start.\n\nDone for today.\n', {
+    ship: 'Ship it', date: 'Treffen mit', tag: 'at the start', done: 'Done for today.', heading: 'Plan',
+  });
+  expect(notes.ship).toBe('Ship it');
+  expect(notes.done).toBe('Done for today.');
+  expect(notes.heading).toBe('Plan');
+  expect(['Treffen mit', '']).toContain(notes.date);
+  expect(['at the start', '']).toContain(notes.tag);
+  // Several in a long document: the blocks that cannot be marked are found among the others, not one run for all.
+  const many = Array.from({ length: 40 }, (_, i) => (i % 13 === 5 ? `\\- escaped ${i}` : `Paragraph number ${i} of the document.`)).join('\n\n');
+  const quotes = Object.fromEntries([0, 4, 6, 12, 20, 30, 39].map((i) => [`p${i}`, `number ${i} of`]));
+  const long = await markedOn(page, `${many}\n`, quotes);
+  for (const i of [0, 4, 6, 12, 20, 30, 39]) expect(long[`p${i}`], `paragraph ${i}`).toBe(`number ${i} of`);
 });
 
 test('a passage in a block whose Markdown is not the same on its own as in the document is marked on the whole of it, or on the right words', async ({ page }) => {

@@ -12,9 +12,9 @@
  * text the editor writes without the marks (an escape that the mark changed, a
  * block whose Markdown depends on where it stands) is not used. A passage that
  * cannot be put exactly is put on the blocks it is in, and one that cannot be
- * found is not put at all. (A paragraph that starts with a character the editor
- * escapes at the start of a line is one the marks change: a document with one
- * has none of its passages put, which is not worked around.)
+ * found is not put at all. A block whose Markdown the marks change (a paragraph
+ * that starts with a character the editor escapes at the start of a line) is
+ * left out, and only passages in it are not put.
  *
  *   selected(ctx, kept)       the passage the editor's selection is, in the text it writes
  *   place(ctx, kept, threads) where the threads' passages are, as editor positions
@@ -78,6 +78,37 @@ export function selected(ctx, kept) {
   }
   // The editor could not say where: what it shows is the words, and the page finds them in the Markdown without its marks.
   return { start: null, end: null, quote: text.trim(), prefix: "", suffix: "", text };
+}
+
+/** The most runs made to find the blocks that the marks change. */
+const MOST_RUNS = 30;
+
+/**
+ * Where the inline text of each of `blocks` starts and ends in the Markdown (`at`, by block, and the Markdown as `text`),
+ * found with a mark at each block's edges in one run. A block whose Markdown the marks change (a paragraph that starts with
+ * a character the editor escapes at the start of a line) spoils a run it is in: the blocks are then halved until the runs that
+ * hold up are found, and that block is the only one with nothing.
+ */
+function blockTable(ctx, kept, doc, blocks) {
+  const at = blocks.map(() => null);
+  let text = null;
+  let runs = 0;
+  const run = (which) => {
+    if (runs++ >= MOST_RUNS) return false;
+    const got = marked(ctx, kept, doc, which.flatMap((i) => [blocks[i].from, blocks[i].to]));
+    if (!got) return false;
+    text = got.text;
+    which.forEach((i, k) => (at[i] = [got.offsets[2 * k], got.offsets[2 * k + 1]]));
+    return true;
+  };
+  const halve = (which) => {
+    if (!which.length || run(which) || which.length === 1) return;
+    const half = which.length >> 1;
+    halve(which.slice(0, half));
+    halve(which.slice(half));
+  };
+  halve(blocks.map((_, i) => i));
+  return text === null ? null : { at, text };
 }
 
 /** The blocks of text of `doc`: where the text in each is. */
@@ -159,26 +190,34 @@ export function place(ctx, kept, threads) {
   if (!wanted.length) return out;
   const blocks = textblocks(doc);
   if (!blocks.length) return out;
-  const table = marked(ctx, kept, doc, blocks.flatMap((b) => [b.from, b.to]));
+  const table = blockTable(ctx, kept, doc, blocks);
   if (!table) return out;
-  // Each block's own Markdown, and where it stands in the whole.
+  // Each block's own Markdown, and where it stands in the whole: nothing for a block whose Markdown the marks change.
   blocks.forEach((block, i) => {
-    const [from, to] = [table.offsets[2 * i], table.offsets[2 * i + 1]];
-    block.src = { from, to, text: table.text.slice(from, to) };
+    const at = table.at[i];
+    block.src = at && { from: at[0], to: at[1], text: table.text.slice(at[0], at[1]) };
   });
   const memo = {};
-  /** The editor position for the offset `o` of the text: a start is at or after the block it is in or before, an end at or before it. */
+  /**
+   * The editor position for the offset `o` of the text: a start is at or after the block it is in or before, an end at or before it.
+   * Nothing where `o` may be in a block that is not known (it is in the Markdown between the known ones, or in that block).
+   */
   const position = (o, side) => {
     if (side === "start") {
-      const block = blocks.find((b) => b.src.to >= o);
-      if (!block) return null;
-      if (o <= block.src.from) return block.from;
-      return within(ctx, block, o - block.src.from, side, memo) ?? block.from;
+      const i = blocks.findIndex((b) => b.src && b.src.to >= o);
+      if (i < 0) return null;
+      const block = blocks[i];
+      if (o > block.src.from) return within(ctx, block, o - block.src.from, side, memo) ?? block.from;
+      // Before the block's text: in its markup, or in a block before it that is not known.
+      return o < block.src.from && i > 0 && !blocks[i - 1].src ? null : block.from;
     }
-    const block = [...blocks].reverse().find((b) => b.src.from <= o);
-    if (!block) return null;
-    if (o >= block.src.to) return block.to;
-    return within(ctx, block, o - block.src.from, side, memo) ?? block.to;
+    let i = -1;
+    blocks.forEach((b, k) => b.src && b.src.from <= o && (i = k));
+    if (i < 0) return null;
+    const block = blocks[i];
+    if (o < block.src.to) return within(ctx, block, o - block.src.from, side, memo) ?? block.to;
+    // After the block's text: in its markup, or in a block after it that is not known.
+    return o > block.src.to && i + 1 < blocks.length && !blocks[i + 1].src ? null : block.to;
   };
   for (const { id, start, end } of wanted) {
     const from = position(start, "start");

@@ -199,6 +199,54 @@ test('a walk by lines that pairs a passage\'s line with another one does not dra
   assert.deepEqual(carry(gone, 'Alpha one.\n\nGamma five more.\n', [anchorOf(gone, 'two three four')]), [null]);
 });
 
+test('what is around a passage, not the blank lines and marks that set off every paragraph, tells its place from another that reads the same', () => {
+  const text = '# Plan\n\nFirst we agree on the scope of the release.\n\nYes.\n\nThen we ship.\n\nYes.\n\nThe end.\n';
+  const first = anchorOf(text, 'Yes.', 0);
+  const gone = text.replace('Yes.\n\nThen', 'Then');
+  // What the deleted one had round it, looked for in the text without it: the other's surroundings match in a blank line, a full stop and "The".
+  const found = locate(gone, first);
+  assert.ok(found && found.score > 0 && found.score < 8, `a score of ${found?.score}: some letters round the words match, too few to tell`);
+  // Surroundings that are alike are what tells them.
+  assert.equal(locate(text, { quote: 'Yes.', prefix: 'Then we ship.\n\n', suffix: '\n\nThe end.\n' })?.start, text.lastIndexOf('Yes.'));
+  // A passage deleted from a text where its twin is, with the same blank lines round both: gone.
+  assert.deepEqual(carry(text, gone, [first]), [null]);
+});
+
+test('words that have lost their place are found again where the text round them is as it was, or where they are long, and nowhere else', () => {
+  const text = '# Plan\n\nShip it on Friday.\n\nThen sign off.\n';
+  const friday = { ...anchorOf(text, 'Friday'), start: null, end: null };
+  // Nothing round them like what was: not found, though they are in the text once.
+  assert.deepEqual(carry(text, '# Plan\n\nThank God it is Friday, said nobody.\n', [friday]), [null]);
+  // The text round them as it was: found.
+  assert.deepEqual(words(text, text, friday), ['Friday']);
+  // Long words that are in the text once are found wherever they are.
+  const sentence = 'The release goes out on a Thursday night, after the review is signed off by all three leads.';
+  const lost = { ...anchorOf(`${sentence}\n`, sentence), start: null, end: null };
+  assert.deepEqual(words('x\n', `Other text.\n\nMoved: ${sentence}\n`, lost), [sentence]);
+  assert.deepEqual(carry('x\n', `${sentence}\n\n${sentence}\n`, [lost]), [null], 'in two places, told apart by nothing');
+});
+
+test('a sentence that is written again round a passage is not the passage written again, and a word of the sentence replaced is', () => {
+  const t = (before: string, quote: string, after: string) => words(before, after, anchorOf(before, quote));
+  assert.deepEqual(t('The budget is 5000 euros.\n', '5000 euros', 'The deadline is next Monday.\n'), [null]);
+  assert.deepEqual(t('Call Bob at noon.\n', 'Bob', 'Weather is nice today.\n'), [null]);
+  assert.deepEqual(t('Call Bob at noon.\n', 'Bob', 'We meet on Friday.\n'), [null]);
+  assert.deepEqual(t('Ship it on Friday.\n', 'Friday', 'Ship it by Monday.\n'), ['Monday']);
+  assert.deepEqual(t('The budget is 5000 euros.\n', '5000 euros', 'The budget is 7500 dollars.\n'), ['7500 dollars']);
+  // Another sentence of the paragraph written again is not the sentence of the passage.
+  assert.deepEqual(t('Ship it on Friday. Call Bob at noon.\n', 'Bob', 'Release it soon. Call Alice at noon.\n'), ['Alice']);
+});
+
+test('a start that is not a place in the text is not taken for one', () => {
+  const text = 'Yes, it is.\n\nA\n\nYes, it is.\n';
+  const quote = 'Yes, it is.';
+  for (const start of [-3, -1e9, 1e9, text.length + 1, 1.5, NaN, null, undefined, '2' as any]) {
+    assert.equal(locate(text, { quote, start })?.start, 0, String(start));
+  }
+  assert.equal(locate(text, { quote, start: text.lastIndexOf(quote) })?.start, text.lastIndexOf(quote));
+  assert.equal(locate('# Plan\n', { quote: '# Plan', start: -3 })?.start, 0);
+});
+
 test('a passage that has no place is looked for by its words alone, and found when they are one place only', () => {
   const orphan: Anchor = { ...anchorOf(PLAN, 'The build is green.'), start: null, end: null };
   assert.deepEqual(words(PLAN, PLAN, orphan), ['The build is green.']);

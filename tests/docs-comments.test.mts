@@ -428,6 +428,84 @@ test('a paragraph that is moved takes its comment along; a short phrase that rea
   }
 });
 
+test('a passage that is gone does not turn up on other words that read the same, in the next revision or the one it was deleted in', async () => {
+  const text = '# Plan\n\nFirst we agree on the scope of the release.\n\nYes.\n\nThen we ship.\n\nYes.\n\nThe end.\n';
+  const { docs, comment, threads, save } = await withDocument('docs-comments-lost-', text);
+  try {
+    const first = (await comment('Yes.', 'Why yes?')).body;
+    const second = (await comment('Yes.', 'And again?', 1, text, 1)).body;
+    // The first one deleted: the blank lines and the full stop round the other are what both were set off by, and are not the same place.
+    const gone = text.replace('Yes.\n\nThen', 'Then');
+    await save(gone, 1);
+    let listed = (await threads()).threads;
+    assert.equal(listed.find((t: any) => t.id === first.id).orphaned, true, 'in the revision it was deleted in');
+    assert.equal(on(gone, listed.find((t: any) => t.id === second.id)), 'Yes.');
+    // And in the next, when it is looked for again by its words alone.
+    const later = gone.replace('The end.', 'The end, really.');
+    await save(later, 2);
+    listed = (await threads()).threads;
+    assert.equal(listed.find((t: any) => t.id === first.id).orphaned, true, 'in the next revision');
+    assert.equal(listed.find((t: any) => t.id === first.id).start, null);
+    assert.equal(listed.find((t: any) => t.id === second.id).start, later.indexOf('Yes.'));
+    // Words of a paragraph that is gone, and another that has them in it, with none of what was round them.
+    const { docs: d2, comment: c2, threads: t2, save: s2 } = await withDocument('docs-comments-lost-friday-', '# Plan\n\nShip it on Friday.\n\nThen sign off.\n');
+    try {
+      const friday = (await c2('Friday', 'Why Friday?', 1, '# Plan\n\nShip it on Friday.\n\nThen sign off.\n')).body;
+      await s2('# Plan\n\nThen sign off.\n', 1);
+      assert.equal((await t2()).threads[0].orphaned, true);
+      await s2('# Plan\n\nThen sign off.\n\nThank God it is Friday, said nobody.\n', 2);
+      const [thread] = (await t2()).threads;
+      assert.equal(thread.id, friday.id);
+      assert.equal(thread.orphaned, true, 'a new "Friday" is not the old one');
+    } finally {
+      await d2.close();
+    }
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a sentence that is written again around a passage in it is not the passage rewritten: the thread is orphaned and does not land on the new words', async () => {
+  const { docs, comment, threads, save } = await withDocument('docs-comments-sentence-', '# Budget\n\nThe budget is 5000 euros.\n\nCall Bob at noon.\n');
+  try {
+    await comment('5000 euros', 'Is this enough?');
+    await comment('Bob', 'Who is Bob?');
+    const text = '# Budget\n\nThe deadline is next Monday.\n\nWeather is nice today.\n';
+    await save(text, 1);
+    const listed = (await threads()).threads;
+    assert.deepEqual(listed.map((t: any) => t.orphaned), [true, true]);
+    assert.deepEqual(listed.map((t: any) => t.quote), ['5000 euros', 'Bob']);
+    // A word of the sentence replaced is as it was: the thread is on the other word.
+    const { docs: d2, comment: c2, threads: t2, save: s2 } = await withDocument('docs-comments-sentence-word-', '# Budget\n\nThe budget is 5000 euros.\n');
+    try {
+      await c2('5000 euros', 'Enough?', 1, '# Budget\n\nThe budget is 5000 euros.\n');
+      const next = '# Budget\n\nThe budget is 7500 dollars.\n';
+      await s2(next, 1);
+      assert.equal(on(next, (await t2()).threads[0]), '7500 dollars');
+    } finally {
+      await d2.close();
+    }
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a start that is not a place in the text is no place: the passage is found by its words', async () => {
+  const { docs, threads, url } = await withDocument('docs-comments-start-');
+  try {
+    for (const start of [-3, -1e9, 1e9, 1.5, 'x', null]) {
+      const made = await docs.call('POST', `${url}/threads`, { base: 1, quote: '# Plan', start, body: 'x' });
+      assert.equal(made.status, 201, JSON.stringify(start));
+      assert.equal(made.body.quote, '# Plan', JSON.stringify(start));
+      assert.equal(made.body.start, 0, JSON.stringify(start));
+      assert.equal(made.body.end, 6, JSON.stringify(start));
+    }
+    assert.equal((await threads()).threads.length, 6);
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a change made outside the page (the file written by another program) is taken in with its revision, and the passage follows it', async () => {
   const { docs, comment, threads, folder } = await withDocument('docs-comments-outside-');
   try {
