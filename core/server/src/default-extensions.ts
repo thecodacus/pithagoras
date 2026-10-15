@@ -18,6 +18,10 @@ import { followPackages, listInstalledPackages } from "./api/extensions.js";
  *
  * What was installed, or found installed, is kept in the portal's settings by
  * folder: a portal that is updated installs what the new list adds, once.
+ *
+ * `PORTAL_DEFAULT_EXTENSIONS=off` installs none of them: a portal whose
+ * operator chooses every extension, and the test portals, which start by the
+ * hundred and have no use for them.
  */
 
 const DONE = "default_extensions_installed";
@@ -61,6 +65,7 @@ const installedOnce = (): string[] => {
  * next start.
  */
 export async function installDefaultExtensions(dir = bundledPath("extensions")): Promise<string[]> {
+  if (/^(off|0|false|no)$/i.test(process.env.PORTAL_DEFAULT_EXTENSIONS ?? "")) return [];
   const done = installedOnce();
   const due = defaultExtensions(dir).filter((ext) => !done.includes(ext.folder));
   if (!due.length) return [];

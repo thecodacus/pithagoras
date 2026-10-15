@@ -27,7 +27,7 @@ esac
 chmodSync(path.join(bin, "pi"), 0o755);
 
 test("a portal stopped while it installs what it starts with exits only once the install has ended", async () => {
-  const { child } = await startServer(serverEnv(home, await freePort(), { PATH: `${bin}${path.delimiter}${process.env.PATH}` }));
+  const { child } = await startServer(serverEnv(home, await freePort(), { PATH: `${bin}${path.delimiter}${process.env.PATH}`, PORTAL_DEFAULT_EXTENSIONS: "on" }));
   // An install is going on.
   for (let i = 0; !(existsSync(noted) && readFileSync(noted, "utf8").includes("start")); i++) {
     assert.ok(i < 200, "the portal never began installing what it starts with");

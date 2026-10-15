@@ -14,7 +14,7 @@ const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { retu
 async function portalWithShell(t) {
   const home = testHome("pithagoras-term-stop-");
   // `script` runs its command through $SHELL, so it has to be a lone path.
-  const { base, child } = await startServer(serverEnv(home, await freePort(), { SHELL: "/bin/sh" }));
+  const { base, child } = await startServer(serverEnv(home, await freePort(), { SHELL: "/bin/sh", PORTAL_DEFAULT_EXTENSIONS: "on" }));
   const send = (url, body) => fetch(base + url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
   const post = (url, body) => send(url, body).then((r) => r.json());
   const TERMINAL = "/api/x/pithagoras-terminal/terminal";

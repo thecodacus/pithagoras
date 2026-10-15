@@ -102,3 +102,15 @@ test("the list names only folders of the portal's own that hold a package", () =
   assert.deepEqual(defaultExtensions(path.join(home, "no-such-folder")), []);
   assert.ok(!existsSync(path.join(home, "outside")));
 });
+
+test("PORTAL_DEFAULT_EXTENSIONS=off installs none of them, and leaves them to be installed once it is on", async () => {
+  const dir = shipped({ themes: "pithagoras-themes" }, ["themes"]);
+  process.env.PORTAL_DEFAULT_EXTENSIONS = "off";
+  try {
+    assert.deepEqual(await installDefaultExtensions(dir), []);
+    assert.ok(!installedNow().includes(path.join(dir, "themes")));
+  } finally {
+    delete process.env.PORTAL_DEFAULT_EXTENSIONS;
+  }
+  assert.deepEqual(await installDefaultExtensions(dir), ["themes"], "nothing was recorded as installed while it was off");
+});
