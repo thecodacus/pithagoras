@@ -8,8 +8,9 @@
  * made here (`hearPings`, registered in every chat's pi by the server half)
  * answers by putting the message into the conversation. The bell carries
  * nothing: any page may ring it (`channel.send` reaches every extension's bus),
- * so what is said to the agent is kept by the server half, which queued it
- * when the person wrote the comment, and the bell only has it handed over.
+ * so what is said to the agent is kept by the server half, which queues it when
+ * the wake is due (a few seconds after the person last changed the comment, in
+ * the background), and the bell only has it handed over.
  */
 import { clip } from "./tools.js";
 
@@ -20,20 +21,12 @@ export const PING_TYPE = "document-ping";
 /** How much of a comment the message to the agent holds: the rest is in the thread, which doc_read gives whole. */
 const COMMENT_CHARS = 1000;
 
-/**
- * Does a comment ask the agent: `@agent` as a name of its own, not part of a
- * longer one (`@agents`, `@agent-x`), not the end of an address
- * (`me@agent.example`) and not in code (`@agent` after a backtick).
- */
-const MENTION = /(?<![\w@`/.])@agent(?![\w@-]|\.\w)/i;
-export const asksAgent = (text) => typeof text === "string" && MENTION.test(text);
-
 /** What the agent is told when it is asked: where the comment is and what it says, and how to answer it. */
 export function wakeMessage({ title, name, id, thread, comment }) {
   return [
     `The person asked you in a comment on the shared document "${title}" (id ${id}, documents/${name}), thread ${thread}:`,
     ...clip(comment, COMMENT_CHARS).split("\n").map((line) => `> ${line}`),
-    "Read the thread with doc_read and answer it there: with doc_reply, or with doc_edit given this thread if the answer is a change to the passage it is on. Leave the thread open for the person to resolve once they have read your answer, unless the comment asks you to resolve it.",
+    "Read the thread with doc_read and answer it there: with doc_reply, or with doc_edit given this thread if the answer is a change to the passage it is on. Resolving the thread with doc_resolve, saying what you did, is an answer too: the person is told that you answered either way.",
   ].join("\n");
 }
 

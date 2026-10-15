@@ -95,7 +95,9 @@
 .pd-thread-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 8px 10px; font-size: 13px; }
 .pd-thread-card[aria-current="true"] { border-color: rgb(var(--accent) / .6); }
 .pd-thread-card[data-status="resolved"] { opacity: .75; }
+.pd-asked { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .pd-asked[data-asked="answered"] { color: rgb(var(--accent)); font-weight: 600; }
+.pd-seen { padding: 0 8px; font-size: 12px; font-weight: 400; }
 .pd-quote { margin: 0; border: 0; border-left: 2px solid rgb(var(--warn) / .7); background: none; padding: 0 0 0 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: 12px; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
 button.pd-quote { cursor: pointer; }
 button.pd-quote:hover { color: rgb(var(--fg)); }

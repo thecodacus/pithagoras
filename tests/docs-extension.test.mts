@@ -23,7 +23,7 @@ function server(folders: Record<string, string>, logged: string[] = []) {
   docsServer({
     extension: 'pithagoras-docs',
     log: (line: string) => logged.push(line),
-    router: { get: add('GET'), post: add('POST'), put: add('PUT') },
+    router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
     http: { json: () => () => {} },
     files: { inside: resolveInside },
     sandbox: { on: () => false },
@@ -155,7 +155,7 @@ test('a pipe named like a document is no document, and asking for one does not h
     const add = (method) => (route, ...handlers) => routes.set(method + ' ' + route, handlers.at(-1));
     docsServer({
       log: () => {},
-      router: { get: add('GET'), post: add('POST'), put: add('PUT') },
+      router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
       http: { json: () => () => {} },
       files: { inside: resolveInside },
       sandbox: { on: () => false },

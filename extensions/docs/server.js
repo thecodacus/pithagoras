@@ -19,7 +19,9 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            its comment threads, each with its passage where it is in the text now
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            a new thread { base, quote, prefix?, suffix?, start?, body }: 422 when the passage is not in revision `base`
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments  a reply { body } to an open thread
- *     (a comment that has @agent in it also asks the agent, below: the answer holds `unreached` if the agent could not be)
+ *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  changes the person's last comment { body }, which the page saves as it is typed
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  takes it away (the thread goes with its only comment)
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/seen      the person has read what the agent said in a thread
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/resolve   resolves a thread, with a last comment if `body` is given
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/reopen    opens a resolved thread again
  *
@@ -39,18 +41,21 @@
  * store's own writes, which is how the changes of Files and editors get told.
  *
  * A comment of the person's that has `@agent` in it asks the agent (ping.js): the
- * thread is marked as waiting for it, and the agent of a chat is woken with the
- * comment, through the portal's own `chats.tell`, to answer it with its tools.
+ * thread is marked as waiting for it, and the agent of the chat the page names
+ * (the one the person is in) is woken with the comment, through the portal's own
+ * `chats.tell`, to answer it with its tools. The wake is in the background, a few
+ * seconds after the comment was last saved: nothing here waits for a chat to start.
  */
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
-import { asksAgent, hearPings, wakeMessage } from "./ping.js";
+import { hearPings, wakeMessage } from "./ping.js";
 import { SECRET, SECRET_WARNING } from "./secret.js";
 import { DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
 import { documentTools } from "./tools.js";
+import { asksAgent } from "./web/mention.js";
 
 /** Where a document's title is looked for: its first heading, near its top. */
 const HEAD_BYTES = 4096;
@@ -327,8 +332,13 @@ const titleOf = (bytes, name) => headingOf(bytes.subarray(0, HEAD_BYTES).toStrin
 const PING_MS = 25_000;
 /** How often a folder with an open stream is looked at for changes outside the store's own writes. */
 const POLL_MS = 2_000;
+/**
+ * How long a comment that asks the agent has to be left alone before the agent is woken: the page saves a comment as it is typed,
+ * and the agent is to be woken with what was written, not with the words typed so far.
+ */
+const WAKE_MS = 3_000;
 
-export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pingMs = PING_MS, pollMs = POLL_MS } = {}) {
+export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pingMs = PING_MS, pollMs = POLL_MS, wakeMs = WAKE_MS } = {}) {
   // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
   // in the background: the portal does not wait for an install to start the rest. The store waits for it.
   const ready = dependencies((line) => portal.log(line));
@@ -525,53 +535,115 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     return body.markdown;
   }
 
-  /** A thread as the page gets it: with the title of the chat the agent was last asked in, which the store does not know. */
-  const withChat = (folder, thread) => (thread.ping ? { ...thread, ping: { ...thread.ping, title: folder.chats.find((chat) => chat.id === thread.ping.chat)?.title ?? null } } : thread);
-
   /**
-   * The chat whose agent is asked about a comment on a document: the one the thread was asked in last, if it still works in the
-   * folder and can read the document; else the first chat of the folder that can, in the order the sidebar lists them.
-   * A chat's own document can be read by that chat only.
+   * The wakes that wait for a comment to be left alone, by folder and ping (a timer), until the agent has been woken or it has not
+   * been reachable: a ping that is neither taken nor waiting was not delivered, and `reasons` says why where it is known.
    */
-  function chatToAsk(folder, doc, thread) {
-    const readers = folder.chats.filter((chat) => doc.scope === "project" || chat.id === doc.chat);
-    return readers.find((chat) => chat.id === thread.ping?.chat) ?? readers[0] ?? null;
+  const wakes = new Map();
+  const reasons = new Map();
+  const wakeKey = (folder, ping) => `${idOf(folder.path)}/${ping}`;
+  const unwake = (folder, ping) => {
+    clearTimeout(wakes.get(wakeKey(folder, ping)));
+    wakes.delete(wakeKey(folder, ping));
+    reasons.delete(wakeKey(folder, ping));
+  };
+
+  /** A thread as the page gets it: how the last ask of the agent stands (`state`: taken by a chat, waiting to be, or not delivered), and in which chat. */
+  function withChat(folder, thread) {
+    if (!thread.ping) return thread;
+    const key = wakeKey(folder, thread.ping.id);
+    const state = thread.ping.sent ? "sent" : wakes.has(key) ? "pending" : "failed";
+    const title = folder.chats.find((chat) => chat.id === thread.ping.chat)?.title ?? null;
+    return { ...thread, ping: { ...thread.ping, title, state, ...(state === "failed" && reasons.has(key) ? { error: reasons.get(key) } : {}) } };
   }
 
   /**
-   * The person wrote `comment` (which asks the agent) in `thread`: the agent of a chat is woken with it. The thread then waits for
-   * the agent until the agent comments in it. Returns the thread as the page gets it, and `unreached` (why) if the agent could
-   * not be reached; the comment is kept all the same, and the agent reads it with the document's other comments when it next looks.
+   * The chat whose agent is asked about a comment on a document: the one the page says the person is in, if it works in the
+   * folder (the page opens one for the folder when they are in none). A chat's own document can be read by that chat only, so
+   * its comments are asked of that chat, wherever the person is.
    */
-  async function ask(folder, store, id, thread, comment) {
+  function chatToAsk(folder, doc, requested) {
+    const readers = folder.chats.filter((chat) => doc.scope === "project" || chat.id === doc.chat);
+    return doc.scope === "chat" ? (readers[0] ?? null) : (readers.find((chat) => chat.id === requested) ?? null);
+  }
+
+  /** The folder's pages are told that the comments of a document changed. */
+  const toldThreads = (folder, id) => live.publish(folder.path, { id, threads: true, at: new Date().toISOString() });
+
+  /**
+   * Wakes the agent of `chat` with the comment the ping `ping` of a thread was made for, as it stands now: through the bell of the
+   * chat's pi extension, which starts the chat's pi if it was let go. The wake is not waited for by anyone: the page is told by the
+   * thread, which says whether the chat took it.
+   */
+  async function wake(folder, store, id, thread, ping, chat) {
+    const key = wakeKey(folder, ping);
     try {
       const doc = await store.read(id);
-      const chat = chatToAsk(folder, doc, thread);
-      if (!chat) return { ...withChat(folder, thread), unreached: "No chat that can read this document works in its folder any more" };
-      const { ping, thread: waiting } = await store.ping(id, thread.id, { chat: chat.id });
-      const entry = { text: wakeMessage({ title: titleOf(doc.bytes, doc.name), name: doc.name, id, thread: thread.id, comment }), details: { folder: idOf(folder.path), id, thread: thread.id }, state: "waiting" };
-      waking.set(chat.id, [...(waking.get(chat.id) ?? []), entry]);
+      const now = (await store.threads(id)).threads.find((t) => t.id === thread);
+      const last = now?.comments.at(-1);
+      // Not asked any more, or the agent has answered (or the thread was closed) while the comment was left alone.
+      if (!now || now.status !== "open" || now.ping?.id !== ping || last?.id !== now.ping.comment || last.author !== "user" || !asksAgent(last.body)) return void wakes.delete(key);
+      const entry = { text: wakeMessage({ title: titleOf(doc.bytes, doc.name), name: doc.name, id, thread, comment: last.body }), details: { folder: idOf(folder.path), id, thread }, state: "waiting" };
+      waking.set(chat, [...(waking.get(chat) ?? []), entry]);
       let why;
       try {
         // Starts the chat's pi if it was let go, and rings the bell its pi extension answers by taking what is queued for it.
-        if (!(await portal.chats.tell(chat.id, { type: "ping" }))) why = "This chat's agent does not run in the portal's own process";
+        if (!(await portal.chats.tell(chat, { type: "ping" }))) why = "This chat's agent does not run in the portal's own process";
       } catch (e) {
         why = e?.message ?? String(e);
       }
       // What the bell did not hand over is not left for whatever rings it next.
-      waking.set(chat.id, (waking.get(chat.id) ?? []).filter((queued) => queued !== entry));
+      waking.set(chat, (waking.get(chat) ?? []).filter((queued) => queued !== entry));
       if (!why && entry.state === "failed") why = entry.error;
       else if (!why && entry.state !== "sent") why = "This chat's agent did not take it";
-      if (why) return { ...withChat(folder, waiting), unreached: why };
-      return withChat(folder, await store.reached(id, thread.id, ping));
+      if (why) throw new Error(why);
+      await store.reached(id, thread, ping);
+      wakes.delete(key);
     } catch (e) {
-      if (!(e instanceof DocError)) portal.log(`Asking the agent in a comment on ${folder.path} failed: ${e?.stack ?? e}`);
-      return { ...withChat(folder, thread), unreached: e instanceof DocError ? e.message : "The documents store could not do that" };
+      portal.log(`The agent in a chat of ${folder.path} could not be asked in a comment: ${e?.message ?? e}`);
+      reasons.set(key, e instanceof DocError ? e.message : (e?.message ?? String(e)));
+      wakes.delete(key);
+      toldThreads(folder, id);
     }
   }
 
-  /** The thread a comment of the person's made, as the page gets it: with the agent asked, if the comment asks it. */
-  const written = (folder, store, id, thread, comment) => (asksAgent(comment) ? ask(folder, store, id, thread, comment.trim()) : withChat(folder, thread));
+  /**
+   * The person's comment in `thread` was made or changed: `thread` is as it is now, and its last comment is theirs. If it asks the
+   * agent, a wake is due once it has been left alone for a while (and again, later, for each change to it until then); if it
+   * does not (any more), a wake that was due is dropped. Returns the thread.
+   */
+  async function asked(folder, store, id, thread, requested) {
+    const last = thread.comments.at(-1);
+    try {
+      if (!asksAgent(last.body)) {
+        const gone = await store.unping(id, thread.id);
+        if (gone.ping !== undefined) unwake(folder, gone.ping);
+        return gone.thread;
+      }
+      const doc = await store.read(id);
+      const chat = chatToAsk(folder, doc, requested);
+      const made = await store.ping(id, thread.id, { chat: chat?.id ?? null });
+      if (made.sent) return made.thread;
+      const key = wakeKey(folder, made.ping);
+      clearTimeout(wakes.get(key));
+      reasons.delete(key);
+      if (!chat) {
+        // No chat to ask: not delivered, and said so.
+        wakes.delete(key);
+        reasons.set(key, doc.scope === "chat" ? "No chat that can read this document works in its folder any more" : "The chat to ask is not one that works in this folder");
+        toldThreads(folder, id);
+        return made.thread;
+      }
+      const timer = setTimeout(() => void wake(folder, store, id, thread.id, made.ping, chat.id), wakeMs);
+      timer.unref?.();
+      wakes.set(key, timer);
+      return made.thread;
+    } catch (e) {
+      // The comment is made all the same: a failure to ask is the thread's to say, and the agent finds the comment when it reads.
+      if (!(e instanceof DocError)) portal.log(`Asking the agent in a comment on ${folder.path} failed: ${e?.stack ?? e}`);
+      return thread;
+    }
+  }
 
   const warn = (markdown) => (SECRET.test(markdown) ? { warning: SECRET_WARNING } : {});
   const shown = ({ bytes, ...doc }) => ({ ...doc, title: titleOf(bytes, doc.name), markdown: bytes.toString("utf8") });
@@ -709,8 +781,10 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   portal.router.get("/folders/:folder/documents/:id/threads", route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);
-    const listed = await (await storeFor(folder.path)).threads(id);
-    res.json({ ...listed, threads: listed.threads.map((thread) => withChat(folder, thread)) });
+    const { scope, chat, ...listed } = await (await storeFor(folder.path)).threads(id);
+    // Where a comment that asks the agent can go: the chats that can read the document, and the folder a new chat is opened in.
+    const chats = folder.chats.filter((c) => scope === "project" || c.id === chat);
+    res.json({ ...listed, threads: listed.threads.map((thread) => withChat(folder, thread)), ask: { chats, own: scope === "chat", workspace: folder.path } });
   }));
 
   portal.router.post("/folders/:folder/documents/:id/threads", small, route(async (req, res) => {
@@ -722,7 +796,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     // The author is the person: the agent has its own tools, and a request cannot say it is someone else.
     const store = await storeFor(folder.path);
     const thread = await store.addThread(id, { base, quote: body.quote, prefix: body.prefix ?? "", suffix: body.suffix ?? "", start, body: body.body, author: "user" });
-    res.status(201).json(await written(folder, store, id, thread, body.body));
+    res.status(201).json(withChat(folder, await asked(folder, store, id, thread, body.chat)));
   }));
 
   portal.router.post("/folders/:folder/documents/:id/threads/:thread/comments", small, route(async (req, res) => {
@@ -730,7 +804,30 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const id = documentOf(req);
     const store = await storeFor(folder.path);
     const thread = await store.reply(id, req.params.thread, { body: req.body?.body, author: "user" });
-    res.status(201).json(await written(folder, store, id, thread, req.body.body));
+    res.status(201).json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
+  }));
+
+  // The page saves a comment as it is typed: the first save makes it (above), the next ones change it, and typing it all away takes it away.
+  portal.router.put("/folders/:folder/documents/:id/threads/:thread/comments/:comment", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const store = await storeFor(folder.path);
+    const thread = await store.edit(id, req.params.thread, req.params.comment, { body: req.body?.body, author: "user" });
+    res.json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
+  }));
+
+  portal.router.delete("/folders/:folder/documents/:id/threads/:thread/comments/:comment", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const { removed, thread, pings } = await (await storeFor(folder.path)).remove(id, req.params.thread, req.params.comment, { author: "user" });
+    for (const ping of pings) unwake(folder, ping);
+    res.json({ removed, thread: thread ? withChat(folder, thread) : null });
+  }));
+
+  portal.router.post("/folders/:folder/documents/:id/threads/:thread/seen", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.json(withChat(folder, await (await storeFor(folder.path)).seen(id, req.params.thread)));
   }));
 
   portal.router.post("/folders/:folder/documents/:id/threads/:thread/resolve", small, route(async (req, res) => {
@@ -747,6 +844,8 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
 
   return async () => {
     stopped = true;
+    for (const timer of wakes.values()) clearTimeout(timer);
+    wakes.clear();
     for (const entry of watching.values()) clearInterval(entry.timer);
     for (const res of [...streams]) res.end();
     const open = [...stores.values()];

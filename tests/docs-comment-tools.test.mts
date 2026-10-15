@@ -488,3 +488,21 @@ test('the tools say what they are for, and the rule for answering a comment is i
     await docs.close();
   }
 });
+
+test('the agent\'s comments are not the person\'s to change or take away: the page can only change its own', async () => {
+  const { docs, agent, person, url, threads } = await withDocument('docs-ct-yours-');
+  try {
+    const mine = await person('Ship it on Friday.', 'Why?');
+    await agent('doc_reply', { id: (await docs.call('GET', '/folders')).body.folders[0].documents[0].id, thread: mine.id, comment: 'Because.' });
+    const [thread] = await threads();
+    const theirs = thread.comments[1].id;
+    for (const [method, body] of [['PUT', { body: 'Changed' }], ['DELETE', undefined]] as const) {
+      const refused = await docs.call(method, `${url}/threads/${mine.id}/comments/${theirs}`, body);
+      assert.equal(refused.status, 409, method);
+      assert.equal(refused.body.code, 'comment_not_yours', method);
+    }
+    assert.deepEqual((await threads())[0].comments.map((c: any) => c.body), ['Why?', 'Because.']);
+  } finally {
+    await docs.close();
+  }
+});

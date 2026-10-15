@@ -83,11 +83,9 @@ export default function (portal) {
     "New comment": "Neuer Kommentar",
     "Write a comment": "Kommentar schreiben",
     "Write a comment…": "Kommentar schreiben…",
-    "Add comment": "Kommentar hinzufügen",
     Cancel: "Abbrechen",
     Reply: "Antworten",
     "Reply…": "Antworten…",
-    "Reply and resolve": "Antworten und erledigen",
     Resolve: "Erledigen",
     Resolved: "Erledigt",
     Reopen: "Wieder öffnen",
@@ -107,8 +105,10 @@ export default function (portal) {
     "Asked the agent": "Den Agenten gefragt",
     "Not delivered to the agent": "Nicht beim Agenten angekommen",
     "The agent answered": "Der Agent hat geantwortet",
-    "Saved, but the agent could not be reached: {error}": "Gespeichert, aber der Agent war nicht zu erreichen: {error}",
     "{n} answered by the agent": "{n} vom Agenten beantwortet",
+    "Got it": "Verstanden",
+    "Comments on {title}": "Kommentare zu {title}",
+    "Could not open a chat to ask the agent in: {error}": "Es konnte kein Chat geöffnet werden, in dem der Agent gefragt wird: {error}",
   });
 
   const icon = (path) => () =>
@@ -165,7 +165,24 @@ export default function (portal) {
     );
   }
 
-  const DocumentEditor = documentEditor(portal, { documentUrl, when, useAnswer });
+  // The Documents page is not in a chat, so it cannot tell which chat the person is in. The chat that was on screen last, in this window,
+  // is the nearest it can know: this entry is there for as long as a chat is on screen, and keeps its id for the page that follows.
+  const WHERE = "pithagoras-docs/chat";
+  let lastChat = null;
+  const remember = (chat) => {
+    lastChat = chat;
+    ui.storage.session.set(WHERE, chat);
+  };
+  const activeChat = () => lastChat ?? ui.storage.session.get(WHERE) ?? null;
+  portal.slots.register("chat.background", {
+    id: "where",
+    component: ({ chat }) => {
+      useEffect(() => remember(chat.id), [chat.id]);
+      return null;
+    },
+  });
+
+  const DocumentEditor = documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember });
 
   /**
    * A call of one of the agent's tools that names a document, in place of the

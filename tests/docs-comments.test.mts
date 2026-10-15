@@ -129,9 +129,12 @@ async function withDocument(prefix: string, markdown = PLAN) {
 const on = (text: string, thread: any) => text.slice(thread.start, thread.end);
 
 test('a thread is made on a passage, with the person as the author of its first comment, and listed with the document', async () => {
-  const { docs, comment, threads, f } = await withDocument('docs-comments-basic-');
+  const { docs, comment, threads, f, folder } = await withDocument('docs-comments-basic-');
   try {
-    assert.deepEqual(await threads(), { revision: 1, threads: [] });
+    // The page is told where a comment that asks the agent can go: the chats that work in the folder, and the folder.
+    const { ask, ...first } = await threads();
+    assert.deepEqual(first, { revision: 1, threads: [] });
+    assert.deepEqual(ask, { chats: [{ id: 'a', title: 'Chat a' }], own: false, workspace: folder });
     const made = await comment(GREEN, 'Is this right?');
     assert.equal(made.status, 201, JSON.stringify(made.body));
     assert.match(made.body.id, /^[0-9a-f]{16}$/);
@@ -145,7 +148,7 @@ test('a thread is made on a passage, with the person as the author of its first 
     assert.equal(made.body.comments[0].author, 'user');
     assert.equal(made.body.comments[0].body, 'Is this right?');
     assert.ok(!Number.isNaN(Date.parse(made.body.comments[0].at)));
-    assert.deepEqual(await threads(), { revision: 1, threads: [made.body] });
+    assert.deepEqual({ ...(await threads()), ask: undefined }, { revision: 1, threads: [made.body], ask: undefined });
     // The listing says how many threads are open on each document.
     const listed = (await docs.call('GET', '/folders')).body.folders[0].documents;
     assert.equal(listed[0].openThreads, 1);
@@ -645,6 +648,73 @@ test('the stream of a document tells of a change to its comments, with no revisi
     // A refused comment tells nothing either.
     await docs.call('POST', `${url}/threads/${made.id}/comments`, { body: 'Closed.' });
     await docs.call('POST', `${url}/threads/${made.id}/reopen`, {});
+    assert.equal((await stream.frame())?.event, 'threads');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('the person\'s last comment is changed as it is typed, and taken away when it is typed away: only while it is the last of an open thread', async () => {
+  const { docs, comment, threads, url } = await withDocument('docs-comments-typed-');
+  try {
+    const made = (await comment(GREEN, 'Is')).body;
+    const first = made.comments[0].id;
+    const at = `${url}/threads/${made.id}/comments`;
+    // Changed: the same comment, with the new words, and the thread changed with it.
+    const changed = await docs.call('PUT', `${at}/${first}`, { body: 'Is it right?' });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.deepEqual(changed.body.comments.map((c: any) => [c.id, c.author, c.body]), [[first, 'user', 'Is it right?']]);
+    assert.ok(changed.body.updatedAt >= made.updatedAt);
+    assert.deepEqual((await threads()).threads[0].comments.map((c: any) => c.body), ['Is it right?']);
+    // Not empty, not too long, and a comment that is there.
+    assert.equal((await docs.call('PUT', `${at}/${first}`, { body: '  ' })).body.code, 'invalid');
+    assert.equal((await docs.call('PUT', `${at}/${first}`, { body: 'x'.repeat(4097) })).body.code, 'too_large');
+    assert.equal((await docs.call('PUT', `${at}/0123456789abcdef`, { body: 'Hi' })).body.code, 'comment_not_found');
+    assert.equal((await docs.call('PUT', `${at}/${first}`, {})).status, 400);
+    // A reply after it: the first is not the last any more, and neither is changed or taken away while it is not the last.
+    const reply = (await docs.call('POST', at, { body: 'And?' })).body.comments[1].id;
+    for (const [method, body] of [['PUT', { body: 'Changed' }], ['DELETE', undefined]] as const) {
+      const refused = await docs.call(method, `${at}/${first}`, body);
+      assert.equal(refused.status, 409, method);
+      assert.equal(refused.body.code, 'comment_not_last', method);
+    }
+    assert.equal((await threads()).threads[0].comments[0].body, 'Is it right?');
+    // The last is taken away: the thread is as it was; the only comment, with its thread.
+    const gone = await docs.call('DELETE', `${at}/${reply}`);
+    assert.equal(gone.status, 200);
+    assert.deepEqual([gone.body.removed, gone.body.thread.comments.map((c: any) => c.body)], ['comment', ['Is it right?']]);
+    const alone = await docs.call('DELETE', `${at}/${first}`);
+    assert.deepEqual(alone.body, { removed: 'thread', thread: null });
+    assert.deepEqual((await threads()).threads, []);
+    assert.equal((await docs.call('GET', '/folders')).body.folders[0].documents[0].openThreads, 0);
+    assert.equal((await docs.call('DELETE', `${at}/${first}`)).body.code, 'thread_not_found');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a comment of a resolved thread is not changed or taken away, and the stream tells of each change that is made', async () => {
+  const { docs, comment, url } = await withDocument('docs-comments-typed-closed-');
+  try {
+    const stream = await docs.listen(`${url}/events`);
+    await stream.next('revision');
+    const made = (await comment(GREEN, 'Is it?')).body;
+    assert.equal((await stream.frame())?.event, 'threads');
+    const at = `${url}/threads/${made.id}/comments/${made.comments[0].id}`;
+    assert.equal((await docs.call('PUT', at, { body: 'Is it right?' })).status, 200);
+    assert.equal((await stream.frame())?.event, 'threads');
+    await docs.call('POST', `${url}/threads/${made.id}/resolve`, {});
+    assert.equal((await stream.frame())?.event, 'threads');
+    for (const method of ['PUT', 'DELETE']) {
+      const refused = await docs.call(method, at, method === 'PUT' ? { body: 'Late' } : undefined);
+      assert.equal(refused.status, 409, method);
+      assert.equal(refused.body.code, 'thread_resolved', method);
+    }
+    // The thread that was resolved is what it was.
+    assert.deepEqual((await docs.call('GET', `${url}/threads`)).body.threads[0].comments.map((c: any) => c.body), ['Is it right?']);
+    await docs.call('POST', `${url}/threads/${made.id}/reopen`, {});
+    assert.equal((await stream.frame())?.event, 'threads');
+    assert.equal((await docs.call('DELETE', at)).body.removed, 'thread');
     assert.equal((await stream.frame())?.event, 'threads');
   } finally {
     await docs.close();

@@ -525,7 +525,7 @@ export function documentTools(pi, chat, deps) {
   pi.registerTool({
     name: "doc_resolve",
     label: "Resolve a comment",
-    description: `Resolve a comment thread of a shared document, from doc_read: it is closed, shown as resolved to the person, and they can open it again. Resolve a thread when what it asked for is done or it is answered for good, and say in comment what was done (Markdown, at most ${MAX_BODY} bytes). Leave a thread open when the person still has to weigh in.`,
+    description: `Resolve a comment thread of a shared document, from doc_read: it is closed, shown as resolved to the person, and they can open it again. Resolve a thread when what it asked for is done or it is answered for good, and say in comment what was done (Markdown, at most ${MAX_BODY} bytes). Leave a thread open when the person still has to weigh in. Resolving a thread the person asked you in (@agent) is an answer like a reply: they are told that you answered.`,
     promptSnippet: "Resolve a comment thread of a shared document, saying what was done",
     executionMode: "sequential",
     parameters: {
