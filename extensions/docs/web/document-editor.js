@@ -472,7 +472,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     /**
      * Saves a comment of the person's as it is typed: `words` is all of it, `id` its id once it is made (null before). The first
      * save makes the thread, when it is the first comment of a passage (`thread.id` is null), or the next comment of one. Returns
-     * the comment's id. A comment that cannot be changed any more (the agent answered it meanwhile) is followed by one of its own.
+     * the comment's id and the thread's. A comment that cannot be changed any more (the agent answered it meanwhile) is followed by
+     * one of its own.
      */
     const write = async (thread, words, id, writing) => {
       const text = words.trim();
@@ -485,23 +486,23 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         setThreads((now) => ({ ...now, items: [...now.items.filter((x) => x.id !== made.id), made] }));
         setCompose((now) => (now?.key === key ? { ...now, threadId: made.id } : now));
         setActive(made.id);
-        return made.comments.at(-1).id;
+        return { comment: made.comments.at(-1).id, thread: made.id };
       }
       if (id !== null) {
         try {
           const changed = await send(`${thread.id}/comments/${id}`, "PUT");
           taken(changed);
-          return id;
+          return { comment: id, thread: thread.id };
         } catch (e) {
           if (!["comment_not_last", "comment_not_found"].includes(e.body?.code)) throw e;
         }
       }
       const added = await send(`${thread.id}/comments`, "POST");
       taken(added);
-      return added.comments.at(-1).id;
+      return { comment: added.comments.at(-1).id, thread: thread.id };
     };
 
-    /** What was saved was typed away: the comment is taken away, and its thread with it if it was the only comment. */
+    /** What was saved was typed away: the comment is taken away, and its thread with it if it was the only comment (which it answers). */
     const clear = async (thread, id, writing) => {
       let gone;
       try {
@@ -511,9 +512,10 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         if (e.body?.code === "comment_not_found") return void refresh.current();
         throw e;
       }
-      if (gone.removed === "comment") return taken(gone.thread);
+      if (gone.removed === "comment") return void taken(gone.thread);
       setThreads((now) => ({ ...now, items: now.items.filter((x) => x.id !== thread.id) }));
       if (writing) setCompose((now) => (now?.key === writing.key ? { ...now, threadId: null } : now));
+      return "thread";
     };
     /** The comment that was being written is let go: it is a thread in the list like the others. */
     const finish = (thread) => {

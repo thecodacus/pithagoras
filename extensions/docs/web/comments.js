@@ -79,18 +79,28 @@ export function comments(portal, { when }) {
     // What the box saves with, as it is now: the box lives on through the thread's being made and changed.
     const now = useRef(null);
     now.current = { thread, onWrite, onClear };
+    // The thread the box's first save made. The card has it as a prop only after it is drawn again, which is later than the save that
+    // follows the first (text typed meanwhile) or the removal that follows it (Cancel meanwhile): those have to go to this thread.
+    const made = useRef(null);
+    const here = () => (now.current.thread.id ? now.current.thread : { ...now.current.thread, id: made.current });
     const typed = useRef(null);
     typed.current ??= createDraft({
-      save: (words, id) => now.current.onWrite(now.current.thread, words, id),
-      remove: (id) => now.current.onClear(now.current.thread, id),
+      save: async (words, id) => {
+        const saved = await now.current.onWrite(here(), words, id);
+        made.current = saved.thread;
+        return saved.comment;
+      },
+      remove: async (id) => {
+        if ((await now.current.onClear(here(), id)) === "thread") made.current = null;
+      },
       onState: setDraft,
     });
     // What was typed is saved when the card goes.
     useEffect(() => () => void typed.current.flush(), []);
-    const here = useRef(true);
+    const mounted = useRef(true);
     useEffect(() => {
-      here.current = true;
-      return () => void (here.current = false);
+      mounted.current = true;
+      return () => void (mounted.current = false);
     }, []);
 
     /** Does `work`, and says why if it did not go through. */
@@ -99,15 +109,15 @@ export function comments(portal, { when }) {
       try {
         await work();
       } catch (e) {
-        if (here.current) setError(e.message);
+        if (mounted.current) setError(e.message);
       }
     };
     /** The comment typed is let go: the box is empty for the next one, and this one is in the list. */
     const done = () =>
       run(async () => {
         if (!(await typed.current.settle())) return;
-        if (here.current) setValue("");
-        if (composing) onFinish(thread);
+        if (mounted.current) setValue("");
+        if (composing) onFinish(here());
       });
     // Somebody else said something after the comment in the box (the agent answered it): it is let go, and the box is for the next.
     useEffect(() => {

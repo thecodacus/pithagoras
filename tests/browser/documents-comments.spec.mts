@@ -48,6 +48,9 @@ class Store {
   refuse: { status: number; error: string } | null = null;
   /** Where a comment that asks the agent can go, as the server says with the threads. */
   ask = { chats: [{ id: 'a', title: 'First chat' }], own: false, workspace: '/w/site' };
+  /** How many requests to make a thread were started, and how long the server keeps each before it answers. */
+  started = 0;
+  delay = 0;
   /** What the page sent to open a chat, and to change or take away a comment. */
   opened: any[] = [];
   requests: { method: string; comment: string; body?: any }[] = [];
@@ -228,7 +231,12 @@ async function open(page: Page, store: Store, { language, ready = 'Ship it on Fr
     if (p === DOCUMENT && method === 'GET') return store.read();
     if (p === DOCUMENT && method === 'PUT') { const { markdown, base } = json(); return store.save(markdown, base); }
     if (p === `${DOCUMENT}/threads` && method === 'GET') return store.list();
-    if (p === `${DOCUMENT}/threads` && method === 'POST') return store.add(json());
+    if (p === `${DOCUMENT}/threads` && method === 'POST') {
+      const body = json();
+      store.started += 1;
+      if (store.delay) await new Promise((resolve) => setTimeout(resolve, store.delay));
+      return store.add(body);
+    }
     const act = new RegExp(`^${DOCUMENT}/threads/(\\w+)/(comments|resolve|reopen|seen)$`).exec(p);
     if (act && method === 'POST') {
       if (act[2] === 'comments') return store.comment(act[1], json().body, 'user', json().chat);
@@ -494,6 +502,45 @@ test('a thread is answered as it is typed, resolved and opened again; a resolved
   await cards(page).first().getByRole('button', { name: 'Resolve', exact: true }).click();
   await expect(cards(page)).toHaveCount(0);
   expect(store.threads[0].comments).toHaveLength(3);
+});
+
+test('text typed while the first save of a new comment is on its way changes that comment, and does not make a second thread', async ({ page }) => {
+  const store = new Store();
+  store.delay = 1500;
+  await open(page, store);
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  const box = panel(page).locator('.pd-compose').getByRole('textbox');
+  await box.fill('Hello');
+  await expect.poll(() => store.started).toBe(1);
+  // The thread is not there yet: the page has not been answered.
+  expect(store.threads).toEqual([]);
+  await box.fill('Hello world');
+  await expect.poll(() => store.threads.length).toBe(1);
+  await expect.poll(() => store.threads[0].comments[0].body).toBe('Hello world');
+  // Long enough for a second thread to have been made, which it was not: the words that came after went to the first.
+  await page.waitForTimeout(1500);
+  expect(store.threads.map((t) => t.comments.map((c) => c.body))).toEqual([['Hello world']]);
+  expect(store.started).toBe(1);
+  expect(store.requests.map((r) => r.method)).toEqual(['PUT']);
+  await expect(panel(page).locator('.pd-compose').getByText('Saved', { exact: true })).toBeVisible();
+});
+
+test('Cancel while the first save of a new comment is on its way takes the thread it made away, and says nothing is wrong', async ({ page }) => {
+  const store = new Store();
+  store.delay = 1500;
+  await open(page, store);
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Hello');
+  await expect.poll(() => store.started).toBe(1);
+  await panel(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
+  expect(store.threads).toEqual([]);
+  // The comment that was made is the one taken away, in its own thread: not in `threads/null`.
+  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String) }]);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(editorOf(page).locator('.pd-thread, .pd-thread-pending')).toHaveCount(0);
 });
 
 test('a comment that could not be saved keeps what was typed and says why, and the next change or leaving the box sends it again', async ({ page }) => {

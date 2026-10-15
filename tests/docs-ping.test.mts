@@ -278,6 +278,61 @@ test('a comment is woken with the text it has when it is left alone: changes to 
   }
 });
 
+test('a change to a comment while the agent is being woken with it does not wake the agent a second time, and is in the thread', async () => {
+  const { docs, person, edit, threads } = await withDocument('docs-ping-running-', ['a'], { wakeMs: 30 });
+  try {
+    // The chat is slow to start, as a chat's pi that was let go is: the wake is on its way for as long as it takes.
+    let start!: () => void;
+    docs.state.hold = new Promise<void>((resolve) => (start = resolve));
+    const made = await person('@agent fix');
+    await until(() => docs.told.length === 1, 'the chat to be rung');
+    // Changed meanwhile (the page saves as it is typed): saved, and still waiting for the chat.
+    const saved = await edit(made.body.id, made.body.comments[0].id, '@agent fix the typo');
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.comments[0].body, '@agent fix the typo');
+    assert.equal(saved.body.ping.state, 'pending');
+    assert.equal(saved.body.ping.id, made.body.ping.id);
+    await later(200);
+    assert.equal(docs.told.length, 1, 'the change did not ring the chat again');
+    start();
+    await until(() => docs.sent.a.length === 1, 'the chat to take it');
+    await until(async () => (await threads())[0].ping.state === 'sent');
+    await later(200);
+    assert.equal(docs.told.length, 1);
+    assert.deepEqual(docs.sent.a.map((s) => s.message.content.split('\n')[1]), ['> @agent fix']);
+    assert.equal((await threads())[0].comments[0].body, '@agent fix the typo');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a wake that fails while the comment is changed says so, and no retry is waiting: the next change asks again', async () => {
+  const { docs, person, edit, threads } = await withDocument('docs-ping-running-failed-', ['a'], { wakeMs: 30, tell: 'throws' });
+  try {
+    let release!: () => void;
+    docs.state.hold = new Promise<void>((resolve) => (release = resolve));
+    const made = await person('@agent fix');
+    await until(() => docs.told.length === 1);
+    await edit(made.body.id, made.body.comments[0].id, '@agent fix the typo');
+    await later(150);
+    release();
+    await until(async () => (await threads())[0].ping.state === 'failed', 'the thread to say it was not delivered');
+    // Nothing was left waiting: no second attempt, and the thread goes on saying it was not delivered.
+    await later(200);
+    assert.equal(docs.told.length, 1);
+    assert.equal((await threads())[0].ping.state, 'failed');
+    assert.match((await threads())[0].ping.error, /discarded/);
+    docs.state.hold = null;
+    docs.state.tell = 'works';
+    await edit(made.body.id, made.body.comments[0].id, '@agent fix the typo, please');
+    await until(() => docs.sent.a.length === 1, 'the agent to be woken');
+    assert.ok(docs.sent.a[0].message.content.includes('> @agent fix the typo, please'));
+    await until(async () => (await threads())[0].ping.state === 'sent');
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a comment that does not ask the agent any more is not woken for: the mention was taken away before the wake', async () => {
   const { docs, person, edit, threads } = await withDocument('docs-ping-unmention-', ['a'], { wakeMs: 150 });
   try {

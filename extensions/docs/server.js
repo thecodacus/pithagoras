@@ -536,14 +536,15 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   }
 
   /**
-   * The wakes that wait for a comment to be left alone, by folder and ping (a timer), until the agent has been woken or it has not
-   * been reachable: a ping that is neither taken nor waiting was not delivered, and `reasons` says why where it is known.
+   * The wakes that wait for a comment to be left alone, by folder and ping (`{ timer, running }`: `running` once the wake has begun,
+   * which is when it is past changing), until the agent has been woken or it has not been reachable: a ping that is neither taken
+   * nor waiting was not delivered, and `reasons` says why where it is known.
    */
   const wakes = new Map();
   const reasons = new Map();
   const wakeKey = (folder, ping) => `${idOf(folder.path)}/${ping}`;
   const unwake = (folder, ping) => {
-    clearTimeout(wakes.get(wakeKey(folder, ping)));
+    clearTimeout(wakes.get(wakeKey(folder, ping))?.timer);
     wakes.delete(wakeKey(folder, ping));
     reasons.delete(wakeKey(folder, ping));
   };
@@ -573,16 +574,20 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   /**
    * Wakes the agent of `chat` with the comment the ping `ping` of a thread was made for, as it stands now: through the bell of the
    * chat's pi extension, which starts the chat's pi if it was let go. The wake is not waited for by anyone: the page is told by the
-   * thread, which says whether the chat took it.
+   * thread, which says whether the chat took it. `mine` is the wake's own entry in `wakes`: it is only ever taken out by the wake
+   * it belongs to (or by `unwake`), and a comment that is changed while the wake is on its way is not woken for again.
    */
-  async function wake(folder, store, id, thread, ping, chat) {
+  async function wake(folder, store, id, thread, ping, chat, mine) {
     const key = wakeKey(folder, ping);
+    const done = () => {
+      if (wakes.get(key) === mine) wakes.delete(key);
+    };
     try {
       const doc = await store.read(id);
       const now = (await store.threads(id)).threads.find((t) => t.id === thread);
       const last = now?.comments.at(-1);
-      // Not asked any more, or the agent has answered (or the thread was closed) while the comment was left alone.
-      if (!now || now.status !== "open" || now.ping?.id !== ping || last?.id !== now.ping.comment || last.author !== "user" || !asksAgent(last.body)) return void wakes.delete(key);
+      // Not asked any more, a chat has taken it already, or the agent has answered (or the thread was closed) while the comment was left alone.
+      if (!now || now.status !== "open" || now.ping?.id !== ping || now.ping.sent || last?.id !== now.ping.comment || last.author !== "user" || !asksAgent(last.body)) return done();
       const entry = { text: wakeMessage({ title: titleOf(doc.bytes, doc.name), name: doc.name, id, thread, comment: last.body }), details: { folder: idOf(folder.path), id, thread }, state: "waiting" };
       waking.set(chat, [...(waking.get(chat) ?? []), entry]);
       let why;
@@ -598,19 +603,22 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       else if (!why && entry.state !== "sent") why = "This chat's agent did not take it";
       if (why) throw new Error(why);
       await store.reached(id, thread, ping);
-      wakes.delete(key);
+      done();
     } catch (e) {
       portal.log(`The agent in a chat of ${folder.path} could not be asked in a comment: ${e?.message ?? e}`);
+      // A wake that was dropped meanwhile (the comment was typed away) has nothing to say.
+      if (wakes.get(key) !== mine) return;
       reasons.set(key, e instanceof DocError ? e.message : (e?.message ?? String(e)));
-      wakes.delete(key);
+      done();
       toldThreads(folder, id);
     }
   }
 
   /**
    * The person's comment in `thread` was made or changed: `thread` is as it is now, and its last comment is theirs. If it asks the
-   * agent, a wake is due once it has been left alone for a while (and again, later, for each change to it until then); if it
-   * does not (any more), a wake that was due is dropped. Returns the thread.
+   * agent, a wake is due once it has been left alone for a while (and again, later, for each change to it until then; not once the
+   * wake has begun: what is changed then is in the thread, and wakes nobody again); if it does not (any more), a wake that was due
+   * is dropped. Returns the thread.
    */
   async function asked(folder, store, id, thread, requested) {
     const last = thread.comments.at(-1);
@@ -620,12 +628,15 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         if (gone.ping !== undefined) unwake(folder, gone.ping);
         return gone.thread;
       }
+      // The agent is being woken with this comment: a change to it now is in the thread, and no second wake is made for it (nor
+      // is the chat it was asked in changed, which the ping below would do).
+      if (thread.ping?.comment === last.id && wakes.get(wakeKey(folder, thread.ping.id))?.running) return thread;
       const doc = await store.read(id);
       const chat = chatToAsk(folder, doc, requested);
       const made = await store.ping(id, thread.id, { chat: chat?.id ?? null });
       if (made.sent) return made.thread;
       const key = wakeKey(folder, made.ping);
-      clearTimeout(wakes.get(key));
+      clearTimeout(wakes.get(key)?.timer);
       reasons.delete(key);
       if (!chat) {
         // No chat to ask: not delivered, and said so.
@@ -634,9 +645,13 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         toldThreads(folder, id);
         return made.thread;
       }
-      const timer = setTimeout(() => void wake(folder, store, id, thread.id, made.ping, chat.id), wakeMs);
-      timer.unref?.();
-      wakes.set(key, timer);
+      const mine = { timer: null, running: false };
+      mine.timer = setTimeout(() => {
+        mine.running = true;
+        void wake(folder, store, id, thread.id, made.ping, chat.id, mine);
+      }, wakeMs);
+      mine.timer.unref?.();
+      wakes.set(key, mine);
       return made.thread;
     } catch (e) {
       // The comment is made all the same: a failure to ask is the thread's to say, and the agent finds the comment when it reads.
@@ -844,7 +859,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
 
   return async () => {
     stopped = true;
-    for (const timer of wakes.values()) clearTimeout(timer);
+    for (const queued of wakes.values()) clearTimeout(queued.timer);
     wakes.clear();
     for (const entry of watching.values()) clearInterval(entry.timer);
     for (const res of [...streams]) res.end();

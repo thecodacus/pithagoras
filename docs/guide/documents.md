@@ -390,8 +390,8 @@ and the agent reads the thread and answers in it with the tools described
   a few seconds after you last changed it, so that it is told what you wrote and
   not what you had typed so far. Nothing waits for the chat to start: you can go
   on writing, and the thread says where the ask stands. A comment you change
-  after the agent was woken with it is changed in the thread and wakes nobody
-  again; one you take the mention out of, or type away, before the agent is woken
+  after the agent was woken with it, or while the chat is still starting up for
+  it, is changed in the thread and wakes nobody again; one you take the mention out of, or type away, before the agent is woken
   does not wake it at all.
 - Only a comment of yours wakes the agent, and only with `@agent` as a name of
   its own: `@agents`, `me@agent.example` and `@agent` in code do not. A comment
