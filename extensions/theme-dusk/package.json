@@ -17,7 +17,7 @@
           "fg": "#f4f0fa",
           "fg-muted": "#c4bcd6",
           "fg-subtle": "#b0a7c4",
-          "fg-faint": "#a096b6",
+          "fg-faint": "#a49bb9",
           "accent": "#ff79c6",
           "accent-fg": "#1b1626",
           "ok": "#50fa7b",
@@ -34,11 +34,11 @@
           "fg": "#221a30",
           "fg-muted": "#54486a",
           "fg-subtle": "#64587a",
-          "fg-faint": "#706486",
+          "fg-faint": "#6c6182",
           "accent": "#a83282",
           "accent-fg": "#ffffff",
-          "ok": "#059669",
-          "warn": "#a0690a",
+          "ok": "#047c57",
+          "warn": "#966209",
           "danger": "#cd283c"
         }
       }

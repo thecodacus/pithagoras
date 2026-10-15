@@ -1,0 +1,192 @@
+{
+  "name": "pithagoras-themes",
+  "version": "0.1.0",
+  "description": "More colours for the Pithagoras portal: Forest, Ocean, Rose, Amber and Mono, each in light and dark. Only themes: no code",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": {
+    "themes": [
+      {
+        "id": "forest",
+        "name": "Forest",
+        "dark": {
+          "canvas": "#0e1311",
+          "surface": "#141c18",
+          "raised": "#1d2822",
+          "line": "#2b3b33",
+          "fg": "#f9faf9",
+          "fg-muted": "#bccdc5",
+          "fg-subtle": "#9fb7ab",
+          "fg-faint": "#85a394",
+          "accent": "#34b469",
+          "accent-fg": "#0e1311",
+          "ok": "#62d28b",
+          "warn": "#f4b027",
+          "danger": "#f48279",
+          "terminal": "#0b0f0d",
+          "terminal-fg": "#c6ceca"
+        },
+        "light": {
+          "canvas": "#f8faf9",
+          "surface": "#ffffff",
+          "raised": "#eff3f1",
+          "line": "#dde6e2",
+          "fg": "#202422",
+          "fg-muted": "#36473e",
+          "fg-subtle": "#43584e",
+          "fg-faint": "#506a5d",
+          "accent": "#117945",
+          "accent-fg": "#ffffff",
+          "ok": "#237943",
+          "warn": "#8e6107",
+          "danger": "#d11e11"
+        }
+      },
+      {
+        "id": "ocean",
+        "name": "Ocean",
+        "dark": {
+          "canvas": "#0b1016",
+          "surface": "#101720",
+          "raised": "#17212d",
+          "line": "#233043",
+          "fg": "#f1f2f3",
+          "fg-muted": "#b8c3d2",
+          "fg-subtle": "#9eacc1",
+          "fg-faint": "#8597b1",
+          "accent": "#3698fa",
+          "accent-fg": "#0b1016",
+          "ok": "#51cd7e",
+          "warn": "#f3a812",
+          "danger": "#f37970",
+          "terminal": "#090c11",
+          "terminal-fg": "#c6cbd3"
+        },
+        "light": {
+          "canvas": "#f7f8fb",
+          "surface": "#ffffff",
+          "raised": "#ecf0f5",
+          "line": "#d8e0eb",
+          "fg": "#1e2126",
+          "fg-muted": "#364355",
+          "fg-subtle": "#435369",
+          "fg-faint": "#51647f",
+          "accent": "#105ecb",
+          "accent-fg": "#ffffff",
+          "ok": "#237742",
+          "warn": "#8d6007",
+          "danger": "#ce1d11"
+        }
+      },
+      {
+        "id": "rose",
+        "name": "Rose",
+        "dark": {
+          "canvas": "#130e10",
+          "surface": "#1c1417",
+          "raised": "#281d21",
+          "line": "#3b2b30",
+          "fg": "#f3f1f2",
+          "fg-muted": "#d0bec4",
+          "fg-subtle": "#bea5ad",
+          "fg-faint": "#ad8e98",
+          "accent": "#f65c82",
+          "accent-fg": "#130e10",
+          "ok": "#51cd7e",
+          "warn": "#f2a70f",
+          "danger": "#f37870",
+          "terminal": "#0f0b0c",
+          "terminal-fg": "#d2c9cc"
+        },
+        "light": {
+          "canvas": "#faf8f8",
+          "surface": "#ffffff",
+          "raised": "#f3eff0",
+          "line": "#e6dde0",
+          "fg": "#262022",
+          "fg-muted": "#533c44",
+          "fg-subtle": "#674b54",
+          "fg-faint": "#7b5965",
+          "accent": "#c51c4f",
+          "accent-fg": "#ffffff",
+          "ok": "#237742",
+          "warn": "#8d6007",
+          "danger": "#ce1d11"
+        }
+      },
+      {
+        "id": "amber",
+        "name": "Amber",
+        "dark": {
+          "canvas": "#13110e",
+          "surface": "#1c1915",
+          "raised": "#27241e",
+          "line": "#3a352c",
+          "fg": "#f8f8f7",
+          "fg-muted": "#cdc8bd",
+          "fg-subtle": "#b7b0a0",
+          "fg-faint": "#a49a86",
+          "accent": "#f4ad06",
+          "accent-fg": "#13110e",
+          "ok": "#5fd088",
+          "warn": "#f3ae22",
+          "danger": "#f47f77",
+          "terminal": "#0f0d0b",
+          "terminal-fg": "#cfccc6"
+        },
+        "light": {
+          "canvas": "#faf9f8",
+          "surface": "#ffffff",
+          "raised": "#f3f2ef",
+          "line": "#e6e3de",
+          "fg": "#242320",
+          "fg-muted": "#494337",
+          "fg-subtle": "#5a5344",
+          "fg-faint": "#6c6352",
+          "accent": "#a15f04",
+          "accent-fg": "#ffffff",
+          "ok": "#237943",
+          "warn": "#8e6107",
+          "danger": "#d11e11"
+        }
+      },
+      {
+        "id": "mono",
+        "name": "Mono",
+        "dark": {
+          "canvas": "#111111",
+          "surface": "#181818",
+          "raised": "#222222",
+          "line": "#333333",
+          "fg": "#f5f5f5",
+          "fg-muted": "#c6c6c6",
+          "fg-subtle": "#aeaeae",
+          "fg-faint": "#999999",
+          "accent": "#ececec",
+          "accent-fg": "#111111",
+          "ok": "#57ce83",
+          "warn": "#f3aa17",
+          "danger": "#f47b72",
+          "terminal": "#0d0d0d",
+          "terminal-fg": "#cccccc"
+        },
+        "light": {
+          "canvas": "#f9f9f9",
+          "surface": "#ffffff",
+          "raised": "#f1f1f1",
+          "line": "#e2e2e2",
+          "fg": "#222222",
+          "fg-muted": "#434343",
+          "fg-subtle": "#535353",
+          "fg-faint": "#636363",
+          "accent": "#1f1f1f",
+          "accent-fg": "#ffffff",
+          "ok": "#237842",
+          "warn": "#8e6107",
+          "danger": "#cf1d11"
+        }
+      }
+    ]
+  },
+  "license": "Apache-2.0"
+}
