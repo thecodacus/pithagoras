@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import express from 'express';
 import docsServer from '../extensions/docs/server.js';
-import { resolveInside } from '../server/src/workspace-files.ts';
+import { resolveInside } from '../core/server/src/workspace-files.ts';
 import { scratch } from './helpers.mts';
 
 /**
