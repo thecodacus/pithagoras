@@ -48,6 +48,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
   const dropDraft = (folder, id) => ui.storage.session.remove(draftKey(folder, id));
 
   const WHO = () => ({ user: t("You"), agent: t("The agent"), external: t("Outside the page") });
+  /** What the server half warns of with a save, in the person's language where it names the warning by a code; as it came where not. */
+  const warningText = (warning) => (warning === "secret" ? t("This document looks like it holds a secret (a private key or a token). Its history keeps every revision: take it out, and see the guide on how to remove it from the history.") : warning);
   /** What a revision was besides who made it: a save is nothing more. */
   function whatOf(revision) {
     if (revision.kind === "restore") return t("Restored from revision {n}", { n: revision.restoredFrom });
@@ -224,6 +226,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             // The server puts the passages of the comments in step with each revision when it is asked for them: after each save, so that each
             // step is a small one and a passage is not lost in a big one.
             if (commented.current) void refresh.current();
+            // The file was gone (deleted, or renamed) and the save made it again: the person is told, since the document is not where it was.
+            if (answer.recreated) setNotice({ kind: "recreated", revision: answer.revision });
             return answer;
           }),
         onMerged: (answer, sent) => live?.merged(answer, sent),
@@ -569,7 +573,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("Could not restore: {error}", { error: problem })),
       commentProblem && h(ui.ErrorBanner, { onClose: () => setCommentProblem(null) }, t("Could not comment: {error}", { error: commentProblem })),
       askProblem && h(ui.WarnBanner, { onClose: () => setAskProblem(null) }, t("Could not open a chat to ask the agent in: {error}", { error: askProblem })),
-      warning && h(ui.WarnBanner, { onClose: () => parts.current?.saver.dismissWarning() }, warning),
+      warning && h(ui.WarnBanner, { onClose: () => parts.current?.saver.dismissWarning() }, warningText(warning)),
       notice &&
         h(
           "div",
@@ -583,6 +587,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
               moved: () => t("The document changed in the meantime and is now at revision {n}. Restore revision {from} again if you still want it.", { n: notice.revision, from: notice.from }),
               updated: () => (notice.author === "agent" ? t("The agent changed this document. It is now at revision {n}.", { n: notice.revision }) : t("This document was changed from elsewhere. It is now at revision {n}.", { n: notice.revision })),
               merged: () => t("The document changed meanwhile and is now at revision {n}. Its changes were merged into your text.", { n: notice.revision }),
+              recreated: () => t("This document's file had been deleted or renamed. It was made again from your text, and is now at revision {n}.", { n: notice.revision }),
             }[notice.kind](),
           ),
           h("button", { type: "button", className: ui.classes.ghost, onClick: () => setNotice(null) }, t("Close")),

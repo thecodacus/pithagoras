@@ -24,7 +24,13 @@ const BRANCH = "refs/heads/main";
 /** A document's text as git names it: the id of its blob. Computed here, so a file can be compared without a process. */
 export const blobId = (bytes) => createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 
-export class GitError extends Error {}
+/** `spawn` is the code of the system's refusal where git could not be started at all (ENOENT: it is not installed). */
+export class GitError extends Error {
+  constructor(message, { spawn } = {}) {
+    super(message);
+    this.spawn = spawn;
+  }
+}
 
 /** How long one git run may take: a hung one is stopped. Far above what any call of the store needs. */
 const RUN_LIMIT_MS = 120_000;
@@ -96,7 +102,7 @@ export class Repo {
       child.stderr.on("data", (chunk) => (err = (err + chunk).slice(-4000)));
       child.on("error", (error) => {
         clearTimeout(timer);
-        reject(new GitError(`git could not be started: ${error.message}`));
+        reject(new GitError(`git could not be started: ${error.message}`, { spawn: error.code }));
       });
       child.on("close", (code) => {
         clearTimeout(timer);

@@ -20,9 +20,10 @@ export default function (portal) {
   // Its own texts in another language: English is what the code says.
   portal.locale.add("de", {
     Documents: "Dokumente",
-    "The Markdown files in the documents folder of each folder your chats work in.": "Die Markdown-Dateien im Ordner documents jedes Ordners, in dem deine Chats arbeiten.",
+    "The Markdown files in the documents folder of each folder your chats work in.": "Die Markdown-Dateien aus dem Ordner documents in jedem Ordner, in dem deine Chats arbeiten.",
     "No folder has documents yet. A document is a Markdown file in a folder called documents, in the folder a chat works in.":
-      "Noch hat kein Ordner Dokumente. Ein Dokument ist eine Markdown-Datei in einem Ordner namens documents, in dem Ordner, in dem ein Chat arbeitet.",
+      "Noch hat kein Ordner Dokumente. Ein Dokument ist eine Markdown-Datei im Unterordner documents des Ordners, in dem ein Chat arbeitet.",
+    "The documents in {folder} could not be opened: {error}": "Die Dokumente in {folder} konnten nicht geöffnet werden: {error}",
     "All documents": "Alle Dokumente",
     "Changed {date}": "Geändert {date}",
     "This document is empty.": "Dieses Dokument ist leer.",
@@ -34,8 +35,8 @@ export default function (portal) {
     "Hide history": "Verlauf ausblenden",
     "This document changed while you were editing it, and is now at revision {n}. Your text is kept here and has not been saved.":
       "Dieses Dokument wurde geändert, während du es bearbeitet hast, und steht jetzt bei Revision {n}. Dein Text bleibt hier erhalten und ist nicht gespeichert.",
-    "Keep mine as a new revision": "Meine als neue Revision behalten",
-    "Take theirs": "Die andere übernehmen",
+    "Keep mine as a new revision": "Meinen Text als neue Revision behalten",
+    "Take theirs": "Die andere Version übernehmen",
     "Show the other version": "Die andere Version anzeigen",
     "Take the other version?": "Die andere Version übernehmen?",
     "The text you have not saved is discarded, and the version that was saved meanwhile is shown instead.":
@@ -45,13 +46,17 @@ export default function (portal) {
     "Could not restore: {error}": "Wiederherstellen fehlgeschlagen: {error}",
     "The editor could not be loaded: {error}": "Der Editor konnte nicht geladen werden: {error}",
     "Text you had not saved was brought back.": "Text, den du nicht gespeichert hattest, wurde zurückgeholt.",
-    "Revision {from} is back, as revision {to}.": "Revision {from} ist zurück, als Revision {to}.",
+    "Revision {from} is back, as revision {to}.": "Revision {from} ist wiederhergestellt, als Revision {to}.",
     "The document changed in the meantime and is now at revision {n}. Restore revision {from} again if you still want it.":
-      "Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision {n}. Stelle Revision {from} noch einmal wieder her, wenn du sie noch willst.",
+      "Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision {n}. Stelle Revision {from} noch einmal wieder her, falls du sie weiterhin möchtest.",
     "The agent changed this document. It is now at revision {n}.": "Der Agent hat dieses Dokument geändert. Es steht jetzt bei Revision {n}.",
     "This document was changed from elsewhere. It is now at revision {n}.": "Dieses Dokument wurde anderswo geändert. Es steht jetzt bei Revision {n}.",
     "The document changed meanwhile and is now at revision {n}. Its changes were merged into your text.":
-      "Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision {n}. Die Änderungen wurden in deinen Text übernommen.",
+      "Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision {n}. Die Änderungen wurden in deinen Text eingearbeitet.",
+    "This document's file had been deleted or renamed. It was made again from your text, and is now at revision {n}.":
+      "Die Datei dieses Dokuments war gelöscht oder umbenannt worden. Sie wurde aus deinem Text neu angelegt, und das Dokument steht jetzt bei Revision {n}.",
+    "This document looks like it holds a secret (a private key or a token). Its history keeps every revision: take it out, and see the guide on how to remove it from the history.":
+      "Dieses Dokument enthält offenbar Zugangsdaten (einen privaten Schlüssel oder ein Token). Der Verlauf behält jede Revision: Nimm sie heraus und lies in der Anleitung nach, wie du sie auch aus dem Verlauf entfernst.",
     Close: "Schließen",
     Current: "Aktuell",
     "This is the current revision.": "Das ist die aktuelle Revision.",
@@ -59,7 +64,7 @@ export default function (portal) {
     "Show older revisions": "Ältere Revisionen anzeigen",
     You: "Du",
     "The agent": "Der Agent",
-    "Outside the page": "Außerhalb der Seite",
+    "Outside the page": "Von außerhalb",
     "Restored from revision {n}": "Wiederhergestellt aus Revision {n}",
     Created: "Erstellt",
     "Existing file": "Vorhandene Datei",
@@ -92,7 +97,7 @@ export default function (portal) {
     "Show resolved ({n})": "Erledigte anzeigen ({n})",
     "Hide resolved": "Erledigte ausblenden",
     "Show in the text": "Im Text zeigen",
-    "Comment thread": "Kommentarverlauf",
+    "Comment thread": "Kommentarthread",
     "The passage this comment was on is no longer in the document.": "Die Textstelle, auf die sich dieser Kommentar bezog, steht nicht mehr im Dokument.",
     "The passage could not be marked in the text.": "Die Textstelle konnte im Text nicht markiert werden.",
     "1 open comment": "1 offener Kommentar",
@@ -138,8 +143,10 @@ export default function (portal) {
     const { body, error, retry } = useAnswer(portal.api.url("/folders"));
     if (error) return h(ui.LoadFailed, { error, onRetry: retry });
     if (!body) return h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") });
-    if (!body.folders.length) return h(ui.Empty, null, t("No folder has documents yet. A document is a Markdown file in a folder called documents, in the folder a chat works in."));
-    return body.folders.map((folder) =>
+    // A folder whose documents could not be opened is said, with the reason: left out without a word it reads as one with none.
+    const problems = (body.problems ?? []).map((problem) => h(ui.ErrorBanner, { key: `problem-${problem.id}` }, t("The documents in {folder} could not be opened: {error}", { folder: problem.path, error: problem.error })));
+    if (!body.folders.length) return problems.length ? problems : h(ui.Empty, null, t("No folder has documents yet. A document is a Markdown file in a folder called documents, in the folder a chat works in."));
+    const section = (folder) =>
       h(
         "section",
         { key: folder.id, className: "pd-folder", "aria-labelledby": `pd-folder-${folder.id}` },
@@ -161,8 +168,8 @@ export default function (portal) {
             ),
           ),
         ),
-      ),
-    );
+      );
+    return [...problems, ...body.folders.map(section)];
   }
 
   // The Documents page is not in a chat, so it cannot tell which chat the person is in. The chat that was on screen last, in this window,

@@ -1,3 +1,5 @@
+import { GitError } from "./git.js";
+
 /** A request the store refuses: its HTTP status, what to say, and what else the answer carries. */
 export class DocError extends Error {
   constructor(status, message, extra = {}) {
@@ -5,4 +7,32 @@ export class DocError extends Error {
     this.status = status;
     this.extra = extra;
   }
+}
+
+/** The first line of what git or the database said, cut to what a person can read. */
+const brief = (text) => String(text).split("\n")[0].slice(0, 300);
+
+/**
+ * What a failure of the disk, of git or of the database is to whoever reads it: a refusal that says what is wrong, for the ones
+ * the person who runs the portal can do something about (a folder it may not write in, a full disk, git that is not there, a
+ * damaged store). Any other failure is returned as it is: it is the portal's log's to say, and the person is told it failed.
+ * `dir` is the store's folder, which a damaged store is mended in.
+ */
+export function explained(e, dir = null) {
+  if (e instanceof DocError) return e;
+  const where = dir ? ` (the store is ${dir})` : "";
+  // The store's own files are named through its open folder (/proc/self/fd/…) or by its path; anything else is in the documents folder.
+  const inStore = typeof e?.path === "string" && (e.path.startsWith("/proc/self/fd/") || (dir !== null && e.path.startsWith(dir)));
+  if (e?.code === "EACCES" || e?.code === "EPERM") return new DocError(403, inStore ? `The portal is not allowed to use the documents store${dir ? ` in ${dir}` : ""} (permission denied)` : "The portal is not allowed to change files in this folder's documents folder (permission denied)");
+  if (e?.code === "EROFS") return new DocError(403, "The documents folder, or the portal's data folder, is on a read-only file system");
+  if (e?.code === "ENOSPC" || e?.code === "EDQUOT") return new DocError(507, "There is no room left on the disk for this document");
+  if (e instanceof GitError) {
+    if (e.spawn === "ENOENT") return new DocError(500, "git could not be found on the portal's PATH: the history of the documents is kept with it");
+    return new DocError(500, `The history of the documents could not be used: ${brief(e.message)}${dir ? ` (the store is ${dir}: if the history there is damaged, remove its git folder to start it again; the documents and their comments stay)` : ""}`);
+  }
+  if (typeof e?.code === "string" && e.code.startsWith("SQLITE_")) {
+    if (["SQLITE_NOTADB", "SQLITE_CORRUPT"].includes(e.code)) return new DocError(500, `The database of the documents is damaged: ${brief(e.message)}${dir ? ` (remove the docs.sqlite files in ${dir} to build it again from the history; the comments are lost)` : ""}`);
+    return new DocError(500, `The database of the documents could not be used: ${brief(e.message)}${where}`);
+  }
+  return e;
 }

@@ -69,7 +69,8 @@ export function createSaver({ read, send, onState, onMerged, delay = 1000, setTi
         baseline = text;
         if (answer.merged) merged = answer;
         if (!answer.warning) dismissed = false;
-        set({ base, warning: dismissed ? null : (answer.warning ?? null) });
+        // The server half names a warning by a code too, so that the page says it in the person's language; one without is said as it came.
+        set({ base, warning: dismissed ? null : (answer.warningCode ?? answer.warning ?? null) });
       } catch (e) {
         if (e?.status === 409 && Number.isInteger(e.body?.revision)) {
           const theirs = typeof e.body.markdown === "string" ? e.body.markdown : "";

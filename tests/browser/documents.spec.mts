@@ -44,7 +44,7 @@ const FOLDERS = [
   { id: 'fedcba9876543210', name: 'tools', path: '/w/tools', chats: [{ id: 'b', title: 'Second chat' }], documents: [{ id: '3333333333333333', name: 'setup.md', title: 'Setting up', revision: 1, size: 20, modified: '2026-10-03T09:30:00.000Z' }] },
 ];
 
-async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' | 'open' = 'idle') {
+async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' | 'open' = 'idle', problems: unknown[] = []) {
   const at = new Date().toISOString();
   const sessions = [{ id: 'a', title: 'First chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null }];
   /** The documents the page asked for, as their addresses. */
@@ -53,7 +53,7 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
     if (p === '/api/extension-ui') return { extensions: [{ name: NAME, version: '0.1.0', entry: address('client.js') + '?v=1', style: address('client.css') + '?v=1', server: `/api/x/${NAME}` }] };
     // The folder the portal serves of the package: its modules, the editor among them, and its stylesheet.
     if (p.startsWith(address(''))) { await route.fulfill({ contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: web(p.slice(address('').length)) }); return DONE; }
-    if (p === `/api/x/${NAME}/folders`) return { folders };
+    if (p === `/api/x/${NAME}/folders`) return { folders, ...(problems.length ? { problems } : {}) };
     if (p.startsWith(`/api/x/${NAME}/folders/`)) {
       // The comments on a document are asked for with it, and are none.
       if (p.endsWith('/threads')) return { revision: 3, threads: [] };
@@ -122,6 +122,38 @@ test('the Documents page says when no folder has documents', async ({ page }) =>
   await sidebar(page).getByRole('button', { name: 'Documents' }).click();
   await expect(page).toHaveURL(new RegExp(`/x/${NAME}/documents$`));
   await expect(page.getByText('No folder has documents yet.', { exact: false })).toBeVisible();
+});
+
+/** Folders whose documents the server half could not open, as it says them. */
+const PROBLEMS = [
+  { id: 'aaaaaaaaaaaaaaaa', name: 'broken', path: '/w/broken', error: 'The history of the documents could not be used: git update-ref failed (128): fatal: cannot lock ref (the store is /data/extension-data/pithagoras-docs/aaaaaaaaaaaaaaaa)' },
+  { id: 'bbbbbbbbbbbbbbbb', name: 'locked', path: '/w/locked', error: "The portal is not allowed to read this folder's documents folder (permission denied)" },
+];
+
+test('a folder whose documents could not be opened is said, with the reason, beside the folders that could, and where there is no other it is not called empty', async ({ page }) => {
+  await portal(page, FOLDERS, 'idle', PROBLEMS);
+  await page.goto(`/x/${NAME}/documents`);
+  const alerts = page.getByRole('alert');
+  await expect(alerts).toHaveCount(2);
+  await expect(alerts.first()).toHaveText('The documents in /w/broken could not be opened: The history of the documents could not be used: git update-ref failed (128): fatal: cannot lock ref (the store is /data/extension-data/pithagoras-docs/aaaaaaaaaaaaaaaa)');
+  await expect(alerts.nth(1)).toHaveText("The documents in /w/locked could not be opened: The portal is not allowed to read this folder's documents folder (permission denied)");
+  // The folders that could be opened are there as they were.
+  await expect(page.getByRole('region', { name: 'site' }).getByRole('listitem')).toHaveCount(2);
+  await expect(page.getByRole('region', { name: 'tools' })).toBeVisible();
+});
+
+test('with no folder that could be opened, the reasons are what the page says, and not that no folder has documents', async ({ page }) => {
+  await portal(page, [], 'idle', PROBLEMS);
+  await page.goto(`/x/${NAME}/documents`);
+  await expect(page.getByRole('alert')).toHaveCount(2);
+  await expect(page.getByText('No folder has documents yet.', { exact: false })).toHaveCount(0);
+});
+
+test('the reasons a folder could not be opened are in German in a German portal', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  await portal(page, [], 'idle', PROBLEMS.slice(1));
+  await page.goto(`/x/${NAME}/documents`);
+  await expect(page.getByRole('alert')).toHaveText("Die Dokumente in /w/locked konnten nicht geöffnet werden: The portal is not allowed to read this folder's documents folder (permission denied)");
 });
 
 /** What the agent's tools report of a document they named, as the server half's tools give it. */

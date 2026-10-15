@@ -6,6 +6,7 @@ import { chmodSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync
 import path from 'node:path';
 import ts from 'typescript';
 import { ensureDependencies, missingDependencies } from '../extensions/docs/deps.js';
+import { SECRET_WARNING } from '../extensions/docs/secret.js';
 import docsServer from '../extensions/docs/server.js';
 import { resolveInside } from '../core/server/src/workspace-files.ts';
 import { scratch } from './helpers.mts';
@@ -335,6 +336,10 @@ test('every text the Documents page shows has a German one, and no German one is
   const modules = readdirSync(folder).filter((name) => name.endsWith('.js') && name !== 'editor.js');
   assert.ok(modules.includes('client.js') && modules.includes('document-editor.js'), modules.join(', '));
   const shown = new Set<string>();
+  // What each German text is, by its English: kept to say each fills in the same words.
+  const said = new Map<string, string>();
+  // A text that is not written out where it is asked for cannot be held to a German one: there are none.
+  const unwritten: string[] = [];
   let german: Set<string> | undefined;
   for (const name of modules) {
     const src = ts.createSourceFile(name, readFileSync(new URL(name, folder), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
@@ -343,9 +348,13 @@ test('every text the Documents page shows has a German one, and no German one is
         const callee = n.expression.getText(src);
         const first = n.arguments[0];
         if (callee === 't' && first && ts.isStringLiteralLike(first)) shown.add(first.text);
+        else if (callee === 't') unwritten.push(`${name}:${src.getLineAndCharacterOfPosition(n.getStart(src)).line + 1}`);
         if (callee === 'portal.locale.add' && first && ts.isStringLiteralLike(first) && first.text === 'de') {
           const table = n.arguments[1] as ts.ObjectLiteralExpression;
           german = new Set(table.properties.map((p) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) ? p.name.text : '')));
+          for (const p of table.properties as unknown as ts.PropertyAssignment[]) {
+            if (p.name && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) && ts.isStringLiteralLike(p.initializer)) said.set(p.name.text, p.initializer.text);
+          }
         }
       }
       // A page's title in the sidebar is shown as well.
@@ -360,6 +369,16 @@ test('every text the Documents page shows has a German one, and no German one is
   assert.ok(shown.size > 3);
   assert.deepEqual([...shown].filter((text) => !german!.has(text)), [], 'shown without German');
   assert.deepEqual([...german!].filter((text) => !shown.has(text)), [], 'German for nothing shown');
+  assert.deepEqual(unwritten, [], 'texts asked for that are not written out');
+  // Each German text fills in the words the English does, and is not empty.
+  const words = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
+  for (const [english, german] of said) {
+    assert.deepEqual(words(german), words(english), english);
+    assert.ok(german.trim(), `${english} has no German`);
+  }
+  assert.equal(said.size, german!.size, 'every German text is written out');
+  // The warning the server half sends with a save is said by the page in the person's language, and is the same words.
+  assert.ok(shown.has(SECRET_WARNING), 'the page says the secret warning as the server half does');
 });
 
 /** `version` of `name` in the package folder `dir`, as npm leaves it there. */

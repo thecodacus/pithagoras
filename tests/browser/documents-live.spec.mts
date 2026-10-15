@@ -355,5 +355,5 @@ test('the notes about a change that came from outside are in German in a German 
   await typeAfter(page, 'Sign-off is on Tuesday.', ' Spät.');
   store.elsewhere(agents().replace('Friday', 'Wednesday').replace('is green', 'is red'));
   await tell(page, 6);
-  await expect(note(page)).toContainText('Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision 6. Die Änderungen wurden in deinen Text übernommen.');
+  await expect(note(page)).toContainText('Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision 6. Die Änderungen wurden in deinen Text eingearbeitet.');
 });

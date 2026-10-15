@@ -168,6 +168,8 @@ export function documentTools(pi, chat, deps) {
   function failed(e) {
     if (e instanceof Refusal) return e;
     if (e instanceof DocError) {
+      // A failure of the store's own (git, the database) is for the log as well: the agent is only told it was refused.
+      if (e.status === 500) deps.log(`A document tool failed in chat ${chat.id}: ${e.message}`);
       // The comments' refusals say what they are: a thread that is not there, a quote that is not in the text, a comment too long.
       if (e.extra?.code && e.extra.code !== "revision_mismatch") return new Refusal(e.extra.code, e.message);
       if (e.status === 404) return new Refusal("not_found", e.message);

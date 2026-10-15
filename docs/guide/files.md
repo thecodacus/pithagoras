@@ -71,6 +71,12 @@ The agent writes here too, so a save is checked. If the file changed after you
 opened it, the save is refused and you choose between loading the new version
 and saving yours anyway.
 
+The Markdown files in a folder called `documents` are also the project's
+[Documents](/guide/documents), with a history of their own. A change made here
+is kept there as a revision, marked as an outside change, and a page that has
+the document open is told of it; deleting or renaming such a file is dealt with
+as [Documents](/guide/documents#a-file-that-is-deleted-or-renamed) describes.
+
 ## Watching the agent
 
 Files follows the agent. When it reads a file, or writes or edits one, that file

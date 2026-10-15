@@ -508,6 +508,34 @@ test('a secret the server warns about is said once, and not again while it stays
   await expect(page.getByText('looks like it holds a secret')).toHaveCount(0);
 });
 
+test('a save that made the document\'s file again, because it was deleted or renamed, says so', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  store.next = { recreated: true };
+  await typeAtEnd(page, ' One.');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  await expect(page.getByRole('status').filter({ hasText: 'file had been deleted or renamed' })).toHaveText("This document's file had been deleted or renamed. It was made again from your text, and is now at revision 4.Close");
+  // An ordinary save after it says nothing more of it.
+  await page.getByRole('button', { name: 'Close' }).click();
+  await typeAtEnd(page, ' Two.');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  await expect(page.getByText('file had been deleted or renamed')).toHaveCount(0);
+});
+
+test('the note that the file was made again, and the warning of a secret, are in German in a German portal, whatever the server half wrote them in', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  store.next = { recreated: true, warning: 'This document looks like it holds a secret.', warningCode: 'secret' };
+  await typeAtEnd(page, ' Eins.');
+  await expect(state(page)).toHaveText('Gespeichert · Revision 4');
+  await expect(page.getByRole('status').filter({ hasText: 'Die Datei dieses Dokuments' })).toContainText('Die Datei dieses Dokuments war gelöscht oder umbenannt worden. Sie wurde aus deinem Text neu angelegt, und das Dokument steht jetzt bei Revision 4.');
+  await expect(page.getByRole('status').filter({ hasText: 'Zugangsdaten' })).toContainText('Dieses Dokument enthält offenbar Zugangsdaten (einen privaten Schlüssel oder ein Token).');
+  await expect(page.getByText('looks like it holds a secret')).toHaveCount(0);
+});
+
 test('the history lists the revisions, shows one, and brings it back as a new revision', async ({ page }) => {
   const store = new Store();
   await open(page, store);
@@ -641,6 +669,23 @@ test('the editor page speaks German in a German portal', async ({ page }) => {
   store.elsewhere('# Der Plan\n');
   await typeAtEnd(page, ' Noch mehr.');
   await expect(page.locator('.pd-conflict')).toContainText('Dieses Dokument wurde geändert, während du es bearbeitet hast, und steht jetzt bei Revision 5.');
-  await expect(page.getByRole('button', { name: 'Meine als neue Revision behalten' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Die andere übernehmen' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Meinen Text als neue Revision behalten' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Die andere Version übernehmen' })).toBeVisible();
+});
+
+test('a document of the largest size opens in the editor, takes what is typed at once, and is saved in one request', async ({ page }) => {
+  const paragraphs = Array.from({ length: 12_000 }, (_, i) => `Paragraph ${i} ${'word '.repeat(10)}`.trim());
+  let text = `# Big\n\n${paragraphs.join('\n\n')}\n`;
+  while (Buffer.byteLength(text) > 1024 * 1024) text = text.slice(0, -1000).replace(/[^\n]*$/, '');
+  expect(Buffer.byteLength(text)).toBeGreaterThan(700_000);
+  const store = new Store(text);
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Paragraph 5', { timeout: 60_000 });
+  const typing = Date.now();
+  await typeAtEnd(page, ' Last words.');
+  // The editor keeps up with a person typing: a document this size is not one they wait for key by key.
+  expect(Date.now() - typing).toBeLessThan(10_000);
+  await expect(state(page)).toHaveText('Saved · Revision 4', { timeout: 60_000 });
+  expect(store.puts.length).toBe(1);
+  expect(store.puts[0].markdown).toBe(text.replace(/\n$/, ' Last words.\n'));
 });

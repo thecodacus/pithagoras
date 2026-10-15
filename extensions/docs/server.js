@@ -50,6 +50,7 @@ import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
+import { explained } from "./errors.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
 import { hearPings, wakeMessage } from "./ping.js";
 import { SECRET, SECRET_WARNING } from "./secret.js";
@@ -337,8 +338,13 @@ const POLL_MS = 2_000;
  * and the agent is to be woken with what was written, not with the words typed so far.
  */
 const WAKE_MS = 3_000;
+/**
+ * How long a chat has to take the wake once it has begun: starting a chat's pi takes a while, and one that never starts would leave the
+ * thread saying the agent was asked for good, with nothing that asks again.
+ */
+const WAKE_LIMIT_MS = 120_000;
 
-export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pingMs = PING_MS, pollMs = POLL_MS, wakeMs = WAKE_MS } = {}) {
+export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pingMs = PING_MS, pollMs = POLL_MS, wakeMs = WAKE_MS, wakeLimitMs = WAKE_LIMIT_MS } = {}) {
   // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
   // in the background: the portal does not wait for an install to start the rest. The store waits for it.
   const ready = dependencies((line) => portal.log(line));
@@ -513,7 +519,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   /** The folder a request names by its id, or a 404. */
   function folderOf(req) {
     const folder = folders().get(req.params.folder);
-    if (!folder) throw new DocError(404, "There is no such folder");
+    if (!folder) throw new DocError(404, "There is no such folder, or no chat works in it any more");
     return folder;
   }
 
@@ -592,11 +598,16 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       const entry = { text: wakeMessage({ title: titleOf(doc.bytes, doc.name), name: doc.name, id, thread, comment: last.body }), details: { folder: idOf(folder.path), id, thread }, state: "waiting" };
       waking.set(chat, [...(waking.get(chat) ?? []), entry]);
       let why;
+      let late;
       try {
         // Starts the chat's pi if it was let go, and rings the bell its pi extension answers by taking what is queued for it.
-        if (!(await portal.chats.tell(chat, { type: "ping" }))) why = "This chat's agent does not run in the portal's own process";
+        const rang = await Promise.race([portal.chats.tell(chat, { type: "ping" }), new Promise((resolve) => (late = setTimeout(resolve, wakeLimitMs, "late")))]);
+        if (rang === "late") why = "This chat did not start in time";
+        else if (!rang) why = "This chat's agent does not run in the portal's own process";
       } catch (e) {
         why = e?.message ?? String(e);
+      } finally {
+        clearTimeout(late);
       }
       // What the bell did not hand over is not left for whatever rings it next.
       waking.set(chat, (waking.get(chat) ?? []).filter((queued) => queued !== entry));
@@ -633,7 +644,8 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       // The agent is being woken with this comment: a change to it now is in the thread, and no second wake is made for it (nor
       // is the chat it was asked in changed, which the ping below would do).
       if (wakes.get(wakeKey(folder, last.id))?.running && thread.ping?.comment === last.id) return thread;
-      const doc = await store.read(id);
+      // Not read: a document whose file is gone is asked about all the same, and the thread says the agent could not read it.
+      const doc = await store.ownerOf(id);
       const chat = chatToAsk(folder, doc, requested);
       const made = await store.ping(id, thread.id, { chat: chat?.id ?? null });
       if (made.sent) return made.thread;
@@ -662,7 +674,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     }
   }
 
-  const warn = (markdown) => (SECRET.test(markdown) ? { warning: SECRET_WARNING } : {});
+  const warn = (markdown) => (SECRET.test(markdown) ? { warning: SECRET_WARNING, warningCode: "secret" } : {});
   const shown = ({ bytes, ...doc }) => ({ ...doc, title: titleOf(bytes, doc.name), markdown: bytes.toString("utf8") });
 
   /** A route whose refusals are answered with their status, and whose failures are logged and answered with a 500. */
@@ -670,7 +682,11 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     try {
       await handler(req, res);
     } catch (e) {
-      if (e instanceof DocError) return res.status(e.status).json({ error: e.message, ...e.extra });
+      if (e instanceof DocError) {
+        // A refusal the person caused is theirs to read; one of the store's own (git, the database) is also for the log.
+        if (e.status === 500) portal.log(`${req.method} ${req.path} failed: ${e.message}`);
+        return res.status(e.status).json({ error: e.message, ...e.extra });
+      }
       portal.log(`${req.method} ${req.path} failed: ${e?.stack ?? e}`);
       res.status(500).json({ error: "The documents store could not do that" });
     }
@@ -681,22 +697,29 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
 
   portal.router.get("/folders", route(async (_req, res) => {
     const list = [];
+    const problems = [];
     for (const folder of folders().values()) {
-      if (!documentsOf(folder.path)) continue;
+      const dir = documentsOf(folder.path);
+      if (!dir) continue;
+      const name = path.basename(folder.path) || folder.path;
       let documents;
       try {
         const store = await storeFor(folder.path, { make: true });
         documents = (await store.list(HEAD_BYTES)).map(({ head, ...doc }) => ({ ...doc, title: titleOf(head, doc.name) }));
       } catch (e) {
-        // One folder's store that cannot be opened (a link in its place, git missing) leaves the others listed.
+        // One folder's store that cannot be opened (a link in its place, git missing) leaves the others listed, and is said on the page:
+        // a folder that is silently left out reads as one with no documents.
         portal.log(`The documents in ${folder.path} could not be listed: ${e?.message ?? e}`);
+        const known = explained(e);
+        problems.push({ id: folder.id, name, path: folder.path, error: known instanceof DocError ? known.message : "The documents store could not be opened: the portal's log says why" });
         continue;
       }
       documents.sort((a, b) => a.title.localeCompare(b.title) || a.name.localeCompare(b.name));
-      if (documents.length) list.push({ ...folder, name: path.basename(folder.path) || folder.path, documents });
+      if (documents.length) list.push({ ...folder, name, documents });
     }
     list.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
-    res.json({ folders: list });
+    problems.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+    res.json({ folders: list, ...(problems.length ? { problems } : {}) });
   }));
 
   portal.router.post("/folders/:folder/documents", json, route(async (req, res) => {

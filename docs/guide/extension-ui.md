@@ -959,9 +959,12 @@ It is the portal's test extension and is not shipped: copy it to start your
 own, and install your copy by its path. What the portal ships is in
 `extensions/`, under **Settings → Extensions → Discover → Comes with
 Pithagoras**: `extensions/theme-dusk` and `extensions/theme-warm` are extensions
-that are only a theme, and `extensions/docs` is a larger one that is still being built: a page in the
-sidebar, fed by its server half's routes, and tools for the agent that share
-the server half's store ([Documents](/guide/documents)).
+that are only a theme, and `extensions/docs` is a large one: a page in the
+sidebar, fed by its server half's routes, a stream that tells the page of
+changes, an editor built into the page, and tools for the agent that share the
+server half's store ([Documents](/guide/documents), whose last section says how
+it is built). Its texts are in German through `portal.locale.add`, and the
+portal's tests hold it to every text it shows.
 
 `extensions/terminal`, the [terminal](/guide/terminal) a fresh portal installs,
 is the one written in TypeScript and JSX:

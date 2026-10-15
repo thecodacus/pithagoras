@@ -3,12 +3,21 @@
 **Documents** is an extension that ships in the repository, in
 `extensions/docs` (package `pithagoras-docs`). It adds a **Documents** page to
 the sidebar. The page shows the Markdown documents in the folders your chats
-work in.
+work in, which you and the agent edit together.
 
-It is under construction: documents can be listed, read, edited by you and by
-the agent at the same time, have a history, and can be commented on, by you and
-by the agent, which you can ask to answer a comment with `@agent`. This page
-describes what it does so far.
+- A document is an ordinary Markdown file, so the agent reads and writes it
+  with its own tools as well as with the ones Documents gives it.
+- You edit it in the page as it will look. The agent can change it while it is
+  open, and its change is put together with yours as it comes.
+- Every revision the portal makes or sees is kept, whoever made it, and an
+  earlier one can be brought back.
+- You and the agent comment on passages of a document, and write `@agent` in a
+  comment to have the agent answer it.
+
+Documents is not [Canvases](/guide/canvases). A canvas belongs to one
+conversation, and is kept by the portal (in memory, or in its database once
+stored). A document is a file in the project, shared by every chat that works
+there, with a history and comments of its own. Both exist side by side.
 
 ## Installing it
 
@@ -24,13 +33,21 @@ versions the extension's lock file names.
 A checkout that was not built since its last change (one run by systemd, for
 example) may not have the packages the extension needs to run, or have other
 versions of them. When the portal starts, the extension then installs them
-with npm in the background. The portal's log says when the
-install starts and when it ends, or why it failed. A failed install is tried
-again at the next start.
+with npm in the background (it needs npm and a network). The portal's log says
+when the install starts and when it ends, or why it failed. A failed install is
+tried again at the next start. A request waits for the install to end, and
+after a failed one the page says that the store's packages are not installed
+yet. This installs what the extension needs to run, not what builds its editor:
+a checkout still needs `npm run build`, or documents are shown read-only
+([History](#history)).
+
+The history is kept with git, which the image has. A portal run from a
+checkout needs `git` on its `PATH`; without it the page says so for every
+folder ([When a folder's documents cannot be opened](#when-a-folders-documents-cannot-be-opened)).
 
 ## What a document is
 
-A document is a Markdown file (`.md`) directly in a folder called `documents`
+A document is a Markdown file (`.md`, in any case) directly in a folder called `documents`
 in a chat's folder:
 
 ```
@@ -43,8 +60,11 @@ in a chat's folder:
 These are ordinary files. [Files](/guide/files) lists them, and the agent can
 read and write them like any other file in its folder.
 
-A Markdown file you or the agent put into `documents` becomes a document the
-next time the page lists the folder. Left out are:
+There is no button for a new document: ask the agent to make one (it has a
+tool for it, [below](#the-agents-tools)), or put a Markdown file into
+`documents`. It becomes a document the next time the page lists the folder
+(or the agent lists them), with the file's text as its first revision. Left
+out are:
 
 - names that start with a dot
 - files in folders below `documents`
@@ -52,7 +72,8 @@ next time the page lists the folder. Left out are:
 - everything in a `documents` that is itself a link to another folder
 - files bigger than 1 MB
 - anything that is not a plain file, such as a pipe
-- names with control characters in them
+- a file the portal is not allowed to read
+- names with a backslash or a control character in them
 - documents past the first 1000 in a folder
 
 ## Revisions and history
@@ -73,10 +94,53 @@ A change made outside the page, by the agent with its own tools, in Files or
 in an editor, is not lost either. The next time the document is listed, read
 or saved, or within a couple of seconds while the document is open on the
 page, it is kept as a revision of its own, marked as an outside change. The
-same happens to a save that the portal could not finish (it stopped in the
-middle, say): what reached the disk is kept as a revision.
+portal sees the file as it is at that moment, so several outside changes made
+between two looks are one revision. The same happens to a save that the portal
+could not finish (it stopped in the middle, say): what reached the disk is kept
+as a revision.
 
-Restoring a document whose file was deleted makes the file again.
+### A file that is deleted or renamed
+
+A document is a file, so [Files](/guide/files), the agent's own tools or an
+editor can delete it or give it another name while you have it open. What
+happens then:
+
+- The document is no longer listed, and asking for it is answered with "There
+  is no such document". Its history and its comments are kept in the store
+  ([below](#where-the-history-is-kept)) and are there again as soon as a file of
+  that name is.
+- The page is not told. The text stays in the editor, and nothing is lost: the
+  next time it is saved, the save makes the file again from your text, under
+  its name, as the next revision, and the page says so ("This document's file
+  had been deleted or renamed. It was made again from your text …"). If the
+  whole `documents` folder was deleted, it is made again with the chat folder's
+  owner and mode, so that the agent can write in it as before.
+- A save that started from an earlier revision than the document's last one is
+  a conflict, as ever, with the last revision's text as the other version. The
+  file is made when you keep your text.
+- Comments on the open document go on: a new one is made on the text the
+  document last had, and replies and resolving work as before. The agent cannot
+  read the document until its file is there, so an `@agent` on it is not
+  delivered, and says why.
+- Something else where the file was (a folder, a link, a file with a second
+  name) is not written over: the save is refused ("Another file took the
+  document's name"), and your text stays in the editor.
+- **Restore this revision** makes the file again too, from an earlier revision.
+- A **rename** is a new file to the portal: it is taken in as a document of its
+  own, at revision 1, marked as an existing file, with none of the old
+  document's history or comments. Those stay with the old name. If a file of
+  the old name is there again (renamed back, or another written by the agent),
+  it is the old document again, at the revision it had if the text is the same
+  and at its next one, marked as an outside change, if it is not.
+- A title whose file is gone is free for the agent: `doc_create` makes a new
+  document with the next file name (`plan-2.md`) and does not touch the one
+  that is gone.
+- A file that is there, but that the portal does not read as a document (an
+  outside change made it bigger than 1 MB, or the portal may not read it), is
+  not called gone and is not written over: reading and saving the document are
+  refused with that reason ("The document's file is bigger than 1 MB, or the
+  portal is not allowed to read it"), and your text stays in the editor. The
+  portal writes over such a file only when you restore an earlier revision.
 
 ### Where the history is kept
 
@@ -111,10 +175,12 @@ The store is for the folder it was made for, not only for a path:
 
 - A folder that was **deleted and made again** at the same path is another
   folder. It starts a new history, and the old one is kept beside it as
-  `<id>.replaced-<time>`, to look at or to delete. The exception is a folder
-  **restored from a backup**: it has other inodes, but its documents are the
-  ones the store knows (some document is there with the text of one of its
-  revisions), so the history stays with it.
+  `<id>.replaced-<time>`, to look at or to delete. (The portal tells folders
+  apart by their device and inode, so on a file system that gives a new folder
+  the inode number of the one deleted, the old history carries on.) The
+  exception is a folder **restored from a backup**: it has other inodes, but
+  its documents are the ones the store knows (some document is there with the
+  text of one of its revisions), so the history stays with it.
 - A folder that was **moved or renamed** on the same disk takes its store along
   the next time a chat works in it and the page lists it, as long as some
   document in it still has the text of one of the store's revisions (the same
@@ -148,10 +214,10 @@ file an agent holds open would then be in the data folder) into the data folder
 as the folder named by the folder's id, the first 16 characters of the SHA-256
 of the folder's path, and then delete `.pithagoras-docs`.
 
-When it cannot be moved, the folder's documents are left out of the page (the
-portal's log says why, as "could not be moved into the portal's data folder"),
-a request for them is answered with the reason, nothing is changed, and the old
-store is not used. A `.pithagoras-docs` that is still there beside a store in
+When it cannot be moved, the page says why for that folder ([below](#when-a-folders-documents-cannot-be-opened)),
+and so does the portal's log ("could not be moved into the portal's data folder"),
+a request for its documents is answered with the reason, nothing is changed, and
+the old store is not used. A `.pithagoras-docs` that is still there beside a store in
 the data folder is left alone, also when the folder is moved: the store in the
 data folder (for this folder) is the one used, and the log says to remove it. If
 the old one could not be removed after it was copied, the log says so: remove it.
@@ -166,6 +232,44 @@ history as well, delete the folder's store in the data folder (and any
 document in that folder; the documents themselves stay, and start again at
 revision 1.
 
+## When a folder's documents cannot be opened
+
+A folder whose documents the portal cannot open is not left out in silence,
+where it would read as a folder with no documents. The page says so above the
+folders it can list, with the folder and the reason:
+
+> The documents in /data/workspaces/site could not be opened: …
+
+The other folders are listed as usual, the portal's log has a line with the same reason, the
+agent's tools in that folder refuse with the same reason, and the documents'
+files are not touched. The reasons are the portal's own words, in English. The
+usual ones are these:
+
+| The page says | Why, and what to do |
+| --- | --- |
+| The documents store's packages are not installed yet | The extension installs what it needs to run in the background when the portal starts ([Installing it](#installing-it)); it needs npm and a network. The install failed (the portal's log says why); the page says this for every folder until the portal starts again and tries again. |
+| The portal is not allowed to read this folder's documents folder (permission denied) | The user the portal runs as cannot enter or list `documents`. Give it the right to (`chmod`, or the folder's owner). |
+| git could not be found on the portal's PATH: … | The history is kept with git ([Installing it](#installing-it)). Install it, or put it on the portal's `PATH` (a portal that was started before has to be restarted). Nothing was changed. |
+| The history of the documents could not be used: git … | git could not read or write the folder's history. It names the store's folder. If the history is damaged (a crash, a disk that failed), remove the `git` folder in the store: the history starts again from the files as they are, every document at revision 1 and marked as an existing file, and the documents and their comments stay (except those of a document whose file is gone: it is forgotten with its comments). The damaged history is gone with it: keep a copy first to look into it. If the reason is something else (a full disk, say), mend that. |
+| The database of the documents is damaged: … | The comments and the index of the revisions could not be read. Remove the `docs.sqlite` files in the store's folder (all of them: a database left with the log of another one is damaged again): the index is built again from the history. The comments are lost, and a chat's own documents become the project's. Keep a copy first if you want to try to read the comments with `sqlite3`. |
+
+A save that the portal cannot make says why ("Could not save: …", and **Try
+again**; your text stays in the editor and is tried again at your next change),
+a restore says "Could not restore: …", and the agent's `doc_create` is refused
+with the same reasons:
+
+- **The portal is not allowed to change files in this folder's documents
+  folder (permission denied)**: it can read the documents but not write them.
+  It is the folder that has to be writable, not the file: a save is a new file
+  renamed over the old one, as an editor does it.
+- **There is no room left on the disk for this document**, or **… is on a
+  read-only file system**: the disk of the documents, or of the portal's data
+  folder, is full or not writable.
+
+Nothing is left half done by any of these: a save is written whole or not at all,
+and a write that was cut off is put right the next time the store is used
+([above](#revisions-and-history)).
+
 ## The page
 
 The page has one section for each folder that has documents. Several chats can
@@ -178,12 +282,13 @@ comment or in a block of HTML is not a heading.
 The title is shown as plain text. Links and pictures are shown by their text,
 emphasis, code and HTML tags lose their marks however long they are, and
 footnote marks are left out. A title longer than 256 characters is cut. A document with no heading in
-its first 4 KB is listed by its file name. The list also shows when the
+its first 4 KB is listed by its file name, without the `.md`. The list also shows when the
 document last changed, how many comments on it are open and how many threads
 the agent has answered, open or resolved, that you have not reacted to yet
 ([below](#comments)).
 
-**All documents** goes back to the list.
+**All documents** goes back to the list. A folder whose documents could not be
+opened is said above the list, with the reason ([above](#when-a-folders-documents-cannot-be-opened)).
 
 ## Editing a document
 
@@ -233,8 +338,9 @@ A save goes against the revision the page started from, as the agent's edits do
 ([above](#revisions-and-history)); when the document has moved on since, it is
 put together with the later revision where it can be
 ([below](#when-the-agent-changes-the-document-while-it-is-open)). A save that
-cannot be made says why ("Could not save: …") and is tried again at your next
-change, or at **Try again**. Your text stays in the editor. A save with a secret in it (see
+cannot be made says why ("Could not save: …": the portal may not write in the
+folder, the disk is full, the history is broken, [above](#when-a-folders-documents-cannot-be-opened))
+and is tried again at your next change, or at **Try again**. Your text stays in the editor. A save with a secret in it (see
 [A secret in a document](#a-secret-in-a-document)) is made, and the page warns
 about it. Once you put the warning away it is not said again with each save,
 until a save without the secret has come in between.
@@ -258,7 +364,9 @@ What the page does with a change depends on what is in the editor:
   a reload. Only the paragraphs, lists and other blocks that changed are
   replaced, and they are marked for a moment. Your caret and selection stay
   where they were, unless the change is in the block they are in. A note says
-  who changed the document and that it is now at the new revision. The change
+  who changed the document (the agent, through its document tools, or "from
+  elsewhere": Files, an editor, the agent's own file tools) and that it is now
+  at the new revision. The change
   is not something Ctrl+Z undoes (it is not yours to take back); what you had
   typed before it still can be.
 - **You have text that is not saved yet.** The change is merged into your text
@@ -315,8 +423,9 @@ while there is such text.
 ## History
 
 **History** shows the document's revisions, newest first, with who made each
-(you, the agent, or an outside change: Files, an editor, or a save the portal
-could not finish) and when. A revision that restored an earlier one says which.
+(you; the agent, through its document tools; or an outside change: Files, an
+editor, the agent's own file tools, or a save the portal could not finish) and
+when. A revision that restored an earlier one says which.
 Click a revision to read its text.
 
 **Restore this revision** saves its text as a new revision, so the history only
@@ -394,8 +503,9 @@ and the agent reads the thread and answers in it with the tools described
   it, is changed in the thread and wakes nobody again; one you take the mention out of, or type away, before the agent is woken
   does not wake it at all.
 - Only a comment of yours wakes the agent, and only with `@agent` as a name of
-  its own: `@agents`, `me@agent.example` and `@agent` in code do not. A comment
-  without it wakes nobody; the agent finds it when it reads the document. Text
+  its own, in any case: `@agents`, `me@agent.example` and `@agent` straight after
+  a backtick do not (a mention elsewhere in a code span or block still counts).
+  A comment without it wakes nobody; the agent finds it when it reads the document. Text
   you type into the document is never a ping, and neither is a comment the agent
   writes.
 - The comment goes to the chat you are in. The Documents page is not in a chat,
@@ -458,7 +568,8 @@ lines that changed. It guesses as little as it can:
   be answered and resolved. If the words come back (a restored revision, an undo)
   the passage is found again, but only where the text around it is like what was
   around it (letters and digits: the blank lines and full stops that set off every
-  paragraph do not count).
+  paragraph do not count). A sentence that stands once in the text is found
+  wherever it is (see below).
 - Words that read the same in two places (a short phrase, "Yes."), or that are
   short, are not taken for the passage unless the text around them is like what
   was around it: a passage deleted from a document where another has the same
@@ -505,7 +616,7 @@ the runner image does not get extensions.
 | Tool | What it does |
 | --- | --- |
 | `doc_list` | The documents the chat sees: id, title, file, revision, whether it is the project's or the chat's own, and how many comments on it are open. `scope` narrows it to one of the two. |
-| `doc_read` | One document's Markdown and revision, and after the text the comment threads on it that are open (`comments` asks for all of them, or none). `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). The comments come with the first part, for the document as it is now. |
+| `doc_read` | One document's Markdown and revision, and after the text the comment threads on it that are open (`comments` asks for all of them, or none). `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). The comments come with the first part, for the document as it is now: at most 30 threads, the last 10 comments of each, and a passage cut to 400 characters, with a line saying how many more there are. |
 | `doc_create` | A new document from a title and its Markdown, at revision 1. |
 | `doc_edit` | Replaces quoted passages with new text, on the revision the agent read. With a `thread` and a `reply` it answers a comment ([below](#answering-a-comment)). |
 | `doc_comment` | Starts a thread on a passage the agent quotes, with its first comment. The document is not changed. |
@@ -529,10 +640,12 @@ What the tools check is what keeps the agent from overwriting you:
 - Each edit is a quote and its replacement. The quote must be in the document
   exactly once, as `doc_read` shows it. All of a call's edits are looked for in
   the document as it was, none may overlap, and either all are made or none.
-  Each call makes one revision, by the agent.
-- `doc_create` never replaces anything: a title whose file name is taken is
-  refused. The agent has no tool to delete a document, to restore a revision
-  or to change the history.
+  Each call that changes the text makes one revision, by the agent; one whose
+  replacements give the same text changes nothing, and says so.
+- `doc_create` never replaces anything: a title whose file name is taken by a
+  document is refused. (A document whose file is gone does not take its name:
+  the new document gets the next one, `plan-2.md`.) The agent has no tool to
+  delete a document, to restore a revision or to change the history.
 - A document is at most 1 MB.
 - The agent is not let to write a secret (a private key, or a token of a common
   service) into a document, since the history keeps every revision. What
@@ -549,7 +662,9 @@ A refusal reaches the agent as an error that starts with its reason
 `exists`, `too_large`, `secret`, `not_found`, `invalid`, `thread_not_found`,
 `thread_resolved`, `thread_orphaned`, `too_many` or `refused`, for
 anything else the store will not do: the folder is full, `documents` is a link,
-the store's packages are not installed yet), so that it can put it right.
+the store's packages are not installed yet, the portal may not write in the
+folder, git is missing or the history is damaged, a document's file is past
+1 MB), so that it can put it right or tell you.
 
 These checks are in the tools. The agent can still change a document's file
 with its own tools (it is an ordinary file in the chat's folder); that is kept
@@ -585,9 +700,9 @@ to it by the tool:
   was done about the comment, not only that it was read. Whether a thread is
   resolved after an answer is the agent's to decide: resolving a thread it was asked
   in (`@agent`) is an answer as a reply is, and you are told so
-  ([above](#asking-the-agent)); on a comment it was not asked in it is told to
-  leave resolving to you unless the comment asked for something the change fully
-  carries out.
+  ([above](#asking-the-agent)). Its instructions say to resolve a thread when
+  what it asked for is done or answered for good, and to leave it open when you
+  still have to weigh in.
 
 An edit without a `thread` is as before: it may change anything in the document,
 and a comment whose passage it touches follows it as above.
@@ -603,3 +718,121 @@ document and says what became of it (created, read, commented on, edited from
 revision 2 to 3 with how many edits, and whether that answered a comment).
 **Open in Documents** opens the document on the page. A call that failed, and a
 list, are drawn as any tool call is.
+
+## Limits
+
+| What | At most |
+| --- | --- |
+| A document | 1 MB of text. A save one byte over is refused ("A document can be at most 1 MB"), and so is a file that grew past it outside the page (it is left as it is) |
+| Documents in a folder | 1000, after which `doc_create` is refused ("A folder holds at most 1000 documents"). A document whose file was deleted or renamed keeps its place |
+| A comment | 4096 bytes. The box takes 4000 characters; a comment over 4096 bytes (accents and other scripts take 2 to 4 bytes a character) is refused when it is saved, with a message, and stays in the box |
+| A passage a comment is on | 5000 characters |
+| Comments in a thread | 100 |
+| Threads on a document | 1000 |
+| A title in the list | 256 characters, from the first heading in the document's first 4 KB |
+| A title given to `doc_create` | 200 characters |
+| Revisions the history shows at once | 50, then **Show older revisions** |
+| What `doc_read` returns at once | about 60,000 characters of the text |
+| Edits in one `doc_edit` | 50 |
+| A comment quoted to the agent that is woken | 1000 characters (the thread has all of it) |
+
+And how long things wait:
+
+| What | How long |
+| --- | --- |
+| A save of the text | 1 second after you stop typing |
+| A save of a comment | 0.7 seconds after you stop typing |
+| A look for changes made outside the page | every 2 seconds, while some page has a document of the folder open |
+| The agent woken by `@agent` | 3 seconds after you last changed the comment |
+| A chat that does not start for a wake | given up after 2 minutes: the thread says "Not delivered to the agent", and changing the comment asks again |
+| A git run | 2 minutes, then it is stopped |
+
+## How it is built
+
+This part is for whoever works on the extension, or builds another like it:
+Documents is the largest worked example of the [extension API](/guide/extension-ui).
+It imports nothing of the portal's core (`npm run check:boundaries` keeps it
+so), and reaches the portal only through that API and the portal's own routes
+(it opens a chat for a comment through `/api/sessions`).
+
+```
+extensions/docs/
+├── package.json     the manifest: the browser half, its style and the server half
+├── package-lock.json  the versions it needs to run and to be built, which the build and the install keep to
+├── build.mjs        builds the editor into web/editor.js
+├── server.js        the server half: routes, the streams, the wake of the agent
+├── store.js         one folder's documents (class Store): files, history, comments
+├── files.js         a document's file, read and written safely
+├── git.js, guard.js the history in git, and the store's folder held open
+├── place.js         where a folder's store is, and which folder it is for
+├── tools.js         the agent's seven tools
+├── ping.js          what wakes the agent's chat, and what it is told
+├── errors.js        the refusals, and what a failed disk, git or database is to a reader
+├── secret.js        what a secret looks like, for the warning and for the agent's tools
+├── deps.js          installs what the extension needs to run
+├── web/             the browser half, plain JavaScript as it is served, and its stylesheet
+└── src/             the editor (Milkdown), built into web/editor.js: not kept in git
+```
+
+**The halves.** The browser half (`web/client.js`) registers a page in the
+sidebar (`nav.page`), the cards for the agent's calls (`chat.tool`) and one
+entry that remembers which chat was on screen last (`chat.background`). Its
+texts are its own, in English in the code and in German through
+`portal.locale.add`. It is plain JavaScript, loaded as it is, with the
+portal's React and building blocks (`portal.ui`). The server half is loaded
+once by the portal, for all chats, and is given `portal`; it adds the routes
+below, and where pi runs in the portal's process (`EXECUTOR=host`) it adds the
+tools to each chat's pi (`portal.chats.extend`). Both import some of the same
+files (`web/merge.js`, `web/anchor.js`, `web/mention.js`), so that the page and
+the server agree on what a merge, a passage and a mention are.
+
+**Routes**, under `/api/x/pithagoras-docs`. A folder is named by an id made from
+its path and a document by an id the store gave it, never by a path:
+
+| | |
+| --- | --- |
+| `GET /folders` | The folders chats work in that have documents, with their documents, and `problems` for the ones that could not be opened |
+| `POST /folders/:folder/documents` | A new document |
+| `GET`, `PUT /folders/:folder/documents/:id` | A document's Markdown and revision; a save `{ markdown, base }`, answered 409 with the current text when its changes meet later ones |
+| `GET …/:id/events` | A stream (server-sent events) of its revisions and comment changes |
+| `GET …/:id/history`, `…/revisions/:n`, `POST …/restore` | The history, one revision's text, and bringing one back |
+| `GET`, `POST …/:id/threads`, `…/threads/:thread/{comments,resolve,reopen,seen}` | The comment threads, and a reply |
+| `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away the person's last comment of a thread: what the page's comment box does as it is typed |
+
+A stream's first message says where the document stands (`revision`, with
+`id: <revision>`, the author and the time), so that a page that was away finds
+out at once; `threads` says the comments changed. A comment line goes out every
+25 seconds so that nothing between the portal and the page takes the stream for
+idle.
+
+**A write** is made under the folder's lock in three steps (the file, the git
+commit, the database) and any failure between them is put right the next time
+the store is used (`store.js`, top). Every refusal is a `DocError` with an HTTP
+status, which a route answers and a tool turns into the error the agent reads;
+a failure of the disk, of git or of the database is made into one that says
+what is wrong (`errors.js`), and anything else is logged and answered with
+"The documents store could not do that".
+
+**Options.** The server half takes a second argument, for tests: `dependencies`
+(what installs the packages), `faults` (breaks a write after a step), `gitTimeoutMs`,
+`pingMs`, `pollMs`, `wakeMs` and `wakeLimitMs` (the times in the table above).
+
+**Tests.** Each file runs alone, with `node --import tsx --test tests/<name>.test.mts`:
+
+| File | What it holds |
+| --- | --- |
+| `docs-store`, `docs-extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, dependencies, German |
+| `docs-hardening` | The edges: a file deleted or renamed, no rights, a broken store, saves at once, the size limit, a chat that never starts |
+| `docs-tools` | The agent's tools |
+| `docs-stream`, `docs-live`, `docs-merge`, `docs-saver` | Telling a page of changes, and taking them in |
+| `docs-frame` | What the editor keeps apart from the Markdown: front matter and line endings |
+| `docs-comments`, `docs-comment-tools`, `docs-anchor`, `docs-draft` | The comments and where their passages are |
+| `docs-ping` | `@agent` and the wake |
+| `tests/browser/documents*.spec.mts` | The page, in a browser, against a stand-in for the server half. They build the editor first |
+
+```
+node --import tsx --test tests/docs-hardening.test.mts
+npx playwright test tests/browser/documents
+```
+
+The browser tests' dev server has a fixed port (5191), so run one set at a time.
