@@ -7,7 +7,8 @@ work in.
 
 It is under construction: documents can be listed, read, edited by you and by
 the agent at the same time, have a history, and can be commented on, by you and
-by the agent. This page describes what it does so far.
+by the agent, which you can ask to answer a comment with `@agent`. This page
+describes what it does so far.
 
 ## Installing it
 
@@ -178,8 +179,8 @@ The title is shown as plain text. Links and pictures are shown by their text,
 emphasis, code and HTML tags lose their marks however long they are, and
 footnote marks are left out. A title longer than 256 characters is cut. A document with no heading in
 its first 4 KB is listed by its file name. The list also shows when the
-document last changed, and how many comments on it are open
-([below](#comments)).
+document last changed, how many comments on it are open and how many of them
+the agent has answered since you last reacted ([below](#comments)).
 
 **All documents** goes back to the list.
 
@@ -356,6 +357,43 @@ What is in a thread:
 You and the agent can both start a thread, answer it and resolve it. Comments
 are not edited or deleted yet.
 
+### Asking the agent
+
+Write **@agent** in a comment, a new one or a reply, to ask the agent to answer
+it. The agent of a chat is then woken with the comment: if the chat's agent had
+been let go it is started, and if it is in the middle of an answer it takes this
+up afterwards. The chat shows a notice that names the document and the thread and
+quotes your comment (the first thousand characters; the thread has all of it),
+and the agent reads the thread and answers in it with the tools described
+[below](#answering-a-comment).
+
+- Only a comment of yours wakes the agent, and only with `@agent` as a name of
+  its own: `@agents`, `me@agent.example` and `@agent` in code do not. A comment
+  without it wakes nobody; the agent finds it when it reads the document. Text
+  you type into the document is never a ping, and neither is a comment the agent
+  writes.
+- The chat is the one the thread was last asked in, if it still works in the
+  folder; otherwise the first chat of the folder as the sidebar lists them
+  (pinned chats first, then the one used last). A chat's own document is
+  answered by that chat only. The thread says which chat it asked.
+- The agent has no more rights than before: it changes only the passage the
+  comment is on, with the document's revision check, and the rest is up to you
+  ([below](#answering-a-comment)). It is told to leave the thread open for you to
+  resolve once you have read its answer, unless your comment asks it to resolve
+  it.
+- If the chat could not be reached (it was discarded, or the agent does not run in
+  the portal's own process) the comment is kept, a notice says why, and the
+  thread reads **Not delivered to the agent**. The agent sees the comment the
+  next time it reads the document. Nothing is sent again later.
+
+The thread says where it stands with the agent: **Asked the agent**, with the
+chat, until the agent comments in it; **The agent answered** from then until you
+react (a reply, resolving or reopening it), and the document's entry in the list
+counts such threads. The page is told as soon as the agent has written, like any
+other comment of the agent's, so you see the answer without a reload. Nothing
+else tells you: there is no notification outside the page. The conversation of
+the chat shows the agent's calls, with a button that opens the document.
+
 A comment on text you have just typed is made on that text: what you typed is
 saved first (a revision of its own), so that the passage is in a revision the
 history has.
@@ -493,9 +531,10 @@ doing, which is why the tools' instructions tell the agent to use them.
 `doc_read` lists the open threads after the document's text: each thread's id,
 the passage it is on (as the Markdown has it) and the line, and what the person
 and the agent said in it. `doc_list` says how many comments are open on each
-document. **Nothing tells the agent that you left a comment**: it sees them when
-it reads the document, so ask it in the chat to look at them. (Letting a comment
-reach the agent, and waking it, is the next step.)
+document. A comment reaches the agent when you write **@agent** in it
+([above](#asking-the-agent)): the agent is woken with the thread's id. A comment
+without it is not sent anywhere; the agent sees it when it reads the document, and
+a thread that asked it is marked *asks you* there.
 
 The rule for answering a comment is the one Claude for Word follows: the agent
 changes only the passage the comment is on, and says what it changed. It is held
@@ -515,7 +554,10 @@ to it by the tool:
 - `doc_reply` and `doc_resolve` say in their instructions that a reply says what
   was done about the comment, not only that it was read. Whether a thread is
   resolved after an answer is the agent's to decide; it is told to leave it to
-  you unless the comment asked for something the change fully carries out.
+  you unless the comment asked for something the change fully carries out. When
+  you asked it with `@agent` it is told to leave the thread open (unless you ask
+  it to resolve it), because a thread it resolves goes out of the list at once (it is under
+  **Show resolved**) and is not marked as answered.
 
 An edit without a `thread` is as before: it may change anything in the document,
 and a comment whose passage it touches follows it as above.

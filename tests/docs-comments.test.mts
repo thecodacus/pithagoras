@@ -138,6 +138,8 @@ test('a thread is made on a passage, with the person as the author of its first 
     assert.deepEqual({ ...made.body, id: undefined, createdAt: undefined, updatedAt: undefined, comments: undefined }, {
       id: undefined, status: 'open', orphaned: false, quote: GREEN, prefix: '# Plan\n\nShip it on Friday.\n\n', suffix: '\n\nSign-off is on Monday.\n',
       start: PLAN.indexOf(GREEN), end: PLAN.indexOf(GREEN) + GREEN.length, revision: 1, createdAt: undefined, updatedAt: undefined, comments: undefined,
+      // Nobody was asked, and the agent has not answered.
+      toAgent: false, answered: false, ping: null,
     });
     assert.equal(made.body.comments.length, 1);
     assert.equal(made.body.comments[0].author, 'user');

@@ -54,7 +54,7 @@ async function portal(chats: Record<string, string>, executor = 'host') {
   /** A chat's pi as the portal starts it: the tools the server half put into it, by name. */
   const pi = (chat: string) => {
     const tools = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool) }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
+    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
     return tools;
   };
   /** What the agent of a chat gets when it calls a tool: its text and details, or the refusal it reads. */

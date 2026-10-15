@@ -171,6 +171,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
     const [compose, setCompose] = useState(null);
     const [active, setActive] = useState(null);
     const [commentProblem, setCommentProblem] = useState(null);
+    // Why the agent could not be asked by a comment that was saved all the same.
+    const [askProblem, setAskProblem] = useState(null);
     const workspace = useRef(null);
     // Asks the server for the threads again: set once the page has a document to ask about.
     const refresh = useRef(() => {});
@@ -426,11 +428,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
       setCompose({ passage, base: saver.state().base, body: "", busy: false, error: null });
     };
 
+    /** A thread the server answered with: what it says of asking the agent is shown, and the thread is what is kept. */
+    const taking = ({ unreached, ...thread }) => {
+      setAskProblem(unreached ?? null);
+      return thread;
+    };
+
     const submit = async (c) => {
       setCompose({ ...c, busy: true, error: null });
       const { passage, base, body } = c;
       try {
-        const made = await portal.api.json(`${url}/threads`, { method: "POST", body: JSON.stringify({ base, quote: passage.quote, prefix: passage.prefix, suffix: passage.suffix, start: passage.start, body: body.trim() }) });
+        const made = taking(await portal.api.json(`${url}/threads`, { method: "POST", body: JSON.stringify({ base, quote: passage.quote, prefix: passage.prefix, suffix: passage.suffix, start: passage.start, body: body.trim() }) }));
         setThreads((now) => ({ ...now, items: [...now.items.filter((x) => x.id !== made.id), made] }));
         setCompose(null);
         setActive(made.id);
@@ -448,7 +456,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
     /** A thread the server changed is taken in its place. */
     const taken = (made) => setThreads((now) => ({ ...now, items: now.items.map((x) => (x.id === made.id ? made : x)) }));
     const post = (path, body) => portal.api.json(`${url}/threads/${path}`, { method: "POST", body: JSON.stringify(body) });
-    const reply = async (thread, body) => taken(await post(`${thread.id}/comments`, { body }));
+    const reply = async (thread, body) => taken(taking(await post(`${thread.id}/comments`, { body })));
     const resolve = async (thread, body) => taken(await post(`${thread.id}/resolve`, body ? { body } : {}));
     const reopen = async (thread) => taken(await post(`${thread.id}/reopen`, {}));
     const show = (thread) => {
@@ -493,6 +501,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
       status === "error" && h(ui.ErrorBanner, null, h("span", null, t("Could not save: {error}", { error })), " ", h("button", { type: "button", className: ui.classes.ghost, onClick: () => void parts.current.saver.flush() }, t("Try again"))),
       problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("Could not restore: {error}", { error: problem })),
       commentProblem && h(ui.ErrorBanner, { onClose: () => setCommentProblem(null) }, t("Could not comment: {error}", { error: commentProblem })),
+      askProblem && h(ui.WarnBanner, { onClose: () => setAskProblem(null) }, t("Saved, but the agent could not be reached: {error}", { error: askProblem })),
       warning && h(ui.WarnBanner, { onClose: () => parts.current?.saver.dismissWarning() }, warning),
       notice &&
         h(

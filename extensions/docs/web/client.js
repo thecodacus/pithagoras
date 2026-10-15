@@ -103,6 +103,12 @@ export default function (portal) {
     "Replied to a comment": "Auf einen Kommentar geantwortet",
     "Resolved a comment": "Kommentar erledigt",
     "answers a comment": "beantwortet einen Kommentar",
+    "Write @agent in a comment to ask the agent to answer it.": "Schreibe @agent in einen Kommentar, damit der Agent ihn beantwortet.",
+    "Asked the agent": "Den Agenten gefragt",
+    "Not delivered to the agent": "Nicht beim Agenten angekommen",
+    "The agent answered": "Der Agent hat geantwortet",
+    "Saved, but the agent could not be reached: {error}": "Gespeichert, aber der Agent war nicht zu erreichen: {error}",
+    "{n} answered by the agent": "{n} vom Agenten beantwortet",
   });
 
   const icon = (path) => () =>
@@ -150,7 +156,7 @@ export default function (portal) {
                 "button",
                 { type: "button", onClick: () => onOpen({ folder: folder.id, id: doc.id }) },
                 h("span", { className: "pd-title" }, doc.title),
-                h("span", { className: "pd-meta" }, [doc.name, t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads }))].filter(Boolean).join(" · ")),
+                h("span", { className: "pd-meta" }, [doc.name, t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads })), doc.answeredThreads > 0 && t("{n} answered by the agent", { n: doc.answeredThreads })].filter(Boolean).join(" · ")),
               ),
             ),
           ),

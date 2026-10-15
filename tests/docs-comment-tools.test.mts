@@ -50,7 +50,7 @@ async function portal(chats: Record<string, string>, faults?: { after(step: stri
   };
   const agent = (chat: string) => {
     const tools = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool) }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
+    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
     return async (name: string, params: unknown): Promise<Result> => {
       try {
         const result = await tools.get(name).execute('call-1', params, undefined, undefined, {});
@@ -62,7 +62,7 @@ async function portal(chats: Record<string, string>, faults?: { after(step: stri
   };
   const tools = (chat: string) => {
     const found = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => found.set(tool.name, tool) }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
+    for (const factory of factories) factory({ registerTool: (tool: any) => found.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
     return found;
   };
   return { call, agent, tools, logged, close: async () => { await stop(); server.close(); } };

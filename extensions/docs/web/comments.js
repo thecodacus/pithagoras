@@ -83,6 +83,14 @@ export function comments(portal, { when }) {
     const reply = () => run(() => onReply(thread, draft.trim()));
     const resolve = () => run(() => onResolve(thread, draft.trim()));
     const reopen = () => run(() => onReopen(thread));
+    // Where the thread stands with the agent: asked and not answered yet, or answered and not reacted to.
+    const asked = thread.answered
+      ? t("The agent answered")
+      : thread.toAgent
+        ? thread.ping?.sent === false
+          ? t("Not delivered to the agent")
+          : [t("Asked the agent"), thread.ping?.title].filter(Boolean).join(" · ")
+        : null;
 
     return h(
       "article",
@@ -90,6 +98,7 @@ export function comments(portal, { when }) {
       h(Passage, { text: text ?? thread.quote, onClick: marked ? () => onActivate(thread.id) : undefined }),
       thread.orphaned && h("p", { className: "pd-meta pd-gone" }, t("The passage this comment was on is no longer in the document.")),
       !thread.orphaned && !marked && settled && open && h("p", { className: "pd-meta pd-gone" }, t("The passage could not be marked in the text.")),
+      open && asked && h("p", { className: "pd-meta pd-asked", "data-asked": thread.answered ? "answered" : "waiting" }, asked),
       !open && h("p", { className: "pd-meta" }, t("Resolved")),
       h(
         "ol",
@@ -158,6 +167,7 @@ export function comments(portal, { when }) {
       "aside",
       { className: "pd-threads", "aria-label": t("Comments") },
       h("h2", null, t("Comments"), open.length > 0 && h("span", { className: "pd-count" }, open.length)),
+      h("p", { className: "pd-hint" }, t("Write @agent in a comment to ask the agent to answer it.")),
       compose && h(Compose, { compose, onChange: (value) => onCompose({ ...compose, body: value }), onSend: () => onCompose(compose, true), onCancel: () => onCompose(null) }),
       error && !loaded
         ? h(ui.LoadFailed, { error: t("Comments could not be loaded: {error}", { error: error.message }), onRetry })

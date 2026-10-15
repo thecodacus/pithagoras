@@ -20,6 +20,8 @@
  *   - a comment is the agent's, never the person's, and it answers a comment by
  *     changing only the passage the comment is on, and saying in the thread what
  *     it changed
+ *   - it is woken only by the person's `@agent` in a comment (ping.js), with the
+ *     thread to answer: that gives it the same tools and no others
  *
  * A refusal is an error the agent reads, which starts with its code:
  * `not_found`, `exists`, `too_large`, `secret`, `revision_mismatch`,
@@ -99,7 +101,7 @@ function find(text, quote) {
 }
 
 /** The start of `text`, at most `n` characters of it, with a mark where it was cut (not between the two halves of a character). */
-function clip(text, n) {
+export function clip(text, n) {
   if (text.length <= n) return text;
   return `${text.slice(0, /[\uD800-\uDBFF]/.test(text[n - 1]) ? n - 1 : n)} […]`;
 }
@@ -131,12 +133,14 @@ function describeThreads(threads, text, which) {
     const said = t.comments.slice(-MOST_SHOWN);
     const omitted = t.comments.length - said.length;
     const lines = said.map((c) => `${c.author === "agent" ? "agent" : "person"} (${minute(c.at)} UTC): ${c.body}`);
-    return [`Thread ${t.id} (${t.status}, ${where})`, `Passage${t.orphaned ? " when it was last in the document" : ""}:`, ...clip(t.quote, PASSAGE_CHARS).split("\n").map((l) => `> ${l}`), ...(omitted ? [`[${omitted} earlier comment${omitted === 1 ? "" : "s"} not shown]`] : []), ...lines].join("\n");
+    return [`Thread ${t.id} (${t.status}, ${where}${t.toAgent ? ", asks you" : ""})`, `Passage${t.orphaned ? " when it was last in the document" : ""}:`, ...clip(t.quote, PASSAGE_CHARS).split("\n").map((l) => `> ${l}`), ...(omitted ? [`[${omitted} earlier comment${omitted === 1 ? "" : "s"} not shown]`] : []), ...lines].join("\n");
   });
   const open = threads.filter((t) => t.status === "open").length;
   const head = which === "all" ? `Comments: ${threads.length} thread${threads.length === 1 ? "" : "s"}, ${open} open` : `Open comments: ${open}${resolved ? ` (${resolved} resolved, not shown)` : ""}`;
   const more = shown.length > MOST_THREADS ? `\n[${shown.length - MOST_THREADS} more thread${shown.length - MOST_THREADS === 1 ? "" : "s"} not shown]` : "";
-  return `\n\n${head}. Answer one with doc_reply, or with doc_edit given its thread; close it with doc_resolve.\n\n${blocks.join("\n\n")}${more}`;
+  // A thread the person wrote @agent in asks the agent for an answer, in the thread.
+  const asking = shown.some((t) => t.toAgent) ? " A thread marked \"asks you\" has @agent in the person's last comment: answer it in the thread." : "";
+  return `\n\n${head}. Answer one with doc_reply, or with doc_edit given its thread; close it with doc_resolve.${asking}\n\n${blocks.join("\n\n")}${more}`;
 }
 
 /**
@@ -217,8 +221,8 @@ export function documentTools(pi, chat, deps) {
         .map(({ head, ...doc }) => ({ ...doc, path: pathOf(doc.name), title: deps.titleOf(head, doc.name) }))
         .sort((a, b) => a.title.localeCompare(b.title) || a.name.localeCompare(b.name));
       if (!documents.length) return text("No documents yet. Make one with doc_create.", { action: "list", documents: [] });
-      const lines = documents.map((doc) => `- ${doc.id}  "${doc.title}"  ${doc.path}  revision ${doc.revision}  ${kind(doc)}  changed ${doc.modified}${doc.openThreads ? `  ${doc.openThreads} open comment${doc.openThreads === 1 ? "" : "s"}` : ""}`);
-      return text(`${documents.length} document${documents.length === 1 ? "" : "s"}:\n${lines.join("\n")}`, { action: "list", documents: documents.map(({ id, title, path, revision, scope, openThreads }) => ({ id, title, path, revision, scope, openThreads })) });
+      const lines = documents.map((doc) => `- ${doc.id}  "${doc.title}"  ${doc.path}  revision ${doc.revision}  ${kind(doc)}  changed ${doc.modified}${doc.openThreads ? `  ${doc.openThreads} open comment${doc.openThreads === 1 ? "" : "s"}${doc.askingThreads ? ` (${doc.askingThreads} ask${doc.askingThreads === 1 ? "s" : ""} you)` : ""}` : ""}`);
+      return text(`${documents.length} document${documents.length === 1 ? "" : "s"}:\n${lines.join("\n")}`, { action: "list", documents: documents.map(({ id, title, path, revision, scope, openThreads, askingThreads }) => ({ id, title, path, revision, scope, openThreads, askingThreads })) });
     }),
   });
 
@@ -495,7 +499,10 @@ export function documentTools(pi, chat, deps) {
     label: "Reply to a comment",
     description: `Add a comment to an open comment thread of a shared document, from doc_read: an answer, a question back, or a note on what you did. If you did something about the comment, say what, so that the person can see it without comparing revisions. The reply is Markdown, at most ${MAX_BODY} bytes. It does not change the document and does not resolve the thread.`,
     promptSnippet: "Reply to a comment thread of a shared document, saying what was done",
-    promptGuidelines: ["A reply to a comment says what was done about it (what you changed and where, or why you left the text as it is), not only that you read it."],
+    promptGuidelines: [
+      "A reply to a comment says what was done about it (what you changed and where, or why you left the text as it is), not only that you read it.",
+      "A comment on a shared document that has @agent in it is addressed to you: answer it in its thread (doc_reply, or doc_edit with the thread), not only in the chat.",
+    ],
     executionMode: "sequential",
     parameters: {
       type: "object",

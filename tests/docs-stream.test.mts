@@ -95,7 +95,7 @@ async function portal(folder: string, { pingMs, pollMs = 40 }: { pingMs?: number
   }
   const agent = () => {
     const tools = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool) }, { id: 'a', title: 'Chat a', workspace: folder, status: 'idle' });
+    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: 'a', title: 'Chat a', workspace: folder, status: 'idle' });
     return async (name: string, params: unknown) => {
       try {
         const result = await tools.get(name).execute('call-1', params, undefined, undefined, {});
