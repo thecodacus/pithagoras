@@ -218,7 +218,7 @@ export class Store {
       if (e.code !== "EEXIST") throw e;
     }
     const db = lstatSync(file);
-    if (!db.isFile() || (process.getuid && db.uid !== process.getuid())) throw new DocError(409, "The documents database is not the store's own");
+    if (!db.isFile() || (process.getuid && db.uid !== process.getuid())) throw Object.assign(new DocError(409, `The documents database is not the store's own (the store is ${this.storeDir})`), { operator: true });
     this.db = new Database(file);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");

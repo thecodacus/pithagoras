@@ -22,6 +22,12 @@ import { DocError } from "./errors.js";
 
 export const isOurs = (stat) => !process.getuid || stat.uid === process.getuid();
 
+/**
+ * A refusal about the store itself, which says where the store is: it is for the person who runs the portal to mend (the guide has
+ * a row for each), and not for the agent, which runs commands in the same portal (`operator`, errors.js).
+ */
+const ofStore = (dir, message) => Object.assign(new DocError(409, `${message} (the store is ${dir})`), { operator: true });
+
 /** What git trusts in a repository besides its objects, that could send it elsewhere or make it run something: gone or written new. */
 const MISTRUSTED = ["commondir", "config.worktree", "shallow", "hooks", "info/grafts", "info/attributes", "objects/info/alternates", "objects/info/http-alternates"];
 export const OPEN_DIR = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
@@ -97,7 +103,7 @@ export class Guard {
     try {
       fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     } catch {
-      throw new DocError(409, "The documents store is not the portal's own (a link, or not a folder)");
+      throw ofStore(dir, "The documents store is not the portal's own (a link, or not a folder)");
     }
     const guard = new Guard(dir, fd);
     try {
@@ -142,7 +148,7 @@ export class Guard {
   /** The held folder is the portal's own, and closed to everyone else: before anything else is looked at, so what is below it is out of reach. */
   #own() {
     const stat = fstatSync(this.fd);
-    if (!stat.isDirectory() || !isOurs(stat)) throw new DocError(409, "The documents store is not the portal's own (someone else made it)");
+    if (!stat.isDirectory() || !isOurs(stat)) throw ofStore(this.dir, "The documents store is not the portal's own (someone else made it)");
     if (stat.mode & 0o077) fchmodSync(this.fd, 0o700);
     this.#group(this.fd, stat);
   }
@@ -169,11 +175,11 @@ export class Guard {
     try {
       now = lstatSync(this.dir);
     } catch {
-      throw new DocError(409, "The documents store was removed while it was in use");
+      throw ofStore(this.dir, "The documents store was removed while it was in use");
     }
     const held = fstatSync(this.fd);
-    if (!now.isDirectory() || now.ino !== held.ino || now.dev !== held.dev) throw new DocError(409, "The documents store was replaced while it was in use");
-    if (!isOurs(held) || held.mode & 0o077) throw new DocError(409, "The documents store was opened to others while it was in use");
+    if (!now.isDirectory() || now.ino !== held.ino || now.dev !== held.dev) throw ofStore(this.dir, "The documents store was replaced while it was in use");
+    if (!isOurs(held) || held.mode & 0o077) throw ofStore(this.dir, "The documents store was opened to others while it was in use");
   }
 
   /**
@@ -216,7 +222,7 @@ export class Guard {
       const place = this.at(name);
       const stat = lstatSync(place);
       const dir = stat.isDirectory();
-      if (!(dir || stat.isFile()) || !isOurs(stat)) throw new DocError(409, "The documents store holds something that is not its own");
+      if (!(dir || stat.isFile()) || !isOurs(stat)) throw ofStore(this.dir, `The documents store holds something that is not its own: ${name}`);
       // The store's own folders are closed to everyone; what is in them, to writing by anyone but the portal.
       const mode = depth === 0 && dir ? stat.mode & 0o700 : stat.mode & ~0o022;
       if ((stat.mode & 0o7777) !== (mode & 0o7777)) chmodSync(place, mode & 0o7777);

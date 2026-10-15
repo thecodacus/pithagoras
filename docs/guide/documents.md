@@ -170,8 +170,11 @@ owner of the `documents` folder.
 The portal checks the store before it uses it, every time. It must be the
 portal's own (not a link, and nothing in it a link or a pipe), and it is closed
 to everyone else again if something opened it (a `chmod -R`, a restore made as
-another user). A store that someone else made or swapped in is refused ("is not
-the portal's own"): fix its owner, or delete the folder to start a new history.
+another user). A store that someone else made or swapped in, or that holds a
+file or folder of another user's, a link or a pipe, is refused ("is not the
+portal's own", "holds something that is not its own"): the page names the store
+and what is wrong with it, and [below](#when-a-folders-documents-cannot-be-opened)
+says what to do.
 
 The store is for the folder it was made for, not only for a path:
 
@@ -244,10 +247,11 @@ folders it can list, with the folder and the reason:
 
 The other folders are listed as usual, the portal's log has a line with the same
 reason, and the documents' files are not touched. The agent's tools in that
-folder refuse as well. For a right the portal lacks, a full disk or a read-only
-file system it is told the same reason as you. For a broken store (git, the
-database) it is told only that the store cannot be used and to ask you: where the
-store is and what to delete in it are yours to decide, and the agent runs
+folder refuse as well. A right the portal lacks in the documents folder, a full
+disk and a read-only file system, said as such, are told to it as they are.
+Anything in the store's own folder (its rights, its owner, its database, git) is
+told to it only as "the store cannot be used, ask the person": where the store
+is and what to delete or change in it are yours to decide, and the agent runs
 commands as the portal and could carry them out. The reasons the page gives are
 the portal's own words, in English. The usual ones are these:
 
@@ -257,8 +261,10 @@ the portal's own words, in English. The usual ones are these:
 | The portal is not allowed to read this folder's documents folder (permission denied) | The user the portal runs as cannot enter or list `documents`. Give it the right to (`chmod`, or the folder's owner). A document of that folder that is open gets the same reason when it is read or saved, not "There is no such document". |
 | git could not be found on the portal's PATH: … | The history is kept with git ([Installing it](#installing-it)). Install it, or put it on the portal's `PATH` (a portal that was started before has to be restarted). Nothing was changed. |
 | The history of the documents could not be used: git … | git could not read or write the folder's history. It names the store's folder. If the history is damaged (a crash, a disk that failed), remove the `git` folder in the store: the history starts again from the files as they are, every document at revision 1 and marked as an existing file, and the documents and their comments stay (except those of a document whose file is gone: it is forgotten with its comments). The damaged history is gone with it: keep a copy first to look into it. A full disk, a read-only file system and a missing right are not this: git saying so is reported as one of those (the next rows and the list below), and the history is not to be removed for it. |
-| The portal is not allowed to use the documents store in … (permission denied) | Something in the store's folder is not the portal's user's to write: it was started once as another user (`root`, with `sudo`, say) and left files there that are that user's. Give the whole store folder back to the portal's user (`chown -R`), then save again. Nothing is to be removed for it. |
-| The documents database cannot be written: … | The portal may not write the `docs.sqlite` files in the store (the same cause as the row above, for the database), or their file system is read-only. SQLite then opens the database read-only and says so at the first write. Mend the owner or the mount; the comments are all still there. |
+| The portal is not allowed to use the documents store in … (permission denied) | A file or folder in the store belongs to the portal's user, but it may not write it: its mode was changed (a `chmod -R`, a restore that kept other modes). Make the store's folder writable for the portal's user again (`chmod -R u+rwX`). Nothing is to be removed for it. |
+| The documents database cannot be written: … | The portal's user may not write the `docs.sqlite` files in the store (the same cause as the row above, for the database), or their file system is read-only. SQLite then opens the database read-only and says so at the first write. Mend the mode or the mount; the comments are all still there. |
+| The documents store is not the portal's own (…), The documents store holds something that is not its own: …, The documents database is not the store's own (…) | The store, a file or folder in it (the page names it) or its database belongs to another user, or is a link or a pipe. It is usually a store copied or restored as another user (`sudo cp -r`, a restore as `root`), or a portal that now runs as another user than it did. The message says where the store is. If you trust what is there, give the whole store folder to the portal's user (`chown -R`); a link or a pipe is removed. If you do not, remove the store's folder: the history starts again, and the history and the comments of that folder's documents are lost. |
+| The documents store was removed, replaced or opened to others while it was in use | The store's folder changed under the running portal (a restore, a `chmod -R`). The next request opens it again and closes it to others; if what is there is not the portal's own, it gives the row above. |
 | The database of the documents is damaged: … | The comments and the index of the revisions could not be read. Remove the `docs.sqlite` files in the store's folder (all of them: a database left with the log of another one is damaged again): the index is built again from the history. The comments are lost, and a chat's own documents become the project's. Keep a copy first if you want to try to read the comments with `sqlite3`. |
 
 A save that the portal cannot make says why ("Could not save: …", and **Try

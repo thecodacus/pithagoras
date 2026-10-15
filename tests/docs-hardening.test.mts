@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -645,6 +645,36 @@ test('a store left to another user, which git and SQLite may not write, is said 
   } finally {
     chmodSync(path.join(store, 'docs.sqlite'), 0o644);
     await readonly.close();
+  }
+});
+
+test('a store that holds what is not the portal\'s own is refused naming the store and the entry, for the person alone, and with nothing done to it', async () => {
+  const { folder, id } = await stored('docs-hard-notown-');
+  const store = storeOf(folder);
+  // As a store copied in by another user, or with something put in it, looks to the portal: a link in the history's folder.
+  symlinkSync('/etc/hostname', path.join(store, 'git', 'planted'));
+  const docs = await portal({ a: folder });
+  try {
+    const { problems } = (await docs.call('GET', '/folders')).body;
+    assert.equal(problems[0].error, `The documents store holds something that is not its own: git/planted (the store is ${store})`);
+    const saved = await docs.call('PUT', `/folders/${folderIdOf(folder)}/documents/${id}`, { markdown: `${PLAN}\nMore, more.\n`, base: 2 });
+    assert.equal(saved.status, 409);
+    assert.equal(saved.body.error, problems[0].error);
+    // The agent is told only to ask the person: it runs commands as the portal, and could carry out a remedy that names the store.
+    for (const [name, params] of [['doc_list', {}], ['doc_read', { id }]] as const) assert.equal((await docs.agent('a')(name, params)).error, AGENT_TOLD, name);
+    assert.ok(docs.logged.some((line) => line.includes(`git/planted (the store is ${store})`)));
+    // Nothing was done to it: the link is where it was, and what it leads to is not read or changed.
+    assert.equal(readlinkSync(path.join(store, 'git', 'planted')), '/etc/hostname');
+  } finally {
+    await docs.close();
+  }
+  // Taken away, as the guide says, the store is used again.
+  rmSync(path.join(store, 'git', 'planted'));
+  const mended = await portal({ a: folder });
+  try {
+    assert.equal((await mended.call('GET', '/folders')).body.problems, undefined);
+  } finally {
+    await mended.close();
   }
 });
 
