@@ -46,7 +46,7 @@
  * is the last of its thread.
  */
 import { randomBytes } from "node:crypto";
-import { accessSync, chmodSync, chownSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
+import { accessSync, closeSync, constants, fchmodSync, fchownSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
@@ -160,8 +160,11 @@ export class Store {
    * The store of `folder` (a chat's folder, as the portal names it), opened
    * in `dir` (place.js has seen to which one it is): made where it is not
    * there yet, then put right. `inside` is the portal's files helper.
-   * `faults` lets a test break a write after one of its steps:
-   * `faults.after(step)` is called after "write" and after "commit".
+   * `faults` lets a test break a write after one of its steps, or do
+   * what someone else could in between: `faults.after(step)` is called
+   * after "write" and after "commit", and while a missing `documents` folder
+   * is made, after it is made ("documents") and after it is opened
+   * ("documents-open").
    * `gitTimeoutMs` is how long one git run may take. `onRevision` is told of
    * every revision made from here on, as it is made (see `commit`), and
    * `onThreads` of every change to a document's comments.
@@ -308,12 +311,34 @@ export class Store {
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
     }
-    if (!lstatSync(dir).isDirectory()) throw new DocError(409, "documents in this folder is not a folder");
-    chmodSync(dir, folder.mode & 0o7777);
+    this.fault("documents");
+    // Opened once, never through a link, and its mode and owner set through that descriptor: with the sandbox on the portal is root and
+    // the agent can write in the chat folder, so a link put where the folder was between a check and a `chmod` by path would have its
+    // target given the chat folder's mode and owner.
+    let fd;
     try {
-      chownSync(dir, folder.uid, folder.gid);
-    } catch {
-      // The portal is not root: the folder is its own already.
+      fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    } catch (e) {
+      if (e.code !== "ELOOP" && e.code !== "ENOTDIR") throw e;
+      // Which of the two it is only changes what is said: nothing was opened, or changed.
+      let link = e.code === "ELOOP";
+      try {
+        link ||= lstatSync(dir).isSymbolicLink();
+      } catch {
+        // Gone again: it is neither.
+      }
+      throw new DocError(409, link ? "documents in this folder is a link" : "documents in this folder is not a folder");
+    }
+    try {
+      this.fault("documents-open");
+      fchmodSync(fd, folder.mode & 0o7777);
+      try {
+        fchownSync(fd, folder.uid, folder.gid);
+      } catch {
+        // The portal is not root: the folder is its own already.
+      }
+    } finally {
+      closeSync(fd);
     }
     return dir;
   }
