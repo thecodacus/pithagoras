@@ -124,7 +124,9 @@ happens then:
   delivered, and says why.
 - Something else where the file was (a folder, a link, a file with a second
   name) is not written over: the save is refused ("Another file took the
-  document's name"), and your text stays in the editor.
+  document's name"), and your text stays in the editor. If `documents` itself
+  became a link, nothing is written through it either: a save and the agent's
+  `doc_create` are refused ("documents in this folder is a link").
 - **Restore this revision** makes the file again too, from an earlier revision.
 - A **rename** is a new file to the portal: it is taken in as a document of its
   own, at revision 1, marked as an existing file, with none of the old
@@ -240,17 +242,21 @@ folders it can list, with the folder and the reason:
 
 > The documents in /data/workspaces/site could not be opened: …
 
-The other folders are listed as usual, the portal's log has a line with the same reason, the
-agent's tools in that folder refuse with the same reason, and the documents'
-files are not touched. The reasons are the portal's own words, in English. The
-usual ones are these:
+The other folders are listed as usual, the portal's log has a line with the same
+reason, and the documents' files are not touched. The agent's tools in that
+folder refuse as well. For a right the portal lacks, a full disk or a read-only
+file system it is told the same reason as you. For a broken store (git, the
+database) it is told only that the store cannot be used and to ask you: where the
+store is and what to delete in it are yours to decide, and the agent runs
+commands as the portal and could carry them out. The reasons the page gives are
+the portal's own words, in English. The usual ones are these:
 
 | The page says | Why, and what to do |
 | --- | --- |
 | The documents store's packages are not installed yet | The extension installs what it needs to run in the background when the portal starts ([Installing it](#installing-it)); it needs npm and a network. The install failed (the portal's log says why); the page says this for every folder until the portal starts again and tries again. |
-| The portal is not allowed to read this folder's documents folder (permission denied) | The user the portal runs as cannot enter or list `documents`. Give it the right to (`chmod`, or the folder's owner). |
+| The portal is not allowed to read this folder's documents folder (permission denied) | The user the portal runs as cannot enter or list `documents`. Give it the right to (`chmod`, or the folder's owner). A document of that folder that is open gets the same reason when it is read or saved, not "There is no such document". |
 | git could not be found on the portal's PATH: … | The history is kept with git ([Installing it](#installing-it)). Install it, or put it on the portal's `PATH` (a portal that was started before has to be restarted). Nothing was changed. |
-| The history of the documents could not be used: git … | git could not read or write the folder's history. It names the store's folder. If the history is damaged (a crash, a disk that failed), remove the `git` folder in the store: the history starts again from the files as they are, every document at revision 1 and marked as an existing file, and the documents and their comments stay (except those of a document whose file is gone: it is forgotten with its comments). The damaged history is gone with it: keep a copy first to look into it. If the reason is something else (a full disk, say), mend that. |
+| The history of the documents could not be used: git … | git could not read or write the folder's history. It names the store's folder. If the history is damaged (a crash, a disk that failed), remove the `git` folder in the store: the history starts again from the files as they are, every document at revision 1 and marked as an existing file, and the documents and their comments stay (except those of a document whose file is gone: it is forgotten with its comments). The damaged history is gone with it: keep a copy first to look into it. A full disk or a read-only file system is not this: git saying so is reported as a full disk or a read-only file system (the list below), and the history is not to be removed for it. |
 | The database of the documents is damaged: … | The comments and the index of the revisions could not be read. Remove the `docs.sqlite` files in the store's folder (all of them: a database left with the log of another one is damaged again): the index is built again from the history. The comments are lost, and a chat's own documents become the project's. Keep a copy first if you want to try to read the comments with `sqlite3`. |
 
 A save that the portal cannot make says why ("Could not save: …", and **Try

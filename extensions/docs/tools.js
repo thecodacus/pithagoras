@@ -168,8 +168,12 @@ export function documentTools(pi, chat, deps) {
   function failed(e) {
     if (e instanceof Refusal) return e;
     if (e instanceof DocError) {
-      // A failure of the store's own (git, the database) is for the log as well: the agent is only told it was refused.
-      if (e.status === 500) deps.log(`A document tool failed in chat ${chat.id}: ${e.message}`);
+      // A failure of the store's own (git, the database) is for the log and the person, who is told on the Documents page what is wrong and
+      // how to mend it: the agent is told only that, not where the store is or what to delete in it, which it could do with its own commands.
+      if (e.status === 500 || e.operator) {
+        deps.log(`A document tool failed in chat ${chat.id}: ${e.message}`);
+        return new Refusal("refused", "the documents store of this folder cannot be used just now. Tell the person: the Documents page says what is wrong and how to mend it. Do not try to repair it yourself");
+      }
       // The comments' refusals say what they are: a thread that is not there, a quote that is not in the text, a comment too long.
       if (e.extra?.code && e.extra.code !== "revision_mismatch") return new Refusal(e.extra.code, e.message);
       if (e.status === 404) return new Refusal("not_found", e.message);

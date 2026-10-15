@@ -20,7 +20,13 @@ export const isAdoptable = (name) => isDocumentName(name) && name.length <= 255 
 /** The temporary files a write leaves behind when it is cut off: `.<name>.<12 hex>.tmp`. */
 export const isTempName = (name) => /^\..+\.[0-9a-f]{12}\.tmp$/.test(name);
 
-export class Refused extends Error {}
+/** Something in the way of a write. `taken`: the name is another file's (a link, a folder, a second name), not a document's. */
+export class Refused extends Error {
+  constructor(message, { taken = false } = {}) {
+    super(message);
+    this.taken = taken;
+  }
+}
 
 /** `name` in `dir`, through `inside`: the path, or nothing when it is not exactly that (a link, or no such name). */
 function placeOf(inside, dir, name) {
@@ -114,7 +120,7 @@ export function readDocument(inside, dir, name) {
  */
 export function writeDocument(inside, dir, name, bytes, { create = false } = {}) {
   const file = placeOf(inside, dir, name);
-  if (!file) throw new Refused(`${name} is not a document's name in this folder`);
+  if (!file) throw new Refused(`${name} is not a document's name in this folder`, { taken: true });
   let mode;
   let owner;
   if (create) {
@@ -147,7 +153,7 @@ export function writeDocument(inside, dir, name, bytes, { create = false } = {})
       try {
         linkSync(temp, file);
       } catch (e) {
-        if (e.code === "EEXIST") throw new Refused("exists");
+        if (e.code === "EEXIST") throw new Refused("exists", { taken: true });
         throw e;
       }
       unlinkSync(temp);

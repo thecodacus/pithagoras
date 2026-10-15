@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -270,6 +270,19 @@ test('something else in the place of the deleted file is not written over: the s
     const linked = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
     assert.equal(linked.status, 409, JSON.stringify(linked.body));
     assert.equal(readFileSync(other, 'utf8'), 'not a document');
+    rmSync(file);
+    // A link to another file, and one that leads nowhere: the same answer, and what they lead to is not written.
+    symlinkSync('other.txt', file);
+    const toFile = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
+    assert.equal(toFile.status, 409, JSON.stringify(toFile.body));
+    assert.match(toFile.body.error, /^Another file took the document's name$/);
+    assert.equal(readFileSync(other, 'utf8'), 'not a document');
+    rmSync(file);
+    symlinkSync('nowhere.txt', file);
+    const dangling = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
+    assert.equal(dangling.status, 409, JSON.stringify(dangling.body));
+    assert.match(dangling.body.error, /^Another file took the document's name$/);
+    assert.equal(existsSync(path.join(path.dirname(file), 'nowhere.txt')), false);
   } finally {
     await docs.close();
   }
@@ -349,14 +362,22 @@ test('a documents folder the portal may not read is said on the page, with the r
   writeFileSync(path.join(other, 'documents', 'notes.md'), '# Notes\n');
   const docs = await portal({ a: folder, b: other });
   try {
+    const id = (await docs.call('GET', '/folders')).body.folders.find((x: any) => x.path === folder).documents[0].id as string;
     chmodSync(path.join(folder, 'documents'), 0o000);
     const { folders, problems } = (await docs.call('GET', '/folders')).body;
     assert.deepEqual(folders.map((x: any) => x.path), [other], 'the others are listed');
     assert.deepEqual(problems.map((x: any) => [x.path, x.name, x.id]), [[folder, path.basename(folder), folderIdOf(folder)]]);
     assert.match(problems[0].error, /not allowed to read this folder's documents folder/);
-    // The agent is told too, and not that there are no documents to list.
+    // The agent is told too, and not that there are no documents to list; and the document that is open is not called missing,
+    // nor its save said to be a refusal to write.
     const tool = await docs.agent('a')('doc_list', {});
     assert.match(tool.error ?? '', /^refused: The portal is not allowed to read this folder's documents folder/);
+    const url = `/folders/${folderIdOf(folder)}/documents/${id}`;
+    for (const answer of [await docs.call('GET', url), await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 })]) {
+      assert.equal(answer.status, 403, JSON.stringify(answer.body));
+      assert.match(answer.body.error, /^The portal is not allowed to read this folder's documents folder/);
+    }
+    assert.match((await docs.agent('a')('doc_read', { id })).error ?? '', /^refused: The portal is not allowed to read this folder's documents folder/);
     chmodSync(path.join(folder, 'documents'), 0o755);
     const again = (await docs.call('GET', '/folders')).body;
     assert.equal(again.problems, undefined);
@@ -367,7 +388,46 @@ test('a documents folder the portal may not read is said on the page, with the r
   }
 });
 
+test('a documents folder that is a link leading out of the folder is refused when a document is saved or made, and nothing is written where it leads', async () => {
+  const { docs, folder, url } = await withDocument('docs-hard-linked-');
+  const outside = realpathSync(scratch('docs-hard-linked-outside-'));
+  try {
+    rmSync(path.join(folder, 'documents'), { recursive: true });
+    symlinkSync(outside, path.join(folder, 'documents'));
+    const saved = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
+    assert.equal(saved.status, 409, JSON.stringify(saved.body));
+    assert.equal(saved.body.error, 'documents in this folder is a link');
+    const made = await docs.agent('a')('doc_create', { title: 'Another' });
+    assert.equal(made.error, 'refused: documents in this folder is a link');
+    assert.deepEqual(readdirSync(outside), []);
+    assert.deepEqual(docs.logged.filter((line) => /failed/.test(line)), []);
+  } finally {
+    await docs.close();
+  }
+});
+
 // What a failed disk, git or database is to the person who reads it
+
+test('a full data disk, which git says in words, is said as a full disk and not as a damaged history to be removed', async () => {
+  const { docs, url } = await withDocument('docs-hard-full-');
+  // A git that fails as it does when the data folder's disk is full, and is git otherwise.
+  const bin = realpathSync(scratch('docs-hard-fakegit-'));
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = hash-object ]; then echo "error: unable to create temporary file: No space left on device" >&2; exit 128; fi\ndone\nexec ${real} "$@"\n`, { mode: 0o755 });
+  const was = process.env.PATH;
+  process.env.PATH = `${bin}:${was}`;
+  try {
+    const saved = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
+    assert.equal(saved.status, 507, JSON.stringify(saved.body));
+    assert.equal(saved.body.error, 'There is no room left on the disk for this document');
+    const made = await docs.agent('a')('doc_create', { title: 'Another' });
+    assert.equal(made.error, 'refused: There is no room left on the disk for this document');
+    assert.ok(![...docs.logged].some((line) => /remove its git folder/.test(line)));
+  } finally {
+    process.env.PATH = was;
+    await docs.close();
+  }
+});
 
 test('a full disk, a read-only file system, a missing right, git and the database say what is wrong, and anything else is left as it is', () => {
   const fs = (code: string, path = '/data/ws/documents/.plan.md.0123456789ab.tmp') => Object.assign(new Error(`${code}: failed, open '${path}'`), { code, path });
@@ -386,6 +446,22 @@ test('a full disk, a read-only file system, a missing right, git and the databas
   assert.equal(status, 500);
   assert.match(why, /^The history of the documents could not be used: git cat-file failed \(128\): fatal: bad object \(the store is \/data\/store: /);
   assert.ok(!why.includes('more of what it said'));
+  // What the disk said to git, which is a child process: it reaches it as words.
+  assert.deepEqual(reasons(new GitError('git hash-object failed (128): error: unable to create temporary file: No space left on device')), [507, 'There is no room left on the disk for this document']);
+  assert.deepEqual(reasons(new GitError('git commit-tree failed (128): fatal: Disk quota exceeded')), [507, 'There is no room left on the disk for this document']);
+  assert.deepEqual(reasons(new GitError('git update-ref failed (128): error: could not write: Read-only file system')), [403, "The documents folder, or the portal's data folder, is on a read-only file system"]);
+  assert.deepEqual(reasons(new GitError("git read-tree failed (128): fatal: Unable to create '/x/index.lock': Permission denied")), [403, 'The portal is not allowed to use the documents store in /data/store (permission denied)']);
+  assert.deepEqual(reasons(Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL' })), [507, 'There is no room left on the disk for this document']);
+  assert.deepEqual(reasons(Object.assign(new Error('attempt to write a readonly database'), { code: 'SQLITE_READONLY_DBMOVED' })), [403, "The documents folder, or the portal's data folder, is on a read-only file system"]);
+  assert.deepEqual(reasons(Object.assign(new Error('access permission denied'), { code: 'SQLITE_PERM' })), [403, 'The portal is not allowed to use the documents store in /data/store (permission denied)']);
+  // What names the store or a way to mend it is for the person alone: marked, so that the agent is not given it.
+  const forThePerson = (e: unknown) => Boolean((explained(e, '/data/store') as any).operator);
+  assert.equal(forThePerson(new GitError('git cat-file failed (128): fatal: bad object')), true);
+  assert.equal(forThePerson(new GitError('git could not be started', { spawn: 'ENOENT' })), true);
+  assert.equal(forThePerson(Object.assign(new Error('x'), { code: 'SQLITE_CORRUPT' })), true);
+  assert.equal(forThePerson(fs('EACCES', '/proc/self/fd/9/git/index.lock')), true);
+  assert.equal(forThePerson(fs('EACCES')), false);
+  assert.equal(forThePerson(new GitError('git hash-object failed (128): No space left on device')), false);
   // The database: damaged, with what to do, or failed for another reason.
   assert.match(reasons(Object.assign(new Error('file is not a database'), { code: 'SQLITE_NOTADB' }))[1], /^The database of the documents is damaged: file is not a database \(remove the docs\.sqlite files in \/data\/store /);
   assert.deepEqual(reasons(Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' })), [500, 'The database of the documents could not be used: database is locked (the store is /data/store)']);
@@ -399,6 +475,9 @@ test('a full disk, a read-only file system, a missing right, git and the databas
 });
 
 // A broken store
+
+/** What the agent is told when the store is broken: that the person has to mend it, and nothing of where it is or what to delete. */
+const AGENT_TOLD = 'refused: the documents store of this folder cannot be used just now. Tell the person: the Documents page says what is wrong and how to mend it. Do not try to repair it yourself';
 
 /** The store of `folder` in the data folder. */
 const storeOf = (folder: string) => path.join(DATA, folderIdOf(folder));
@@ -435,7 +514,8 @@ test('a folder whose store cannot be opened is said on the page, with the reason
     assert.match(read.body.error, /git could not be found on the portal's PATH/);
     // And the agent is told the same.
     const tool = await docs.agent('a')('doc_list', {});
-    assert.match(tool.error ?? '', /^refused: git could not be found/);
+    assert.equal(tool.error, AGENT_TOLD);
+    assert.ok(docs.logged.some((line) => /^A document tool failed in chat a: git could not be found/.test(line)), 'the log has the reason');
   } finally {
     process.env.PATH = was;
     await docs.close();
@@ -464,6 +544,7 @@ test('a store whose history is damaged is said, with where it is, and starting i
     const read = await docs.call('GET', `/folders/${folderIdOf(folder)}/documents/${id}`);
     assert.equal(read.status, 500);
     assert.match(read.body.error, /history of the documents could not be used/);
+    assert.equal((await docs.agent('a')('doc_read', { id })).error, AGENT_TOLD);
     // The file is the person's own, and is as it was.
     assert.equal(readFileSync(path.join(folder, 'documents', 'plan.md'), 'utf8'), `${PLAN}\nMore.\n`);
   } finally {
@@ -502,6 +583,13 @@ test('a database that is not one is said, with what to do, and without it the do
     const read = await docs.call('GET', `/folders/${folderIdOf(folder)}/documents/${id}`);
     assert.equal(read.status, 500);
     assert.match(read.body.error, /database of the documents is damaged/);
+    // The remedy is the person's: the agent runs commands as the portal and could carry it out, so it is told only to ask them.
+    for (const [name, params] of [['doc_list', {}], ['doc_read', { id }], ['doc_create', { title: 'Another' }]] as const) {
+      const tool = await docs.agent('a')(name, params);
+      assert.equal(tool.error, AGENT_TOLD, name);
+      assert.ok(!tool.error!.includes(storeOf(folder)) && !/remove|delete/i.test(tool.error!), name);
+    }
+    assert.ok(docs.logged.some((line) => line.includes(`remove the docs.sqlite files in ${storeOf(folder)}`)), 'the log has the whole reason');
   } finally {
     await docs.close();
   }

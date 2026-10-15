@@ -294,7 +294,14 @@ export class Store {
     const found = this.documentsDir();
     if (found) return found;
     const dir = path.join(this.folder, DOCUMENTS);
-    if (this.inside(this.folder, DOCUMENTS) !== dir) throw new DocError(409, "documents in this folder is a link");
+    let followed;
+    try {
+      followed = this.inside(this.folder, DOCUMENTS);
+    } catch {
+      // A link that leads out of the folder is refused by `inside`: it is a link all the same.
+      throw new DocError(409, "documents in this folder is a link");
+    }
+    if (followed !== dir) throw new DocError(409, "documents in this folder is a link");
     const folder = lstatSync(this.folder);
     try {
       mkdirSync(dir, { mode: folder.mode & 0o7777 });
@@ -490,12 +497,8 @@ export class Store {
       await this.recover();
       const dir = this.documentsDir();
       if (!dir) return [];
-      // A folder the portal may not read is not an empty one: it would be said to have no documents.
-      try {
-        accessSync(dir, constants.R_OK | constants.X_OK);
-      } catch (e) {
-        if (e.code === "EACCES" || e.code === "EPERM") throw new DocError(403, "The portal is not allowed to read this folder's documents folder (permission denied)");
-      }
+      const closed = this.closed(dir);
+      if (closed) throw closed;
       const out = [];
       const open = new Map(this.db.prepare("SELECT doc_id, COUNT(*) AS n FROM threads WHERE status = 'open' GROUP BY doc_id").all().map((r) => [r.doc_id, r.n]));
       const answered = new Map(this.db.prepare("SELECT doc_id, COUNT(*) AS n FROM threads WHERE answered = 1 GROUP BY doc_id").all().map((r) => [r.doc_id, r.n]));
@@ -554,13 +557,25 @@ export class Store {
     return dir ? readDocument(this.inside, dir, row.name) : null;
   }
 
+  /** A refusal when the portal may not read the documents folder `dir`: an unreadable folder is not an empty one, nor are its files gone. */
+  closed(dir) {
+    try {
+      accessSync(dir, constants.R_OK | constants.X_OK);
+    } catch (e) {
+      if (e.code === "EACCES" || e.code === "EPERM") return new DocError(403, "The portal is not allowed to read this folder's documents folder (permission denied)");
+    }
+    return null;
+  }
+
   /**
-   * Why a document's file cannot be read, as a refusal: it is gone (deleted, or renamed: 404, as for a document that is not
-   * there), or something is at its name that the portal does not read as a document (a file past 1 MB, or one it is not
-   * allowed to read: 409, which says so).
+   * Why a document's file cannot be read, as a refusal: the portal may not read the documents folder (403), it is gone (deleted,
+   * or renamed: 404, as for a document that is not there), or something is at its name that the portal does not read as a
+   * document (a file past 1 MB, or one it is not allowed to read: 409, which says so).
    */
   unreadable(row) {
     const dir = this.documentsDir();
+    const closed = dir && this.closed(dir);
+    if (closed) return closed;
     if (dir && isPlainFile(this.inside, dir, row.name)) return new DocError(409, "The document's file is bigger than 1 MB, or the portal is not allowed to read it");
     return new DocError(404, "There is no such document");
   }
@@ -699,7 +714,7 @@ export class Store {
     try {
       written = writeDocument(this.inside, dir, row.name, bytes, { create });
     } catch (e) {
-      if (e instanceof Refused) throw new DocError(409, e.message === "exists" ? "Another file took the document's name" : e.message);
+      if (e instanceof Refused) throw new DocError(409, e.taken ? "Another file took the document's name" : e.message);
       throw e;
     }
     this.fault("write");
@@ -900,7 +915,8 @@ export class Store {
       const file = this.fileOf(row);
       // A document whose file is gone (deleted, or renamed) is still open on a page that has its text: the passage is in the text the
       // document last had, which is what the page shows until its next save makes the file again.
-      if (!file && this.unreadable(row).status !== 404) throw this.unreadable(row);
+      const refusal = file ? null : this.unreadable(row);
+      if (refusal && refusal.status !== 404) throw refusal;
       const current = file ? this.text(file.bytes) : await this.textAt(row, row.revision);
       const there = base === row.revision ? current : await this.textAt(row, base);
       if (there === null || current === null) throw new DocError(409, "The document is not text that can be commented on");
