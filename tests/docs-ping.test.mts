@@ -333,6 +333,36 @@ test('a wake that fails while the comment is changed says so, and no retry is wa
   }
 });
 
+test('a comment typed away and another written while the agent is being woken with the first is woken for on its own: the wake of the one that went does not take the one that has its ping number now', async () => {
+  const { docs, person, reply, remove, threads } = await withDocument('docs-ping-reused-', ['a'], { wakeMs: 400 });
+  try {
+    let release!: () => void;
+    docs.state.hold = new Promise<void>((resolve) => (release = resolve));
+    const made = await person('Hello');
+    const first = await reply(made.body.id, '@agent fix the date');
+    await until(() => docs.told.length === 1, 'the chat to be rung');
+    // The comment is typed away and another written, while the chat is starting for the first: the ping that is gone gives its number to the next.
+    assert.equal((await remove(made.body.id, first.body.comments[1].id)).body.removed, 'comment');
+    const second = await reply(made.body.id, '@agent please check the numbers instead');
+    assert.equal(second.body.ping.id, first.body.ping.id, 'the number is given again');
+    release();
+    await until(() => docs.sent.a.length === 1, 'the chat to take what it was rung for');
+    await later(150);
+    // That wake was for the comment that went: the comment that is there was not delivered by it, and says so.
+    assert.deepEqual(docs.sent.a.map((s) => s.message.content.split('\n')[1]), ['> @agent fix the date']);
+    let [thread] = await threads();
+    assert.deepEqual([thread.ping.sent, thread.ping.state], [false, 'pending']);
+    // Its own wake delivers it.
+    await until(() => docs.sent.a.length === 2, 'the agent to be woken with the comment that is there');
+    assert.equal(docs.sent.a[1].message.content.split('\n')[1], '> @agent please check the numbers instead');
+    await until(async () => (await threads())[0].ping.state === 'sent');
+    [thread] = await threads();
+    assert.equal(thread.comments.at(-1).body, '@agent please check the numbers instead');
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a comment that does not ask the agent any more is not woken for: the mention was taken away before the wake', async () => {
   const { docs, person, edit, threads } = await withDocument('docs-ping-unmention-', ['a'], { wakeMs: 150 });
   try {

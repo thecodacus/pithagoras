@@ -51,6 +51,9 @@ class Store {
   /** How many requests to make a thread were started, and how long the server keeps each before it answers. */
   started = 0;
   delay = 0;
+  /** The same for the requests that take a comment away. */
+  deleting = 0;
+  deleteDelay = 0;
   /** What the page sent to open a chat, and to change or take away a comment. */
   opened: any[] = [];
   requests: { method: string; comment: string; body?: any }[] = [];
@@ -246,7 +249,11 @@ async function open(page: Page, store: Store, { language, ready = 'Ship it on Fr
     }
     const one = new RegExp(`^${DOCUMENT}/threads/(\\w+)/comments/(\\w+)$`).exec(p);
     if (one && method === 'PUT') return store.edit(one[1], one[2], json());
-    if (one && method === 'DELETE') return store.remove(one[1], one[2]);
+    if (one && method === 'DELETE') {
+      store.deleting += 1;
+      if (store.deleteDelay) await new Promise((resolve) => setTimeout(resolve, store.deleteDelay));
+      return store.remove(one[1], one[2]);
+    }
     // A chat opened for the folder, as the portal's own route makes one.
     if (p === '/api/sessions' && method === 'POST') {
       const made = { id: `n${store.opened.length + 1}`, title: json().title, workspace: json().workspace };
@@ -541,6 +548,29 @@ test('Cancel while the first save of a new comment is on its way takes the threa
   expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String) }]);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(editorOf(page).locator('.pd-thread, .pd-thread-pending')).toHaveCount(0);
+});
+
+test('text typed while a new comment that was typed away is being taken away makes a new thread, and is saved', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  const compose = panel(page).locator('.pd-compose');
+  await compose.getByRole('textbox').fill('Hello');
+  await expect.poll(() => store.threads.length).toBe(1);
+  await expect(compose.getByText('Saved', { exact: true })).toBeVisible();
+  // Typed away, and typed again before the server has answered: the thread is going, so the words are for a new one.
+  store.deleteDelay = 1500;
+  await compose.getByRole('textbox').fill('');
+  await expect.poll(() => store.deleting).toBe(1);
+  await compose.getByRole('textbox').fill('Hi');
+  await expect.poll(() => store.threads.map((t) => t.comments.map((c) => c.body)), { timeout: 10_000 }).toEqual([['Hi']]);
+  expect(store.made).toHaveLength(2);
+  await expect(compose.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  // Nothing was sent to the thread that was taken away.
+  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String) }]);
+  await expectMarked(page, store.threads[0].id, 'The build is green.');
 });
 
 test('a comment that could not be saved keeps what was typed and says why, and the next change or leaving the box sends it again', async ({ page }) => {

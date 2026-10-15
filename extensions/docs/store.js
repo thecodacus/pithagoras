@@ -961,7 +961,7 @@ export class Store {
 
   /**
    * The person's last comment of the thread no longer asks the agent (it was edited): a ping that no chat took is taken back.
-   * Returns the number of the ping that was, or nothing, and the thread.
+   * Returns the number of the ping that was, or nothing, the comment it was for, and the thread.
    */
   unping(id, thread) {
     return this.locked(async () => {
@@ -977,17 +977,20 @@ export class Store {
         })();
         this.toldThreads(row);
       }
-      return { ping: had?.id, thread: this.threadsOf(row).find((t) => t.id === found.id) };
+      return { ping: had?.id, comment: had ? last.id : undefined, thread: this.threadsOf(row).find((t) => t.id === found.id) };
     });
   }
 
-  /** The chat took the ping `ping` of a thread. Returns the thread. */
-  reached(id, thread, ping) {
+  /**
+   * The chat took the ping `ping` of a thread, which was made for the comment `comment`. A ping number is given again once the ping
+   * that had it is gone (its comment typed away), so the ping that is marked is the one of that comment and no other. Returns the thread.
+   */
+  reached(id, thread, ping, comment) {
     return this.locked(async () => {
       await this.recover();
       const row = this.existing(id);
       const found = this.thread(row, thread);
-      this.db.prepare("UPDATE pings SET sent_at = ? WHERE id = ? AND thread_id = ?").run(new Date().toISOString(), ping, found.id);
+      this.db.prepare("UPDATE pings SET sent_at = ? WHERE id = ? AND thread_id = ? AND comment_id = ?").run(new Date().toISOString(), ping, found.id, comment);
       this.toldThreads(row);
       return this.threadsOf(row).find((t) => t.id === found.id);
     });
@@ -1040,8 +1043,8 @@ export class Store {
 
   /**
    * Takes away a comment, which is the last of its open thread and written by `author`: the page does it when what it saved
-   * was typed away. The thread goes with its only comment. Returns what was taken away (`thread` or `comment`), the thread if it
-   * is still there, and the numbers of the pings that went with it.
+   * was typed away. The thread goes with its only comment. Returns what was taken away (`thread` or `comment`), and the thread if
+   * it is still there. Its pings go with it.
    */
   remove(id, thread, comment, { author }) {
     return this.locked(async () => {
@@ -1049,7 +1052,6 @@ export class Store {
       const row = this.existing(id);
       const found = this.thread(row, thread);
       const mine = this.editable(found, comment, author);
-      const pings = this.db.prepare("SELECT id FROM pings WHERE comment_id = ?").all(mine.id).map((p) => p.id);
       const only = this.db.prepare("SELECT COUNT(*) AS n FROM comments WHERE thread_id = ?").get(found.id).n === 1;
       this.db.transaction(() => {
         if (only) return this.db.prepare("DELETE FROM threads WHERE id = ?").run(found.id);
@@ -1058,7 +1060,7 @@ export class Store {
         this.settleFlags(found);
       })();
       this.toldThreads(row);
-      return { removed: only ? "thread" : "comment", thread: only ? null : this.threadsOf(row).find((t) => t.id === found.id), pings };
+      return { removed: only ? "thread" : "comment", thread: only ? null : this.threadsOf(row).find((t) => t.id === found.id) };
     });
   }
 

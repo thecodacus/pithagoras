@@ -79,10 +79,12 @@ export function comments(portal, { when }) {
     // What the box saves with, as it is now: the box lives on through the thread's being made and changed.
     const now = useRef(null);
     now.current = { thread, onWrite, onClear };
-    // The thread the box's first save made. The card has it as a prop only after it is drawn again, which is later than the save that
-    // follows the first (text typed meanwhile) or the removal that follows it (Cancel meanwhile): those have to go to this thread.
+    // The thread of a card that is composing, as the box's saves have left it: the one its first save made, until a removal takes it
+    // away again (typing the only comment away takes the thread with it). The card has it as a prop only after it is drawn again,
+    // which is later than the save that follows the first (text typed meanwhile), the removal that follows it (Cancel meanwhile)
+    // and the save that follows a removal (text typed meanwhile): each of those has to go by this, and not by the prop.
     const made = useRef(null);
-    const here = () => (now.current.thread.id ? now.current.thread : { ...now.current.thread, id: made.current });
+    const here = () => (composing ? { ...now.current.thread, id: made.current } : now.current.thread);
     const typed = useRef(null);
     typed.current ??= createDraft({
       save: async (words, id) => {
