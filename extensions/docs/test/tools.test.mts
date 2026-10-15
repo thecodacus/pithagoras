@@ -115,7 +115,7 @@ test('the seven tools are put into each chat\'s pi where pi runs in the portal, 
   const container = await portal({ a: folder }, 'container');
   try {
     assert.equal(host.factories.length, 1, 'one pi extension for every chat');
-    assert.deepEqual([...host.pi('a').keys()].sort(), ['doc_comment', 'doc_create', 'doc_edit', 'doc_list', 'doc_read', 'doc_reply', 'doc_resolve']);
+    assert.deepEqual([...host.pi('a').keys()].sort(), ['doc_comment', 'doc_create', 'doc_delete_comment', 'doc_edit', 'doc_edit_comment', 'doc_list', 'doc_read', 'doc_reply', 'doc_resolve']);
     for (const tool of host.pi('a').values()) {
       assert.ok(tool.description.length > 40 && tool.label && tool.promptSnippet, `${tool.name} says what it is for`);
       // A part is counted in characters, and so is said to be.

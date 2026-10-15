@@ -199,7 +199,7 @@ test('a call of one of the agent\'s document tools is drawn as what became of th
   await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
 });
 
-test('a comment, a reply, a resolved thread and an edit that answers a comment are drawn as what became of the document, in English and in German', async ({ page }) => {
+test('a comment, a reply, a changed or deleted comment, a resolved thread and an edit that answers a comment are drawn as what became of the document, in English and in German', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const { caughtUp, calls } = await portal(page, FOLDERS, 'open');
   await page.goto('/s/a');
@@ -209,14 +209,19 @@ test('a comment, a reply, a resolved thread and an edit that answers a comment a
   await calls('k2', 'doc_reply', { id: PLAN_AT.id, thread, comment: 'Done.' }, 'Replied', { ...PLAN_AT, action: 'reply', revision: 3, thread });
   await calls('k3', 'doc_resolve', { id: PLAN_AT.id, thread }, 'Resolved', { ...PLAN_AT, action: 'resolve', revision: 3, thread, changed: true });
   await calls('k4', 'doc_edit', { id: PLAN_AT.id, thread }, 'Edited', { ...PLAN_AT, action: 'edit', revision: 4, from: 3, edits: 1, changed: true, thread, replied: true });
+  await calls('k5', 'doc_edit_comment', { id: PLAN_AT.id, thread, comment_id: 'c1', comment: 'Fixed.' }, 'Changed', { ...PLAN_AT, action: 'edit_comment', revision: 4, thread, comment: 'c1' });
+  await calls('k6', 'doc_delete_comment', { id: PLAN_AT.id, thread, comment_id: 'c1' }, 'Deleted', { ...PLAN_AT, action: 'delete_comment', revision: 4, thread, comment: 'c1', removed: 'comment' });
   const cards = page.locator('.tool-row .pd-call');
-  await expect(cards).toHaveCount(4);
+  await expect(cards).toHaveCount(6);
   await expect(cards.nth(0)).toContainText('Commented on a document');
   await expect(cards.nth(0)).toContainText('documents/plan.md · Revision 3');
   await expect(cards.nth(1)).toContainText('Replied to a comment');
   await expect(cards.nth(2)).toContainText('Resolved a comment');
   await expect(cards.nth(3)).toContainText('Edited a document');
   await expect(cards.nth(3)).toContainText('documents/plan.md · Revision 3 to 4 · 1 edit · answers a comment');
+  await expect(cards.nth(4)).toContainText('Changed a comment');
+  await expect(cards.nth(4)).toContainText('documents/plan.md · Revision 4');
+  await expect(cards.nth(5)).toContainText('Deleted a comment');
   await expect(cards.nth(0).getByRole('button', { name: 'Open in Documents' })).toBeVisible();
 });
 
@@ -231,7 +236,11 @@ test('the cards of the agent\'s comments are in German in a German portal', asyn
   await calls('k2', 'doc_reply', { id: PLAN_AT.id }, 'Replied', { ...PLAN_AT, action: 'reply', revision: 3, thread });
   await calls('k3', 'doc_resolve', { id: PLAN_AT.id }, 'Resolved', { ...PLAN_AT, action: 'resolve', revision: 3, thread });
   await calls('k4', 'doc_edit', { id: PLAN_AT.id }, 'Edited', { ...PLAN_AT, action: 'edit', revision: 4, from: 3, edits: 1, changed: true, thread });
+  await calls('k5', 'doc_edit_comment', { id: PLAN_AT.id }, 'Changed', { ...PLAN_AT, action: 'edit_comment', revision: 4, thread, comment: 'c1' });
+  await calls('k6', 'doc_delete_comment', { id: PLAN_AT.id }, 'Deleted', { ...PLAN_AT, action: 'delete_comment', revision: 4, thread, comment: 'c1', removed: 'comment' });
   const cards = page.locator('.tool-row .pd-call');
+  await expect(cards.nth(4)).toContainText('Kommentar geändert');
+  await expect(cards.nth(5)).toContainText('Kommentar gelöscht');
   await expect(cards.nth(0)).toContainText('Dokument kommentiert');
   await expect(cards.nth(1)).toContainText('Auf einen Kommentar geantwortet');
   await expect(cards.nth(2)).toContainText('Kommentar erledigt');

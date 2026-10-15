@@ -19,8 +19,9 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            its comment threads, each with its passage where it is in the text now
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            a new thread { base, quote, prefix?, suffix?, start?, body }: 422 when the passage is not in revision `base`
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments  a reply { body } to an open thread
- *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  changes the person's last comment { body }, which the page saves as it is typed
- *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  takes it away (the thread goes with its only comment)
+ *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  changes one of the person's comments { body }; with `draft` the last comment, which the page saves as it is typed
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  takes it away (the thread goes with its only comment); ?draft=1 for the one typed away
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread  takes away a thread the person started, with its comments, while the agent has not commented in it
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/seen      the person has read what the agent said in a thread
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/resolve   resolves a thread, with a last comment if `body` is given
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/reopen    opens a resolved thread again
@@ -45,6 +46,8 @@
  * (the one the person is in) is woken with the comment, through the portal's own
  * `chats.tell`, to answer it with its tools. The wake is in the background, a few
  * seconds after the comment was last saved: nothing here waits for a chat to start.
+ * A comment that is changed asks as a new one would, only while it is the last of an open
+ * thread; one that is taken away, or its thread, takes the wake with it.
  */
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
@@ -637,7 +640,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const last = thread.comments.at(-1);
     try {
       if (!asksAgent(last.body)) {
-        const gone = await store.unping(id, thread.id);
+        const gone = await store.unping(id, thread.id, last.id);
         if (gone.ping !== undefined) unwake(folder, gone.comment);
         return gone.thread;
       }
@@ -847,21 +850,35 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.status(201).json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
   }));
 
-  // The page saves a comment as it is typed: the first save makes it (above), the next ones change it, and typing it all away takes it away.
+  // The page saves a comment as it is typed: the first save makes it (above), the next ones change it (`draft`), and typing it all away
+  // takes it away. Once it is let go the person changes or takes away any of their comments, in an open thread or a resolved one.
   portal.router.put("/folders/:folder/documents/:id/threads/:thread/comments/:comment", small, route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);
     const store = await storeFor(folder.path);
-    const thread = await store.edit(id, req.params.thread, req.params.comment, { body: req.body?.body, author: "user" });
-    res.json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
+    const thread = await store.edit(id, req.params.thread, req.params.comment, { body: req.body?.body, author: "user", draft: req.body?.draft === true });
+    // As a new comment asks: the last comment of a thread that is open. Any other has nothing to ask, but loses an ask that was not taken.
+    if (thread.status === "open" && thread.comments.at(-1)?.id === req.params.comment) return res.json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
+    if (asksAgent(thread.comments.find((c) => c.id === req.params.comment)?.body)) return res.json(withChat(folder, thread));
+    const gone = await store.unping(id, thread.id, req.params.comment);
+    if (gone.ping !== undefined) unwake(folder, gone.comment);
+    res.json(withChat(folder, gone.thread));
   }));
 
   portal.router.delete("/folders/:folder/documents/:id/threads/:thread/comments/:comment", route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);
-    const { removed, thread } = await (await storeFor(folder.path)).remove(id, req.params.thread, req.params.comment, { author: "user" });
+    const { removed, thread } = await (await storeFor(folder.path)).remove(id, req.params.thread, req.params.comment, { author: "user", draft: req.query.draft === "1" });
     unwake(folder, req.params.comment);
     res.json({ removed, thread: thread ? withChat(folder, thread) : null });
+  }));
+
+  portal.router.delete("/folders/:folder/documents/:id/threads/:thread", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const { removed, comments } = await (await storeFor(folder.path)).removeThread(id, req.params.thread);
+    for (const comment of comments) unwake(folder, comment);
+    res.json({ removed });
   }));
 
   portal.router.post("/folders/:folder/documents/:id/threads/:thread/seen", route(async (req, res) => {

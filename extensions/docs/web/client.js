@@ -112,6 +112,19 @@ export default function (portal) {
     "The agent answered": "Der Agent hat geantwortet",
     "{n} answered by the agent": "{n} vom Agenten beantwortet",
     "Got it": "Verstanden",
+    Edit: "Bearbeiten",
+    Delete: "Löschen",
+    Save: "Speichern",
+    "Edit the comment": "Kommentar bearbeiten",
+    edited: "bearbeitet",
+    "Edited {date}": "Bearbeitet {date}",
+    "Delete this comment?": "Diesen Kommentar löschen?",
+    "The comment is deleted for good.": "Der Kommentar wird endgültig gelöscht.",
+    "Delete this thread?": "Diesen Kommentarthread löschen?",
+    "The thread and all its comments are deleted for good.": "Der Kommentarthread und alle seine Kommentare werden endgültig gelöscht.",
+    "Delete thread": "Kommentarthread löschen",
+    "Changed a comment": "Kommentar geändert",
+    "Deleted a comment": "Kommentar gelöscht",
     "Comments on {title}": "Kommentare zu {title}",
     "Could not open a chat to ask the agent in: {error}": "Es konnte kein Chat geöffnet werden, in dem der Agent gefragt wird: {error}",
   });
@@ -201,13 +214,13 @@ export default function (portal) {
     portal.locale.use();
     const d = call.details;
     if (call.status !== "done" || typeof d?.id !== "string" || typeof d.folder !== "string") return card;
-    const heading = { create: t("Created a document"), edit: t("Edited a document"), read: t("Read a document"), comment: t("Commented on a document"), reply: t("Replied to a comment"), resolve: t("Resolved a comment") }[d.action];
+    const heading = { create: t("Created a document"), edit: t("Edited a document"), read: t("Read a document"), comment: t("Commented on a document"), reply: t("Replied to a comment"), resolve: t("Resolved a comment"), edit_comment: t("Changed a comment"), delete_comment: t("Deleted a comment") }[d.action];
     if (!heading) return card;
     const facts = [`documents/${d.name}`];
     if (d.action === "edit") {
       facts.push(d.changed ? t("Revision {from} to {to}", { from: d.from, to: d.revision }) : t("No change"), d.edits === 1 ? t("1 edit") : t("{n} edits", { n: d.edits }));
       if (d.thread) facts.push(t("answers a comment"));
-    } else if (d.action === "comment" || d.action === "reply" || d.action === "resolve") {
+    } else if (["comment", "reply", "resolve", "edit_comment", "delete_comment"].includes(d.action)) {
       facts.push(t("Revision {n}", { n: d.revision }));
     } else {
       facts.push(t("Revision {n}", { n: d.revision }));
@@ -243,5 +256,5 @@ export default function (portal) {
   }
 
   portal.slots.register("nav.page", { id: "documents", title: "Documents", icon: DocumentIcon, component: DocumentsPage });
-  for (const tool of ["doc_create", "doc_read", "doc_edit", "doc_comment", "doc_reply", "doc_resolve"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
+  for (const tool of ["doc_create", "doc_read", "doc_edit", "doc_comment", "doc_reply", "doc_edit_comment", "doc_delete_comment", "doc_resolve"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
 }

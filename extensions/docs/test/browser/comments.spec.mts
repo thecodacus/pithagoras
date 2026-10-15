@@ -27,7 +27,7 @@ test.beforeAll(() => {
 
 const PLAN = '# The plan\n\nShip it on **Friday**, [see the guide](https://example.com/guide) now.\n\nThe build is green.\n\nSign-off is on Monday.\n';
 
-interface Comment { id: string; author: 'user' | 'agent'; body: string; at: string }
+interface Comment { id: string; author: 'user' | 'agent'; body: string; at: string; edited?: string }
 interface Thread {
   id: string; status: 'open' | 'resolved'; orphaned: boolean; quote: string; prefix: string; suffix: string; start: number | null; end: number | null;
   revision: number; createdAt: string; updatedAt: string; comments: Comment[];
@@ -56,7 +56,7 @@ class Store {
   deleteDelay = 0;
   /** What the page sent to open a chat, and to change or take away a comment. */
   opened: any[] = [];
-  requests: { method: string; comment: string; body?: any }[] = [];
+  requests: { method: string; comment: string; body?: any; draft?: boolean }[] = [];
   private count = 0;
   private clock = Date.UTC(2026, 9, 2, 9);
 
@@ -148,34 +148,60 @@ class Store {
     return thread;
   }
 
-  /** The last comment of a thread, changed as the person types it. */
-  edit(id: string, comment: string, body: { body: string; chat?: string | null }) {
+  /**
+   * A comment of the person's changed. As the person types it (`draft`) it is the last of an open thread; once it is in the list it is any of
+   * theirs, in an open thread or a resolved one, marked as edited, and asking the agent only if it is the last of an open thread.
+   */
+  edit(id: string, comment: string, body: { body: string; chat?: string | null; draft?: boolean }) {
     this.requests.push({ method: 'PUT', comment, body });
     const thread = this.threads.find((t) => t.id === id);
     if (!thread) return reply(404, { error: 'There is no such comment thread', code: 'thread_not_found' });
     if (this.refuse) return reply(this.refuse.status, { error: this.refuse.error });
     const mine = thread.comments.find((c) => c.id === comment);
-    if (thread.status !== 'open') return reply(409, { error: 'The thread is resolved', code: 'thread_resolved' });
+    if (body.draft) {
+      if (thread.status !== 'open') return reply(409, { error: 'The thread is resolved', code: 'thread_resolved' });
+      if (!mine) return reply(404, { error: 'There is no such comment', code: 'comment_not_found' });
+      if (thread.comments.at(-1) !== mine) return reply(409, { error: 'Something was said in the thread after that comment', code: 'comment_not_last' });
+      mine.body = body.body;
+      thread.updatedAt = this.stamp();
+      return this.asked(thread, body.body, 'user', body.chat);
+    }
     if (!mine) return reply(404, { error: 'There is no such comment', code: 'comment_not_found' });
-    if (thread.comments.at(-1) !== mine) return reply(409, { error: 'Something was said in the thread after that comment', code: 'comment_not_last' });
+    if (mine.author !== 'user') return reply(409, { error: 'That comment is not yours to change', code: 'comment_not_yours' });
+    if (mine.body === body.body) return thread;
     mine.body = body.body;
-    thread.updatedAt = this.stamp();
-    return this.asked(thread, body.body, 'user', body.chat);
+    mine.edited = thread.updatedAt = this.stamp();
+    if (thread.status === 'open' && thread.comments.at(-1) === mine) return this.asked(thread, body.body, 'user', body.chat);
+    if (!/@agent\b/i.test(body.body) && thread.ping?.comment === mine.id && !thread.ping.sent) Object.assign(thread, { ping: null, toAgent: false });
+    return thread;
   }
 
-  /** The last comment of a thread, taken away when it is typed away: the thread with its only comment. */
-  remove(id: string, comment: string) {
-    this.requests.push({ method: 'DELETE', comment });
+  /** A comment of the person's taken away: the one typed away (`draft`, the last), or any of theirs, the thread going with its only comment. */
+  remove(id: string, comment: string, draft = false) {
+    this.requests.push({ method: 'DELETE', comment, ...(draft ? { draft } : {}) });
     const thread = this.threads.find((t) => t.id === id);
     if (!thread) return reply(404, { error: 'There is no such comment thread', code: 'thread_not_found' });
-    if (thread.comments.at(-1)?.id !== comment) return reply(404, { error: 'There is no such comment', code: 'comment_not_found' });
+    const mine = thread.comments.find((c) => c.id === comment);
+    if (!mine || (draft && thread.comments.at(-1) !== mine)) return reply(404, { error: 'There is no such comment', code: 'comment_not_found' });
+    if (mine.author !== 'user') return reply(409, { error: 'That comment is not yours to change', code: 'comment_not_yours' });
     if (thread.comments.length === 1) {
       this.threads = this.threads.filter((t) => t !== thread);
       return { removed: 'thread', thread: null };
     }
-    thread.comments.pop();
+    thread.comments.splice(thread.comments.indexOf(mine), 1);
     if (thread.ping && !thread.comments.some((c) => c.id === thread.ping!.comment)) Object.assign(thread, { ping: null, toAgent: false });
     return { removed: 'comment', thread };
+  }
+
+  /** A whole thread taken away: the person's, while the agent has not commented in it. */
+  removeThread(id: string) {
+    this.requests.push({ method: 'DELETE-THREAD', comment: id });
+    const thread = this.threads.find((t) => t.id === id);
+    if (!thread) return reply(404, { error: 'There is no such comment thread', code: 'thread_not_found' });
+    if (thread.comments[0].author !== 'user') return reply(409, { error: 'That thread was started by the agent', code: 'thread_not_yours' });
+    if (thread.comments.some((c) => c.author === 'agent')) return reply(409, { error: 'The agent has commented in this thread', code: 'thread_answered' });
+    this.threads = this.threads.filter((t) => t !== thread);
+    return { removed: 'thread' };
   }
 
   /** The person has read what the agent said. */
@@ -224,7 +250,7 @@ async function open(page: Page, store: Store, { language, ready = 'Ship it on Fr
   if (chat) await page.addInitScript((id) => sessionStorage.setItem('pithagoras-docs/chat', id), chat);
   const sessions = [{ id: 'a', title: 'First chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString(), provider: null, model: null, thinking_level: null }];
   const folders = () => [{ id: FOLDER, name: 'site', path: '/w/site', chats: [{ id: 'a', title: 'First chat' }], documents: [{ id: ID, name: 'plan.md', title: 'The plan', revision: store.revision, size: 40, modified: '2026-10-01T11:00:00.000Z', openThreads: store.threads.filter((t) => t.status === 'open').length, answeredThreads: store.threads.filter((t) => t.answered).length }] }];
-  await mockPortal(page, async ({ path: p, method, json, route }) => {
+  await mockPortal(page, async ({ path: p, method, json, route, url }) => {
     if (p === '/api/extension-ui') return { extensions: [{ name: NAME, version: '0.1.0', entry: address('client.js') + '?v=1', style: address('client.css') + '?v=1', server: API }] };
     if (p.startsWith(address(''))) {
       await route.fulfill({ contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: web(p.slice(address('').length)) });
@@ -252,8 +278,10 @@ async function open(page: Page, store: Store, { language, ready = 'Ship it on Fr
     if (one && method === 'DELETE') {
       store.deleting += 1;
       if (store.deleteDelay) await new Promise((resolve) => setTimeout(resolve, store.deleteDelay));
-      return store.remove(one[1], one[2]);
+      return store.remove(one[1], one[2], url.searchParams.get('draft') === '1');
     }
+    const whole = new RegExp(`^${DOCUMENT}/threads/(\\w+)$`).exec(p);
+    if (whole && method === 'DELETE') return store.removeThread(whole[1]);
     // A chat opened for the folder, as the portal's own route makes one.
     if (p === '/api/sessions' && method === 'POST') {
       const made = { id: `n${store.opened.length + 1}`, title: json().title, workspace: json().workspace };
@@ -389,7 +417,7 @@ test('text that is selected is commented on: the passage is marked while the com
   // Typed on: it is the same comment that is changed, and no other is made.
   await compose.getByRole('textbox').fill('Is the guide up to date? Really?');
   await expect.poll(() => store.requests.length).toBe(1);
-  expect(store.requests[0]).toEqual({ method: 'PUT', comment: store.threads[0].comments[0].id, body: { body: 'Is the guide up to date? Really?' } });
+  expect(store.requests[0]).toEqual({ method: 'PUT', comment: store.threads[0].comments[0].id, body: { body: 'Is the guide up to date? Really?', draft: true } });
   expect(store.threads[0].comments.map((c) => c.body)).toEqual(['Is the guide up to date? Really?']);
   expect(store.made).toHaveLength(1);
   // Ctrl+Enter lets it go: it is a thread of the list, with the comment in it, and the document was not changed by any of it.
@@ -423,7 +451,7 @@ test('a comment that is dropped leaves nothing marked, one that is typed away is
   const gone = store.threads[0].id;
   await box.fill('');
   await expect.poll(() => store.threads.length).toBe(0);
-  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String) }]);
+  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String), draft: true }]);
   await expect(panel(page).locator('.pd-compose')).toContainText('The build is green.');
   await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('The build is green.');
   await expect(editorOf(page).locator(`[data-pd-thread="${gone}"]`)).toHaveCount(0);
@@ -545,7 +573,7 @@ test('Cancel while the first save of a new comment is on its way takes the threa
   await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
   expect(store.threads).toEqual([]);
   // The comment that was made is the one taken away, in its own thread: not in `threads/null`.
-  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String) }]);
+  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String), draft: true }]);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(editorOf(page).locator('.pd-thread, .pd-thread-pending')).toHaveCount(0);
 });
@@ -569,7 +597,7 @@ test('text typed while a new comment that was typed away is being taken away mak
   await expect(compose.getByText('Saved', { exact: true })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   // Nothing was sent to the thread that was taken away.
-  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String) }]);
+  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String), draft: true }]);
   await expectMarked(page, store.threads[0].id, 'The build is green.');
 });
 
@@ -944,4 +972,220 @@ test('the list of documents says how many comments the agent answered, and none 
   Object.assign(second, { status: 'resolved', answered: true });
   await page.goto(`/x/${NAME}/documents`);
   await expect(page.getByRole('region', { name: 'site' }).getByRole('listitem')).toHaveText([/plan\.md · Changed .* · 1 open comment · 2 answered by the agent$/]);
+});
+
+const dialog = (page: Page) => page.getByRole('alertdialog');
+
+test('a comment of the person in the list is changed with Edit: the box is kept as it is until Save, Cancel and Escape leave it, and the comment says it was edited', async ({ page }) => {
+  const store = new Store();
+  const thread = seeded(store, 'The build is green.', 'Is it?');
+  store.comment(thread.id, 'Yes.', 'agent');
+  store.comment(thread.id, 'Sure?');
+  await open(page, store);
+  const card = cards(page).first();
+  const items = card.locator('li');
+  await expect(items).toHaveCount(3);
+  // Only the person's own comments are theirs to change: not the agent's.
+  await expect(items.nth(0).getByRole('button', { name: 'Edit' })).toBeVisible();
+  await expect(items.nth(1).getByRole('button', { name: 'Edit' })).toHaveCount(0);
+  await expect(items.nth(1).getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(items.nth(0).getByText('edited', { exact: true })).toHaveCount(0);
+  // Cancel and Escape leave it as it was, and send nothing.
+  await items.nth(0).getByRole('button', { name: 'Edit' }).click();
+  const box = card.getByRole('textbox', { name: 'Edit the comment' });
+  await expect(box).toHaveValue('Is it?');
+  await expect(box).toBeFocused();
+  await box.fill('Is it really?');
+  await card.getByRole('button', { name: 'Cancel' }).click();
+  await expect(items.nth(0)).toContainText('Is it?');
+  await expect(box).toHaveCount(0);
+  await items.nth(0).getByRole('button', { name: 'Edit' }).click();
+  await expect(box).toHaveValue('Is it?', 'a new box starts from the comment, not from what was given up');
+  await box.fill('Is it really?');
+  await box.press('Escape');
+  await expect(box).toHaveCount(0);
+  expect(store.requests).toEqual([]);
+  // Saving needs words that are new.
+  await items.nth(0).getByRole('button', { name: 'Edit' }).click();
+  const save = card.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toBeDisabled();
+  await box.fill('   ');
+  await expect(save).toBeDisabled();
+  await box.fill('Is it right?');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(box).toHaveCount(0);
+  await expect(items.nth(0)).toContainText('Is it right?');
+  await expect(items.nth(0).getByText('edited', { exact: true })).toBeVisible();
+  await expect(items).toHaveCount(3);
+  // A comment that is in the list is changed with no draft: whatever its place, and it names no chat when it asks nobody.
+  expect(store.requests).toEqual([{ method: 'PUT', comment: thread.comments[0].id, body: { body: 'Is it right?' } }]);
+  expect(store.threads[0].comments[0].edited).toBeTruthy();
+  // Ctrl+Enter saves too.
+  await items.nth(2).getByRole('button', { name: 'Edit' }).click();
+  await box.fill('Sure about that?');
+  await box.press('Control+Enter');
+  await expect(items.nth(2)).toContainText('Sure about that?');
+  expect(store.threads[0].comments.map((c) => c.body)).toEqual(['Is it right?', 'Yes.', 'Sure about that?']);
+});
+
+test('a change that cannot be saved says why and stays in the box, to be saved again', async ({ page }) => {
+  const store = new Store();
+  seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  const card = cards(page).first();
+  await card.getByRole('button', { name: 'Edit' }).click();
+  const box = card.getByRole('textbox', { name: 'Edit the comment' });
+  await box.fill('Is it right?');
+  store.refuse = { status: 409, error: 'The thread is resolved elsewhere' };
+  await card.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(card.getByRole('alert')).toContainText('Could not comment: The thread is resolved elsewhere');
+  await expect(box).toHaveValue('Is it right?');
+  store.refuse = null;
+  await card.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(box).toHaveCount(0);
+  await expect(card.locator('li').first()).toContainText('Is it right?');
+});
+
+test('a comment is deleted after a question, and the thread stays; the only comment of a thread is deleted with the thread, by its own button', async ({ page }) => {
+  const store = new Store();
+  const thread = seeded(store, 'The build is green.', 'Is it?');
+  const first = thread.comments[0].id;
+  store.comment(thread.id, 'Sure?');
+  await open(page, store);
+  const card = cards(page).first();
+  const items = card.locator('li');
+  await expectMarked(page, thread.id, 'The build is green.');
+  await expect(items).toHaveCount(2);
+  // Asked first; Cancel leaves everything.
+  await items.nth(0).getByRole('button', { name: 'Delete' }).click();
+  await expect(dialog(page)).toContainText('Delete this comment?');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(items).toHaveCount(2);
+  expect(store.requests).toEqual([]);
+  await items.nth(0).getByRole('button', { name: 'Delete' }).click();
+  await dialog(page).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(items).toHaveCount(1);
+  await expect(items.first()).toContainText('Sure?');
+  expect(store.requests).toEqual([{ method: 'DELETE', comment: first }]);
+  expect(store.threads[0].comments.map((c) => c.body)).toEqual(['Sure?']);
+  await expectMarked(page, thread.id, 'The build is green.');
+  // The one comment left is the thread: it has no Delete of its own, the thread has.
+  await expect(items.first().getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await card.getByRole('button', { name: 'Delete thread' }).click();
+  await expect(dialog(page)).toContainText('Delete this thread?');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(cards(page)).toHaveCount(1);
+  await card.getByRole('button', { name: 'Delete thread' }).click();
+  await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
+  await expect(cards(page)).toHaveCount(0);
+  expect(store.threads).toEqual([]);
+  expect(store.requests.at(-1)).toEqual({ method: 'DELETE-THREAD', comment: thread.id });
+  // Its mark in the text goes with it.
+  await expect(editorOf(page).locator('.pd-thread')).toHaveCount(0);
+  await expect(panel(page)).toContainText('No comments yet.');
+});
+
+test('a thread is deleted as a whole only while it is the person\'s and the agent has not commented in it, and the buttons follow what the agent does', async ({ page }) => {
+  const store = new Store();
+  const mine = seeded(store, 'The build is green.', 'Is it?');
+  store.comment(mine.id, 'More.');
+  const answered = seeded(store, 'Sign-off is on Monday.', 'Who signs off?');
+  store.comment(answered.id, 'The release manager.', 'agent');
+  const theirs = seeded(store, 'Ship it on', 'Why Friday?', 'agent');
+  const closed = seeded(store, 'The plan', 'Old.');
+  store.settle(closed.id, 'resolved');
+  await open(page, store);
+  const card = (words: string) => cards(page).filter({ hasText: words });
+  await expect(card('Is it?').getByRole('button', { name: 'Delete thread' })).toBeVisible();
+  await expect(card('Who signs off?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
+  await expect(card('Why Friday?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
+  // The person's comment in a thread of the answered kind can still go by itself.
+  await expect(card('Who signs off?').locator('li').first().getByRole('button', { name: 'Delete' })).toBeVisible();
+  // A resolved thread of the person's is theirs to delete too, beside Reopen.
+  await panel(page).getByRole('button', { name: 'Show resolved (1)' }).click();
+  await expect(card('Old.').getByRole('button', { name: 'Reopen' })).toBeVisible();
+  await expect(card('Old.').getByRole('button', { name: 'Delete thread' })).toBeVisible();
+  // The agent comments in the person's thread: the button goes, when the page is told.
+  store.comment(mine.id, 'Yes.', 'agent');
+  await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
+  await expect(card('Is it?').locator('li')).toHaveCount(3);
+  await expect(card('Is it?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
+  // A thread that is deleted elsewhere is gone from here when the page is told, with its mark in the text.
+  await expectMarked(page, answered.id, 'Sign-off is on Monday.');
+  store.threads = store.threads.filter((t) => t.id !== answered.id);
+  await told(page, 'threads', { at: '2026-10-02T10:01:00.000Z' });
+  await expect(card('Who signs off?')).toHaveCount(0);
+  await expect(editorOf(page).locator(`[data-pd-thread="${answered.id}"]`)).toHaveCount(0);
+  // The resolved one is deleted from here.
+  await card('Old.').getByRole('button', { name: 'Delete thread' }).click();
+  await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
+  await expect(card('Old.')).toHaveCount(0);
+  expect(store.threads.map((t) => t.id)).toEqual([mine.id, theirs.id]);
+});
+
+test('a thread deleted while a comment was being typed in it takes the box with it, and says nothing is wrong', async ({ page }) => {
+  const store = new Store();
+  seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  const card = cards(page).first();
+  await card.getByRole('textbox', { name: 'Reply' }).fill('Typed on.');
+  await expect.poll(() => store.threads[0].comments.length).toBe(2);
+  await card.getByRole('button', { name: 'Delete thread' }).click();
+  await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
+  await expect(cards(page)).toHaveCount(0);
+  expect(store.threads).toEqual([]);
+  // What was typed was taken away with the rest, not saved to a thread that is gone.
+  expect(store.requests.map((r) => r.method)).toEqual(['DELETE', 'DELETE-THREAD']);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('changing the last comment of an open thread asks the agent as a new one would; one that is not the last asks nobody, and opens no chat', async ({ page }) => {
+  const store = new Store();
+  const last = seeded(store, 'The build is green.', 'Is it?');
+  const older = seeded(store, 'Sign-off is on Monday.', 'Who signs off?');
+  store.comment(older.id, 'The release manager.', 'agent');
+  await open(page, store, { chat: 'a' });
+  const edit = async (words: string, text: string) => {
+    const card = cards(page).filter({ hasText: words });
+    await card.locator('li').first().getByRole('button', { name: 'Edit' }).click();
+    await card.getByRole('textbox', { name: 'Edit the comment' }).fill(text);
+    await card.getByRole('button', { name: 'Save', exact: true }).click();
+    return card;
+  };
+  const card = await edit('Is it?', 'Is it? @agent, please check.');
+  await expect(card.locator('.pd-asked')).toHaveText('Asked the agent · First chat');
+  expect(store.requests.at(-1)).toMatchObject({ method: 'PUT', comment: last.comments[0].id, body: { body: 'Is it? @agent, please check.', chat: 'a' } });
+  expect(store.threads[0].ping?.chat).toBe('a');
+  // The agent has answered the other: the mention changes nothing there.
+  const answered = await edit('Who signs off?', 'Who signs off? @agent');
+  await expect(answered.locator('li').first()).toContainText('@agent');
+  expect(store.requests.at(-1)!.body).not.toHaveProperty('chat');
+  expect(store.threads[1].toAgent).toBeFalsy();
+  await expect(answered.locator('.pd-asked')).toHaveText(/^The agent answered/);
+  expect(store.opened).toEqual([]);
+});
+
+test('what changing and deleting comments says is in German in a German portal', async ({ page }) => {
+  const store = new Store();
+  const thread = seeded(store, 'The build is green.', 'Is it?');
+  store.comment(thread.id, 'Sure?');
+  store.threads[0].comments[0].edited = '2026-10-02T09:30:00.000Z';
+  await open(page, store, { language: 'de' });
+  const card = cards(page).first();
+  const first = card.locator('li').first();
+  await expect(first.getByText('bearbeitet', { exact: true })).toBeVisible();
+  await expect(first.getByText('bearbeitet', { exact: true })).toHaveAttribute('title', /^Bearbeitet /);
+  await expect(card.getByRole('button', { name: 'Kommentarthread löschen' })).toBeVisible();
+  await first.getByRole('button', { name: 'Bearbeiten' }).click();
+  await expect(card.getByRole('textbox', { name: 'Kommentar bearbeiten' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
+  await card.getByRole('button', { name: 'Abbrechen' }).click();
+  await first.getByRole('button', { name: 'Löschen' }).click();
+  await expect(dialog(page)).toContainText('Diesen Kommentar löschen?');
+  await expect(dialog(page)).toContainText('Der Kommentar wird endgültig gelöscht.');
+  await dialog(page).getByRole('button', { name: 'Abbrechen' }).click();
+  await card.getByRole('button', { name: 'Kommentarthread löschen' }).click();
+  await expect(dialog(page)).toContainText('Diesen Kommentarthread löschen?');
+  await expect(dialog(page)).toContainText('Der Kommentarthread und alle seine Kommentare werden endgültig gelöscht.');
 });

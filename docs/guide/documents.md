@@ -477,9 +477,10 @@ list of comments as well; **Ctrl+Enter** lets it go, so that it is in the list a
 the box is empty for the next, and so does an answer from the agent. Text typed
 after the agent answered is a comment of its own.
 
-A comment is the last of its thread while it is written: the page can change or
-take away your last comment of an open thread, and nothing else. Comments are
-not edited or deleted otherwise.
+A comment is the last of its thread while it is written, and it is only then
+that the box changes or takes it away as you type: once the agent has answered
+(or you have said anything after it) the comment is as it was. You change or
+delete it afterwards with the buttons beside it ([below](#changing-and-deleting-comments)).
 
 A comment on text you have just typed is made on that text: what you typed is
 saved first (a revision of its own), so that the passage is in a revision the
@@ -499,6 +500,53 @@ What is in a thread:
 
 You and the agent can both start a thread, answer it and resolve it.
 
+### Changing and deleting comments
+
+A comment that is in the list can be changed or deleted by whoever wrote it: you
+change your own, and the agent its own ([below](#the-agents-tools)). Neither
+changes or deletes the other's. Each of your comments has **Edit** and **Delete**
+beside its time, in an open thread or a resolved one.
+
+- **Edit** turns the comment into a box with **Save** and **Cancel**. It is kept
+  as it was until you press **Save** (or **Ctrl+Enter**); **Cancel** and
+  **Escape** give it up. **Save** is for words that are new: the same words
+  change nothing. A comment that was changed says **edited** beside its time (the
+  time of the change is its tooltip), and so does the agent's when the agent
+  changes it. The comment keeps its place in the thread and its passage in the
+  text. Text that is still being typed in the box is not an edit, and is not
+  marked.
+- **Delete** asks first (**Delete this comment?**; the question can be switched
+  off in Settings, like the portal's other deletions). The thread stays with its
+  other comments, on its passage. A thread's only comment is the thread, and a
+  thread of one comment has **Delete thread** instead.
+- **Delete thread** takes a whole thread away with its comments, open or
+  resolved, and its mark in the text with it. It is for a thread you started,
+  and only while the agent has not commented in it: it is not there on a
+  thread the agent started or has commented in, which you resolve instead (and
+  if the agent takes its own comments away, what is left is yours to delete).
+  The agent resolving a thread without a comment does not count. It asks
+  first, too.
+- Pages that have the document open show a change, a deletion or a deleted thread
+  as soon as it is made, like any other comment.
+
+What a change or a deletion does to where the thread stands with the agent
+([below](#asking-the-agent)):
+
+- **A change asks the agent as a new comment would**: only if it is the last
+  comment of an open thread, and the agent is woken (a few seconds later, with the
+  words it has by then) if it now has `@agent` in it. A comment that is not the
+  last, one in a resolved thread, and one that the agent has answered already ask
+  nobody, even when you put the mention in: write a new reply to ask again. A
+  comment the chat has taken already is changed in the thread and wakes nobody
+  again, as before. Taking the mention out of a comment whose ask no chat has taken
+  takes the ask back, wherever the comment is in the thread.
+- **Deleting a comment that asked** takes its ask with it: the thread stops
+  waiting for the agent, and the agent is not woken for it. Deleting your reply to
+  an answer of the agent's makes that answer news again (**The agent answered**);
+  deleting a comment in the middle of the thread changes nothing of that.
+- A deleted thread is not woken for either. If the agent was already woken, it
+  finds the thread gone when it tries to answer, and says so.
+
 ### Asking the agent
 
 Write **@agent** in a comment, a new one or a reply, to ask the agent to answer
@@ -515,7 +563,8 @@ and the agent reads the thread and answers in it with the tools described
   on writing, and the thread says where the ask stands. A comment you change
   after the agent was woken with it, or while the chat is still starting up for
   it, is changed in the thread and wakes nobody again; one you take the mention out of, or type away, before the agent is woken
-  does not wake it at all.
+  does not wake it at all. A comment you change later with **Edit** asks as a
+  new one would, as [above](#changing-and-deleting-comments) says.
 - Only a comment of yours wakes the agent, and only with `@agent` as a name of
   its own, in any case: `@agents`, `me@agent.example` and `@agent` straight after
   a backtick do not (a mention elsewhere in a code span or block still counts).
@@ -621,7 +670,7 @@ its comments, and restoring a revision brings back text, not comments.
 ## The agent's tools
 
 With the host executor (pi runs in the portal's own process) each chat's agent
-has seven tools for the documents. Like any tool they can be switched off for
+has nine tools for the documents. Like any tool they can be switched off for
 a chat or by default under Settings → Tools, where they are listed in the group
 `extension-host`: the name the portal gives to what extensions add to a chat's
 pi through their server half. With `EXECUTOR=container` the agent has none:
@@ -630,11 +679,13 @@ the runner image does not get extensions.
 | Tool | What it does |
 | --- | --- |
 | `doc_list` | The documents the chat sees: id, title, file, revision, whether it is the project's or the chat's own, and how many comments on it are open. `scope` narrows it to one of the two. |
-| `doc_read` | One document's Markdown and revision, and after the text the comment threads on it that are open (`comments` asks for all of them, or none). `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). The comments come with the first part, for the document as it is now: at most 30 threads, the last 10 comments of each, and a passage cut to 400 characters, with a line saying how many more there are. |
+| `doc_read` | One document's Markdown and revision, and after the text the comment threads on it that are open (`comments` asks for all of them, or none), with the ids of the agent's own comments and whether they were edited. `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). The comments come with the first part, for the document as it is now: at most 30 threads, the last 10 comments of each, and a passage cut to 400 characters, with a line saying how many more there are. |
 | `doc_create` | A new document from a title and its Markdown, at revision 1. |
 | `doc_edit` | Replaces quoted passages with new text, on the revision the agent read. With a `thread` and a `reply` it answers a comment ([below](#answering-a-comment)). |
 | `doc_comment` | Starts a thread on a passage the agent quotes, with its first comment. The document is not changed. |
 | `doc_reply` | Adds a comment to an open thread. |
+| `doc_edit_comment` | Changes the text of one of the agent's own comments or replies, in an open thread or a resolved one. The comment is marked as edited. |
+| `doc_delete_comment` | Deletes one of the agent's own comments or replies. A thread goes with its only comment. |
 | `doc_resolve` | Resolves a thread, with a last comment if the agent gives one. |
 
 The agent names a document by its id, never by a path. A document is the
@@ -674,7 +725,8 @@ What the tools check is what keeps the agent from overwriting you:
 A refusal reaches the agent as an error that starts with its reason
 (`revision_mismatch`, `quote_not_found`, `quote_ambiguous`, `edits_overlap`,
 `exists`, `too_large`, `secret`, `not_found`, `invalid`, `thread_not_found`,
-`thread_resolved`, `thread_orphaned`, `too_many` or `refused`, for
+`thread_resolved`, `thread_orphaned`, `comment_not_found`, `comment_not_yours`,
+`too_many` or `refused`, for
 anything else the store will not do: the folder is full, `documents` is a link,
 the store's packages are not installed yet, the portal may not write in the
 folder, git is missing or the history is damaged, a document's file is past
@@ -721,14 +773,35 @@ to it by the tool:
 An edit without a `thread` is as before: it may change anything in the document,
 and a comment whose passage it touches follows it as above.
 
+The agent's own comments are its to correct: `doc_edit_comment` changes one,
+whichever it is (named by the id `doc_read` shows beside it), and
+`doc_delete_comment` takes one away. Both refuse a comment of yours
+(`comment_not_yours`): the agent does not change or delete what you wrote, it
+answers it or resolves the thread. Neither answers: a thread that still asks the
+agent (`@agent`) is answered with `doc_reply`, and the tool says so when it
+leaves the thread asking. What they do to the thread:
+
+- A change marks the comment as edited. If it is the last comment of the thread
+  the answer is news to you again (**The agent answered**), as a new answer
+  would be; a change to an earlier comment is not. The same words change nothing.
+- A deleted comment leaves the thread on its passage with the others. The
+  agent's only comment of a thread of its own takes the thread with it; if you had
+  replied, your comments stay, and the thread is then yours to delete. If the
+  deleted comment was the answer to a comment of yours that asked, the thread asks
+  the agent again (**Asked the agent**), but nobody is woken again; the agent's
+  deleting its own last comment never makes an answer that you have read news
+  again.
+- Both work in a resolved thread too, and neither reopens it.
+
 A comment the agent starts is its own, and a comment you make through the page
 is always yours: neither can be made in the other's name. Comments on a document
 that is only a chat's own (`scope: chat`) can be read and answered only by that
 chat, like the document.
 
 In the conversation a call of `doc_create`, `doc_read`, `doc_edit`,
-`doc_comment`, `doc_reply` or `doc_resolve` is drawn as a card that names the
-document and says what became of it (created, read, commented on, edited from
+`doc_comment`, `doc_reply`, `doc_edit_comment`, `doc_delete_comment` or
+`doc_resolve` is drawn as a card that names the document and says what became of
+it (created, read, commented on, a comment changed or deleted, edited from
 revision 2 to 3 with how many edits, and whether that answered a comment).
 **Open in Documents** opens the document on the page. A call that failed, and a
 list, are drawn as any tool call is.
@@ -779,7 +852,7 @@ extensions/docs/
 ├── files.js         a document's file, read and written safely
 ├── git.js, guard.js the history in git, and the store's folder held open
 ├── place.js         where a folder's store is, and which folder it is for
-├── tools.js         the agent's seven tools
+├── tools.js         the agent's nine tools
 ├── ping.js          what wakes the agent's chat, and what it is told
 ├── errors.js        the refusals, and what a failed disk, git or database is to a reader
 ├── secret.js        what a secret looks like, for the warning and for the agent's tools
@@ -811,7 +884,8 @@ its path and a document by an id the store gave it, never by a path:
 | `GET …/:id/events` | A stream (server-sent events) of its revisions and comment changes |
 | `GET …/:id/history`, `…/revisions/:n`, `POST …/restore` | The history, one revision's text, and bringing one back |
 | `GET`, `POST …/:id/threads`, `…/threads/:thread/{comments,resolve,reopen,seen}` | The comment threads, and a reply |
-| `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away the person's last comment of a thread: what the page's comment box does as it is typed |
+| `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away one of the person's comments `{ body }`. With `draft` (`?draft=1` for the delete) it is the page's box, as it is typed: only the last comment of an open thread. Otherwise any of theirs, open thread or resolved; a change is marked as edited |
+| `DELETE …/threads/:thread` | Take away a thread the person started, with its comments, while the agent has not commented in it (409 `thread_answered`, or `thread_not_yours` for one the agent started) |
 
 A stream's first message says where the document stands (`revision`, with
 `id: <revision>`, the author and the time), so that a page that was away finds

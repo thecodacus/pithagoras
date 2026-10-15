@@ -144,11 +144,16 @@ async function withDocument(prefix: string, chatIds: string[] = ['a'], options: 
   /** A comment the person makes on `quote`, in the chat they are in (the page says which). */
   const person = async (body: string, quote = GREEN, chat: string | null = 'a') => docs.call('POST', `${url}/threads`, { base: 1, quote, start: PLAN.indexOf(quote), body, chat });
   const reply = (thread: string, body: string, chat: string | null = 'a') => docs.call('POST', `${url}/threads/${thread}/comments`, { body, chat });
-  const edit = (thread: string, comment: string, body: string, chat: string | null = 'a') => docs.call('PUT', `${url}/threads/${thread}/comments/${comment}`, { body, chat });
-  const remove = (thread: string, comment: string) => docs.call('DELETE', `${url}/threads/${thread}/comments/${comment}`);
+  /** The comment in the page's box, changed and taken away as it is typed (`draft`): only while it is the last of an open thread. */
+  const edit = (thread: string, comment: string, body: string, chat: string | null = 'a') => docs.call('PUT', `${url}/threads/${thread}/comments/${comment}`, { body, chat, draft: true });
+  const remove = (thread: string, comment: string) => docs.call('DELETE', `${url}/threads/${thread}/comments/${comment}?draft=1`);
+  /** A comment that is in the list, changed or deleted with the buttons beside it, and a whole thread: wherever they are in the thread. */
+  const change = (thread: string, comment: string, body: string, chat: string | null = 'a') => docs.call('PUT', `${url}/threads/${thread}/comments/${comment}`, { body, chat });
+  const erase = (thread: string, comment: string) => docs.call('DELETE', `${url}/threads/${thread}/comments/${comment}`);
+  const wipe = (thread: string) => docs.call('DELETE', `${url}/threads/${thread}`);
   const threads = async () => (await docs.call('GET', `${url}/threads`)).body.threads as any[];
   const list = async () => (await docs.call('GET', '/folders')).body.folders[0].documents[0];
-  return { folder, docs, f, id, url, person, reply, edit, remove, threads, list };
+  return { folder, docs, f, id, url, person, reply, edit, remove, change, erase, wipe, threads, list };
 }
 
 test('@agent is a mention of the agent when it stands as a name of its own, and in nothing else', () => {
@@ -720,4 +725,81 @@ test('a wake that is waiting when the extension stops does not happen', async ()
   await docs.close();
   await later(400);
   assert.deepEqual(docs.told, []);
+});
+
+test('a comment changed once it is in the list asks the agent as a new one would: the last comment of an open thread is woken with its new words, one the agent answered or one in a resolved thread is not asked', async () => {
+  const { docs, id, url, person, change, threads } = await withDocument('docs-ping-change-', ['a'], { wakeMs: 120 });
+  try {
+    // The last comment of an open thread: the mention is put in, and the agent is woken with what it says now.
+    const last = await person('Is it right?');
+    const changed = await change(last.body.id, last.body.comments[0].id, '@agent is it right?');
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.deepEqual([changed.body.toAgent, changed.body.ping.state, Boolean(changed.body.comments[0].edited)], [true, 'pending', true]);
+    await until(() => docs.sent.a.length === 1, 'the agent to be woken');
+    assert.ok(docs.sent.a[0].message.content.includes('> @agent is it right?'));
+    await until(async () => (await threads())[0].ping.state === 'sent');
+
+    // A comment the agent answered: the mention put into it asks nobody, and what the thread says of the answer stays.
+    const answered = await person('Is it Monday?', 'Sign-off is on Monday.');
+    await docs.agent('a')('doc_reply', { id, thread: answered.body.id, comment: 'Yes.' });
+    const second = await change(answered.body.id, answered.body.comments[0].id, '@agent is it Monday?');
+    assert.deepEqual([second.status, second.body.toAgent, second.body.ping, second.body.answered, second.body.comments[0].body], [200, false, null, true, '@agent is it Monday?']);
+
+    // A resolved thread: nothing is asked in it either.
+    const closed = await person('Is it green?', 'The build is green.');
+    await docs.call('POST', `${url}/threads/${closed.body.id}/resolve`, {});
+    const third = await change(closed.body.id, closed.body.comments[0].id, '@agent is it green?');
+    assert.deepEqual([third.status, third.body.status, third.body.toAgent, third.body.ping], [200, 'resolved', false, null]);
+    await later(400);
+    assert.equal(docs.sent.a.length, 1, 'only the first was asked');
+    assert.equal(docs.told.length, 1);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('the mention taken out of a comment that is not the last takes the ask back, and the thread no longer waits for the agent', async () => {
+  const { docs, person, reply, change, threads } = await withDocument('docs-ping-change-away-', ['a'], { wakeMs: 300 });
+  try {
+    const made = await person('@agent, is it?');
+    await reply(made.body.id, 'Also this.');
+    const [ask] = (await threads())[0].comments;
+    assert.equal((await threads())[0].toAgent, true, 'asked, and the page said more since');
+    const away = await change(made.body.id, ask.id, 'is it?');
+    assert.equal(away.status, 200, JSON.stringify(away.body));
+    assert.deepEqual([away.body.toAgent, away.body.ping, away.body.comments.map((c: any) => c.body)], [false, null, ['is it?', 'Also this.']]);
+    await later(500);
+    assert.deepEqual(docs.told, []);
+    // Put back: it is not the last any more, so it asks nobody.
+    const back = await change(made.body.id, ask.id, '@agent, is it?');
+    assert.deepEqual([back.body.toAgent, back.body.ping], [false, null]);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a comment, or a thread, taken away while the agent is to be woken for it is not woken for, and the ones that stay are', async () => {
+  const { docs, person, reply, erase, wipe, threads, list } = await withDocument('docs-ping-erase-', ['a'], { wakeMs: 250 });
+  try {
+    const gone = await person('@agent, this thread goes');
+    const kept = await person('@agent, this one stays', 'Ship it on Friday.');
+    await reply(kept.body.id, 'Not asked.');
+    const deleted = await wipe(gone.body.id);
+    assert.deepEqual([deleted.status, deleted.body], [200, { removed: 'thread' }]);
+    // The first comment of the other one, which is not the last, is taken away: its ask goes with it.
+    const [ask, note] = (await threads())[0].comments;
+    const erased = await erase(kept.body.id, ask.id);
+    assert.deepEqual([erased.status, erased.body.removed, erased.body.thread.toAgent, erased.body.thread.ping, erased.body.thread.comments.map((c: any) => c.body)], [200, 'comment', false, null, ['Not asked.']]);
+    await later(500);
+    assert.deepEqual(docs.told, [], 'nobody was woken for what is gone');
+    assert.equal((await list()).openThreads, 1);
+    // What is asked after is woken for, as it was.
+    const asked = await reply(kept.body.id, '@agent, now?');
+    assert.equal(asked.body.toAgent, true);
+    await until(() => docs.sent.a.length === 1, 'the agent to be woken');
+    assert.ok(docs.sent.a[0].message.content.includes('> @agent, now?'));
+    assert.ok(note.id);
+  } finally {
+    await docs.close();
+  }
 });

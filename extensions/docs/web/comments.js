@@ -7,9 +7,13 @@
  * answered. Plain JavaScript like the rest of the browser half, made with the
  * portal's React and building blocks (`portal.ui`).
  *
+ * A comment of the person's, once it is in the list, can be changed or deleted with
+ * the buttons beside it, and a thread they started, while the agent has not commented
+ * in it, can be deleted as a whole. The agent's comments are only read.
+ *
  * It holds no data of its own: the page (document-editor.js) fetches the
  * threads, tells the editor where their passages are, and hands both over, with
- * what to do when a comment is saved, taken away, resolved or opened again.
+ * what to do when a comment is saved, changed, taken away, resolved or opened again.
  */
 import { createDraft } from "./draft.js";
 
@@ -26,8 +30,8 @@ export function comments(portal, { when }) {
 
   const WHO = () => ({ user: t("You"), agent: t("The agent") });
 
-  /** The box a comment is typed in: Ctrl+Enter (or Cmd+Enter) lets it go, and what was typed is saved first. */
-  function Writing({ value, onChange, onBlur, onDone, label, placeholder, autoFocus }) {
+  /** The box a comment is typed in: Ctrl+Enter (or Cmd+Enter) lets it go, and what was typed is saved first. Escape gives up, where that means something. */
+  function Writing({ value, onChange, onBlur, onDone, onCancel, label, placeholder, autoFocus }) {
     const box = useRef(null);
     useEffect(() => {
       if (autoFocus) box.current?.focus();
@@ -46,6 +50,9 @@ export function comments(portal, { when }) {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && value.trim()) {
           e.preventDefault();
           onDone();
+        } else if (e.key === "Escape" && onCancel) {
+          e.preventDefault();
+          onCancel();
         }
       },
     });
@@ -67,11 +74,72 @@ export function comments(portal, { when }) {
   }
 
   /**
+   * One comment of a thread, in the list. The person's own has **Edit** (the comment becomes a box with Save and Cancel; it is
+   * kept as it is until Save) and **Delete** (after a question). A thread's only comment is taken away with the thread, by its own button.
+   */
+  function Comment({ comment, only, onEdit, onDelete, run }) {
+    const [editing, setEditing] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const mine = comment.author === "user";
+    const mounted = useRef(true);
+    useEffect(() => {
+      mounted.current = true;
+      return () => void (mounted.current = false);
+    }, []);
+    const save = () =>
+      run(async () => {
+        setBusy(true);
+        try {
+          await onEdit(comment, editing);
+          if (mounted.current) setEditing(null);
+        } finally {
+          if (mounted.current) setBusy(false);
+        }
+      });
+    const remove = async () => {
+      const ok = await ui.confirm({ title: t("Delete this comment?"), message: t("The comment is deleted for good."), confirmLabel: t("Delete"), danger: true, deletes: true });
+      if (ok) await run(() => onDelete(comment));
+    };
+    return h(
+      "li",
+      { "data-author": comment.author },
+      h(
+        "div",
+        { className: "pd-comment-head" },
+        h("strong", null, WHO()[comment.author] ?? comment.author),
+        h("span", { className: "pd-meta" }, when(comment.at)),
+        comment.edited && h("span", { className: "pd-meta", title: t("Edited {date}", { date: when(comment.edited) }) }, t("edited")),
+        mine &&
+          editing === null &&
+          h(
+            "span",
+            { className: "pd-comment-actions" },
+            h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: () => setEditing(comment.body) }, t("Edit")),
+            !only && h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: () => void remove() }, t("Delete")),
+          ),
+      ),
+      editing === null
+        ? h("div", { className: "pd-comment-body" }, h(ui.Markdown, null, comment.body))
+        : h(
+            "div",
+            { className: "pd-reply" },
+            h(Writing, { value: editing, onChange: setEditing, onDone: save, onCancel: () => setEditing(null), label: t("Edit the comment"), autoFocus: true }),
+            h(
+              "div",
+              { className: "pd-actions" },
+              h("button", { type: "button", className: ui.classes.primarySmall, disabled: busy || !editing.trim() || editing.trim() === comment.body, onClick: save }, t("Save")),
+              h("button", { type: "button", className: ui.classes.ghost, disabled: busy, onClick: () => setEditing(null) }, t("Cancel")),
+            ),
+          ),
+    );
+  }
+
+  /**
    * One thread: its passage, its comments in the order they were made, and the box to write the next in. `composing` is the
    * card of a comment that is being written on a passage: with no thread yet (`thread.id` is null) until the first thing typed
    * is saved, which makes it, and then it is the thread's card as any other.
    */
-  function Thread({ thread, text, marked, settled, active, composing, onActivate, onWrite, onClear, onFinish, onCancel, onResolve, onReopen, onSeen }) {
+  function Thread({ thread, text, marked, settled, active, composing, onActivate, onWrite, onClear, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
     const [value, setValue] = useState("");
     const [draft, setDraft] = useState({ id: null, saving: false, error: null });
     const [error, setError] = useState(null);
@@ -134,6 +202,16 @@ export function comments(portal, { when }) {
       run(async () => {
         if (await typed.current.discard()) onCancel();
       });
+    // A thread the person started, while the agent has not commented in it, is theirs to delete as a whole.
+    const deletable = !composing && Boolean(thread.id) && thread.comments[0]?.author === "user" && !thread.comments.some((comment) => comment.author === "agent");
+    const removeThread = async () => {
+      const ok = await ui.confirm({ title: t("Delete this thread?"), message: t("The thread and all its comments are deleted for good."), confirmLabel: t("Delete thread"), danger: true, deletes: true });
+      if (!ok) return;
+      // What was typed in the box is not saved to a thread that is going.
+      await run(async () => {
+        if (await typed.current.discard()) await onDeleteThread(thread);
+      });
+    };
     // Where the thread stands with the agent: asked and not answered yet, or answered and not reacted to.
     const asked = thread.answered
       ? t("The agent answered")
@@ -170,14 +248,7 @@ export function comments(portal, { when }) {
         // The comment in the box is not in the list as well.
         thread.comments
           .filter((comment) => comment.id !== draft.id)
-          .map((comment) =>
-            h(
-              "li",
-              { key: comment.id, "data-author": comment.author },
-              h("div", { className: "pd-comment-head" }, h("strong", null, WHO()[comment.author] ?? comment.author), h("span", { className: "pd-meta" }, when(comment.at))),
-              h("div", { className: "pd-comment-body" }, h(ui.Markdown, null, comment.body)),
-            ),
-          ),
+          .map((comment) => h(Comment, { key: comment.id, comment, only: thread.comments.length === 1 && deletable, onEdit: (c, words) => onEdit(thread, c, words), onDelete: (c) => onDelete(thread, c), run })),
       ),
       error && h(ui.ErrorBanner, { onClose: () => setError(null) }, t("Could not comment: {error}", { error })),
       open
@@ -203,10 +274,16 @@ export function comments(portal, { when }) {
               composing
                 ? h("button", { type: "button", className: ui.classes.ghost, onClick: cancel }, t("Cancel"))
                 : h("button", { type: "button", className: ui.classes.button, onClick: resolve }, t("Resolve")),
+              deletable && h("button", { type: "button", className: ui.classes.ghost, onClick: () => void removeThread() }, t("Delete thread")),
             ),
             h(Saved, { draft }),
           )
-        : h("div", { className: "pd-actions" }, h("button", { type: "button", className: ui.classes.button, onClick: () => run(() => onReopen(thread)) }, t("Reopen"))),
+        : h(
+            "div",
+            { className: "pd-actions" },
+            h("button", { type: "button", className: ui.classes.button, onClick: () => run(() => onReopen(thread)) }, t("Reopen")),
+            deletable && h("button", { type: "button", className: ui.classes.ghost, onClick: () => void removeThread() }, t("Delete thread")),
+          ),
     );
   }
 
@@ -216,7 +293,7 @@ export function comments(portal, { when }) {
    * not be fetched. `compose` is the comment being written on a passage, if one is: its `threadId` is the thread its first save
    * made, which is its card and not one of the list's.
    */
-  return function Comments({ threads, loaded, error, texts, settled, active, compose, onRetry, onActivate, onWrite, onClear, onFinish, onCancel, onResolve, onReopen, onSeen }) {
+  return function Comments({ threads, loaded, error, texts, settled, active, compose, onRetry, onActivate, onWrite, onClear, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
     const [resolved, setResolved] = useState(false);
     const listed = threads.filter((thread) => thread.id !== compose?.threadId);
     const open = listed.filter((thread) => thread.status === "open");
@@ -244,6 +321,9 @@ export function comments(portal, { when }) {
         onResolve,
         onReopen,
         onSeen,
+        onEdit,
+        onDelete,
+        onDeleteThread,
       });
     // The thread its first save made, or one that is not made yet.
     const made = compose && threads.find((thread) => thread.id === compose.threadId);
@@ -271,6 +351,9 @@ export function comments(portal, { when }) {
           onResolve,
           onReopen,
           onSeen,
+          onEdit,
+          onDelete,
+          onDeleteThread,
         }),
       error && !loaded
         ? h(ui.LoadFailed, { error: t("Comments could not be loaded: {error}", { error: error.message }), onRetry })
