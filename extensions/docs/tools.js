@@ -553,7 +553,7 @@ export function documentTools(pi, chat, deps) {
       commentOf(comment);
       const { store, doc } = await documentOf(id);
       const title = deps.titleOf(doc.bytes, doc.name);
-      const made = await store.edit(doc.id, threadId, commentId, { body: comment, author: "agent" });
+      const { thread: made } = await store.edit(doc.id, threadId, commentId, { body: comment, author: "agent" });
       return text(`Changed your comment in thread ${made.id} on "${title}".${made.toAgent ? " The thread still asks you: answer it with doc_reply." : ""}`, { ...about("edit_comment", doc, title), thread: made.id, comment: commentId });
     }),
   });

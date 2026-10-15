@@ -1189,3 +1189,36 @@ test('what changing and deleting comments says is in German in a German portal',
   await expect(dialog(page)).toContainText('Diesen Kommentarthread löschen?');
   await expect(dialog(page)).toContainText('Der Kommentarthread und alle seine Kommentare werden endgültig gelöscht.');
 });
+
+test('changing the last comment whose ask a chat has taken looks for no chat and opens none, even when the person is in no chat of the folder', async ({ page }) => {
+  const store = new Store();
+  const thread = seeded(store, 'The build is green.', 'Is it? @agent');
+  // The agent of a chat was woken with it, and has not answered.
+  thread.ping = { ...thread.ping!, sent: true, state: 'sent' };
+  await open(page, store, { chat: 'elsewhere' });
+  const card = cards(page).first();
+  await card.getByRole('button', { name: 'Edit' }).click();
+  await card.getByRole('textbox', { name: 'Edit the comment' }).fill('Is it? @agent, typo fixed');
+  await card.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(card.locator('li').first()).toContainText('typo fixed');
+  expect(store.opened).toEqual([]);
+  expect(store.requests.at(-1)!.body).not.toHaveProperty('chat');
+});
+
+test('Ctrl+Enter in the Edit box with the words unchanged just closes it: nothing is sent', async ({ page }) => {
+  const store = new Store();
+  seeded(store, 'The build is green.', 'Is it? @agent', 'user');
+  await open(page, store, { chat: 'a' });
+  const card = cards(page).first();
+  await card.getByRole('button', { name: 'Edit' }).click();
+  const box = card.getByRole('textbox', { name: 'Edit the comment' });
+  await box.press('Control+Enter');
+  await expect(box).toHaveCount(0);
+  await expect(card.locator('li').first()).toContainText('Is it? @agent');
+  // The same words with spaces around them are the same words.
+  await card.getByRole('button', { name: 'Edit' }).click();
+  await box.fill('  Is it? @agent  ');
+  await box.press('Control+Enter');
+  await expect(box).toHaveCount(0);
+  expect(store.requests).toEqual([]);
+});

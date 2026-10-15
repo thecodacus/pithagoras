@@ -856,7 +856,9 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const folder = folderOf(req);
     const id = documentOf(req);
     const store = await storeFor(folder.path);
-    const thread = await store.edit(id, req.params.thread, req.params.comment, { body: req.body?.body, author: "user", draft: req.body?.draft === true });
+    const { thread, changed } = await store.edit(id, req.params.thread, req.params.comment, { body: req.body?.body, author: "user", draft: req.body?.draft === true });
+    // The same words change nothing, and ask nobody: a save that is no change does not wake the agent, or ask again for an ask that failed.
+    if (!changed) return res.json(withChat(folder, thread));
     // As a new comment asks: the last comment of a thread that is open. Any other has nothing to ask, but loses an ask that was not taken.
     if (thread.status === "open" && thread.comments.at(-1)?.id === req.params.comment) return res.json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
     if (asksAgent(thread.comments.find((c) => c.id === req.params.comment)?.body)) return res.json(withChat(folder, thread));

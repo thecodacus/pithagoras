@@ -510,7 +510,7 @@ beside its time, in an open thread or a resolved one.
 - **Edit** turns the comment into a box with **Save** and **Cancel**. It is kept
   as it was until you press **Save** (or **Ctrl+Enter**); **Cancel** and
   **Escape** give it up. **Save** is for words that are new: the same words
-  change nothing. A comment that was changed says **edited** beside its time (the
+  change nothing (**Ctrl+Enter** on them just closes the box), and ask nobody. A comment that was changed says **edited** beside its time (the
   time of the change is its tooltip), and so does the agent's when the agent
   changes it. The comment keeps its place in the thread and its passage in the
   text. Text that is still being typed in the box is not an edit, and is not

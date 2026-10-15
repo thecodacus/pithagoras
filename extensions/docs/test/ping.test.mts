@@ -803,3 +803,25 @@ test('a comment, or a thread, taken away while the agent is to be woken for it i
     await docs.close();
   }
 });
+
+test('a save with the same words changes nothing and asks nobody: an ask that was not delivered is not asked again by it, and no wake is moved', async () => {
+  const { docs, person, change, threads } = await withDocument('docs-ping-same-', ['a'], { wakeMs: 120 });
+  try {
+    // Asked in no chat that can answer: not delivered, and nothing is waiting.
+    const made = await person('@agent, is it?', GREEN, null);
+    assert.deepEqual([made.body.toAgent, made.body.ping.chat], [true, null]);
+    await later(300);
+    assert.equal((await threads())[0].ping.state, 'failed');
+    const same = await change(made.body.id, made.body.comments[0].id, '@agent, is it?', 'a');
+    assert.equal(same.status, 200, JSON.stringify(same.body));
+    assert.deepEqual([same.body.ping.state, same.body.ping.chat, same.body.comments[0].edited], ['failed', null, undefined]);
+    await later(400);
+    assert.deepEqual(docs.told, [], 'no wake was made for words that did not change');
+    // Other words ask again, as before.
+    const other = await change(made.body.id, made.body.comments[0].id, '@agent, is it right?', 'a');
+    assert.equal(other.body.ping.state, 'pending');
+    await until(() => docs.sent.a.length === 1, 'the agent to be woken');
+  } finally {
+    await docs.close();
+  }
+});

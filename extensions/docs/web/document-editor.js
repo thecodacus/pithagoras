@@ -539,7 +539,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
      */
     const changeComment = async (thread, comment, words) => {
       const text = words.trim();
-      const asks = thread.status === "open" && thread.comments.at(-1)?.id === comment.id;
+      // A comment whose ask a chat has taken asks nobody again: no chat is looked for, or opened, for it.
+      const asks = thread.status === "open" && thread.comments.at(-1)?.id === comment.id && !(thread.ping?.comment === comment.id && thread.ping.sent);
       const chat = asks ? await chatFor(text) : undefined;
       taken(await portal.api.json(`${url}/threads/${thread.id}/comments/${comment.id}`, { method: "PUT", body: JSON.stringify({ body: text, ...(chat === undefined ? {} : { chat }) }) }));
     };

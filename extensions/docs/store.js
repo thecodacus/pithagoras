@@ -1135,6 +1135,7 @@ export class Store {
    * Changes the text of a comment which `author` wrote, and returns the thread. Any comment of theirs, in an open thread or a
    * resolved one, and it is marked as edited. A `draft` is the comment the page saves as it is typed: only while it is the last of an
    * open thread, and no edit of anyone's. The agent changing its last comment is news to the person again, as a new comment would be.
+   * Returns the thread, and whether anything changed: the same words change nothing.
    */
   edit(id, thread, comment, { body, author, draft = false }) {
     return this.locked(async () => {
@@ -1144,7 +1145,7 @@ export class Store {
       const mine = draft ? this.editable(found, comment, author) : this.ownComment(found, comment, author);
       const text = this.bodyOf(body);
       // The words are the same: nothing is marked as edited, and nobody is told.
-      if (!draft && text === mine.body) return this.threadsOf(row).find((t) => t.id === found.id);
+      if (!draft && text === mine.body) return { thread: this.threadsOf(row).find((t) => t.id === found.id), changed: false };
       const now = new Date().toISOString();
       const news = !draft && author === "agent" && this.lastComment(found).id === mine.id;
       this.db.transaction(() => {
@@ -1152,7 +1153,7 @@ export class Store {
         this.db.prepare("UPDATE threads SET updated_at = ?, answered = ? WHERE id = ?").run(now, news || found.answered === 1 ? 1 : 0, found.id);
       })();
       this.toldThreads(row);
-      return this.threadsOf(row).find((t) => t.id === found.id);
+      return { thread: this.threadsOf(row).find((t) => t.id === found.id), changed: true };
     });
   }
 

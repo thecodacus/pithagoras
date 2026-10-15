@@ -86,8 +86,10 @@ export function comments(portal, { when }) {
       mounted.current = true;
       return () => void (mounted.current = false);
     }, []);
-    const save = () =>
-      run(async () => {
+    const save = () => {
+      // The same words are no change: the box is just closed, and nothing is sent.
+      if (editing.trim() === comment.body) return setEditing(null);
+      return run(async () => {
         setBusy(true);
         try {
           await onEdit(comment, editing);
@@ -96,6 +98,7 @@ export function comments(portal, { when }) {
           if (mounted.current) setBusy(false);
         }
       });
+    };
     const remove = async () => {
       const ok = await ui.confirm({ title: t("Delete this comment?"), message: t("The comment is deleted for good."), confirmLabel: t("Delete"), danger: true, deletes: true });
       if (ok) await run(() => onDelete(comment));
