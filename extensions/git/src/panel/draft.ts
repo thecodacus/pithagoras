@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { gitDrafts } from "../../drafts";
+import { gitDrafts } from "../helpers";
 
 /**
  * A piece of text the panel keeps while something is opened over it, or the

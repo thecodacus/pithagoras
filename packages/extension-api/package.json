@@ -5,16 +5,37 @@
   "type": "module",
   "types": "./index.d.ts",
   "exports": {
-    ".": { "types": "./index.d.ts" },
-    "./server": { "types": "./server.d.ts" },
-    "./build": "./build.mjs"
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./server": {
+      "types": "./server.d.ts"
+    },
+    "./build": "./build.mjs",
+    "./tailwind": "./tailwind.mjs"
   },
-  "files": ["index.d.ts", "server.d.ts", "build.mjs", "README.md"],
+  "files": [
+    "index.d.ts",
+    "server.d.ts",
+    "build.mjs",
+    "tailwind.mjs",
+    "README.md"
+  ],
   "peerDependencies": {
-    "esbuild": ">=0.20"
+    "esbuild": ">=0.20",
+    "tailwindcss": "^3.4",
+    "postcss": "^8"
   },
   "peerDependenciesMeta": {
-    "esbuild": { "optional": true }
+    "esbuild": {
+      "optional": true
+    },
+    "tailwindcss": {
+      "optional": true
+    },
+    "postcss": {
+      "optional": true
+    }
   },
   "license": "Apache-2.0"
 }

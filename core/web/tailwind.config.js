@@ -1,7 +1,11 @@
 /** @type {import('tailwindcss').Config} */
+import portal from "@pithagoras/extension-api/tailwind";
+
 const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
 
 export default {
+  // The portal's colours, rounding and shadow, which an extension's stylesheet is made with too.
+  presets: [portal],
   content: [
     // Streamdown ships its own utility classes; without this they are purged.
     "./node_modules/streamdown/dist/*.js",
@@ -27,31 +31,6 @@ export default {
         // The mermaid block sits on bg-sidebar; without this it is a border
         // around nothing and the diagram floats on the transcript.
         sidebar: token("surface"),
-        // Named for the job, not the colour — see index.css.
-        canvas: token("canvas"),
-        surface: token("surface"),
-        raised: token("raised"),
-        line: token("line"),
-
-        fg: {
-          DEFAULT: token("fg"),
-          muted: token("fg-muted"),
-          subtle: token("fg-subtle"),
-          faint: token("fg-faint"),
-        },
-
-        accent: {
-          DEFAULT: token("accent"),
-          fg: token("accent-fg"),
-        },
-        ok: token("ok"),
-        warn: token("warn"),
-        danger: token("danger"),
-      },
-      borderColor: { DEFAULT: token("line") },
-      borderRadius: { xl: "0.75rem", "2xl": "1rem" },
-      boxShadow: {
-        pop: "0 10px 30px -12px rgb(0 0 0 / 0.35), 0 2px 8px -4px rgb(0 0 0 / 0.2)",
       },
     },
   },

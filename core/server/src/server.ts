@@ -97,7 +97,6 @@ import { extensionRoutes, openingFor, stopServerHalves } from "./extension-host.
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
-import { gitRouter } from "./api/git.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
@@ -1771,7 +1770,6 @@ app.use(
 );
 app.use("/api", skillsRouter());
 app.use("/api", filesRouter());
-app.use("/api", gitRouter());
 // What the configuration offers is what a running chat may use: told at once, as a default is.
 onMcpWritten(() => {
   sessions.applyToolDefaults().catch((e) => console.error(`[portal] could not apply the MCP configuration to running chats: ${(e as Error).message}`));

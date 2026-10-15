@@ -22,6 +22,32 @@ export type ChatLife = "started" | "stopped" | "deleted";
 export type Upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 export type Ran = { code: number | null; stdout: Buffer; stderr: string };
 
+/** What a git or gh step printed. `cut`: it printed more than `max`, and the rest was not read. */
+export type GitRan = { stdout: string; stderr: string; code: number; cut: boolean };
+
+export interface GitStepOptions {
+  /** What the step reads on its standard input. */
+  input?: string;
+  /** How long it may take, in ms: by default 20 seconds for reading, 3 minutes for a step that writes. */
+  timeout?: number;
+  /** Stop reading after this many bytes of output: by default 16 MB. */
+  max?: number;
+  /** Exit codes that are answers rather than failures (`diff --no-index` says 1 for "they differ"). */
+  ok?: number[];
+  /** A step that changes the repository: it may take the index lock and run a hook, as `git` typed in a terminal does. */
+  writes?: boolean;
+}
+
+/**
+ * git and gh in one folder. A step that fails rejects with an Error that has a
+ * `status`: 409 with git's own words, 504 for one stopped for taking too long,
+ * 501 where git (or gh) is not installed.
+ */
+export interface GitHandle {
+  run(args: string[], options?: GitStepOptions): Promise<GitRan>;
+  gh(args: string[], options?: GitStepOptions): Promise<GitRan>;
+}
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -96,6 +122,17 @@ export interface ServerPortal {
   files: {
     /** `rel` inside `base`, checked: throws for `..`, an absolute path, or a link that leads out. */
     inside(base: string, rel: string): string;
+  };
+  git: {
+    /**
+     * git in a folder an agent can write, run as the portal runs its own: no
+     * prompt, editor or pager, no colour, and nothing the repository's config
+     * would run while it is only read (a filter, an fsmonitor hook, a
+     * signature's gpg). A step that writes is `git` as someone would type it,
+     * hooks and filters included. What reading turns off is looked up once
+     * for the handle: make one for each request rather than keeping it.
+     */
+    at(folder: string): GitHandle;
   };
   /**
    * A folder of the package's own in the portal's data folder, made (closed to

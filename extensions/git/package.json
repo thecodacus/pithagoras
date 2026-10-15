@@ -1,0 +1,14 @@
+{
+  "name": "pithagoras-git",
+  "version": "0.1.0",
+  "description": "Git for a Pithagoras chat's folder: what changed, staging and committing, history, branches, pushing and pulling, and pull requests through gh",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}

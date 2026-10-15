@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { LuCheck, LuChevronDown, LuChevronRight, LuGitBranchPlus, LuTrash2 } from "react-icons/lu";
-import { gitApi, type Branch } from "../../git-api";
-import { confirmDialog } from "../ConfirmDialog";
+import { gitApi, type Branch } from "../git-api";
+import { confirmDialog } from "../portal";
 import { ago, ErrorNote, IconButton, Quiet, SectionHead, TextButton } from "./bits";
 import { useGit } from "./context";
-import { msg, t } from "../../i18n";
+import { msg, t } from "../portal";
 
 /** The branches here and on the remotes: switched to, made, deleted. */
 export function Branches() {

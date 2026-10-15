@@ -99,7 +99,7 @@ export const FilesPanel = memo(function FilesPanel({
   folder: string;
   activity: FileActivity | null;
   since?: number;
-  /** A file somebody asked to see from elsewhere — Git — by its path in the folder; a new `seq` is a new ask. */
+  /** A file somebody asked to see from elsewhere (a panel that lists it) by its path in the folder; a new `seq` is a new ask. */
   reveal?: { path: string; seq: number } | null;
   /** Told once the ask is answered, so that it is not answered again when the panel is drawn anew. */
   onRevealed?: () => void;

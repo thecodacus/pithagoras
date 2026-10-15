@@ -1,0 +1,5 @@
+/* The tabs in the panel's head; the rest of the panel is drawn with the portal's Tailwind preset (see build.mjs). */
+.git-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgb(var(--fg) / .05); }
+.git-tabs button { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 6px; font-size: 11px; white-space: nowrap; color: rgb(var(--fg-subtle)); transition: background .2s, color .2s, box-shadow .2s; }
+.git-tabs button:hover { color: rgb(var(--fg)); }
+.git-tabs button[aria-selected="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 3px #0000001f, 0 0 0 1px rgb(var(--line)); }

@@ -209,7 +209,8 @@ export const useLanguage = (): string => {
   return current.code;
 };
 
-const fill = (text: string, vars?: Record<string, string | number>) =>
+/** `{name}` in `text` filled in from `vars`, and left as it is where they have nothing by that name. */
+export const fill = (text: string, vars?: Record<string, string | number>) =>
   vars ? text.replace(/\{(\w+)\}/g, (all, name: string) => (Object.hasOwn(vars, name) ? String(vars[name]) : all)) : text;
 
 /** A text in the language in effect. */
@@ -224,6 +225,9 @@ const pluralOf = (code: string, n: number): Intl.LDMLPluralRule => {
   if (!rules) plurals.set(code, (rules = new Intl.PluralRules(code)));
   return rules.select(n);
 };
+
+/** Which of the language's forms a count takes: "one", "few", "other"… */
+export const pluralForm = (n: number): Intl.LDMLPluralRule => pluralOf(current.code, n);
 
 /**
  * A text with a count, `{n}` in it being the count, written the language's
@@ -264,7 +268,12 @@ export const labelOf = (labels: Readonly<Record<string, string>>, value: string,
  */
 export function tx(text: string, vars: Record<string, ReactNode>): ReactNode {
   const said = current.strings[text];
-  const parts = (typeof said === "string" ? said : text).split(/\{(\w+)\}/);
+  return withParts(typeof said === "string" ? said : text, vars);
+}
+
+/** A text already in the language, with what is drawn in it put in its places. */
+export function withParts(text: string, vars: Record<string, ReactNode>): ReactNode {
+  const parts = text.split(/\{(\w+)\}/);
   return createElement(Fragment, null, ...parts.map((part, i) => (i % 2 ? (Object.hasOwn(vars, part) ? vars[part] : `{${part}}`) : part)));
 }
 

@@ -220,8 +220,12 @@ changed while it is open — it was committed, or put back — the view says so.
 - **It is the same repository as the agent's.** There is no separate copy: a
   commit made here is in the agent's history, and the agent's uncommitted work is
   what appears under Changes.
-- **The HTTP routes** are under `/api/sessions/:id/git`; see the
-  [HTTP API](/reference/api#git).
+- **It is an extension.** The panel is the `pithagoras-git` package from the
+  portal's `extensions/git`, installed when a portal starts for the first time
+  and listed under Settings → Extensions → Installed like any other. Turn it off
+  or remove it and the branch icon goes; install your own panel by the name
+  `git` and it takes its place. Its HTTP routes are under
+  `/api/x/pithagoras-git/chats/:id`; see the [HTTP API](/reference/api#git).
 - Like the other panels, it docks left, right or bottom or floats; see
   [Files → Panels](/guide/files#panels). In [voice mode](/guide/voice) it is not
   offered.

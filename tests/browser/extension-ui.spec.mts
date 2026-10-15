@@ -171,7 +171,7 @@ test('an extension\'s panel is opened from the chat\'s header, talks to its exte
   await expect(panel(page).getByRole('listitem')).toHaveCount(1);
 
   // Two panels beside the conversation is what fits: a third closes the one open longest, whoever brought it.
-  await header(page).getByRole('button', { name: 'Git', exact: true }).click();
+  await header(page).getByRole('button', { name: 'Session canvases', exact: true }).click();
   await header(page).getByRole('button', { name: 'Files', exact: true }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -320,12 +320,12 @@ test('a panel says more of itself: tabs in its head, a button that follows the c
   await expect(page.getByRole('alertdialog')).toContainText('Discard the note you were writing?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
   await expect(panel(page).getByRole('textbox', { name: 'New note' })).toHaveValue('Half a thought');
-  // And it is not the one closed to make room for a third: Git, opened after it, goes instead.
-  const git = header(page).getByRole('button', { name: 'Git', exact: true });
-  await git.click();
+  // And it is not the one closed to make room for a third: the canvases, opened after it, go instead.
+  const canvases = header(page).getByRole('button', { name: 'Session canvases', exact: true });
+  await canvases.click();
   await header(page).getByRole('button', { name: 'Files', exact: true }).click();
   await expect(panel(page)).toBeVisible();
-  await expect(git).toHaveAttribute('aria-expanded', 'false');
+  await expect(canvases).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
   await expect(panel(page)).toHaveCount(0);

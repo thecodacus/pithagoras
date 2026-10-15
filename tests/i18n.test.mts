@@ -75,12 +75,22 @@ test("an extension of the portal's own that speaks German has every text it show
   assert.ok(speaking.includes("terminal"));
   for (const name of speaking) {
     const want = texts(path.join(root, name, "src"));
-    const { de } = (await import(path.join(root, name, "src", "de.ts"))) as { de: Record<string, string> };
+    const { de } = (await import(path.join(root, name, "src", "de.ts"))) as { de: Record<string, string | Plural> };
     const missing = [...want.keys()].filter((k) => !(k in de));
     const stale = Object.keys(de).filter((k) => !want.has(k));
     assert.deepEqual(missing.map((k) => `${want.get(k)!.where}: ${k}`), [], `${name} lacks these`);
     assert.deepEqual(stale, [], `${name} has these its code no longer shows`);
-    for (const [key, text] of Object.entries(de)) assert.deepEqual(words(text), words(key), `${name}: ${key}`);
+    for (const [key, said] of Object.entries(de)) {
+      // A count's forms, as the portal's own are checked: each fills in only what is given, `other` all of it.
+      if (want.get(key)?.plural) {
+        assert.equal(typeof said, "object", `${name}: "${key}" is a count, with a form for each number`);
+        const known = new Set([...words(key), "n"]);
+        for (const text of Object.values(said as Plural)) for (const w of words(text!)) assert.ok(known.has(w), `${name}: "${key}" fills in {${w}}`);
+      } else {
+        assert.equal(typeof said, "string", `${name}: "${key}" is no count`);
+        assert.deepEqual(words(said as string), words(key), `${name}: ${key}`);
+      }
+    }
   }
 });
 

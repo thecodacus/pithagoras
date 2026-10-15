@@ -1,15 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { LuExternalLink, LuMinus, LuPlus, LuUndo2 } from "react-icons/lu";
-import { gitApi, type DiffOf } from "../../git-api";
-import { parseDiff, type DiffFile } from "../../git-diff";
-import { confirmDialog } from "../ConfirmDialog";
+import { gitApi, type DiffOf } from "../git-api";
+import { parseDiff, type DiffFile } from "../git-diff";
+import { confirmDialog } from "../portal";
 import { Counts, ErrorNote, Quiet, TextButton } from "./bits";
 import { unstagePaths } from "./Changes";
 import { useGit, type View } from "./context";
 import { DiffView } from "./DiffView";
 import { CommitView, CompareView } from "./History";
 import { PullView } from "./Pulls";
-import { msg, t, tp } from "../../i18n";
+import { msg, t, tp } from "../portal";
 
 /** Whatever was opened over the tab. `onDone` goes back, for a view whose work is finished. */
 export function ViewHost({ view, onDone }: { view: View; onDone: () => void }) {

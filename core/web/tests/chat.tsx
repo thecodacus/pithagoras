@@ -221,8 +221,9 @@ if (phase === 'git') {
   (window as any).gitAsked = 0;
   let off: string[] = [];
   mockFetch((u, init) => {
-    if (u.endsWith('/git/gh')) return { installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install gh' };
-    if (/\/git(\?|$)/.test(u)) {
+    // The Git extension's routes, for this chat: /api/x/pithagoras-git/chats/<chat>/….
+    if (/\/api\/x\/pithagoras-git\/chats\/[^/?]+\/gh(\?|$)/.test(u)) return { installed: false, authed: false, repo: null, url: null, defaultBranch: null, note: 'Install gh' };
+    if (/\/api\/x\/pithagoras-git\/chats\/[^/?]+(\?|$)/.test(u)) {
       (window as any).gitAsked++;
       return { repo: true, root: '/workspaces/pithagoras', prefix: '', branch: 'main', head: 'a'.repeat(40), upstream: 'origin/main', ahead: 0, behind: 0, stashes: 0, operation: null, truncated: false, remotes: [], files: [{ path: 'README.md', x: '.', y: 'M', kind: 'changed', unstaged: { added: 2, removed: 1, binary: false } }, { path: 'notes.txt', x: '?', y: '?', kind: 'untracked' }] };
     }

@@ -1,4 +1,5 @@
-// Development-only fixture: the Git panel on a repository kept in the page, without a server.
+// Development-only fixture: the Git panel on a repository kept in the page, without a server. The panel is the Git
+// extension's (extensions/git), loaded as the app loads it, and drawn with its head as the chat draws them.
 // Open /tests/git.html to see it; ?gh=off for a machine without gh, ?repo=none for a folder in no repository,
 // ?ghslow=1 for a GitHub that takes seconds to answer, ?rename=1 for a renamed file with more changes in the
 // tree, ?conflict=1 for a merge stopped on a conflict, ?op=am for patches stopped half way, ?prefix=src for a
@@ -12,11 +13,20 @@
 // ?repo=none it is the only one), ?branch=<name> for another branch checked out. window.stateFails = true makes reading the repository
 // fail, as a portal that cannot be reached would. window.moveHead() moves HEAD, as a commit in the shell would.
 // What the panel asked for is in window.gitCalls; window.agentWrote() changes a file the way the agent would.
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../src/styles';
-import { GIT_TABS, GitPanel, type GitTab } from '../src/components/git/GitPanel';
+import type { PortalEvent } from '../src/api';
 import { ConfirmHost } from '../src/components/ConfirmDialog';
+import { publishChat } from '../src/extensions/chat-feed';
+import { startExtensions } from '../src/extensions/loader';
+import { useSlot } from '../src/extensions/slots';
+import { channelFor } from '../src/extensions/channel';
+import { panelsFor } from '../src/extensions/panels';
+
+startExtensions();
+/** Where the Git extension's routes are, for the chat "s". */
+const ROUTES = '/api/x/pithagoras-git/chats/s';
 
 const params = new URLSearchParams(location.search);
 const now = Math.floor(Date.now() / 1000);
@@ -85,12 +95,12 @@ if (params.get('fork')) pulls.unshift({ number: 43, title: 'Fix a typo from a fo
 const realFetch = window.fetch;
 window.fetch = (async (input: any, init?: any) => {
   const url = String(input);
-  if (!url.startsWith('/api/sessions/s/git')) return realFetch(input, init);
+  if (!url.startsWith(ROUTES)) return realFetch(input, init);
   const method = init?.method ?? 'GET';
   const body = init?.body ? JSON.parse(init.body) : undefined;
   calls.push({ method, url, body });
   const reply = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
-  const path = url.replace('/api/sessions/s/git', '').split('?')[0];
+  const path = url.replace(ROUTES, '').split('?')[0];
   const q = new URLSearchParams(url.split('?')[1] ?? '');
   // The clone in the folder: a repository of its own, on its own branch, with a change of its own.
   if (path === '' && q.get('repo') === 'tools/lib') {
@@ -191,29 +201,41 @@ window.fetch = (async (input: any, init?: any) => {
   return reply({ ok: true });
 }) as typeof fetch;
 
+const chat = { id: 's', title: 'Login work', workspace: '/w/site' };
+
 function Fixture() {
-  const [tab, setTab] = useState<GitTab>((params.get('tab') as GitTab) ?? 'changes');
-  const [activity, setActivity] = useState(0);
+  const entry = useSlot('chat.panel').find((e) => e.name === 'git');
+  // What the panel shares with its head (the tab), as the chat keeps it while the panel is open.
+  const [state, setState] = useState<unknown>(params.get('tab') ? { tab: params.get('tab') } : undefined);
+  // The chat's events: a file the agent wrote is one, and the panel looks again.
+  const [events, setEvents] = useState<PortalEvent[]>([]);
   const [opened, setOpened] = useState<string[]>([]);
+  const wrote = (path: string) =>
+    setEvents((e) => [...e, { seq: e.length + 1, type: 'tool_execution_end', payload: { toolName: 'write', toolCallId: `w${e.length}`, input: { path } } }]);
+  useLayoutEffect(
+    () => publishChat('s', { events, items: [], running: false, status: 'idle', loading: false, background: { supported: false, jobs: [], statuses: [], widgets: [] }, refreshBackground: () => {} }),
+    [events],
+  );
   (window as any).moveHead = () => {
     repo.head = 'e'.repeat(40);
-    setActivity((n) => n + 1);
+    wrote('src/auth/login.ts');
   };
   (window as any).agentWrote = (path: string) => {
     repo.files.push({ path, x: '?', y: '?', kind: 'untracked' });
-    setActivity((n) => n + 1);
+    wrote(path);
   };
+  if (!entry) return null;
+  const handle = { params: undefined, state, setState, keep: () => {}, guardClose: () => {}, open: (_name: string, given?: unknown) => setOpened((o) => [...o, String((given as { path?: string })?.path)]) };
+  const props = { chat, channel: channelFor('s', entry.extension), panels: panelsFor(entry.extension), close: () => {}, panel: handle };
+  const Head = entry.header!;
+  const Body = entry.component;
   return (
     <div className="bg-canvas text-fg" style={{ height: '100vh', display: 'flex', flexDirection: 'column', maxWidth: 520 }}>
-      <div className="chat-tabs" role="tablist" aria-label="Git" style={{ padding: 6 }}>
-        {GIT_TABS.map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
-            {t.label}
-          </button>
-        ))}
+      <div style={{ padding: 6 }}>
+        <Head {...props} />
       </div>
-      <div className="min-h-0 flex-1 bg-surface">
-        <GitPanel sessionId="s" tab={tab} onTab={setTab} activity={activity} onOpenFile={(p) => setOpened((o) => [...o, p])} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Body {...props} />
       </div>
       <output data-testid="opened">{opened.join(',')}</output>
       <ConfirmHost />

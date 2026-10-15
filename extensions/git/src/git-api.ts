@@ -1,9 +1,12 @@
-import { json } from "./api";
+import { portal } from "./portal";
 
 /**
- * The Git panel's side of the portal: the repository a chat's folder is in,
- * and GitHub through gh. The shapes are the server's (server/src/git.ts).
+ * The Git panel's routes: the repository a chat's folder is in, and GitHub
+ * through gh. The shapes are the server half's (git.ts), at
+ * /api/x/pithagoras-git/chats/<chat>/….
  */
+
+const json = <T>(url: string, init?: RequestInit) => portal.api.json<T>(url, init);
 
 export interface Counts {
   added: number;
@@ -187,7 +190,7 @@ const query = (params: Record<string, string | number | undefined>) =>
 /** The URL of `rest` for a repository, with what it is asked in `params`. */
 const at = (t: GitTarget, rest = "", params: Record<string, string | number | undefined> = {}) => {
   const q = query({ ...params, repo: t.repo });
-  return `/api/sessions/${encodeURIComponent(t.session)}/git${rest}${q ? `?${q}` : ""}`;
+  return portal.api.url(`/chats/${encodeURIComponent(t.session)}${rest}${q ? `?${q}` : ""}`);
 };
 const post = <T = { ok: true }>(url: string, body: unknown = {}) => json<T>(url, { method: "POST", body: JSON.stringify(body) });
 

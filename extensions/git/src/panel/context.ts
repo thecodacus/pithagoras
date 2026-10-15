@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
-import type { DiffOf, GhState, GitState, GitTarget } from "../../git-api";
-import type { DiffFile } from "../../git-diff";
+import type { DiffOf, GhState, GitState, GitTarget } from "../git-api";
+import type { DiffFile } from "../git-diff";
 
 /** What is running now: `act`'s label and what it names. */
 export type Busy = { label: string; vars?: Record<string, string | number> };

@@ -28,7 +28,7 @@ test('Git is a panel of its own beside the chat, with its tabs in its header, an
 
   await tabs.getByRole('tab', { name: 'Pull requests' }).click();
   await expect(panels.getByText('Install gh')).toBeVisible();
-  await panels.getByRole('button', { name: 'Close the git panel' }).click();
+  await panels.getByRole('button', { name: 'Close Git' }).click();
   await expect(tabs).toHaveCount(0);
 });
 

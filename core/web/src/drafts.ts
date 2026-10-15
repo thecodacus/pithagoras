@@ -71,13 +71,6 @@ function tellPortal(): (id: string, text: string) => void {
 
 export const drafts = createDrafts(session, tellPortal());
 
-/**
- * What is typed into the Git panel and not yet sent: a commit message, a pull
- * request being opened, a comment. Kept apart from the message box's drafts, and
- * never told to the portal: no extension reads them.
- */
-export const gitDrafts = createDrafts(session, undefined, "pithagoras.git-draft.");
-
 /** Whether a chat's pi is up. Once it is, what is in the box is told at once: it may have been typed before. */
 export function piRunning(id: string, up: boolean): void {
   if (up === piUp.has(id)) return;

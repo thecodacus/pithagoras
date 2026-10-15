@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LuArrowDown, LuArrowLeft, LuArrowUp, LuCloudDownload, LuGitBranch, LuRefreshCw } from "react-icons/lu";
-import { gitApi, type GhState, type GitState, type RepoChoice } from "../../git-api";
+import { gitApi, type GhState, type GitState, type RepoChoice } from "../git-api";
 import { Branches } from "./Branches";
 import { Changes } from "./Changes";
 import { Ctx, useGit, type Busy, type GitCtx, type View } from "./context";
@@ -8,10 +8,10 @@ import { ErrorNote, Quiet, TextButton } from "./bits";
 import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
-import { Select } from "../Select";
-import { local } from "../../safe-storage";
-import { labelOf, msg, t, tp, useLanguage } from "../../i18n";
-import { below } from "../../paths";
+import { Select } from "../portal";
+import { local } from "../portal";
+import { labelOf, msg, t, tp, useLanguage } from "../portal";
+import { below } from "../helpers";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
 export const GIT_TABS: { id: GitTab; label: string }[] = [

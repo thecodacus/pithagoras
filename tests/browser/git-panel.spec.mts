@@ -1,7 +1,7 @@
 import { type Page } from '@playwright/test';
 import { test, expect } from './portal-mock';
 
-const calls = (page: Page) => page.evaluate(() => (window as any).gitCalls.filter((c: any) => c.method === 'POST').map((c: any) => ({ url: c.url.replace('/api/sessions/s/git', ''), body: c.body })));
+const calls = (page: Page) => page.evaluate(() => (window as any).gitCalls.filter((c: any) => c.method === 'POST').map((c: any) => ({ url: c.url.replace('/api/x/pithagoras-git/chats/s', ''), body: c.body })));
 const row = (page: Page, name: string) => page.getByRole('button', { name: new RegExp(name.replace(/[.]/g, '\\.')) }).first();
 
 test.beforeEach(async ({ page }) => {
@@ -283,7 +283,7 @@ test('a history that failed once shows the commits when asked again, not the old
 test('Refresh reads the state once', async ({ page }) => {
   await page.goto('/tests/git.html');
   await expect(page.getByText('session.ts')).toBeVisible();
-  const states = () => page.evaluate(() => (window as any).gitCalls.filter((c: any) => c.method === 'GET' && c.url === '/api/sessions/s/git').length);
+  const states = () => page.evaluate(() => (window as any).gitCalls.filter((c: any) => c.method === 'GET' && c.url === '/api/x/pithagoras-git/chats/s').length);
   const before = await states();
   await page.getByRole('button', { name: 'Refresh' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Refreshing' })).toHaveCount(0);

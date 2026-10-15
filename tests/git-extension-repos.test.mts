@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { inProcessHome } from "./server-harness.mjs";
+import { scratch } from "./helpers.mts";
 
 // A home of its own: who commits, and no config of the person running the tests.
-const home = inProcessHome("pithagoras-git-repos-");
+const home = scratch("pithagoras-git-repos-");
 process.env.HOME = home;
 process.env.GIT_CONFIG_GLOBAL = path.join(home, ".gitconfig");
 process.env.GIT_CONFIG_NOSYSTEM = "1";
@@ -15,9 +15,14 @@ process.env.GIT_CEILING_DIRECTORIES = path.dirname(home);
 writeFileSync(process.env.GIT_CONFIG_GLOBAL, "[user]\n\tname = Tester\n\temail = t@example.com\n[init]\n\tdefaultBranch = main\n");
 
 const { default: express } = await import("express");
-const { gitRouter } = await import("../dist/api/git.js");
-const { createSession } = await import("../dist/db.js");
-const g = await import("../dist/git.js");
+// The Git extension: its git, run by the portal's own runner, and its server half, given a portal as the portal gives
+// it one: each chat's folder as the portal finds it, a path checked inside it as the portal checks one, and git.
+const g = await import("../extensions/git/src/git.ts");
+const { default: gitServer } = await import("../extensions/git/src/server.ts");
+const { gitAt } = await import("../core/server/src/git.ts");
+const { baseDir, resolveInside } = await import("../core/server/src/workspace-files.ts");
+g.useGit(gitAt);
+const folders = new Map();
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 let n = 0;
@@ -34,16 +39,28 @@ function repo(dir, branch) {
 function chat() {
   const work = path.join(home, `work${++n}`);
   mkdirSync(work);
-  createSession({ id: `s${n}`, title: "s", workspace: work, executor: "host" });
+  folders.set(`s${n}`, work);
   return { id: `s${n}`, work };
 }
 
 async function withApi(fn) {
+  const router = express.Router();
+  gitServer({
+    router,
+    http: { json: express.json },
+    chats: {
+      folder: (id) => {
+        if (!folders.has(id)) throw new Error("No such chat");
+        return baseDir(folders.get(id));
+      },
+    },
+    files: { inside: resolveInside },
+    git: { at: gitAt },
+  });
   const app = express();
-  app.use(express.json());
-  app.use("/api", gitRouter());
+  app.use("/api/x/pithagoras-git", router);
   const server = app.listen(0);
-  const base = `http://127.0.0.1:${server.address().port}/api/sessions`;
+  const base = `http://127.0.0.1:${server.address().port}/api/x/pithagoras-git/chats`;
   try {
     await fn(base);
   } finally {
@@ -116,7 +133,7 @@ test("an empty or broken .git is not a repository: it is not listed, and ?repo= 
   repo(path.join(work, "real"), "real");
   mkdirSync(path.join(work, "plain"));
   await withApi(async (base) => {
-    const url = `${base}/${id}/git`;
+    const url = `${base}/${id}`;
     assert.deepEqual((await get(`${url}/repos`)).repos.map((r) => r.path), ["", "real"]);
     // Git works in the repository around such a folder, so a route given it would act on that one.
     for (const repoName of ["empty", "plain"]) {
@@ -136,7 +153,7 @@ async function onlyRealListed(make) {
   make(path.join(work, "odd"));
   assert.deepEqual((await g.findRepos(work)).repos.map((r) => r.path), ["real"]);
   await withApi(async (base) => {
-    assert.deepEqual((await get(`${base}/${id}/git/repos`)).repos.map((r) => r.path), ["real"]);
+    assert.deepEqual((await get(`${base}/${id}/repos`)).repos.map((r) => r.path), ["real"]);
   });
 }
 
@@ -181,7 +198,7 @@ test("the routes work in the clone ?repo= names, and refuse a path out of the fo
   repo(path.join(work, "tools", "lib"), "lib");
   writeFileSync(path.join(work, "tools", "lib", "tag.txt"), "changed\n");
   await withApi(async (base) => {
-    const url = `${base}/${id}/git`;
+    const url = `${base}/${id}`;
     assert.deepEqual((await get(`${url}/repos`)).repos.map((r) => r.path), ["", "tools/lib"]);
 
     // Without it, the repository the folder is in, which holds the clone as it does any folder.
@@ -209,7 +226,7 @@ test("a clone is found in a folder that is in no repository, and the folder itse
   const { id, work } = chat();
   repo(path.join(work, "only"), "only");
   await withApi(async (base) => {
-    const url = `${base}/${id}/git`;
+    const url = `${base}/${id}`;
     assert.equal((await get(url)).repo, false);
     assert.deepEqual((await get(`${url}/repos`)).repos, [{ path: "only", name: "only" }]);
     assert.equal((await get(`${url}?repo=only`)).branch, "only");

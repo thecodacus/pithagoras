@@ -212,27 +212,30 @@ model.
 
 ## Git
 
-The Git panel's routes, all for the folder of session `:id`. Each is refused when
-the folder is not a repository, except `init`. See [Git](/guide/git).
+The [Git](/guide/git) extension's routes (`extensions/git`), while it is installed,
+all for the folder of chat `:id`. Each is refused when the folder is not a
+repository, except `init` and `repos`. `?repo=` picks one of the repositories
+inside the folder, by its path relative to it.
 
 | | |
 | --- | --- |
-| `GET /api/sessions/:id/git` | Branch, upstream, ahead/behind, changed files, an operation in progress. Reads the disk only |
-| `GET /api/sessions/:id/git/gh` | Whether pull requests can be had through `gh`, and for which GitHub repository. `?fresh=1` asks again |
-| `POST /api/sessions/:id/git/init` | Make the folder a repository |
-| `GET /api/sessions/:id/git/diff?of=` | A diff: `of` is `unstaged`, `staged`, `untracked` (with `path`), `commit` (`sha`), `range` (`base`) or `stash` (`stash`) |
-| `POST …/git/stage` · `/unstage` · `/discard` | `{ paths }` or `{ all: true }` (not for `discard`) |
-| `POST …/git/commit` | `{ message, amend? }` |
-| `POST …/git/abort` · `/continue` | Abort or continue a paused merge or rebase |
-| `GET …/git/log` · `GET …/git/commits/:sha` | History, in pages; one commit with its files |
-| `GET …/git/branches` · `POST …/git/branches` · `POST …/git/branches/delete` | List, `{ name, from? }`, `{ name, force? }` |
-| `POST …/git/switch` | `{ name, remote? }` |
-| `POST …/git/fetch` · `/pull` · `/push` | Each answers `{ said }`; pull is fast-forward only |
-| `GET …/git/stashes` · `POST …/git/stashes` | List; `{ message? }` stashes the changes. `POST …/git/stashes/apply` · `/pop` · `/drop` with `{ ref, sha? }` act on one |
-| `GET …/git/compare?base=` | The branch against its base |
-| `GET …/git/pulls?state=` · `…/pulls/current` · `…/pulls/:n` · `…/pulls/:n/diff` | Pull requests, through `gh` |
-| `POST …/git/pulls` | `{ title, body, base?, draft? }` |
-| `POST …/git/pulls/:n/checkout` · `/merge` · `/comment` · `/review` | `merge`: `{ method, deleteBranch? }`; `comment`: `{ body }`; `review`: `{ action, body }` |
+| `GET /api/x/pithagoras-git/chats/:id` | Branch, upstream, ahead/behind, changed files, an operation in progress. Reads the disk only |
+| `GET …/chats/:id/repos` | The repositories inside the chat's folder, for the Repository picker |
+| `GET …/chats/:id/gh` | Whether pull requests can be had through `gh`, and for which GitHub repository. `?fresh=1` asks again |
+| `POST …/chats/:id/init` | Make the folder a repository |
+| `GET …/chats/:id/diff?of=` | A diff: `of` is `unstaged`, `staged`, `untracked` (with `path`), `commit` (`sha`), `range` (`base`) or `stash` (`stash`) |
+| `POST …/chats/:id/stage` · `/unstage` · `/discard` | `{ paths }` or `{ all: true }` (not for `discard`) |
+| `POST …/chats/:id/commit` | `{ message, amend? }` |
+| `POST …/chats/:id/abort` · `/continue` | Abort or continue a paused merge or rebase |
+| `GET …/chats/:id/log` · `GET …/chats/:id/commits/:sha` | History, in pages; one commit with its files |
+| `GET …/chats/:id/branches` · `POST …/chats/:id/branches` · `POST …/chats/:id/branches/delete` | List, `{ name, from? }`, `{ name, force? }` |
+| `POST …/chats/:id/switch` | `{ name, remote? }` |
+| `POST …/chats/:id/fetch` · `/pull` · `/push` | Each answers `{ said }`; pull is fast-forward only |
+| `GET …/chats/:id/stashes` · `POST …/chats/:id/stashes` | List; `{ message? }` stashes the changes. `POST …/stashes/apply` · `/pop` · `/drop` with `{ ref, sha? }` act on one |
+| `GET …/chats/:id/compare?base=` | The branch against its base |
+| `GET …/chats/:id/pulls?state=` · `…/pulls/current` · `…/pulls/:n` · `…/pulls/:n/diff` | Pull requests, through `gh` |
+| `POST …/chats/:id/pulls` | `{ title, body, base?, draft? }` |
+| `POST …/chats/:id/pulls/:n/checkout` · `/merge` · `/comment` · `/review` | `merge`: `{ method, deleteBranch? }`; `comment`: `{ body }`; `review`: `{ action, body }` |
 
 ## Terminal, background jobs and subagents
 

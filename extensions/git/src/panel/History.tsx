@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { LuCopy, LuGitCompareArrows } from "react-icons/lu";
-import { copyText } from "../../clipboard";
-import { gitApi, type Branch, type Commit, type CommitDetail, type Comparison, type FileChange } from "../../git-api";
+import { copyText } from "../portal";
+import { gitApi, type Branch, type Commit, type CommitDetail, type Comparison, type FileChange } from "../git-api";
 import { ago, Counts, ErrorNote, IconButton, Letter, LETTER_NAME, Quiet, RefBadge, SectionHead, splitPath } from "./bits";
 import { useGit } from "./context";
-import { Select } from "../Select";
-import { formatDateTime, t } from "../../i18n";
+import { Select } from "../portal";
+import { formatDateTime, t } from "../portal";
 
 const PAGE = 100;
 

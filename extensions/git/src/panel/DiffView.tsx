@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
-import type { DiffFile } from "../../git-diff";
-import { t, useLanguage } from "../../i18n";
+import type { DiffFile } from "../git-diff";
+import { t, useLanguage } from "../portal";
 
 /**
  * How many rows are drawn at first, and added by each "Show more". A row is a

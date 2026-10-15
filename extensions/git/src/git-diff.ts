@@ -1,4 +1,4 @@
-import { msg } from "./i18n";
+import { msg } from "./portal";
 /**
  * A unified diff, as git or gh prints it, read into files and lines to draw.
  *
