@@ -28,6 +28,8 @@ jobs:
       - run: npm ci
       # A Chromium for the browser tools' test (test/browser-tools), which drives one over its debugging port.
       - run: npx playwright install --with-deps chromium
+      # The extensions as the portal ships them, built: the tests list the ones in extensions/ by the halves they have.
+      - run: npm run build:extensions
       - run: npm test
 
   # The type check of the web app and its build, which is also what the image runs, the extensions' builds, and
