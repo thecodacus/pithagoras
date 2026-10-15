@@ -6,7 +6,7 @@ import { Chat } from '../src/components/Chat';
 import { ExtensionDialog } from '../src/components/ExtensionDialog';
 import { KeyboardShortcuts } from '../src/components/KeyboardShortcuts';
 import type { PortalEvent, Session } from '../src/api';
-import { canvasConnection, canvasMessage, type CanvasMessage } from '../src/canvas-feed';
+import { serverPush } from '../src/extensions/server-feed';
 import '../src/styles';
 import { register } from '../src/extensions/slots';
 import { registerShortcut } from '../src/extensions/shortcuts';
@@ -147,6 +147,6 @@ function Fixture() {
   </>;
 }
 // Inside a router, as in the app: the chat's links go through it.
-// What the app's stream would pass on for this chat's canvases.
-(window as any).canvasFeed = { message: (m: CanvasMessage) => canvasMessage('test', m), connected: (on: boolean) => canvasConnection('test', on ? 'up' : 'down') };
+// What an installed extension's server half tells this chat's page, as the app's stream passes it on: see extensions/server-feed.ts.
+(window as any).extensionSays = (extension: string, data: unknown) => serverPush('test', extension, data);
 createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);

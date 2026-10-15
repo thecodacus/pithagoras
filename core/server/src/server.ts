@@ -1,6 +1,4 @@
 import { bindHost, loginThrottle, portalSecurityHeaders, tlsFiles } from "./http-security.js";
-import { canvasesRouter } from "./api/canvases.js";
-import { interruptCanvasWrites } from "./canvases.js";
 import { eventsRouter } from "./api/events.js";
 import { serveWeb } from "./web-static.js";
 import { clampLevel } from "./pi/model-runtime.js";
@@ -92,7 +90,7 @@ import { removeSso, saveSso, ssoConfig } from "./sso-settings.js";
 import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter, noteLoadedExtensions, syncExtensionServers } from "./api/extensions.js";
-import { installDefaultExtensions } from "./default-extensions.js";
+import { installDefaultExtensions, stopInstallingDefaults } from "./default-extensions.js";
 import { extensionRoutes, openingFor, stopServerHalves } from "./extension-host.js";
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
@@ -1783,7 +1781,6 @@ app.use("/api", logsRouter());
 app.use("/api", updateRouter());
 app.use("/api", restartRouter());
 app.use("/api", voiceRouter());
-app.use("/api", canvasesRouter());
 // The routes of the installed extensions' server halves, each under its package's name.
 app.use("/api/x", extensionRoutes);
 // Before the SPA fallback, which answers everything that is not /api.
@@ -1922,13 +1919,12 @@ sessions.startReaper();
 // Folders put aside for removal that a stop cut short: see folder-removal.ts.
 sweepRemoved(WORKSPACE_ROOT);
 sweepRemoved(agentsRoot());
-interruptCanvasWrites();
 // The server halves of the installed extensions: see extension-host.ts.
 void syncExtensionServers().catch((e) => console.error("[extensions] could not start the server halves:", e));
 // What a portal starts with is installed once (extensions/defaults.json), and then loaded like anything installed by
 // hand: an install brings the server halves in line again. What the portal runs with is noted once that is done.
-// A portal that stops while it goes on lets it finish (see stop): pi is writing its settings, and with the portal gone
-// it would go on writing them alone.
+// A portal that stops while it goes on lets the install going on finish, and begins no other (see stop): pi is writing
+// its settings, and with the portal gone it would go on writing them alone.
 const startingWith = installDefaultExtensions()
   .catch((e) => console.error("[extensions] could not install what a portal starts with:", e))
   .finally(() => void noteLoadedExtensions());
@@ -1961,6 +1957,7 @@ async function stop(signal: string) {
   console.log(`${signal} received — stopping running sessions`);
   // However long the rest takes, and no longer than docker waits before it kills.
   setTimeout(() => process.exit(requestedExit()), 10_000).unref();
+  stopInstallingDefaults();
   routineSupervisor.stop();
   await channelSupervisor.shutdown();
   await sessions.shutdown();

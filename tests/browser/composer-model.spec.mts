@@ -33,7 +33,6 @@ async function portal(page: Page): Promise<Portal> {
     }
     if (p === '/api/sessions/b/config') return config(model('prov-b', 'Beta'));
     if (p.endsWith('/models')) return config(model('prov-a', 'Alpha'));
-    if (p.endsWith('/canvases')) return [];
     if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
     if (p === '/api/models') return { models: [], providers: {} };
   }, { streams: 'open', settings: true });

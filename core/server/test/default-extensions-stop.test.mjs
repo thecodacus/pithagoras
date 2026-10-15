@@ -6,10 +6,11 @@ import test from "node:test";
 import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs";
 
 /**
- * A portal that stops while it is installing what it starts with (extensions/defaults.json) lets the install finish
- * before it exits: pi is writing its settings, and with the portal gone it would go on writing them alone, into a
- * folder that may be on its way out. pi here is a stand-in that takes two seconds over each install and notes when it
- * starts and ends one.
+ * A portal that stops while it is installing what it starts with (extensions/defaults.json) lets the install going on
+ * finish before it exits, and begins no other: pi is writing its settings, and with the portal gone it would go on
+ * writing them alone, into a folder that may be on its way out; and the rest of the list, one after the other, ran past
+ * the ten seconds docker waits before it kills. pi here is a stand-in that takes two seconds over each install and
+ * notes when it starts and ends one.
  */
 const home = testHome("default-extensions-stop-");
 const bin = path.join(home, "bin");
@@ -39,4 +40,5 @@ test("a portal stopped while it installs what it starts with exits only once the
   const started = lines.filter((line) => line.startsWith("start ")).map((line) => line.slice(6));
   const ended = lines.filter((line) => line.startsWith("end ")).map((line) => line.slice(4));
   assert.deepEqual(ended, started, "every install that began had ended when the portal exited");
+  assert.ok(started.length < 4, `no install began once the portal was stopping: ${started.join(", ")}`);
 });

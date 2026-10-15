@@ -25,7 +25,7 @@ is what there is to install, in three parts: **Comes with Pithagoras**, **Find
 packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
-(the Dusk and Warm themes, a pack of five more, the terminal, Git and [Documents](/guide/documents)), each installed from the portal's own
+(the Dusk and Warm themes, a pack of five more, the terminal, Git, Canvases and [Documents](/guide/documents)), each installed from the portal's own
 folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
@@ -52,7 +52,7 @@ started from then on have the package; open ones pick it up with `/reload`.
 ## What a portal starts with
 
 A fresh portal installs the extensions its own `extensions/defaults.json` names,
-once: today the [terminal](/guide/terminal), [Git](/guide/git) and the theme pack (Forest, Ocean,
+once: today the [terminal](/guide/terminal), [Git](/guide/git), [Canvases](/guide/canvases) and the theme pack (Forest, Ocean,
 Rose, Amber and Mono, chosen under Settings → This browser → Colours). They are ordinary packages from then on: listed under **Installed**,
 switched off or removed like any other, and one you removed is not put back
 when the portal starts again. To use your own in place of one of them, remove
@@ -349,7 +349,7 @@ Any tool can be made lazy except pi's own built-in ones (`read`, `bash`, `edit`,
 and `ls`), which every conversation works with and which are always offered. They have no lazy button, and
 the portal refuses a mark that names them, in whichever group they are listed: with the
 [sandbox](/guide/sandbox) on they are listed under **sandbox**, and an extension that brings a tool of one
-of these names does not make it lazy either. The canvas tools can be lazy, `canvas_write` too: a document
+of these names does not make it lazy either. The [Canvases](/guide/canvases) tools can be lazy, `canvas_write` too: a document
 written through `tools` fills the canvas while the model writes it, and what has come is kept if the turn
 is cut off, as for a direct call. Text is written only for a `canvas_write` the model can call: one offered
 by its own name, or a lazy one called through `tools`. A lazy or switched-off one called by its own name is

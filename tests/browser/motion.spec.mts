@@ -74,7 +74,6 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
     if ((m = p.match(/^\/api\/sessions\/(\w+)$/))) return state.sessions.find((s) => s.id === m![1]) ?? {};
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model: { id: 'm', name: 'Model', provider: 'x' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
     if (/^\/api\/sessions\/\w+\/files$/.test(p)) return { path: '', entries: [], truncated: false };
-    if (p.endsWith('/canvases')) return [];
     if (p.endsWith('/background')) return { jobs: [], statuses: [] };
     if (p === '/api/projects') return { root: '/w', home: '/w', projects: [] };
     if (p === '/api/workspaces') return { root: '/w', workspaces: [] };

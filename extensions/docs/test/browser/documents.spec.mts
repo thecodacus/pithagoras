@@ -65,7 +65,6 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
     if (p === '/api/models') return { models: [], providers: {} };
     if (/^\/api\/sessions\/\w+$/.test(p)) return sessions[0];
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model: null, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
-    if (p.endsWith('/canvases')) return [];
   }, { streams });
   /** Something the chat's pi said, as the chat's stream carries it. */
   let seq = 100;

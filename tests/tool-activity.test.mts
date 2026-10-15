@@ -24,7 +24,6 @@ test('other tools say what they are doing and where it can be seen', () => {
   assert.deepEqual(describeCall(start('browser_find', { query: 'pricing' }), folder), { label: 'Searching the page', detail: 'pricing', target: 'browser' });
   assert.deepEqual(describeCall(start('browser_get_text', { ref: 'e5' }), folder), { label: 'Reading the page', detail: '', target: 'browser' });
   assert.deepEqual(describeCall(start('browser_key', { key: 'Enter' }), folder), { label: 'Typing in the browser', detail: '', target: 'browser' });
-  assert.deepEqual(describeCall(start('canvas_create', { title: 'Report' }), folder), { label: 'Starting a document', detail: 'Report', target: 'canvas' });
   assert.deepEqual(describeCall(start('show_image', { path: 'a.png', title: 'Sales' }), folder), { label: 'Showing a picture', detail: 'Sales', target: 'pictures' });
   assert.deepEqual(describeCall(start('jira_get_issue', { query: 'ABC-1' }), folder), { label: 'Using jira get issue', detail: 'ABC-1' });
 });

@@ -20,7 +20,6 @@ const { channelSupervisor } = await import("../dist/channels/supervisor.js");
 const { resolveChannelSession } = await import("../dist/agent.js");
 const { findSessionFile } = await import("../dist/pi/session-file.js");
 const { routineSupervisor } = await import("../dist/routines/supervisor.js");
-const { beginCanvasWrite, createCanvas, listCanvases, markCanvasRead, saveCanvasPrefix } = await import("../dist/canvases.js");
 const { proxyBaseUrl, startLlamaProxy } = await import("../dist/llama-progress.js");
 const { guardExtension, taintSession } = await import("../dist/pi/guard.js");
 
@@ -788,19 +787,3 @@ test("a routine run in a clean session lets its pi go when it ends; one that kee
   }
 });
 
-test("deleting a chat lets go of its temporary canvases, and of a write that was going on", () => {
-  const id = chat();
-  const other = chat();
-  const draft = createCanvas(id, "Unsaved");
-  markCanvasRead(id, draft.id);
-  beginCanvasWrite(id, draft.id, 0, "call-1");
-  saveCanvasPrefix(id, draft.id, "call-1", "half a document");
-  createCanvas(other, "Kept");
-  assert.equal(listCanvases(id).length, 1);
-
-  sessions.removeFiles(id);
-
-  assert.deepEqual(listCanvases(id), []);
-  assert.throws(() => saveCanvasPrefix(id, draft.id, "call-1", "half a document, and more"), /not found/);
-  assert.equal(listCanvases(other).length, 1, "another chat's canvases stay");
-});

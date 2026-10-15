@@ -235,8 +235,8 @@ export function channelsRouter(): Router {
       const ids = getDb()
         .prepare("SELECT id FROM sessions WHERE channel_slug = ?")
         .all(row.slug) as { id: string }[];
-      // The same as deleting a chat: brought to a stop first, its rows (canvases
-      // included) removed together, and the folder pi wrote for it after them.
+      // The same as deleting a chat: brought to a stop first, its rows removed
+      // together, and the folder pi wrote for it after them.
       try {
         for (const s of ids) await sessions.discard(s.id);
         getDb().transaction(() => {

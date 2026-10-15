@@ -40,6 +40,17 @@ export default function (pi: any) {
   pi.on("input", (event: any) => (event.text.includes("take this") ? { action: "handled" } : undefined));
 }
 `);
+// A tool an extension brings with what the model is to be told in a spoken turn, while a test asks for it.
+writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "extensions", "board.ts"), `
+export default function (pi: any) {
+  if (!(globalThis as any).boardTool) return;
+  pi.registerTool({
+    name: "board_write", label: "board write", description: "Write on the board.", parameters: { type: "object", properties: {} },
+    voiceGuidelines: ["Write long things on the board, and say only a line about it."],
+    execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+  });
+}
+`);
 // Compaction keeps as little as it can, so a message can be compacted away.
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 1 } }));
 
@@ -687,5 +698,21 @@ test("image editing: the edit tool and what the voice rule says of it come and g
   } finally {
     client.dispose();
     saveImageGeneration({ enabled: false, editEnabled: false });
+  }
+});
+
+test("what a tool asks to be told in a spoken turn is in the voice rule while the tool is on, and in no typed turn", async () => {
+  const line = "Write long things on the board, and say only a line about it.";
+  saveInstructions(undefined);
+  globalThis.boardTool = true;
+  const client = await open(undefined, { sessionId: "board-chat" });
+  try {
+    assert.ok(!(await say(client, "Typed")).includes(line), "not in a typed turn");
+    const spoken = await say(client, "Spoken", true);
+    assert.ok(spoken.includes(audioSystemRule(DEFAULT_VOICE_INSTRUCTIONS, line)), "in the rule of a spoken one");
+    assert.ok(offered.at(-1).includes("board_write"));
+  } finally {
+    client.dispose();
+    globalThis.boardTool = false;
   }
 });

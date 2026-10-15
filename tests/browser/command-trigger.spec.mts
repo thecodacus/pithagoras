@@ -32,7 +32,6 @@ async function portal(page: Page, opts: { listAfter?: Promise<void> } = {}) {
       return { ok: true };
     }
     if (p.endsWith('/config')) return { live: false, state: { model: { id: 'test', name: 'Test', provider: 'local' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: [] }, models: { models: [] } };
-    if (p.endsWith('/canvases')) return [];
   }, { streams: 'open', setup: 'skipped', settings: true });
   // Out of the way, so the sidebar's chats are not what the test reaches for.
   await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));

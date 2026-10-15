@@ -3,14 +3,18 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { inProcessHome } from './helpers.mts';
-inProcessHome('pithagoras-canvas-test-');
-const {getDb}=await import('../core/server/src/db.js');
-const {CanvasTools,WriteStream,GatewayWriteStream,canvasWritePrefix}=await import('../core/server/src/pi/canvas-tools.js');
-const {readCanvas,editCanvas,listCanvases,persistCanvas,restoreCanvas,forgetCanvases,createCanvas,interruptCanvasWrites}=await import('../core/server/src/canvases.js');
-getDb().prepare('INSERT INTO sessions (id,title,workspace) VALUES (?,?,?)').run('s1','test','/tmp');
-getDb().prepare('INSERT INTO sessions (id,title,workspace) VALUES (?,?,?)').run('s2','other','/tmp');
-function setup(){const controller=new CanvasTools('s1');const tools:Record<string,any>={};controller.extension({registerTool:(t:any)=>tools[t.name]=t} as any);return {controller,tools};}
+import Database from 'better-sqlite3';
+import { openStore } from '../src/store.ts';
+import { CanvasTools, WriteStream, GatewayWriteStream, canvasWritePrefix } from '../src/tools.ts';
+
+/** The store in a database of its own, for the chats s1 and s2. */
+const db = new Database(':memory:');
+const store = openStore(db, (id) => id === 's1' || id === 's2');
+const getDb = () => db;
+const { read: readCanvas, edit: editCanvas, list: listCanvases, persist: persistCanvas, restore: restoreCanvas, forget: forgetCanvases, create: createCanvas } = store;
+/** How canvas_write is offered to the model in s1 now (`portal.chats.offers`): by its own name unless a test says. */
+let offered: 'direct' | 'lazy' | undefined = 'direct';
+function setup(){offered='direct';const controller=new CanvasTools(store,'s1',()=>offered);const tools:Record<string,any>={};controller.register({registerTool:(t:any)=>tools[t.name]=t});return {controller,tools};}
 const value=(r:any)=>{assert.equal(r.content[0].type,'text');return JSON.parse(r.content[0].text)};
 function delta(controller:any,id:string,raw:string){controller.observe({type:'message_update',assistantMessageEvent:{type:'toolcall_delta',contentIndex:0,delta:raw,partial:{content:[{type:'toolCall',name:'canvas_write',id}]}}});}
 test('partial JSON decoder preserves escapes and does not invent incomplete Unicode',()=>{
@@ -264,33 +268,35 @@ test('a write cut off by a restart can be gone back from; what was held back is 
  const calm=await storedCanvas(tools,'Nobody is writing to this one.','Calm');
  const calmBefore=inTable(calm);
  delta(controller,'r',`{"canvas_id":"${id}","revision":${row.revision},"operation":"replace","content":"A doc`);
- // The server stops here: nothing held in memory is left, and what it does at start is this.
- forgetCanvases('s1');
+ // The portal stops here: nothing held in memory is left, and what the store does when it opens again is this.
+ const restarted=openStore(getDb(),(id)=>id==='s1'||id==='s2');
  // What the write had moved on in the table is not what the agent had read.
  getDb().prepare('UPDATE canvases SET agent_read_revision = NULL WHERE id = ?').run(id);
- interruptCanvasWrites();
+ restarted.interruptAll();
  // A canvas no write was going on in is left as it was.
  assert.deepEqual(inTable(calm),calmBefore);
- const after=readCanvas('s1',id);
+ const after=restarted.read('s1',id);
  assert.equal(after.restorable,true);
  // No call is running any more, the canvas says it was cut off, and it counts as read: the agent may write to it again.
  assert.deepEqual([after.status,after.active_call,after.agent_read_revision],['interrupted',null,after.revision]);
- assert.equal(restoreCanvas('s1',id,after.revision).content,original);
+ assert.equal(restarted.restore('s1',id,after.revision).content,original);
 });
-test('temporary canvases of a chat that is gone are let go, and nothing else is',async()=>{
+test('the canvases of a chat that is gone are let go, stored or not, and nothing else is',async()=>{
  const {controller,tools}=setup();
  const keep=value(await tools.canvas_create.execute('keep',{title:'Stays'}));
  const gone=createCanvas('s2','Unsaved').id;
+ const stored=persistCanvas('s2',createCanvas('s2','Stored').id).id;
  forgetCanvases('s2');
- assert.deepEqual(listCanvases('s2'),[]);assert.throws(()=>readCanvas('s2',gone),/not found/);
+ assert.deepEqual(listCanvases('s2'),[]);assert.throws(()=>readCanvas('s2',gone),/not found/);assert.throws(()=>readCanvas('s2',stored),/not found/);
  assert.equal(readCanvas('s1',keep.id).title,'Stays');
  controller.interrupt();
 });
 test('the restore route puts the text from before the cut-off write back',async()=>{
- const express=(await import('express')).default;const {canvasesRouter}=await import('../core/server/src/api/canvases.js');
- const portal=express().use(express.json()).use('/api',canvasesRouter()).listen(0,'127.0.0.1');
+ const express=(await import('express')).default;const {routes}=await import('../src/server.ts');
+ const router=express.Router();routes(router,express.json(),store,(id)=>id==='s1'||id==='s2');
+ const portal=express().use('/api/x/pithagoras-canvas',router).listen(0,'127.0.0.1');
  await new Promise(resolve=>portal.once('listening',resolve));
- const at=`http://127.0.0.1:${(portal.address() as {port:number}).port}/api/sessions/s1/canvases`;
+ const at=`http://127.0.0.1:${(portal.address() as {port:number}).port}/api/x/pithagoras-canvas/chats/s1/canvases`;
  try{
   const {controller,tools}=setup();const original='The text the route brings back.';const id=await storedCanvas(tools,original,'Route');
   const row=value(await tools.canvas_read.execute('read',{canvas_id:id}));
@@ -360,7 +366,7 @@ test('a write through the tools tool is decoded the same however it is cut up, a
  ])assert.equal(new GatewayWriteStream().push(raw),undefined,raw);
 });
 test('a write through the tools tool is saved as it streams in, and survives an interruption',async()=>{
- const {controller,tools}=setup();controller.viaGateway=()=>true;
+ const {controller,tools}=setup();offered='lazy';
  const row=value(await tools.canvas_create.execute('create',{title:'Lazy'}));
  through(controller,'write',`{"action":"call","name":"canvas_write","args":{"canvas_id":"${row.id}","revision":0,"operation":"replace","content":"First`);
  assert.equal(readCanvas('s1',row.id).content,'First');assert.equal(readCanvas('s1',row.id).status,'writing');
@@ -385,7 +391,7 @@ test('a call through the tools tool is no write to follow unless canvas_write is
  // canvas_write is not lazy here: the call is refused, and what it carries is nobody's text.
  through(controller,'refused',raw);
  assert.equal(readCanvas('s1',row.id).content,'');
- controller.viaGateway=()=>true;
+ offered='lazy';
  // A search of the lazy tools, a call of another one, or a call by another name than the tools tool's.
  through(controller,'search',JSON.stringify({action:'search',query:'canvas'}));
  through(controller,'other',JSON.stringify({action:'call',name:'canvas_read',args:{canvas_id:row.id,content:'x'}}));
@@ -401,18 +407,18 @@ test('a canvas_write that the model cannot call by its own name writes nothing, 
  const row=value(await tools.canvas_create.execute('create',{title:'Hidden'}));
  const raw=JSON.stringify({canvas_id:row.id,revision:0,operation:'replace',content:'Hello world'});
  // Lazy or switched off: pi answers the call "not found" and never runs it, so its text is nobody's to write.
- controller.direct=()=>false;
+ offered=undefined;
  for(const piece of raw.match(/.{1,9}/g)!)delta(controller,'by-name',piece);
  assert.equal(readCanvas('s1',row.id).content,'');assert.equal(readCanvas('s1',row.id).active_call,null);
  controller.observe({type:'tool_execution_end',toolCallId:'by-name',isError:true});
  assert.equal(readCanvas('s1',row.id).content,'');assert.equal(readCanvas('s1',row.id).status,row.status,'not marked interrupted');
  // Offered by its own name it is followed, as it always was.
- controller.direct=()=>true;
+ offered='direct';
  delta(controller,'offered',raw);
  assert.equal(readCanvas('s1',row.id).content,'Hello world');
 });
 test('a call of the tools tool that is no canvas_write after all takes back what was written on its way, and a real one keeps it',async()=>{
- const {controller,tools}=setup();controller.viaGateway=()=>true;
+ const {controller,tools}=setup();offered='lazy';
  const row=value(await tools.canvas_create.execute('create',{title:'Sneaky'}));
  value(await tools.canvas_write.execute('first',{canvas_id:row.id,revision:0,operation:'replace',content:'Before.'}));
  const rev=readCanvas('s1',row.id).revision;

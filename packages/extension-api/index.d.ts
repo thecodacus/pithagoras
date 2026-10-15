@@ -81,8 +81,8 @@ export interface SlotMap {
    * button. `useButton` is a hook, called as the chat's header is drawn: how
    * its button is for this chat. `name` is a name of its own that
    * `portal.panels.open(name, params)` reaches it by, from anywhere: the
-   * portal's own panels go by "files", "browser", "agents" and
-   * "canvas", and while one of those is the portal's, it is the one.
+   * portal's own panels go by "files", "browser" and "agents", and while
+   * one of those is the portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one loaded first).
    */
@@ -133,6 +133,8 @@ export interface SlotMap {
       place?: "side" | "middle";
       useAutoOpen?: (props: ChatProps) => number;
       opensFor?: (call: ToolCallView) => boolean;
+      /** What the card of a call it opens for says, in place of the portal's words for a tool it does not know ("Using canvas write"). */
+      describe?: (call: ToolCallView) => { label: string; detail?: string } | undefined;
     };
     props: ChatProps & { close(): void };
   };
@@ -345,6 +347,8 @@ export interface Ui {
   classes: { input: string; inputSmall: string; codeArea: string; button: string; primary: string; primarySmall: string; ghost: string };
   /** Copies text, where the page is served over plain HTTP as well. Resolves false when it could not. */
   copyText(text: string): Promise<boolean>;
+  /** Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when true. */
+  asksBeforeDeleting(): boolean;
   /** The browser's storage, which never throws: kept across reloads, and kept for the tab. */
   storage: { local: SafeStorage; session: SafeStorage };
   /** Keeps a scrolling box at its end while more comes, until the person scrolls away. */

@@ -13,15 +13,15 @@ test('a third closes the one that has been open longest', () => {
 });
 
 test('a panel that was closed drops out of the order, and comes back as the newest', () => {
-  const opened = settlePanels([], ['files', 'canvas']);
-  const closed = settlePanels(opened.order, ['canvas']);
-  assert.deepEqual(closed, { order: ['canvas'], close: [] });
-  assert.deepEqual(settlePanels(closed.order, ['canvas', 'files']).order, ['canvas', 'files']);
+  const opened = settlePanels([], ['files', 'pictures']);
+  const closed = settlePanels(opened.order, ['pictures']);
+  assert.deepEqual(closed, { order: ['pictures'], close: [] });
+  assert.deepEqual(settlePanels(closed.order, ['pictures', 'files']).order, ['pictures', 'files']);
 });
 
-test('files and canvas count like the others', () => {
-  const a = settlePanels(['canvas', 'files'], ['canvas', 'files', 'browser']);
-  assert.deepEqual(a, { order: ['files', 'browser'], close: ['canvas'] });
+test('files and pictures count like the others', () => {
+  const a = settlePanels(['pictures', 'files'], ['pictures', 'files', 'browser']);
+  assert.deepEqual(a, { order: ['files', 'browser'], close: ['pictures'] });
 });
 
 test('a panel with something in it that would be lost stays, and another goes instead', () => {

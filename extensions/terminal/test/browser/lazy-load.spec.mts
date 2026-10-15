@@ -15,7 +15,6 @@ async function portal(page: Page) {
     if (path === '/api/sessions') return { sessions: [chat], executor: 'host' };
     if (/^\/api\/sessions\/\w+$/.test(path)) return chat;
     if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
-    if (path.endsWith('/canvases')) return [];
     if (path === '/api/workspaces') return { root: '/w', workspaces: [] };
     if (path === '/api/models') return { models: [], providers: {} };
   });

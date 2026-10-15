@@ -90,7 +90,6 @@ test("what mail, the web through a command, an MCP server or the browser returne
     ["read", { path: "a.md" }], ["write", { path: "a.md" }], ["edit", { path: "a.md" }], ["grep", { pattern: "x" }], ["find", { pattern: "x" }], ["ls", {}],
     ["bash", { command: "ls -la" }], ["bash", { command: "git status" }], ["ask_primary", {}], ["activity_note", {}], ["report", {}],
     ["routines_list", {}], ["routine_create", {}], ["routine_update", {}], ["show_image", {}], ["generate_image", {}], ["edit_image", {}],
-    ["canvas_list", {}], ["canvas_create", {}], ["canvas_read", {}], ["canvas_write", {}], ["canvas_delete", {}],
     ["understory_memory_search", { query: "x" }], ["subagent", { task: "x" }], ["routine_run", {}], ["todo", { action: "list" }],
   ];
   for (const [tool, input] of own) {

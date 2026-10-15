@@ -10,7 +10,6 @@ import { inProcessHome } from "./helpers.mts";
 // the measure, as in the review of issue #183), with a little room for a word to be changed.
 inProcessHome("pitha-tool-texts-");
 const { putSetting } = await import("../core/server/src/db.ts");
-const { CanvasTools } = await import("../core/server/src/pi/canvas-tools.ts");
 const { ToolsGateway } = await import("../core/server/src/pi/tools-gateway.ts");
 const { browserTools } = await import("../core/server/src/browser/tools.ts");
 const { askPrimaryTool } = await import("../core/server/src/pi/ask-primary.ts");
@@ -54,7 +53,6 @@ putSetting("image_generation", JSON.stringify({ enabled: true, baseUrl: "https:/
 putSetting("video_generation", JSON.stringify({ enabled: true, baseUrl: "https://videos.example.com/v1" }));
 
 const all: Registered[] = [];
-load(new CanvasTools("s").extension as any, all);
 load(new ToolsGateway(["browser", "media"]).extension, all);
 load(browserTools("s"), all);
 load(askPrimaryTool("s"), all);
@@ -82,11 +80,6 @@ load(subagent, subagentBackground);
 /** The most each tool may cost, in tokens: what was agreed, as the review of issue #183 measured it, and 10 for a changed word. */
 const ROOM = 10;
 const AGREED: Record<string, number> = {
-  canvas_list: 21,
-  canvas_create: 50,
-  canvas_read: 59,
-  canvas_write: 161,
-  canvas_delete: 51,
   tools: 154,
   browser_navigate: 90,
   browser_back: 43,
@@ -162,8 +155,6 @@ test("a value outside the list of an enum is refused before the tool runs, as it
     validateToolArguments(find(name), { type: "toolCall", id: "1", name, arguments: args });
   const refused = (name: string, args: Record<string, unknown>) => assert.throws(() => check(name, args), /Validation failed/, `${name} ${JSON.stringify(args)}`);
 
-  assert.deepEqual(check("canvas_write", { canvas_id: "c", revision: 1, operation: "append", content: "x" }).operation, "append");
-  refused("canvas_write", { canvas_id: "c", revision: 1, operation: "prepend", content: "x" });
   assert.equal(check("tools", { action: "describe", name: "x" }).action, "describe");
   refused("tools", { action: "destroy" });
   assert.equal(check("browser_snapshot", { mode: "index" }).mode, "index");

@@ -20,7 +20,6 @@ async function portal(page: Page, { second = false } = {}) {
       state.switched.push({ path: p, body: json() });
       return { ok: true };
     }
-    if (p.endsWith('/canvases')) return [];
   }, { streams: 'open', settings: true });
   return state;
 }

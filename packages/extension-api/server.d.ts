@@ -101,6 +101,12 @@ export interface ServerPortal {
      * runs in the portal's own process.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
+    /**
+     * How a chat's model is offered a tool now: by its own name ("direct"), through the `tools` tool where the
+     * tool is lazy ("lazy"), or not at all: switched off, out of reach, or the chat's pi is not running here. A
+     * call of a tool by a name it is not offered under is refused and never runs.
+     */
+    offers(chatId: string, tool: string): "direct" | "lazy" | undefined;
     /** Keeps a chat's pi from being let go while work of the package's goes on. Returns what lets it go again. */
     hold(chatId: string): () => void;
   };

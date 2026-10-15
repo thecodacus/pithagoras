@@ -86,6 +86,18 @@ that file, and `reset-password.js` and `sso-only-off.js` beside it, as small
 files that load the same ones from `core/server/dist`. Change the command when
 it suits you.
 
+## Canvases are an extension
+
+Canvases are the `pithagoras-canvas` extension now, installed on the first
+start, with a database of their own. The canvases a portal stored before are
+not carried into it: the first start after the upgrade writes each of them out
+as a Markdown file in its chat's folder, `canvases/<title>.md` (a taken name
+gets a number, as an upload's does), and drops the table they were in. A chat
+whose folder is gone has its canvases written to `canvases/` in the data
+folder, beside `backups/`; the log says where each one went. They are files
+now, to open in Files or ask the agent to read, not canvases. The database was
+backed up before, as for any upgrade.
+
 ## Upgrading from the first release
 
 What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:

@@ -27,7 +27,6 @@ async function portal(page: Page, opts: { password?: boolean } = {}) {
     if (p === `/api/sessions/${other.id}`) return other;
     if (p.endsWith('/commands')) return { commands };
     if (p.endsWith('/config')) return { live: false, state: { model: { id: 'test', name: 'Test', provider: 'local' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: [] }, models: { models: [] } };
-    if (p.endsWith('/canvases')) return [];
     if (method !== 'GET' && p.endsWith('/prompt')) return { ok: true };
   }, { streams: 'open', setup: 'skipped', settings: true });
   await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));

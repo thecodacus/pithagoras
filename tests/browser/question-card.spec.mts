@@ -22,7 +22,6 @@ async function portal(page: Page) {
     if (/^\/api\/sessions\/\w+$/.test(path)) return chat;
     if (path.endsWith('/ui-response')) { answered.push(json()); return { ok: true }; }
     if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
-    if (path.endsWith('/canvases')) return [];
   }, { streams: 'open', settings: true });
   return { answered };
 }

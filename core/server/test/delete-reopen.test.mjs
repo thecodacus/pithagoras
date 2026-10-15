@@ -38,12 +38,12 @@ function refuseDeletes() {
   };
 }
 
-/** What of a chat is left in the database: its transcript and its stored canvases go before the chat's own row does. */
+/** What of a chat is left in the database: its transcript goes before the chat's own row does. */
 function whatIsLeft(id) {
   const db = new Database(path.join(home, "portal.db"), { readonly: true });
   try {
     const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE session_id = ?`).get(id).n;
-    return { events: count("events"), canvases: count("canvases") };
+    return { events: count("events") };
   } finally {
     db.close();
   }
@@ -53,7 +53,6 @@ test("a chat whose delete failed takes messages again, and still has what it had
   const chat = (await call("POST", "/api/sessions", {})).body;
   const db = new Database(path.join(home, "portal.db"));
   db.prepare("INSERT INTO events (session_id, type, payload) VALUES (?, 'user_message', '{}')").run(chat.id);
-  db.prepare("INSERT INTO canvases (id, session_id, title, content) VALUES ('kept-canvas', ?, 'Notes', 'text')").run(chat.id);
   db.close();
   const allow = refuseDeletes();
   try {
@@ -64,7 +63,7 @@ test("a chat whose delete failed takes messages again, and still has what it had
     allow();
   }
   // Each statement of the delete ran in turn: the chat is back in use, so it must not be one without its history.
-  assert.deepEqual(whatIsLeft(chat.id), { events: 1, canvases: 1 });
+  assert.deepEqual(whatIsLeft(chat.id), { events: 1 });
   await messageTaken(chat.id);
   assert.equal((await call("DELETE", `/api/sessions/${chat.id}`)).status, 200, "and it can still be deleted");
 });

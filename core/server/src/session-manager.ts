@@ -29,7 +29,6 @@ import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Att
 import { forgetBrowserSession } from "./browser/tools.js";
 import { BACKGROUND_SUPPORTED, listJobs, startedWhen, type BackgroundJob } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
-import { forgetCanvases } from "./canvases.js";
 import { chatEvent, chatLife, extensionHolds, serversSettled, setChatBridge } from "./extension-host.js";
 import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor } from "./executors/index.js";
@@ -1079,6 +1078,11 @@ class SessionManager extends EventEmitter {
     if (EXECUTOR_KIND !== "host") return false;
     const client = await this.ensureClient(sessionId);
     return client.tellExtension?.(extension, data) ?? false;
+  }
+
+  /** How a running chat's model is offered a tool now (see PiClient.offers); nothing for a chat whose pi is not running. */
+  toolOffered(sessionId: string, tool: string): "direct" | "lazy" | undefined {
+    return this.live.get(sessionId)?.client.offers?.(tool);
   }
 
   /** The session's model is being loaded, or has finished loading. */
@@ -3070,8 +3074,6 @@ class SessionManager extends EventEmitter {
     this.drafts.delete(sessionId);
     this.stops.delete(sessionId);
     this.aborts.delete(sessionId);
-    // Its temporary canvases are in memory only, so no row delete reaches them.
-    forgetCanvases(sessionId);
     chatLife("deleted", sessionId);
     // Each on its own: pi's folder is the one that can refuse, and the pictures
     // are what would then stay downloadable.
@@ -3142,5 +3144,5 @@ class SessionManager extends EventEmitter {
 }
 
 export const sessions = new SessionManager();
-setChatBridge({ tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data) });
+setChatBridge({ tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data), offers: (chatId, tool) => sessions.toolOffered(chatId, tool) });
 export { SESSION_ROOT, IMAGE_ROOT };

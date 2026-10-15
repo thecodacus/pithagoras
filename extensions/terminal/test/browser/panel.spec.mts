@@ -15,7 +15,6 @@ async function shell(page: Page, fails: (n: number, route: import('@playwright/t
   await mockPortal(page, ({ path, method, route }) => {
     if (path === '/api/sessions') return { sessions: [chat], executor: 'host' };
     if (/^\/api\/sessions\/\w+$/.test(path)) return chat;
-    if (path.endsWith('/canvases')) return [];
     if (path === '/api/x/pithagoras-terminal/terminal' && method === 'POST') return { id: 't1', cwd: '/w/site' };
     if (path === '/api/x/pithagoras-terminal/terminal/t1/input') return fails(++inputs, route);
     if (path === '/api/x/pithagoras-terminal/terminal/t1/resize' || path === '/api/x/pithagoras-terminal/terminal/t1') return { ok: true };

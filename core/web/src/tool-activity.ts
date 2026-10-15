@@ -18,7 +18,7 @@ import { GATEWAY_TOOL, calledThrough } from "../../server/src/pi/tools-gateway-n
  * anything unrecognised is described by its name rather than not at all.
  */
 
-export type ToolTarget = "files" | "browser" | "canvas" | "pictures";
+export type ToolTarget = "files" | "browser" | "pictures";
 
 export interface ToolCall {
   label: string;
@@ -130,10 +130,6 @@ export function describeCall(payload: any, folder: string): ToolCall {
   if (name === "generate_video") return { label: t("Making a video"), detail: flat(text(input.title) || text(input.prompt)) };
   if (name === "show_video") return { label: t("Showing a video"), detail: flat(text(input.title) || text(input.path)) };
   if (name === "ask_question") return { label: t("Asking you a question"), detail: flat(text(input.title) || text((input.questions as { question?: unknown }[] | undefined)?.[0]?.question)) };
-  if (name.startsWith("canvas_")) {
-    const verb: Record<string, string> = { canvas_create: t("Starting a document"), canvas_write: t("Writing in a document"), canvas_read: t("Reading a document"), canvas_list: t("Looking at the documents"), canvas_delete: t("Deleting a document") };
-    return { label: verb[name] ?? t("Using a document"), detail: flat(text(input.title)), target: "canvas" };
-  }
   if (/^browser[_.]/.test(name)) return browser(name.replace(/^browser[_.]/, ""), input);
   if (typeof input.tool === "string" && /browser/.test(input.tool)) return browser(input.tool, input);
   if (/web_?search|search_web/.test(name)) return { label: t("Searching the web"), detail: flat(text(input.query)) };

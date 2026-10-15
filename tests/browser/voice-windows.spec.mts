@@ -93,11 +93,9 @@ test('the browser maximizes within the stage, not the page, and gives its place 
 });
 
 test('a single window stays inside its workspace and the orb moves aside for it', async ({ page }) => {
-  await page.evaluate(() => (window as any).canvasFeed.message({ type: 'update', canvas: { id: 'doc', title: 'A shared draft', content: '# Draft', revision: 1, status: 'writing', active_call: 'draft', updated_at: '' } }));
-  const canvas = page.getByLabel('Session canvas workspace');
-  await expect(canvas).toBeVisible();
+  await openConsole(page);
   await settled(page);
-  const panel = page.locator('.canvas-panel');
+  const panel = page.locator('.voice-extension-window[data-extension="test-console"]');
   await drag(page, panel.locator('.resize-w'), -1200);
   const workspace = await box(page.getByTestId('workspace'));
   expect((await box(panel)).x).toBeGreaterThanOrEqual(workspace.x);
@@ -122,28 +120,13 @@ async function drag2(page: Page, handle: Locator, dx: number, dy: number) {
   await page.mouse.up();
 }
 
-const openCanvas = async (page: Page) => {
-  await page.evaluate(() => (window as any).canvasFeed.message({ type: 'update', canvas: { id: 'doc', title: 'A shared draft', content: '# Draft', revision: 1, status: 'writing', active_call: 'draft', updated_at: '' } }));
-  await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
-};
+/** The stand-in's window, shown by hand. */
+async function openConsole(page: Page) {
+  await page.getByRole('button', { name: 'Show console' }).click();
+  await expect(page.locator('.voice-extension-window[data-extension="test-console"]')).toHaveClass(/is-open/);
+}
 const overlap = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
   a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
-
-test('a maximized browser is not covered by the canvas, and nothing moves under it', async ({ page }) => {
-  await openCanvas(page);
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  const browser = page.locator('.voice-browser-window'), panel = page.locator('.canvas-panel');
-  await expect(browser).toHaveClass(/is-open/);
-  await settled(page);
-  const before = await box(panel);
-  await page.getByRole('button', { name: 'Maximize browser' }).click();
-  await settled(page);
-  await expect(panel).toBeHidden();
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels', '2');
-  await page.getByRole('button', { name: 'Restore browser size' }).click();
-  await expect(panel).toBeVisible();
-  expect(await box(panel)).toEqual(before);
-});
 
 test('a browser closed for a third window is not maximized any more: Escape is Stop again, and it opens at its size', async ({ page }) => {
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
@@ -180,22 +163,12 @@ test('on a phone the maximized browser ends above the dock', async ({ page }) =>
   expect(browser.y + browser.height).toBeLessThanOrEqual(dock.y);
 });
 
-test('the canvas stops above the dock', async ({ page }) => {
-  await openCanvas(page);
-  await page.getByRole('button', { name: 'Use browser', exact: true }).click();
-  await settled(page);
-  const panel = page.locator('.canvas-panel');
-  await drag2(page, panel.locator('.resize-s'), 0, 500);
-  const dock = await box(page.locator('.voice-presence'));
-  expect((await box(panel)).y + (await box(panel)).height).toBeLessThanOrEqual(dock.y - 15);
-});
-
 test('a window dragged by its corner stops short of a window off that corner', async ({ page }) => {
-  await openCanvas(page);
+  await openConsole(page);
   await settled(page);
-  const panel = page.locator('.canvas-panel');
+  const panel = page.locator('.voice-extension-window[data-extension="test-console"]');
   await drag2(page, panel.locator('.resize-s'), 0, -250);
-  // A window below and to the left of the canvas, touching it at neither side.
+  // A window below and to the left of it, touching it at neither side.
   const c = await box(panel), ws = await box(page.getByTestId('workspace'));
   await page.evaluate(({ left, top }) => {
     const w = document.createElement('section');
@@ -290,10 +263,10 @@ test('a window dragged while the orb goes back to its dock is not fought over, a
   expect(t.y + t.height).toBeLessThanOrEqual(dock.y - 15);
 });
 
-test('a canvas sized by hand takes its place again when another window opens', async ({ page }) => {
-  await openCanvas(page);
+test('a window sized by hand takes its place again when another window opens', async ({ page }) => {
+  await openConsole(page);
   await settled(page);
-  const panel = page.locator('.canvas-panel');
+  const panel = page.locator('.voice-extension-window[data-extension="test-console"]');
   await drag(page, panel.locator('.resize-w'), -150);
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await settled(page);
@@ -331,9 +304,9 @@ test('a window opening while the browser is maximized gives it its place back', 
   await expect(browser).not.toHaveClass(/is-maximized/);
   await expect(page.locator('.voice-extension-window[data-extension="test-console"]')).toHaveClass(/is-open/);
   await page.getByRole('button', { name: 'Maximize browser' }).click();
-  await page.getByRole('button', { name: 'Session canvases' }).click();
+  await page.getByRole('button', { name: 'Show files' }).click();
   await expect(browser).not.toHaveClass(/is-maximized/);
-  await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Files', exact: true })).toHaveClass(/is-open/);
 });
 
 test('pictures waiting to be sent do not cover the maximized browser\'s buttons', async ({ page }) => {
@@ -418,20 +391,6 @@ test('closing one of two windows stands the orb beside the other from the first 
   expect(frames.every(f => f === 'column')).toBe(true);
 });
 
-test('the canvas keeps the size it was given before voice mode', async ({ page }) => {
-  await openCanvas(page);
-  await page.getByRole('button', { name: 'End voice mode' }).click();
-  await expect(page.locator('.voice-stage')).toHaveCount(0);
-  const panel = page.locator('.canvas-panel');
-  await settled(page);
-  await drag(page, panel.locator('.resize-w'), -120);
-  const sized = await box(panel);
-  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
-  await expect(page.locator('.voice-stage')).toHaveCount(1);
-  await settled(page);
-  expect((await box(panel)).width).toBeCloseTo(sized.width, 0);
-});
-
 test('a drag measures the other windows once, not at every move of the pointer', async ({ page }) => {
   await page.getByRole('button', { name: 'Use browser', exact: true }).click();
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
@@ -480,16 +439,12 @@ test('on a phone the windows end above the dock, one or two of them, and the car
 });
 
 test('a window\'s shadow falls downwards and does not reach across the gap onto the window beside it', async ({ page }) => {
-  await openCanvas(page);
-  await settled(page);
   // How far each shadow reaches out at the sides: its offset, blur and spread. The right one's lay over the left one.
   const reach = (el: Element) => getComputedStyle(el).boxShadow.split(/,(?![^(]*\))/).map(shadow => {
     const [x, , blur = 0, spread = 0] = shadow.replace(/rgba?\([^)]*\)/, '').trim().split(/\s+/).map(parseFloat);
     return Math.abs(x) + blur + spread;
   });
-  // The canvas as it stands once it has slid in, then the windows of the stage.
-  const shadows = [await page.locator('.canvas-panel').evaluate(reach)];
-  await page.getByRole('button', { name: 'Session canvases' }).click();
+  const shadows: number[][] = [];
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
   await page.getByRole('button', { name: 'Show files' }).click();
   await settled(page);

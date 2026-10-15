@@ -195,7 +195,7 @@ export function filesRouter(): Router {
 
   /**
    * A picture in the folder, drawn in the page rather than downloaded: for the
-   * Files panel, a canvas that shows one, and what the agent puts in front of
+   * Files panel, an extension's page that shows one (a canvas), and what the agent puts in front of
    * the person with show_image. Only what its bytes say is a picture is sent,
    * with that type, and under a policy that would stop it running anything
    * even if a browser disagreed.

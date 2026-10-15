@@ -18,7 +18,6 @@ import { ConfirmHost } from "./components/ConfirmDialog";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { ErrorBanner, ghostCls } from "./components/SettingsUi";
 import { pollWhileVisible, reconnectDelay } from "./poll";
-import { canvasConnection, canvasMessage } from "./canvas-feed";
 import { APP_NAME, finishedRuns, tabTitle } from "./attention";
 import { notifyIfAway, notifyState } from "./notify";
 import { guardStrayDrops } from "./drop-guard";
@@ -382,13 +381,9 @@ function Shell({
         connect();
       };
       esRef.current = es;
-      // The canvas panel is drawn before the stream is up: it waits for the
-      // list the stream sends first, rather than asking for it as well.
-      canvasConnection(sessionId, "connecting");
       es.onopen = () => {
         failed = 0;
         setFailures(0);
-        canvasConnection(sessionId, "up");
       };
       // A count other than the last one seen: events came back while this page
       // was away, under seqs it had read past, and going on from its cursor
@@ -404,7 +399,6 @@ function Shell({
         drain();
         setEvents(resetLiveEvents);
       });
-      es.addEventListener("canvas", (m) => canvasMessage(sessionId, JSON.parse((m as MessageEvent).data)));
       // What the installed extensions' server halves tell what they drew on this chat: see extensions/server-feed.ts.
       es.addEventListener("extension", (m) => {
         const { extension, data } = JSON.parse((m as MessageEvent).data) as { extension: string; data: unknown };
@@ -547,7 +541,6 @@ function Shell({
           seq = 0;
         } else flush();
         es.close();
-        canvasConnection(sessionId, "down");
         failed += 1;
         setFailures(failed);
         retry = setTimeout(connect, reconnectDelay(failed));
@@ -560,7 +553,6 @@ function Shell({
       if (frame !== undefined) cancelAnimationFrame(frame);
       clearTimeout(timer);
       esRef.current?.close();
-      canvasConnection(sessionId, "down");
       setChatOnScreen(undefined);
     };
   }, [sessionId, missing, refreshSessions]);

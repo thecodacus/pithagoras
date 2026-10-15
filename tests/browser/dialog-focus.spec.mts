@@ -22,7 +22,6 @@ async function portal(page: Page, { withModel = false, expired = false } = {}) {
     }
     if (path.endsWith('/config') && withModel) return { live: true, state: { model: alpha, thinkingLevel: 'off' }, stats: null, thinking: { levels: [] }, models: { models: [alpha] }, named: { provider: 'prov-a', model: 'm' } };
     if (path.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
-    if (path.endsWith('/canvases')) return [];
     if (path === '/api/settings' && method === 'PUT') return { settings: {}, compaction: { keepRecentTokens: 20000 }, refreshed: 0, note: '' };
   }, { streams: 'open', settings: true });
   return { answered };

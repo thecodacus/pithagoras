@@ -17,7 +17,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 4, fingerprint: "efbdd8979a8d5394300b7204d1486827c1831b1a13d4956828900facc7aba461" };
+const PINNED = { version: 5, fingerprint: "06e47b6fe66c1c572ae81987761da0aad10656b2f72825fdff93f74f342ed6cc" };
 
 const home = inProcessHome("pithagoras-schema-");
 
@@ -77,11 +77,9 @@ function startUpgrade(dataDir, port) {
     await m.prepareDatabase();
     const db = await import(${dist("db.js")});
     const voices = await import(${dist("voice-presets.js")});
-    const canvases = await import(${dist("canvases.js")});
     console.log("RESULT " + JSON.stringify({
       title: db.getSession("chat1")?.title,
       messages: db.sentMessages("chat1").map((x) => x.message),
-      canvas: canvases.listCanvases("chat1").map((c) => [c.content, c.restorable]),
       voices: voices.listVoices().map((v) => v.name),
     }));`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
@@ -151,7 +149,11 @@ test("a database at the schema before this one is checked and backed up, brought
   assert.equal(d.pragma("user_version", { simple: true }), SCHEMA_VERSION);
   assert.equal(schemaFingerprint(d), PINNED.fingerprint);
   assert.deepEqual(d.prepare("SELECT key, renamed FROM people").all(), [{ key: "telegram:42", renamed: 1 }], "a name that had notes is one somebody chose");
-  assert.deepEqual(d.prepare("SELECT content, revision, previous_content FROM canvases").all(), [{ content: "The whole summary.", revision: 3, previous_content: null }]);
+  // Canvases are an extension's now: the one it had is a Markdown file. Its chat's folder (/work/example) is not on this
+  // machine, so it is in the data folder, beside the backup.
+  assert.ok(!d.prepare("SELECT 1 FROM sqlite_master WHERE name = 'canvases'").get(), "the table is gone");
+  assert.equal(readFileSync(path.join(dir, "canvases", "Summary.md"), "utf8"), "The whole summary.");
+  assert.match(run.output(), /a stored canvas is now a Markdown file: .*canvases\/Summary\.md/);
   assert.deepEqual(d.prepare("SELECT id, source_id FROM images ORDER BY id").all(), [{ id: "img1", source_id: null }, { id: "img2", source_id: "img1" }]);
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM events WHERE session_id = 'chat1'").get().n, 4);
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM voice_presets").get().n, 1);
@@ -161,7 +163,7 @@ test("a database at the schema before this one is checked and backed up, brought
 
   // And the portal reads it.
   const result = JSON.parse(/RESULT (.*)/.exec(run.output())[1]);
-  assert.deepEqual(result, { title: "A chat from the 2026-10-02 build", messages: ["Write the summary", "Shorter, please"], canvas: [["The whole summary.", false]], voices: ["Calm"] });
+  assert.deepEqual(result, { title: "A chat from the 2026-10-02 build", messages: ["Write the summary", "Shorter, please"], voices: ["Calm"] });
   assert.ok(!readdirSync(dir).some((f) => f.endsWith(".partial")));
   assert.equal(existsSync(path.join(dir, "backups")), true);
 });
@@ -225,4 +227,41 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
   assert.equal(result.agentTools, 0, "no agent says anything yet");
   assert.deepEqual(result.projectAgent, { agent: "", understoryOff: false }, "a project of v0.1.0 is a blank slate, as it was");
   assert.equal(result.projectAgents, 0);
+});
+
+// Canvases are an extension's from version 5 (extensions/canvas), with a store of its own. Two canvases of a chat stored
+// in a database of v0.1.0, with the same title, and one of a chat whose folder is gone: each becomes a Markdown file,
+// in its chat's folder where there is one, and the table goes.
+test("the canvases a portal stored are written out as Markdown in their chat's folder, and the table goes", async () => {
+  const dir = path.join(home, "canvases-out");
+  const folder = path.join(dir, "ws", "site");
+  mkdirSync(folder, { recursive: true });
+  const file = path.join(dir, "portal.db");
+  copyFileSync(new URL("./fixtures/portal-v3.db", import.meta.url), file);
+  const before = new Database(file);
+  const chat = before.prepare("INSERT INTO sessions (id, title, workspace, kind) VALUES (?, ?, ?, 'task')");
+  chat.run("c1", "Plans", folder);
+  chat.run("c2", "Moved away", path.join(dir, "ws", "gone"));
+  const canvas = before.prepare("INSERT INTO canvases (id, session_id, title, content, revision, status, updated_at) VALUES (?, ?, ?, ?, 1, 'saved', '2026-10-10T10:00:00Z')");
+  canvas.run("k1", "c1", "Launch plan", "# Launch\n\nFirst draft.");
+  canvas.run("k2", "c1", "Launch plan", "Second draft.");
+  canvas.run("k3", "c2", "Notes/2026: draft?", "Kept anyway.");
+  before.close();
+
+  const run = startUpgrade(dir, await freePort());
+  const exited = await new Promise((resolve) => run.child.on("exit", resolve));
+  assert.equal(exited, 0, run.output());
+
+  const d = new Database(file, { readonly: true });
+  assert.ok(!d.prepare("SELECT 1 FROM sqlite_master WHERE name = 'canvases'").get(), run.output());
+  assert.equal(schemaFingerprint(d), PINNED.fingerprint);
+  d.close();
+  // In the chat's folder, a taken name numbered as an upload's is; nothing over anything.
+  assert.deepEqual(readdirSync(path.join(folder, "canvases")).sort(), ["Launch plan (2).md", "Launch plan.md"]);
+  assert.deepEqual(
+    readdirSync(path.join(folder, "canvases")).map((f) => readFileSync(path.join(folder, "canvases", f), "utf8")).sort(),
+    ["# Launch\n\nFirst draft.", "Second draft."],
+  );
+  // A chat whose folder is gone: in the data folder, its name made one a file can have.
+  assert.equal(readFileSync(path.join(dir, "canvases", "Notes_2026_ draft_.md"), "utf8"), "Kept anyway.");
 });

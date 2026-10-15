@@ -28,7 +28,7 @@ import { local } from "../safe-storage";
 import { bytesLabel } from "../projects";
 import { confirmDialog } from "./ConfirmDialog";
 import { Markdown } from "./Markdown";
-import { canvasPictures } from "../canvas-pictures";
+import { folderPictures } from "../folder-pictures";
 import { within } from "../paths";
 import { isEnter, isEscape } from "../shortcuts";
 import { deleteAsking, unsavedNotes } from "../unsaved";
@@ -666,7 +666,7 @@ export const FilesPanel = memo(function FilesPanel({
           ) : asPage && isMarkdown(file.path) ? (
             // The draft, not the saved text: what is typed shows at once, and the page is never behind the source.
             <div role="region" aria-label={t("Rendered {path}", { path: file.path })} className="prose prose-sm min-h-0 max-w-none flex-1 overflow-auto p-3">
-              <Markdown>{canvasPictures(draft, folder, (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
+              <Markdown>{folderPictures(draft, folder, (p) => api.pictureUrl(sessionId, p), parentOf(file.path))}</Markdown>
             </div>
           ) : (
             <textarea

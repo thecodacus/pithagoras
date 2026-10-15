@@ -277,8 +277,6 @@ button.running-chip-command:hover { text-decoration: underline; }
    say the title a second time. Voice mode drops that header, and the bar is back. */
 @media (max-width: 767px) {
   main:has(.chat-header) > .app-mobile-bar { display: none; }
-  .session-canvases { right: 8px; }
-  .session-canvases .canvas-panel { width: calc(100vw - 16px); max-width: none; }
 }
 
 @media (pointer: coarse) {

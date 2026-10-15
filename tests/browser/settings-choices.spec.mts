@@ -107,7 +107,6 @@ test('the auto-compact switch in the context card says it is a switch, and its s
     '/api/sessions/a': chat,
     '/api/sessions/a/config': config,
     '/api/sessions/a/models': config,
-    '/api/sessions/a/canvases': [],
     '/api/workspaces': { root: '/w', workspaces: [] },
     '/api/models': { models: [], providers: {} },
   });

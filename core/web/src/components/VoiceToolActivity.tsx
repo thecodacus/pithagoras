@@ -32,7 +32,6 @@ const SLOT_IDS = Array.from({ length: SLOTS }, (_, i) => i);
 const TARGET: Record<ToolTarget, string> = {
   files: msg("the files"),
   browser: msg("the browser"),
-  canvas: msg("the document"),
   pictures: msg("the picture"),
 };
 
@@ -47,11 +46,13 @@ const TARGET: Record<ToolTarget, string> = {
  * extension brought for it (`opens` names it).
  * That is a role it takes on, not another element: see the card below.
  */
-export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens }: {
+export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, words }: {
   events: PortalEvent[]; sessionId: string; folder: string;
   onOpen: (call: ToolCall, view: ToolCallView) => void;
   /** The title of a window an extension brought for a call, when one is for it. */
   opens?: (view: ToolCallView) => string | undefined;
+  /** What that window says the card of a call says, when it says (`describe`). */
+  words?: (view: ToolCallView) => { label: string; detail?: string } | undefined;
 }) {
   const seen = useRef(events.reduce((n, e) => Math.max(n, e.seq), 0));
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -89,7 +90,8 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens }: 
         next = next.filter(c => !(c.leaving && c.slot === slot));
         const call = unwrap(p);
         const look = isPictureTool(call.name) && p[GENERATED_PICTURE_MARK] === true ? pictureCall(call.name, call.input, folder) : undefined;
-        next = [...next, { ...describeCall(p, folder), id: event.seq, callId: String(p.toolCallId ?? ''), start: p, startedAt: Date.now(), status: 'running', outcome: '', slot, leaving: false, ...(look ? { look } : {}) }];
+        const said = words?.({ name: call.name, callId: String(p.toolCallId ?? '') || undefined, status: 'running', input: call.input });
+        next = [...next, { ...describeCall(p, folder), ...(said ? { label: said.label, detail: said.detail ?? '' } : {}), id: event.seq, callId: String(p.toolCallId ?? ''), start: p, startedAt: Date.now(), status: 'running', outcome: '', slot, leaving: false, ...(look ? { look } : {}) }];
       } else if (event.type === 'tool_execution_end') {
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');
         if (!card) continue;

@@ -32,7 +32,6 @@ async function chat(page: Page, theme: 'light' | 'dark', percent: number) {
     if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
     if (p === '/api/sessions/a') return session;
     if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') return config;
-    if (p === '/api/sessions/a/canvases') return [];
   }, { streams: 'open', settings: true });
   await page.goto('/s/a');
   await expect.poll(() => page.evaluate(() => (window as any).streams.some((s: any) => !s.closed))).toBe(true);
@@ -59,22 +58,18 @@ for (const theme of ['light', 'dark'] as const) {
     const ring = page.locator('.composer-settings').getByRole('button', { name: /^Context/ }).locator('circle').nth(1);
     expect(await ring.evaluate((el) => getComputedStyle(el).stroke)).toBe(await token(page, 'danger'));
   });
-  test(`${theme}: the canvas's warnings, the delete question and the voice stage's focus ring use the theme's colours`, async ({ page }) => {
+  test(`${theme}: the voice stage's focus ring uses the theme's accent`, async ({ page }) => {
     await mockPortal(page);
     await page.addInitScript((value) => localStorage.setItem('pithagoras.theme', value), theme);
     await page.goto('/sessions');
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-    const read = await page.evaluate(() => {
-      document.body.insertAdjacentHTML('beforeend', '<p class="canvas-notice">n</p><p class="canvas-error">e</p><p class="canvas-delete-confirm">d</p><div class="voice-stage"><button id="stage-button">b</button></div>');
-      const colour = (selector: string) => getComputedStyle(document.querySelector(selector)!).color;
+    const ring = await page.evaluate(() => {
+      document.body.insertAdjacentHTML('beforeend', '<div class="voice-stage"><button id="stage-button">b</button></div>');
       const button = document.querySelector<HTMLButtonElement>('#stage-button')!;
       button.focus();
-      return { notice: colour('.canvas-notice'), error: colour('.canvas-error'), confirm: colour('.canvas-delete-confirm'), ring: getComputedStyle(button).outlineColor };
+      return getComputedStyle(button).outlineColor;
     });
-    expect(read.notice).toBe(await token(page, 'warn'));
-    expect(read.error).toBe(await token(page, 'danger'));
-    expect(read.confirm).toBe(await token(page, 'danger'));
-    expect(read.ring).toBe(await token(page, 'accent'));
+    expect(ring).toBe(await token(page, 'accent'));
   });
 }
 

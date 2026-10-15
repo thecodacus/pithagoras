@@ -8,7 +8,6 @@ const open = async (page: import('@playwright/test').Page) => {
     if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
     if (p === `/api/sessions/${session.id}`) return session;
     if (p.endsWith('/commands')) return { commands: [] };
-    if (p.endsWith('/canvases')) return [];
   });
   await page.addInitScript(() => {
     localStorage.setItem('sidebarCollapsed', 'true');

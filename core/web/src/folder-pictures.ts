@@ -1,7 +1,7 @@
 import { insideFolder } from "./file-activity";
 
 /**
- * Pictures from the chat's folder, in a canvas.
+ * Pictures from the chat's folder, in Markdown the page draws (a file in Files).
  *
  * The agent writes `![chart](plots/chart.png)`: a path in the folder it works
  * in. As a URL that means nothing to the page, and the Markdown renderer
@@ -13,13 +13,13 @@ import { insideFolder } from "./file-activity";
  *
  * `base` is the folder the markdown itself lies in, relative to the chat's
  * folder (a file in the Files panel): a relative path is read from there, as a
- * viewer of the file would. A canvas has none.
+ * viewer of the file would.
  */
 
 const IMAGE = /!\[([^\]\n]*)\]\(\s*(<[^>\n]*>|[^()\s]+)(\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/g;
 const ADDRESS = /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/api\/|#)/i;
 
-export function canvasPictures(markdown: string, folder: string, url: (path: string) => string, base = ""): string {
+export function folderPictures(markdown: string, folder: string, url: (path: string) => string, base = ""): string {
   if (!markdown.includes("![")) return markdown;
   return markdown.replace(IMAGE, (whole, alt: string, raw: string, title = "") => {
     const target = raw.startsWith("<") ? raw.slice(1, -1).trim() : raw;

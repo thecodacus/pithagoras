@@ -27,7 +27,6 @@ async function portal(page: Page, opts: Opts = {}) {
       return opts.answer ?? { ok: true };
     }
     if (p.endsWith('/config')) return { live: false, state: null, stats: null, thinking: { levels: [] }, models: { models: [] }, named: { provider: null, model: null } };
-    if (p.endsWith('/canvases')) return [];
   }, { streams: 'none', settings: true });
   await page.addInitScript(() => {
     // The page's animations are on here: the sidebar measures its rows only then.

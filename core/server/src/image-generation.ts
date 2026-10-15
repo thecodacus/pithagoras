@@ -36,7 +36,7 @@ export const EDIT_IMAGE_TOOL = "edit_image";
 export const GENERATE_IMAGE_SOURCE = "image-generation";
 /** The same for the editing tool, which is an extension of its own: `<inline:image-editing>`. */
 export const EDIT_IMAGE_SOURCE = "image-editing";
-/** And for `show_image`, which the portal registers beside the canvases: `<inline:pictures>`. */
+/** And for `show_image`, which the portal registers itself: `<inline:pictures>`. */
 export const SHOW_IMAGE_SOURCE = "pictures";
 
 export interface ImageGenerationConfig {

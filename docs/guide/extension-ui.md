@@ -261,6 +261,7 @@ prefix of your own: the stylesheet is the page's.
 | `confirm(options)` | A question asked over the page; resolves true for yes |
 | `classes` | The look of the portal's fields and buttons as class names: `input`, `inputSmall`, `codeArea`, `button`, `primary`, `primarySmall`, `ghost` |
 | `copyText(text)` | Copies, over plain HTTP as well |
+| `asksBeforeDeleting()` | Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when it is true |
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
 
@@ -296,7 +297,7 @@ puts it before entries with a higher one, or none.
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
-| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `useAutoOpen?`, `opensFor?` | `chat`, `channel`, `panels`, `close()` |
+| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()` |
 | `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?` | |
 | `settings.page` | Your package's page in Settings, above the fields the portal found for it | | |
 
@@ -410,6 +411,9 @@ how it behaves beside the portal's own windows:
   for: a file's card opens Files, a page's the browser, and a shell call's,
   which has none of the portal's, the window that says it is for it (the
   terminal's).
+- `describe(call)`: what the card of such a call says, `{ label, detail? }`,
+  in place of the portal's words for a tool it does not know ("Using canvas
+  write"): Canvases' cards say "Writing in a document" and its title.
 
 ```js
 portal.slots.register("voice.window", {
@@ -588,6 +592,7 @@ restart the portal.
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
 | `chats.tell(chatId, data)` | To the package's own pi extension in a chat (`pithagoras:v1:ui:receive`) |
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
+| `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here) |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
@@ -716,6 +721,22 @@ chat's pi says, a tool call's arguments as they stream included, and what the
 package's own pi extension sends its browser half arrives there as
 `{ type: "portal_extension_ui", extension, data }`.
 
+To follow a call of your tool as the model writes its arguments (Canvases
+shows a document being written), ask `portal.chats.offers(chatId, tool)` how
+the tool is offered first: a call by a name it is not offered under is refused
+and never runs, so its text is nobody's. A call of a lazy tool comes as a call
+of the `tools` tool, with yours in its arguments.
+
+What the model is to be told of a tool goes in its description, or in pi's
+`promptGuidelines`, in every turn while the tool is on. What only a spoken
+turn needs (a long report goes in a document, and only a line of it is said)
+goes in `voiceGuidelines`, which the portal adds to its voice rule while the
+tool is on, once however many tools have the same line:
+
+```js
+pi.registerTool({ name: "canvas_write", /* … */ voiceGuidelines: ["Write the full report in a canvas and give only a brief spoken summary."] });
+```
+
 ### Running things as the chat's agent
 
 With the [sandbox](/guide/sandbox) on, each agent runs as a user of its own.
@@ -772,11 +793,12 @@ name: a lower `order` first, then the one loaded first. The portal's own are:
 | --- | --- |
 | `files` | `{ path }`: a file to show |
 | `agents` | `{ id }`: a subagent to show |
-| `browser`, `canvas` | |
+| `browser` | |
 
-Two extensions a fresh portal installs go by names too. The terminal is
-`terminal` and takes `{ callId }`, a command of the agent's to bring into view,
-or `{ job }`, a background job to follow. Git is `git`, and takes nothing.
+Extensions a fresh portal installs go by names too. The terminal is `terminal`
+and takes `{ callId }`, a command of the agent's to bring into view, or
+`{ job }`, a background job to follow. Git is `git`, and Canvases `canvas`;
+neither takes anything.
 
 A command is something an extension says it can be asked to do, for another
 extension or the portal to ask by name. Start the name with your package's.
@@ -1005,8 +1027,9 @@ portal can be removed without a spec of the portal's failing.
 
 ## What the portal's own apps use
 
-The terminal and Git are extensions (`extensions/terminal`, `extensions/git`);
-the portal's Files and Canvases are written into it today. This is what each of them takes from
+The terminal, Git and Canvases are extensions (`extensions/terminal`,
+`extensions/git`, `extensions/canvas`); the portal's Files is written into it
+today. This is what each of them takes from
 the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
@@ -1026,6 +1049,9 @@ the portal, and what gives the same to an extension:
 | A window over the chat; chips above the message box | `chat.overlay`, `chat.composer.above` |
 | Opening itself when the agent makes something | `chat.background` |
 | A window in voice mode, at the side, opening itself when the agent runs a command and when its card is tapped | `voice.window` with `place`, `useAutoOpen`, `opensFor` |
+| A document written live as the model writes the call, only for a call that will run | `chats.onEvent`, `chats.offers` |
+| Its tools' cards in voice mode saying what they do, and its tools telling a spoken turn to keep it short | `describe` on its `voice.window`; `voiceGuidelines` on its tools |
+| "Delete this document?" only for someone who wants to be asked | `ui.asksBeforeDeleting()` |
 | "Open in the agent terminal" on the card of a shell call | `chat.tool.action` |
 | A key in voice mode (T for the terminal) | `portal.shortcuts.register` |
 | Being opened by name from anywhere (`terminal`) | `name` on its `chat.panel` |

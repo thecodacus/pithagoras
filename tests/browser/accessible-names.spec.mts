@@ -100,7 +100,6 @@ async function chat(page: Page, answer: Parameters<typeof mockPortal>[1] = () =>
     if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
     if (p === '/api/sessions/a') return session;
     if (p === '/api/sessions/a/config' || p === '/api/sessions/a/models') return config;
-    if (p === '/api/sessions/a/canvases') return [];
   }, { streams: 'open', settings: true });
   await page.goto('/s/a');
   await expect.poll(() => page.evaluate(() => (window as any).streams.some((s: any) => !s.closed))).toBe(true);

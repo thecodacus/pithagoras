@@ -137,7 +137,7 @@ Each setting is remembered in this browser.
 the voice turns you take, see [Voice latency profiling](/guide/voice-profiling).
 
 **Resizing windows.** Drag a window's left, right or bottom edge, or a bottom
-corner, to make it the size you want; the canvas panel has the same grips. A
+corner, to make it the size you want. A
 window keeps that size until the windows are arranged differently — one opens
 or closes — and then the layout places them again. On a phone the windows take
 the width and cannot be resized. Without a pointer, a window's bottom corner is

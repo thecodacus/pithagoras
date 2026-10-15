@@ -11,7 +11,6 @@ import { stableSubagents, subagents, type Subagent } from "../subagents";
 import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
-import { CanvasPanel } from "./CanvasPanel";
 import { latestBrowserActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
@@ -21,7 +20,7 @@ import { createPortal } from "react-dom";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquare, LuFileText, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -235,7 +234,6 @@ export function Chat({
   const caret = useRef<{ start: number; end: number } | null>(null);
   const caretTo = useRef<number | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [canvasOpen, setCanvasOpen] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
   // Sends and uploads on their way, by the chat they are for: this is one component for every chat, and what is
   // still going on in one must not hold up another (one id for each thing going on).
@@ -414,10 +412,10 @@ export function Chat({
   const toggleExtensionPanel = useStable((key: string, open: boolean) => (open ? void closeExtensionPanel(key) : showExtensionPanel(key, true)));
   useWorkPanels(
     {
-      browser: !voiceMode && watching, canvas: canvasOpen, files: !voiceMode && files, agents: !voiceMode && agentsOpen,
+      browser: !voiceMode && watching, files: !voiceMode && files, agents: !voiceMode && agentsOpen,
       ...Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
     },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "files") setFiles(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); else setCanvasOpen(false); },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "files") setFiles(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); },
     // A third panel closes another one instead, while Files has an edit in it.
     // One an extension says holds something that would be lost stays as well,
     // and one that has just opened the third.
@@ -1633,7 +1631,7 @@ export function Chat({
   const panelControl = useRef<PanelController>({ isOpen: () => false, open: () => {}, close: () => {} });
   panelControl.current = {
     isOpen: (key) =>
-      key === "files" ? files : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(panelKey(key) ?? key),
+      key === "files" ? files : key === "browser" ? watching : key === "agents" ? agentsOpen : extensionPanels.includes(panelKey(key) ?? key),
     open: (key, params) => {
       const given = (params ?? {}) as { path?: unknown; id?: unknown };
       if (key === "files") {
@@ -1641,7 +1639,6 @@ export function Chat({
         if (typeof given.path === "string") setFileAsked({ path: given.path, seq: Date.now() });
       } else if (key === "browser") setWatching(true);
       else if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
-      else if (key === "canvas") setCanvasOpen(true);
       else {
         const found = panelKey(key);
         if (!found) throw new Error(`There is no panel called "${key}"`);
@@ -1649,8 +1646,7 @@ export function Chat({
       }
     },
     close: (key) => {
-      if (key === "canvas") setCanvasOpen(false);
-      else if (key in closeOwn) closeOwn[key as OwnPanel]();
+      if (key in closeOwn) closeOwn[key as OwnPanel]();
       else showExtensionPanel(panelKey(key) ?? key, false);
     },
   };
@@ -1822,7 +1818,6 @@ export function Chat({
   return (
     <div className="session-workspace relative flex h-full min-h-0 flex-col">
       {pictures.viewer}
-      <CanvasPanel key={session.id} sessionId={session.id} folder={session.workspace} open={canvasOpen} setOpen={setCanvasOpen}/>
       <div ref={setVoiceHost} className={voiceMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} />
       <header className={voiceMode ? "hidden" : "chat-header border-b border-line px-4 py-3 max-md:px-3 max-md:py-2"}>
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3 max-md:gap-2">
@@ -1894,9 +1889,6 @@ export function Chat({
             title={files ? t("Hide the files") : t("Browse the files in this chat's folder")}
           >
             <LuFolderOpen />
-          </PanelToggle>
-          <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label={t("Session canvases")} title={t("Session canvases")}>
-            <LuFileText />
           </PanelToggle>
           {panelEntries.map((entry) => (
             // Its button is its own to say about (hidden, live): one whose say fails is left out, and the header stays.
@@ -2283,7 +2275,7 @@ export function Chat({
                 <LuPaperclip aria-hidden className="h-4 w-4" />
               </button>
               <DictationButton dictation={dictation} />
-              <VoiceControl folder={session.workspace} canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={browserActivity} toolEvents={events} />
+              <VoiceControl folder={session.workspace} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={browserActivity} toolEvents={events} />
               {/* Mid-run, Stop stays while a message is written: it is the
                   moment the agent is seen going the wrong way, and whether to
                   steer it or stop it is still open. */}

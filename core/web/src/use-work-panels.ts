@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 /** The portal's own panels, and one an extension brought: `x:<extension>/<id>`. */
-export type Panel = 'browser' | 'canvas' | 'files' | 'pictures' | 'conversation' | 'agents' | `x:${string}`;
+export type Panel = 'browser' | 'files' | 'pictures' | 'conversation' | 'agents' | `x:${string}`;
 /** Two panels beside the conversation is what fits; a third would cover one of them. */
 const MAX_OPEN = 2;
 

@@ -7,9 +7,10 @@ import { BUILT_IN_SET, MEDIA_SET, PI_BUILT_IN_TOOLS, PORTAL_BROWSER_TOOLS, brows
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
-import { mkdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
+import { baseDir, fitBytes, makeFolder, saveNewFile } from "./workspace-files.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
 import { removeThumbs } from "./image-thumbs.js";
@@ -144,20 +145,6 @@ function schema(db: Database.Database): void {
     -- upgrade these columns do not exist yet at this point and indexing them
     -- fails — which took the server down until the migration had run.
 
-    CREATE TABLE IF NOT EXISTS canvases (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL DEFAULT '',
-      revision INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'saved',
-      active_call TEXT,
-      agent_read_revision INTEGER,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      -- The text from before a write that is going on, or was cut off: see restoreCanvas.
-      previous_content TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_canvases_session ON canvases(session_id);
 
     -- Every event pi emits is appended here. This is what makes the portal
     -- fire-and-forget: a browser that reconnects days later replays from its
@@ -509,6 +496,41 @@ function schema(db: Database.Database): void {
 }
 
 /**
+ * Canvases are an extension's now (extensions/canvas), with a store of its own.
+ * What a portal stored here before is written out as Markdown in its chat's
+ * folder (`canvases/<title>.md`), where the person finds it among their files;
+ * a chat whose folder is gone has its canvases written to the portal's data
+ * folder instead (`canvases/` beside `backups/`). The table goes once it is
+ * empty. The database was backed up before this ran (db-upgrade.ts).
+ */
+function writeOutCanvases(d: Database.Database): void {
+  if (!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'canvases'").get()) return;
+  const rows = d.prepare("SELECT c.id, c.title, c.content, s.workspace FROM canvases c LEFT JOIN sessions s ON s.id = c.session_id").all() as { id: string; title: string; content: string; workspace: string | null }[];
+  const gone = d.prepare("DELETE FROM canvases WHERE id = ?");
+  const folderOf = (workspace: string | null) => {
+    try {
+      if (workspace !== null) return baseDir(workspace);
+    } catch {
+      // The chat's folder is gone: what it had goes to the data folder.
+    }
+    return baseDir(DATA_DIR);
+  };
+  for (const row of rows) {
+    try {
+      const base = folderOf(row.workspace);
+      if (!existsSync(path.join(base, "canvases"))) makeFolder(base, "", "canvases");
+      const name = fitBytes(row.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim().replace(/^\.+/, "") || "canvas", 240);
+      const kept = path.join(base, saveNewFile(base, "canvases", `${name}.md`, Buffer.from(row.content, "utf8")));
+      console.log(`[portal] a stored canvas is now a Markdown file: ${kept}`);
+      gone.run(row.id);
+    } catch (e) {
+      console.warn(`[portal] a stored canvas (${row.id}) could not be written out, and is kept for the next start: ${(e as Error).message}`);
+    }
+  }
+  if (!(d.prepare("SELECT count(*) AS n FROM canvases").get() as { n: number }).n) d.exec("DROP TABLE canvases");
+}
+
+/**
  * Migrations run in place rather than recreating the table, so existing
  * sessions and their event history survive an upgrade.
  */
@@ -622,11 +644,7 @@ function migrate(d: Database.Database): void {
     d.exec("ALTER TABLE people ADD COLUMN renamed INTEGER NOT NULL DEFAULT 0");
     d.exec("UPDATE people SET renamed = 1 WHERE notes != ''");
   }
-  // The text from before a write, kept until the write has ended (see canvases.ts).
-  const canvasCols = (d.prepare("PRAGMA table_info(canvases)").all() as { name: string }[]).map((c) => c.name);
-  if (canvasCols.length && !canvasCols.includes("previous_content")) {
-    d.exec("ALTER TABLE canvases ADD COLUMN previous_content TEXT");
-  }
+  writeOutCanvases(d);
   const agentCols = (d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name);
   for (const col of ["voice", "quiet_start", "quiet_end", "last_heartbeat", "heartbeat_status"]) {
     if (!agentCols.includes(col)) d.exec(`ALTER TABLE agents ADD COLUMN ${col} TEXT`);
@@ -883,14 +901,13 @@ export function updateSession(
     .run(...values, id);
 }
 
-// One transaction: the chat of a delete that failed stays, and it takes messages again, so it must still have its transcript and canvases.
+// One transaction: the chat of a delete that failed stays, and it takes messages again, so it must still have its transcript.
 // Inside the bulk routes' own transaction this is a savepoint, so they still remove all of their chats or none.
 export const deleteSession = (id: string): void => getDb().transaction(() => removeSession(id))();
 
 function removeSession(id: string): void {
   const d = getDb();
   const folder = (d.prepare("SELECT workspace FROM sessions WHERE id = ?").get(id) as { workspace: string } | undefined)?.workspace;
-  d.prepare("DELETE FROM canvases WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);

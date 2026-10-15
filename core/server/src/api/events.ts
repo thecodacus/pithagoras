@@ -1,5 +1,4 @@
 import express, { type Router } from "express";
-import { canvasEvents, listCanvases } from "../canvases.js";
 import { eventsBefore, getSession, replayStart, type EventRow } from "../db.js";
 import { watchStream } from "../login-streams.js";
 import { eventJson, replaySince } from "../event-replay.js";
@@ -16,8 +15,6 @@ import { openingPushes, pagePushes } from "../extension-host.js";
  */
 const REPLAY_EVENTS = 1_200;
 
-/** How often a canvas being written is sent on its chat's stream, at most. */
-const CANVAS_EVERY_MS = 250;
 
 /**
  * Live events a snapshot already holds, which a page reads after the replay: one
@@ -67,7 +64,6 @@ export function eventsRouter(): Router {
     let replaying = true;
     const waiting: EventRow[] = [];
     let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let heldTimer: ReturnType<typeof setTimeout> | undefined;
 
     // False when the socket has more than it can send at once.
     const write = (row: { seq: number; type: string; payload: string; created_at?: string }) =>
@@ -90,37 +86,6 @@ export function eventsRouter(): Router {
         res.once("drain", done);
         res.once("close", done);
       });
-
-    // The chat's canvases come on the same stream, under their own name. They
-    // had a stream of their own, and two per open chat is how three tabs used up
-    // the six connections a browser allows one address: a fourth chat, and every
-    // request its page made, waited for one of them to close.
-    //
-    // The list first, not after the conversation: a long one replayed over a
-    // slow link kept the panel empty until the last of it had come.
-    const writeCanvas = (message: unknown) => res.write(`event: canvas\ndata: ${JSON.stringify(message)}\n\n`);
-    // A document being written changes many times a second, each change the
-    // whole of it, and the conversation's own events wait behind them on this
-    // one connection. So only the latest of a document's changes goes, at most
-    // every CANVAS_EVERY_MS; anything else sends what was held first, in order.
-    const held = new Map<string, unknown>();
-    const sendHeld = () => {
-      clearTimeout(heldTimer);
-      heldTimer = undefined;
-      for (const message of held.values()) writeCanvas(message);
-      held.clear();
-    };
-    const onCanvas = (message: { type?: string; canvas?: { id?: string } }) => {
-      if (message?.type === "update" && message.canvas?.id) {
-        held.set(message.canvas.id, message);
-        heldTimer ??= setTimeout(sendHeld, CANVAS_EVERY_MS);
-        return;
-      }
-      sendHeld();
-      writeCanvas(message);
-    };
-    canvasEvents.on(session.id, onCanvas);
-    writeCanvas({ type: "snapshot", canvases: listCanvases(session.id) });
 
     // What the installed extensions' server halves tell what they drew on this
     // chat's page, on the same stream under a name of its own: where things
@@ -165,9 +130,7 @@ export function eventsRouter(): Router {
       gone = true;
       clearInterval(heartbeat);
       sessions.off(`session:${session.id}`, onEvent);
-      canvasEvents.off(session.id, onCanvas);
       pagePushes.off(session.id, writePush);
-      clearTimeout(heldTimer);
     });
 
     void (async () => {

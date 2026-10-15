@@ -11,7 +11,7 @@ export const VOICE_RATES = [1, 1.25, 1.5, 1.75];
  * remembered in this browser.
  *
  * Drawn over the whole page, not inside the voice stage: the stage is its own
- * layer, and the canvas panel beside it would otherwise cover the card. It is
+ * layer, and a window an extension brought beside it would otherwise cover the card. It is
  * placed above the button that opens it, and follows it when the window changes.
  */
 export function VoiceSettings({ anchor, sounds, onSounds, rate, onRate, steer, onSteer, ptt, onPtt, onClose }: {

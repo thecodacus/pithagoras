@@ -29,8 +29,8 @@ import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithag
  * chat it keeps where the chat's pi works, in the chat's folder; what the
  * portal itself must run on, and no agent may change, it keeps in a folder of
  * the portal's data folder (`dataDir`).
- * It is what the portal's own Files, Terminal and Canvases have, each written
- * into the server; a package gets it by naming a module:
+ * It is what the portal's own Files has, written into the server, and what the
+ * Terminal, Git and Canvases extensions use; a package gets it by naming a module:
  *
  *   "pithagoras": { "server": "./server.js" }
  *
@@ -115,8 +115,10 @@ function wire(name: string, data: unknown): string | undefined {
 
 /** How the host reaches what only the session manager can do, which it cannot import: the manager imports it. */
 let tellChat: (chatId: string, extension: string, data: unknown) => Promise<boolean> = async () => false;
-export function setChatBridge(bridge: { tell: typeof tellChat }): void {
+let toolOffered: (chatId: string, tool: string) => "direct" | "lazy" | undefined = () => undefined;
+export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof toolOffered }): void {
   tellChat = bridge.tell;
+  toolOffered = bridge.offers;
 }
 
 function whoOf(chatId: string) {
@@ -180,6 +182,7 @@ function portalFor(ext: Running): ServerPortal {
       on: (event, handler) => void ext.life.on(event, handler),
       onEvent: (handler) => void ext.events.push(handler),
       tell: (chatId, data) => tellChat(chatId, name, data),
+      offers: (chatId, tool) => toolOffered(chatId, tool),
       extend: (factory) => void ext.factories.push(factory),
       hold: (chatId) => {
         ext.holds.set(chatId, (ext.holds.get(chatId) ?? 0) + 1);

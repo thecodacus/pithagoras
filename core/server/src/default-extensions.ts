@@ -26,6 +26,16 @@ import { followPackages, listInstalledPackages } from "./api/extensions.js";
 
 const DONE = "default_extensions_installed";
 
+/** The portal is stopping: no install of the list begins after this. */
+let stopping = false;
+/**
+ * No more of the list is installed: the one going on finishes, and what is left is installed on the next start.
+ * Waiting for the whole list on a stop ran past the ten seconds docker gives a container before it kills it.
+ */
+export function stopInstallingDefaults(): void {
+  stopping = true;
+}
+
 /** The folders the list names, with the package each holds. A name that is not a folder of the portal's is left out. */
 export function defaultExtensions(dir = bundledPath("extensions")): { folder: string; dir: string; name: string }[] {
   if (!dir) return [];
@@ -62,7 +72,7 @@ const installedOnce = (): string[] => {
 /**
  * Installs each package of the list not installed once before. Resolves with
  * the folders it installed now. One that fails is said, and tried again on the
- * next start.
+ * next start, as is one a stop came before (see stopInstallingDefaults).
  */
 export async function installDefaultExtensions(dir = bundledPath("extensions")): Promise<string[]> {
   if (/^(off|0|false|no)$/i.test(process.env.PORTAL_DEFAULT_EXTENSIONS ?? "")) return [];
@@ -80,6 +90,7 @@ export async function installDefaultExtensions(dir = bundledPath("extensions")):
   }
   const installed: string[] = [];
   for (const ext of due) {
+    if (stopping) break;
     if (!names.has(ext.name)) {
       try {
         await pi(["install", ext.dir]);
@@ -93,6 +104,6 @@ export async function installDefaultExtensions(dir = bundledPath("extensions")):
     done.push(ext.folder);
     putSetting(DONE, JSON.stringify(done));
   }
-  if (installed.length) await followPackages();
+  if (installed.length && !stopping) await followPackages();
   return installed;
 }

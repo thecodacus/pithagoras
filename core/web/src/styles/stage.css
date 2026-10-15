@@ -1,4 +1,4 @@
-/* Voice mode's stage, the canvases beside a chat, and the windows (browser, files, pictures, an extension's) that open on it. Tokens and base rules are in index.css. */
+/* Voice mode's stage, and the windows (browser, files, pictures, an extension's) that open on it. Tokens and base rules are in index.css. */
 
 /* The stage's colour fades from one state to the next rather than jumping: its
    channels are registered so they can be transitioned, and --voice-hue, which
@@ -73,8 +73,7 @@
    just above the dock, the gap between two windows short of it. That is also
    the deepest a window can be dragged (see ResizeHandles), so it opens as
    deep as it goes. Centred on --window-middle, as the windows slide in on
-   transforms that centre them. The canvas, which hangs outside the stage,
-   ends at the same place (106px: 50 + 80 / 2 + 16). Set for every width, not
+   transforms that centre them. Set for every width, not
    only from 601px: a phone's (below) are set over them, and a width between
    the two queries, as zoom can make, would have had none at all. */
 .voice-stage {
@@ -137,49 +136,9 @@
 .voice-stage.is-docked .voice-tool-float.flight-lane-1 { --flight-y: -205px; }
 @media (max-width: 600px) { .voice-stage.is-docked .voice-tool-activity { --origin-x: calc(32px - min(260px, 50cqw - 16px)); } }
 
-/* Session documents stay on the same stage in chat and voice mode. */
-.session-canvases { position: absolute; z-index: 15; right: 16px; top: 65px; pointer-events: none; }
-.canvas-panel { pointer-events: auto; display: flex; flex-direction: column; width: min(600px, calc(100vw - 100px)); height: min(640px, calc(100dvh - 210px)); min-height: 260px; margin-top: 8px; background: rgb(var(--surface)); color: rgb(var(--fg)); border: 1px solid rgb(var(--line)); border-radius: 18px; box-shadow: 0 22px 30px -22px #000a, 0 2px 6px #0003; overflow: hidden; }
-.canvas-panel header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgb(var(--line)); }
-.canvas-panel header>div { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.canvas-panel button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 8px; font-size: 12px; }
-.canvas-panel button:hover { background: rgb(var(--fg) / .08); }
-.canvas-panel button:disabled { opacity: .4; cursor: not-allowed; }
-.canvas-picker { display: flex; align-items: center; gap: 8px; padding: 10px 16px; }
-.canvas-document-heading { padding: 6px 22px 14px; }
-.canvas-document-heading h3 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
-.canvas-document-heading span { display: block; font-size: 11px; color: rgb(var(--fg-muted)); }
-.canvas-document-heading input { width: 100%; color: rgb(var(--fg)); background: rgb(var(--canvas)); padding: 6px; border: 1px solid rgb(var(--line)); border-radius: 6px; }
-.canvas-document,.canvas-editor { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 24px 30px; font-size: 14px; line-height: 1.75; }
-.canvas-editor { width: 100%; resize: none; outline-offset: -2px; background: rgb(var(--canvas)); color: rgb(var(--fg)); font-family: inherit; }
-.canvas-panel footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px; border-top: 1px solid rgb(var(--line)); }
-.canvas-delete-confirm { font-size: 12px; color: rgb(var(--danger)); }
-.canvas-empty { padding: 25px; color: rgb(var(--fg-muted)); font-size: 13px; }
-.canvas-empty h3 { margin: 12px 0; color: rgb(var(--fg)); }
-.canvas-error,.canvas-notice { margin: 4px 16px; font-size: 12px; }
-.canvas-error { color: rgb(var(--danger)); }
-.canvas-notice { color: rgb(var(--warn)); }
-@media (max-width: 600px) { .session-canvases { right: 8px; top: 57px; } .canvas-panel { width: calc(100vw - 72px); height: calc(100dvh - 225px); } }
-
 /* One work panel beside a full orb; two panels above a compact dock. */
 .session-workspace { container-type: inline-size; }
-.canvas-panel { transition: width .7s cubic-bezier(.22,1,.36,1), height .7s cubic-bezier(.22,1,.36,1); }
-.session-canvases { transition: top .7s cubic-bezier(.22,1,.36,1), right .7s cubic-bezier(.22,1,.36,1); }
-/* Revealed and slid in, never faded. In Chromium on the GPU (Brave, with
-   Vulkan) any fade of this panel — opacity, filter: opacity(), an overlay
-   fading off it — stepped back once or twice on the way in, and the darker
-   chat showed through: a flicker. A wipe with clip-path does not. The clip
-   reaches well past the box, so the shadow is not cut off once in, and stays
-   that way (fill both), so nothing changes when the animation ends; the
-   shadow grows in with the wipe, so its edge does not show while it runs. */
-.session-canvases.is-open .canvas-panel { animation: canvas-enter .5s cubic-bezier(.22,1,.36,1) both; }
-@keyframes canvas-enter {
-  from { transform: translate3d(28px, 0, 0); clip-path: inset(-120px -120px -120px 35% round 18px); box-shadow: 0 22px 30px -22px #0000, 0 2px 6px #0000; }
-  to { transform: translate3d(0, 0, 0); clip-path: inset(-120px round 18px); box-shadow: 0 22px 30px -22px #000a, 0 2px 6px #0003; }
-}
 @media (min-width: 601px) {
-  .session-workspace:has(.voice-stage) .session-canvases { top: 52px; }
-  .session-workspace:has(.voice-stage) .canvas-panel { width: 57cqw; height: calc(100% - 106px); margin-top: 0; }
   /* The orb standing on its own, as it does with nothing open, where the
      stage's data-orb says: beside a single window, or free in a gap between
      windows sized by hand, whose middle and width the stage measures
@@ -199,23 +158,12 @@
   .voice-stage.voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-tool-activity { left: var(--stand-x); top: 48%; --origin-x: 0px; --origin-y: -30px; }
   .voice-stage[data-panels="1"] .voice-files-window,
   .voice-stage[data-panels="1"] .voice-browser-window { left: auto; right: 18px; top: var(--window-middle); transform: translateY(-50%); width: 57%; height: var(--window-room); }
-  .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-files-window,
-  .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-browser-window { left: 2%; right: auto; top: 46%; width: 42%; height: calc(100% - 175px); }
-  .session-workspace:has(.voice-stage[data-panels="2"]) .canvas-panel { width: 51cqw; height: calc(100dvh - 275px); }
 }
-@media (prefers-reduced-motion: reduce) { .canvas-panel,.session-canvases { transition: none; animation: none !important; } }
-.canvas-panel { max-width: calc(100vw - 72px); }
 @media (min-width: 601px) { .voice-stage:is([data-orb="beside"], [data-orb="free"]) .voice-tool-float.flies-left { --flight-x: max(-60px, -6cqw); } }
 
 .voice-stage-header { position: static; }
 .voice-utilities { position: absolute; z-index: 20; right: 16px; bottom: 16px; display: flex; gap: 8px; align-items: center; }
 .voice-stage .voice-utilities button { width: 36px; height: 36px; }
-@media (min-width: 601px) {
-  .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-browser-window,
-  .session-workspace:has(.session-canvases.is-open) .voice-stage[data-panels="2"] .voice-files-window { left: 16px; top: var(--window-top); width: calc(49% - 32px); height: var(--window-room); transform: none; }
-  .session-workspace:has(.voice-stage[data-panels="2"]) .canvas-panel { width: calc(51cqw - 16px); height: calc(100% - 106px); margin-top: 0; }
-  .session-workspace:has(.voice-stage) .session-canvases { top: 52px; bottom: 0; }
-}
 @media (max-width: 600px) {
   .voice-utilities { bottom: 8px; right: 8px; gap: 6px; }
 }
@@ -389,8 +337,7 @@
 .resize-se::after, .resize-sw::after { content: ""; position: absolute; bottom: 4px; width: 8px; height: 8px; border-bottom: 2px solid rgb(var(--fg) / .35); opacity: 0; transition: opacity .2s; }
 .resize-se::after { right: 4px; border-right: 2px solid rgb(var(--fg) / .35); border-bottom-right-radius: 3px; }
 .resize-sw::after { left: 4px; border-left: 2px solid rgb(var(--fg) / .35); border-bottom-left-radius: 3px; }
-:is(.voice-browser-window, .voice-files-window, .canvas-panel):hover > :is(.resize-se, .resize-sw)::after, .resize-handle:focus-visible::after { opacity: 1; }
-.canvas-panel { position: relative; }
+:is(.voice-browser-window, .voice-files-window):hover > :is(.resize-se, .resize-sw)::after, .resize-handle:focus-visible::after { opacity: 1; }
 /* While dragging, a frame under the pointer (the browser) must not take the moves, and text is not selected. */
 body.is-resizing { user-select: none; -webkit-user-select: none; }
 body.is-resizing iframe { pointer-events: none; }
@@ -403,6 +350,3 @@ body.is-resizing iframe { pointer-events: none; }
 .voice-browser-window.is-maximized > .resize-handle { display: none; }
 /* Pictures waiting to be sent sit at the top right, over where the browser's buttons would be. */
 .voice-stage:has(.voice-attachments) .voice-browser-window.is-open.is-maximized { top: 56px !important; }
-/* The canvas hangs over the stage rather than in it, and would stay on top of
-   the browser: it waits, in its place, until the browser is restored. */
-.session-workspace:has(.voice-browser-window.is-open.is-maximized) .session-canvases { visibility: hidden; }

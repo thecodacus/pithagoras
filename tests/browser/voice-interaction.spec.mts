@@ -215,14 +215,14 @@ test('settings, push-to-talk, adding to a running task, the conversation and rep
   await settings.getByRole('group', { name: 'Push to talk' }).getByRole('button', { name: 'On' }).click();
   expect(await page.evaluate(() => [localStorage.getItem('voiceRate'), localStorage.getItem('voiceSteer'), localStorage.getItem('voicePtt')])).toEqual(['1.5', 'on', 'on']);
   await page.keyboard.press('Escape');
-  // With the canvas open beside the stage, the card is still on top of it.
-  await page.getByRole('button', { name: 'Session canvases' }).click();
-  await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
+  // With a window an extension brought open on the stage, the card is still on top of it.
+  await page.getByRole('button', { name: 'Show console' }).click();
+  await expect(page.getByRole('region', { name: 'Console', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Voice settings' }).click();
   const card = await settings.boundingBox();
   expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.voice-settings'), [card!.x + card!.width / 2, card!.y + 20])).toBe(true);
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Close canvas' }).click();
+  await page.getByRole('button', { name: 'Minimize console' }).click();
   await expect(settings).toBeHidden();
   await expect(page.getByRole('button', { name: 'Hold to talk' })).toBeVisible();
   // Once the repeated reply (the fixture's long clip) has finished.

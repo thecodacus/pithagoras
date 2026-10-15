@@ -8,7 +8,6 @@ test('phone can send, open workspace navigation, and scroll slash commands witho
   if(p==='/api/workspaces')return{root:'/workspaces',workspaces:[{name:'demo',path:'/workspaces/demo',isGit:false}]};
   if(p.endsWith('/commands'))return{commands:Array.from({length:10},(_,i)=>({name:`cmd${i}`,description:'A command',source:'extension'}))};
   if(p.endsWith('/config'))return{live:false,state:{model:{id:'test',name:'Test',provider:'local'},thinkingLevel:'medium'},stats:null,thinking:{levels:[]},models:{models:[]}};
-  if(p.endsWith('/canvases'))return[];
   if(p.endsWith('/prompt')){submitted=json().message;return{ok:true};}
  });
  await page.addInitScript(()=>localStorage.setItem('sidebarCollapsed','true'));

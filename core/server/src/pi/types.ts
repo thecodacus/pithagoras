@@ -85,6 +85,8 @@ export interface PiClient extends EventEmitter {
   subagentStop?(id: string): boolean;
   /** What a page says to an extension's own half in this chat. Absent where the executor cannot reach the extensions. */
   tellExtension?(extension: string, data: unknown): boolean;
+  /** How the model is offered a tool now: by its own name, through the `tools` tool, or not at all. Absent where the executor cannot tell. */
+  offers?(tool: string): "direct" | "lazy" | undefined;
   /** How many subagents it announced are still running: a background one outlives the turn that started it. */
   subagentsRunning?(): number;
   /** How many dialogs an extension has open, waiting on a person: its pi is not one to stop. */

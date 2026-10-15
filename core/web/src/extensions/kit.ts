@@ -1,4 +1,5 @@
 import { copyText } from "../clipboard";
+import { asksBeforeDeleting } from "../confirm-prefs";
 import { confirmDialog } from "../components/ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "../components/ErrorBoundary";
 import { Markdown } from "../components/Markdown";
@@ -57,6 +58,8 @@ export const ui: Ui = {
   classes: { input: inputCls, inputSmall: inputSmCls, codeArea: codeAreaCls, button: btnCls, primary: primaryCls, primarySmall: primarySmCls, ghost: ghostCls },
   /** Copies text, where the page is served over plain HTTP as well. */
   copyText,
+  /** Whether the person wants to be asked before something is deleted (Settings → This browser). */
+  asksBeforeDeleting,
   /** The browser's storage, which never throws: kept across reloads, and kept for the tab. */
   storage: { local, session },
   /** Keeps a scrolling box at its end while more comes, until the person scrolls away. */

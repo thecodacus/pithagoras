@@ -58,7 +58,6 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
     if (told && method === 'POST') { said.push({ chat: told[1], ...json() }); return { ok: true }; }
     if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [model] }, named: { provider: null, model: null } };
-    if (p.endsWith('/canvases')) return [];
     if (p === '/api/models') return { models: [], providers: {} };
   }, { streams: 'open', settings: true });
   /** What the extension in a chat says to its browser half, as the chat's stream carries it. */
@@ -143,6 +142,9 @@ const sidebar = (page: Page) => page.getByRole('navigation', { name: 'Destinatio
 test('an extension\'s panel is opened from the chat\'s header, talks to its extension in that chat, and closes like the portal\'s own', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const { said, hears } = await portal(page);
+  // The browser, one of the portal's own panels, to open as a third.
+  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
+  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
   await page.goto('/s/a');
   const toggle = header(page).getByRole('button', { name: 'Notes', exact: true });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -171,7 +173,7 @@ test('an extension\'s panel is opened from the chat\'s header, talks to its exte
   await expect(panel(page).getByRole('listitem')).toHaveCount(1);
 
   // Two panels beside the conversation is what fits: a third closes the one open longest, whoever brought it.
-  await header(page).getByRole('button', { name: 'Session canvases', exact: true }).click();
+  await header(page).getByRole('button', { name: 'Browser', exact: true }).click();
   await header(page).getByRole('button', { name: 'Files', exact: true }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -296,6 +298,9 @@ test('an extension that fails to load, or to draw, fails alone', async ({ page }
 test('a panel says more of itself: tabs in its head, a button that follows the chat, kept and asking while something in it would be lost', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const { hears, pushed } = await portal(page);
+  // The browser, one of the portal's own panels, to open as a third.
+  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
+  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
   await page.goto('/s/a');
   const toggle = header(page).getByRole('button', { name: 'Notes', exact: true });
   await expect(toggle).toHaveAttribute('title', 'Notes');
@@ -320,12 +325,12 @@ test('a panel says more of itself: tabs in its head, a button that follows the c
   await expect(page.getByRole('alertdialog')).toContainText('Discard the note you were writing?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
   await expect(panel(page).getByRole('textbox', { name: 'New note' })).toHaveValue('Half a thought');
-  // And it is not the one closed to make room for a third: the canvases, opened after it, go instead.
-  const canvases = header(page).getByRole('button', { name: 'Session canvases', exact: true });
-  await canvases.click();
+  // And it is not the one closed to make room for a third: the browser, opened after it, goes instead.
+  const browser = header(page).getByRole('button', { name: 'Browser', exact: true });
+  await browser.click();
   await header(page).getByRole('button', { name: 'Files', exact: true }).click();
   await expect(panel(page)).toBeVisible();
-  await expect(canvases).toHaveAttribute('aria-expanded', 'false');
+  await expect(browser).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
   await expect(panel(page)).toHaveCount(0);

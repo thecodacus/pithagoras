@@ -20,7 +20,6 @@ async function portal(page: Page, { refuse = false } = {}) {
       return { ok: true };
     }
     if (p.endsWith('/config')) return { live: false, state: { model: { id: 'test', name: 'Test', provider: 'local' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: [] }, models: { models: [] } };
-    if (p.endsWith('/canvases')) return [];
   }, { streams: 'open', setup: 'skipped', settings: true });
   await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));
   return calls;

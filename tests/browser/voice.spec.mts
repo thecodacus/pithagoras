@@ -243,27 +243,6 @@ test('voice panels animate into browser, side window and simultaneous layouts', 
   const consoleWindow = await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
   expect(browser!.width).toBeGreaterThan(consoleWindow!.width * 1.8);
   expect(browser!.x + browser!.width).toBeLessThan(consoleWindow!.x);
-  await page.evaluate(() => (window as any).canvasFeed.message({type:'update',canvas:{id:'doc',title:'A shared draft',content:'# Live canvas\n\nWriting alongside the consoleWindow.',revision:1,status:'writing',active_call:'draft',updated_at:''}}));
-  await expect(page.locator('.voice-stage')).toHaveAttribute('data-panels','2');
-  await expect(page.locator('.voice-stage')).not.toHaveClass(/is-browsing/);
-  await expect(page.getByLabel('Session canvas workspace')).toBeVisible();
-  await settled(page);
-  const canvasBox=await page.getByLabel('Session canvas workspace').boundingBox();
-  const consoleBox=await page.locator('.voice-extension-window[data-extension="test-console"]').boundingBox();
-  expect(canvasBox!.width).toBeGreaterThan(consoleBox!.width);
-  expect(consoleBox!.x+consoleBox!.width).toBeLessThan(canvasBox!.x);
-  await expect(page.locator('.voice-presence')).toHaveCSS('height','80px');
-  await page.getByLabel('Show browser').click();
-  await settled(page);
-  const sideBrowser=await page.getByLabel('Live browser',{exact:true}).boundingBox();
-  const sideCanvas=await page.getByLabel('Session canvas workspace').boundingBox();
-  expect(sideBrowser!.x).toBeGreaterThanOrEqual(0);
-  expect(sideCanvas!.x-sideBrowser!.x-sideBrowser!.width).toBeGreaterThan(0);
-  expect(sideCanvas!.x-sideBrowser!.x-sideBrowser!.width).toBeLessThanOrEqual(20);
-  await page.getByLabel('Minimize browser').click();
-  await page.getByLabel('Show console').click();
-  await page.getByLabel('Close canvas').click();
-  await page.getByLabel('Show browser').click();
 
   await page.getByRole('button', { name: 'Minimize browser' }).click();
   await settled(page);
@@ -336,7 +315,7 @@ test('prompt and compaction progress remain visible in chat and voice',async({pa
  await page.getByRole('button',{name:'End voice mode'}).click();
 });
 
-test('composer offers send beside stop for a follow-up and canvas lives in the header',async({page})=>{
+test('composer offers send beside stop for a follow-up, and an extension\'s panel has its button in the header',async({page})=>{
  await page.goto('/tests/voice.html');
  const input=page.locator('textarea').first();
  await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
@@ -352,7 +331,7 @@ test('composer offers send beside stop for a follow-up and canvas lives in the h
  await input.fill('   ');
  await page.getByRole('button',{name:'Stop generation',exact:true}).click();
  await expect(page.getByTestId('aborted')).toHaveText('1');
- await expect(page.locator('.session-workspace > header').getByRole('button',{name:'Session canvases',exact:true})).toBeVisible();
+ await expect(page.locator('.session-workspace > header').getByRole('button',{name:'Console',exact:true})).toBeVisible();
 });
 
 test('without speech synthesis voice mode is not offered, because it speaks its replies, and dictation, which only listens, is', async ({ page }) => {
@@ -394,7 +373,6 @@ test('a sentence being dictated when another chat is opened is not sent to that 
   await page.route('**/voice/transcribe*', route => { const url = new URL(route.request().url()); asked.push(url.pathname); purposes.push(url.searchParams.get('purpose')); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
   // The chat switched to answers as the one the page starts in does.
   await page.route('**/api/sessions/other/commands', route => route.fulfill({ json: { commands: [] } }));
-  await page.route('**/api/sessions/other/canvases', route => route.fulfill({ json: [] }));
   await page.route('**/api/sessions/other/config', route => route.fulfill({ status: 503, json: {} }));
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Dictate a message' }).click();

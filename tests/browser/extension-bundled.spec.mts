@@ -27,7 +27,6 @@ async function portal(page: Page) {
     if (p === '/api/sessions') return { sessions: [session], executor: 'host' };
     if (p === '/api/sessions/a') return session;
     if (/^\/api\/sessions\/a\/(config|models)$/.test(p)) return { live: false, state: { model, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [model] }, named: { provider: null, model: null } };
-    if (p.endsWith('/canvases')) return [];
     if (p === '/api/models') return { models: [], providers: {} };
   }, { streams: 'open', settings: true });
 }

@@ -110,13 +110,12 @@ export function dockBox(stage: Box, size: DockSize): Box {
  * coming back would be drawn over it.
  *
  * Shorter, down to `least` — the smallest the window may be. One that would
- * have to be smaller moves up instead, when it `moves` (not the canvas, which
- * hangs from its corner), as far as `ceiling`, the top of its area.
+ * have to be smaller moves up instead, as far as `ceiling`, the top of its area.
  */
-export function clearOfDock(dock: Box, window: Box, least: number, moves: boolean, ceiling: number): { top: number; height: number } | null {
+export function clearOfDock(dock: Box, window: Box, least: number, ceiling: number): { top: number; height: number } | null {
   if (window.right <= dock.left || window.left >= dock.right || window.bottom <= dock.top) return null;
   const bottom = dock.top - GAP;
-  if (bottom - window.top >= least || !moves) return { top: window.top, height: Math.max(least, bottom - window.top) };
+  if (bottom - window.top >= least) return { top: window.top, height: bottom - window.top };
   const top = Math.max(ceiling, bottom - least);
   return { top, height: Math.max(least, bottom - top) };
 }

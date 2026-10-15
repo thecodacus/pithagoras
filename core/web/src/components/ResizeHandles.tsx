@@ -12,31 +12,23 @@ type Edge = "e" | "w" | "s" | "se" | "sw";
  * takes it out of that: the window is pinned where it is, in pixels, and from
  * then on its size is the person's. `clearSize` hands it back to the layout;
  * the stage does that when the arrangement of windows changes.
- *
- * The canvas panel is not placed by the stage but hangs from the top right of
- * its own corner, so it is only given a size: its left edge and its bottom
- * move, and the corner stays.
  */
-type ResizeMode = "pin" | "anchored";
 
-/**
- * Sized by hand, and how: `data-sized` holds the ResizeMode — whether the
- * window was pinned where it is or only given a size.
- */
+/** Sized by hand: `data-sized` is "pin", the window pinned where it is. */
 export function clearSize(el: HTMLElement | null) {
   if (!el?.dataset.sized) return;
   for (const p of ["left", "top", "right", "bottom", "width", "height", "transform", "maxWidth", "maxHeight"] as const) el.style[p] = "";
   delete el.dataset.sized;
 }
 
-/** Every window a voice stage or a chat can have open, the canvas included. */
-export const WINDOWS = ".voice-browser-window.is-open, .voice-files-window.is-open, .session-canvases.is-open .canvas-panel";
+/** Every window a voice stage can have open. */
+export const WINDOWS = ".voice-browser-window.is-open, .voice-files-window.is-open";
 /** Kept clear at the edges of the area a window lives in. */
 const EDGE = 8;
 
 /**
  * The windows open around `root` — a chat's workspace, which holds the voice
- * stage's windows and the canvas — that are there to be seen: not one hidden
+ * stage's windows — that are there to be seen: not one hidden
  * under a maximized browser. What the orb makes room for and what a window
  * being resized stops at are the same windows.
  */
@@ -47,15 +39,15 @@ export function openWindows(root: ParentNode): HTMLElement[] {
   });
 }
 
-/** The chat's workspace: the voice stage's windows and the canvas are all in it. */
+/** The chat's workspace: the voice stage's windows are all in it. */
 export const workspaceOf = (el: Element) => el.closest<HTMLElement>(".session-workspace");
-/** The chat's voice stage, for a window in it or for the canvas, which hangs beside it. */
+/** The chat's voice stage, for a window in it. */
 const stageOf = (el: Element) => el.closest<HTMLElement>(".voice-stage") ?? workspaceOf(el)?.querySelector<HTMLElement>(".voice-stage") ?? null;
 
 /**
  * How far a window's edges may go, in the page's coordinates: inside the area
- * it belongs to — the voice stage, or the chat's workspace for the canvas,
- * which hangs over it and would otherwise reach under the sidebar.
+ * it belongs to: the voice stage, or the chat's workspace for a window that
+ * is not in one, which would otherwise reach under the sidebar.
  */
 export function areaFor(el: HTMLElement): Box {
   const area = (el.closest(".voice-stage") ?? workspaceOf(el))?.getBoundingClientRect() ?? { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
@@ -123,7 +115,7 @@ const fit = (want: number, least: number, room: number) => Math.min(room, Math.m
  * pointer or a key has gone from where it was, and `end` is called once it is
  * let go. Measured once, here: nothing else moves while it goes on.
  */
-function sizing(el: HTMLElement, edge: Edge, mode: ResizeMode) {
+function sizing(el: HTMLElement, edge: Edge) {
   const box = el.getBoundingClientRect();
   const area = areaFor(el), obstacles = obstaclesFor(el);
   const parent = (el.offsetParent as HTMLElement | null)?.getBoundingClientRect() ?? { left: 0, top: 0, width: innerWidth, height: innerHeight, right: innerWidth, bottom: innerHeight };
@@ -143,11 +135,9 @@ function sizing(el: HTMLElement, edge: Edge, mode: ResizeMode) {
   let dragging = false;
   const take = () => {
     dragging = true;
-    if (mode === "pin") {
-      Object.assign(el.style, { left: `${start.left}px`, top: `${start.top}px`, width: `${start.width}px`, height: `${start.height}px`, right: "auto", bottom: "auto", transform: "none" });
-    }
+    Object.assign(el.style, { left: `${start.left}px`, top: `${start.top}px`, width: `${start.width}px`, height: `${start.height}px`, right: "auto", bottom: "auto", transform: "none" });
     el.style.maxWidth = "none"; el.style.maxHeight = "none";
-    el.dataset.sized = mode;
+    el.dataset.sized = "pin";
     // No sliding into place while dragging, and no frame under the pointer taking the moves.
     el.style.transition = "none";
     document.body.classList.add("is-resizing");
@@ -165,7 +155,7 @@ function sizing(el: HTMLElement, edge: Edge, mode: ResizeMode) {
     const width = Math.max(0, got.right - got.left), height = Math.max(0, got.bottom - got.top);
     if (edge.includes("e") || edge.includes("w")) el.style.width = `${width}px`;
     // Growing leftwards: the right edge stays where it was.
-    if (edge.includes("w") && mode === "pin") el.style.left = `${start.left + start.width - width}px`;
+    if (edge.includes("w")) el.style.left = `${start.left + start.width - width}px`;
     if (edge.includes("s")) el.style.height = `${height}px`;
     moved();
   };
@@ -180,17 +170,17 @@ function sizing(el: HTMLElement, edge: Edge, mode: ResizeMode) {
   return { move, end };
 }
 
-function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge, mode: ResizeMode) {
+function begin(e: ReactPointerEvent, el: HTMLElement, edge: Edge) {
   if (e.button !== 0) return;
   e.preventDefault(); e.stopPropagation();
-  const { move, end } = sizing(el, edge, mode);
+  const { move, end } = sizing(el, edge);
   // Over when the pointer is let go — or when the window closes mid-drag and
   // takes the handle with it (see followPointer).
   followPointer(e, (ev) => move(ev.clientX - e.clientX, ev.clientY - e.clientY), end);
 }
 
 /** The keys of the grip: an arrow takes the edge or corner a step that way, Home, Enter or Space hand the window back to the layout. */
-function keys(e: ReactKeyboardEvent, el: HTMLElement, edge: Edge, mode: ResizeMode) {
+function keys(e: ReactKeyboardEvent, el: HTMLElement, edge: Edge) {
   const reset = e.key === "Home" || e.key === "Enter" || e.key === " ";
   const dx = arrowSteps(e, "x") * STEP, dy = arrowSteps(e, "y") * STEP;
   if (!reset && !dx && !dy) return;
@@ -200,7 +190,7 @@ function keys(e: ReactKeyboardEvent, el: HTMLElement, edge: Edge, mode: ResizeMo
     return void el.dispatchEvent(new Event("panel-resize", { bubbles: true }));
   }
   // An edge that is not the grip's does not move: Up and Down leave a side grip where it is.
-  const { move, end } = sizing(el, edge, mode);
+  const { move, end } = sizing(el, edge);
   move(edge.includes("e") || edge.includes("w") ? dx : 0, edge.includes("s") ? dy : 0);
   end();
 }
@@ -209,14 +199,14 @@ function keys(e: ReactKeyboardEvent, el: HTMLElement, edge: Edge, mode: ResizeMo
  * Grips on a window's edges and bottom corners. Hidden on phones, where windows take the width.
  * One of them, a bottom corner, is reached with Tab and sized with the arrow keys, for whoever has no pointer.
  */
-export function ResizeHandles({ target, mode = "pin", edges = ["e", "w", "s", "se", "sw"] }: { target: RefObject<HTMLElement>; mode?: ResizeMode; edges?: Edge[] }) {
+export function ResizeHandles({ target, edges = ["e", "w", "s", "se", "sw"] }: { target: RefObject<HTMLElement>; edges?: Edge[] }) {
   const name: Record<Edge, string> = { e: t("Drag the right edge to resize"), w: t("Drag the left edge to resize"), s: t("Drag the bottom edge to resize"), se: t("Drag the bottom right corner to resize"), sw: t("Drag the bottom left corner to resize") };
   const keyed = edges.includes("se") ? "se" : edges.includes("sw") ? "sw" : null;
   return <>{edges.map(edge => edge === keyed
     ? <div key={edge} className={`resize-handle resize-${edge}`} role="button" tabIndex={0} title={name[edge]} aria-label={t("Resize the window")}
         aria-description={t("The arrow keys make the window larger or smaller, Home gives it back to the layout.")}
-        onPointerDown={e => { if (target.current) begin(e, target.current, edge, mode); }}
-        onKeyDown={e => { if (target.current) keys(e, target.current, edge, mode); }} />
+        onPointerDown={e => { if (target.current) begin(e, target.current, edge); }}
+        onKeyDown={e => { if (target.current) keys(e, target.current, edge); }} />
     : <div key={edge} className={`resize-handle resize-${edge}`} aria-hidden="true" title={name[edge]}
-        onPointerDown={e => { if (target.current) begin(e, target.current, edge, mode); }} />)}</>;
+        onPointerDown={e => { if (target.current) begin(e, target.current, edge); }} />)}</>;
 }

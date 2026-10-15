@@ -755,151 +755,21 @@ test("ask_question, lazy, is asked through the tools tool: the dialog opens for 
   }
 });
 
-test("a lazy canvas_write fills the canvas while the model writes it, and what came survives a stop", async () => {
-  const { createCanvas, markCanvasRead, readCanvas } = await import("../dist/canvases.js");
-  const { createSession } = await import("../dist/db.js");
-  /** One chat, with a canvas to write in, whose canvas_write is lazy; the model writes it in pieces and `between` looks at the canvas after each. */
-  async function writing(pieces, between, finish) {
-    const session = `gateway-canvas-${n++}`;
-    createSession({ id: session, title: session, workspace: process.env.WORKSPACE_ROOT, executor: "host", kind: "task" });
-    const row = createCanvas(session, "Lazy document");
-    markCanvasRead(session, row.id);
-    const text = pieces(row.id);
-    let client;
-    script = [{ name: "tools", pieces: text, between: (i) => between(i, session, row.id, client) }];
-    model.requests.length = 0;
-    client = await SdkPiClient.create({
-      cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: session,
-      toolsLazy: ["canvas_write"], lazySets: ["canvases"],
-    });
-    const events = [];
-    client.on("event", (e) => events.push(e));
-    try {
-      await client.prompt("Write it");
-      await finish(client, events, session, row.id);
-    } finally {
-      client.dispose();
-    }
-    return { session, id: row.id, events };
+// What an extension asks (`portal.chats.offers`) before it follows a call of its tool as the model writes it: a call
+// by a name the tool is not offered under is refused, and never runs.
+test("a chat's pi says how a tool is offered to its model: by its name, through the tools tool, or not at all", async () => {
+  const client = await SdkPiClient.create({
+    cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: `gateway-${n++}`,
+    toolsLazy: ["docs_open", "docs_export"], toolsOff: ["secret_delete"],
+  });
+  try {
+    assert.equal(client.offers("notes_add"), "direct");
+    assert.equal(client.offers("docs_open"), "lazy");
+    assert.equal(client.offers("secret_delete"), undefined, "switched off");
+    assert.equal(client.offers("no_such_tool"), undefined);
+  } finally {
+    client.dispose();
   }
-  /** The canvas as it is after a short while: the table is written as the pieces come in. */
-  const contentOf = async (session, id, expected) => {
-    for (let i = 0; i < 100 && readCanvas(session, id).content !== expected; i++) await new Promise((r) => setTimeout(r, 20));
-    return readCanvas(session, id);
-  };
-  const head = (id) => `{"action":"call","name":"canvas_write","args":{"canvas_id":"${id}","revision":0,"operation":"replace","content":"First`;
-
-  // Called through the tools tool, whole: the text is there before the call has ended, and the call makes one revision.
-  const seen = [];
-  const whole = await writing(
-    (id) => [head(id), ` line\\nSecond`, ` and third"}}`],
-    async (i, session, id) => {
-      if (i === 0) seen.push((await contentOf(session, id, "First")).content);
-      if (i === 1) {
-        const row = await contentOf(session, id, "First line\nSecond");
-        seen.push(row.content, row.status);
-      }
-    },
-    async (_client, events) => {
-      for (let i = 0; i < 200 && !events.some((e) => e.type === "agent_settled"); i++) await new Promise((r) => setTimeout(r, 25));
-    },
-  );
-  assert.deepEqual(seen, ["First", "First line\nSecond", "writing"], "the canvas filled while the call was still coming in");
-  const done = readCanvas(whole.session, whole.id);
-  assert.equal(done.content, "First line\nSecond and third");
-  assert.equal(done.revision, 1, "one revision however many pieces it came in");
-  const end = whole.events.find((e) => e.type === "tool_execution_end");
-  assert.equal(end.isError, false);
-  assert.equal(end.portalCalledTool, "canvas_write");
-
-  // The text of the arguments, as a model may send them: the same.
-  const asText = await writing(
-    (id) => {
-      const raw = JSON.stringify({ action: "call", name: "canvas_write", args: JSON.stringify({ canvas_id: id, revision: 0, operation: "replace", content: "Alpha\nBeta \"quoted\" gamma" }) });
-      return raw.match(/.{1,17}/g);
-    },
-    async () => {},
-    async (_client, events) => {
-      for (let i = 0; i < 200 && !events.some((e) => e.type === "agent_settled"); i++) await new Promise((r) => setTimeout(r, 25));
-    },
-  );
-  assert.equal(readCanvas(asText.session, asText.id).content, "Alpha\nBeta \"quoted\" gamma");
-
-  // The turn is stopped in the middle of the call: what came is kept, and the call never ran.
-  const stopped = await writing(
-    (id) => [head(id), ` line\\nSecond`, ` and the rest that never comes"}}`],
-    async (i, session, id, client) => {
-      if (i === 1) {
-        await contentOf(session, id, "First line\nSecond");
-        await client.abort();
-      }
-    },
-    async (_client, events) => {
-      for (let i = 0; i < 200 && !events.some((e) => e.type === "agent_settled"); i++) await new Promise((r) => setTimeout(r, 25));
-    },
-  );
-  const cut = readCanvas(stopped.session, stopped.id);
-  assert.equal(cut.content, "First line\nSecond", "partial text survives the interruption");
-  assert.equal(cut.status, "interrupted");
-  assert.equal(cut.active_call, null);
-});
-
-test("a canvas_write that is lazy or switched off writes nothing when the model calls it by its own name, and a call that turns out to be another one takes its text back", async () => {
-  const { createCanvas, markCanvasRead, readCanvas } = await import("../dist/canvases.js");
-  const { createSession } = await import("../dist/db.js");
-  /** The model sends one call in pieces; `options` say how canvas_write stands in the chat. Resolves with the canvas and the call's end once the chat is quiet. */
-  async function sends(name, pieces, options) {
-    const session = `gateway-canvas-${n++}`;
-    createSession({ id: session, title: session, workspace: process.env.WORKSPACE_ROOT, executor: "host", kind: "task" });
-    const row = createCanvas(session, "Hidden document");
-    markCanvasRead(session, row.id);
-    const seen = [];
-    script = [{ name, pieces: pieces(row.id), between: async () => { await new Promise((r) => setTimeout(r, 120)); seen.push(readCanvas(session, row.id).content); } }];
-    model.requests.length = 0;
-    const client = await SdkPiClient.create({ cwd: chat(), sessionDir: mkdtempSync(path.join(home, "chat-")), provider: "fake", modelId: "m", sessionId: session, ...options });
-    const events = [];
-    client.on("event", (e) => events.push(e));
-    try {
-      await client.prompt("Write it");
-      for (let i = 0; i < 200 && !events.some((e) => e.type === "agent_settled"); i++) await new Promise((r) => setTimeout(r, 25));
-    } finally {
-      client.dispose();
-    }
-    return { canvas: readCanvas(session, row.id), end: events.find((e) => e.type === "tool_execution_end"), requests: [...model.requests], seen };
-  }
-  const direct = (id) => [`{"canvas_id":"${id}","revision":0,"operation":"replace","content":"Hello`, ` world"}`];
-
-  // Offered by its own name: written as it comes in, as it always was.
-  const offered = await sends("canvas_write", direct, {});
-  assert.deepEqual(offered.seen, ["Hello", "Hello world"]);
-  assert.equal(offered.canvas.content, "Hello world");
-
-  // Lazy: not in the model's list, so pi answers "not found" and never runs it, and the text it carried is not in the canvas.
-  const lazyCall = await sends("canvas_write", direct, { toolsLazy: ["canvas_write"], lazySets: ["canvases"] });
-  assert.ok(!names(lazyCall.requests[0]).includes("canvas_write") && names(lazyCall.requests[0]).includes("tools"));
-  assert.equal(lazyCall.end.isError, true);
-  assert.match(textOf(lazyCall.end), /not found/);
-  assert.deepEqual(lazyCall.seen, ["", ""], "nothing came into the canvas while it was written");
-  assert.equal(lazyCall.canvas.content, "");
-  assert.equal(lazyCall.canvas.revision, 0, "so the revision the model has is still the right one");
-
-  // Switched off: the same.
-  const off = await sends("canvas_write", direct, { toolsOff: ["canvas_write"] });
-  assert.equal(off.end.isError, true);
-  assert.equal(off.canvas.content, "");
-  assert.equal(off.canvas.revision, 0);
-
-  // Through the tools tool a key given twice: the stream saw canvas_write, JSON takes the last name, and pi runs another tool.
-  const twice = await sends(
-    "tools",
-    (id) => [`{"action":"call","name":"canvas_write","args":{"canvas_id":"${id}","revision":0,"operation":"replace","content":"Sneaky`, ` text"},"name":"canvas_list"}`],
-    { toolsLazy: ["canvas_write"], lazySets: ["canvases"] },
-  );
-  assert.equal(twice.seen[0], "Sneaky", "it could not be known yet, so it was written while it came in");
-  assert.equal(twice.canvas.content, "", "and is out of the document again when the call is whole and is no write");
-  assert.equal(twice.canvas.status, "saved");
-  assert.equal(twice.canvas.active_call, null);
-  assert.match(textOf(twice.end), /not a lazy tool: call it directly/, "the tool that ran was canvas_list");
 });
 
 test("a result a lazy tool returned that looks like a prompt injection is flagged, holds the conversation, and is let go once the person trusts it", async () => {

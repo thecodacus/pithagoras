@@ -145,7 +145,7 @@ Each data message is one event:
 
 Track the highest `seq` you have seen and pass it as `since` when reconnecting.
 
-The stream also carries named events (`event: canvas`, `event: extension`, and
+The stream also carries named events (`event: extension`, and
 a few of the portal's own). `extension` is what an installed extension's server
 half tells what it drew on the page: `{ "extension": "<package>", "data": … }`,
 first where things stand as the stream opens, then each thing as it is said.
@@ -300,13 +300,18 @@ The session routes answer 409 until Voice is enabled in Settings → Add-ons. Se
 
 ## Canvases
 
+The [Canvases](/guide/canvases) extension's routes (`extensions/canvas`), while
+it is installed, for chat `:id`. What changes is told to the pages open on the
+chat on its stream, as `event: extension` with `pithagoras-canvas`: all of its
+canvases when a page opens it, then each change.
+
 | | |
 | --- | --- |
-| `GET /api/sessions/:id/canvases` · `POST` | List; `{ title }` creates one |
-| `PUT /api/sessions/:id/canvases/:cid` | `{ revision, title, content }` — 409 when `revision` is stale |
-| `POST /api/sessions/:id/canvases/:cid/persist` | Store a temporary canvas |
-| `POST /api/sessions/:id/canvases/:cid/restore` | `{ revision }` — put back the text from before a write that was cut off (`restorable` in the canvas). 409 when `revision` is stale, a write is going on, or there is no earlier text |
-| `DELETE /api/sessions/:id/canvases/:cid` | Delete |
+| `GET /api/x/pithagoras-canvas/chats/:id/canvases` · `POST` | List; `{ title }` creates one |
+| `PUT …/chats/:id/canvases/:cid` | `{ revision, title, content }` — 409 when `revision` is stale |
+| `POST …/chats/:id/canvases/:cid/persist` | Store a temporary canvas |
+| `POST …/chats/:id/canvases/:cid/restore` | `{ revision }` — put back the text from before a write that was cut off (`restorable` in the canvas). 409 when `revision` is stale, a write is going on, or there is no earlier text |
+| `DELETE …/chats/:id/canvases/:cid` | `{ revision }` — Delete |
 
 ## Updating the portal
 
