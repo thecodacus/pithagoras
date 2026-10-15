@@ -53,6 +53,16 @@ test('what an extension built and what it installed are not read', () => {
   assert.deepEqual(findCrossings(root), []);
 });
 
+test('an extension\'s own tests may reach into core, as the portal\'s may', () => {
+  const root = repo({
+    'extensions/git/test/git.test.mts': 'import { gitAt } from "../../../core/server/src/git.ts";',
+    'extensions/git/test/browser/panel.page.tsx': 'import { useSlot } from "../../../../core/web/src/extensions/slots";',
+    // Not a folder of tests: its own code, which may not.
+    'extensions/git/src/test/helper.ts': 'import { api } from "../../../../core/web/src/api";',
+  });
+  assert.deepEqual(findCrossings(root), ['extensions/git/src/test/helper.ts:1 imports "../../../../core/web/src/api": an extension imports nothing of core']);
+});
+
 test('this repository keeps them apart', () => {
   assert.deepEqual(findCrossings(path.resolve(import.meta.dirname, '..')), []);
 });

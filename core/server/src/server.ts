@@ -97,7 +97,6 @@ import { extensionRoutes, openingFor, stopServerHalves } from "./extension-host.
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
-import { gitRouter } from "./api/git.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
@@ -1771,7 +1770,6 @@ app.use(
 );
 app.use("/api", skillsRouter());
 app.use("/api", filesRouter());
-app.use("/api", gitRouter());
 // What the configuration offers is what a running chat may use: told at once, as a default is.
 onMcpWritten(() => {
   sessions.applyToolDefaults().catch((e) => console.error(`[portal] could not apply the MCP configuration to running chats: ${(e as Error).message}`));
@@ -1929,7 +1927,9 @@ interruptCanvasWrites();
 void syncExtensionServers().catch((e) => console.error("[extensions] could not start the server halves:", e));
 // What a portal starts with is installed once (extensions/defaults.json), and then loaded like anything installed by
 // hand: an install brings the server halves in line again. What the portal runs with is noted once that is done.
-void installDefaultExtensions()
+// A portal that stops while it goes on lets it finish (see stop): pi is writing its settings, and with the portal gone
+// it would go on writing them alone.
+const startingWith = installDefaultExtensions()
   .catch((e) => console.error("[extensions] could not install what a portal starts with:", e))
   .finally(() => void noteLoadedExtensions());
 pinConnection();
@@ -1964,6 +1964,7 @@ async function stop(signal: string) {
   routineSupervisor.stop();
   await channelSupervisor.shutdown();
   await sessions.shutdown();
+  await startingWith;
   // After the chats: a chat's pi may still be using what a server half holds.
   await stopServerHalves();
   server.close(() => process.exit(requestedExit()));

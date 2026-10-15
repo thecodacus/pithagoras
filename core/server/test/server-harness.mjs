@@ -98,6 +98,9 @@ export const serverEnv = (home, port, overrides = {}) => ({
   PORTAL_PASSWORD: "", PORTAL_ALLOW_NO_PASSWORD: "1", EXECUTOR: "host", LLAMA_BASE_URL: "http://127.0.0.1:1",
   // The checkout a test server runs from is the developer's own: it does not fetch from its remote on a schedule.
   PORTAL_UPDATE_CHECK: "off",
+  // Nor does it install the extensions a portal starts with: pi at work at its start and stop, for tests that do not
+  // use them. One that does says "on".
+  PORTAL_DEFAULT_EXTENSIONS: "off",
   ...overrides,
 });
 

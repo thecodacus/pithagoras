@@ -1,6 +1,6 @@
 /**
  * A comment being written, saved as it is typed: no React in it, so that what
- * it does can be tried alone (tests/docs-draft.test.mts).
+ * it does can be tried alone (extensions/docs/test/draft.test.mts).
  *
  * The box tells it what was typed (`changed`), and it sends that after a short
  * while with nothing more typed, as the document's own autosave does (saver.js).

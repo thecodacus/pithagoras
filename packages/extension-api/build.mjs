@@ -14,10 +14,23 @@
  *   import { buildExtension } from "@pithagoras/extension-api/build";
  *   await buildExtension({ dir: import.meta.dirname });
  *
- * esbuild is the caller's: it is a peer of this package.
+ * With `tailwind: true`, the Tailwind utilities its code uses are made into
+ * its stylesheet, after what it imports, with the portal's colours, rounding
+ * and shadow (./tailwind.mjs) and without Tailwind's reset: the portal's page
+ * has had its own since before any extension came. They are scoped to the
+ * extension's own parts, which the portal draws inside an element marked with
+ * its package's name: the portal's utilities go by the same names, and one of
+ * the extension's that came after them would win over the portal's own
+ * (a `.flex` over an `md:hidden`) everywhere on the page. With `server`, its server
+ * half is written in TypeScript too: that module is bundled into `server.js`
+ * beside its package.json, its packages left to be imported where it runs.
+ *
+ * esbuild is the caller's, and tailwindcss and postcss with `tailwind`: they
+ * are peers of this package.
  */
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import portal from "./tailwind.mjs";
 
 /** The portal's packages, by what the code imports, and the names each hands out. */
 const SHARED = {
@@ -60,14 +73,16 @@ const portalPackages = {
  * `entry` is its module (default `src/client.tsx`), and `outdir` the folder
  * its package.json names under `pithagoras.client` (default `web`). The build
  * owns `client.js`, `client.css`, `chunks/` and `assets/` in it, and replaces
- * them each time; anything else there is left as it is.
+ * them each time; anything else there is left as it is. `tailwind`: make the
+ * utilities its code uses into `client.css`. `server`: the server half's
+ * module (`src/server.ts`), built into `server.js` in `dir`.
  */
-export async function buildExtension({ dir, entry = "src/client.tsx", outdir = "web", minify = true } = {}) {
+export async function buildExtension({ dir, entry = "src/client.tsx", outdir = "web", minify = true, tailwind = false, server } = {}) {
   if (!dir) throw new Error("buildExtension needs the extension's folder: { dir }");
   const { build } = await import("esbuild");
   const out = path.resolve(dir, outdir);
   for (const owned of ["chunks", "assets"]) rmSync(path.join(out, owned), { recursive: true, force: true });
-  return build({
+  const client = await build({
     entryPoints: { client: path.resolve(dir, entry) },
     outdir: out,
     bundle: true,
@@ -83,4 +98,45 @@ export async function buildExtension({ dir, entry = "src/client.tsx", outdir = "
     logLevel: "warning",
     plugins: [portalPackages],
   });
+  if (tailwind) await utilities(dir, path.join(out, "client.css"), minify);
+  if (server) {
+    await build({
+      entryPoints: [path.resolve(dir, server)],
+      outfile: path.join(dir, "server.js"),
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node20",
+      // Its packages are imported where it runs, from its own node_modules: a native one cannot be bundled.
+      packages: "external",
+      legalComments: "eof",
+      logLevel: "warning",
+    });
+  }
+  return client;
+}
+
+/**
+ * The Tailwind utilities the extension's code names, with the portal's preset,
+ * after what is already in `css` (its own stylesheet, if it imports one), each
+ * for the extension's own parts only. Only utilities: Tailwind's reset would
+ * restyle the whole page.
+ */
+async function utilities(dir, css, minify) {
+  const { default: postcss } = await import("postcss");
+  const { default: tailwindcss } = await import("tailwindcss");
+  const { name } = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+  const made = await postcss([
+    tailwindcss({
+      presets: [portal],
+      // `:where` keeps each utility's weight as the portal's is: inside the extension's parts, the later one wins.
+      important: `:where([data-extension=${JSON.stringify(name)}])`,
+      content: [path.join(dir, "src/**/*.{ts,tsx,js,jsx}")],
+      corePlugins: { preflight: false },
+    }),
+  ]).process("@tailwind utilities;", { from: undefined });
+  let text = made.css;
+  if (minify) text = (await (await import("esbuild")).transform(text, { loader: "css", minify: true })).code;
+  const own = existsSync(css) ? readFileSync(css, "utf8") : "";
+  writeFileSync(css, own ? `${own}\n${text}` : text);
 }

@@ -831,22 +831,23 @@ what is wrong (`errors.js`), and anything else is logged and answered with
 (what installs the packages), `faults` (breaks a write after a step), `gitTimeoutMs`,
 `pingMs`, `pollMs`, `wakeMs` and `wakeLimitMs` (the times in the table above).
 
-**Tests.** Each file runs alone, with `node --import tsx --test tests/<name>.test.mts`:
+**Tests.** They are beside the code, in `extensions/docs/test/`. Each file runs
+alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:
 
 | File | What it holds |
 | --- | --- |
-| `docs-store`, `docs-extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, dependencies, German |
-| `docs-hardening` | The edges: a file deleted or renamed, no rights, a broken store, saves at once, the size limit, a chat that never starts |
-| `docs-tools` | The agent's tools |
-| `docs-stream`, `docs-live`, `docs-merge`, `docs-saver` | Telling a page of changes, and taking them in |
-| `docs-frame` | What the editor keeps apart from the Markdown: front matter and line endings |
-| `docs-comments`, `docs-comment-tools`, `docs-anchor`, `docs-draft` | The comments and where their passages are |
-| `docs-ping` | `@agent` and the wake |
-| `tests/browser/documents*.spec.mts` | The page, in a browser, against a stand-in for the server half. They build the editor first |
+| `store`, `extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, dependencies, German |
+| `hardening` | The edges: a file deleted or renamed, no rights, a broken store, saves at once, the size limit, a chat that never starts |
+| `tools` | The agent's tools |
+| `stream`, `live`, `merge`, `saver` | Telling a page of changes, and taking them in |
+| `frame` | What the editor keeps apart from the Markdown: front matter and line endings |
+| `comments`, `comment-tools`, `anchor`, `draft` | The comments and where their passages are |
+| `ping` | `@agent` and the wake |
+| `browser/*.spec.mts` | The page, in a browser, against a stand-in for the server half. They build the editor first |
 
 ```
-node --import tsx --test tests/docs-hardening.test.mts
-npx playwright test tests/browser/documents
+node --import tsx --test extensions/docs/test/hardening.test.mts
+npx playwright test extensions/docs/test/browser
 ```
 
 The browser tests' dev server has a fixed port (5191), so run one set at a time.

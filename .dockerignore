@@ -16,3 +16,5 @@ docs/.vitepress/dist
 docs/.vitepress/cache
 playwright-report
 test-results
+# Each extension's tests are the repository's, not the image's.
+extensions/*/test

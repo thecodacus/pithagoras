@@ -1,7 +1,7 @@
 /**
  * A document that is changed while it is open: no React, no editor library and
  * no network of its own in it, so that what it does can be tried alone
- * (tests/docs-live.test.mts).
+ * (extensions/docs/test/live.test.mts).
  *
  * The page is told which revision the document is at (`seen`), as the server
  * half's stream says it, and asks for its text. What it does with it depends on

@@ -2,10 +2,11 @@
 <script>
 // With `&count=1`: React tells a hook of this name about every commit (as its devtools are told), and this one counts how often each
 // component named in `window.watched` ran, by the name of its function. `window.drawn` has the counts. One of an
-// extension's, whose bundle is minified, is known instead by the class of the first element it draws: `window.drawsClass`.
+// extension's, whose bundle is minified, is known instead by the first element it draws: by a class it has, or an
+// attribute (`window.drawsWith`).
 if (location.search.includes('count=1')) {
-  window.watched = ['CopyAction', 'GitPanel', 'ChildItem'];
-  window.drawsClass = { JobOutput: 'terminal-job-output' };
+  window.watched = ['CopyAction', 'ChildItem'];
+  window.drawsWith = { JobOutput: { className: 'terminal-job-output' }, GitPanel: { attribute: 'data-git-tab' } };
   window.drawn = {};
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
     supportsFiber: true, isDisabled: false, renderers: new Map(),
@@ -22,8 +23,11 @@ if (location.search.includes('count=1')) {
         if (fiber.flags & 1 && (typeof type === 'function' || (type && typeof type.type === 'function'))) {
           let host = fiber.child;
           while (host && typeof host.type !== 'string') host = host.child;
-          const classes = (host && host.memoizedProps && host.memoizedProps.className) || '';
-          for (const [as, cls] of Object.entries(window.drawsClass)) if (classes.split(' ').includes(cls)) window.drawn[as] = (window.drawn[as] || 0) + 1;
+          const props = (host && host.memoizedProps) || {};
+          for (const [as, by] of Object.entries(window.drawsWith)) {
+            const found = by.className ? String(props.className || '').split(' ').includes(by.className) : by.attribute in props;
+            if (found) window.drawn[as] = (window.drawn[as] || 0) + 1;
+          }
         }
         if (was && fiber.child === was.child) return;
         for (let child = fiber.child; child; child = child.sibling) walk(child, child.alternate);

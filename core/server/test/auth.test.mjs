@@ -463,7 +463,8 @@ const staysOpen = async (stream, what) => {
 };
 
 test("changing the password ends every event and terminal stream that was open under the old one, also those that share the cookie it was changed with", async () => {
-  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD });
+  // With the terminal, an extension a portal starts with.
+  const p = await portalOf({ PORTAL_PASSWORD: PASSWORD, PORTAL_DEFAULT_EXTENSIONS: "on" });
   try {
     const mine = cookieOf(await login(PASSWORD, p.base));
     const other = cookieOf(await login(PASSWORD, p.base));

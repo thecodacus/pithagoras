@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
 import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi } from "../api";
-import { useLanguage } from "../i18n";
+import { formatDate, formatDateTime, formatNumber, formatTime, useLanguage } from "../i18n";
 import type { Portal } from "@pithagoras/extension-api";
 import { onChatFeed, useChatFeed } from "./chat-feed";
 import { hasCommand, registerCommand, runCommand } from "./commands";
@@ -11,7 +11,7 @@ import { ui } from "./kit";
 import { panels } from "./panels";
 import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from "./server-feed";
 import { register } from "./slots";
-import { addStrings, forgetStrings, translate } from "./strings";
+import { addStrings, forgetStrings, translate, translateCount, translateInContext, translateWithParts } from "./strings";
 import { registerShortcut } from "./shortcuts";
 import { choose, registerTheme, themes, themesSettled } from "./themes";
 import { chosenPalette, usePalette, useResolvedTheme } from "../theme";
@@ -146,6 +146,10 @@ async function activate(ext: ExtensionUi): Promise<void> {
         ApiError,
       },
       t: (text, vars) => translate(ext.name, text, vars),
+      tp: (n, one, other, vars) => translateCount(ext.name, n, one, other, vars),
+      tc: (text, context, vars) => translateInContext(ext.name, text, context, vars),
+      tx: (text, vars) => translateWithParts(ext.name, text, vars),
+      format: { number: formatNumber, date: formatDate, dateTime: formatDateTime, time: formatTime },
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
       commands: { register: (name, run) => kept(registerCommand(name, run)), run: runCommand, has: hasCommand },
       panels,

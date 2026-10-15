@@ -15,6 +15,7 @@ import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
 import { baseDir, resolveInside } from "./workspace-files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
+import { gitAt } from "./git.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -207,6 +208,7 @@ function portalFor(ext: Running): ServerPortal {
       },
     },
     files: { inside: (base, rel) => resolveInside(base, rel) },
+    git: { at: gitAt },
     dataDir: () => {
       // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
       const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));

@@ -7,7 +7,8 @@
  *     by their package names.
  *
  * Both may import packages/extension-api, which is the contract between them,
- * and any package from npm. Tests are not checked: a test may reach into both.
+ * and any package from npm. Tests are not checked, core's nor an extension's
+ * own (extensions/<name>/test): a test may reach into both.
  *
  * Run by `npm test` and in CI. `node scripts/check-boundaries.mjs [repo]`.
  */
@@ -66,7 +67,9 @@ export function findCrossings(root) {
     }
   }
   if (existsSync(extensions) && statSync(extensions).isDirectory()) {
+    const isTest = (file) => path.relative(extensions, file).split(path.sep)[1] === "test";
     for (const file of sources(extensions)) {
+      if (isTest(file)) continue;
       for (const { spec, line } of specifiersOf(file)) {
         if (CORE_PACKAGES.test(spec)) {
           say(file, line, spec, "an extension imports nothing of core");

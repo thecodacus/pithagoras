@@ -225,7 +225,17 @@ const Shell = portal.ui.lazy(() => import("./Shell"), "Shell");
 // Drawn in Suspense, inside ui.ErrorBoundary with ui.PartFailed as its fallback.
 ```
 
-`extensions/terminal` in the repository is an extension written this way.
+The server half can be written in TypeScript as well: `server` names its
+module, and the build bundles it into `server.js` beside `package.json`, with
+the packages it imports left to be imported where it runs (a native one cannot
+be bundled).
+
+```js
+await buildExtension({ dir: import.meta.dirname, tailwind: true, server: "src/server.ts" });
+```
+
+`extensions/terminal` and `extensions/git` in the repository are extensions
+written this way; Git builds its server half and its utilities too.
 
 ### Looking like the portal
 
@@ -254,9 +264,22 @@ prefix of your own: the stylesheet is the page's.
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
 
-The portal's utility classes (Tailwind) exist only for what the portal itself
-uses, so do not rely on one being there: style your own markup in your own
-stylesheet.
+The portal's own utility classes (Tailwind) exist only for what the portal
+itself uses, so do not rely on one being there. Style your markup in your own
+stylesheet, or have the build make the utilities your code uses: with
+`tailwind: true`, `buildExtension` reads `src/` for class names and adds the
+utilities they are to `web/client.css`, after your own rules. They are made
+with the portal's preset, `@pithagoras/extension-api/tailwind`, so
+`bg-surface`, `text-fg-muted`, `border-line`, `bg-accent`, `text-danger`,
+`rounded-xl` and `shadow-pop` are the portal's colours, rounding and shadow and
+follow the theme. Tailwind's reset of the page is left out: the page has the
+portal's. The utilities reach only your own parts: the portal draws each part
+you register inside an element marked with your package's name
+(`data-extension`, laid out as if it were not there), and the build scopes each
+utility to it. The portal's utilities go by the same names, and yours, coming
+after them, would otherwise win over its own on every page (a `.flex` over an
+`md:hidden`). tailwindcss and postcss are then the extension's to install,
+beside esbuild.
 
 ## Slots
 
@@ -320,6 +343,7 @@ itself:
 | `state`, `setState(next)` | Shared by the body and what is in the head, and kept while the panel is open: which tab is shown |
 | `keep(true)` | It is not the one closed to make room for a third: there is something in it that would be lost |
 | `guardClose(fn)` | Asked before it is closed by hand; it stays open if `fn` answers false. `null` to stop asking |
+| `open(name, params?)` | Opens another panel from this one, as `portal.panels.open` does, but this one is not the one closed to make room for it: Git opening a file it lists in Files |
 
 ```js
 // A note being written would be lost.
@@ -568,6 +592,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
+| `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
@@ -707,6 +732,32 @@ const shell = spawn(command, args, { env, cwd: portal.chats.folder(chatId) });
 `run` starts in the chat's folder and never throws for a command that fails.
 With the sandbox off both are the portal's own user, and `argv` is empty.
 
+### git in a chat's folder
+
+A chat's folder is one its agent can write, and so is a repository in it: its
+config can name a program for git to run (a filter, an fsmonitor hook, a
+signature's gpg) that would run as the portal. `portal.git.at(folder)` runs
+git as the portal runs its own: no prompt, editor or pager, no colour, and,
+for a step that only reads, none of those programs and no index lock for the
+agent's own `git add` to find held. A step that writes is git as someone would
+type it in the folder, hooks and filters included. Two writes to one
+repository at once trip over its lock, so queue your own (the Git extension
+runs one at a time per repository).
+
+```js
+const repo = portal.git.at(portal.chats.folder(chatId));
+const { stdout } = await repo.run(["status", "--porcelain=v2", "-z"]);
+await repo.run(["commit", "-F", "-"], { input: message, writes: true });
+const { stdout: pulls } = await repo.gh(["pr", "list", "--json", "number,title"]);
+```
+
+A step that fails rejects with an `Error` that has a `status`: 409 with git's
+own words, 504 for one stopped for taking too long, 501 where git or gh is not
+installed. `ok` lists exit codes that are answers rather than failures,
+`timeout` and `max` bound a step (20 seconds for reading and three minutes for
+writing; 16 MB of output). What reading turns off is looked up once for each
+handle: make one for each request rather than keeping it.
+
 ## Panels and commands
 
 `portal.panels` is the panels of the chat on screen, any of them, by name:
@@ -721,11 +772,11 @@ name: a lower `order` first, then the one loaded first. The portal's own are:
 | --- | --- |
 | `files` | `{ path }`: a file to show |
 | `agents` | `{ id }`: a subagent to show |
-| `git`, `browser`, `canvas` | |
+| `browser`, `canvas` | |
 
-The terminal, an extension a fresh portal installs, goes by `terminal` and
-takes `{ callId }`, a command of the agent's to bring into view, or `{ job }`,
-a background job to follow.
+Two extensions a fresh portal installs go by names too. The terminal is
+`terminal` and takes `{ callId }`, a command of the agent's to bring into view,
+or `{ job }`, a background job to follow. Git is `git`, and takes nothing.
 
 A command is something an extension says it can be asked to do, for another
 extension or the portal to ask by name. Start the name with your package's.
@@ -789,6 +840,27 @@ function Panel() {
 
 A text you did not add falls back to the portal's own where it has it
 ("Loading…", "Remove"), and to what you wrote otherwise.
+
+For a count, `portal.tp(n, one, other)` writes `{n}` the language's way and
+picks the form; a language gives its forms under the English plural. Where
+one English word means two things, `portal.tc(text, context)` tells them
+apart, keyed as `text` and `context` with `\u0004` between them. And
+`portal.tx(text, parts)` puts something drawn (a `<kbd>`, a link) where the
+text has `{name}`:
+
+```js
+portal.locale.add("de", {
+  "{n} commits": { one: "{n} Commit", other: "{n} Commits" },
+  "Open\u0004state": "Offen",
+  "Press {key} to send": "Mit {key} senden",
+});
+portal.tp(count, "{n} commit", "{n} commits");
+portal.tc("Open", "state");
+portal.tx("Press {key} to send", { key: h("kbd", null, "Enter") });
+```
+
+`portal.format.number(n)`, `.date(d)`, `.dateTime(d)` and `.time(d)` write
+numbers and times as the page's language does.
 
 ## Themes
 
@@ -902,6 +974,19 @@ portal's code: `npm run check:boundaries` holds that line, and CI runs it.
 What they need of the portal they get the way your extension does, through
 the `portal` they are given.
 
+Each keeps its tests beside its code, in `test/`, so removing its folder takes
+them with it, and the image leaves them out:
+
+- `test/*.test.mts`: unit and server tests, run by the portal's `npm test`;
+- `test/browser/*.spec.mts`: browser specs, run by Playwright with the
+  portal's own;
+- `test/browser/<page>.page.tsx`: a page of its own for those specs, served by
+  the portal's dev server at `/tests/extension.html?page=<folder>/<page>`.
+
+A test may reach into the portal's code and its test helpers
+(`tests/helpers.mts`, `tests/browser/portal-mock.ts`); the extension's own code
+may not.
+
 ## Keeping it fast
 
 - Say what you use of the chat: `portal.chats.use(chat.id, pick)`.
@@ -915,8 +1000,8 @@ the `portal` they are given.
 
 ## What the portal's own apps use
 
-The terminal is an extension (`extensions/terminal`); the portal's Files, Git
-and Canvases are written into it today. This is what each of them takes from
+The terminal and Git are extensions (`extensions/terminal`, `extensions/git`);
+the portal's Files and Canvases are written into it today. This is what each of them takes from
 the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
@@ -928,7 +1013,10 @@ the portal, and what gives the same to an extension:
 | Tabs and a count in a panel's head, a fullscreen button | `header`, `actions`, `panel.state` |
 | A button only when there is something to open, with a dot while it runs | `useButton` |
 | "Discard your changes?", and staying open when a third panel opens | `panel.guardClose`, `panel.keep` |
-| One panel asking another to show a file | `portal.panels.open("files", { path })`, `portal.commands` |
+| One panel asking another to show a file, and staying open beside it | `panel.open("files", { path })`, `portal.commands` |
+| git and gh in a chat's folder, safely, with a write at a time | `portal.git.at(folder)` |
+| What changed in the history it shows, counted and dated in the page's language | `portal.tp`, `portal.tc`, `portal.tx`, `portal.format` |
+| Its components styled with the portal's utilities | `buildExtension` with `tailwind: true` |
 | A card of its own for its tool in the conversation | `chat.tool` |
 | A window over the chat; chips above the message box | `chat.overlay`, `chat.composer.above` |
 | Opening itself when the agent makes something | `chat.background` |
@@ -980,3 +1068,14 @@ is the one written in TypeScript and JSX:
   stopper that ends every shell as the portal stops.
 - `src/de.ts` is its German, which the portal's tests hold to every text it
   shows.
+
+`extensions/git`, the [Git](/guide/git) panel, is a larger one:
+
+- `src/client.tsx` registers a panel by the name `git`, with its tabs and the
+  count of changed files in its head (`panel.state`), and opens a file in
+  Files with `panel.open`. It looks again when the agent wrote a file or its
+  turn ended, from `portal.chats.use`.
+- `src/panel/` is the panel, styled with Tailwind utilities its build makes
+  into its own stylesheet.
+- `src/server.ts` is its routes, keyed by chat, and `src/git.ts` what each
+  runs, through `portal.git.at`.

@@ -53,6 +53,8 @@ export interface PanelHandle {
   keep(keep: boolean): void;
   /** Asked before it is closed by hand, and it stays open on false: "Discard your changes?". Null to stop asking. */
   guardClose(guard: (() => boolean | Promise<boolean>) | null): void;
+  /** Opens another panel from this one (a file it lists, in Files): this one is not the one closed to make room for it. */
+  open(name: string, params?: unknown): void;
 }
 
 export type PanelProps = ChatProps & { close(): void; panel: PanelHandle };
@@ -79,7 +81,7 @@ export interface SlotMap {
    * button. `useButton` is a hook, called as the chat's header is drawn: how
    * its button is for this chat. `name` is a name of its own that
    * `portal.panels.open(name, params)` reaches it by, from anywhere: the
-   * portal's own panels go by "files", "git", "browser", "agents" and
+   * portal's own panels go by "files", "browser", "agents" and
    * "canvas", and while one of those is the portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one loaded first).
@@ -389,6 +391,9 @@ export interface Shortcut {
 
 // --- the portal ---
 
+/** A count's forms in a language, by the language's plural rules: `{ one: "{n} Datei", other: "{n} Dateien" }`. */
+export type Plural = Partial<Record<Intl.LDMLPluralRule, string>> & { other: string };
+
 /**
  * What an extension's browser half is called with. Its module's default
  * export is a function taking this; it may return a function, called when the
@@ -412,11 +417,32 @@ export interface Portal {
     url(path: string): string;
     ApiError: new (message: string, status: number, body: Record<string, unknown>) => ApiError;
   };
-  /** A text in the language in effect: the package's own where it added one, as written otherwise. */
+  /** A text in the language in effect: the package's own where it added one, as written otherwise. `{name}` is filled in from `vars`. */
   t(text: string, vars?: Record<string, string | number>): string;
+  /**
+   * A text with a count, `{n}` in it being the count written the language's
+   * way: `tp(3, "{n} file", "{n} files")`. A language gives its forms under
+   * the English plural: `"{n} files": { one: "{n} Datei", other: "{n} Dateien" }`.
+   */
+  tp(n: number, one: string, other: string, vars?: Record<string, string | number>): string;
+  /**
+   * A text whose English is the same word as another's with another meaning,
+   * told apart by what it is: `tc("Open", "state")`. A language keys it as
+   * `"Open\u0004state"`.
+   */
+  tc(text: string, context: string, vars?: Record<string, string | number>): string;
+  /** A text with something drawn in it where `t` takes only words: `tx("Press {key}", { key: <kbd>Enter</kbd> })`. */
+  tx(text: string, vars: Record<string, ReactNode>): ReactNode;
+  /** Numbers, dates and times written the way the page's language writes them, as toLocaleString would. */
+  format: {
+    number(n: number, options?: Intl.NumberFormatOptions): string;
+    date(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
+    dateTime(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
+    time(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
+  };
   locale: {
-    /** The package's texts in a language ("de"), each by what the code says in English. */
-    add(code: string, strings: Record<string, string>): () => void;
+    /** The package's texts in a language ("de"), each by what the code says in English: a text, or a count's forms (see `tp`). */
+    add(code: string, strings: Record<string, string | Plural>): () => void;
     /** A hook: the language in effect, drawing the component again when it changes. */
     use(): string;
   };
@@ -427,7 +453,7 @@ export interface Portal {
     run(name: string, ...args: unknown[]): unknown;
     has(name: string): boolean;
   };
-  /** The panels of the chat on screen, any of them: the portal's ("files", "git", …) and an extension's ("<package>/<id>", or the name it gave itself). */
+  /** The panels of the chat on screen, any of them: the portal's ("files", "browser", …) and an extension's ("<package>/<id>", or the name it gave itself). */
   panels: PanelController;
   chats: {
     /**

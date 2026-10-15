@@ -21,7 +21,7 @@ import { createPortal } from "react-dom";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquare, LuFileText, LuGitBranch, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquare, LuFileText, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -36,7 +36,6 @@ import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slas
 import { useCommandTrigger } from "../command-trigger";
 import { forgetFileDraft } from "../file-drafts";
 import { FilesPanel } from "./FilesPanel";
-import { GIT_TABS, GitPanel, type GitTab } from "./git/GitPanel";
 import { TitleInput } from "./TitleInput";
 import { keepFileActivity, latestFileActivity, type FileActivity } from "../file-activity";
 import { caretFrom, drafts, withUnsent } from "../drafts";
@@ -52,7 +51,6 @@ import { channelFor } from "../extensions/channel";
 import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
 import { setPanelController, type PanelController } from "../extensions/panels";
 import { runCommand, useHasCommand } from "../extensions/commands";
-import { tabKeys } from "../tab-keys";
 import { STEP, arrowSteps } from "../resize-keys";
 
 /** How many messages are drawn at first, and added each time you scroll up to the edge. */
@@ -77,7 +75,7 @@ const ASIDE: Record<Dock, string> = {
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
 
-type OwnPanel = "browser" | "agents" | "files" | "git";
+type OwnPanel = "browser" | "agents" | "files";
 /** A panel an extension brought (the `chat.panel` slot), by its entry's key: `x:<extension>/<id>`. */
 type ExtensionPanel = `x:${string}`;
 /** The panels that sit beside the conversation, each in a place of its own. */
@@ -88,7 +86,6 @@ const PANEL: Record<OwnPanel, { label: string; close: string }> = {
   browser: { label: msg("Browser"), close: msg("Close the browser") },
   agents: { label: msg("Subagents"), close: msg("Close the subagents") },
   files: { label: msg("Files"), close: msg("Close the files") },
-  git: { label: msg("Git"), close: msg("Close the git panel") },
 };
 
 /** Where a slash command comes from; one a newer portal adds is shown as it is named. */
@@ -302,26 +299,12 @@ export function Chat({
   const [files, setFiles] = useState(false);
   // Whether Files has an edit that is not saved: closing it would lose it.
   const [filesDirty, setFilesDirty] = useState(false);
-  // The same entry while it has not changed, so that Files and Git, which are given it, are not drawn for every event.
+  // The same entry while it has not changed, so that Files, which is given it, is not drawn for every event.
   const lastFile = useRef<FileActivity | null>(null);
   const fileActivity = useMemo(() => (lastFile.current = keepFileActivity(lastFile.current, latestFileActivity(events, session.workspace))), [events, session.workspace]);
-  // A file Git asked Files to show, by its path in the chat's folder; `seq` makes the same file asked twice a new ask.
+  // A file another panel asked Files to show (`panels.open("files", { path })`), by its path in the chat's folder;
+  // `seq` makes the same file asked twice a new ask.
   const [fileAsked, setFileAsked] = useState<{ path: string; seq: number } | null>(null);
-  const [git, setGit] = useState(false);
-  const [gitTab, setGitTab] = useState<GitTab>("changes");
-  // How many files have changed, for the Changes tab: known only while the panel is open.
-  const [gitCount, setGitCount] = useState(0);
-  // Files opened from Git beside it: a third panel closes the one open longest,
-  // and that must not be Git, which was just clicked in.
-  const [gitHeld, setGitHeld] = useState(false);
-  const showInFiles = useCallback((path: string) => {
-    setGitHeld(true);
-    setFiles(true);
-    setFileAsked({ path, seq: Date.now() });
-  }, []);
-  useEffect(() => {
-    if (!files || !git) setGitHeld(false);
-  }, [files, git]);
   // An ask is for the chat it was made in, and answered once: Files, drawn
   // again later or for another chat, is not sent back to it.
   const fileAnswered = useCallback(() => setFileAsked(null), []);
@@ -337,6 +320,11 @@ export function Chat({
   const [panelParams, setPanelParams] = useState<Record<string, unknown>>({});
   const [panelStates, setPanelStates] = useState<Record<string, unknown>>({});
   const [panelsKept, setPanelsKept] = useState<readonly string[]>([]);
+  // An extension's panel that has just opened another (`panel.open`): not the one closed to make room for it.
+  const [openedFrom, setOpenedFrom] = useState<string | null>(null);
+  useEffect(() => {
+    if (openedFrom) setOpenedFrom(null);
+  }, [openedFrom]);
   /** What each asks before it is closed by hand. */
   const closeGuards = useRef(new Map<string, () => boolean | Promise<boolean>>());
   // Only what is still there: an extension taken out takes its panels with it.
@@ -408,6 +396,10 @@ export function Chat({
         setState: (next: unknown) => setPanelStates((all) => (Object.is(all[key], next) ? all : { ...all, [key]: next })),
         keep: (keep: boolean) => setPanelsKept((all) => (keep === all.includes(key) ? all : keep ? [...all, key] : all.filter((k) => k !== key))),
         guardClose: (guard: (() => boolean | Promise<boolean>) | null) => void (guard ? closeGuards.current.set(key, guard) : closeGuards.current.delete(key)),
+        open: (name: string, opened?: unknown) => {
+          setOpenedFrom(key);
+          panelControl.current.open(name, opened);
+        },
       },
     };
     panelParts.current.set(key, now);
@@ -422,15 +414,18 @@ export function Chat({
   const toggleExtensionPanel = useStable((key: string, open: boolean) => (open ? void closeExtensionPanel(key) : showExtensionPanel(key, true)));
   useWorkPanels(
     {
-      browser: !voiceMode && watching, canvas: canvasOpen, files: !voiceMode && files, git: !voiceMode && git, agents: !voiceMode && agentsOpen,
+      browser: !voiceMode && watching, canvas: canvasOpen, files: !voiceMode && files, agents: !voiceMode && agentsOpen,
       ...Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
     },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "files") setFiles(false); else if (panel === "git") setGit(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); else setCanvasOpen(false); },
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "files") setFiles(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); else setCanvasOpen(false); },
     // A third panel closes another one instead, while Files has an edit in it.
-    // An edit not saved outweighs keeping Git in view: with both kept nothing
-    // could go, and the fallback closed Files — edit and all — unasked.
-    // One an extension says holds something that would be lost stays as well.
-    [...(filesDirty ? (["files"] as const) : gitHeld ? (["git"] as const) : []), ...panelsKept.map((key) => `x:${key}` as const)],
+    // One an extension says holds something that would be lost stays as well,
+    // and one that has just opened the third.
+    [
+      ...(filesDirty ? (["files"] as const) : []),
+      ...panelsKept.map((key) => `x:${key}` as const),
+      ...(openedFrom ? [`x:${openedFrom}` as const] : []),
+    ],
   );
   const closeFiles = async () => {
     if (
@@ -444,7 +439,7 @@ export function Chat({
     setFiles(false);
   };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", git && "git", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1583,7 +1578,6 @@ export function Chat({
     browser: () => setWatching(false),
     agents: () => setAgentsOpen(false),
     files: () => void closeFiles(),
-    git: () => setGit(false),
   };
   const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : void closeExtensionPanel(kind.slice(2)));
   /** The entry an extension's panel is drawn from. */
@@ -1639,14 +1633,13 @@ export function Chat({
   const panelControl = useRef<PanelController>({ isOpen: () => false, open: () => {}, close: () => {} });
   panelControl.current = {
     isOpen: (key) =>
-      key === "files" ? files : key === "git" ? git : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(panelKey(key) ?? key),
+      key === "files" ? files : key === "browser" ? watching : key === "agents" ? agentsOpen : key === "canvas" ? canvasOpen : extensionPanels.includes(panelKey(key) ?? key),
     open: (key, params) => {
       const given = (params ?? {}) as { path?: unknown; id?: unknown };
       if (key === "files") {
         setFiles(true);
         if (typeof given.path === "string") setFileAsked({ path: given.path, seq: Date.now() });
-      } else if (key === "git") setGit(true);
-      else if (key === "browser") setWatching(true);
+      } else if (key === "browser") setWatching(true);
       else if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
       else if (key === "canvas") setCanvasOpen(true);
       else {
@@ -1683,24 +1676,13 @@ export function Chat({
         <span title={t("Drag to an edge to dock this panel there, anywhere else to float it")} className="-ml-1.5 shrink-0 text-fg-faint max-md:hidden">
           <LuGripVertical aria-hidden className="h-3.5 w-3.5" />
         </span>
-        {kind === "git" ? (
-          <div className="chat-tabs" role="tablist" aria-label={t("Git")} onKeyDown={tabKeys}>
-            {GIT_TABS.map((tab) => (
-              <button key={tab.id} type="button" role="tab" aria-selected={gitTab === tab.id} tabIndex={gitTab === tab.id ? 0 : -1} onClick={() => setGitTab(tab.id)}>
-                {t(tab.label)}
-                {tab.id === "changes" && gitCount > 0 && <span className="ml-1 rounded-full bg-fg/10 px-1 text-[10px]">{gitCount}</span>}
-              </button>
-            ))}
-          </div>
-        ) : (
-          extensionHead(kind, "header") ?? <span className="text-[11px] text-fg-subtle">{panelName(kind).label}</span>
-        )}
+        {extensionHead(kind, "header") ?? <span className="text-[11px] text-fg-subtle">{panelName(kind).label}</span>}
         <div className="ml-auto flex items-center gap-0.5">
           {extensionHead(kind, "actions")}
           {kind === "browser" && (
             <button
               // The browser's own box is what goes fullscreen, not the place
-              // it shares: Files or Git beside it stays where it is,
+              // it shares: the panel beside it stays where it is,
               // and closed, the box leaves the page, and fullscreen with it.
               onClick={() => boxes.box("browser").requestFullscreen?.()}
               className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
@@ -1735,11 +1717,6 @@ export function Chat({
         <div className="min-h-0 flex-1 bg-surface">
           {/* Not before the chat's events are here: what it did earlier is not news. */}
           {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} keepDraft />}
-        </div>
-      )}
-      {kind === "git" && (
-        <div className="min-h-0 flex-1 bg-surface">
-          <GitPanel key={session.id} sessionId={session.id} tab={gitTab} onTab={setGitTab} activity={fileActivity?.seq} running={running} onOpenFile={showInFiles} onCount={setGitCount} />
         </div>
       )}
       {extensionBody(kind)}
@@ -1917,14 +1894,6 @@ export function Chat({
             title={files ? t("Hide the files") : t("Browse the files in this chat's folder")}
           >
             <LuFolderOpen />
-          </PanelToggle>
-          <PanelToggle
-            open={git}
-            onClick={() => setGit((v) => !v)}
-            label={t("Git")}
-            title={git ? t("Hide git") : t("What changed, commits, branches and pull requests — for this chat's repository")}
-          >
-            <LuGitBranch />
           </PanelToggle>
           <PanelToggle open={canvasOpen} onClick={() => setCanvasOpen((v) => !v)} label={t("Session canvases")} title={t("Session canvases")}>
             <LuFileText />

@@ -1,7 +1,7 @@
 /**
  * Where the passage of a comment is in a document, and where it goes when the
  * document changes: no editor, no browser and no server in it, so that what it
- * does can be tried alone (tests/docs-anchor.test.mts). The server half keeps
+ * does can be tried alone (extensions/docs/test/anchor.test.mts). The server half keeps
  * a passage in step with the revisions, the page finds it in the text the
  * editor holds; both go through this one.
  *

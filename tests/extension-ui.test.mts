@@ -8,7 +8,9 @@ import { choose, registerTheme, themes, themesSettled } from '../core/web/src/ex
 import { chosenPalette, choosePalette, coloursOf, toTriplet, TOKENS } from '../core/web/src/theme.tsx';
 import { register, slotEntries } from '../core/web/src/extensions/slots.ts';
 import { hasCommand, registerCommand, runCommand } from '../core/web/src/extensions/commands.ts';
-import { addStrings, forgetStrings, translate } from '../core/web/src/extensions/strings.ts';
+import { addStrings, forgetStrings, translate, translateCount, translateInContext, translateWithParts } from '../core/web/src/extensions/strings.ts';
+import { createElement, Fragment } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush, setChatOnScreen } from '../core/web/src/extensions/server-feed.ts';
 import { panels, panelsFor, setPanelController } from '../core/web/src/extensions/panels.ts';
 import { chatFeed, forgetChatFeed, onChatFeed, publishChat, sameValue } from '../core/web/src/extensions/chat-feed.ts';
@@ -119,6 +121,25 @@ test('a slot holds what was registered in it, in order, until it is taken out', 
   assert.deepEqual(slotEntries('chat.panel'), [], 'each slot its own');
   for (const off of offs) off();
   assert.deepEqual(slotEntries('nav.page'), []);
+});
+
+test('each part an extension draws is inside an element that says whose it is, laid out as if it were not there', () => {
+  const off = register('@me/panel', 'chat.panel', {
+    id: 'p',
+    title: 'P',
+    component: ({ chat }: { chat: { id: string } }) => createElement('p', { className: 'flex' }, chat.id),
+    header: () => createElement('span', null, 'Tabs'),
+    actions: () => createElement('button', null, 'Go'),
+  });
+  try {
+    const [entry] = slotEntries('chat.panel');
+    const drawn = (part: unknown, props: object) => renderToStaticMarkup(createElement(part as any, props));
+    assert.equal(drawn(entry.component, { chat: { id: 'c1' } }), '<div data-extension="@me/panel" style="display:contents"><p class="flex">c1</p></div>');
+    assert.equal(drawn(entry.header, {}), '<div data-extension="@me/panel" style="display:contents"><span>Tabs</span></div>');
+    assert.equal(drawn(entry.actions, {}), '<div data-extension="@me/panel" style="display:contents"><button>Go</button></div>');
+  } finally {
+    off();
+  }
 });
 
 test('what cannot be drawn is refused where it is registered, with why', () => {
@@ -244,6 +265,32 @@ test('an extension\'s texts are its own in each language, beside the portal\'s a
     forgetStrings('other');
     assert.equal(translate('other', 'Notes'), 'Notes');
   } finally {
+    setLanguage('system');
+  }
+});
+
+test('an extension\'s counts, texts told apart by what they are, and texts with parts drawn in, are its own before the portal\'s', () => {
+  addLocale({ code: 'xx', name: 'Test', strings: { '{n} files': { one: '{n} Portal-Datei', other: '{n} Portal-Dateien' }, 'Open\u0004state': 'Offen (Portal)' } });
+  const off = addStrings('git', 'xx', {
+    '{n} commits': { one: '{n} Eintrag', other: '{n} Einträge' },
+    'Open\u0004state': 'Offen',
+    'Pushed to {branch}': 'Nach {branch} geschoben',
+  });
+  try {
+    setLanguage('en');
+    assert.equal(translateCount('git', 1, '{n} commit', '{n} commits'), '1 commit');
+    assert.equal(translateCount('git', 3, '{n} commit', '{n} commits'), '3 commits');
+    setLanguage('xx');
+    assert.equal(translateCount('git', 1, '{n} commit', '{n} commits'), '1 Eintrag');
+    assert.equal(translateCount('git', 3, '{n} commit', '{n} commits'), '3 Einträge');
+    assert.equal(translateCount('git', 2, '{n} file', '{n} files'), '2 Portal-Dateien', 'the portal\'s where it has none');
+    assert.equal(translateInContext('git', 'Open', 'state'), 'Offen');
+    assert.equal(translateInContext('notes', 'Open', 'state'), 'Offen (Portal)');
+    assert.equal(translateInContext('git', 'Open', 'button'), 'Open');
+    const drawn = translateWithParts('git', 'Pushed to {branch}', { branch: createElement('b', null, 'main') });
+    assert.equal(renderToStaticMarkup(createElement(Fragment, null, drawn)), 'Nach <b>main</b> geschoben');
+  } finally {
+    off();
     setLanguage('system');
   }
 });
