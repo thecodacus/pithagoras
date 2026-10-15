@@ -107,6 +107,7 @@ async function open(page: Page, store: Store, { editor = true }: { editor?: bool
     if (p === `${API}/folders`) return { folders };
     if (p === DOCUMENT && method === 'GET') return store.read();
     if (p === DOCUMENT && method === 'PUT') { const { markdown, base } = json(); return store.save(markdown, base); }
+    if (p === `${DOCUMENT}/threads`) return { revision: store.revision, threads: [] };
     if (p === `${DOCUMENT}/history`) return store.history(url.searchParams.has('before') ? Number(url.searchParams.get('before')) : undefined, Number(url.searchParams.get('limit') ?? 200));
     if (p === `${DOCUMENT}/restore`) { const { revision, base } = json(); return store.restore(revision, base); }
     const revision = /\/revisions\/(\d+)$/.exec(p);

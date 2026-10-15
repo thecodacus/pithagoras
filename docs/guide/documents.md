@@ -6,8 +6,8 @@ the sidebar. The page shows the Markdown documents in the folders your chats
 work in.
 
 It is under construction: documents can be listed, read, edited by you and by
-the agent at the same time, and have a history. This page describes what it
-does so far.
+the agent at the same time, have a history, and can be commented on, by you and
+by the agent. This page describes what it does so far.
 
 ## Installing it
 
@@ -178,7 +178,8 @@ The title is shown as plain text. Links and pictures are shown by their text,
 emphasis, code and HTML tags lose their marks however long they are, and
 footnote marks are left out. A title longer than 256 characters is cut. A document with no heading in
 its first 4 KB is listed by its file name. The list also shows when the
-document last changed.
+document last changed, and how many comments on it are open
+([below](#comments)).
 
 **All documents** goes back to the list.
 
@@ -329,10 +330,81 @@ If the editor cannot be loaded (its file is missing from a checkout that was
 not built), the document is shown read-only, drawn as the portal draws
 Markdown, with the reason and **Try again**.
 
+## Comments
+
+A comment is on a passage of a document: you select some words, press
+**Comment** in the bar above the text, write what you want to say and press
+**Add comment** (or Ctrl+Enter). The words are marked in the text, and the
+comment is a **thread** in the list of comments beside the text (under it on a
+narrow screen). The agent starts threads too, with its tools
+([below](#the-agents-tools)), and your page shows them as soon as they are
+made, without a reload.
+
+What is in a thread:
+
+- The passage it is on, which you can click to bring it into view in the text
+  (clicking the marked words does the same the other way round).
+- The comments in it, in the order they were made, each with who made it (you or
+  the agent) and when. A comment is Markdown, drawn as the conversation draws
+  it.
+- A box to **Reply** in. **Resolve** closes the thread: it is no longer marked in
+  the text and is out of the list until you press **Show resolved**. With
+  something written in the box it reads **Reply and resolve** and adds the
+  comment first. **Reopen** opens a resolved thread again. Nothing is added to a
+  resolved thread until it is opened.
+
+You and the agent can both start a thread, answer it and resolve it. Comments
+are not edited or deleted yet.
+
+A comment on text you have just typed is made on that text: what you typed is
+saved first (a revision of its own), so that the passage is in a revision the
+history has.
+
+### Where the passage is
+
+A passage is a stretch of the document's Markdown, kept with up to 32
+characters on either side of it. It keeps its place when the text around it
+changes: a paragraph added above it, words changed after it, a revision restored
+that still has it. It follows text that is edited in it too: words you type
+inside it are in it, a word replaced by another is the other word, and a
+sentence of a paragraph rewritten is the new sentence. Text put in at the very
+start or end of it is not in it.
+
+The portal works this out from the text a passage was last placed in and the
+text the document has now, when the comments are asked for (the page asks after
+every save, so each step is a small one): by lines first, and by words inside the
+lines that changed. It guesses as little as it can:
+
+- A passage that was a whole paragraph, and is replaced by words that have next
+  to nothing in common with it, is gone: nothing can tell a paragraph rewritten
+  from one deleted and another written. The agent's `doc_edit` with a `thread`
+  ([below](#the-agents-tools)) is how a passage is rewritten and stays: it knows
+  which words stand there now.
+- A passage that is deleted, or cannot be followed, is **no longer in the
+  document**. Its thread stays in the list, with the words it had, and can still
+  be answered and resolved. If the words come back (a restored revision, an undo)
+  the passage is found again.
+- Words that read the same in two places (a short phrase) are not taken for
+  the passage unless the text around them is like what was around it.
+
+A passage is marked in the editor by finding its words in the text the editor
+writes. A document written in another style than the editor's (`*` bullets,
+padded tables) is found by its letters and digits, with the marks left out; if
+that is not enough, the thread says **The passage could not be marked in the
+text**, and works all the same. Editing the document once writes it in the
+editor's style.
+
+Limits: a passage is at most 5000 characters, a comment at most 4096 bytes, a
+thread at most 100 comments and a document at most 1000 threads.
+
+Comments are kept in the store's database ([above](#where-the-history-is-kept)),
+not in the document's file or in its history: copying the file does not copy
+its comments, and restoring a revision brings back text, not comments.
+
 ## The agent's tools
 
 With the host executor (pi runs in the portal's own process) each chat's agent
-has four tools for the documents. Like any tool they can be switched off for
+has seven tools for the documents. Like any tool they can be switched off for
 a chat or by default under Settings → Tools, where they are listed in the group
 `extension-host`: the name the portal gives to what extensions add to a chat's
 pi through their server half. With `EXECUTOR=container` the agent has none:
@@ -340,10 +412,13 @@ the runner image does not get extensions.
 
 | Tool | What it does |
 | --- | --- |
-| `doc_list` | The documents the chat sees: id, title, file, revision and whether it is the project's or the chat's own. `scope` narrows it to one of the two. |
-| `doc_read` | One document's Markdown and revision. `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). |
+| `doc_list` | The documents the chat sees: id, title, file, revision, whether it is the project's or the chat's own, and how many comments on it are open. `scope` narrows it to one of the two. |
+| `doc_read` | One document's Markdown and revision, and after the text the comment threads on it that are open (`comments` asks for all of them, or none). `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). The comments come with the first part, for the document as it is now. |
 | `doc_create` | A new document from a title and its Markdown, at revision 1. |
-| `doc_edit` | Replaces quoted passages with new text, on the revision the agent read. |
+| `doc_edit` | Replaces quoted passages with new text, on the revision the agent read. With a `thread` and a `reply` it answers a comment ([below](#answering-a-comment)). |
+| `doc_comment` | Starts a thread on a passage the agent quotes, with its first comment. The document is not changed. |
+| `doc_reply` | Adds a comment to an open thread. |
+| `doc_resolve` | Resolves a thread, with a last comment if the agent gives one. |
 
 The agent names a document by its id, never by a path. A document is the
 **project's** (every chat that works in the folder sees it) unless the agent
@@ -379,7 +454,8 @@ What the tools check is what keeps the agent from overwriting you:
 
 A refusal reaches the agent as an error that starts with its reason
 (`revision_mismatch`, `quote_not_found`, `quote_ambiguous`, `edits_overlap`,
-`exists`, `too_large`, `secret`, `not_found`, `invalid` or `refused`, for
+`exists`, `too_large`, `secret`, `not_found`, `invalid`, `thread_not_found`,
+`thread_resolved`, `thread_orphaned`, `too_many` or `refused`, for
 anything else the store will not do: the folder is full, `documents` is a link,
 the store's packages are not installed yet), so that it can put it right.
 
@@ -388,8 +464,46 @@ with its own tools (it is an ordinary file in the chat's folder); that is kept
 as an outside change like any other, but it is not checked against what you are
 doing, which is why the tools' instructions tell the agent to use them.
 
-In the conversation a call of `doc_create`, `doc_read` or `doc_edit` is drawn
-as a card that names the document and says what became of it (created, read,
-edited from revision 2 to 3, with how many edits). **Open in Documents** opens
-the document on the page. A call that failed, and a list, are drawn as any
-tool call is.
+### Answering a comment
+
+`doc_read` lists the open threads after the document's text: each thread's id,
+the passage it is on (as the Markdown has it) and the line, and what the person
+and the agent said in it. `doc_list` says how many comments are open on each
+document. **Nothing tells the agent that you left a comment**: it sees them when
+it reads the document, so ask it in the chat to look at them. (Letting a comment
+reach the agent, and waking it, is the next step.)
+
+The rule for answering a comment is the one Claude for Word follows: the agent
+changes only the passage the comment is on, and says what it changed. It is held
+to it by the tool:
+
+- `doc_edit` given a `thread` looks for its quotes only in that thread's
+  passage, so a quote need be unique in the passage only, and nothing outside the
+  passage can be changed by it. The thread must be open, and its passage still in
+  the document.
+- It then needs a `reply`, which is added to the thread as the agent's comment
+  once the change is made, so that you can read in the thread what was done. A
+  `reply` is checked before anything is written; if the document is changed and
+  the reply then cannot be added (the thread was resolved meanwhile), the tool
+  says so and the agent adds it with `doc_reply`.
+- The thread's passage is then the words that now stand there, including what
+  the edit added at its end.
+- `doc_reply` and `doc_resolve` say in their instructions that a reply says what
+  was done about the comment, not only that it was read. Whether a thread is
+  resolved after an answer is the agent's to decide; it is told to leave it to
+  you unless the comment asked for something the change fully carries out.
+
+An edit without a `thread` is as before: it may change anything in the document,
+and a comment whose passage it touches follows it as above.
+
+A comment the agent starts is its own, and a comment you make through the page
+is always yours: neither can be made in the other's name. Comments on a document
+that is only a chat's own (`scope: chat`) can be read and answered only by that
+chat, like the document.
+
+In the conversation a call of `doc_create`, `doc_read`, `doc_edit`,
+`doc_comment`, `doc_reply` or `doc_resolve` is drawn as a card that names the
+document and says what became of it (created, read, commented on, edited from
+revision 2 to 3 with how many edits, and whether that answered a comment).
+**Open in Documents** opens the document on the page. A call that failed, and a
+list, are drawn as any tool call is.

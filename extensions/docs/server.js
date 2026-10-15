@@ -16,6 +16,11 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/history            its revisions, newest first (?before=, ?limit=)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/revisions/:revision  the text of one of them
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/restore            { revision, base? }: that text as a new revision
+ *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            its comment threads, each with its passage where it is in the text now
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            a new thread { base, quote, prefix?, suffix?, start?, body }: 422 when the passage is not in revision `base`
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments  a reply { body } to an open thread
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/resolve   resolves a thread, with a last comment if `body` is given
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/reopen    opens a resolved thread again
  *
  * The page names a folder by an id made from its path, and a document by an
  * id the store gave it, never by a path: a folder is only one that a chat
@@ -26,7 +31,9 @@
  * message is where the document stands, so that a page that was away (a
  * reconnect, or a change between its load and its stream) finds out at once,
  * whatever it missed. A message says which revision, who made it and when; the
- * text is asked for from the document's own route. While a stream is open the
+ * text is asked for from the document's own route. A change to the document's
+ * comments is told too (`threads`, with when), and the threads are asked for
+ * from their own route. While a stream is open the
  * folder is looked at every couple of seconds for what changed outside the
  * store's own writes, which is how the changes of Files and editors get told.
  */
@@ -453,7 +460,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         Database = (await import("better-sqlite3")).default;
       }
       const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), inside: portal.files.inside, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
-      return Store.open(folder, { dir, inside: portal.files.inside, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change) });
+      return Store.open(folder, { dir, inside: portal.files.inside, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
     })();
     stores.set(folder, opening);
     return opening;
@@ -511,6 +518,8 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     }
   };
   const json = portal.http.json({ limit: BODY_LIMIT });
+  /** A comment and the passage it is on are small: nothing like a document's text. */
+  const small = portal.http.json({ limit: "64kb" });
 
   portal.router.get("/folders", route(async (_req, res) => {
     const list = [];
@@ -589,9 +598,11 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     // A page that lost the stream asks again after this long, with its last id: the first message tells it where things stand, so it is not needed.
     res.write("retry: 2000\n\n");
-    const write = ({ revision, author, at }) => res.write(`id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`);
+    const write = ({ revision, author, at, threads }) =>
+      // A change to the comments is no revision: it has no id, which a reconnecting page would take for the last one it saw.
+      res.write(threads ? `event: threads\ndata: ${JSON.stringify({ at })}\n\n` : `id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`);
     write(now);
-    for (const change of queued) if (change.revision > now.revision) write(change);
+    for (const change of queued) if (change.threads || change.revision > now.revision) write(change);
     send = write;
     const ping = setInterval(() => res.write(": ping\n\n"), pingMs);
     ping.unref?.();
@@ -624,6 +635,41 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const revision = revisionOf(req.body?.revision, "revision");
     const base = req.body?.base === undefined ? undefined : revisionOf(req.body.base, "base");
     res.json(await (await storeFor(folder.path)).restore(id, { revision, base }));
+  }));
+
+  portal.router.get("/folders/:folder/documents/:id/threads", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.json(await (await storeFor(folder.path)).threads(id));
+  }));
+
+  portal.router.post("/folders/:folder/documents/:id/threads", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const body = req.body ?? {};
+    const base = revisionOf(body.base, "base");
+    const start = Number.isInteger(body.start) ? body.start : null;
+    // The author is the person: the agent has its own tools, and a request cannot say it is someone else.
+    const thread = await (await storeFor(folder.path)).addThread(id, { base, quote: body.quote, prefix: body.prefix ?? "", suffix: body.suffix ?? "", start, body: body.body, author: "user" });
+    res.status(201).json(thread);
+  }));
+
+  portal.router.post("/folders/:folder/documents/:id/threads/:thread/comments", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.status(201).json(await (await storeFor(folder.path)).reply(id, req.params.thread, { body: req.body?.body, author: "user" }));
+  }));
+
+  portal.router.post("/folders/:folder/documents/:id/threads/:thread/resolve", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.json(await (await storeFor(folder.path)).settle(id, req.params.thread, { status: "resolved", body: req.body?.body, author: "user" }));
+  }));
+
+  portal.router.post("/folders/:folder/documents/:id/threads/:thread/reopen", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.json(await (await storeFor(folder.path)).settle(id, req.params.thread, { status: "open", author: "user" }));
   }));
 
   return async () => {

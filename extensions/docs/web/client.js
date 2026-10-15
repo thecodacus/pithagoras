@@ -73,6 +73,36 @@ export default function (portal) {
     "No change": "Keine Änderung",
     "an earlier revision, the document is at {n}": "eine frühere Revision, das Dokument steht bei {n}",
     "Open in Documents": "In Dokumenten öffnen",
+    Comments: "Kommentare",
+    Comment: "Kommentieren",
+    "Select the text you want to comment on.": "Wähle den Text aus, den du kommentieren willst.",
+    "Select less text: a comment can be on at most {n} characters.": "Wähle weniger Text aus: Ein Kommentar kann sich auf höchstens {n} Zeichen beziehen.",
+    "No comments yet. Select some text, then press Comment.": "Noch keine Kommentare. Wähle Text aus und drücke Kommentieren.",
+    "Comments could not be loaded: {error}": "Kommentare konnten nicht geladen werden: {error}",
+    "Could not comment: {error}": "Kommentar fehlgeschlagen: {error}",
+    "New comment": "Neuer Kommentar",
+    "Write a comment": "Kommentar schreiben",
+    "Write a comment…": "Kommentar schreiben…",
+    "Add comment": "Kommentar hinzufügen",
+    Cancel: "Abbrechen",
+    Reply: "Antworten",
+    "Reply…": "Antworten…",
+    "Reply and resolve": "Antworten und erledigen",
+    Resolve: "Erledigen",
+    Resolved: "Erledigt",
+    Reopen: "Wieder öffnen",
+    "Show resolved ({n})": "Erledigte anzeigen ({n})",
+    "Hide resolved": "Erledigte ausblenden",
+    "Show in the text": "Im Text zeigen",
+    "Comment thread": "Kommentarverlauf",
+    "The passage this comment was on is no longer in the document.": "Die Textstelle, auf die sich dieser Kommentar bezog, steht nicht mehr im Dokument.",
+    "The passage could not be marked in the text.": "Die Textstelle konnte im Text nicht markiert werden.",
+    "1 open comment": "1 offener Kommentar",
+    "{n} open comments": "{n} offene Kommentare",
+    "Commented on a document": "Dokument kommentiert",
+    "Replied to a comment": "Auf einen Kommentar geantwortet",
+    "Resolved a comment": "Kommentar erledigt",
+    "answers a comment": "beantwortet einen Kommentar",
   });
 
   const icon = (path) => () =>
@@ -120,7 +150,7 @@ export default function (portal) {
                 "button",
                 { type: "button", onClick: () => onOpen({ folder: folder.id, id: doc.id }) },
                 h("span", { className: "pd-title" }, doc.title),
-                h("span", { className: "pd-meta" }, `${doc.name} · ${t("Changed {date}", { date: when(doc.modified) })}`),
+                h("span", { className: "pd-meta" }, [doc.name, t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads }))].filter(Boolean).join(" · ")),
               ),
             ),
           ),
@@ -141,11 +171,14 @@ export default function (portal) {
     portal.locale.use();
     const d = call.details;
     if (call.status !== "done" || typeof d?.id !== "string" || typeof d.folder !== "string") return card;
-    const heading = { create: t("Created a document"), edit: t("Edited a document"), read: t("Read a document") }[d.action];
+    const heading = { create: t("Created a document"), edit: t("Edited a document"), read: t("Read a document"), comment: t("Commented on a document"), reply: t("Replied to a comment"), resolve: t("Resolved a comment") }[d.action];
     if (!heading) return card;
     const facts = [`documents/${d.name}`];
     if (d.action === "edit") {
       facts.push(d.changed ? t("Revision {from} to {to}", { from: d.from, to: d.revision }) : t("No change"), d.edits === 1 ? t("1 edit") : t("{n} edits", { n: d.edits }));
+      if (d.thread) facts.push(t("answers a comment"));
+    } else if (d.action === "comment" || d.action === "reply" || d.action === "resolve") {
+      facts.push(t("Revision {n}", { n: d.revision }));
     } else {
       facts.push(t("Revision {n}", { n: d.revision }));
       if (d.current !== undefined && d.current !== d.revision) facts.push(t("an earlier revision, the document is at {n}", { n: d.current }));
@@ -180,5 +213,5 @@ export default function (portal) {
   }
 
   portal.slots.register("nav.page", { id: "documents", title: "Documents", icon: DocumentIcon, component: DocumentsPage });
-  for (const tool of ["doc_create", "doc_read", "doc_edit"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
+  for (const tool of ["doc_create", "doc_read", "doc_edit", "doc_comment", "doc_reply", "doc_resolve"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
 }

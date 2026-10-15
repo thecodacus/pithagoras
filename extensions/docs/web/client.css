@@ -81,3 +81,35 @@
 .pd-editor .ProseMirror .pd-changed { border-radius: 4px; animation: pd-changed 2s ease-out; }
 @keyframes pd-changed { from { background: rgb(var(--accent) / .22); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .pd-editor .ProseMirror .pd-changed { animation: none; background: rgb(var(--accent) / .12); } }
+
+/* The comments: the text and the threads side by side where there is room, one under the other where there is not. */
+.pd-page:has(.pd-workspace) { max-width: 76rem; }
+.pd-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (min-width: 62rem) { .pd-workspace { grid-template-columns: minmax(0, 1fr) 20rem; } }
+.pd-threads { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+@media (min-width: 62rem) { .pd-threads { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; } }
+.pd-threads h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
+.pd-count { border-radius: 999px; background: rgb(var(--accent) / .15); padding: 0 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 600; }
+.pd-hint { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; }
+.pd-thread-list { display: flex; flex-direction: column; gap: 8px; }
+.pd-thread-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 8px 10px; font-size: 13px; }
+.pd-thread-card[aria-current="true"] { border-color: rgb(var(--accent) / .6); }
+.pd-thread-card[data-status="resolved"] { opacity: .75; }
+.pd-quote { margin: 0; border: 0; border-left: 2px solid rgb(var(--warn) / .7); background: none; padding: 0 0 0 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: 12px; text-align: left; overflow-wrap: anywhere; white-space: pre-wrap; }
+button.pd-quote { cursor: pointer; }
+button.pd-quote:hover { color: rgb(var(--fg)); }
+button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-gone { color: rgb(var(--warn)); }
+.pd-comments { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pd-comment-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.pd-comments li[data-author="agent"] .pd-comment-head strong { color: rgb(var(--accent)); }
+.pd-comment-body { overflow-wrap: anywhere; }
+.pd-comment-body > :first-child { margin-top: 0; }
+.pd-comment-body > :last-child { margin-bottom: 0; }
+.pd-reply, .pd-compose { display: flex; flex-direction: column; gap: 6px; }
+.pd-write { width: 100%; resize: vertical; }
+.pd-thread-card .pd-actions { margin: 0; }
+.pd-more { align-self: flex-start; }
+/* The words a comment is on, marked in the text, and the one being written (the one being looked at is drawn by editor.js). */
+.pd-editor .ProseMirror .pd-thread { border-radius: 2px; background: rgb(var(--warn) / .2); box-shadow: 0 -1px 0 rgb(var(--warn) / .2); }
+.pd-editor .ProseMirror .pd-thread-pending { background: rgb(var(--accent) / .2); }

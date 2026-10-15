@@ -106,7 +106,7 @@ function changes(a, b, start, endA, endB, gone, added) {
 }
 
 /** A text as its lines, each with its line break: the last one has none when the text does not end in one. */
-const linesOf = (text) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+export const linesOf = (text) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 
 /** `lines` replaced by each hunk's own, from `from` to `to` of the base: what that stretch of the base is on one side. */
 function region(base, hunks, side, from, to) {

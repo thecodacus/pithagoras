@@ -55,6 +55,8 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
     if (p.startsWith(address(''))) { await route.fulfill({ contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: web(p.slice(address('').length)) }); return DONE; }
     if (p === `/api/x/${NAME}/folders`) return { folders };
     if (p.startsWith(`/api/x/${NAME}/folders/`)) {
+      // The comments on a document are asked for with it, and are none.
+      if (p.endsWith('/threads')) return { revision: 3, threads: [] };
       asked.push(p);
       if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents/1111111111111111`) return { id: '1111111111111111', name: 'plan.md', title: 'The plan', revision: 3, markdown: PLAN, modified: '2026-10-01T09:30:00.000Z' };
       return reply(404, { error: 'There is no such document' });
@@ -163,6 +165,45 @@ test('a call of one of the agent\'s document tools is drawn as what became of th
   expect([...new Set(asked)]).toEqual([`/api/x/${NAME}/folders/0123456789abcdef/documents/1111111111111111`]);
   await page.getByRole('button', { name: /All documents/ }).click();
   await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
+});
+
+test('a comment, a reply, a resolved thread and an edit that answers a comment are drawn as what became of the document, in English and in German', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { caughtUp, calls } = await portal(page, FOLDERS, 'open');
+  await page.goto('/s/a');
+  await caughtUp();
+  const thread = 'abcdef0123456789';
+  await calls('k1', 'doc_comment', { id: PLAN_AT.id, quote: 'Friday', comment: 'Why?' }, 'Commented', { ...PLAN_AT, action: 'comment', revision: 3, thread });
+  await calls('k2', 'doc_reply', { id: PLAN_AT.id, thread, comment: 'Done.' }, 'Replied', { ...PLAN_AT, action: 'reply', revision: 3, thread });
+  await calls('k3', 'doc_resolve', { id: PLAN_AT.id, thread }, 'Resolved', { ...PLAN_AT, action: 'resolve', revision: 3, thread, changed: true });
+  await calls('k4', 'doc_edit', { id: PLAN_AT.id, thread }, 'Edited', { ...PLAN_AT, action: 'edit', revision: 4, from: 3, edits: 1, changed: true, thread, replied: true });
+  const cards = page.locator('.tool-row .pd-call');
+  await expect(cards).toHaveCount(4);
+  await expect(cards.nth(0)).toContainText('Commented on a document');
+  await expect(cards.nth(0)).toContainText('documents/plan.md · Revision 3');
+  await expect(cards.nth(1)).toContainText('Replied to a comment');
+  await expect(cards.nth(2)).toContainText('Resolved a comment');
+  await expect(cards.nth(3)).toContainText('Edited a document');
+  await expect(cards.nth(3)).toContainText('documents/plan.md · Revision 3 to 4 · 1 edit · answers a comment');
+  await expect(cards.nth(0).getByRole('button', { name: 'Open in Documents' })).toBeVisible();
+});
+
+test('the cards of the agent\'s comments are in German in a German portal', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { caughtUp, calls } = await portal(page, FOLDERS, 'open');
+  await page.goto('/s/a');
+  await caughtUp();
+  const thread = 'abcdef0123456789';
+  await calls('k1', 'doc_comment', { id: PLAN_AT.id }, 'Commented', { ...PLAN_AT, action: 'comment', revision: 3, thread });
+  await calls('k2', 'doc_reply', { id: PLAN_AT.id }, 'Replied', { ...PLAN_AT, action: 'reply', revision: 3, thread });
+  await calls('k3', 'doc_resolve', { id: PLAN_AT.id }, 'Resolved', { ...PLAN_AT, action: 'resolve', revision: 3, thread });
+  await calls('k4', 'doc_edit', { id: PLAN_AT.id }, 'Edited', { ...PLAN_AT, action: 'edit', revision: 4, from: 3, edits: 1, changed: true, thread });
+  const cards = page.locator('.tool-row .pd-call');
+  await expect(cards.nth(0)).toContainText('Dokument kommentiert');
+  await expect(cards.nth(1)).toContainText('Auf einen Kommentar geantwortet');
+  await expect(cards.nth(2)).toContainText('Kommentar erledigt');
+  await expect(cards.nth(3)).toContainText('documents/plan.md · Revision 3 auf 4 · 1 Änderung · beantwortet einen Kommentar');
 });
 
 test('the agent\'s document cards are in German in a German portal', async ({ page }) => {

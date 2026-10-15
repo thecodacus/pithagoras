@@ -77,6 +77,7 @@ async function open(page: Page, store: Store) {
       return DONE;
     }
     if (p === `${API}/folders`) return { folders };
+    if (p === `${DOCUMENT}/threads`) return { revision: store.revision, threads: [] };
     if (p === DOCUMENT && method === 'GET') return store.read();
     if (p === DOCUMENT && method === 'PUT') { const { markdown, base } = json(); return store.save(markdown, base); }
     if (p === '/api/sessions') return { sessions, executor: 'host' };

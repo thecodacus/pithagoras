@@ -28,6 +28,14 @@
  *
  * Documents are named by ids, never by paths: a name is made by the store
  * (a slug of the title) or found on disk by it.
+ *
+ * Comments are in the database, not in the files or the history. A thread is on
+ * a passage of the document's text (web/anchor.js): its words, what is around
+ * them, and where they were in the revision it was last placed at. That is
+ * brought to the text the document has now when the threads are asked for
+ * (`follow`), from the old revision's text in the history, so that a revision
+ * made any way at all (the page, the agent, a file written outside, a restore)
+ * moves the passages and none has to say how.
  */
 import { randomBytes } from "node:crypto";
 import { chmodSync, chownSync, closeSync, constants, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
@@ -37,11 +45,17 @@ import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
 import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
 import { isAdoptable, isDocumentName, isTempName, isPlainFile, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
+import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
 
 export const DOCUMENTS = "documents";
 /** As many documents as a folder lists: the store takes in no more than that. */
 export const MAX_DOCUMENTS = 1000;
+/** As many comment threads as one document has, and comments in one thread. */
+export const MAX_THREADS = 1000;
+export const MAX_COMMENTS = 100;
+/** The most a comment can be, in bytes (the database holds it to this too). */
+export const MAX_BODY = 4096;
 const SCHEMA = 1;
 /** How many commits go by between two looks at whether git wants to pack the history. */
 const GC_EVERY = 100;
@@ -141,10 +155,11 @@ export class Store {
    * `faults` lets a test break a write after one of its steps:
    * `faults.after(step)` is called after "write" and after "commit".
    * `gitTimeoutMs` is how long one git run may take. `onRevision` is told of
-   * every revision made from here on, as it is made (see `commit`).
+   * every revision made from here on, as it is made (see `commit`), and
+   * `onThreads` of every change to a document's comments.
    */
-  static async open(folder, { dir, inside, Database, faults, gitTimeoutMs, onRevision }) {
-    const store = new Store(folder, dir, inside, faults, gitTimeoutMs, onRevision);
+  static async open(folder, { dir, inside, Database, faults, gitTimeoutMs, onRevision, onThreads }) {
+    const store = new Store(folder, dir, inside, faults, gitTimeoutMs, onRevision, onThreads);
     try {
       await store.#open(Database);
     } catch (e) {
@@ -160,12 +175,13 @@ export class Store {
     return store;
   }
 
-  constructor(folder, dir, inside, faults, gitTimeoutMs, onRevision) {
+  constructor(folder, dir, inside, faults, gitTimeoutMs, onRevision, onThreads) {
     this.folder = folder;
     this.inside = inside;
     this.faults = faults;
     this.gitTimeoutMs = gitTimeoutMs;
     this.onRevision = onRevision;
+    this.onThreads = onThreads;
     this.storeDir = dir;
     this.queue = Promise.resolve();
     this.commits = 0;
@@ -454,19 +470,20 @@ export class Store {
     return { id: row.id, name: row.name, scope: row.scope, chat: row.chat_id, revision: row.revision, size: file.bytes?.length ?? file.size, modified: file.modified.toISOString() };
   }
 
-  /** The documents there are, each with the start of its text (for its title). */
+  /** The documents there are, each with the start of its text (for its title) and how many comment threads are open on it. */
   list(headBytes) {
     return this.locked(async () => {
       await this.recover();
       const dir = this.documentsDir();
       if (!dir) return [];
       const out = [];
+      const open = new Map(this.db.prepare("SELECT doc_id, COUNT(*) AS n FROM threads WHERE status = 'open' GROUP BY doc_id").all().map((r) => [r.doc_id, r.n]));
       for (const row of this.rows()) {
         if (row.revision === 0) continue;
         const opened = openDocument(this.inside, dir, row.name);
         if (!opened) continue;
         try {
-          out.push({ ...this.describe(row, opened), head: readOpen(opened.fd, Math.min(headBytes, opened.size)) });
+          out.push({ ...this.describe(row, opened), openThreads: open.get(row.id) ?? 0, head: readOpen(opened.fd, Math.min(headBytes, opened.size)) });
         } finally {
           closeSync(opened.fd);
         }
@@ -675,6 +692,226 @@ export class Store {
       const dir = file ? null : this.documentsDir();
       const replace = !file && dir !== null && isPlainFile(this.inside, dir, row.name);
       return this.#write(row, bytes, { author, subject: `Restore ${row.name} to revision ${revision}`, restoredFrom: revision, create: !file && !replace });
+    });
+  }
+
+  /** A document's text as text, or nothing when its bytes are not UTF-8 (they would be written back as other bytes). */
+  text(bytes) {
+    const text = bytes.toString("utf8");
+    return Buffer.from(text, "utf8").equals(bytes) ? text : null;
+  }
+
+  /** The text of one revision of a document, from the history: nothing when there is no such revision or it is not text. */
+  async textAt(row, revision) {
+    const found = this.db.prepare("SELECT sha FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
+    if (!found) return null;
+    try {
+      return this.text(await this.repo.show(found.sha, row.name));
+    } catch (e) {
+      if (e instanceof GitError) return null;
+      throw e;
+    }
+  }
+
+  /** A comment thread as the page and the tools get it, with its comments in the order they were made. */
+  threadView(t, comments) {
+    return {
+      id: t.id,
+      status: t.status,
+      orphaned: Boolean(t.orphaned),
+      quote: t.quote,
+      prefix: t.prefix,
+      suffix: t.suffix,
+      start: t.start,
+      end: t.end,
+      revision: t.revision,
+      createdAt: t.created_at,
+      updatedAt: t.updated_at,
+      comments: comments.map((c) => ({ id: c.id, author: c.author, body: c.body, at: c.created_at })),
+    };
+  }
+
+  /** A document's threads, oldest first, with their comments. */
+  threadsOf(row) {
+    const threads = this.db.prepare("SELECT * FROM threads WHERE doc_id = ? ORDER BY rowid").all(row.id);
+    const comments = new Map(threads.map((t) => [t.id, []]));
+    for (const c of this.db.prepare("SELECT c.* FROM comments c JOIN threads t ON t.id = c.thread_id WHERE t.doc_id = ? ORDER BY c.rowid").all(row.id)) comments.get(c.thread_id).push(c);
+    return threads.map((t) => this.threadView(t, comments.get(t.id)));
+  }
+
+  /** A thread of the document, or a 404. */
+  thread(row, id) {
+    const found = typeof id === "string" && /^[0-9a-f]{16}$/.test(id) ? this.db.prepare("SELECT * FROM threads WHERE id = ? AND doc_id = ?").get(id, row.id) : null;
+    if (!found) throw new DocError(404, "There is no such comment thread", { code: "thread_not_found" });
+    return found;
+  }
+
+  /** The thread told to whoever listens: its document's comments changed. A listener's failure is not the write's. */
+  toldThreads(row) {
+    try {
+      this.onThreads?.({ id: row.id, at: new Date().toISOString() });
+    } catch {
+      // The listener's own: the comment is made all the same.
+    }
+  }
+
+  /** A comment's text as it is kept: trimmed, not empty, and no more than the database holds. */
+  bodyOf(body) {
+    const text = typeof body === "string" ? body.trim() : "";
+    if (!text) throw new DocError(400, "A comment cannot be empty", { code: "invalid" });
+    if (Buffer.byteLength(text, "utf8") > MAX_BODY) throw new DocError(413, `A comment can be at most ${MAX_BODY} bytes`, { code: "too_large" });
+    return text;
+  }
+
+  /**
+   * Puts the passages of the document's threads that were placed on an earlier
+   * revision where they are in the text it has now (anchor.js): the words of a
+   * passage that was changed are the passage, one that is nowhere is orphaned
+   * (kept, with its words, and looked for again with the next revision). Under
+   * the lock, after recovery. A document whose file cannot be read as text
+   * leaves them as they are.
+   */
+  async follow(row) {
+    const behind = this.db.prepare("SELECT * FROM threads WHERE doc_id = ? AND revision != ?").all(row.id, row.revision);
+    if (!behind.length) return;
+    const file = this.fileOf(row);
+    const after = file ? this.text(file.bytes) : null;
+    if (after === null) return;
+    const moves = [];
+    for (const revision of new Set(behind.map((t) => t.revision))) {
+      const group = behind.filter((t) => t.revision === revision);
+      // A thread with no place is looked for by its words, which the text it was last in cannot help with.
+      const placed = group.filter((t) => !t.orphaned && t.start !== null);
+      const before = placed.length ? await this.textAt(row, revision) : null;
+      const anchors = group.map((t) => (before !== null && !t.orphaned && t.start !== null ? { quote: t.quote, prefix: t.prefix, suffix: t.suffix, start: t.start, end: t.end } : { quote: t.quote, prefix: t.prefix, suffix: t.suffix, start: null, end: null }));
+      const found = carry(before ?? after, after, anchors);
+      group.forEach((t, i) => moves.push({ t, to: found[i] ? passage(after, found[i].start, found[i].end) : null }));
+    }
+    this.db.transaction(() => {
+      for (const { t, to } of moves) {
+        if (to) this.db.prepare('UPDATE threads SET quote = ?, prefix = ?, suffix = ?, start = ?, "end" = ?, revision = ?, orphaned = 0 WHERE id = ?').run(to.quote, to.prefix, to.suffix, to.start, to.end, row.revision, t.id);
+        else this.db.prepare('UPDATE threads SET start = NULL, "end" = NULL, revision = ?, orphaned = 1 WHERE id = ?').run(row.revision, t.id);
+      }
+    })();
+  }
+
+  /** A document's comment threads, each with its passage where it is in the text now. */
+  threads(id) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      await this.follow(row);
+      return { revision: row.revision, threads: this.threadsOf(row) };
+    });
+  }
+
+  /**
+   * Starts a thread on a passage of the document, with its first comment.
+   * `quote` is the passage as the sender saw it in revision `base` (the
+   * document's text then, which may be an earlier one than the document is at
+   * now), with `prefix` and `suffix` around it and `start` where it began; it
+   * is found in that text again (anchor.js) and brought forward to the text the
+   * document has now. Refused (422) when it is not in that text.
+   */
+  addThread(id, { base, quote, prefix = "", suffix = "", start = null, body, author }) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const text = this.bodyOf(body);
+      if (typeof quote !== "string" || !quote.trim() || [prefix, suffix].some((x) => typeof x !== "string")) throw new DocError(400, "A comment needs the passage it is on", { code: "invalid" });
+      if (!isWhole(quote) || !isWhole(prefix) || !isWhole(suffix)) throw new DocError(400, "The passage is cut in the middle of a character", { code: "invalid" });
+      if (quote.length > MAX_QUOTE) throw new DocError(413, `A comment can be on at most ${MAX_QUOTE} characters of the text`, { code: "too_large" });
+      if (!Number.isInteger(base) || base < 1 || base > row.revision) throw new DocError(409, `The document is at revision ${row.revision}, not ${base}`, { code: "revision_mismatch", revision: row.revision });
+      if (this.db.prepare("SELECT COUNT(*) AS n FROM threads WHERE doc_id = ?").get(row.id).n >= MAX_THREADS) throw new DocError(409, `A document can have at most ${MAX_THREADS} comment threads`, { code: "too_many" });
+      const file = this.fileOf(row);
+      if (!file) throw new DocError(404, "There is no such document");
+      const current = this.text(file.bytes);
+      const there = base === row.revision ? current : await this.textAt(row, base);
+      if (there === null || current === null) throw new DocError(409, "The document is not text that can be commented on");
+      const found = locate(there, { quote, prefix, suffix, start });
+      const placed = found && passage(there, found.start, found.end);
+      if (!placed) throw new DocError(422, `That passage is not in the document at revision ${base}`, { code: "quote_not_found", revision: row.revision });
+      const now = new Date().toISOString();
+      const thread = randomBytes(8).toString("hex");
+      this.db.transaction(() => {
+        this.db
+          .prepare('INSERT INTO threads (id, doc_id, quote, prefix, suffix, start, "end", revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(thread, row.id, placed.quote, placed.prefix, placed.suffix, placed.start, placed.end, base, now, now);
+        this.db.prepare("INSERT INTO comments (id, thread_id, author, body, created_at) VALUES (?, ?, ?, ?, ?)").run(randomBytes(8).toString("hex"), thread, author, text, now);
+      })();
+      await this.follow(row);
+      this.toldThreads(row);
+      return this.threadsOf(row).find((t) => t.id === thread);
+    });
+  }
+
+  /**
+   * Puts a thread's passage at `[start, end)` of the text the document has at
+   * `revision`, for a caller that knows where it is: the change that was made
+   * to answer the comment has just put new words in its place. True when it
+   * was done; false when the document has moved on or the stretch is nothing
+   * (the passage is then put where it goes by the next look at the threads).
+   */
+  place(id, thread, { revision, start, end }) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const found = this.thread(row, thread);
+      if (revision !== row.revision) return false;
+      const file = this.fileOf(row);
+      const text = file ? this.text(file.bytes) : null;
+      const placed = text !== null && Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end <= text.length ? passage(text, start, end) : null;
+      if (!placed || placed.quote.length > MAX_QUOTE) return false;
+      this.db.prepare('UPDATE threads SET quote = ?, prefix = ?, suffix = ?, start = ?, "end" = ?, revision = ?, orphaned = 0 WHERE id = ?').run(placed.quote, placed.prefix, placed.suffix, placed.start, placed.end, row.revision, found.id);
+      return true;
+    });
+  }
+
+  /** Adds a comment to an open thread. */
+  reply(id, thread, { body, author }) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const found = this.thread(row, thread);
+      const text = this.bodyOf(body);
+      if (found.status !== "open") throw new DocError(409, "The thread is resolved: it is to be reopened to be added to", { code: "thread_resolved" });
+      this.addComment(found, text, author);
+      this.toldThreads(row);
+      return this.threadsOf(row).find((t) => t.id === found.id);
+    });
+  }
+
+  /** The comment is added and the thread is last changed now. */
+  addComment(thread, text, author) {
+    if (this.db.prepare("SELECT COUNT(*) AS n FROM comments WHERE thread_id = ?").get(thread.id).n >= MAX_COMMENTS) throw new DocError(409, `A thread can have at most ${MAX_COMMENTS} comments`, { code: "too_many" });
+    const now = new Date().toISOString();
+    this.db.transaction(() => {
+      this.db.prepare("INSERT INTO comments (id, thread_id, author, body, created_at) VALUES (?, ?, ?, ?, ?)").run(randomBytes(8).toString("hex"), thread.id, author, text, now);
+      this.db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(now, thread.id);
+    })();
+  }
+
+  /**
+   * Resolves a thread, or opens a resolved one again (`status`). A `body` is
+   * added to the thread with it, as the last comment of a resolved thread. One
+   * that is in the state asked for already is left as it is.
+   */
+  settle(id, thread, { status, body, author }) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const found = this.thread(row, thread);
+      const text = body === undefined ? null : this.bodyOf(body);
+      if (found.status !== status) {
+        // The comment and the new state are made together or not at all.
+        this.db.transaction(() => {
+          if (text !== null && status === "resolved") this.addComment(found, text, author);
+          this.db.prepare("UPDATE threads SET status = ?, updated_at = ? WHERE id = ?").run(status, new Date().toISOString(), found.id);
+          if (text !== null && status === "open") this.addComment(found, text, author);
+        })();
+        this.toldThreads(row);
+      }
+      return this.threadsOf(row).find((t) => t.id === found.id);
     });
   }
 }

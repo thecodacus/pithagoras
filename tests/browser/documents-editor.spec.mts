@@ -123,3 +123,234 @@ test('the editor says what was typed into it as Markdown, and brings no React of
   // The page's React draws everything around it: a second one in the bundle would be dead weight.
   expect(readFileSync(BUNDLE, 'utf8')).not.toMatch(/react\.production|__SECRET_INTERNALS|from\s*["']react["']/);
 });
+
+/** The text the passages of comments are marked on in an editor holding `markdown`, by the quotes they were kept as. */
+const MARKED = '# Plan\n\nShip it on **Friday**, [see the guide](https://example.com/guide) now, and `run` it.\n\n- one\n- two *three* four\n\n| a | b |\n| - | - |\n| cell one | cell *two* |\n\n```js\nconst x = 1;\n```\n\n> A quote with **bold** words.\n\nThe build is green.\n';
+
+test('the passage of a comment is marked on the words it was kept as, whatever Markdown marks are inside them or at their edges', async ({ page }) => {
+  await editorPage(page);
+  const quotes: Record<string, string> = {
+    heading: 'Plan',
+    word: 'Ship it',
+    bold: '**Friday**',
+    insideBold: 'rida',
+    acrossMarks: 'Friday**, [see the guide](https://example.com/guide) now',
+    link: '[see the guide](https://example.com/guide)',
+    linkText: 'see the',
+    code: '`run`',
+    listItems: 'one\n- two *three* four',
+    inItalic: 'hre',
+    cell: 'cell *two*',
+    codeBlock: 'x = 1',
+    inQuote: 'with **bold** words',
+    last: 'The build is green.',
+  };
+  const placed = await page.evaluate(async ([markdown, quotes]) => {
+    const root = document.getElementById('root')!;
+    let last = new Map<string, string>();
+    const editor = await (window as any).editor.createEditor({ root, markdown, onPlaced: (m: Map<string, string>) => (last = m) });
+    const text = editor.markdown() as string;
+    // One at a time: where passages overlap, the editor's marks leave only one of their ids on the words they share.
+    const onPage: Record<string, string> = {};
+    const reported: Record<string, string> = {};
+    for (const [id, quote] of Object.entries(quotes)) {
+      editor.threads([{ id, quote, prefix: '', suffix: '', start: text.indexOf(quote) }]);
+      onPage[id] = [...root.querySelectorAll(`[data-pd-thread="${id}"]`)].map((s) => s.textContent).join('');
+      if (last.has(id)) reported[id] = last.get(id)!;
+    }
+    return { reported, onPage };
+  }, [MARKED, quotes] as const);
+  expect(placed.onPage).toEqual({
+    heading: 'Plan', word: 'Ship it', bold: 'Friday', insideBold: 'rida', acrossMarks: 'Friday, see the guide now', link: 'see the guide', linkText: 'see the', code: 'run',
+    listItems: 'onetwo three four', inItalic: 'hre', cell: 'cell two', codeBlock: 'x = 1', inQuote: 'with bold words', last: 'The build is green.',
+  });
+  // What the page is told is what is marked, read as the editor shows it.
+  expect(placed.reported.listItems).toBe('one\ntwo three four');
+  expect(placed.reported.acrossMarks).toBe('Friday, see the guide now');
+  expect(Object.keys(placed.reported).sort()).toEqual(Object.keys(quotes).sort());
+});
+
+test('a selection is the passage as the Markdown holds it: the marks at its edges are in it when it takes all of what they mark, and out of it when it takes part', async ({ page }) => {
+  await editorPage(page);
+  await page.evaluate(async (markdown) => {
+    (window as any).ed = await (window as any).editor.createEditor({ root: document.getElementById('root'), markdown });
+  }, MARKED);
+  const passageOf = async (text: string) => {
+    await page.locator('#root .ProseMirror').click();
+    await page.evaluate((text) => {
+      const root = document.querySelector('#root .ProseMirror')!;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes: { node: Node; from: number }[] = [];
+      let all = '';
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) { nodes.push({ node: n, from: all.length }); all += n.textContent; }
+      const at = all.indexOf(text);
+      if (at < 0) throw new Error(`${text} is not in the editor`);
+      const place = (position: number, end: boolean) => { const found = [...nodes].reverse().find((n) => (end ? n.from < position : n.from <= position))!; return [found.node, position - found.from] as const; };
+      const range = document.createRange();
+      range.setStart(...place(at, false));
+      range.setEnd(...place(at + text.length, true));
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }, text);
+    // The editor learns of a selection a moment after the browser has it.
+    await page.waitForFunction((text) => (window as any).ed.selection()?.text === text, text);
+    return page.evaluate(() => (window as any).ed.selection());
+  };
+  const markdown = MARKED;
+  for (const [selected, quote] of [
+    ['Friday', '**Friday**'],
+    ['rida', 'rida'],
+    ['Ship it on Friday', 'Ship it on **Friday**'],
+    ['guide now', 'guide](https://example.com/guide) now'],
+    ['see the guide', '[see the guide](https://example.com/guide)'],
+    ['run', '`run`'],
+    ['cell two', 'cell *two*'],
+    ['x = 1', 'x = 1'],
+    ['with bold words', 'with **bold** words'],
+    ['The build is green.', 'The build is green.'],
+  ] as const) {
+    const got = await passageOf(selected);
+    expect(got.quote, selected).toBe(quote);
+    expect(markdown.slice(got.start, got.end), selected).toBe(quote);
+    expect(got.text, selected).toBe(selected);
+    expect(markdown.slice(got.start - got.prefix.length, got.start)).toBe(got.prefix);
+    expect(markdown.slice(got.end, got.end + got.suffix.length)).toBe(got.suffix);
+  }
+  // Nothing selected is no passage; neither is a selection of white space.
+  await page.locator('#root p').first().click();
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => (window as any).ed.selection() === null);
+});
+
+test('a mark moves with the text as it is typed, a click on it is told with the caret put where it was clicked, and the one looked at is drawn without touching the caret', async ({ page }) => {
+  await editorPage(page);
+  await page.evaluate(async (markdown) => {
+    (window as any).clicked = [];
+    (window as any).selected = [];
+    (window as any).placed = [];
+    const ed = (window as any).ed = await (window as any).editor.createEditor({
+      root: document.getElementById('root'), markdown,
+      // The page makes a thread the one looked at when it is clicked, and does it at once.
+      onThread: (id: string) => { (window as any).clicked.push(id); ed.activate(id); },
+      onSelect: (on: boolean) => (window as any).selected.push(on),
+      onPlaced: (m: Map<string, string>) => (window as any).placed.push([...m]),
+    });
+    const text = ed.markdown();
+    (window as any).list = [{ id: 'green', quote: 'The build is green.', prefix: '', suffix: '', start: text.indexOf('The build') }, { id: 'one', quote: 'Friday', prefix: '', suffix: '', start: text.indexOf('Friday') }];
+    ed.threads((window as any).list);
+  }, MARKED);
+  const mark = (id: string) => page.locator(`#root [data-pd-thread="${id}"]`);
+  const caret = () => page.evaluate(() => { const s = window.getSelection()!; return [s.anchorNode?.textContent, s.anchorOffset]; });
+  await expect(mark('green')).toHaveText('The build is green.');
+  // Text typed before it, in the paragraph above.
+  await page.locator('#root p').first().click();
+  await page.keyboard.press('Home');
+  await page.keyboard.type('Early. ');
+  await expect(mark('green')).toHaveText('The build is green.');
+  // A click on it is told, and puts the caret where it was clicked, though the page draws the thread as the one looked at at once.
+  await mark('green').click({ position: { x: 20, y: 5 } });
+  expect(await page.evaluate(() => (window as any).clicked)).toContain('green');
+  expect((await caret())[0]).toBe('The build is green.');
+  expect(await page.locator('#root').evaluate((root) => (root as HTMLElement).dataset.activeThread)).toBe('green');
+  // Typed at its start, it is not in it.
+  await page.keyboard.press('Home');
+  await page.keyboard.type('Now ');
+  await expect(mark('green')).toHaveText('The build is green.');
+  // Typed inside it, it is; and after its words are not the words it was kept as, it is still on the same place.
+  for (let n = 0; n < 4; n++) await page.keyboard.press('ArrowRight');
+  await page.keyboard.type('very ');
+  await expect(mark('green')).toHaveText('The very build is green.');
+  // What the passage reads as is told to the page while it is typed.
+  await expect.poll(() => page.evaluate(() => new Map((window as any).placed.at(-1)).get('green'))).toBe('The very build is green.');
+  await page.evaluate(() => (window as any).ed.threads((window as any).list));
+  await expect(mark('green')).toHaveText('The very build is green.');
+  // Typed at its end, it is not in it.
+  await page.keyboard.press('End');
+  await page.keyboard.type(' More.');
+  await expect(mark('green')).toHaveText('The very build is green.');
+  // (A space typed where it would be lost at the edge of a line is a non-breaking one, as the browser makes it.)
+  expect(await page.evaluate(() => (window as any).ed.markdown())).toMatch(/Now\s+The very build is green\.\s+More\.\n$/);
+  // The one looked at is drawn: no change to the editor's state, so the caret is where it was.
+  const before = await caret();
+  await page.evaluate(() => (window as any).ed.activate('one'));
+  expect(await page.locator('#root').evaluate((root) => (root as HTMLElement).dataset.activeThread)).toBe('one');
+  expect(await caret()).toEqual(before);
+  await page.evaluate(() => (window as any).ed.activate(null));
+  expect(await page.locator('#root').evaluate((root) => (root as HTMLElement).dataset.activeThread)).toBe('');
+  // Selected, and not.
+  await page.keyboard.press('Shift+Home');
+  await expect.poll(() => page.evaluate(() => (window as any).selected.at(-1))).toBe(true);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => (window as any).selected.at(-1))).toBe(false);
+});
+
+test('the marks are where they were when the document is put in the editor again, by change or whole', async ({ page }) => {
+  await editorPage(page);
+  await page.evaluate(async (markdown) => {
+    const ed = (window as any).ed = await (window as any).editor.createEditor({ root: document.getElementById('root'), markdown });
+    const text = ed.markdown();
+    ed.threads([{ id: 'friday', quote: 'Friday', prefix: '', suffix: '', start: text.indexOf('Friday') }, { id: 'green', quote: 'The build is green.', prefix: '', suffix: '', start: text.indexOf('The build') }]);
+  }, MARKED);
+  const mark = (id: string) => page.locator(`#root [data-pd-thread="${id}"]`);
+  await expect(mark('friday')).toHaveText('Friday');
+  // A change to the paragraph a mark is in: the paragraph is replaced, and the mark is put on the words again.
+  await page.evaluate((markdown) => (window as any).ed.apply(markdown.replace('now,', 'then,')), MARKED);
+  await expect(page.locator('#root p').first()).toContainText('then,');
+  await expect(mark('friday')).toHaveText('Friday');
+  await expect(mark('green')).toHaveText('The build is green.');
+  // The whole document taken in its place (an earlier revision brought back, the other version taken).
+  await page.evaluate((markdown) => (window as any).ed.replace(`# Other\n\n${markdown}`), MARKED);
+  await expect(page.locator('#root h1').first()).toHaveText('Other');
+  await expect(mark('friday')).toHaveText('Friday');
+  await expect(mark('green')).toHaveText('The build is green.');
+});
+
+/** What each quote of `markdown` is marked on in the editor, one at a time. */
+async function markedOn(page: Page, markdown: string, quotes: Record<string, string>) {
+  return page.evaluate(async ([markdown, quotes]) => {
+    const root = document.getElementById('root')!;
+    const ed = await (window as any).editor.createEditor({ root, markdown });
+    const text = ed.markdown() as string;
+    const out: Record<string, string> = {};
+    for (const [id, quote] of Object.entries(quotes)) {
+      ed.threads([{ id, quote, prefix: '', suffix: '', start: text.indexOf(quote) }]);
+      out[id] = [...root.querySelectorAll(`[data-pd-thread="${id}"]`)].map((s) => s.textContent).join('');
+    }
+    return out;
+  }, [markdown, quotes] as const);
+}
+
+test('a passage in text whose Markdown the editor writes differently with a mark in it is not marked on the wrong words', async ({ page }) => {
+  await editorPage(page);
+  // A paragraph that starts like a list item is written with an escape that a mark in front of it takes away.
+  const marked = await markedOn(page, '\\- not a list\n\nSecond one.\n', { escaped: 'not a list', second: 'Second one.' });
+  // Marked on the right words, or not marked: not on some others. (A document with a paragraph like the first has none of its
+  // passages put on the words they hold: where the marks change what is written, they are not trusted.)
+  expect(['not a list', '']).toContain(marked.escaped);
+  expect(['Second one.', '']).toContain(marked.second);
+});
+
+test('a passage in a block whose Markdown is not the same on its own as in the document is marked on the whole of it, or on the right words', async ({ page }) => {
+  await editorPage(page);
+  // A heading that starts like a numbered item: written as it is in the heading, and with an escape on its own in a paragraph.
+  const marked = await markedOn(page, '# 1. The plan\n\nSecond one.\n', { heading: 'plan', second: 'Second one.' });
+  expect(['plan', '1. The plan']).toContain(marked.heading);
+  expect(marked.second).toBe('Second one.');
+});
+
+test('a passage whose words are not in the text the editor writes, and are too few to be found without its marks, is not marked, and the others are', async ({ page }) => {
+  await editorPage(page);
+  const out = await page.evaluate(async (markdown) => {
+    const root = document.getElementById('root')!;
+    let reported: string[] = [];
+    const editor = await (window as any).editor.createEditor({ root, markdown, onPlaced: (m: Map<string, string>) => (reported = [...m.keys()]) });
+    editor.threads([
+      { id: 'there', quote: 'Ship it', prefix: '', suffix: '', start: 8 },
+      { id: 'gone', quote: 'Not in this document at all', prefix: '', suffix: '', start: 3 },
+      { id: 'few', quote: '* a', prefix: '', suffix: '', start: null },
+    ]);
+    return reported;
+  }, '# Plan\n\nShip it on Friday.\n\n* a\n* b\n');
+  expect(out).toEqual(['there']);
+});

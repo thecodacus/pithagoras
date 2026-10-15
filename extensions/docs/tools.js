@@ -1,6 +1,7 @@
 /**
  * The agent's tools for the documents of the folder its chat works in: list,
- * read, create and edit. They are registered in each chat's pi by the server
+ * read, create and edit, and comment on one, reply to a comment and resolve it.
+ * They are registered in each chat's pi by the server
  * half (`chats.extend`), only where pi runs in the portal's process, and they
  * go through the same store as the page does (store.js): the same history,
  * the same revisions, the same lock.
@@ -16,16 +17,21 @@
  *   - it makes a new document, never one in place of another, and cannot
  *     delete, restore or rewrite the history
  *   - it does not write a secret into a document: the history would keep it
+ *   - a comment is the agent's, never the person's, and it answers a comment by
+ *     changing only the passage the comment is on, and saying in the thread what
+ *     it changed
  *
  * A refusal is an error the agent reads, which starts with its code:
  * `not_found`, `exists`, `too_large`, `secret`, `revision_mismatch`,
- * `quote_not_found`, `quote_ambiguous`, `edits_overlap`, `invalid`, or
+ * `quote_not_found`, `quote_ambiguous`, `edits_overlap`, `thread_not_found`,
+ * `thread_resolved`, `thread_orphaned`, `too_many`, `invalid`, or
  * `refused` for anything else the store will not do (its message says what: the
  * folder is full, `documents` is a link, the store is not ready yet).
  */
 import { DocError } from "./errors.js";
 import { secretsIn } from "./secret.js";
-import { DOCUMENTS, isDocumentId } from "./store.js";
+import { DOCUMENTS, isDocumentId, MAX_BODY, MAX_COMMENTS } from "./store.js";
+import { MAX_QUOTE } from "./web/anchor.js";
 
 /** The most that one doc_edit changes: more is a rewrite, and a new revision of its own is the clearer way. */
 const MAX_EDITS = 50;
@@ -92,6 +98,47 @@ function find(text, quote) {
   return { first, more: text.indexOf(quote, first + 1) !== -1 };
 }
 
+/** The start of `text`, at most `n` characters of it, with a mark where it was cut (not between the two halves of a character). */
+function clip(text, n) {
+  if (text.length <= n) return text;
+  return `${text.slice(0, /[\uD800-\uDBFF]/.test(text[n - 1]) ? n - 1 : n)} […]`;
+}
+
+/** The line of `text` that `at` is on (1 is the first). */
+const lineOf = (text, at) => text.slice(0, at).split("\n").length;
+
+/** A comment's time as the agent reads it: to the minute, in UTC. */
+const minute = (iso) => iso.slice(0, 16).replace("T", " ");
+
+/** The most open threads, and the most comments of one thread, that doc_read shows in full. */
+const MOST_THREADS = 30;
+const MOST_SHOWN = 10;
+/** How much of a passage doc_read shows. */
+const PASSAGE_CHARS = 400;
+
+/**
+ * The comment threads of a document as doc_read shows them: each with its id,
+ * the passage it is on, where that is and what was said, the person's and the
+ * agent's own comments. `text` is the document's text, which the passages are
+ * places in. Nothing for a document with none to show.
+ */
+function describeThreads(threads, text, which) {
+  const shown = threads.filter((t) => which === "all" || t.status === "open");
+  const resolved = threads.length - threads.filter((t) => t.status === "open").length;
+  if (!shown.length) return resolved && which !== "all" ? `\n\n[No open comments. ${resolved} resolved: doc_read with comments=all shows them.]` : "";
+  const blocks = shown.slice(0, MOST_THREADS).map((t) => {
+    const where = t.orphaned ? "its passage is no longer in the document" : `on line ${lineOf(text, t.start)}`;
+    const said = t.comments.slice(-MOST_SHOWN);
+    const omitted = t.comments.length - said.length;
+    const lines = said.map((c) => `${c.author === "agent" ? "agent" : "person"} (${minute(c.at)} UTC): ${c.body}`);
+    return [`Thread ${t.id} (${t.status}, ${where})`, `Passage${t.orphaned ? " when it was last in the document" : ""}:`, ...clip(t.quote, PASSAGE_CHARS).split("\n").map((l) => `> ${l}`), ...(omitted ? [`[${omitted} earlier comment${omitted === 1 ? "" : "s"} not shown]`] : []), ...lines].join("\n");
+  });
+  const open = threads.filter((t) => t.status === "open").length;
+  const head = which === "all" ? `Comments: ${threads.length} thread${threads.length === 1 ? "" : "s"}, ${open} open` : `Open comments: ${open}${resolved ? ` (${resolved} resolved, not shown)` : ""}`;
+  const more = shown.length > MOST_THREADS ? `\n[${shown.length - MOST_THREADS} more thread${shown.length - MOST_THREADS === 1 ? "" : "s"} not shown]` : "";
+  return `\n\n${head}. Answer one with doc_reply, or with doc_edit given its thread; close it with doc_resolve.\n\n${blocks.join("\n\n")}${more}`;
+}
+
 /**
  * Registers the tools in a chat's pi. `deps` is what the server half has: the
  * chat's folder (`folder()`, which throws when it is gone), the folder's
@@ -117,6 +164,8 @@ export function documentTools(pi, chat, deps) {
   function failed(e) {
     if (e instanceof Refusal) return e;
     if (e instanceof DocError) {
+      // The comments' refusals say what they are: a thread that is not there, a quote that is not in the text, a comment too long.
+      if (e.extra?.code && e.extra.code !== "revision_mismatch") return new Refusal(e.extra.code, e.message);
       if (e.status === 404) return new Refusal("not_found", e.message);
       if (e.status === 413) return new Refusal("too_large", "a document can be at most 1 MB");
       if (e.extra?.exists !== undefined) return new Refusal("exists", e.message);
@@ -153,7 +202,7 @@ export function documentTools(pi, chat, deps) {
   pi.registerTool({
     name: "doc_list",
     label: "List documents",
-    description: "List the shared documents of this project that you and the person work on together: each one's id, title, file, revision and whether it is the project's or this chat's own. A document is a Markdown file in the project's documents folder, shown to the person on the Documents page.",
+    description: "List the shared documents of this project that you and the person work on together: each one's id, title, file, revision, whether it is the project's or this chat's own, and how many comments on it are open. A document is a Markdown file in the project's documents folder, shown to the person on the Documents page.",
     promptSnippet: "List the shared documents (Markdown, shown to the person on the Documents page)",
     parameters: {
       type: "object",
@@ -168,16 +217,16 @@ export function documentTools(pi, chat, deps) {
         .map(({ head, ...doc }) => ({ ...doc, path: pathOf(doc.name), title: deps.titleOf(head, doc.name) }))
         .sort((a, b) => a.title.localeCompare(b.title) || a.name.localeCompare(b.name));
       if (!documents.length) return text("No documents yet. Make one with doc_create.", { action: "list", documents: [] });
-      const lines = documents.map((doc) => `- ${doc.id}  "${doc.title}"  ${doc.path}  revision ${doc.revision}  ${kind(doc)}  changed ${doc.modified}`);
-      return text(`${documents.length} document${documents.length === 1 ? "" : "s"}:\n${lines.join("\n")}`, { action: "list", documents: documents.map(({ id, title, path, revision, scope }) => ({ id, title, path, revision, scope })) });
+      const lines = documents.map((doc) => `- ${doc.id}  "${doc.title}"  ${doc.path}  revision ${doc.revision}  ${kind(doc)}  changed ${doc.modified}${doc.openThreads ? `  ${doc.openThreads} open comment${doc.openThreads === 1 ? "" : "s"}` : ""}`);
+      return text(`${documents.length} document${documents.length === 1 ? "" : "s"}:\n${lines.join("\n")}`, { action: "list", documents: documents.map(({ id, title, path, revision, scope, openThreads }) => ({ id, title, path, revision, scope, openThreads })) });
     }),
   });
 
   pi.registerTool({
     name: "doc_read",
     label: "Read a document",
-    description: `Read a shared document by its id: its Markdown and its revision. Read a document before you edit it: doc_edit needs the revision you read. revision reads an earlier revision of it, from its history. A long document is returned in parts of about ${READ_CHARS.toLocaleString("en-US")} characters: the end of one says where to read on (from_line, and char_offset inside a line that is longer than a part).`,
-    promptSnippet: "Read a shared document by id: its Markdown and revision",
+    description: `Read a shared document by its id: its Markdown and its revision, and after the text the comment threads on it that are open, each with its id, the passage it is on and what was said. Read a document before you edit it: doc_edit needs the revision you read. revision reads an earlier revision of it, from its history. A long document is returned in parts of about ${READ_CHARS.toLocaleString("en-US")} characters: the end of one says where to read on (from_line, and char_offset inside a line that is longer than a part); the comments come with the first part.`,
+    promptSnippet: "Read a shared document by id: its Markdown, revision and open comments",
     parameters: {
       type: "object",
       properties: {
@@ -185,12 +234,14 @@ export function documentTools(pi, chat, deps) {
         revision: { type: "integer", description: "An earlier revision to read instead of the current one." },
         from_line: { type: "integer", description: "The line to start at, to read on in a long document (1 is the first)." },
         char_offset: { type: "integer", description: "With from_line: how many characters into that line to start, to read on in a line that is longer than a part (0 is its start)." },
+        comments: { type: "string", enum: ["open", "all", "none"], description: "Which comment threads to show after the text: open (the default), all (resolved ones too) or none." },
       },
       required: ["id"],
     },
-    execute: guarded(async ({ id, revision, from_line: from = 1, char_offset: offset = 0 }) => {
+    execute: guarded(async ({ id, revision, from_line: from = 1, char_offset: offset = 0, comments: which = "open" }) => {
       whole(from, "from_line");
       whole(offset, "char_offset", 0);
+      if (!["open", "all", "none"].includes(which)) throw new Refusal("invalid", "comments is open, all or none");
       const { store, doc } = await documentOf(id);
       let bytes = doc.bytes;
       let at = doc.revision;
@@ -211,8 +262,15 @@ export function documentTools(pi, chat, deps) {
         else if (part.next.offset) more = `\n[${where}, the last one only in part. Read on with from_line=${part.next.line}, char_offset=${part.next.offset}.]`;
         else more = `\n[${where}. Read on with from_line=${part.next.line}.]`;
       }
-      const which = at === doc.revision ? `revision ${at}` : `revision ${at} (an earlier one; it is at ${doc.revision} now)`;
-      return text(`"${title}" (id ${doc.id}, ${pathOf(doc.name)}, ${which}, ${kind(doc)} document)\n\n${shown}${more}`, { ...about("read", doc, title), revision: at, current: doc.revision });
+      const where = at === doc.revision ? `revision ${at}` : `revision ${at} (an earlier one; it is at ${doc.revision} now)`;
+      // The comments are about the text as it is now, and come once, with the first part.
+      let comments = "";
+      if (which !== "none" && at === doc.revision && from === 1 && offset === 0) {
+        const listed = await store.threads(doc.id);
+        // The text the passages are in is the one the store followed them to: if the document moved meanwhile, they are not shown against this one.
+        if (listed.revision === doc.revision) comments = describeThreads(listed.threads, markdown, which);
+      }
+      return text(`"${title}" (id ${doc.id}, ${pathOf(doc.name)}, ${where}, ${kind(doc)} document)\n\n${shown}${more}${comments}`, { ...about("read", doc, title), revision: at, current: doc.revision });
     }),
   });
 
@@ -248,9 +306,12 @@ export function documentTools(pi, chat, deps) {
   pi.registerTool({
     name: "doc_edit",
     label: "Edit a document",
-    description: `Change a shared document by replacing quoted text, as doc_read shows it. Each quote must appear exactly once in the document (take enough of the text around it to be sure), and quotes may not overlap; they are all found in the document as it is now. All edits are made or none. expected_revision is the revision you read: if the person (or anything else) changed the document since, nothing is written and you read it again first. Up to ${MAX_EDITS} edits at a time. A replacement may be empty, to remove the quote. Does not accept secrets.`,
+    description: `Change a shared document by replacing quoted text, as doc_read shows it. Each quote must appear exactly once in the document (take enough of the text around it to be sure), and quotes may not overlap; they are all found in the document as it is now. All edits are made or none. expected_revision is the revision you read: if the person (or anything else) changed the document since, nothing is written and you read it again first. Up to ${MAX_EDITS} edits at a time. A replacement may be empty, to remove the quote. Does not accept secrets. To answer a comment by changing the document, give its thread and a reply: the quotes are then looked for only in the passage the comment is on (each must appear once there), nothing else in the document is changed, and the reply is added to the thread, so say in it what you changed.`,
     promptSnippet: "Edit a shared document: quoted text and its replacement, on the revision you read",
-    promptGuidelines: ["Edit a shared document only with doc_edit, on the revision you read: the person may be editing it too, and a write outside the tool is not checked against their changes."],
+    promptGuidelines: [
+      "Edit a shared document only with doc_edit, on the revision you read: the person may be editing it too, and a write outside the tool is not checked against their changes.",
+      "To answer a comment on a shared document by changing it, use doc_edit with the comment's thread and a reply that says what you changed. Change only the passage the comment is on; if the answer needs a change elsewhere, say so in a reply and let the person decide.",
+    ],
     executionMode: "sequential",
     parameters: {
       type: "object",
@@ -264,27 +325,43 @@ export function documentTools(pi, chat, deps) {
           items: {
             type: "object",
             properties: {
-              quote: { type: "string", description: "Text to replace, exactly as it is in the document, once." },
+              quote: { type: "string", description: "Text to replace, exactly as it is in the document, once (with thread: once in the comment's passage)." },
               replacement: { type: "string", description: "What takes its place: Markdown, or empty to remove the quote." },
             },
             required: ["quote", "replacement"],
           },
         },
+        thread: { type: "string", description: "The id of the comment thread this change answers, from doc_read. The edits are then made only inside its passage, and reply is required." },
+        reply: { type: "string", description: `With thread: what you changed, for the person to read in the thread (at most ${MAX_BODY} bytes). Markdown.` },
       },
       required: ["id", "expected_revision", "edits"],
     },
-    execute: guarded(async ({ id, expected_revision: expected, edits }) => {
+    execute: guarded(async ({ id, expected_revision: expected, edits, thread: threadId, reply }) => {
       whole(expected, "expected_revision");
       if (!Array.isArray(edits) || !edits.length || edits.length > MAX_EDITS) throw new Refusal("invalid", `edits is a list of 1 to ${MAX_EDITS} edits`);
       edits.forEach((edit, i) => {
         if (typeof edit?.quote !== "string" || !edit.quote || typeof edit.replacement !== "string") throw new Refusal("invalid", `edit ${i + 1} needs a quote (not empty) and a replacement (text, or empty)`);
       });
+      if (threadId !== undefined && typeof threadId !== "string") throw new Refusal("invalid", "thread is a thread's id, from doc_read");
+      if (threadId === undefined && reply !== undefined) throw new Refusal("invalid", "reply goes with thread: it is added to that thread");
+      if (threadId !== undefined && (typeof reply !== "string" || !reply.trim())) throw new Refusal("invalid", "an edit that answers a comment needs a reply saying what was changed");
       const { store, doc } = await documentOf(id);
       const current = doc.bytes.toString("utf8");
       const title = deps.titleOf(doc.bytes, doc.name);
       if (doc.revision !== expected) {
         throw new Refusal("revision_mismatch", `"${title}" is at revision ${doc.revision}, not ${expected}: it changed since you read it. Nothing was written. Read it again with doc_read, then redo the change.`);
       }
+      // With a thread, the part of the document the quotes are looked for in is the comment's passage. Checked before anything is written.
+      let scope = { from: 0, to: current.length };
+      let thread = null;
+      if (threadId !== undefined) {
+        store.bodyOf(reply);
+        thread = await threadOf(store, doc, current, threadId, { open: true, placed: true });
+        if (thread.orphaned) throw new Refusal("thread_orphaned", "the passage this comment was on is no longer in the document, so there is no passage to change. Reply with doc_reply, or edit without thread.");
+        if (thread.comments.length >= MAX_COMMENTS) throw new Refusal("too_many", `the thread has ${MAX_COMMENTS} comments, which is the most`);
+        scope = { from: thread.start, to: thread.end };
+      }
+      const haystack = current.slice(scope.from, scope.to);
       // A document written on Windows has CRLF line breaks, which a quote read back as text rarely carries, and
       // what is written into it is to have them too: a document with both keeps the ones most of it has.
       const crlfs = (current.match(/\r\n/g) ?? []).length;
@@ -292,22 +369,23 @@ export function documentTools(pi, chat, deps) {
       // All quotes are looked for in the text as it is, none in the result of another.
       const found = edits.map((edit, i) => {
         let { quote, replacement } = edit;
-        let place = find(current, quote);
+        let place = find(haystack, quote);
         if (place.first === -1 && crlfs && quote.includes("\n")) {
-          place = find(current, crlf(quote));
+          place = find(haystack, crlf(quote));
           if (place.first !== -1) quote = crlf(quote);
         }
         // A quote that starts with the line feed of a CRLF break has the carriage return in front of it: it is replaced with it,
         // or it would be left with nothing after it, or in front of the replacement's own line break.
-        let at = place.first;
+        let at = place.first === -1 ? -1 : scope.from + place.first;
         if (at > 0 && quote.startsWith("\n") && current[at - 1] === "\r") {
           at--;
           quote = `\r${quote}`;
         }
         if (dos || quote.includes("\r\n")) replacement = crlf(replacement);
         const which = edits.length > 1 ? `edit ${i + 1}: ` : "";
-        if (place.first === -1) throw new Refusal("quote_not_found", `${which}the quote is not in "${title}" at revision ${doc.revision}. Quote it exactly as doc_read shows it, with its Markdown marks. Nothing was written.`);
-        if (place.more) throw new Refusal("quote_ambiguous", `${which}the quote appears more than once in "${title}". Take more of the text around it, so that it appears once. Nothing was written.`);
+        const within = thread ? ` in the passage of thread ${thread.id}` : "";
+        if (place.first === -1) throw new Refusal("quote_not_found", `${which}the quote is not in "${title}" at revision ${doc.revision}${within}. Quote it exactly as doc_read shows it, with its Markdown marks. Nothing was written.`);
+        if (place.more) throw new Refusal("quote_ambiguous", `${which}the quote appears more than once in "${title}"${within}. Take more of the text around it, so that it appears once. Nothing was written.`);
         return { at, end: at + quote.length, replacement, n: i + 1 };
       });
       found.sort((a, b) => a.at - b.at);
@@ -333,8 +411,132 @@ export function documentTools(pi, chat, deps) {
       const shown = deps.titleOf(Buffer.from(out, "utf8"), doc.name);
       const n = found.length;
       const details = { ...about("edit", saved, shown), from: doc.revision, edits: n, changed: saved.changed };
-      if (!saved.changed) return text(`No change: the replacements gave the same text. "${shown}" stays at revision ${saved.revision}.`, details);
-      return text(`Edited "${shown}" (${pathOf(doc.name)}): ${n} edit${n === 1 ? "" : "s"} made, now at revision ${saved.revision}.`, details);
+      let said = saved.changed ? `Edited "${shown}" (${pathOf(doc.name)}): ${n} edit${n === 1 ? "" : "s"} made, now at revision ${saved.revision}.` : `No change: the replacements gave the same text. "${shown}" stays at revision ${saved.revision}.`;
+      if (thread) {
+        details.thread = thread.id;
+        // The passage is the words that stand there now: it is known, and not left to be worked out from the two texts.
+        if (saved.changed) await store.place(doc.id, thread.id, { revision: saved.revision, start: scope.from, end: scope.to + out.length - current.length }).catch(() => false);
+        // The change is made: a reply that cannot be added is said, and the agent adds it with doc_reply.
+        try {
+          await store.reply(doc.id, thread.id, { body: reply, author: "agent" });
+          said += ` Your reply is in thread ${thread.id}.`;
+          details.replied = true;
+        } catch (e) {
+          const why = failed(e).message;
+          deps.log(`A reply to a comment thread of a document could not be added in chat ${chat.id}: ${why}`);
+          said += ` The reply could not be added to thread ${thread.id} (${why}): add it with doc_reply.`;
+        }
+      }
+      return text(said, details);
+    }),
+  });
+
+  /**
+   * A thread of the document `doc` (whose text is `current`), by its id: or a refusal. `open`: it must be open. `placed`: its
+   * passage must be a place in `current` (the document has not moved on since it was read), which a change to the passage needs.
+   */
+  async function threadOf(store, doc, current, id, { open = false, placed = false } = {}) {
+    if (typeof id !== "string" || !/^[0-9a-f]{16}$/.test(id)) throw new Refusal("thread_not_found", "There is no comment thread with that id. Ids come from doc_read");
+    const listed = await store.threads(doc.id);
+    const thread = listed.threads.find((t) => t.id === id);
+    if (!thread) throw new Refusal("thread_not_found", "There is no comment thread with that id on this document. Ids come from doc_read");
+    if (open && thread.status !== "open") throw new Refusal("thread_resolved", "The thread is resolved: the person opens it again to go on with it");
+    // The passages are places in the text the store followed them to; if the document moved on since it was read, they are not places in it.
+    if (placed && (listed.revision !== doc.revision || (!thread.orphaned && current.slice(thread.start, thread.end) !== thread.quote))) {
+      throw new Refusal("revision_mismatch", `"${deps.titleOf(doc.bytes, doc.name)}" changed since you read it (it is at revision ${listed.revision}, not ${doc.revision}). Nothing was written. Read it again with doc_read, then redo the change.`);
+    }
+    return thread;
+  }
+
+  /** The comment text of a tool call, or a refusal: the store holds it to its size. */
+  const commentOf = (value, what = "comment") => {
+    if (typeof value !== "string" || !value.trim()) throw new Refusal("invalid", `${what} is the text of the comment (not empty)`);
+    return value;
+  };
+
+  pi.registerTool({
+    name: "doc_comment",
+    label: "Comment on a document",
+    description: `Start a comment thread on a passage of a shared document, for the person to read on the Documents page: a question, a note on why you wrote it that way, or something to look at. quote is the passage, exactly as doc_read shows it and once in the document; the comment is anchored to it and stays with it when the text around it changes. The comment is Markdown, at most ${MAX_BODY} bytes. It does not change the document. The person's comments on a document are read with doc_read.`,
+    promptSnippet: "Comment on a passage of a shared document: a quote from it and the comment",
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The document's id, from doc_list or doc_create." },
+        quote: { type: "string", description: `The passage to comment on, exactly as it is in the document, once (at most ${MAX_QUOTE} characters).` },
+        comment: { type: "string", description: "What you want to say." },
+      },
+      required: ["id", "quote", "comment"],
+    },
+    execute: guarded(async ({ id, quote, comment }) => {
+      if (typeof quote !== "string" || !quote.trim()) throw new Refusal("invalid", "quote is the passage to comment on (not empty)");
+      if (quote.length > MAX_QUOTE) throw new Refusal("too_large", `quote can be at most ${MAX_QUOTE} characters: comment on less of the text`);
+      commentOf(comment);
+      const { store, doc } = await documentOf(id);
+      const current = doc.bytes.toString("utf8");
+      const title = deps.titleOf(doc.bytes, doc.name);
+      const crlfs = /\r\n/.test(current);
+      let place = find(current, quote);
+      let exact = quote;
+      if (place.first === -1 && crlfs && quote.includes("\n")) {
+        place = find(current, crlf(quote));
+        if (place.first !== -1) exact = crlf(quote);
+      }
+      if (place.first === -1) throw new Refusal("quote_not_found", `the quote is not in "${title}" at revision ${doc.revision}. Quote it exactly as doc_read shows it, with its Markdown marks. Nothing was written.`);
+      if (place.more) throw new Refusal("quote_ambiguous", `the quote appears more than once in "${title}". Take more of the text around it, so that it appears once. Nothing was written.`);
+      const made = await store.addThread(doc.id, { base: doc.revision, quote: exact, start: place.first, body: comment, author: "agent" });
+      return text(`Commented on "${clip(made.quote, 80)}" in "${title}" (${pathOf(doc.name)}), thread ${made.id}. The person sees it on the Documents page.`, { ...about("comment", doc, title), thread: made.id });
+    }),
+  });
+
+  pi.registerTool({
+    name: "doc_reply",
+    label: "Reply to a comment",
+    description: `Add a comment to an open comment thread of a shared document, from doc_read: an answer, a question back, or a note on what you did. If you did something about the comment, say what, so that the person can see it without comparing revisions. The reply is Markdown, at most ${MAX_BODY} bytes. It does not change the document and does not resolve the thread.`,
+    promptSnippet: "Reply to a comment thread of a shared document, saying what was done",
+    promptGuidelines: ["A reply to a comment says what was done about it (what you changed and where, or why you left the text as it is), not only that you read it."],
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The document's id." },
+        thread: { type: "string", description: "The thread's id, from doc_read." },
+        comment: { type: "string", description: "The reply." },
+      },
+      required: ["id", "thread", "comment"],
+    },
+    execute: guarded(async ({ id, thread: threadId, comment }) => {
+      commentOf(comment);
+      const { store, doc } = await documentOf(id);
+      const title = deps.titleOf(doc.bytes, doc.name);
+      const made = await store.reply(doc.id, typeof threadId === "string" ? threadId : "", { body: comment, author: "agent" });
+      return text(`Replied in thread ${made.id} on "${title}" (${made.comments.length} comment${made.comments.length === 1 ? "" : "s"} in it).`, { ...about("reply", doc, title), thread: made.id });
+    }),
+  });
+
+  pi.registerTool({
+    name: "doc_resolve",
+    label: "Resolve a comment",
+    description: `Resolve a comment thread of a shared document, from doc_read: it is closed, shown as resolved to the person, and they can open it again. Resolve a thread when what it asked for is done or it is answered for good, and say in comment what was done (Markdown, at most ${MAX_BODY} bytes). Leave a thread open when the person still has to weigh in.`,
+    promptSnippet: "Resolve a comment thread of a shared document, saying what was done",
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The document's id." },
+        thread: { type: "string", description: "The thread's id, from doc_read." },
+        comment: { type: "string", description: "A last comment saying what was done." },
+      },
+      required: ["id", "thread"],
+    },
+    execute: guarded(async ({ id, thread: threadId, comment }) => {
+      if (comment !== undefined) commentOf(comment);
+      const { store, doc } = await documentOf(id);
+      const title = deps.titleOf(doc.bytes, doc.name);
+      const wasOpen = (await threadOf(store, doc, "", threadId)).status === "open";
+      const made = await store.settle(doc.id, threadId, { status: "resolved", body: comment, author: "agent" });
+      return text(wasOpen ? `Resolved thread ${made.id} on "${title}".` : `Thread ${made.id} on "${title}" was resolved already; nothing changed.`, { ...about("resolve", doc, title), thread: made.id, changed: wasOpen });
     }),
   });
 }

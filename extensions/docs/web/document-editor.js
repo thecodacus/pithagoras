@@ -1,12 +1,15 @@
 /**
  * A document on the Documents page, edited: the editor (editor.js, loaded when
  * a document is first opened), saved as it is edited (saver.js), kept up to
- * date with what the agent and others change meanwhile (live.js), and the
- * document's history with a way back to an earlier revision.
+ * date with what the agent and others change meanwhile (live.js), the
+ * document's history with a way back to an earlier revision, and the comments
+ * on its passages (comments.js).
  *
  * Plain JavaScript like the rest of the browser half, made with the portal's
  * React and building blocks (`portal.ui`).
  */
+import { MAX_QUOTE } from "./anchor.js";
+import { comments } from "./comments.js";
 import { createLive } from "./live.js";
 import { createSaver } from "./saver.js";
 
@@ -14,11 +17,14 @@ import { createSaver } from "./saver.js";
 const DRAFT = "pithagoras-docs/draft";
 /** What a request that goes on after the page is gone may carry: the browsers allow 64 KiB, and it is kept well under. */
 const KEEPALIVE_BYTES = 60 * 1024;
+/** The id the passage of a comment that is being written is marked by in the editor: no thread has it. */
+const PENDING = "pending";
 
 export function documentEditor(portal, { documentUrl, when, useAnswer }) {
   const { React, ui, t } = portal;
   const { useEffect, useRef, useState } = React;
   const h = React.createElement;
+  const Comments = comments(portal, { when });
 
   /** The editor's module, loaded once and when first wanted; one that failed to load is asked for again. */
   let bundle = null;
@@ -155,11 +161,27 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
     const [problem, setProblem] = useState(null);
     const [history, setHistory] = useState(false);
     const [busy, setBusy] = useState(false);
+    // The comments: the threads as the server has them, what their marked passages read as, whether something is selected to
+    // comment on, the comment being written, and the thread looked at.
+    const [threads, setThreads] = useState({ items: [], loaded: false, error: null });
+    const [texts, setTexts] = useState(() => new Map());
+    // Which threads (by their words) the editor was last asked to mark: until it has been asked about these, a thread that is not marked is not one that cannot be.
+    const [asked, setAsked] = useState(null);
+    const [selected, setSelected] = useState(false);
+    const [compose, setCompose] = useState(null);
+    const [active, setActive] = useState(null);
+    const [commentProblem, setCommentProblem] = useState(null);
+    const workspace = useRef(null);
+    // Asks the server for the threads again: set once the page has a document to ask about.
+    const refresh = useRef(() => {});
+    // Whether there are any, which is when a save is followed by asking after them (see `send`).
+    const commented = useRef(false);
+    commented.current = threads.items.length > 0;
+    const url = documentUrl(folder, id);
 
     useEffect(() => {
       const mount = document.createElement("div");
       host.current.append(mount);
-      const url = documentUrl(folder, id);
       let editor = null;
       let gone = false;
       // The text once the editor is gone: what a save that is still on its way sends.
@@ -171,10 +193,30 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
       let stream = null;
       let retry = null;
       let failed = 0;
+      let connected = false;
+      // Which answer to a request for the threads is the newest: an older one that comes late is not taken.
+      let latest = 0;
+      refresh.current = async () => {
+        const mine = ++latest;
+        try {
+          const body = await portal.api.json(`${url}/threads`);
+          // The same threads as before are left as they are, so that a save every second does not draw them again.
+          if (!gone && mine === latest) setThreads((now) => (now.loaded && !now.error && JSON.stringify(now.items) === JSON.stringify(body.threads) ? now : { items: body.threads, loaded: true, error: null }));
+        } catch (error) {
+          // The threads that were shown stay; only a page that has none yet says why.
+          if (!gone && mine === latest) setThreads((now) => ({ ...now, error }));
+        }
+      };
       const read = () => frozen ?? editor.markdown();
       const saver = createSaver({
         read,
-        send: (markdown, base) => portal.api.json(url, { method: "PUT", body: JSON.stringify({ markdown, base }), keepalive: leaving }),
+        send: (markdown, base) =>
+          portal.api.json(url, { method: "PUT", body: JSON.stringify({ markdown, base }), keepalive: leaving }).then((answer) => {
+            // The server puts the passages of the comments in step with each revision when it is asked for them: after each save, so that each
+            // step is a small one and a passage is not lost in a big one.
+            if (commented.current) void refresh.current();
+            return answer;
+          }),
         onMerged: (answer, sent) => live?.merged(answer, sent),
         onState: (state) => {
           // Kept while it cannot be saved, and let go once it is, also when the page is gone by then.
@@ -213,7 +255,14 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
 
       (async () => {
         try {
-          editor = await edit.createEditor({ root: mount, markdown: doc.markdown, onChange: () => saver.changed() });
+          editor = await edit.createEditor({
+            root: mount,
+            markdown: doc.markdown,
+            onChange: () => saver.changed(),
+            onSelect: (on) => setSelected(on),
+            onThread: (thread) => setActive(thread),
+            onPlaced: (placed) => setTexts(placed),
+          });
         } catch (e) {
           if (!gone) setBroken(e);
           return;
@@ -236,7 +285,12 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
           saver,
           revision: doc.revision,
           load: () => portal.api.json(url),
-          notify: ({ kind, revision, author }) => kind !== "conflict" && setNotice({ kind, revision, author }),
+          notify: ({ kind, revision, author }) => {
+            if (kind === "conflict") return;
+            setNotice({ kind, revision, author });
+            // What changed meanwhile may have moved the passages of the comments.
+            void refresh.current();
+          },
         });
         // Told where the document stands as it opens, which is how a change between its load and now is found, and after each revision.
         const listen = () => {
@@ -250,6 +304,13 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
               // A message that is not one of ours: nothing to take from it.
             }
           });
+          // The comments changed (the agent wrote one, or another window did): asked for again.
+          source.addEventListener("threads", () => void refresh.current());
+          // A stream that is back may have missed such a message.
+          source.onopen = () => {
+            if (connected) void refresh.current();
+            connected = true;
+          };
           // One that dropped is asked for again after a while, longer each time, as the chat's own stream is: the first message of a new one
           // says where the document stands, so nothing that happened meanwhile is missed. (The browser would not ask again for one a proxy refused.)
           source.addEventListener("error", () => {
@@ -258,6 +319,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
           });
         };
         if (typeof EventSource !== "undefined") listen();
+        void refresh.current();
         setReady(true);
       })();
 
@@ -333,6 +395,69 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
       }
     };
 
+    // The passages of the comments that are open (and of the one being written) are marked in the text. Marked again when their words
+    // change, not when only the places they are at do: the editor moves a mark with the text as it is typed.
+    const open = threads.items.filter((x) => x.status === "open" && !x.orphaned);
+    const wanted = JSON.stringify(open.map((x) => [x.id, x.quote, x.prefix, x.suffix]));
+    useEffect(() => {
+      if (!ready) return;
+      const list = [...open];
+      if (compose) list.push({ id: PENDING, pending: true, quote: compose.passage.quote, prefix: compose.passage.prefix, suffix: compose.passage.suffix, start: compose.passage.start });
+      parts.current?.editor.threads(list);
+      setAsked(wanted);
+    }, [ready, wanted, compose?.passage]);
+    useEffect(() => {
+      if (ready) parts.current?.editor.activate(active);
+    }, [ready, active]);
+    // A thread that is looked at is brought into view in the list.
+    useEffect(() => {
+      if (active) workspace.current?.querySelector(`.pd-thread-card[data-thread="${active}"]`)?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    }, [active]);
+
+    /** The passage selected is commented on: the text is saved first, so that the passage is in a revision the server has. */
+    const startComment = async () => {
+      const { editor, saver } = parts.current;
+      setCommentProblem(null);
+      if (!(await saver.flush())) return;
+      const passage = editor.selection();
+      if (!passage) return;
+      if (passage.quote.length > MAX_QUOTE) return setCommentProblem(t("Select less text: a comment can be on at most {n} characters.", { n: MAX_QUOTE }));
+      setActive(null);
+      setCompose({ passage, base: saver.state().base, body: "", busy: false, error: null });
+    };
+
+    const submit = async (c) => {
+      setCompose({ ...c, busy: true, error: null });
+      const { passage, base, body } = c;
+      try {
+        const made = await portal.api.json(`${url}/threads`, { method: "POST", body: JSON.stringify({ base, quote: passage.quote, prefix: passage.prefix, suffix: passage.suffix, start: passage.start, body: body.trim() }) });
+        setThreads((now) => ({ ...now, items: [...now.items.filter((x) => x.id !== made.id), made] }));
+        setCompose(null);
+        setActive(made.id);
+      } catch (e) {
+        setCompose((now) => (now ? { ...now, busy: false, error: e.message } : now));
+      }
+    };
+
+    /** `next` is the comment being written (null: it is dropped), and with `send` it is sent. */
+    const writing = (next, send) => {
+      if (send) void submit(next);
+      else setCompose(next);
+    };
+
+    /** A thread the server changed is taken in its place. */
+    const taken = (made) => setThreads((now) => ({ ...now, items: now.items.map((x) => (x.id === made.id ? made : x)) }));
+    const post = (path, body) => portal.api.json(`${url}/threads/${path}`, { method: "POST", body: JSON.stringify(body) });
+    const reply = async (thread, body) => taken(await post(`${thread.id}/comments`, { body }));
+    const resolve = async (thread, body) => taken(await post(`${thread.id}/resolve`, body ? { body } : {}));
+    const reopen = async (thread) => taken(await post(`${thread.id}/reopen`, {}));
+    const show = (thread) => {
+      setActive(thread);
+      parts.current?.editor.reveal(thread);
+    };
+    // In the order of the text, those that have no place last.
+    const ordered = [...threads.items].sort((a, b) => (a.start ?? Infinity) - (b.start ?? Infinity) || a.createdAt.localeCompare(b.createdAt));
+
     const { status, base, conflict, error, warning } = view;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
     return h(
@@ -346,6 +471,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
           "div",
           { className: "pd-bar-end" },
           h("span", { className: "pd-state", "data-status": status, "aria-live": "polite" }, `${label} · ${t("Revision {n}", { n: base })}`),
+          h("button", { type: "button", className: ui.classes.ghost, disabled: !ready || !selected || Boolean(compose), title: selected ? undefined : t("Select the text you want to comment on."), onClick: () => void startComment() }, t("Comment")),
           h("button", { type: "button", className: ui.classes.ghost, "aria-expanded": history, disabled: !ready, onClick: () => setHistory((on) => !on) }, history ? t("Hide history") : t("History")),
         ),
       ),
@@ -366,6 +492,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
         ),
       status === "error" && h(ui.ErrorBanner, null, h("span", null, t("Could not save: {error}", { error })), " ", h("button", { type: "button", className: ui.classes.ghost, onClick: () => void parts.current.saver.flush() }, t("Try again"))),
       problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("Could not restore: {error}", { error: problem })),
+      commentProblem && h(ui.ErrorBanner, { onClose: () => setCommentProblem(null) }, t("Could not comment: {error}", { error: commentProblem })),
       warning && h(ui.WarnBanner, { onClose: () => parts.current?.saver.dismissWarning() }, warning),
       notice &&
         h(
@@ -387,7 +514,27 @@ export function documentEditor(portal, { documentUrl, when, useAnswer }) {
       history && ready && h(History, { folder, id, current: base, busy, onRestore: restore }),
       broken && h(ui.ErrorBanner, null, t("The editor could not be loaded: {error}", { error: broken.message })),
       !ready && !broken && h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
-      h("div", { ref: host, className: "pd-editor", hidden: !ready }),
+      h(
+        "div",
+        { ref: workspace, className: "pd-workspace" },
+        h("div", { ref: host, className: "pd-editor", hidden: !ready }),
+        ready &&
+          h(Comments, {
+            threads: ordered,
+            loaded: threads.loaded,
+            error: threads.error,
+            texts,
+            settled: asked === wanted,
+            active,
+            compose,
+            onRetry: () => void refresh.current(),
+            onActivate: show,
+            onCompose: writing,
+            onReply: reply,
+            onResolve: resolve,
+            onReopen: reopen,
+          }),
+      ),
     );
   }
 
