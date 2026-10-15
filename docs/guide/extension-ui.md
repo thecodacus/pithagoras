@@ -974,6 +974,19 @@ portal's code: `npm run check:boundaries` holds that line, and CI runs it.
 What they need of the portal they get the way your extension does, through
 the `portal` they are given.
 
+Each keeps its tests beside its code, in `test/`, so removing its folder takes
+them with it, and the image leaves them out:
+
+- `test/*.test.mts`: unit and server tests, run by the portal's `npm test`;
+- `test/browser/*.spec.mts`: browser specs, run by Playwright with the
+  portal's own;
+- `test/browser/<page>.page.tsx`: a page of its own for those specs, served by
+  the portal's dev server at `/tests/extension.html?page=<folder>/<page>`.
+
+A test may reach into the portal's code and its test helpers
+(`tests/helpers.mts`, `tests/browser/portal-mock.ts`); the extension's own code
+may not.
+
 ## Keeping it fast
 
 - Say what you use of the chat: `portal.chats.use(chat.id, pick)`.

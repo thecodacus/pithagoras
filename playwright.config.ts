@@ -1,7 +1,8 @@
 import { defineConfig } from '@playwright/test';
 const origin = 'http://127.0.0.1:5191';
 export default defineConfig({
-  testDir: './tests/browser', timeout: 45000, workers: 1,
+  // The portal's own specs, and each extension's beside its code (extensions/<name>/test/browser).
+  testDir: '.', testMatch: /\/(tests\/browser|extensions\/[^/]+\/test\/browser)\/[^/]+\.spec\.mts$/, timeout: 45000, workers: 1,
   use: {
     baseURL: origin, browserName: 'chromium', ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}), headless: true,
     // The portal's extra animations (core/web/src/motion.ts) are on until someone switches them off, and what leaves
