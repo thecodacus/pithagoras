@@ -310,6 +310,8 @@ test('the marks are where they were when the document is put in the editor again
 async function markedOn(page: Page, markdown: string, quotes: Record<string, string>) {
   return page.evaluate(async ([markdown, quotes]) => {
     const root = document.getElementById('root')!;
+    // Nothing left of an editor that held another document.
+    root.replaceChildren();
     const ed = await (window as any).editor.createEditor({ root, markdown });
     const text = ed.markdown() as string;
     const out: Record<string, string> = {};
@@ -317,6 +319,7 @@ async function markedOn(page: Page, markdown: string, quotes: Record<string, str
       ed.threads([{ id, quote, prefix: '', suffix: '', start: text.indexOf(quote) }]);
       out[id] = [...root.querySelectorAll(`[data-pd-thread="${id}"]`)].map((s) => s.textContent).join('');
     }
+    await ed.destroy();
     return out;
   }, [markdown, quotes] as const);
 }
@@ -345,6 +348,28 @@ test('a passage in text whose Markdown the editor writes differently with a mark
     const long = await markedOn(page, `${notesOf(count, every)}\n`, quotes);
     for (const i of picked) expect(long[`p${i}`], `paragraph ${i} of ${count}`).toBe(`number ${i} of`);
   }
+  // The same as a bullet list with an item for each meeting, a numbered list, a quote, and a list of tasks: their text is at the start of a line
+  // in the same way, and is escaped the same way.
+  const item = (i: number, every: number) => (i % every === 0 ? `${i + 1}\\. März: Treffen mit dem Team.` : `Item number ${i} of the list.`);
+  const nested: Record<string, (i: number, every: number) => string> = {
+    bullets: (i, every) => `- ${item(i, every)}`,
+    numbered: (i, every) => `${i + 1}. ${item(i, every)}`,
+    quote: (i, every) => `> ${item(i, every)}`,
+    tasks: (i, every) => `- [ ] ${item(i, every)}`,
+  };
+  for (const [kind, line] of Object.entries(nested)) {
+    for (const [count, every, picked] of [[40, 4, [1, 5, 10, 21, 30, 38]], [200, 5, [1, 2, 49, 101, 151, 197, 199]]] as const) {
+      // A quote is a paragraph for each line, set apart by a line of its own with the quote mark on it.
+      const lines = Array.from({ length: count }, (_, i) => line(i, every));
+      const markdown = `${kind === 'quote' ? lines.join('\n>\n') : lines.join('\n')}\n`;
+      const got = await markedOn(page, markdown, Object.fromEntries(picked.map((i) => [`p${i}`, `number ${i} of`])));
+      for (const i of picked) expect(got[`p${i}`], `${kind}: item ${i} of ${count}`).toBe(`number ${i} of`);
+    }
+  }
+  // A cell of a table that starts like a date is not one of them (a bar is in front of it), and is marked along with the rest.
+  const table = await markedOn(page, '| Date | What |\n| - | - |\n| 15. März | Treffen mit dem Team |\n\n15\\. März: Treffen mit dem Team.\n\nShip it on Friday.\n', { cell: '15. März', ship: 'Ship it' });
+  expect(table.cell).toBe('15. März');
+  expect(table.ship).toBe('Ship it');
   // And a numbered heading among them, which is not one of them.
   const heading = await markedOn(page, `# 1. The plan\n\n${notesOf(12, 3)}\n`, { plan: 'plan', last: 'number 10 of' });
   expect(['plan', '1. The plan']).toContain(heading.plan);

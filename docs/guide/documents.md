@@ -402,18 +402,21 @@ lines that changed. It guesses as little as it can:
   once is the same passage wherever it is, so a sentence moved to another place in
   the document keeps its comment, and a short paragraph cut and pasted does not.
   Words the comparison put at the place where the passage was, and that are still
-  in it, are the passage.
+  in it, are the passage. The text round a passage is compared with CRLF and LF
+  line breaks as the same, so a document written back with the other line
+  endings by a program outside the portal keeps its comments.
 
 A passage is marked in the editor by finding its words in the text the editor
 writes. A document written in another style than the editor's (`*` bullets,
 padded tables) is found by its letters and digits, with the marks left out; if
 that is not enough, the thread says **The passage could not be marked in the
 text**, and works all the same. Editing the document once writes it in the
-editor's style. The same is said of a passage in a paragraph that the editor
-cannot put a mark in without changing what it writes (a paragraph that starts
-with a character the editor writes escaped at the start of a line, such as
-`15\. März` or `\#hashtag`): the passages in all the other paragraphs are marked
-as usual, however many of those there are.
+editor's style. The same is said of a passage in a paragraph, list item or quote
+that the editor cannot put a mark in without changing what it writes (one that
+starts with a character the editor writes escaped at the start of a line, such as
+`15\. März` or `\#hashtag`, also as `- 15\. März` in a list of meetings): the
+passages in all the other paragraphs and items are marked as usual, however many
+of those there are.
 
 Limits: a passage is at most 5000 characters, a comment at most 4096 bytes, a
 thread at most 100 comments and a document at most 1000 threads.

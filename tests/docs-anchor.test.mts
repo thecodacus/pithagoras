@@ -237,6 +237,24 @@ test('a sentence that is written again round a passage is not the passage writte
   assert.deepEqual(t('Ship it on Friday. Call Bob at noon.\n', 'Bob', 'Release it soon. Call Alice at noon.\n'), ['Alice']);
 });
 
+test('a document of any size written back with the other line endings keeps the passages that are whole lines, though nothing is followed through it', () => {
+  // Over 10 KB, where the walk by words is given up: the context of the passages is what finds them, and compares line breaks as the same.
+  const lf = `# Plan\n\n## Risks\n\nApproved.\n\n${Array.from({ length: 230 }, (_, i) => `Paragraph ${i} says something about the plan.`).join('\n\n')}\n`;
+  const crlf = lf.replace(/\n/g, '\r\n');
+  assert.ok(crlf.length > 10_000);
+  for (const [before, after, what] of [[crlf, lf, 'CRLF written back as LF'], [lf, crlf, 'LF written back as CRLF']] as const) {
+    const anchors = ['Risks', 'Approved.', 'Paragraph 7 says'].map((q) => anchorOf(before, q));
+    assert.deepEqual(words(before, after, ...anchors), ['Risks', 'Approved.', 'Paragraph 7 says'], what);
+    // And again, the passages as they were kept, looked for by their words in the text with the other line breaks: as before the change.
+    const kept = (carry(before, after, anchors) as NonNullable<Range>[]).map((r, i) => ({ ...anchors[i], start: r.start, end: r.end }));
+    assert.deepEqual(words(after, after, ...kept), ['Risks', 'Approved.', 'Paragraph 7 says'], what);
+  }
+  // A passage with no place, found by its context with the line breaks of the other kind.
+  const lost = { ...anchorOf(crlf, 'Risks'), start: null, end: null };
+  assert.deepEqual(words(lf, lf, lost), ['Risks']);
+  assert.equal(locate(lf, { quote: 'Risks', prefix: '# Plan\r\n\r\n## ', suffix: '\r\n\r\nApproved.\r\n' })?.score, 12, 'the letters of "Plan" and "Approved" round it');
+});
+
 test('a start that is not a place in the text is not taken for one', () => {
   const text = 'Yes, it is.\n\nA\n\nYes, it is.\n';
   const quote = 'Yes, it is.';

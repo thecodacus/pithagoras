@@ -521,6 +521,28 @@ test('a start that is not a place in the text is no place: the passage is found 
   }
 });
 
+test('a document of a dozen pages written back with other line endings, by a program outside the portal, keeps its comments on headings and short lines', async () => {
+  const lf = `# Plan\n\n## Risks\n\nApproved.\n\n${Array.from({ length: 230 }, (_, i) => `Paragraph ${i} says something about the plan.`).join('\n\n')}\n`;
+  const crlf = lf.replace(/\n/g, '\r\n');
+  const { docs, comment, threads, save, folder } = await withDocument('docs-comments-crlf-', crlf);
+  try {
+    await comment('Risks', 'Which?', 1, crlf);
+    await comment('Approved.', 'By whom?', 1, crlf);
+    await comment('Paragraph 7 says', 'Says what?', 1, crlf);
+    // The file written back with LF by something outside (a Windows editor, git), found as a change and listed.
+    writeFile(folder, lf);
+    let listed = (await threads()).threads;
+    assert.deepEqual(listed.map((t: any) => [t.orphaned, on(lf, t)]), [[false, 'Risks'], [false, 'Approved.'], [false, 'Paragraph 7 says']]);
+    // Nothing is lost at the next listing either, nor when it is written back again.
+    await save(`${lf}One more.\n`, 2);
+    writeFile(folder, crlf);
+    listed = (await threads()).threads;
+    assert.deepEqual(listed.map((t: any) => [t.orphaned, on(crlf, t)]), [[false, 'Risks'], [false, 'Approved.'], [false, 'Paragraph 7 says']]);
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a change made outside the page (the file written by another program) is taken in with its revision, and the passage follows it', async () => {
   const { docs, comment, threads, folder } = await withDocument('docs-comments-outside-');
   try {

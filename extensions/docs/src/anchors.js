@@ -80,18 +80,21 @@ export function selected(ctx, kept) {
   return { start: null, end: null, quote: text.trim(), prefix: "", suffix: "", text };
 }
 
+/** The blocks a block of text can be in and have its text start at the start of a line. */
+const LINE_CONTAINERS = ["blockquote", "bullet_list", "ordered_list", "list_item"];
+
 /** The most runs of the whole document made to put marks at the blocks' edges. */
 const MOST_RUNS = 32;
 
 /**
- * Whether marks at the two edges of the top-level block `block` change what the editor writes of it on its own: a paragraph that
- * starts with a character the editor escapes at the start of a line (`15\. März`, `\#hashtag`). A block on its own is written
- * the way it is written in the document (at the start of a line, after a blank one), so this is found without a run of the whole
- * document, and it is not asked of a block in a list, a quote or a table, which has markup in front of it that the escape does
- * not depend on.
+ * Whether marks at the two edges of the block `block` change what the editor writes of it on its own: a paragraph that starts
+ * with a character the editor escapes at the start of a line (`15\. März`, `\#hashtag`). A block on its own is written the way
+ * its text is written at the start of a line in the document, so this is found without a run of the whole document. That is
+ * the start of a paragraph and of a list item's or a quote's text alike (`- 15\. März`, `> 15\. März`, tasks and numbered
+ * items too), and not of a cell of a table, which has a bar in front of it.
  */
 function changesWithMarks(ctx, block) {
-  if (!block.top || block.node.type.spec.code) return false;
+  if (!block.line || block.node.type.spec.code) return false;
   try {
     const schema = ctx.get(schemaCtx);
     const write = ctx.get(serializerCtx);
@@ -109,8 +112,8 @@ function changesWithMarks(ctx, block) {
  * Where the inline text of each of `blocks` starts and ends in the Markdown (`at`, by block, and the Markdown as `text`),
  * found with a mark at each block's edges in one run. A block whose Markdown the marks change spoils a run it is in. Those
  * are found one by one on their own (`changesWithMarks`) and left out, and the rest are put in one run: a document with a
- * paragraph for each date has as many of them as it likes. A block that only changes where it stands is looked for by halving
- * the rest, which has a limit; a block with nothing is left without a place, and so are the passages in it.
+ * paragraph, or a bullet, for each date has as many of them as it likes. A block that only changes where it stands is looked
+ * for by halving the rest, which has a limit; a block with nothing is left without a place, and so are the passages in it.
  */
 function blockTable(ctx, kept, doc, blocks) {
   const at = blocks.map(() => null);
@@ -132,8 +135,9 @@ function blockTable(ctx, kept, doc, blocks) {
   };
   const all = blocks.map((_, i) => i);
   if (run(all)) return { at, text };
-  const clean = all.filter((i) => !changesWithMarks(ctx, blocks[i]));
-  if (clean.length && clean.length < all.length && run(clean)) return { at, text };
+  const suspects = all.filter((i) => changesWithMarks(ctx, blocks[i]));
+  const clean = all.filter((i) => !suspects.includes(i));
+  if (clean.length && suspects.length && run(clean)) return { at, text };
   halve(clean);
   return text === null ? null : { at, text };
 }
@@ -143,7 +147,10 @@ function textblocks(doc) {
   const found = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
-    found.push({ node, from: pos + 1, to: pos + 1 + node.content.size, top: doc.resolve(pos).depth === 0 });
+    const $pos = doc.resolve(pos);
+    const inside = Array.from({ length: $pos.depth }, (_, d) => $pos.node(d + 1).type.name);
+    // `line`: the block's text starts at the start of a line (in the document, or after a list's or a quote's mark), not in a table.
+    found.push({ node, from: pos + 1, to: pos + 1 + node.content.size, line: inside.every((name) => LINE_CONTAINERS.includes(name)) });
     return false;
   });
   return found;

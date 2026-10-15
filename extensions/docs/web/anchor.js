@@ -131,6 +131,9 @@ export function squash(text) {
   return { s, at, to };
 }
 
+/** `text` with its line breaks all LF. */
+const lines = (text) => text.replace(/\r\n?/g, "\n");
+
 /** The places `needle` is in `haystack`, at most MOST_PLACES of them, overlapping ones too. */
 function places(haystack, needle) {
   const found = [];
@@ -166,7 +169,11 @@ export function locate(text, { quote, prefix = "", suffix = "", start = null }, 
   // The place it was, when it still reads the same, is weighed with the others even past the limit.
   if (hint !== null && !found.includes(hint) && text.startsWith(quote, hint)) found.push(hint);
   if (found.length) {
-    const choice = best(found, (at) => commonSuffix(prefix, text.slice(Math.max(0, at - prefix.length), at)) + commonPrefix(suffix, text.slice(at + quote.length, at + quote.length + suffix.length)), hint);
+    // The text round it is compared with its line breaks the same (a document written with CRLF and again with LF is the same text), so
+    // a longer stretch of it is taken, to have as many characters as the context has.
+    const [before, after] = [lines(prefix), lines(suffix)];
+    const reach = (n) => 2 * n + 2;
+    const choice = best(found, (at) => commonSuffix(before, lines(text.slice(Math.max(0, at - reach(prefix.length)), at))) + commonPrefix(after, lines(text.slice(at + quote.length, at + quote.length + reach(suffix.length)))), hint);
     return { start: choice.at, end: choice.at + quote.length, score: choice.score };
   }
   const wanted = squash(quote).s;
