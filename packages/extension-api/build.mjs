@@ -17,7 +17,11 @@
  * With `tailwind: true`, the Tailwind utilities its code uses are made into
  * its stylesheet, after what it imports, with the portal's colours, rounding
  * and shadow (./tailwind.mjs) and without Tailwind's reset: the portal's page
- * has had its own since before any extension came. With `server`, its server
+ * has had its own since before any extension came. They are scoped to the
+ * extension's own parts, which the portal draws inside an element marked with
+ * its package's name: the portal's utilities go by the same names, and one of
+ * the extension's that came after them would win over the portal's own
+ * (a `.flex` over an `md:hidden`) everywhere on the page. With `server`, its server
  * half is written in TypeScript too: that module is bundled into `server.js`
  * beside its package.json, its packages left to be imported where it runs.
  *
@@ -114,15 +118,19 @@ export async function buildExtension({ dir, entry = "src/client.tsx", outdir = "
 
 /**
  * The Tailwind utilities the extension's code names, with the portal's preset,
- * after what is already in `css` (its own stylesheet, if it imports one).
- * Only utilities: Tailwind's reset would restyle the whole page.
+ * after what is already in `css` (its own stylesheet, if it imports one), each
+ * for the extension's own parts only. Only utilities: Tailwind's reset would
+ * restyle the whole page.
  */
 async function utilities(dir, css, minify) {
   const { default: postcss } = await import("postcss");
   const { default: tailwindcss } = await import("tailwindcss");
+  const { name } = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
   const made = await postcss([
     tailwindcss({
       presets: [portal],
+      // `:where` keeps each utility's weight as the portal's is: inside the extension's parts, the later one wins.
+      important: `:where([data-extension=${JSON.stringify(name)}])`,
       content: [path.join(dir, "src/**/*.{ts,tsx,js,jsx}")],
       corePlugins: { preflight: false },
     }),

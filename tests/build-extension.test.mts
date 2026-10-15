@@ -14,6 +14,7 @@ import { scratch } from './helpers.mts';
 test('an extension is built with the utilities it uses in its own stylesheet, and its server half into server.js', async () => {
   const dir = scratch('build-extension-');
   mkdirSync(path.join(dir, 'src'));
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@me/panel', type: 'module' }));
   writeFileSync(path.join(dir, 'src', 'client.tsx'), `import "./client.css";
 export default function (portal: any) {
   portal.slots.register("chat.panel", { id: "p", title: "P", component: () => <div className="bg-surface text-fg-muted p-2 shadow-pop">hello</div> });
@@ -35,6 +36,10 @@ export default function (portal: { log(text: string): void }) {
   assert.match(css, /\.bg-surface\s*\{[^}]*var\(--surface\)/);
   assert.match(css, /\.text-fg-muted\s*\{[^}]*var\(--fg-muted\)/);
   assert.match(css, /\.shadow-pop/);
+  // Each for the extension's own parts only, weighing what the portal's own does: the portal's utilities go by the
+  // same names, and the page's are not the extension's to restyle.
+  assert.match(css, /:where\(\[data-extension="@me\/panel"\]\) \.bg-surface/);
+  assert.doesNotMatch(css, /^\.bg-surface/m);
   // Only what it uses, and no reset of the page.
   assert.doesNotMatch(css, /\.bg-raised|\.text-danger/);
   assert.doesNotMatch(css, /box-sizing:\s*border-box/);

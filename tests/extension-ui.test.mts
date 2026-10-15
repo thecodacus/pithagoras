@@ -123,6 +123,25 @@ test('a slot holds what was registered in it, in order, until it is taken out', 
   assert.deepEqual(slotEntries('nav.page'), []);
 });
 
+test('each part an extension draws is inside an element that says whose it is, laid out as if it were not there', () => {
+  const off = register('@me/panel', 'chat.panel', {
+    id: 'p',
+    title: 'P',
+    component: ({ chat }: { chat: { id: string } }) => createElement('p', { className: 'flex' }, chat.id),
+    header: () => createElement('span', null, 'Tabs'),
+    actions: () => createElement('button', null, 'Go'),
+  });
+  try {
+    const [entry] = slotEntries('chat.panel');
+    const drawn = (part: unknown, props: object) => renderToStaticMarkup(createElement(part as any, props));
+    assert.equal(drawn(entry.component, { chat: { id: 'c1' } }), '<div data-extension="@me/panel" style="display:contents"><p class="flex">c1</p></div>');
+    assert.equal(drawn(entry.header, {}), '<div data-extension="@me/panel" style="display:contents"><span>Tabs</span></div>');
+    assert.equal(drawn(entry.actions, {}), '<div data-extension="@me/panel" style="display:contents"><button>Go</button></div>');
+  } finally {
+    off();
+  }
+});
+
 test('what cannot be drawn is refused where it is registered, with why', () => {
   assert.throws(() => register('ext', 'chat.sidebar' as any, { id: 'x', component: Nothing } as any), /no slot called "chat\.sidebar".*chat\.panel/);
   assert.throws(() => register('ext', 'chat.panel', { id: '', title: 'X', component: Nothing }), /needs an id and a component/);

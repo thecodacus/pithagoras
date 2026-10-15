@@ -273,8 +273,13 @@ with the portal's preset, `@pithagoras/extension-api/tailwind`, so
 `bg-surface`, `text-fg-muted`, `border-line`, `bg-accent`, `text-danger`,
 `rounded-xl` and `shadow-pop` are the portal's colours, rounding and shadow and
 follow the theme. Tailwind's reset of the page is left out: the page has the
-portal's. tailwindcss and postcss are then the extension's to install, beside
-esbuild.
+portal's. The utilities reach only your own parts: the portal draws each part
+you register inside an element marked with your package's name
+(`data-extension`, laid out as if it were not there), and the build scopes each
+utility to it. The portal's utilities go by the same names, and yours, coming
+after them, would otherwise win over its own on every page (a `.flex` over an
+`md:hidden`). tailwindcss and postcss are then the extension's to install,
+beside esbuild.
 
 ## Slots
 

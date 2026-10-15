@@ -1,4 +1,4 @@
-import { memo, useSyncExternalStore, type ComponentType } from "react";
+import { createElement, memo, useSyncExternalStore, type ComponentType } from "react";
 
 /**
  * Where an extension's browser half puts what it draws: the portal's slots.
@@ -42,6 +42,18 @@ const ordered = (entries: Registered<SlotName>[]) =>
     .map(({ entry }) => entry);
 
 /**
+ * An extension's part, drawn inside an element that says whose it is
+ * (`data-extension`) and that is laid out as if it were not there. What an
+ * extension's stylesheet scopes to that, as the utilities `buildExtension`
+ * makes are, reaches its own parts and nothing of the portal's or another
+ * extension's.
+ */
+const marked = (extension: string, Part: ComponentType<any>) =>
+  memo(function ExtensionPart(props: object) {
+    return createElement("div", { "data-extension": extension, style: { display: "contents" } }, createElement(Part, props));
+  });
+
+/**
  * Put `entry` into `slot` for `extension`. Returns what takes it out again.
  * Throws for a slot there is none of, an entry without an id or a component,
  * and a second entry of the extension's under one id.
@@ -61,9 +73,9 @@ export function register<S extends SlotName>(extension: string, slot: S, entry: 
   const parts = entry as { header?: ComponentType<any>; actions?: ComponentType<any> };
   const row = {
     ...entry,
-    component: memo(entry.component as ComponentType<any>),
-    ...(parts.header ? { header: memo(parts.header) } : {}),
-    ...(parts.actions ? { actions: memo(parts.actions) } : {}),
+    component: marked(extension, entry.component as ComponentType<any>),
+    ...(parts.header ? { header: marked(extension, parts.header) } : {}),
+    ...(parts.actions ? { actions: marked(extension, parts.actions) } : {}),
     extension,
     key,
   } as unknown as Registered<SlotName>;
