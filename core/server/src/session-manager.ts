@@ -2407,22 +2407,23 @@ class SessionManager extends EventEmitter {
 
         // What a call gave the person is part of the answer, whatever the
         // channel relays of the work: a picture or a clip is sent on as it is
-        // shown, where the channel can send one, and any other file is named.
-        // The words that go with it are the agent's, after it.
+        // shown, where the channel can send one, and any other file is named,
+        // as is one the channel failed to send. The words that go with it are
+        // the agent's, after it.
         case "tool_execution_end": {
           const files = shownFiles(payload);
           if (!files.length) break;
           flush();
           for (const file of files) {
+            const name = () => {
+              const named = `📎 ${file.title ? `${file.title} (${file.path})` : file.path}`;
+              all.push(named);
+              if (streamText) relay(named);
+            };
             const to = file.kind === "picture" ? send.picture : file.kind === "video" ? send.video : undefined;
             const read = to && this.fileShown(sessionId, file);
-            if (read) {
-              void Promise.resolve(to!({ ...read, ...(file.title ? { title: file.title } : {}) })).catch(() => {});
-              continue;
-            }
-            const named = `📎 ${file.title ? `${file.title} (${file.path})` : file.path}`;
-            all.push(named);
-            if (streamText) relay(named);
+            if (read) void Promise.resolve(to!({ ...read, ...(file.title ? { title: file.title } : {}) })).catch(name);
+            else name();
           }
           break;
         }

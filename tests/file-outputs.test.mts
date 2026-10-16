@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { scratch } from "./helpers.mts";
@@ -47,6 +47,9 @@ test("each file is what its bytes say, wherever it is named from in the folder, 
   const folder = folderWith({ "chart.png": PNG, "clips/fox.mp4": MP4, "old.avi": AVI, "notes.txt": "hello", "named.png": "not a picture", "sub/x.txt": "x" });
   const outside = folderWith({ "secret.png": PNG });
   symlinkSync(path.join(outside, "secret.png"), path.join(folder, "link.png"));
+  // A picture larger than the picture route draws (25 MB), as a sparse file: one to save.
+  writeFileSync(path.join(folder, "huge.png"), PNG);
+  truncateSync(path.join(folder, "huge.png"), 26 * 1024 * 1024);
   const files = filesFound(folder, {
     files: [
       { path: "chart.png", title: "Chart" },
@@ -54,6 +57,7 @@ test("each file is what its bytes say, wherever it is named from in the folder, 
       // A clip a browser does not play, and a file called a picture that is none, are files to save.
       { path: "old.avi" },
       { path: "named.png" },
+      { path: "huge.png" },
       { path: "./notes.txt", from: ["chart.png", path.join(folder, "clips/fox.mp4"), "../elsewhere.png"] },
       // Not given: outside the folder, through a link out of it, not there, a folder.
       { path: "../x.png" },
@@ -68,6 +72,7 @@ test("each file is what its bytes say, wherever it is named from in the folder, 
     { path: "clips/fox.mp4", kind: "video" },
     { path: "old.avi", kind: "file" },
     { path: "named.png", kind: "file" },
+    { path: "huge.png", kind: "file" },
     { path: "notes.txt", kind: "file", from: ["chart.png", "clips/fox.mp4"] },
   ]);
   assert.deepEqual(filesFound(path.join(folder, "no-such-folder"), { files: [{ path: "chart.png" }] }), [], "a chat whose folder is gone gave nothing that can be shown");

@@ -104,6 +104,16 @@ test("what a call gives goes to a channel as it is given, with the words after i
       onPicture: (picture) => order.push(`[${picture.name}]`),
     });
     assert.deepEqual(order.filter((l) => !l.startsWith("⚙")), ["Drawing it.", "[chart.png]", "📎 A fox (fox.mp4)", "📎 sales.csv", "Sales doubled."]);
+
+    // One the channel failed to send is named too, so the person still hears of it: when the failure is known, after what was said by then.
+    const failed = await sessions.ask("shown", "once more", {
+      streamText: false,
+      onPicture: () => {},
+      onVideo: async () => {
+        throw new Error("Signal refused the attachment");
+      },
+    });
+    assert.equal(failed, "Drawing it.\n\n📎 sales.csv\n\nSales doubled.\n\n📎 A fox (fox.mp4)");
   } finally {
     sessions.submit = realSubmit;
   }

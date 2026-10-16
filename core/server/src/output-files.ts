@@ -1,9 +1,10 @@
-import { closeSync } from "node:fs";
+import { closeSync, readSync } from "node:fs";
 import path from "node:path";
 import { FILES_KEY, fileOutputs, type FileKind, type ShownFile } from "./file-outputs.js";
-import { openVideo } from "./video-files.js";
+import { pictureType } from "./prompt-images.js";
+import { MAX_VIDEO_BYTES, VIDEO_HEAD, videoType } from "./video-files.js";
 import { pathBelow } from "./within.js";
-import { baseDir, openDownload, openPicture } from "./workspace-files.js";
+import { MAX_PICTURE_BYTES, baseDir, openDownload } from "./workspace-files.js";
 
 /**
  * What the files a call gave are, by their bytes: see file-outputs.ts. Looked
@@ -21,21 +22,27 @@ export function inFolder(folder: string, base: string, given: string): string | 
 }
 
 /**
- * What a file in the folder is, as the portal serves it: a picture when the picture route would draw it, a clip when
- * the video route would play it, and a file to download when it is a plain file in the folder at all. Nothing for
- * one that is not there, is a folder, or leads out of the folder through a link.
+ * What a file in the folder is, as the portal serves it, from one look at its first bytes: a picture when the picture
+ * route would draw it (see openPicture), a clip when the video route would play it (see openVideo), and a file to
+ * download when it is a plain file in the folder at all. Nothing for one that is not there, is a folder, or leads out
+ * of the folder through a link.
  */
 function kindOf(base: string, rel: string): FileKind | undefined {
-  const tries: [FileKind, (base: string, rel: string) => { fd: number }][] = [["picture", openPicture], ["video", openVideo], ["file", openDownload]];
-  for (const [kind, open] of tries) {
-    try {
-      closeSync(open(base, rel).fd);
-      return kind;
-    } catch {
-      // Not this kind: the next is looked at.
-    }
+  let opened: { fd: number; size: number };
+  try {
+    opened = openDownload(base, rel);
+  } catch {
+    return undefined;
   }
-  return undefined;
+  try {
+    const head = Buffer.alloc(VIDEO_HEAD);
+    const bytes = head.subarray(0, readSync(opened.fd, head, 0, head.length, 0));
+    if (opened.size <= MAX_PICTURE_BYTES && pictureType(bytes)) return "picture";
+    if (opened.size <= MAX_VIDEO_BYTES && videoType(bytes)) return "video";
+    return "file";
+  } finally {
+    closeSync(opened.fd);
+  }
 }
 
 /** The files a call's answer names, as they are in the chat's folder `folder` now. */
