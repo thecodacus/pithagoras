@@ -14,7 +14,7 @@ function Page() {
   const [began, setBegan] = useState<number | null>(null);
   const job: BackgroundJob = { key: 'j1', sid: 1, pids: [], command: 'sleep 100', startedAt: began ?? 0, state: began ? 'running' : 'exited', exitedAt: began ? undefined : 1, hasOutput: false, attached: false };
   // The chat as the page has it, for the terminal: before the first frame that shows the job.
-  useLayoutEffect(() => publishChat('clock', { events: [], items: [], running: false, status: 'idle', loading: false, background: { supported: true, jobs: [job], statuses: [], widgets: [] }, refreshBackground: () => {} }), [began]);
+  useLayoutEffect(() => publishChat('clock', { events: [], items: [], calls: [], call: () => undefined, running: false, status: 'idle', loading: false, background: { supported: true, jobs: [job], statuses: [], widgets: [] }, refreshBackground: () => {} }), [began]);
   return (
     <>
       <button onClick={() => setBegan(Date.now() - 3000)}>Start</button>

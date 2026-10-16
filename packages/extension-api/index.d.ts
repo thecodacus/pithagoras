@@ -64,8 +64,9 @@ export interface ToolCallView {
   /** The tool's name. */
   name: string;
   callId?: string;
-  status: "running" | "done" | "error";
-  /** What it was called with. */
+  /** `writing` while the model is still writing the call (`ChatFeed.calls`): it has not run yet, and may never. */
+  status: "writing" | "running" | "done" | "error";
+  /** What it was called with: of a call being written, as far as the model has written it, a string cut where it has come to. */
   input: Record<string, unknown>;
   /** What it has returned so far, as text: its end, of a long one. */
   output?: string;
@@ -211,6 +212,14 @@ export interface ChatFeed {
   events: readonly PortalEvent[];
   /** The conversation as the portal draws it: messages, tool calls with their output, notices. Read `kind`; the rest is the portal's own and may change. */
   items: readonly { kind: string; [key: string]: unknown }[];
+  /**
+   * The tool calls that have not ended, oldest first: the ones the model is writing now (`status: "writing"`, `input` as far as
+   * it has come, read again a few times a second, not with every token) and the ones it has written that are running. Only in a
+   * page that has the chat open: nothing of it is done where nobody looks.
+   */
+  calls: readonly ToolCallView[];
+  /** A call of the conversation by its id, ended or not: to follow one from `calls` to how it came out. Nothing for one the page does not have. */
+  call(callId: string): ToolCallView | undefined;
   /** The agent is at work. */
   running: boolean;
   /** How the chat stands: at work, waiting, or stopped by an error or by hand. After those two, a call that has not ended will not. */

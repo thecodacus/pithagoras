@@ -45,6 +45,7 @@ import { labelOf, msg, t } from "../i18n";
 import { titleOf, useSlot, type ChatProps, type PanelHandle, type Panels, type Registered } from "../extensions/slots";
 import { channelFor } from "../extensions/channel";
 import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
+import { forgetOpenCalls, openCalls } from "../open-calls";
 import { setPanelController, type ChatPanels } from "../extensions/panels";
 import { runCommand, useHasCommand } from "../extensions/commands";
 import { STEP, arrowSteps } from "../resize-keys";
@@ -1644,12 +1645,18 @@ export function Chat({
     setPanelController({ isOpen: (key) => panelControl.current.isOpen(key), open: (key, params) => panelControl.current.open(key, params), close: (key) => panelControl.current.close(key) });
     return () => setPanelController(undefined);
   }, []);
-  // The chat as it is now, for what the extensions drew: see extensions/chat-feed.ts.
+  // The chat as it is now, for what the extensions drew: see extensions/chat-feed.ts, and open-calls.ts for its calls.
+  useEffect(() => {
+    const { calls, call } = openCalls(session.id, events, items);
+    publishChat(session.id, { events, items, calls, call, running, status: session.status, loading: loading === true, background, refreshBackground });
+  }, [session.id, events, items, running, session.status, loading, background, refreshBackground]);
   useEffect(
-    () => publishChat(session.id, { events, items, running, status: session.status, loading: loading === true, background, refreshBackground }),
-    [session.id, events, items, running, session.status, loading, background, refreshBackground],
+    () => () => {
+      forgetChatFeed(session.id);
+      forgetOpenCalls(session.id);
+    },
+    [session.id],
   );
-  useEffect(() => () => forgetChatFeed(session.id), [session.id]);
 
   /** What is in a panel: its header, which carries it, and what it shows. */
   const panelContent = (kind: AsidePanel) => (

@@ -31,20 +31,30 @@ function settles(e: PortalEvent, event: PortalEvent): boolean {
  * whole transcript was read through again for it. This is the shape the server
  * sends a page that opens mid-message (`message_snapshot`), and the transcript
  * reads it the same. A block goes last when it is added to, which is how
- * `activity` knows what was written last; a tool call's arguments, which the
- * page does not show, are one block saying that.
+ * `activity` knows what was written last. A tool call is a block of its own,
+ * by its id, with its arguments as the JSON text that has come (`partialJson`),
+ * and as an object once the model has written it all (`arguments`): what an
+ * extension shows of it as it is written (see open-calls.ts).
  *
- * Null for an update that adds nothing: a block starting or ending.
+ * Null for an update that adds nothing: a text starting or ending.
  */
 function writing(into: PortalEvent | undefined, event: PortalEvent): PortalEvent | null {
   const p = event.payload ?? {};
   const inner = p.assistantMessageEvent ?? {};
   const delta = typeof inner.delta === 'string' ? inner.delta : '';
-  if (!delta) return null;
+  const call = typeof inner.toolCallId === 'string' && typeof inner.type === 'string' && inner.type.startsWith('toolcall_') ? inner.toolCallId : undefined;
+  if (!delta && !call) return null;
   const kind = inner.type === 'thinking_delta' ? 'thinking' : inner.type === 'text_delta' ? 'text' : 'toolCall';
   const was = into?.payload ?? {};
   const content: any[] = Array.isArray(was.message?.content) ? [...was.message.content] : [];
-  if (kind === 'toolCall') {
+  if (call) {
+    const at = content.findIndex((c) => c?.type === 'toolCall' && c.id === call);
+    const block = at >= 0 ? content.splice(at, 1)[0] : { type: 'toolCall', id: call, name: inner.toolName, partialJson: '' };
+    // Its arguments as an object only once the model has written it all: what a snapshot had of them is behind the pieces that follow it.
+    const { arguments: _behind, ...rest } = block;
+    const done = inner.type === 'toolcall_end' && inner.toolCall && typeof inner.toolCall === 'object' ? { arguments: inner.toolCall.arguments } : delta ? {} : { arguments: _behind };
+    content.push({ ...rest, partialJson: (block.partialJson ?? '') + delta, ...done });
+  } else if (kind === 'toolCall') {
     if (content[content.length - 1]?.type !== 'toolCall') content.push({ type: 'toolCall' });
   } else {
     const at = content.map(c => c?.type).lastIndexOf(kind);

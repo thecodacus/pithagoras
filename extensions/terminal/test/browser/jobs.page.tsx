@@ -8,7 +8,7 @@ import { TerminalPanel } from './terminal-panel';
 import '../../../../core/web/src/styles';
 
 const job: BackgroundJob = { key: 'j1', sid: 1, pids: [], command: 'npm run dev', startedAt: 1, state: 'running', hasOutput: true, attached: false };
-publishChat('jobs', { events: [], items: [], running: false, status: 'idle', loading: false, background: { supported: true, jobs: [job], statuses: [], widgets: [] }, refreshBackground: () => {} });
+publishChat('jobs', { events: [], items: [], calls: [], call: () => undefined, running: false, status: 'idle', loading: false, background: { supported: true, jobs: [job], statuses: [], widgets: [] }, refreshBackground: () => {} });
 startExtensions();
 
 createRoot(document.getElementById('root')!).render(

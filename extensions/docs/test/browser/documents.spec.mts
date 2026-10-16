@@ -241,75 +241,96 @@ test('a chat has a Documents panel beside it: its folder\'s documents, opened in
   expect(made).toEqual([{ title: 'Ideas' }]);
 });
 
-/** What the server half tells the chat's pages as the model writes a call (writing.js), as the chat's stream carries it. */
-const serverSays = (page: Page) => (data: unknown) =>
-  page.evaluate((message) => (window as any).streams.find((s: any) => !s.closed && s.url.includes('/api/sessions/a/events')).emit('extension', message), { extension: NAME, data });
+/**
+ * The model writing a call, as the chat's stream carries it to the page: each piece of its arguments as it comes (live, which call
+ * it is of said with it), then the message ends with the call in it, and the call starts and ends as any does.
+ */
+function model(page: Page, says: (type: string, payload: unknown) => Promise<unknown>) {
+  let live = -1000;
+  const emit = (event: unknown) => page.evaluate((e) => (window as any).streams.find((s: any) => !s.closed && s.url.includes('/api/sessions/a/events')).emit('message', e), event);
+  return {
+    /** A piece of the arguments of call `call` of tool `name`. Read a few times a second at most: a test that wants the next read waits that long. */
+    writes: async (call: string, name: string, delta: string) => {
+      await emit({ seq: live--, type: 'message_update', at: Date.now(), payload: { type: 'message_update', streamId: `m-${call}`, assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta, toolCallId: call, toolName: name } } });
+      await page.waitForTimeout(200);
+    },
+    /** The model wrote all of it, and the call ran: `details` when it succeeded, as the tool answers. */
+    runs: async (call: string, name: string, args: unknown, details?: unknown) => {
+      await says('message_end', { streamId: `m-${call}`, message: { role: 'assistant', content: [{ type: 'toolCall', id: call, name, arguments: args }] } });
+      await says('tool_execution_start', { toolCallId: call, toolName: name, args });
+      await says('tool_execution_end', { toolCallId: call, toolName: name, isError: !details, result: { content: [{ type: 'text', text: details ? 'Done' : 'exists: refused' }], ...(details ? { details } : {}) } });
+    },
+  };
+}
 
-test('the panel opens when the agent begins a new document, shows it as it is written, and opens it in the editor once it is made', async ({ page }) => {
+test('the panel opens when the agent begins a new document, which is drawn as the model writes it and opens in the editor once it is made', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  const { caughtUp } = await portal(page, FOLDERS, 'open');
+  const { says, caughtUp } = await portal(page, FOLDERS, 'open');
   await page.goto('/s/a');
   await caughtUp();
-  const writes = serverSays(page);
+  const { writes, runs } = model(page, says);
   const panels = page.getByRole('complementary', { name: 'Panels' });
-  await writes({ type: 'writing', call: 'c9', tool: 'create', folder: '0123456789abcdef', title: 'Ideas', markdown: 'The first' });
+  await writes('c9', 'doc_create', '{"title":"Ideas","markdown":"The first');
   await expect(panels.getByText('The agent is writing a new document…')).toBeVisible();
   // As doc_create will make it: its title as its heading, where the Markdown has none.
   await expect(panels.locator('.pd-draft h1')).toHaveText('Ideas');
   await expect(panels.locator('.pd-draft')).toContainText('The first');
-  await writes({ type: 'writing', call: 'c9', tool: 'create', folder: '0123456789abcdef', title: 'Ideas', markdown: 'The first idea, and the second.' });
+  await writes('c9', 'doc_create', ' idea, and the second.');
   await expect(panels.locator('.pd-draft')).toContainText('The first idea, and the second.');
-  // Made: the document as it is stored, in the editor.
-  await writes({ type: 'written', call: 'c9', ok: true, folder: '0123456789abcdef', id: '4444444444444444' });
+  // Made: the document as the tool saved it, in the editor.
+  await runs('c9', 'doc_create', { title: 'Ideas', markdown: 'The first idea, and the second.' }, { action: 'create', folder: '0123456789abcdef', id: '4444444444444444', name: 'ideas.md', title: 'Ideas', revision: 1 });
   await expect(panels.getByText('The agent is writing a new document…')).toHaveCount(0);
   await expect(panels.locator('.pd-editor .ProseMirror h1')).toHaveText('Ideas');
   // One that was not made says so, and the list is a click away.
-  await writes({ type: 'writing', call: 'c10', tool: 'create', folder: '0123456789abcdef', title: 'Taken', markdown: 'Text' });
+  await writes('c10', 'doc_create', '{"title":"Taken","markdown":"Text"}');
   await expect(panels.getByText('The agent is writing a new document…')).toBeVisible();
-  await writes({ type: 'written', call: 'c10', ok: false });
+  await runs('c10', 'doc_create', { title: 'Taken', markdown: 'Text' });
   await expect(panels.getByText("The agent's new document was not made.")).toBeVisible();
   await panels.getByRole('button', { name: /All documents/ }).click();
   await expect(panels.getByRole('button', { name: /The plan/ })).toBeVisible();
 });
 
-test('an edit the agent is writing is shown on its document while nothing of the person\'s is unsaved, the saved text a click away, and the panel opens once for each', async ({ page }) => {
+test('an edit the model is writing is drawn on its document while nothing of the person\'s is unsaved, the saved text a click away, and the panel opens once for each', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  const { caughtUp } = await portal(page, FOLDERS, 'open');
+  const { says, caughtUp } = await portal(page, FOLDERS, 'open');
   await page.goto('/s/a');
   await caughtUp();
-  const writes = serverSays(page);
+  const { writes, runs } = model(page, says);
   const panels = page.getByRole('complementary', { name: 'Panels' });
-  const edit = (call: string, markdown: string) => writes({ type: 'writing', call, tool: 'edit', folder: '0123456789abcdef', id: '1111111111111111', revision: 3, markdown });
-  await edit('e9', PLAN.replace('Friday', 'Monday'));
+  const done = { action: 'edit', folder: '0123456789abcdef', id: '1111111111111111', name: 'plan.md', title: 'The plan', revision: 4, from: 3, edits: 1, changed: true };
+  // Opened once all of the id has come, on that document, in the chat's folder.
+  await writes('e9', 'doc_edit', '{"id":"11111111');
+  await expect(page.locator('.pd-page')).toHaveCount(0);
+  await writes('e9', 'doc_edit', '11111111","expected_revision":3,"edits":[{"quote":"Friday","replacement":"Mon');
   await expect(panels.getByText('The agent is writing in this document…')).toBeVisible();
-  await expect(panels.locator('.pd-draft')).toContainText('Ship it on Monday.');
-  await edit('e9', PLAN.replace('Friday', 'Monday afternoon'));
+  await expect(panels.locator('.pd-draft')).toContainText('Ship it on Mon.');
+  await writes('e9', 'doc_edit', 'day afternoon"}]}');
   await expect(panels.locator('.pd-draft')).toContainText('Ship it on Monday afternoon.');
   // The saved text instead, for the rest of this call.
   await panels.getByRole('button', { name: 'Show the saved text' }).click();
   await expect(panels.locator('.pd-draft')).toHaveCount(0);
   await expect(panels.getByText('Ship it on Friday.', { exact: true })).toBeVisible();
   await expect(panels.getByText('The agent is writing in this document. What it writes comes in when it is done.')).toBeVisible();
-  await writes({ type: 'written', call: 'e9', ok: true, folder: '0123456789abcdef', id: '1111111111111111' });
+  await runs('e9', 'doc_edit', { id: '1111111111111111', expected_revision: 3, edits: [{ quote: 'Friday', replacement: 'Monday afternoon' }] }, done);
   await expect(panels.getByText(/The agent is writing in this document/)).toHaveCount(0);
 
   // Closed while a call is written, it stays closed for that call; the next one opens it again.
-  await edit('e10', PLAN);
+  await writes('e10', 'doc_edit', '{"id":"1111111111111111","expected_revision":3,"edits":[{"quote":"Friday","replacement":"Sun');
   await expect(panels.locator('.pd-draft')).toBeVisible();
   await page.getByRole('button', { name: 'Close Documents' }).click();
-  await expect(panels.locator('.pd-page')).toHaveCount(0);
-  await edit('e10', PLAN.replace('Friday', 'Sunday'));
   await expect(page.locator('.pd-page')).toHaveCount(0);
-  await writes({ type: 'written', call: 'e10', ok: false });
-  await edit('e11', PLAN.replace('Friday', 'Saturday'));
+  await writes('e10', 'doc_edit', 'day"}]}');
+  await expect(page.locator('.pd-page')).toHaveCount(0);
+  await runs('e10', 'doc_edit', { id: '1111111111111111', edits: [] });
+  await writes('e11', 'doc_edit', '{"id":"1111111111111111","expected_revision":3,"edits":[{"quote":"Friday","replacement":"Saturday"}]}');
   await expect(panels.locator('.pd-draft')).toContainText('Ship it on Saturday.');
 
   // With text of the person's own unsaved, theirs stays in front of them.
   await panels.getByRole('button', { name: 'Show the saved text' }).click();
-  await writes({ type: 'written', call: 'e11', ok: false });
+  await runs('e11', 'doc_edit', { id: '1111111111111111', edits: [] });
   await panels.locator('.pd-editor .ProseMirror p').first().click();
   await page.keyboard.type(' Mine.');
-  await edit('e12', PLAN.replace('Friday', 'Tuesday'));
+  await writes('e12', 'doc_edit', '{"id":"1111111111111111","expected_revision":3,"edits":[{"quote":"Friday","replacement":"Tuesday"}]}');
   await expect(panels.getByText('The agent is writing in this document. What it writes comes in when it is done.')).toBeVisible();
   await expect(panels.locator('.pd-draft')).toHaveCount(0);
   await expect(panels.locator('.pd-editor .ProseMirror')).toContainText('Mine.');

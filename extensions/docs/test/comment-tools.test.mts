@@ -37,12 +37,6 @@ async function portal(chats: Record<string, string>, faults?: { after(step: stri
       list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(chats[id]),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
-      // What follows the agent's writing (writing.js): heard in its own test.
-      onEvent: () => {},
-      onOpen: () => {},
-      on: () => {},
-      offers: () => undefined,
-      send: () => {},
     },
   }, { dependencies: async () => true, pollMs: 0, faults }) as () => Promise<void>;
   const app = express();

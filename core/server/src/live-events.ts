@@ -6,7 +6,7 @@ type Store = (session: string, type: string, payload: unknown) => EventRow;
 /** One current snapshot per message/tool, never a growing list of token events. */
 export class LiveEvents {
   /** `thinkingSince`/`thinkingUntil`: epoch ms of the reasoning's first and last token, kept on message_end for "Thought for 12s". */
-  private messages = new Map<string, { streamId: string; message: any; at: string; thinkingSince?: number; thinkingUntil?: number }>();
+  private messages = new Map<string, { streamId: string; message: any; at: string; thinkingSince?: number; thinkingUntil?: number; calls?: Map<string, string> }>();
   private tools = new Map<string, Map<string, EventRow>>();
   /** How many updates each running tool call has streamed: kept on its end. See tool_execution_end. */
   private updates = new Map<string, Map<string, number>>();
@@ -89,9 +89,14 @@ export class LiveEvents {
         const block = state.message.content[index] ??= { type: kind, [kind]: '' };
         block[kind] += inner.delta;
       }
-      // The SDK's full snapshot stays in this buffer; clients receive only the delta.
+      // The SDK's full snapshot stays in this buffer; clients receive only the delta. Of a tool call being written, which call it
+      // is, as only the snapshot says: a page follows it as it comes (see ChatFeed.calls in the page).
       const { partial: _partial, ...update } = inner ?? {};
-      return this.live(session, type, { type, streamId: state.streamId, assistantMessageEvent: update });
+      const call = typeof inner?.type === 'string' && inner.type.startsWith('toolcall_') ? message?.content?.[inner.contentIndex] : undefined;
+      const said = call && typeof call.id === 'string' ? { ...update, toolCallId: call.id, toolName: String(call.name ?? '') } : update;
+      // What has come of each call's arguments, for a page that opens mid-call: it goes on from there with the pieces that follow.
+      if (said !== update && typeof inner.delta === 'string') (state.calls ??= new Map()).set(call.id, (state.calls.get(call.id) ?? '') + inner.delta);
+      return this.live(session, type, { type, streamId: state.streamId, assistantMessageEvent: said });
     }
     if (type === 'tool_execution_update') {
       const row = this.live(session, type, payload);
@@ -137,8 +142,12 @@ export class LiveEvents {
 
   snapshot(session: string): EventRow[] {
     const state = this.messages.get(session);
+    const calls = state?.calls;
+    const message = state && calls?.size
+      ? { ...state.message, content: state.message.content.map((block: any) => (block?.type === 'toolCall' && calls.has(block.id) ? { ...block, partialJson: calls.get(block.id) } : block)) }
+      : state?.message;
     const rows = state ? [this.live(session, 'message_snapshot', {
-      streamId: state.streamId, message: state.message, ...thinkingTimes(state),
+      streamId: state.streamId, message, ...thinkingTimes(state),
     }, state.at)] : [];
     const subagents: EventRow[] = [];
     for (const [id, state] of this.subagents.get(session) ?? []) {

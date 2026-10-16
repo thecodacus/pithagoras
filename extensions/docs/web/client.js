@@ -11,7 +11,7 @@
  * the listing gives it, never by its file's name.
  */
 import { documentEditor } from "./document-editor.js";
-import { shownNew, writingStore } from "./writing.js";
+import { WRITING_TOOLS, isDocumentId, sameCall, sameCalls, shownNew } from "./writing.js";
 
 export default function (portal) {
   const { React, ui, t } = portal;
@@ -142,10 +142,10 @@ export default function (portal) {
     "Show the saved text": "Den gespeicherten Text zeigen",
   });
 
-  // What the agent is writing in documents, as the server half tells this chat's pages (writing.js): drawn in the panel as it comes.
-  const writes = writingStore();
-  portal.server.on((chat, data) => writes.hear(chat, data));
-  const useWriting = (chat) => React.useSyncExternalStore(writes.subscribe, () => writes.of(chat));
+  // What the agent is writing in a document, from the chat's calls as this page has them (writing.js): drawn in the panel as it
+  // comes, drawn again only when a call changes (its arguments are read again a few times a second, not with each token).
+  const useWriting = (chat) => portal.chats.use(chat, (feed) => feed.calls.filter((call) => WRITING_TOOLS.has(call.name)), sameCalls);
+  const useCall = (chat, callId) => portal.chats.use(chat, (feed) => (callId ? feed.call(callId) : undefined), sameCall);
 
   const icon = (path) => () =>
     h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true }, h("path", { d: path }));
@@ -409,12 +409,12 @@ export default function (portal) {
   }
 
   /** A new document the agent is writing, as far as it has come, drawn as the portal draws Markdown until it is made and opens in the editor. */
-  function Drafting({ writing, onBack }) {
+  function Drafting({ call, onBack }) {
     portal.locale.use();
     const box = React.useRef(null);
-    const shown = shownNew(writing.title, writing.markdown);
+    const shown = shownNew(call.input.title, call.input.markdown);
     useFollowEnd(box, shown);
-    const failed = writing.done && !writing.ok;
+    const failed = call.status === "error";
     return h(
       "article",
       { className: "pd-document", ref: box },
@@ -427,6 +427,21 @@ export default function (portal) {
   /** What a panel is asked to show: a document; the same, with what the agent is writing in it (`writing`, its call); or a new one the agent is writing. */
   const openOf = (asked) => (asked?.doc ? { folder: asked.folder, id: asked.doc, ...(asked.writing ? { writing: asked.writing } : {}) } : asked?.writing ? { writing: asked.writing } : null);
 
+  /** The id of the chat's folder, asked for when `needed`: a document the agent edits is named by its own id alone. */
+  function useChatFolder(chat, needed) {
+    const [folder, setFolder] = useState({ id: null, failed: false });
+    useEffect(() => {
+      if (!needed || folder.id) return;
+      let here = true;
+      portal.api.json(portal.api.url(`/chats/${encodeURIComponent(chat)}/documents`)).then(
+        (body) => here && setFolder({ id: body.folder.id, failed: false }),
+        () => here && setFolder({ id: null, failed: true }),
+      );
+      return () => void (here = false);
+    }, [chat, needed, folder.id]);
+    return folder;
+  }
+
   function DocumentsPanel({ chat, panel }) {
     portal.locale.use();
     // A tool card asked for one (`open("documents", { folder, doc })`), or the agent began to write one (`writing`): each ask anew, also for the same document.
@@ -436,36 +451,49 @@ export default function (portal) {
       const next = openOf(asked);
       if (next) setOpen(next);
     }, [asked]);
-    const calls = useWriting(chat.id);
-    const writing = open?.writing ? calls.get(open.writing) : undefined;
+    // Between the end of the message that wrote it and its start, a call is for a moment neither being written nor running: what it was stands.
+    const now = useCall(chat.id, open?.writing);
+    const last = React.useRef(undefined);
+    if (now) last.current = now;
+    const call = now ?? (last.current?.callId === open?.writing ? last.current : undefined);
     // A new document the agent was writing opens in the editor once it is made.
     useEffect(() => {
-      if (open && !open.id && writing?.done && writing.ok) setOpen({ folder: writing.folder, id: writing.id });
-    }, [open, writing]);
+      if (open && !open.id && call?.status === "done" && typeof call.details?.id === "string") setOpen({ folder: call.details.folder, id: call.details.id });
+    }, [open, call]);
+    const chatFolder = useChatFolder(chat.id, Boolean(open?.id && !open.folder));
+    const folder = open?.folder ?? chatFolder.id;
     const back = () => setOpen(null);
-    const draft = writing?.tool === "edit" && !writing.done && writing.id === open?.id ? writing : null;
+    // An edit of this document that the model is writing, or that is running: drawn until it has ended, when the document's stream has what it saved.
+    const draft = open?.id && call?.name === "doc_edit" && (call.status === "writing" || call.status === "running") && call.input.id === open.id ? { call: call.callId, edits: call.input.edits } : null;
     return h(
       "div",
       { className: "pd-page pd-panel" },
-      open?.id
-        ? h(DocumentEditor, { folder: open.folder, id: open.id, key: `${open.folder}/${open.id}`, draft, onBack: back })
-        : writing
-          ? h(Drafting, { writing, onBack: back })
-          : h(ChatDocuments, { chat, onOpen: setOpen }),
+      open?.id && folder
+        ? h(DocumentEditor, { folder, id: open.id, key: `${folder}/${open.id}`, draft, onBack: back })
+        : open?.id && !chatFolder.failed
+          ? h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") })
+          : call && open?.writing && !open.id
+            ? h(Drafting, { call, onBack: back })
+            : h(ChatDocuments, { chat, onOpen: setOpen }),
     );
   }
 
-  /** Opens the panel when the agent begins to write in a document in this chat, on that document, or on the new one it is writing. */
+  /** Opens the panel when the agent begins to write in a document in this chat: on the new one it is writing, or on the one it edits once its id has come. Once for each call. */
   function Follow({ chat, panels }) {
-    const now = useWriting(chat.id);
-    const seen = React.useRef(new Set());
+    const calls = useWriting(chat.id);
+    const opened = React.useRef(new Set());
     useEffect(() => {
-      for (const [call, write] of now) {
-        if (seen.current.has(call)) continue;
-        seen.current.add(call);
-        if (!write.done) panels.open("documents", write.tool === "edit" ? { folder: write.folder, doc: write.id, writing: call } : { writing: call });
+      for (const call of calls) {
+        if (opened.current.has(call.callId)) continue;
+        if (call.name === "doc_create") {
+          opened.current.add(call.callId);
+          panels.open("documents", { writing: call.callId });
+        } else if (isDocumentId(call.input.id)) {
+          opened.current.add(call.callId);
+          panels.open("documents", { doc: call.input.id, writing: call.callId });
+        }
       }
-    }, [now]);
+    }, [calls]);
     return null;
   }
 

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
+import type { ToolCallView } from "@pithagoras/extension-api";
 import type { BackgroundState, PortalEvent, SessionStatus } from "../api";
 import type { Item } from "../transcript";
 
@@ -16,6 +17,10 @@ export interface ChatFeed {
   events: readonly PortalEvent[];
   /** The conversation as the portal draws it: messages, tool calls with their output, notices. */
   items: readonly Item[];
+  /** The tool calls that have not ended: being written by the model, with what has come of their arguments, or running. See open-calls.ts. */
+  calls: readonly ToolCallView[];
+  /** A call of the conversation by its id, ended or not; nothing for one the page does not have. */
+  call(callId: string): ToolCallView | undefined;
   /** The agent is at work. */
   running: boolean;
   /** How the chat stands: at work, waiting, or stopped by an error or by hand. After those two, a call that has not ended will not. */
@@ -31,6 +36,8 @@ export interface ChatFeed {
 const NOTHING: ChatFeed = {
   events: [],
   items: [],
+  calls: [],
+  call: () => undefined,
   running: false,
   status: "idle",
   loading: true,

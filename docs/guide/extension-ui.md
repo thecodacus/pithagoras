@@ -492,6 +492,8 @@ the page has it:
 | --- | --- |
 | `events` | The chat's own events as they came: pi's (a message as it streams, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `agent_start`, `agent_end`) and the portal's (`portal_*`). Each is `{ seq, type, at, payload }` |
 | `items` | The conversation made of them, as the portal draws it: messages, tool calls with their output, notices |
+| `calls` | The tool calls that have not ended, oldest first: the ones the model is writing now, and the ones it has written that are running. Each is `{ name, callId, status, input, output?, details? }`, as a `chat.tool` card's `call` is (see [below](#a-call-as-the-model-writes-it)) |
+| `call(callId)` | A call of the conversation by its id, ended or not: to follow one from `calls` to how it came out |
 | `running` | The agent is at work |
 | `status` | How the chat stands: `"idle"`, `"running"`, or stopped by `"error"` or by hand (`"interrupted"`). After those two, a call that has not ended will not |
 | `loading` | The conversation is still being fetched |
@@ -523,6 +525,32 @@ call starts, reports or ends.
 Of a long conversation `events` and `items` hold the latest part, and more as
 the person scrolls back. `portal.chats.on(chatId, handler)` is the same outside
 a component, for a module that keeps something of its own from the chat.
+
+### A call as the model writes it
+
+A call in `calls` has `status: "writing"` while the model is still writing it:
+its `input` is its arguments as far as they have come, a string cut where it has
+come to, read again a few times a second rather than with each token, so that a
+long one costs no more as it grows. It has not run yet, and may never (a call
+the chat refuses ends at once). Once the model has written it, it is `"running"`
+with all of its arguments, and it leaves `calls` when it ends, with what it
+answered in `call(callId)`. A call through the lazy tools' gateway is the call of
+the tool it calls.
+
+That is all it takes to show what the agent is writing before the tool runs, as
+Documents does (`extensions/docs/web/client.js`): the tool saves when it runs,
+and until then the draft is the page's alone.
+
+```js
+const writing = (chat) => portal.chats.use(chat, (feed) => feed.calls.filter((call) => call.name === "note_write"));
+
+function NoteDraft({ chat }) {
+  return writing(chat.id).map((call) => h("pre", { key: call.callId }, String(call.input.text ?? "")));
+}
+```
+
+It happens only in a page that has the chat open, from the stream the page has
+anyway: nothing of it is done where nobody looks (a channel, a routine).
 
 ## Talking to your pi extension
 
@@ -1168,6 +1196,7 @@ of them takes from the portal, and what gives the same to an extension:
 | Opening itself when the agent makes something | `chat.background` |
 | A window in voice mode, at the side, opening itself when the agent runs a command and when its card is tapped | `voice.window` with `place`, `useAutoOpen`, `opensFor` |
 | A document written live as the model writes the call, only for a call that will run | `chats.onEvent`, `chats.offers` |
+| A document drawn as the model writes the call, before the tool runs and saves it | `calls` and `call(callId)` in `portal.chats.use` |
 | Its tools' cards in voice mode saying what they do, and its tools telling a spoken turn to keep it short | `describe` on its `voice.window`; `voiceGuidelines` on its tools |
 | "Delete this document?" only for someone who wants to be asked | `ui.asksBeforeDeleting()` |
 | "Open in the agent terminal" on the card of a shell call | `chat.tool.action` |

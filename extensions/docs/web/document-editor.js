@@ -13,7 +13,7 @@ import { comments } from "./comments.js";
 import { createLive } from "./live.js";
 import { asksAgent } from "./mention.js";
 import { createSaver } from "./saver.js";
-import { shownOf } from "./writing.js";
+import { drafted, shownOf } from "./writing.js";
 
 /** What the person's text was, kept while it is not saved (a conflict, a save that failed, a page that went away): per document, for the tab. */
 const DRAFT = "pithagoras-docs/draft";
@@ -154,10 +154,10 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
   }
 
   /**
-   * The document in the editor: saved as it is edited, with what to do when it was changed meanwhile. `draft`: what the agent is
-   * writing in it now (web/writing.js), shown in the editor's place as it comes. Not over a person who is working in the text when
-   * the call begins (it has the focus, or something unsaved): they keep their text, and the agent's change comes in when it is
-   * done, as any change from elsewhere does.
+   * The document in the editor: saved as it is edited, with what to do when it was changed meanwhile. `draft`: an edit the agent
+   * is writing in it now (`{ call, edits }`, web/writing.js), drawn on the document as it is stored, in the editor's place, as it
+   * comes. Not over a person who is working in the text when the call begins (it has the focus, or something unsaved): they keep
+   * their text, and the agent's change comes in when it is done, as any change from elsewhere does.
    */
   function Editing({ folder, id, doc, edit, onBack, draft }) {
     const host = useRef(null);
@@ -172,6 +172,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const [busy, setBusy] = useState(false);
     // The call whose draft the person chose not to watch, or that began while they were working in the text: the text is shown.
     const [unwatched, setUnwatched] = useState(null);
+    // The document as it is stored, read when the agent's edit begins: what its quotes are found in, as the tool finds them.
+    const [stored, setStored] = useState(null);
     // The comments: the threads as the server has them, what their marked passages read as, whether something is selected to
     // comment on, the comment being written, and the thread looked at.
     const [threads, setThreads] = useState({ items: [], loaded: false, error: null });
@@ -370,6 +372,16 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     React.useLayoutEffect(() => {
       if (draft?.call && (host.current?.contains(document.activeElement) || parts.current?.saver.unsaved())) setUnwatched(draft.call);
     }, [draft?.call]);
+    useEffect(() => {
+      if (!draft?.call) return;
+      let here = true;
+      portal.api.json(url).then(
+        (body) => here && setStored({ call: draft.call, markdown: body.markdown }),
+        () => {},
+      );
+      return () => void (here = false);
+    }, [draft?.call]);
+    const edited = React.useMemo(() => (draft && stored?.call === draft.call ? drafted(stored.markdown, draft.edits) : null), [draft?.call, draft?.edits, stored]);
 
     /** Back to the list, once what was typed is saved: with text that cannot be, the page stays and says why. */
     const leave = async () => {
@@ -555,7 +567,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
 
     const { status, base, conflict, error, warning } = view;
     // What the agent is writing is shown as it comes while the person has nothing unsaved, unless they chose the saved text.
-    const watching = Boolean(draft) && status === "saved" && unwatched !== draft.call;
+    const watching = edited !== null && status === "saved" && unwatched !== draft.call;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
     return h(
       React.Fragment,
@@ -623,7 +635,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       h(
         "div",
         { ref: workspace, className: "pd-workspace" },
-        watching && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shownOf(draft.markdown))),
+        watching && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shownOf(edited))),
         h("div", { ref: host, className: "pd-editor", hidden: !ready || watching }),
         ready &&
           h(Comments, {

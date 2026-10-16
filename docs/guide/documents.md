@@ -324,26 +324,27 @@ to date as the page's does.
 
 When the agent begins a document (`doc_create`) or an edit of one (`doc_edit`)
 in the chat on screen, the panel opens by itself and shows it as the model
-writes the call, a few times a second, before anything is saved:
+writes the call, a few times a second:
 
 - **A new document** is drawn as it will be, its title as its heading where the
   Markdown has none. Once it is made it opens in the editor; one the agent could
   not make (its title was taken, say) says so.
-- **An edit** is drawn on its document, with the edits that have come so far:
-  each replacement appears where its quote is, as it is written. An edit the tool
-  will refuse (a quote that is not there, or there twice) is not in the draft.
-  **Show the saved text** goes back to the document as it is saved, for the rest
-  of that call. When the call is done the change is in the editor like any
-  change from elsewhere, marked for a moment.
+- **An edit** is drawn on its document as it is stored, with the edits that have
+  come so far: each replacement appears where its quote is, as it is written. An
+  edit the tool will refuse (a quote that is not there, or there twice) is not in
+  the draft. **Show the saved text** goes back to the document as it is saved,
+  for the rest of that call. When the call is done the change is in the editor
+  like any change from elsewhere, marked for a moment.
 
-Nothing of this is saved: what is saved is what the tool makes when it runs, as
-before. If you are working in the document when the agent's call begins (the
-text has your cursor, or something of yours is unsaved), the draft is not drawn
-over it: your text stays, and the agent's change comes in when it is done (or
-is refused, if your save came first). Closed while a call is written, the panel
-stays closed for that call, and opens again for the next. A call of the tools
-made through the lazy tools' gateway with its arguments written as text is shown
-once it is done.
+Until the call ends it is all the page's own: what is drawn is never saved, and
+what is saved is what the tool makes when it runs, as before. The page draws it
+from the call as the chat's stream brings it to the page; with no page open on
+the chat (a channel, a routine) nothing of this is done. If you are working in
+the document when the agent's call begins (the text has your cursor, or
+something of yours is unsaved), the draft is not drawn over it: your text stays,
+and the agent's change comes in when it is done (or is refused, if your save
+came first). Closed while a call is written, the panel stays closed for that
+call, and opens again for the next.
 
 ### The list keeps itself up to date
 
@@ -919,7 +920,6 @@ extensions/docs/
 ├── git.js, guard.js the history in git, and the store's folder held open
 ├── place.js         where a folder's store is, and which folder it is for
 ├── tools.js         the agent's nine tools
-├── writing.js       what the agent is writing in a document, followed as the model writes the call
 ├── ping.js          what wakes the agent's chat, and what it is told
 ├── errors.js        the refusals, and what a failed disk, git or database is to a reader
 ├── secret.js        what a secret looks like, for the warning and for the agent's tools
@@ -956,18 +956,13 @@ its path and a document by an id the store gave it, never by a path:
 | `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away one of the person's comments `{ body }`. With `draft` (`?draft=1` for the delete) it is a comment saved as it is typed, by a client that does that (the page sends one only when it is sent): only the last comment of an open thread, not marked as edited. Otherwise any of theirs, open thread or resolved; a change is marked as edited |
 | `DELETE …/threads/:thread` | Take away a thread the person started, with its comments, while the agent has not commented in it (409 `thread_answered`, or `thread_not_yours` for one the agent started) |
 
-**What the agent is writing.** `writing.js` follows a chat's `doc_create` and
-`doc_edit` calls in its events (`portal.chats.onEvent`) as the model writes them:
-pi's message has the arguments as far as they have come, strings and all, so
-nothing is parsed. A call is followed by the name the chat offers the tool under
-now (`portal.chats.offers`). For an edit it reads the document once, as soon as
-all of its id has come and only if the chat sees it, and makes the edits that
-have come on it. The pages of the chat are told at most every 250 ms
-(`portal.chats.send`): `{ type: "writing", call, tool, folder, id?, title?,
-markdown }`, then `{ type: "written", call, ok, folder?, id? }` at the end of the
-call, or with `ok: false` when the run ends without it. A page that opens the
-chat meanwhile is told what is being written (`portal.chats.onOpen`). The
-browser half keeps it in `web/writing.js`.
+**What the agent is writing** is the browser half's alone. It reads the chat's
+calls as the page has them (`calls` in `portal.chats.use`: a call the model is
+writing, with its arguments as far as they have come), opens the panel for a
+`doc_create` or `doc_edit` once for each call, and draws the draft
+(`web/writing.js`): a new document's Markdown, or the edits so far made on the
+document as it is stored, which it reads once when the edit begins. The server
+half does nothing for it: the tool saves when it runs, as before.
 
 A stream's first message says where the document stands (`revision`, with
 `id: <revision>`, the author and the time), so that a page that was away finds

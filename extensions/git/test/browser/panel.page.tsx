@@ -215,7 +215,7 @@ function Fixture() {
   const wrote = (path: string) =>
     setEvents((e) => [...e, { seq: e.length + 1, type: 'tool_execution_end', payload: { toolName: 'write', toolCallId: `w${e.length}`, input: { path } } }]);
   useLayoutEffect(
-    () => publishChat('s', { events, items: [], running: false, status: 'idle', loading: false, background: { supported: false, jobs: [], statuses: [], widgets: [] }, refreshBackground: () => {} }),
+    () => publishChat('s', { events, items: [], calls: [], call: () => undefined, running: false, status: 'idle', loading: false, background: { supported: false, jobs: [], statuses: [], widgets: [] }, refreshBackground: () => {} }),
     [events],
   );
   (window as any).moveHead = () => {
