@@ -18,15 +18,13 @@ import { GATEWAY_TOOL, calledThrough } from "../../server/src/pi/tools-gateway-n
  * anything unrecognised is described by its name rather than not at all.
  */
 
-export type ToolTarget = "files" | "browser" | "pictures";
+export type ToolTarget = "browser" | "pictures";
 
 export interface ToolCall {
   label: string;
   detail: string;
   /** Where tapping the card goes. */
   target?: ToolTarget;
-  /** For `files`: the file, inside the chat's folder. */
-  path?: string;
 }
 
 const text = (v: unknown) => (typeof v === "string" ? v : "");
@@ -96,7 +94,11 @@ function browser(action: string, input: Record<string, any>): ToolCall {
   return { label: t("Using the browser"), detail: url ? hostOf(url) : "", target: "browser" };
 }
 
-/** A call as it starts. `folder` is the chat's, for which paths can be opened in Files. */
+/**
+ * A call as it starts. `folder` is the chat's: a file in it is named by its
+ * path there. A file's card has no target of the portal's: the window it opens
+ * is an extension's that says it is for files (Files').
+ */
 export function describeCall(payload: any, folder: string): ToolCall {
   const { name, input } = unwrap(payload);
   const path = text(input.path ?? input.file_path);
@@ -104,7 +106,6 @@ export function describeCall(payload: any, folder: string): ToolCall {
   const file = (label: (file: string) => string): ToolCall => ({
     label: label(path ? base(path) : t("a file")),
     detail: inside && inside !== base(path) ? inside : "",
-    ...(inside ? { target: "files" as const, path: inside } : {}),
   });
 
   if (SHELL_TOOL.test(name)) {

@@ -1,33 +1,42 @@
 import type { PanelController, Panels } from "@pithagoras/extension-api";
+import { slotEntries, useSlot } from "./slots";
 
 /**
  * The panels beside the conversation on screen, opened and closed by name
- * from anywhere in the page: the portal's own ("files", "browser", "agents")
- * and an extension's ("<package>/<id>", or the `name` its entry gave it, as
- * the terminal's is "terminal", Git's "git" and Canvases' "canvas": the chat
- * resolves it, see Chat.tsx).
+ * from anywhere in the page: the portal's own ("browser", "agents") and an
+ * extension's ("<package>/<id>", or the `name` its entry gave it, as the
+ * terminal's is "terminal", Git's "git", Files' "files" and Canvases'
+ * "canvas": the chat resolves it, see Chat.tsx).
  *
  * What is handed over with `open` is the panel's to read: a path for Files to
  * show, anything an extension's panel says it takes.
  */
-export type { PanelController } from "@pithagoras/extension-api";
+/** What the chat on screen answers for: its panels, open or not. Which panels there are is the slot's to say. */
+export type ChatPanels = Pick<PanelController, "isOpen" | "open" | "close">;
 
-let current: PanelController | undefined;
+let current: ChatPanels | undefined;
 
 /** The chat on screen says how its panels are opened; nothing, when it leaves. */
-export function setPanelController(controller: PanelController | undefined): void {
+export function setPanelController(controller: ChatPanels | undefined): void {
   current = controller;
 }
 
-const onScreen = (): PanelController => {
+const onScreen = (): ChatPanels => {
   if (!current) throw new Error("No chat is on screen to open a panel in");
   return current;
 };
+
+/** The portal's own panels' names: see Chat.tsx. */
+const OWN = ["browser", "agents"];
+const named = (entries: ReturnType<typeof slotEntries<"chat.panel">>, key: string) =>
+  OWN.includes(key) || entries.some((entry) => entry.key === key || entry.name === key);
 
 export const panels: PanelController = {
   isOpen: (key) => current?.isOpen(key) ?? false,
   open: (key, params) => onScreen().open(key, params),
   close: (key) => current?.close(key),
+  has: (key) => named(slotEntries("chat.panel"), key),
+  useHas: (key) => named(useSlot("chat.panel"), key),
 };
 
 const scoped = new Map<string, Panels>();

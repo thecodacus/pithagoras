@@ -1,5 +1,8 @@
 import { type Page } from '@playwright/test';
-import { test, expect } from './portal-mock';
+import { test, expect } from '../../../../tests/browser/portal-mock';
+
+// Files, as a portal that ships it has it.
+test.use({ installed: ['extensions/files'] });
 
 type Unsaved = { changed: number; unpushed: number; stashes: number; unknown?: true };
 

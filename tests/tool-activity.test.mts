@@ -7,9 +7,10 @@ const start = (toolName: string, args: any) => ({ toolName, args, toolCallId: 'c
 const end = (toolName: string, result: any, isError = false) => ({ toolName, toolCallId: 'c', result, isError });
 const said = (t: string, details?: any) => ({ content: [{ type: 'text', text: t }], ...(details ? { details } : {}) });
 
-test('file tools name the file, and open it in Files when it is in the folder', () => {
-  assert.deepEqual(describeCall(start('read', { path: 'src/app.ts', offset: 10, limit: 20 }), folder), { label: 'Reading app.ts', detail: 'src/app.ts · lines 10–29', target: 'files', path: 'src/app.ts' });
-  assert.deepEqual(describeCall(start('edit', { path: '/work/proj/README.md' }), folder), { label: 'Editing README.md', detail: '', target: 'files', path: 'README.md' });
+test('file tools name the file, by its path in the folder, and open no window of the portal\'s own', () => {
+  // The window a file's card opens is an extension's that says it is for files (Files', `opensFor`).
+  assert.deepEqual(describeCall(start('read', { path: 'src/app.ts', offset: 10, limit: 20 }), folder), { label: 'Reading app.ts', detail: 'src/app.ts · lines 10–29' });
+  assert.deepEqual(describeCall(start('edit', { path: '/work/proj/README.md' }), folder), { label: 'Editing README.md', detail: '' });
   assert.deepEqual(describeCall(start('write', { path: '/etc/hosts' }), folder), { label: 'Writing hosts', detail: '' });
 });
 

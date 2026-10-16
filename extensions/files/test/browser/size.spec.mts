@@ -1,4 +1,7 @@
-import { test, expect } from './portal-mock';
+import { test, expect } from '../../../../tests/browser/portal-mock';
+
+// Files, as a portal that ships it has it.
+test.use({ installed: ['extensions/files'] });
 
 /** A file's size reads in the unit it is nearest, up to gigabytes: the same words as the project pages use. */
 test('the size of a file in Files goes up to gigabytes', async ({ page }) => {

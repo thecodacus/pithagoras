@@ -351,12 +351,12 @@ test('a chat is said as the page has it, to whoever listens to that chat', () =>
   assert.equal(chatFeed('a').loading, true);
 });
 
-test('a window an extension brought to voice mode is placed as Files is: at the side, or in the middle when the side is taken', () => {
+test('a window an extension brought to voice mode is placed as the pictures are: at the side, or in the middle when the side is taken', () => {
   assert.deepEqual(placeWindows({ 'x:notes/notes': true }), { main: undefined, side: 'x:notes/notes' });
   assert.deepEqual(placeWindows({ conversation: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'conversation' });
   assert.deepEqual(placeWindows({ browser: true, 'x:notes/notes': true }), { main: 'browser', side: 'x:notes/notes' });
-  assert.deepEqual(placeWindows({ files: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'files' }, 'after the portal\'s own');
-  assert.deepEqual(placeWindows({ files: true, 'x:notes/notes': false }), { main: undefined, side: 'files' });
+  assert.deepEqual(placeWindows({ pictures: true, 'x:notes/notes': true }), { main: 'x:notes/notes', side: 'pictures' }, 'after the portal\'s own');
+  assert.deepEqual(placeWindows({ pictures: true, 'x:notes/notes': false }), { main: undefined, side: 'pictures' });
 });
 
 test('the Notes extension\'s server half keeps each chat\'s notes in the chat\'s folder, answers for all chats, and tells a page how many', () => {
@@ -549,7 +549,7 @@ test('an action on a call\'s card names its tool by a name or a pattern, and a s
 
 test('a window an extension brought that asks for a place has it before those that take what is left, and the other place when it is taken', () => {
   assert.deepEqual(placeWindows({ 'x:a/w': true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: undefined });
-  assert.deepEqual(placeWindows({ 'x:a/w': true, files: true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: 'files' });
+  assert.deepEqual(placeWindows({ 'x:a/w': true, pictures: true }, { 'x:a/w': 'middle' }), { main: 'x:a/w', side: 'pictures' });
   assert.deepEqual(placeWindows({ conversation: true, 'x:a/w': true }, { 'x:a/w': 'side' }), { main: 'conversation', side: 'x:a/w' });
   // The browser has the middle, another that asked first the side: it is given the other.
   assert.deepEqual(placeWindows({ browser: true, 'x:a/w': true }, { 'x:a/w': 'middle' }), { main: 'browser', side: 'x:a/w' });

@@ -81,7 +81,7 @@ export interface SlotMap {
    * button. `useButton` is a hook, called as the chat's header is drawn: how
    * its button is for this chat. `name` is a name of its own that
    * `portal.panels.open(name, params)` reaches it by, from anywhere: the
-   * portal's own panels go by "files", "browser" and "agents", and while
+   * portal's own panels go by "browser" and "agents", and while
    * one of those is the portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
    * order has it (a lower `order`, then the one loaded first).
@@ -143,11 +143,12 @@ export interface SlotMap {
       maximizable?: boolean;
       keepLoaded?: boolean;
       useAutoOpen?: (props: ChatProps) => number;
-      opensFor?: (call: ToolCallView) => boolean;
+      /** `chat` is the chat on screen: its `workspace` tells a path in its folder from one elsewhere. */
+      opensFor?: (call: ToolCallView, chat: Chat) => boolean;
       /** What the card of a call it opens for says, in place of the portal's words for a tool it does not know ("Using canvas write"). */
-      describe?: (call: ToolCallView) => { label: string; detail?: string } | undefined;
+      describe?: (call: ToolCallView, chat: Chat) => { label: string; detail?: string } | undefined;
     };
-    props: ChatProps & { close(): void; maximized: boolean; maximize(): void; restore(): void };
+    props: ChatProps & { close(): void; opened: VoiceWindowOpened; maximized: boolean; maximize(): void; restore(): void };
   };
   /**
    * A page of the portal, at /x/<extension>/<id>, with an entry in the
@@ -161,6 +162,7 @@ export interface SlotMap {
 }
 export type SlotName = keyof SlotMap;
 
+/** An entry of a slot. A `title` it has is said in the page's language as the extension's own `t` says it: in its texts, by the English. */
 export type Entry<S extends SlotName> = SlotMap[S]["entry"] & {
   /** Its name among the extension's entries in the slot. */
   id: string;
@@ -225,7 +227,12 @@ export interface ChatFeed {
 export interface PanelController {
   isOpen(key: string): boolean;
   open(key: string, params?: unknown): void;
+  /** As by hand: what the panel asks before it is closed (`guardClose`) is asked. */
   close(key: string): void;
+  /** Whether there is a panel by this name or key, the portal's or an installed extension's: an "Open in Files" only where there is a Files. */
+  has(key: string): boolean;
+  /** The same as a hook: the component is drawn again when an extension with such a panel comes or goes. */
+  useHas(key: string): boolean;
 }
 
 /** A theme an extension brings: colours in place of the portal's own. */
@@ -389,9 +396,22 @@ export interface KeyBinding {
 /** The extension's own voice windows in the chat on screen, by the id each was registered with. */
 export interface VoiceWindows {
   isOpen(id: string): boolean;
-  open(id: string): void;
+  /** `params` is the window's to read, as `opened.params`: what it is opened to show. */
+  open(id: string, params?: unknown): void;
   close(id: string): void;
 }
+
+/**
+ * What a voice window was opened for, the last time it was: a new object each
+ * time. By the person, with its button; by the agent's work, as `useAutoOpen`
+ * counted it; for the card of a call that was tapped, with the call; or by
+ * the extension's own `windows.open(id, params)`, with what it was given.
+ */
+export type VoiceWindowOpened =
+  | { by: "person" }
+  | { by: "work" }
+  | { by: "call"; call: ToolCallView }
+  | { by: "open"; params?: unknown };
 
 /**
  * A keyboard shortcut of the extension's, listed in Settings → Shortcuts with
@@ -473,7 +493,7 @@ export interface Portal {
     run(name: string, ...args: unknown[]): unknown;
     has(name: string): boolean;
   };
-  /** The panels of the chat on screen, any of them: the portal's ("files", "browser", …) and an extension's ("<package>/<id>", or the name it gave itself). */
+  /** The panels of the chat on screen, any of them: the portal's ("browser", "agents") and an extension's ("<package>/<id>", or the name it gave itself, as Files' is "files"). */
   panels: PanelController;
   chats: {
     /**

@@ -2,8 +2,8 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 import { DEFAULT_ORB } from '../../core/server/src/orb-style';
 
-// A second panel beside Files: the portal's tests' stand-in for an extension's.
-test.use({ installed: ['tests/fixtures/extensions/console'] });
+// Two panels beside the conversation: the portal's tests' stand-ins for extensions' panels.
+test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
 
 /**
  * What a keyboard can do that a pointer does: go through a list of tabs with the arrow keys, and size the panels, the
@@ -16,7 +16,7 @@ const bounds = async (page: Page, selector = '.chat-aside') => (await page.locat
 const settled = (page: Page) =>
   page.evaluate(() => Promise.all([...document.querySelectorAll('.chat-aside')].flatMap((e) => e.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished))));
 /** The chat with the panels open, in the place the browser last had them. */
-async function chat(page: Page, stored: Record<string, string> = {}, open: ('Console' | 'Files')[] = ['Console', 'Files']) {
+async function chat(page: Page, stored: Record<string, string> = {}, open: ('Console' | 'Viewer')[] = ['Console', 'Viewer']) {
   await page.setViewportSize({ width: 1300, height: 800 });
   await page.goto('/tests/chat.html?phase=tools');
   await page.evaluate((s) => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v); }, stored);
@@ -45,7 +45,7 @@ test('the edge between the conversation and the panels is sized with the arrow k
   await expect(edge).toBeFocused();
   await page.reload();
   await page.getByRole('button', { name: 'Console', exact: true }).click();
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'Viewer', exact: true }).click();
   await settled(page);
   expect((await bounds(page)).width).toBeCloseTo(first + 96, 0);
   await page.getByRole('separator', { name: 'Width of the panels on the right' }).focus();

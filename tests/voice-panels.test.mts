@@ -37,15 +37,16 @@ test('a shell tool called through MCP is a run, and one its run left open is set
   assert.equal(terminalRuns(events.slice(0, 2), 6, 20000, true)[1].interrupted, true, 'ended with no event to say so');
 });
 
-test('files and pictures take the side first, and the middle when the side is taken', async () => {
+test('the pictures and a window that says nothing of its place take the side first, and the middle when the side is taken', async () => {
   const { placeWindows } = await import('../core/web/src/voice-windows.js');
-  const none = { browser: false, files: false, pictures: false };
-  // The terminal's window, an extension's that asks for the side.
+  const none = { browser: false, pictures: false };
+  // The terminal's window, an extension's that asks for the side, and Files', which does not say.
   const terminal = 'x:pithagoras-terminal/terminal' as const, side = { [terminal]: 'side' as const };
+  const files = 'x:pithagoras-files/files' as const;
   assert.deepEqual(placeWindows({ ...none, pictures: true }), { main: undefined, side: 'pictures' });
-  assert.deepEqual(placeWindows({ ...none, files: true, [terminal]: true }, side), { main: 'files', side: terminal });
+  assert.deepEqual(placeWindows({ ...none, [files]: true, [terminal]: true }, side), { main: files, side: terminal });
   assert.deepEqual(placeWindows({ ...none, pictures: true, browser: true }), { main: 'browser', side: 'pictures' });
-  assert.deepEqual(placeWindows({ ...none, pictures: true, files: true }), { main: 'pictures', side: 'files' });
+  assert.deepEqual(placeWindows({ ...none, pictures: true, [files]: true }), { main: files, side: 'pictures' });
   assert.deepEqual(placeWindows({ ...none, browser: true, [terminal]: true }, side), { main: 'browser', side: terminal });
   // The conversation is a window like them, not something drawn over them.
   assert.deepEqual(placeWindows({ ...none, conversation: true }), { main: undefined, side: 'conversation' });

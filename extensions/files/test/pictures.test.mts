@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { folderPictures } from '../core/web/src/folder-pictures.js';
+import { folderPictures } from '../src/pictures.ts';
 
 const folder = '/workspaces/proj';
 const url = (p: string) => `/api/sessions/s/picture?path=${encodeURIComponent(p)}`;
@@ -30,7 +30,7 @@ test('in a file of a subfolder a relative path is read from that subfolder, and 
   assert.equal(folderPictures('![a](../../a.png)', folder, url, 'docs'), '![a](../../a.png)');
 });
 
-test('the Files panel passes the chat folder: an absolute path inside it is the file, one outside stays as written', () => {
+test('Files passes the chat folder: an absolute path inside it is the file, one outside stays as written', () => {
   // The call as the panel makes it, for a file in the top of the folder.
   assert.equal(folderPictures('![a](/workspaces/proj/a.png)', folder, url, ''), '![a](</api/sessions/s/picture?path=a.png>)');
   assert.equal(folderPictures('![a](/etc/a.png)', folder, url, ''), '![a](/etc/a.png)');

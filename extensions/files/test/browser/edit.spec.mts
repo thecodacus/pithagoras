@@ -1,5 +1,8 @@
 import { type Page, type Route } from '@playwright/test';
-import { test, expect } from './portal-mock';
+import { test, expect } from '../../../../tests/browser/portal-mock';
+
+// Files, as a portal that ships it has it.
+test.use({ installed: ['extensions/files'] });
 
 type Put = { content: string; mtime?: number };
 

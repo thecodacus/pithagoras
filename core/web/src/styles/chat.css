@@ -284,9 +284,6 @@ button.running-chip-command:hover { text-decoration: underline; }
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
   textarea:not(.xterm-helper-textarea),
   [contenteditable="true"] { font-size: max(16px, 1em); }
-  /* A fingertip, not a pointer: room around the small icon buttons of a row. */
-  .files-row-actions > a,
-  .files-row-actions > button { padding: 7px; }
 }
 
 /* A slash command that was sent: on the side of what you send, small, with how it went. */

@@ -275,8 +275,8 @@ export function MediaPage() {
       message: agents
         ? only
           ? only.folder
-            ? t("It is a file in the folder “{folder}”, where the agent made it. Deleting it removes it from there for good: the chats that work there will not find it any more, and neither will their Files panel. This cannot be undone.", { folder: folderName(only.folder) })
-            : t("It is a file in the folder of the chat “{chat}”, where the agent made it. Deleting it removes it from there for good: the chat will not find it any more, and neither will its Files panel. This cannot be undone.", { chat: only.chat?.title || t("a chat that is gone") })
+            ? t("It is a file in the folder “{folder}”, where the agent made it. Deleting it removes it from there for good: the chats that work there will not find it any more. This cannot be undone.", { folder: folderName(only.folder) })
+            : t("It is a file in the folder of the chat “{chat}”, where the agent made it. Deleting it removes it from there for good: the chat will not find it any more. This cannot be undone.", { chat: only.chat?.title || t("a chat that is gone") })
           : inFolders.length
             ? tp(
                 agents,

@@ -15,12 +15,16 @@ import { createElement, memo, useSyncExternalStore, type ComponentType } from "r
 // What a slot's entry says of itself and what its component is given are the public contract,
 // @pithagoras/extension-api: the portal draws exactly that.
 import type { Entry, SlotName } from "@pithagoras/extension-api";
-export type { Channel, Chat, ChatProps, Entry, PanelHandle, PanelProps, Panels, SlotMap, SlotName, ToolCallView } from "@pithagoras/extension-api";
+import { translate } from "./strings";
+export type { Channel, Chat, ChatProps, Entry, PanelHandle, PanelProps, Panels, SlotMap, SlotName, ToolCallView, VoiceWindowOpened } from "@pithagoras/extension-api";
 
 const SLOTS: readonly SlotName[] = ["chat.panel", "chat.header.action", "chat.background", "chat.overlay", "chat.composer.above", "chat.tool", "chat.tool.action", "voice.window", "nav.page", "settings.page"];
 
 /** An entry as the portal holds it. `key` is its name among all the slot's entries. */
 export type Registered<S extends SlotName> = Entry<S> & { extension: string; key: string };
+
+/** What an entry is called, in the language in effect: by the extension's own texts, as its `t` would say it. */
+export const titleOf = (entry: { extension: string; title: string }): string => translate(entry.extension, entry.title);
 
 // Each slot's list is replaced when it changes, never changed in place: a list is what useSlot hands React to compare.
 const held = new Map<SlotName, readonly Registered<SlotName>[]>();

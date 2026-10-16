@@ -1,7 +1,6 @@
-import { createDrafts } from "./drafts";
-import { session } from "./safe-storage";
+import { session } from "./portal";
 
-/** A file in the Files panel with changes not saved, and what they were made on. */
+/** A file in Files with changes not saved, and what they were made on. */
 export interface FileDraft {
   path: string;
   /** What is in the editor. */
@@ -15,8 +14,25 @@ export interface FileDraft {
   writing?: boolean;
 }
 
-/** Held in memory and mirrored to session storage, so a reload does not lose an edit either. */
-const store = createDrafts(session, undefined, "pithagoras.file-draft.");
+/**
+ * Held in memory and mirrored to session storage, so a reload does not lose an
+ * edit either. Under the keys the portal's own Files kept them by, so an edit
+ * left from before Files was an extension comes back too.
+ */
+const PREFIX = "pithagoras.file-draft.";
+const memory = new Map<string, string>();
+const store = {
+  get: (chat: string): string => memory.get(chat) ?? session.get(PREFIX + chat) ?? "",
+  set: (chat: string, text: string): void => {
+    if (text) {
+      memory.set(chat, text);
+      session.set(PREFIX + chat, text);
+    } else {
+      memory.delete(chat);
+      session.remove(PREFIX + chat);
+    }
+  },
+};
 /** The latest edit of each chat that is not written yet: a file can be a megabyte, and a keystroke is not worth writing one. */
 const waiting = new Map<string, { draft: FileDraft; timer: ReturnType<typeof setTimeout> }>();
 const WAIT_MS = 400;
@@ -62,6 +78,9 @@ export function flushFileDraft(chat: string): void {
   store.set(chat, JSON.stringify(pending.draft));
 }
 
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", () => [...waiting.keys()].forEach(flushFileDraft));
+/** What is waiting written as the page goes. Returns the way to stop, for the extension taken out. */
+export function flushOnLeave(): () => void {
+  const leave = () => [...waiting.keys()].forEach(flushFileDraft);
+  window.addEventListener("pagehide", leave);
+  return () => window.removeEventListener("pagehide", leave);
 }

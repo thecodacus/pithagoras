@@ -20,7 +20,7 @@ import { createPortal } from "react-dom";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuFolderOpen, LuGlobe, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuGlobe, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -33,10 +33,7 @@ import { confirmDialog } from "./ConfirmDialog";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { moveHighlight, paletteMatches, slashToken, typedCommand } from "../slash-palette";
 import { useCommandTrigger } from "../command-trigger";
-import { forgetFileDraft } from "../file-drafts";
-import { FilesPanel } from "./FilesPanel";
 import { TitleInput } from "./TitleInput";
-import { keepFileActivity, latestFileActivity, type FileActivity } from "../file-activity";
 import { caretFrom, drafts, withUnsent } from "../drafts";
 import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
@@ -45,10 +42,10 @@ import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands"
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, SPLIT, SPLIT_LEAST, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
 import { labelOf, msg, t } from "../i18n";
-import { useSlot, type ChatProps, type PanelHandle, type Panels, type Registered } from "../extensions/slots";
+import { titleOf, useSlot, type ChatProps, type PanelHandle, type Panels, type Registered } from "../extensions/slots";
 import { channelFor } from "../extensions/channel";
 import { forgetChatFeed, publishChat } from "../extensions/chat-feed";
-import { setPanelController, type PanelController } from "../extensions/panels";
+import { setPanelController, type ChatPanels } from "../extensions/panels";
 import { runCommand, useHasCommand } from "../extensions/commands";
 import { STEP, arrowSteps } from "../resize-keys";
 
@@ -74,7 +71,7 @@ const ASIDE: Record<Dock, string> = {
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
 
-type OwnPanel = "browser" | "agents" | "files";
+type OwnPanel = "browser" | "agents";
 /** A panel an extension brought (the `chat.panel` slot), by its entry's key: `x:<extension>/<id>`. */
 type ExtensionPanel = `x:${string}`;
 /** The panels that sit beside the conversation, each in a place of its own. */
@@ -84,7 +81,6 @@ const isOwn = (kind: AsidePanel): kind is OwnPanel => !kind.startsWith("x:");
 const PANEL: Record<OwnPanel, { label: string; close: string }> = {
   browser: { label: msg("Browser"), close: msg("Close the browser") },
   agents: { label: msg("Subagents"), close: msg("Close the subagents") },
-  files: { label: msg("Files"), close: msg("Close the files") },
 };
 
 /** Where a slash command comes from; one a newer portal adds is shown as it is named. */
@@ -294,19 +290,6 @@ export function Chat({
       failed(e);
     }
   };
-  const [files, setFiles] = useState(false);
-  // Whether Files has an edit that is not saved: closing it would lose it.
-  const [filesDirty, setFilesDirty] = useState(false);
-  // The same entry while it has not changed, so that Files, which is given it, is not drawn for every event.
-  const lastFile = useRef<FileActivity | null>(null);
-  const fileActivity = useMemo(() => (lastFile.current = keepFileActivity(lastFile.current, latestFileActivity(events, session.workspace))), [events, session.workspace]);
-  // A file another panel asked Files to show (`panels.open("files", { path })`), by its path in the chat's folder;
-  // `seq` makes the same file asked twice a new ask.
-  const [fileAsked, setFileAsked] = useState<{ path: string; seq: number } | null>(null);
-  // An ask is for the chat it was made in, and answered once: Files, drawn
-  // again later or for another chat, is not sent back to it.
-  const fileAnswered = useCallback(() => setFileAsked(null), []);
-  useEffect(() => setFileAsked(null), [session.id]);
   // The panels the installed extensions brought, and their controls for the header: see extensions/slots.ts.
   const panelEntries = useSlot("chat.panel");
   const headerActions = useSlot("chat.header.action");
@@ -412,32 +395,20 @@ export function Chat({
   const toggleExtensionPanel = useStable((key: string, open: boolean) => (open ? void closeExtensionPanel(key) : showExtensionPanel(key, true)));
   useWorkPanels(
     {
-      browser: !voiceMode && watching, files: !voiceMode && files, agents: !voiceMode && agentsOpen,
+      browser: !voiceMode && watching, agents: !voiceMode && agentsOpen,
       ...Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
     },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "files") setFiles(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); },
-    // A third panel closes another one instead, while Files has an edit in it.
-    // One an extension says holds something that would be lost stays as well,
-    // and one that has just opened the third.
+    panel => { if (panel === "browser") setWatching(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); },
+    // A third panel closes another one instead of one an extension says holds
+    // something that would be lost (an edit not saved), and of one that has
+    // just opened the third.
     [
-      ...(filesDirty ? (["files"] as const) : []),
       ...panelsKept.map((key) => `x:${key}` as const),
       ...(openedFrom ? [`x:${openedFrom}` as const] : []),
     ],
   );
-  const closeFiles = async () => {
-    if (
-      filesDirty &&
-      !(await confirmDialog({ title: t("Discard your changes?"), message: t("The file open in Files has changes that are not saved."), confirmLabel: t("Discard"), danger: true }))
-    ) {
-      return;
-    }
-    // Given up on: the panel's unmounting would otherwise keep the edit for the next time it opens.
-    forgetFileDraft(session.id);
-    setFiles(false);
-  };
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", files && "files", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
+  const asidePanels = [watching && "browser", agentsOpen && "agents", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1575,7 +1546,6 @@ export function Chat({
   const closeOwn: Record<OwnPanel, () => void> = {
     browser: () => setWatching(false),
     agents: () => setAgentsOpen(false),
-    files: () => void closeFiles(),
   };
   const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : void closeExtensionPanel(kind.slice(2)));
   /** The entry an extension's panel is drawn from. */
@@ -1583,7 +1553,8 @@ export function Chat({
   /** What a panel is called: in its header, and on its close button. */
   const panelName = (kind: AsidePanel) => {
     if (isOwn(kind)) return { label: t(PANEL[kind].label), close: t(PANEL[kind].close) };
-    const title = entryOf(kind)?.title ?? "";
+    const entry = entryOf(kind);
+    const title = entry ? titleOf(entry) : "";
     return { label: title, close: t("Close {panel}", { panel: title }) };
   };
 
@@ -1628,16 +1599,13 @@ export function Chat({
   // An extension's panel goes by its key ("<package>/<id>") or by the name it gave itself (`name`), the first
   // loaded having a name two give; the portal's own names are the portal's while those panels are its own.
   const panelKey = (key: string) => (panelEntries.some((entry) => entry.key === key) ? key : panelEntries.find((entry) => entry.name === key)?.key);
-  const panelControl = useRef<PanelController>({ isOpen: () => false, open: () => {}, close: () => {} });
+  const panelControl = useRef<ChatPanels>({ isOpen: () => false, open: () => {}, close: () => {} });
   panelControl.current = {
     isOpen: (key) =>
-      key === "files" ? files : key === "browser" ? watching : key === "agents" ? agentsOpen : extensionPanels.includes(panelKey(key) ?? key),
+      key === "browser" ? watching : key === "agents" ? agentsOpen : extensionPanels.includes(panelKey(key) ?? key),
     open: (key, params) => {
-      const given = (params ?? {}) as { path?: unknown; id?: unknown };
-      if (key === "files") {
-        setFiles(true);
-        if (typeof given.path === "string") setFileAsked({ path: given.path, seq: Date.now() });
-      } else if (key === "browser") setWatching(true);
+      const given = (params ?? {}) as { id?: unknown };
+      if (key === "browser") setWatching(true);
       else if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
       else {
         const found = panelKey(key);
@@ -1645,9 +1613,10 @@ export function Chat({
         showExtensionPanel(found, true, params);
       }
     },
+    // As by hand: what an extension's panel asks before it is closed is asked.
     close: (key) => {
       if (key in closeOwn) closeOwn[key as OwnPanel]();
-      else showExtensionPanel(panelKey(key) ?? key, false);
+      else void closeExtensionPanel(panelKey(key) ?? key);
     },
   };
   useEffect(() => {
@@ -1707,12 +1676,6 @@ export function Chat({
       {kind === "agents" && (
         <div className="min-h-0 flex-1 bg-surface">
           <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
-        </div>
-      )}
-      {kind === "files" && (
-        <div className="min-h-0 flex-1 bg-surface">
-          {/* Not before the chat's events are here: what it did earlier is not news. */}
-          {!loading && <FilesPanel key={session.id} sessionId={session.id} folder={session.workspace} activity={fileActivity} reveal={fileAsked} onRevealed={fileAnswered} onDirtyChange={setFilesDirty} keepDraft />}
         </div>
       )}
       {extensionBody(kind)}
@@ -1882,14 +1845,6 @@ export function Chat({
               <LuGlobe />
             </PanelToggle>
           )}
-          <PanelToggle
-            open={files}
-            onClick={() => (files ? void closeFiles() : setFiles(true))}
-            label={t("Files")}
-            title={files ? t("Hide the files") : t("Browse the files in this chat's folder")}
-          >
-            <LuFolderOpen />
-          </PanelToggle>
           {panelEntries.map((entry) => (
             // Its button is its own to say about (hidden, live): one whose say fails is left out, and the header stays.
             <ErrorBoundary key={entry.key} resetKey={`${entry.key}:${session.id}`} fallback={() => null}>
@@ -2360,7 +2315,7 @@ const ExtensionToggle = memo(function ExtensionToggle({ entry, open, onToggle, .
   // Hidden, there is no way to it from the header; open, there has to be a way to close it.
   if (button.hidden && !open) return null;
   return (
-    <PanelToggle open={open} onClick={() => onToggle(entry.key, open)} label={entry.title} title={open ? t("Hide {panel}", { panel: entry.title }) : button.title ?? entry.title} live={button.live && !open}>
+    <PanelToggle open={open} onClick={() => onToggle(entry.key, open)} label={titleOf(entry)} title={open ? t("Hide {panel}", { panel: titleOf(entry) }) : button.title ?? titleOf(entry)} live={button.live && !open}>
       {entry.icon ? <entry.icon /> : <LuPuzzle />}
     </PanelToggle>
   );

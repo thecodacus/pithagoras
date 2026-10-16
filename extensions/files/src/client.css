@@ -1,0 +1,6 @@
+/* The panel is drawn with the portal's Tailwind preset (see build.mjs); what that cannot say is here. */
+@media (pointer: coarse) {
+  /* A fingertip, not a pointer: room around the small icon buttons of a row. */
+  .files-row-actions > a,
+  .files-row-actions > button { padding: 7px; }
+}

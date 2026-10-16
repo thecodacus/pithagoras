@@ -5,13 +5,13 @@
  * A window an extension brought (`x:<extension>/<id>`) that says where it
  * goes (`place`) is placed next, at the side or in the middle, and in the
  * other place when that one is taken: the terminal's asks for the side. The
- * conversation, Files and pictures fill whichever is left, the side first —
- * beside a full orb, which moves over for it — and the middle when the side
- * is taken, and an extension's window that does not say where it goes after
+ * conversation and pictures fill whichever is left, the side first — beside a
+ * full orb, which moves over for it — and the middle when the side is taken,
+ * and an extension's window that does not say where it goes (Files') after
  * them. At most two are open at once (see use-work-panels.ts), so there is
  * always a place.
  */
-export type VoiceWindow = "browser" | "files" | "pictures" | "conversation" | `x:${string}`;
+export type VoiceWindow = "browser" | "pictures" | "conversation" | `x:${string}`;
 
 export function placeWindows(
   open: Partial<Record<VoiceWindow, boolean>>,
@@ -32,7 +32,7 @@ export function placeWindows(
     } else if (!main) main = window;
     else if (!side) side = window;
   }
-  for (const window of ["conversation", "files", "pictures", ...brought.filter((window) => !wants[window])] as const) {
+  for (const window of ["conversation", "pictures", ...brought.filter((window) => !wants[window])] as const) {
     if (!open[window]) continue;
     if (!side) side = window;
     else if (!main) main = window;

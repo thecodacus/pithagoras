@@ -31,7 +31,7 @@ const seconds = (phrase: KeptPhrase) => phrase.samples.reduce((n, s) => n + s.le
 
 export function VoiceControl({ sessionId, folder, items, running, work, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, toolEvents }: {
   sessionId: string;
-  /** The folder the chat works in, for the Files window. */
+  /** The folder the chat works in: a tool card names a file by its path there, and the windows are told of it. */
   folder: string;
   stageTarget: HTMLElement | null;
   onModeChange: (active: boolean) => void;
@@ -71,7 +71,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
   useEffect(() => pending.subscribe(id => { if (id === sessionId) setAttachments(pending.get(id)); }), [sessionId]);
   const addPictures = async (files: File[]) => {
     const pictures = files.filter(file => isImage(file.type));
-    const problems = pictures.length < files.length ? [t("Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in Files.")] : [];
+    const problems = pictures.length < files.length ? [t("Only PNG, JPEG, GIF and WebP pictures can be sent in voice mode. Put other files in the chat's folder.")] : [];
     problems.push(...await pending.add(sessionId, pictures));
     if (problems.length && mounted.current) setError(problems.join(" "));
   };

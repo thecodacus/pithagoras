@@ -297,7 +297,7 @@ puts it before entries with a higher one, or none.
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
-| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `maximized`, `maximize()`, `restore()` |
+| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
 | `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?`, `useShown?` | |
 | `settings.page` | Your package's page in Settings, above the fields the portal found for it | | |
 
@@ -406,12 +406,13 @@ behaves beside the portal's own windows:
 - `useAutoOpen(props)`: a hook, called while voice mode is on in a chat. It
   returns a count, and the window opens each time the count grows: the number
   of commands the agent ran, say, from `portal.chats.use`.
-- `opensFor(call)`: whether the card of a call in voice mode opens this window
-  when it is tapped. It is asked for the calls the portal's own windows are not
-  for: a file's card opens Files, a page's the browser, and a shell call's,
-  which has none of the portal's, the window that says it is for it (the
-  terminal's).
-- `describe(call)`: what the card of such a call says, `{ label, detail? }`,
+- `opensFor(call, chat)`: whether the card of a call in voice mode opens this
+  window when it is tapped. It is asked for the calls the portal's own windows
+  are not for: a page's card opens the browser, and a file's or a shell call's,
+  which have none of the portal's, the window that says it is for them (Files',
+  the terminal's). `chat.workspace` tells a path in the chat's folder from one
+  elsewhere.
+- `describe(call, chat)`: what the card of such a call says, `{ label, detail? }`,
   in place of the portal's words for a tool it does not know ("Using canvas
   write"): Canvases' cards say "Writing in a document" and its title.
 - `maximizable`: its head gets a Maximize button, as the browser's has. The
@@ -422,6 +423,14 @@ behaves beside the portal's own windows:
 - `keepLoaded`: once it has opened, it stays while it is minimized, hidden and
   out of reach, so a frame or a stream in it is not loaded again each time it
   opens. Without it, a minimized window is gone until it opens again.
+
+Your component is told `opened`: what it was opened for, the last time it was,
+a new object each time. `{ by: "person" }` with its button, `{ by: "work" }`
+for what `useAutoOpen` counted, `{ by: "call", call }` for the card of a call
+that was tapped, and `{ by: "open", params }` for your own
+`windows.open(id, params)` in a shortcut. Files' window shows the file of a
+tapped card this way, and the file the agent just changed when that is what
+brought it up.
 
 ```js
 portal.slots.register("voice.window", {
@@ -820,7 +829,12 @@ handle: make one for each request rather than keeping it.
 ## Panels and commands
 
 `portal.panels` is the panels of the chat on screen, any of them, by name:
-`isOpen(name)`, `open(name, params?)`, `close(name)`. An extension's panel is
+`isOpen(name)`, `open(name, params?)`, `close(name)`, which asks what the panel
+asks before it is closed by hand (`guardClose`). `has(name)` says whether
+there is a panel by that name at all, the portal's or an installed
+extension's, and `useHas(name)` is the same as a hook, drawn again when an
+extension comes or goes: Git offers "Open in Files" only where there is a
+Files, which may be switched off or replaced. An extension's panel is
 `<package>/<id>`, and also the `name` it gave itself, if any: that is how one
 extension's panel takes the place of another's that went by the name. The
 portal's own names are the portal's while those panels are its own. Of two
@@ -829,14 +843,18 @@ name: a lower `order` first, then the one loaded first. The portal's own are:
 
 | Name | `open` takes |
 | --- | --- |
-| `files` | `{ path }`: a file to show |
 | `agents` | `{ id }`: a subagent to show |
 | `browser` | |
 
-Extensions a fresh portal installs go by names too. The terminal is `terminal`
+Extensions a fresh portal installs go by names too. Files is `files` and takes
+`{ path }`, a file in the chat's folder to show. The terminal is `terminal`
 and takes `{ callId }`, a command of the agent's to bring into view, or
 `{ job }`, a background job to follow. Git is `git`, and Canvases `canvas`;
 neither takes anything.
+
+The `title` of a panel, a voice window or a page is drawn in the page's
+language as your own `t` would say it: give its German in `locale.add`, and
+mark it with a `msg()` of your own so that your texts' check finds it.
 
 A command is something an extension says it can be asked to do, for another
 extension or the portal to ask by name. Start the name with your package's.
@@ -1065,14 +1083,14 @@ portal can be removed without a spec of the portal's failing.
 
 ## What the portal's own apps use
 
-The terminal, Git and Canvases are extensions (`extensions/terminal`,
-`extensions/git`, `extensions/canvas`); the portal's Files is written into it
-today. This is what each of them takes from
-the portal, and what gives the same to an extension:
+The terminal, Git, Files and Canvases are extensions (`extensions/terminal`,
+`extensions/git`, `extensions/files`, `extensions/canvas`). This is what each
+of them takes from the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
 | --- | --- |
 | Routes that work with no agent running: listing, saving, uploads, downloads | `portal.router`, `chats.folder`, `files.inside` |
+| A chat's folder listed, read, written, uploaded to, renamed, deleted from and downloaded, with the portal's checks | The portal's own [routes for a chat's folder](/reference/api), through `portal.api.json` |
 | A shell and its stream, ended with the login it was opened under; cleanup when a chat goes | The server half, `http.upgrade` or a stream route, `http.endWithLogin`, `sandbox.personEnv`, `chats.on("deleted")` |
 | What the agent read, wrote and ran, as it happens | `portal.chats.use(chat.id, pick)` |
 | Tools that write to what the pages show (canvases, pictures) | `chats.extend`, `chats.send`, `chats.onOpen`, `chats.onEvent` |
@@ -1080,6 +1098,9 @@ the portal, and what gives the same to an extension:
 | A button only when there is something to open, with a dot while it runs | `useButton` |
 | "Discard your changes?", and staying open when a third panel opens | `panel.guardClose`, `panel.keep` |
 | One panel asking another to show a file, and staying open beside it | `panel.open("files", { path })`, `portal.commands` |
+| "Open in Files" only where there is a Files | `portal.panels.useHas("files")` |
+| A window in voice mode that shows the file of the card that was tapped | `opened` given to its `voice.window`, `opensFor(call, chat)` |
+| Its name in the page's language | `title` with `msg()`, and `locale.add` |
 | git and gh in a chat's folder, safely, with a write at a time | `portal.git.at(folder)` |
 | What changed in the history it shows, counted and dated in the page's language | `portal.tp`, `portal.tc`, `portal.tx`, `portal.format` |
 | Its components styled with the portal's utilities | `buildExtension` with `tailwind: true` |

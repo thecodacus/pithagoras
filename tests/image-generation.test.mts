@@ -1368,7 +1368,7 @@ test("an agent whose endpoint takes one picture is told so, and what to do about
   assert.match(one.description, /do not edit with one of them; say so/, "no picture is dropped without a word");
   assert.match(one.description, /Settings → Agent → Media \(Several pictures per edit\)/, "and where several are switched on");
   assert.match(one.description, /make a new one from it as reference/, "one reference picture is still what it can be given");
-  const attached = /only attached to a message is not in the folder and cannot be used[^]*Files panel[^]*Media page[^]*never guess a path/;
+  const attached = /only attached to a message is not in the folder and cannot be used[^]*chat's folder[^]*Media page[^]*never guess a path/;
   assert.match(one.description, attached, "a picture only attached to a message has no path: the agent says so rather than guess one");
 
   // With several taken, the same sentence is not there, and the limits are: the count and the weight.

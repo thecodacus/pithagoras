@@ -1,0 +1,14 @@
+{
+  "name": "pithagoras-files",
+  "version": "0.1.0",
+  "description": "The files of a Pithagoras chat's folder beside the conversation and in voice mode: browse, read and edit them, follow what the agent reads and writes, upload, rename, delete and download",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css" },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "devDependencies": {
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}

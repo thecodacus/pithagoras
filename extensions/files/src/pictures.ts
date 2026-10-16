@@ -1,7 +1,7 @@
-import { insideFolder } from "./file-activity";
+import { insideFolder } from "./helpers";
 
 /**
- * Pictures from the chat's folder, in Markdown the page draws (a file in Files).
+ * Pictures from the chat's folder, in Markdown Files draws as a page.
  *
  * The agent writes `![chart](plots/chart.png)`: a path in the folder it works
  * in. As a URL that means nothing to the page, and the Markdown renderer
@@ -12,8 +12,7 @@ import { insideFolder } from "./file-activity";
  * it anyway, and this way it is not quietly sent somewhere else.
  *
  * `base` is the folder the markdown itself lies in, relative to the chat's
- * folder (a file in the Files panel): a relative path is read from there, as a
- * viewer of the file would.
+ * folder: a relative path is read from there, as a viewer of the file would.
  */
 
 const IMAGE = /!\[([^\]\n]*)\]\(\s*(<[^>\n]*>|[^()\s]+)(\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/g;

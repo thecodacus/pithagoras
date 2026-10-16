@@ -1,12 +1,10 @@
 import { ActivityProgress } from './ActivityProgress';
 import type { Activity } from '../transcript';
 import { useWorkPanels } from "../use-work-panels";
-import { FilesPanel } from "./FilesPanel";
-import { keepFileActivity, latestFileActivity, type FileActivity } from "../file-activity";
 import { VoiceToolActivity } from "./VoiceToolActivity";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { Item } from "../transcript";
-import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuFolderOpen, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
+import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuImage, LuImagePlus, LuRotateCcw, LuSquare, LuMessageSquareText, LuSlidersHorizontal } from "react-icons/lu";
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
@@ -16,7 +14,7 @@ import type { ToolCallView, VoiceWindows } from "@pithagoras/extension-api";
 import { MIN, clearOfDock, dockBox, dockSize, freeStrip, placeWindows, type Orb } from "../voice-windows";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { LuPuzzle } from "react-icons/lu";
-import { useSlot, type ChatProps, type Registered } from "../extensions/slots";
+import { titleOf, useSlot, type ChatProps, type Registered, type VoiceWindowOpened } from "../extensions/slots";
 import { channelFor } from "../extensions/channel";
 import { panelsFor } from "../extensions/panels";
 import { ResizeHandles, WINDOWS, areaFor, clearSize, openWindows, workspaceOf } from "./ResizeHandles";
@@ -54,15 +52,16 @@ const watchWide = (changed: () => void) => {
 const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
 
 /**
- * A window an extension brought to voice mode: placed and sized as Files, the
+ * A window an extension brought to voice mode: placed and sized as the
  * pictures and the conversation are, with what the extension draws in it. It
  * is there while open, and one kept loaded (`keepLoaded`) from when it first
  * opens, hidden while minimized; one that fails to draw says so in its window.
  */
-function BroughtWindow({ entry, main, open, maximized, onClose, onMaximize, onRestore, ...props }: ChatProps & {
-  entry: Registered<"voice.window">; main: boolean; open: boolean; maximized: boolean; onClose: () => void; onMaximize: () => void; onRestore: () => void;
+function BroughtWindow({ entry, main, open, opened, maximized, onClose, onMaximize, onRestore, ...props }: ChatProps & {
+  entry: Registered<"voice.window">; main: boolean; open: boolean; opened: VoiceWindowOpened; maximized: boolean; onClose: () => void; onMaximize: () => void; onRestore: () => void;
 }) {
   const section = useRef<HTMLElement>(null);
+  const title = titleOf(entry);
   useEffect(() => { if (section.current) section.current.inert = !open; }, [open]);
   // The same functions each time it is drawn: what is in the window is drawn again only for what is new in what it is handed.
   const latest = useRef({ onClose, onMaximize, onRestore });
@@ -71,15 +70,15 @@ function BroughtWindow({ entry, main, open, maximized, onClose, onMaximize, onRe
   const maximize = useCallback(() => latest.current.onMaximize(), []);
   const restore = useCallback(() => latest.current.onRestore(), []);
   return (
-    <section ref={section} className={`voice-files-window voice-extension-window ${main ? "as-main" : "as-side"} ${open ? "is-open" : ""} ${maximized ? "is-maximized" : ""}`} aria-label={entry.title} aria-hidden={!open} data-extension={entry.extension}>
-      <header><span>{entry.icon ? <entry.icon /> : <LuPuzzle />}{entry.title}</span><div>
+    <section ref={section} className={`voice-files-window voice-extension-window ${main ? "as-main" : "as-side"} ${open ? "is-open" : ""} ${maximized ? "is-maximized" : ""}`} aria-label={title} aria-hidden={!open} data-extension={entry.extension}>
+      <header><span>{entry.icon ? <entry.icon /> : <LuPuzzle />}{title}</span><div>
         {entry.maximizable && (maximized
-          ? <button type="button" aria-label={t("Restore the size of {panel}", { panel: entry.title })} title={t("Restore size (Esc)")} onClick={restore}><LuMinimize2 /></button>
-          : <button type="button" aria-label={t("Maximize {panel}", { panel: entry.title })} title={t("Maximize")} onClick={maximize}><LuMaximize2 /></button>)}
-        <button type="button" aria-label={t("Minimize {panel}", { panel: entry.title })} title={t("Minimize")} onClick={onClose}><LuMinus /></button>
+          ? <button type="button" aria-label={t("Restore the size of {panel}", { panel: title })} title={t("Restore size (Esc)")} onClick={restore}><LuMinimize2 /></button>
+          : <button type="button" aria-label={t("Maximize {panel}", { panel: title })} title={t("Maximize")} onClick={maximize}><LuMaximize2 /></button>)}
+        <button type="button" aria-label={t("Minimize {panel}", { panel: title })} title={t("Minimize")} onClick={onClose}><LuMinus /></button>
       </div></header>
       <ErrorBoundary resetKey={`${entry.key}:${props.chat.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
-        <entry.component key={props.chat.id} {...props} close={close} maximized={maximized} maximize={maximize} restore={restore} />
+        <entry.component key={props.chat.id} {...props} close={close} opened={opened} maximized={maximized} maximize={maximize} restore={restore} />
       </ErrorBoundary>
       <ResizeHandles target={section} />
     </section>
@@ -135,8 +134,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const wide = useSyncExternalStore(watchWide, () => matchMedia(WIDE).matches);
   const activity = useRef(browserActivity);
   const [shown, setShown] = useState(false);
-  const [filesShown, setFilesShown] = useState(false), [filesUsed, setFilesUsed] = useState(false), [filesSince, setFilesSince] = useState<number | undefined>(undefined);
-  const filesWindow = useRef<HTMLElement>(null), picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
+  const picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
   // Pictures the agent showed with show_image or made with generate_image or edit_image. A new one opens the window on it.
   const pictures = useMemo(() => shownPictures(toolEvents), [toolEvents]);
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
@@ -163,54 +161,48 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const [broughtOpen, setBroughtOpen] = useState<readonly string[]>([]);
   // Every one opened in this chat's voice mode: one kept loaded stays from then on.
   const [broughtOnce, setBroughtOnce] = useState<readonly string[]>([]);
+  // What each was opened for, the last time it was: told to it.
+  const [broughtFor, setBroughtFor] = useState<Readonly<Record<string, VoiceWindowOpened>>>({});
   const brought = windowEntries.filter((entry) => broughtOpen.includes(entry.key));
   const broughtShown = Object.fromEntries(brought.map((entry) => [`x:${entry.key}`, true])) as Record<`x:${string}`, boolean>;
   const closeBrought = (key: string) => setBroughtOpen((open) => open.filter((k) => k !== key));
-  const openBrought = (key: string) => {
+  const openBrought = (key: string, opened: VoiceWindowOpened) => {
     setBroughtOpen((open) => (open.includes(key) ? open : [...open, key]));
+    setBroughtFor((all) => ({ ...all, [key]: opened }));
     setBroughtOnce((once) => (once.includes(key) ? once : [...once, key]));
     onCue("focus");
   };
   /** An extension's own windows, by the ids it registered them with: for its shortcuts. */
   const windowsOf = (extension: string): VoiceWindows => ({
     isOpen: (id) => broughtOpen.includes(`${extension}/${id}`),
-    open: (id) => { if (windowEntries.some((entry) => entry.key === `${extension}/${id}`)) openBrought(`${extension}/${id}`); },
+    open: (id, params) => { if (windowEntries.some((entry) => entry.key === `${extension}/${id}`)) openBrought(`${extension}/${id}`, { by: "open", params }); },
     close: (id) => closeBrought(`${extension}/${id}`),
   });
   /** The window an extension brought for a call, when one says it is for it (`opensFor`). */
   const windowFor = (call: ToolCallView) =>
     windowEntries.find((entry) => {
       try {
-        return entry.opensFor?.(call) === true;
+        return entry.opensFor?.(call, chat) === true;
       } catch (e) {
         console.error(`[extensions] ${entry.extension} failed on being asked whether its window is for a call:`, e);
         return false;
       }
     });
   const chat = useMemo(() => ({ id: sessionId, title, workspace: folder }), [sessionId, title, folder]);
-  const windows: Record<string, boolean> = { browser: shown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown };
+  const windows: Record<string, boolean> = { browser: shown, pictures: picturesShown, conversation, ...broughtShown };
   useWorkPanels(windows, panel => {
     if (panel.startsWith("x:")) closeBrought(panel.slice(2)); else
-    if (panel === "browser") setShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else if (panel === "conversation") setConversation(false);
+    if (panel === "browser") setShown(false); else if (panel === "pictures") setPicturesShown(false); else if (panel === "conversation") setConversation(false);
   });
-  // What the agent reads or changes in the chat's folder. Files opens on it as
-  // the browser does, and follows it from there. A file opened from
-  // a tool card is put after everything that has happened, so that the panel
-  // takes it, and the agent's next file after that again.
-  const lastFile = useRef<FileActivity | null>(null);
-  const agentFile = useMemo(() => (lastFile.current = keepFileActivity(lastFile.current, latestFileActivity(toolEvents, folder))), [toolEvents, folder]);
-  const [openedFile, setOpenedFile] = useState<FileActivity | null>(null);
-  const fileActivity = openedFile && openedFile.seq > (agentFile?.seq ?? 0) ? openedFile : agentFile;
-  const filesSeen = useRef(agentFile?.seq ?? 0);
   // Where the windows go: the browser in the middle, an extension's where it
-  // asks, and Files and pictures wherever is left (see voice-windows.ts). The stage's
+  // asks, and the pictures and the conversation wherever is left (see voice-windows.ts). The stage's
   // classes say whether there is a window in the middle and one at the side,
   // for where the orb goes; which window is open is the window's own `is-open`.
   const place = placeWindows(
     windows,
     Object.fromEntries(brought.filter((entry) => entry.place).map((entry) => [`x:${entry.key}`, entry.place])),
   );
-  const filesMain = place.main === "files", picturesMain = place.main === "pictures", conversationMain = place.main === "conversation";
+  const picturesMain = place.main === "pictures", conversationMain = place.main === "conversation";
   const browsing = !!place.main;
   const sideWindow = !!place.side;
   const [loaded, setLoaded] = useState(false);
@@ -228,21 +220,13 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     const observer = new ResizeObserver(follow);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [thought, shown, filesShown, picturesShown, conversation]);
+  }, [thought, shown, picturesShown, conversation, brought.length]);
   useEffect(() => { end.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     if (browser.current) browser.current.inert = !shown;
-    if (filesWindow.current) filesWindow.current.inert = !filesShown;
     if (picturesWindow.current) picturesWindow.current.inert = !picturesShown;
     if (conversationWindow.current) conversationWindow.current.inert = !conversation;
-  }, [shown, filesShown, picturesShown, conversation]);
-  useEffect(() => {
-    if (!agentFile || agentFile.seq <= filesSeen.current) return;
-    filesSeen.current = agentFile.seq;
-    // The first time, the panel starts from just before this, so it shows it.
-    if (!filesUsed) { setFilesSince(agentFile.seq - 1); setFilesUsed(true); }
-    setFilesShown(true); onCue("focus");
-  }, [agentFile?.seq, filesUsed, onCue]);
+  }, [shown, picturesShown, conversation]);
   useEffect(() => {
     const last = pictures.at(-1);
     if (!last || last.seq <= picturesSeen.current) return;
@@ -254,14 +238,10 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const openCall = (call: ToolCall, view: ToolCallView) => {
     if (!call.target) {
       const entry = windowFor(view);
-      if (entry) openBrought(entry.key);
+      if (entry) openBrought(entry.key, { by: "call", call: view });
       return;
     }
-    if (call.target === "files" && call.path) {
-      const seq = toolEvents.reduce((n, e) => Math.max(n, e.seq), fileActivity?.seq ?? 0) + 0.5;
-      if (!filesUsed) { setFilesSince(seq - 1); setFilesUsed(true); }
-      setOpenedFile({ seq, path: call.path, tool: "read" }); setFilesShown(true); onCue("focus");
-    } else if (call.target === "browser") open();
+    if (call.target === "browser") open();
     else if (call.target === "pictures") openPictures();
   };
   // Pictures pasted anywhere on the stage go with the next thing said; a paste
@@ -294,7 +274,6 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     "voice.picture": () => { picker.current?.click(); },
     "voice.repeat": () => { if (!canRepeat || speaking) return false; onRepeat(); },
     "voice.conversation": () => { if (!conversation) onCue("focus"); setConversation(v => !v); },
-    "voice.files": () => { if (filesShown) setFilesShown(false); else openFiles(); },
     "voice.pictures": () => { if (picturesShown) setPicturesShown(false); else if (pictures.length) openPictures(); else return false; },
     "voice.browser": () => { if (shown) minimize(); else if (browserAvailable || loaded) open(); else return false; },
     "voice.settings": () => { setSettings(v => !v); },
@@ -345,9 +324,6 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     window.addEventListener("keydown", down, true); window.addEventListener("keyup", up, true); window.addEventListener("blur", away);
     return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", away); };
   }, []);
-  const openFiles = () => {
-    setFilesUsed(true); setFilesShown(true); onCue("focus");
-  };
   useEffect(() => {
     if (browserActivity <= activity.current) return;
     activity.current = browserActivity;
@@ -402,7 +378,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const orbStyle = useOrbStyle(sessionId);
   const touch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
   const status = waitingForTap ? (touch ? t("Tap to continue voice mode") : t("Click or press a key to continue voice mode")) : starting ? t("Connecting") : input || holding ? t("Hearing you") : speaking ? t("Speaking") : phase === "Speaking" ? t("Preparing your reply") : phase === "Thinking" ? t("Thinking") : phase === "Transcribing" ? t("Transcribing") : muted ? t("Microphone muted") : ptt ? (touch || !bindings["voice.hold"] ? t("Hold the microphone to talk") : t("Hold {keys} to talk", { keys: describe(bindings["voice.hold"], layout) })) : t("Listening");
-  const anyPanel = shown || filesShown || picturesShown || conversation || brought.length > 0;
+  const anyPanel = shown || picturesShown || conversation || brought.length > 0;
   // A window sized by hand keeps its size until the windows are arranged
   // differently — one opens or closes — and then the layout places it again.
   // Before it is drawn, so that no frame shows the new arrangement with the
@@ -412,7 +388,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   useLayoutEffect(() => {
     if (arranged.current === arrangement) return;
     arranged.current = arrangement;
-    for (const el of [browser.current, filesWindow.current, picturesWindow.current, conversationWindow.current]) clearSize(el);
+    for (const el of [browser.current, picturesWindow.current, conversationWindow.current]) clearSize(el);
     for (const el of stage.current?.querySelectorAll<HTMLElement>(".voice-extension-window") ?? []) clearSize(el);
   }, [arrangement]);
   // What the orb's place was measured for. Anything else — a window opened or
@@ -478,7 +454,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     e.preventDefault(); e.stopPropagation(); setDropping(false);
     add.current([...e.dataTransfer.files]);
   };
-  const panels = Number(shown) + Number(filesShown) + Number(picturesShown) + Number(conversation) + brought.length;
+  const panels = Number(shown) + Number(picturesShown) + Number(conversation) + brought.length;
   // Where the orb is, said once for the stage's styles and for the windows
   // being resized (see Orb). In its dock under a maximized browser, or when
   // the windows sized by hand leave no gap wide enough; in the gap when they
@@ -498,11 +474,10 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
         {!conversation && <button type="button" onClick={() => { setConversation(true); onCue("focus"); }} title={`${t("Conversation")}${hint("voice.conversation")}`} aria-label={t("Show the conversation")}><LuMessageSquareText /></button>}
-        {!filesShown && <button type="button" onClick={openFiles} title={`${t("Show files")}${hint("voice.files")}`} aria-label={t("Show files")}><LuFolderOpen /></button>}
         {pictures.length > 0 && !picturesShown && <button type="button" onClick={openPictures} title={`${t("Show pictures")}${hint("voice.pictures")}`} aria-label={t("Show pictures")}><LuImage /></button>}
         {(browserAvailable || loaded) && !shown && <button type="button" onClick={open} title={`${t("Show browser")}${hint("voice.browser")}`} aria-label={t("Show browser")}><LuGlobe /></button>}
         {windowEntries.filter((entry) => !broughtOpen.includes(entry.key)).map((entry) => (
-          <button key={entry.key} type="button" aria-label={t("Show {panel}", { panel: entry.title })} title={entry.title} onClick={() => openBrought(entry.key)}>
+          <button key={entry.key} type="button" aria-label={t("Show {panel}", { panel: titleOf(entry) })} title={titleOf(entry)} onClick={() => openBrought(entry.key, { by: "person" })}>
             {entry.icon ? <entry.icon /> : <LuPuzzle />}
           </button>
         ))}
@@ -529,11 +504,6 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       {loaded && <iframe onLoad={e => frameKeys(e.currentTarget)} src="/browser-ui/" title={t("The agent's browser")} allow="clipboard-read; clipboard-write; fullscreen" />}
       <ResizeHandles target={browser} />
     </section>
-    <section ref={filesWindow} className={`voice-files-window ${filesMain ? 'as-main' : 'as-side'} ${filesShown ? 'is-open' : ''}`} aria-label={t("Files")} aria-hidden={!filesShown}>
-      <header><span><LuFolderOpen />{t("Files")}</span><div><button type="button" aria-label={t("Minimize files")} title={t("Minimize files")} onClick={() => { setFilesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
-      {filesUsed && <FilesPanel key={sessionId} sessionId={sessionId} folder={folder} activity={fileActivity} since={filesSince} />}
-      <ResizeHandles target={filesWindow} />
-    </section>
     <section ref={picturesWindow} className={`voice-files-window voice-pictures-window ${picturesMain ? 'as-main' : 'as-side'} ${picturesShown ? 'is-open' : ''}`} aria-label={t("Pictures")} aria-hidden={!picturesShown}>
       <header><span><LuImage />{t("Pictures")}</span><div><button type="button" aria-label={t("Minimize pictures")} title={t("Minimize pictures")} onClick={() => { setPicturesShown(false); end.current?.focus({ preventScroll: true }); }}><LuMinus /></button></div></header>
       {picturesShown && <VoicePictures sessionId={sessionId} pictures={pictures} index={Math.min(pictureIndex, pictures.length - 1)} onIndex={setPictureIndex} />}
@@ -545,19 +515,19 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       <ResizeHandles target={conversationWindow} />
     </section>
     {windowEntries.filter((entry) => broughtOpen.includes(entry.key) || (entry.keepLoaded && broughtOnce.includes(entry.key))).map((entry) => (
-      <BroughtWindow key={entry.key} entry={entry} main={place.main === `x:${entry.key}`} open={broughtOpen.includes(entry.key)} maximized={maximized && maxed === `x:${entry.key}`}
+      <BroughtWindow key={entry.key} entry={entry} main={place.main === `x:${entry.key}`} open={broughtOpen.includes(entry.key)} opened={broughtFor[entry.key]!} maximized={maximized && maxed === `x:${entry.key}`}
         chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)}
         onClose={() => { closeBrought(entry.key); end.current?.focus({ preventScroll: true }); }} onMaximize={() => setMaxed(`x:${entry.key}`)} onRestore={() => setMaxed(null)} />
     ))}
     {windowEntries.filter((entry) => entry.useAutoOpen).map((entry) => (
       <ErrorBoundary key={`${entry.key}:${sessionId}`} resetKey={`${entry.key}:${sessionId}`} fallback={() => null}>
-        <AutoOpener entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} onGrow={() => openBrought(entry.key)} />
+        <AutoOpener entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} onGrow={() => openBrought(entry.key, { by: "work" })} />
       </ErrorBoundary>
     ))}
-    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} opens={(view) => windowFor(view)?.title} words={(view) => {
+    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} opens={(view) => { const entry = windowFor(view); return entry && titleOf(entry); }} words={(view) => {
       const entry = windowFor(view);
       try {
-        return entry?.describe?.(view);
+        return entry?.describe?.(view, chat);
       } catch (e) {
         console.error(`[extensions] ${entry?.extension} failed on describing a call:`, e);
         return undefined;

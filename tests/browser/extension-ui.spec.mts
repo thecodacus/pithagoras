@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal, DONE, HANG } from './portal-mock';
+import { test, expect, extensionOnDisk, mockPortal, DONE, HANG } from './portal-mock';
 
 /**
  * An extension that draws in the portal: the Notes test extension's own
@@ -11,7 +12,9 @@ const NAME = 'pithagoras-notes';
 const web = (file: string) => readFileSync(new URL(`../fixtures/extensions/notes/web/${file}`, import.meta.url), 'utf8');
 const address = (name: string, file: string) => `/api/extension-ui/${name}/${file}`;
 
-async function portal(page: Page, module = web('client.js'), probe?: string) {
+/** `also` is more extensions, by their folders from the repository's root, installed as they are on disk: a stand-in. */
+async function portal(page: Page, module = web('client.js'), probe?: string, also: string[] = []) {
+  const more = also.map((folder) => extensionOnDisk(path.resolve(import.meta.dirname, '../..', folder)));
   const at = new Date().toISOString();
   const sessions = [
     { id: 'a', title: 'First chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null },
@@ -41,12 +44,14 @@ async function portal(page: Page, module = web('client.js'), probe?: string) {
           ...(state.themed ? [{ name: 'more-themes', version: '1.0.0', themes: [{ id: 'dusk', name: 'Noon', light: { accent: '#0055aa' } }, { id: 'midnight', name: 'Midnight', dark: { canvas: '#05070d' } }] }] : []),
           ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}`, ...(state.notesThemes ? { themes: state.notesThemes } : {}) }] : []),
           ...(probe ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
+          ...more.map((extension) => extension.listing),
         ],
       };
     }
     // What is installed, as Settings lists it.
     if (p === '/api/extensions' && probe) return { settingsPath: '/a/settings.json', extensions: [{ spec: 'npm:probe', name: 'probe', version: '1.0.0', enabled: true, settings: [] }] };
     if (p === address('probe', 'client.js')) { await route.fulfill({ contentType: 'text/javascript', body: probe! }); return DONE; }
+    for (const extension of more) if (await extension.serve(p, route)) return DONE;
     // The Notes extension's own route, as its server half answers it.
     if (p === `/api/x/${NAME}/notes`) return { chats: [{ id: 'b', title: 'Second chat', notes: [{ id: 1, text: 'Kept with the second chat', by: 'agent' }] }] };
     if (p === address(NAME, 'client.js')) { await route.fulfill({ contentType: 'text/javascript', body: module }); return DONE; }
@@ -123,7 +128,8 @@ const PROBE = `export default function (portal) {
   } });
   portal.slots.register("chat.overlay", { id: "corner", component: ({ chat }) => h("div", { "data-testid": "overlay", style: { position: "absolute", left: 8, bottom: 8, zIndex: 30 } },
     "Over " + chat.title + " · " + portal.api.url("/state") + " ",
-    h("button", { type: "button", onClick: () => portal.panels.open("files", { path: "README.md" }) }, "Show the README")) });
+    h(function Has() { return h("span", { "data-testid": "has", "data-browser": String(portal.panels.useHas("browser")), "data-files": String(portal.panels.useHas("files")), "data-runs": String(portal.panels.useHas("probe/runs")) }); }),
+    h("button", { type: "button", onClick: () => portal.panels.open("browser") }, "Show the browser")) });
   portal.slots.register("chat.composer.above", { id: "chip", component: ({ chat }) => h("div", { "data-testid": "above" }, "Above the box of " + chat.id) });
   portal.slots.register("settings.page", { id: "own", component: () => h("p", { "data-testid": "probe-settings" }, "Probe's own settings") });
   // A theme changer: it switches the portal to a theme another package brought, and back.
@@ -141,8 +147,8 @@ const sidebar = (page: Page) => page.getByRole('navigation', { name: 'Destinatio
 
 test('an extension\'s panel is opened from the chat\'s header, talks to its extension in that chat, and closes like the portal\'s own', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  const { said, hears } = await portal(page);
-  // The browser, one of the portal's own panels, to open as a third.
+  // The browser, one of the portal's own panels, and the console stand-in's, to open beside it as a second and a third.
+  const { said, hears } = await portal(page, undefined, undefined, ['tests/fixtures/extensions/console']);
   await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
   await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
   await page.goto('/s/a');
@@ -150,8 +156,8 @@ test('an extension\'s panel is opened from the chat\'s header, talks to its exte
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   // Its button, and the extension's own control beside it, are the size of the portal's.
   const sizes = await header(page).getByRole('button').evaluateAll((items) => Object.fromEntries(items.map((b) => [b.getAttribute('aria-label'), [b.getBoundingClientRect().height, b.querySelector('svg')?.getBoundingClientRect().width]])));
-  expect(sizes.Notes).toEqual(sizes.Files);
-  expect(sizes["Pin the agent's last reply to Notes"]).toEqual(sizes.Files);
+  expect(sizes.Notes).toEqual(sizes.Browser);
+  expect(sizes["Pin the agent's last reply to Notes"]).toEqual(sizes.Browser);
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(panel(page)).toBeVisible();
@@ -174,7 +180,7 @@ test('an extension\'s panel is opened from the chat\'s header, talks to its exte
 
   // Two panels beside the conversation is what fits: a third closes the one open longest, whoever brought it.
   await header(page).getByRole('button', { name: 'Browser', exact: true }).click();
-  await header(page).getByRole('button', { name: 'Files', exact: true }).click();
+  await header(page).getByRole('button', { name: 'Console', exact: true }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
@@ -297,7 +303,7 @@ test('an extension that fails to load, or to draw, fails alone', async ({ page }
 
 test('a panel says more of itself: tabs in its head, a button that follows the chat, kept and asking while something in it would be lost', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
-  const { hears, pushed } = await portal(page);
+  const { hears, pushed } = await portal(page, undefined, undefined, ['tests/fixtures/extensions/console']);
   // The browser, one of the portal's own panels, to open as a third.
   await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
   await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
@@ -328,7 +334,7 @@ test('a panel says more of itself: tabs in its head, a button that follows the c
   // And it is not the one closed to make room for a third: the browser, opened after it, goes instead.
   const browser = header(page).getByRole('button', { name: 'Browser', exact: true });
   await browser.click();
-  await header(page).getByRole('button', { name: 'Files', exact: true }).click();
+  await header(page).getByRole('button', { name: 'Console', exact: true }).click();
   await expect(panel(page)).toBeVisible();
   await expect(browser).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
@@ -363,6 +369,9 @@ test("a call of an extension's tool is drawn by the extension, and any other cal
 test('an extension follows what the agent runs from the chat itself, and is drawn again only for what it reads of it', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const { says, pushed, caughtUp } = await portal(page, undefined, PROBE);
+  // The browser, one of the portal's own panels, to open by its name.
+  await page.route('**/api/browser', (route) => route.fulfill({ json: { install: { container: 'running' } } }));
+  await page.route('**/browser-ui/', (route) => route.fulfill({ contentType: 'text/html', body: '<body>A browser, in view.</body>' }));
   await page.goto('/s/a');
   await caughtUp('a');
   // Nothing run yet: its button is not in the header, where the other extension's is.
@@ -400,11 +409,14 @@ test('an extension follows what the agent runs from the chat itself, and is draw
   // Over the chat and above the message box, with where its own routes are.
   await expect(page.getByTestId('overlay')).toContainText('Over First chat · /api/x/probe/state');
   await expect(page.getByTestId('above')).toHaveText('Above the box of a');
-  // Any panel of the chat by its name, the portal's own included.
-  const files = header(page).getByRole('button', { name: 'Files', exact: true });
-  await expect(files).toHaveAttribute('aria-expanded', 'false');
-  await page.getByTestId('overlay').getByRole('button', { name: 'Show the README' }).click();
-  await expect(files).toHaveAttribute('aria-expanded', 'true');
+  // Any panel of the chat by its name, the portal's own included; and whether there is one by a name, for one that is not.
+  await expect(page.getByTestId('has')).toHaveAttribute('data-browser', 'true');
+  await expect(page.getByTestId('has')).toHaveAttribute('data-runs', 'true');
+  await expect(page.getByTestId('has')).toHaveAttribute('data-files', 'false');
+  const browser = header(page).getByRole('button', { name: 'Browser', exact: true });
+  await expect(browser).toHaveAttribute('aria-expanded', 'false');
+  await page.getByTestId('overlay').getByRole('button', { name: 'Show the browser' }).click();
+  await expect(browser).toHaveAttribute('aria-expanded', 'true');
 });
 
 test("an extension's own page in Settings, and why its server half is not running", async ({ page }) => {

@@ -84,14 +84,16 @@ still be live.
 
 The files in the folder a session works in, whether that is a project, the
 workspace root or Home. Every path is relative to that folder; one that leads
-out of it, by `..` or by a link, is refused with 400.
+out of it, by `..` or by a link, is refused with 400. They are the portal's,
+whoever draws the folder: the [Files](/guide/files) extension uses them, and
+any extension's browser half can, with `portal.api.json`.
 
 | | |
 | --- | --- |
 | `GET /api/sessions/:id/files?path=` | `{ path, entries: [{ name, type, link?, size, mtime }], truncated }` — `type` is `dir`, `file` or `link` (a link that leads out of the folder or nowhere); `link: true` marks every link, including one to a folder inside this one that is listed as a `dir`. Folders first; `.git` is left out; at most 2,000 entries |
 | `GET /api/sessions/:id/file?path=` | `{ binary: false, size, mtime, content }`, or `{ binary: true, size, mtime }` for what is not text or is over 1 MB |
 | `GET /api/sessions/:id/file?path=&download=1` | The file, as a download |
-| `GET /api/sessions/:id/picture?path=` | A PNG, JPEG, GIF or WebP in the folder, to be drawn in the page, with the type its first bytes say it is and a `sandbox` content security policy. 400 for anything that is not one of those four, whatever its name; 413 over 25 MB. The Files panel, canvases and `show_image` use it |
+| `GET /api/sessions/:id/picture?path=` | A PNG, JPEG, GIF or WebP in the folder, to be drawn in the page, with the type its first bytes say it is and a `sandbox` content security policy. 400 for anything that is not one of those four, whatever its name; 413 over 25 MB. Files, canvases and `show_image` use it |
 | `GET /api/sessions/:id/video?path=` | A WebM or an MP4 in the folder, to be played in the page, with the type its first bytes say it is and a `sandbox` content security policy, in the parts a player asks for: `Range` is answered `206` with `Content-Range` (a single range of bytes; several, or another unit, get the whole file, and one past the end `416`), `Accept-Ranges: bytes`, `ETag`/`304`, and `If-Range` is honoured. 400 for anything that is not a WebM or an MP4, whatever its name; 413 over 100 MB. The chat's player uses it for `generate_video` and `show_video` |
 | `PUT /api/sessions/:id/file?path=` | `{ content, mtime? }` → saves it. With `mtime`, the time it was read at, the save is refused with 409 and `code: "conflict"` if the file has changed since. 413 over 1 MB. Every refusal of the file routes answers `{ error, code }` with `code` one of `invalid`, `missing`, `conflict`, `exists`, `too_large`, `failed` and `unsaved-work` |
 | `PUT /api/sessions/:id/file?path=` with `create: true` | `{ content, create: true }` → makes the file, and refuses with 409 if something already has the name |

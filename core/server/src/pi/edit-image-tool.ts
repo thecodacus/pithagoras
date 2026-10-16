@@ -48,7 +48,7 @@ export const EDIT_IMAGE_VOICE_LINE =
  * folder, so there is no path for it, and an agent that is not told guesses one or edits another picture.
  */
 const ATTACHED =
-  "A picture only attached to a message is not in the folder and cannot be used: ask the person to put it in the chat's folder (Files panel) or edit it on the Media page; " +
+  "A picture only attached to a message is not in the folder and cannot be used: ask the person to put it in the chat's folder or edit it on the Media page; " +
   "never guess a path or edit another picture. ";
 
 /** What the model is told about the pictures of an edit when the endpoint takes one, and when it takes several. */
@@ -95,7 +95,7 @@ function readOriginal(folder: string, given: unknown): { original: string; bytes
     const original = pictureIn(folder, given, "edited");
     return { original, bytes: readPicture(baseDir(folder), original).bytes };
   } catch (e) {
-    // The Files panel's words for it ("download it instead") are no way forward for an edit.
+    // The words the folder's routes have for it ("download it instead") are no way forward for an edit.
     if (e instanceof FileError && e.code === "too_large") {
       throw new Error(`The picture is over ${MAX_PICTURE_BYTES / 1024 / 1024} MB, which is more than can be read to be scaled down for an edit; say so to the person, or make a smaller copy of it first.`);
     }

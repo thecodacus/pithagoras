@@ -133,7 +133,7 @@ test('a browser closed for a third window is not maximized any more: Escape is S
   const browser = page.locator('.voice-browser-window');
   await page.getByRole('button', { name: 'Maximize browser' }).click();
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  await page.getByRole('button', { name: 'Show files' }).click();
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
   await expect(browser).not.toHaveClass(/is-open/);
   await page.getByRole('button', { name: 'Show browser' }).click();
   await expect(browser).toHaveClass(/is-open/);
@@ -304,9 +304,9 @@ test('a window opening while the browser is maximized gives it its place back', 
   await expect(browser).not.toHaveClass(/is-maximized/);
   await expect(page.locator('.voice-extension-window[data-extension="test-console"]')).toHaveClass(/is-open/);
   await page.getByRole('button', { name: 'Maximize browser' }).click();
-  await page.getByRole('button', { name: 'Show files' }).click();
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
   await expect(browser).not.toHaveClass(/is-maximized/);
-  await expect(page.getByRole('region', { name: 'Files', exact: true })).toHaveClass(/is-open/);
+  await expect(page.getByRole('region', { name: 'Conversation', exact: true })).toHaveClass(/is-open/);
 });
 
 test('pictures waiting to be sent do not cover the maximized browser\'s buttons', async ({ page }) => {
@@ -446,9 +446,9 @@ test('a window\'s shadow falls downwards and does not reach across the gap onto 
   });
   const shadows: number[][] = [];
   await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
-  await page.getByRole('button', { name: 'Show files' }).click();
+  await page.getByRole('button', { name: 'Show the conversation' }).click();
   await settled(page);
-  for (const selector of ['.voice-extension-window[data-extension="test-console"]', '.voice-files-window']) shadows.push(await page.locator(selector).first().evaluate(reach));
+  for (const selector of ['.voice-extension-window[data-extension="test-console"]', '.voice-conversation-window']) shadows.push(await page.locator(selector).first().evaluate(reach));
   for (const reaches of shadows) {
     expect(reaches.length).toBeGreaterThan(0);
     for (const r of reaches) expect(r).toBeLessThan(16);
@@ -517,9 +517,9 @@ test.describe('a window an extension lets be maximized', () => {
 
     // A window opening is there to be seen: the portal's own, and the browser.
     await page.getByRole('button', { name: 'Maximize Viewer' }).click();
-    await page.getByRole('button', { name: 'Show files' }).click();
+    await page.getByRole('button', { name: 'Show the conversation' }).click();
     await expect(viewer).not.toHaveClass(/is-maximized/);
-    await page.getByRole('button', { name: 'Minimize files' }).click();
+    await page.getByRole('button', { name: 'Close the conversation' }).click();
     await page.getByRole('button', { name: 'Maximize Viewer' }).click();
     await page.getByRole('button', { name: 'Use browser', exact: true }).click();
     await expect(page.locator('.voice-browser-window')).toHaveClass(/is-open/);

@@ -35,7 +35,6 @@ type CoreActionId =
   | "voice.picture"
   | "voice.repeat"
   | "voice.conversation"
-  | "voice.files"
   | "voice.pictures"
   | "voice.browser"
   | "voice.settings"
@@ -67,7 +66,6 @@ export const ACTIONS: Action[] = [
   { id: "voice.picture", label: msg("Add a picture"), scope: "Voice mode", default: { code: "KeyP" } },
   { id: "voice.repeat", label: msg("Repeat the last reply"), scope: "Voice mode", default: { code: "KeyR" } },
   { id: "voice.conversation", label: msg("Show or hide the conversation"), scope: "Voice mode", default: { code: "KeyC" } },
-  { id: "voice.files", label: msg("Show or hide files"), scope: "Voice mode", default: { code: "KeyF" } },
   { id: "voice.pictures", label: msg("Show or hide pictures"), scope: "Voice mode", default: { code: "KeyI" } },
   { id: "voice.browser", label: msg("Show or hide the browser"), scope: "Voice mode", default: { code: "KeyB" } },
   { id: "voice.settings", label: msg("Open or close voice settings"), scope: "Voice mode", default: { code: "KeyO" } },

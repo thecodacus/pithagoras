@@ -1,7 +1,7 @@
 import { test, expect } from '../../../../tests/browser/portal-mock';
 
-// Git, and a third panel to open beside it and Files: the portal's tests' stand-in.
-test.use({ installed: ['extensions/git', 'tests/fixtures/extensions/console'] });
+// Git, Files to open a file in, and a third panel to open beside them: the portal's tests' stand-in.
+test.use({ installed: ['extensions/git', 'extensions/files', 'tests/fixtures/extensions/console'] });
 
 test.beforeEach(async ({ page }) => {
   // Git's routes for the chat: a repository with a file changed and one new, and no gh.
@@ -29,7 +29,7 @@ test('Git is a panel of its own beside the chat, with its tabs in its header, an
   await expect(panels.getByRole('textbox', { name: 'Contents of README.md' })).toHaveValue('# Pithagoras\n');
   await expect(tabs).toBeVisible();
   // Asked once: Files closed and opened again shows the folder, not the file again.
-  await panels.getByRole('button', { name: 'Close the files' }).click();
+  await panels.getByRole('button', { name: 'Close Files' }).click();
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await expect(panels.getByRole('button', { name: /README\.md/ }).first()).toBeVisible();
   await expect(panels.getByRole('textbox', { name: 'Contents of README.md' })).toHaveCount(0);
@@ -62,4 +62,17 @@ test('an edit not saved in Files outweighs keeping Git open: a third panel close
   await expect(text).toHaveValue('# Pithagoras\nnot saved yet\n');
   await expect(panels.getByRole('tablist', { name: 'Git' })).toHaveCount(0);
   await expect(panels.getByRole('tablist', { name: 'Consoles' })).toBeVisible();
+});
+
+test.describe('without Files', () => {
+  // Files is an extension of its own, which may be switched off or removed.
+  test.use({ installed: ['extensions/git'] });
+
+  test('Git offers no way to open a file in Files', async ({ page }) => {
+    await page.getByRole('button', { name: 'Git', exact: true }).click();
+    const panels = page.getByRole('complementary', { name: 'Panels' });
+    await expect(panels.getByText('notes.txt')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Files', exact: true })).toHaveCount(0);
+    await expect(panels.getByRole('button', { name: /in Files/ })).toHaveCount(0);
+  });
 });

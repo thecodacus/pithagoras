@@ -1,4 +1,7 @@
-import { test, expect } from './portal-mock';
+import { test, expect } from '../../../../tests/browser/portal-mock';
+
+// Files, as a portal that ships it has it.
+test.use({ installed: ['extensions/files'] });
 
 test("a chat's full path is not drawn under its title, and the Files panel shows it on request", async ({ page }) => {
   await page.route('**/api/sessions/*/files*', (route) =>

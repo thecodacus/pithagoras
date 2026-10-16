@@ -28,7 +28,7 @@ import { pick, useFlip } from "../motion";
 import { HOME, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t, useLanguage } from "../i18n";
-import { useSlot, type Registered } from "../extensions/slots";
+import { titleOf, useSlot, type Registered } from "../extensions/slots";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
@@ -218,7 +218,7 @@ export const Sidebar = memo(function Sidebar({
     ...pages.map((page) => ({
       to: `x/${page.key}` as const,
       icon: page.icon ? <span className="contents [&>svg]:h-[1em] [&>svg]:w-[1em]"><page.icon /></span> : <LuPuzzle />,
-      label: page.title,
+      label: titleOf(page),
     })),
   ];
   const anyRunning = sessions.some((s) => s.status === "running");

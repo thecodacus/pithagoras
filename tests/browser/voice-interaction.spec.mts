@@ -16,8 +16,6 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
   await page.route('**/voice/speech', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
   await page.route('**/api/sessions/test/picture?**', route => route.fulfill({ body: png, contentType: 'image/png' }));
-  await page.route('**/api/sessions/test/files?**', route => route.fulfill({ json: { path: 'src', entries: [{ name: 'app.ts', type: 'file', size: 3, mtime: 1 }], truncated: false } }));
-  await page.route('**/api/sessions/test/file?**', route => route.fulfill({ json: { binary: false, size: 3, mtime: 1, content: 'abc' } }));
 });
 
 async function start(page: import('@playwright/test').Page) {
@@ -153,39 +151,9 @@ test('tool cards say what came of a call, and open what they are about', async (
   // Still there after the old eight seconds would have faded it, counting.
   await page.waitForTimeout(4200);
   await expect(search).toContainText(/\d+ s/);
+  // What came of an edit; what its card opens is the window of an extension that says it is for files (Files').
   await page.getByRole('button', { name: 'Edit file' }).click();
-  const edit = page.getByRole('button', { name: /Editing app\.ts/ });
-  await expect(edit).toContainText('+2 −1');
-  await edit.click();
-  await expect(page.getByRole('region', { name: 'Files' })).toBeVisible();
-  await expect(page.getByLabel('Contents of src/app.ts')).toHaveValue('abc');
-});
-
-test('the Files window of voice mode leaves the edit of the chat\'s own Files panel where it is', async ({ page }) => {
-  await page.goto('/tests/voice.html');
-  // An edit in the chat's Files panel that is not saved.
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
-  await page.getByRole('button', { name: /^app\.ts/ }).click();
-  await page.getByLabel('Contents of app.ts').fill('edited by hand');
-  const kept = () => page.evaluate(() => sessionStorage.getItem('pithagoras.file-draft.test') ?? '');
-  await expect.poll(kept).toContain('edited by hand');
-  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
-  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
-  // The voice stage's own window opens on the folder, ready to show what the agent does, not on a half-made edit of the other.
-  await page.getByRole('button', { name: 'Show files' }).click();
-  const window = page.locator('.voice-files-window', { has: page.getByRole('button', { name: 'Minimize files' }) });
-  await expect(window.getByRole('button', { name: /^app\.ts/ })).toBeVisible();
-  await expect(window.getByLabel('Contents of app.ts')).toHaveCount(0);
-  await expect(window.getByRole('button', { name: 'Following' })).toBeVisible();
-  // Clicking Following again lets go, and Follow takes it up again.
-  await window.getByRole('button', { name: 'Following' }).click();
-  await expect(window.getByRole('button', { name: 'Follow', exact: true })).toBeVisible();
-  await window.getByRole('button', { name: 'Follow', exact: true }).click();
-  await expect(window.getByRole('button', { name: 'Following' })).toBeVisible();
-  // And it did not take the chat's edit with it when it came: that is still kept, for a reload.
-  expect(await kept()).toContain('edited by hand');
-  await page.getByRole('button', { name: 'End voice mode' }).click();
-  await expect(page.getByLabel('Contents of app.ts')).toHaveValue('edited by hand');
+  await expect(page.locator('.voice-tool-float', { hasText: 'Editing app.ts' })).toContainText('+2 −1');
 });
 
 test('settings, push-to-talk, adding to a running task, the conversation and repeat', async ({ page }) => {

@@ -30,8 +30,11 @@ function Body({ chat, panel }: PanelProps) {
   const { activity, running } = portal.chats.use(chat.id, (feed) => ({ activity: latestFileActivity(feed.events, chat.workspace), running: feed.running }));
   const onTab = useCallback((next: GitTab) => show(panel, { tab: next }), [panel]);
   const onCount = useCallback((n: number) => show(panel, { count: n }), [panel]);
-  // In Files beside it: Git, just clicked in, is not the panel closed to make room.
-  const onOpenFile = useCallback((path: string) => panel.open("files", { path }), [panel]);
+  // In Files beside it: Git, just clicked in, is not the panel closed to make room. Offered only where there is a
+  // panel by that name: Files is an extension, and may be switched off or replaced.
+  const hasFiles = portal.panels.useHas("files");
+  const openInFiles = useCallback((path: string) => panel.open("files", { path }), [panel]);
+  const onOpenFile = hasFiles ? openInFiles : undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface">
       <GitPanel sessionId={chat.id} tab={tab} onTab={onTab} activity={activity} running={running} onOpenFile={onOpenFile} onCount={onCount} />

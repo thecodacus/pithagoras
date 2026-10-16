@@ -21,18 +21,13 @@ import {
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
-import { ApiError, api, type FileEntry, type Unsaved } from "../api";
-import type { FileActivity } from "../file-activity";
-import { flushFileDraft, keepFileDraft, readFileDraft } from "../file-drafts";
-import { local } from "../safe-storage";
-import { bytesLabel } from "../projects";
-import { confirmDialog } from "./ConfirmDialog";
-import { Markdown } from "./Markdown";
-import { folderPictures } from "../folder-pictures";
-import { within } from "../paths";
-import { isEnter, isEscape } from "../shortcuts";
-import { deleteAsking, unsavedNotes } from "../unsaved";
-import { t, tp, useLanguage } from "../i18n";
+import { api, type FileEntry, type Unsaved } from "./files-api";
+import type { FileActivity } from "./activity";
+import { flushFileDraft, keepFileDraft, readFileDraft } from "./drafts";
+import { bytesLabel, isEnter, isEscape, within } from "./helpers";
+import { folderPictures } from "./pictures";
+import { deleteAsking, unsavedNotes } from "./unsaved";
+import { confirmDialog, isApiError, local, Markdown, t, tp, useLanguage } from "./portal";
 
 interface Open {
   path: string;
@@ -345,7 +340,7 @@ export const FilesPanel = memo(function FilesPanel({
       setChanged(false);
     } catch (e) {
       // By the code, not the sentence: the server's wording is not this page's to depend on.
-      if (e instanceof ApiError && e.body.code === "conflict") setChanged(true);
+      if (isApiError(e) && e.body.code === "conflict") setChanged(true);
       else setSaveError((e as Error).message);
     } finally {
       setSaving(false);

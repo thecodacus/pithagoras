@@ -8,6 +8,14 @@ changed or taken away without a shell on the host.
 That folder is the project the chat is in, the workspace root, or Home for a chat
 that started there. Nothing outside it can be reached.
 
+Files is an extension, `pithagoras-files` from the portal's `extensions/files`,
+installed when a portal starts for the first time and listed under Settings →
+Extensions → Installed like any other. Switch it off or remove it and the
+button, the panel and its window in voice mode go; the folder stays the
+agent's, and what Files does is done through the portal's routes for a chat's
+folder (see the [API](/reference/api)), which another extension can use the
+same way.
+
 ## What you can do
 
 - **Browse.** Click a folder to go in, the path at the top to go back.

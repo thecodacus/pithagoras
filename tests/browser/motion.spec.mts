@@ -3,7 +3,7 @@ import { test, expect, mockPortal } from './portal-mock';
 import { settled } from './settled';
 
 // An extension's panel beside the portal's own: the portal's tests' stand-in for one.
-test.use({ installed: ['tests/fixtures/extensions/console'] });
+test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
 
 /**
  * The extra animations (core/web/src/motion.ts): on by default, one switch to turn
@@ -73,7 +73,6 @@ async function portal(page: Page, { off = false, confirms = true, places, many =
     }
     if ((m = p.match(/^\/api\/sessions\/(\w+)$/))) return state.sessions.find((s) => s.id === m![1]) ?? {};
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model: { id: 'm', name: 'Model', provider: 'x' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
-    if (/^\/api\/sessions\/\w+\/files$/.test(p)) return { path: '', entries: [], truncated: false };
     if (p.endsWith('/background')) return { jobs: [], statuses: [] };
     if (p === '/api/projects') return { root: '/w', home: '/w', projects: [] };
     if (p === '/api/workspaces') return { root: '/w', workspaces: [] };
@@ -353,24 +352,24 @@ test('with the switch off none of it is made: no doors, no pictures, no animatio
 
 test('closing one of two places plays that place, not the other that stays', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 800 });
-  // Files at the left, the console at the right.
-  await portal(page, { places: { files: 'left' } });
+  // The viewer at the left, the console at the right.
+  await portal(page, { places: { 'x:test-viewer/viewer': 'left' } });
   await page.goto('/s/a');
   await page.getByRole('button', { name: 'Console', exact: true }).click();
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'Viewer', exact: true }).click();
   await expect(page.locator('aside[data-dock="right"]')).toBeVisible();
   await expect(page.locator('aside[data-dock="left"]')).toBeVisible();
   await settled(page);
 
   await page.getByRole('button', { name: 'Close Console' }).click();
   await expect(page.locator('aside[data-dock="right"]')).toHaveCount(0);
-  // What went was the console's place; the files stay where they are.
+  // What went was the console's place; the viewer stays where it is.
   await expect.poll(async () => (await pictures(page)).map((p) => p.dock)).toEqual(['right']);
   await expect(page.locator('aside[data-dock="left"]')).toBeVisible();
   await settled(page);
 
   // And the one that stayed drops away in its turn when it goes.
-  await page.getByRole('button', { name: 'Close the files' }).click();
+  await page.getByRole('button', { name: 'Close Viewer' }).click();
   await expect(page.locator('aside[data-dock]')).toHaveCount(0);
   await expect.poll(async () => (await pictures(page)).map((p) => p.dock)).toEqual(['right', 'left']);
 });
@@ -899,17 +898,17 @@ test('deleting a message with many rows in its turn still breaks the message its
 
 test('closing the window at the back of two does not bring it in front of the other', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 760 });
-  await portal(page, { places: { 'x:test-console/console': 'float', files: 'float' } });
+  await portal(page, { places: { 'x:test-console/console': 'float', 'x:test-viewer/viewer': 'float' } });
   await page.goto('/s/a');
   await expect(page.getByText('A answer 5')).toBeVisible();
   await page.getByRole('button', { name: 'Console', exact: true }).click();
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'Viewer', exact: true }).click();
   await expect(page.locator('aside[data-dock="float"]')).toHaveCount(2);
   await settled(page);
-  const files = page.locator('aside[data-dock="float"]', { hasText: 'Files' });
-  const z = Number(await files.evaluate((el) => getComputedStyle(el).zIndex));
+  const viewer = page.locator('aside[data-dock="float"]', { hasText: 'Viewer' });
+  const z = Number(await viewer.evaluate((el) => getComputedStyle(el).zIndex));
 
-  await page.getByRole('button', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: 'Viewer', exact: true }).click();
   await expect(page.locator('aside[data-dock="float"]')).toHaveCount(1);
   await expect.poll(async () => (await pictures(page)).filter((p) => p.dock === 'float').length).toBeGreaterThan(0);
   const seen = (await pictures(page)).find((p) => p.dock === 'float')!;

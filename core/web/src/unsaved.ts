@@ -4,7 +4,7 @@ import { t, tp } from "./i18n";
 /**
  * What a delete would lose that only the folder has, in the words a confirmation
  * uses: the git sentences, and whether the question must be asked whatever
- * Settings says. The same for a project and for a folder in the Files panel.
+ * Settings says. For a project; Files asks it the same way for a folder in a chat's.
  *
  * `lost` is whether there is something to name, `risky` whether there is
  * something to ask about — also when the folder could not be read, which is not

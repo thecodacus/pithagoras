@@ -20,11 +20,13 @@ import type { PortalEvent } from '../../../../core/web/src/api';
 import { ConfirmHost } from '../../../../core/web/src/components/ConfirmDialog';
 import { publishChat } from '../../../../core/web/src/extensions/chat-feed';
 import { startExtensions } from '../../../../core/web/src/extensions/loader';
-import { useSlot } from '../../../../core/web/src/extensions/slots';
+import { register, useSlot } from '../../../../core/web/src/extensions/slots';
 import { channelFor } from '../../../../core/web/src/extensions/channel';
 import { panelsFor } from '../../../../core/web/src/extensions/panels';
 
 startExtensions();
+// A panel by the name Files goes by, for Git to offer to open a file in: what it is opened with is written below.
+register('test-files', 'chat.panel', { id: 'files', name: 'files', title: 'Files', component: () => null });
 /** Where the Git extension's routes are, for the chat "s". */
 const ROUTES = '/api/x/pithagoras-git/chats/s';
 

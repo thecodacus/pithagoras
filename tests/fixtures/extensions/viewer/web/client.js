@@ -4,6 +4,7 @@
  * the portal's own tests the portal with it and needs none of the extensions
  * the portal ships, any of which can be removed.
  *
+ *   chat.panel     "Viewer", a plain panel: the second of two beside the conversation, with the console's
  *   voice.window   "Viewer" in the middle, that can be maximized and is kept loaded while minimized, with a frame of
  *                  its own in which Escape restores it; `window.viewerLoads` counts the frame's loads
  *   nav.page       "Viewer", listed while a spec says so with `window.viewerListed(true)`
@@ -50,6 +51,14 @@ export default function (portal) {
       style: { border: 0, width: "100%", height: "100%", background: "#fff" },
     });
   }
+
+  portal.slots.register("chat.panel", {
+    id: "viewer",
+    title: "Viewer",
+    icon: Icon,
+    component: () => h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, overflow: "auto", padding: 12 } }, "In view."),
+    useButton: () => ({ title: "What the viewer shows" }),
+  });
 
   portal.slots.register("voice.window", { id: "viewer", title: "Viewer", icon: Icon, place: "middle", maximizable: true, keepLoaded: true, component: Viewer });
 

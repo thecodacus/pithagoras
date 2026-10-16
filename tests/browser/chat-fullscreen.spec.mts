@@ -1,7 +1,7 @@
 import { test, expect } from './portal-mock';
 
-// A panel of an extension's beside the browser: the portal's tests' stand-in for one.
-test.use({ installed: ['tests/fixtures/extensions/console'] });
+// Panels of extensions' beside the browser: the portal's tests' stand-ins for them.
+test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/browser', route => route.fulfill({ json: { install: { container: 'running' } } }));
@@ -21,7 +21,7 @@ test('only the browser goes fullscreen, not the panel beside it', async ({ page 
 
 test('the browser closed for a third panel takes fullscreen with it', async ({ page }) => {
   await page.keyboard.press('Shift');
-  await page.evaluate(() => (document.querySelector('[title="Browse the files in this chat\'s folder"]') as HTMLElement).click());
+  await page.evaluate(() => (document.querySelector('[title="What the viewer shows"]') as HTMLElement).click());
   await expect(page.getByRole('button', { name: 'Close the browser' })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
 });
