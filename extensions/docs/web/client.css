@@ -105,6 +105,8 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
 .pd-gone { color: rgb(var(--warn)); }
 .pd-comments { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .pd-comment-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.pd-comment-actions { display: flex; gap: 2px; margin-left: auto; }
+.pd-act { padding: 0 8px; font-size: 12px; font-weight: 400; }
 .pd-comments li[data-author="agent"] .pd-comment-head strong { color: rgb(var(--accent)); }
 .pd-comment-body { overflow-wrap: anywhere; }
 .pd-comment-body > :first-child { margin-top: 0; }

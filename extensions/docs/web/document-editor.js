@@ -494,7 +494,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       }
       if (id !== null) {
         try {
-          const changed = await send(`${thread.id}/comments/${id}`, "PUT");
+          // The box's comment: it is changed only while nothing has been said after it.
+          const changed = await send(`${thread.id}/comments/${id}`, "PUT", { draft: true });
           taken(changed);
           return { comment: id, thread: thread.id };
         } catch (e) {
@@ -510,10 +511,10 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const clear = async (thread, id, writing) => {
       let gone;
       try {
-        gone = await portal.api.json(`${url}/threads/${thread.id}/comments/${id}`, { method: "DELETE", keepalive: true });
+        gone = await portal.api.json(`${url}/threads/${thread.id}/comments/${id}?draft=1`, { method: "DELETE", keepalive: true });
       } catch (e) {
         // Not there any more (another window): the threads are asked for again.
-        if (e.body?.code === "comment_not_found") return void refresh.current();
+        if (["comment_not_found", "thread_not_found"].includes(e.body?.code)) return void refresh.current();
         throw e;
       }
       if (gone.removed === "comment") return void taken(gone.thread);
@@ -527,6 +528,36 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       setActive(thread.id);
     };
     const cancel = (writing) => setCompose((now) => (now?.key === writing.key ? null : now));
+    /** A thread that is gone, from the server or from another window, is gone from the list and from the text. */
+    const dropped = (id) => {
+      setThreads((now) => ({ ...now, items: now.items.filter((x) => x.id !== id) }));
+      setActive((now) => (now === id ? null : now));
+    };
+    /**
+     * Changes a comment that is in the list (not the one in the box). The comment asks the agent again only if it is the last of an
+     * open thread, as the server decides; the chat to ask is looked for only then, so that a change to an older one opens none.
+     */
+    const changeComment = async (thread, comment, words) => {
+      const text = words.trim();
+      // A comment whose ask a chat has taken asks nobody again: no chat is looked for, or opened, for it.
+      const asks = thread.status === "open" && thread.comments.at(-1)?.id === comment.id && !(thread.ping?.comment === comment.id && thread.ping.sent);
+      const chat = asks ? await chatFor(text) : undefined;
+      taken(await portal.api.json(`${url}/threads/${thread.id}/comments/${comment.id}`, { method: "PUT", body: JSON.stringify({ body: text, ...(chat === undefined ? {} : { chat }) }) }));
+    };
+    const removeComment = async (thread, comment) => {
+      const gone = await portal.api.json(`${url}/threads/${thread.id}/comments/${comment.id}`, { method: "DELETE" });
+      if (gone.removed === "comment") taken(gone.thread);
+      else dropped(thread.id);
+    };
+    const removeThread = async (thread) => {
+      try {
+        await portal.api.json(`${url}/threads/${thread.id}`, { method: "DELETE" });
+      } catch (e) {
+        // Gone already (another window, or the comment the box had saved was its only one): that is what was asked.
+        if (e.body?.code !== "thread_not_found") throw e;
+      }
+      dropped(thread.id);
+    };
     const resolve = async (thread) => taken(await post(`${thread.id}/resolve`, {}));
     const reopen = async (thread) => taken(await post(`${thread.id}/reopen`, {}));
     const seen = async (thread) => taken(await post(`${thread.id}/seen`, {}));
@@ -617,6 +648,9 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             onResolve: resolve,
             onReopen: reopen,
             onSeen: seen,
+            onEdit: changeComment,
+            onDelete: removeComment,
+            onDeleteThread: removeThread,
           }),
       ),
     );

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -19,15 +19,30 @@ import { scratch } from '../../../tests/helpers.mts';
  */
 
 const DATA = scratch('docs-stream-data-');
+/** Permissions mean nothing to root: those tests are for a portal that is not. */
+const unprivileged = process.getuid?.() !== 0;
 
 /** One message of a stream: a frame up to the blank line, in its parts. */
 interface Frame { id?: string; event?: string; data?: any; comment?: string; retry?: string }
 
-/** The server half for a chat in `folder`. `pingMs` and `pollMs`: how often the stream is pinged and the folder looked at. */
-async function portal(folder: string, { pingMs, pollMs = 40 }: { pingMs?: number; pollMs?: number } = {}) {
+/** Waits for `done`, or fails saying what it waited for (and `more`, where it knows more). */
+async function until(done: () => boolean, what: string, more: () => string = () => '', ms = 5000) {
+  const from = Date.now();
+  while (!done()) {
+    if (Date.now() - from > ms) throw new Error(`Gave up waiting for ${what}; ${more()}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/**
+ * The server half for a chat in `folder`, or for the chats that work in the folders `folder` names (by chat; a test may add to it, as a chat
+ * that is started). `pingMs` and `pollMs`: how often the stream is pinged and the folder looked at.
+ */
+async function portal(folder: string | Record<string, string>, { pingMs, pollMs = 40 }: { pingMs?: number; pollMs?: number } = {}) {
   const router = express.Router();
   const factories: ((pi: unknown, chat: unknown) => void)[] = [];
   const logged: string[] = [];
+  const chats: Record<string, string> = typeof folder === 'string' ? { a: folder } : folder;
   const stop = docsServer({
     extension: 'pithagoras-docs',
     executor: 'host',
@@ -38,8 +53,8 @@ async function portal(folder: string, { pingMs, pollMs = 40 }: { pingMs?: number
     sandbox: { on: () => false },
     dataDir: () => DATA,
     chats: {
-      list: () => [{ id: 'a', title: 'Chat a' }],
-      folder: () => folder,
+      list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
+      folder: (id: string) => chats[id],
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
     },
   }, { dependencies: async () => true, pingMs, pollMs }) as () => Promise<void>;
@@ -95,7 +110,7 @@ async function portal(folder: string, { pingMs, pollMs = 40 }: { pingMs?: number
   }
   const agent = () => {
     const tools = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: 'a', title: 'Chat a', workspace: folder, status: 'idle' });
+    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: 'a', title: 'Chat a', workspace: chats.a, status: 'idle' });
     return async (name: string, params: unknown) => {
       try {
         const result = await tools.get(name).execute('call-1', params, undefined, undefined, {});
@@ -105,9 +120,30 @@ async function portal(folder: string, { pingMs, pollMs = 40 }: { pingMs?: number
       }
     };
   };
+  /**
+   * A page's stream, followed as it comes: every frame is kept, so that what it does not say can be told too. `told()` is the versions of
+   * the list it has said; `until` waits for something it will say.
+   */
+  async function follow(url: string) {
+    const stream = await listen(url);
+    const frames: Frame[] = [];
+    let ended = false;
+    void (async () => {
+      for (let next = await stream.frame?.(); next; next = await stream.frame?.()) frames.push(next);
+      ended = true;
+    })();
+    const told = () => frames.filter((f) => f.event === 'documents').map((f) => f.data.version as string);
+    const wait = async (done: () => boolean, what: string) => {
+      await until(() => done() || ended, what, () => `the list was told as ${JSON.stringify(told())}`);
+      if (!done()) throw new Error(`The stream ended before ${what}`);
+    };
+    return { ...stream, frames, told, ended: () => ended, until: wait, last: () => told().at(-1) };
+  }
   return {
     call,
     listen,
+    follow,
+    chats,
     agent: agent(),
     logged,
     close: async () => {
@@ -432,6 +468,310 @@ test('two changes that fit in a megabyte each but not together are refused, and 
     assert.equal(git(folder, 'rev-parse', 'HEAD'), was);
     assert.ok(fileOf(folder).startsWith('A'));
   } finally {
+    await docs.close();
+  }
+});
+
+/**
+ * The list of folders and their documents, which the page that shows it keeps up to date: one stream for all of them, that says the
+ * list's version when it changes, and the page asks for the list again when that is not the version it holds.
+ */
+
+type Docs = Awaited<ReturnType<typeof portal>>;
+/** The list as the page asks for it. */
+const listed = async (docs: Docs) => (await docs.call('GET', '/folders')).body as { folders: any[]; problems?: any[]; version: string };
+const namesOf = (list: { folders: any[] }) => list.folders.flatMap((f) => f.documents.map((d: any) => d.name as string)).sort();
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The stream has said the version the list has now: waits for it, as long as the list is still changing. */
+async function current(docs: Docs, stream: { last(): string | undefined; told(): string[] }) {
+  let version = '';
+  for (let n = 0; n < 200; n++) {
+    version = (await listed(docs)).version;
+    if (stream.last() === version) return version;
+    await pause(25);
+  }
+  assert.fail(`The list is at ${version}, and the stream said ${JSON.stringify(stream.told())}`);
+}
+
+test('the page that lists the folders is told where the list stands, then its new version as the agent and the page change it, with no look at the folders to find it', async () => {
+  // No poll: what the store writes itself is told by the store, at once.
+  const { docs, f, id, url } = await withDocument('docs-list-told-', { pollMs: 0 });
+  try {
+    const stream = await docs.follow('/folders/events');
+    assert.equal(stream.status, 200);
+    assert.equal(stream.res.headers.get('cache-control'), 'no-cache, no-transform');
+    assert.equal(stream.res.headers.get('x-accel-buffering'), 'no', 'a proxy is not to hold it');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    assert.deepEqual(stream.frames[0], { retry: '2000' });
+    // Nothing but a version, which says nothing of what the folders and their documents are called.
+    assert.equal(stream.frames[1].event, 'documents');
+    assert.deepEqual(Object.keys(stream.frames[1].data), ['version']);
+    assert.match(stream.last()!, /^[0-9a-f]{16}$/);
+    // It is the version of the list the page asks for, which is then current: nothing more to ask.
+    assert.equal((await listed(docs)).version, stream.last());
+
+    // The agent makes a document.
+    assert.equal((await docs.agent('doc_create', { title: 'Notes', markdown: '# Field notes\n\nOne.\n' })).ok, true);
+    await stream.until(() => stream.told().length === 2, 'the agent\'s document');
+    assert.deepEqual(namesOf(await listed(docs)), ['notes.md', 'plan.md']);
+    assert.equal(stream.last(), (await listed(docs)).version);
+    // The page makes another.
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'Ideas' })).status, 201);
+    await stream.until(() => stream.told().length === 3, 'the page\'s document');
+    assert.deepEqual(namesOf(await listed(docs)), ['ideas.md', 'notes.md', 'plan.md']);
+    // A change to a document's text is told: its title, time and size are in the list.
+    assert.equal((await edit(docs, id, 1, '# Plan', '# The plan')).ok, true);
+    await stream.until(() => stream.told().length === 4, 'the edit');
+    assert.equal((await listed(docs)).folders[0].documents.find((d: any) => d.id === id).title, 'The plan');
+    // So is a comment, which the list counts.
+    const thread = await docs.call('POST', `${url}/threads`, { base: 2, quote: 'Ship it on Friday.', body: 'Why Friday?' });
+    assert.equal(thread.status, 201, JSON.stringify(thread.body));
+    await stream.until(() => stream.told().length === 5, 'the comment');
+    assert.equal((await listed(docs)).folders[0].documents.find((d: any) => d.id === id).openThreads, 1);
+    // Every message is a version the list had, and none of them twice in a row.
+    assert.equal(new Set(stream.told()).size, 5);
+    assert.equal(stream.last(), (await listed(docs)).version);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a document that is deleted, renamed or made again outside the page is told once the folders are looked at, as the list shows it', async () => {
+  const { folder, docs, id } = await withDocument('docs-list-outside-');
+  try {
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    const file = path.join(folder, 'documents', 'plan.md');
+    // Put in place whole, as an editor does: a look in the middle of a write would take in the half of it as a revision.
+    const put = (to: string, text: string) => {
+      writeFileSync(`${to}.new`, text);
+      renameSync(`${to}.new`, to);
+    };
+
+    // Deleted, in Files or an editor: no revision is made, and the document is no longer listed.
+    unlinkSync(file);
+    await stream.until(() => stream.told().length === 2, 'the deletion');
+    assert.deepEqual((await listed(docs)).folders, [], 'a folder with no document left is not listed');
+    await current(docs, stream);
+
+    // Made again under its name: the same document is listed again.
+    put(file, PLAN);
+    await stream.until(() => stream.told().length === 3, 'the file made again');
+    const again = await listed(docs);
+    assert.deepEqual(again.folders[0].documents.map((d: any) => [d.id, d.name, d.revision]), [[id, 'plan.md', 1]]);
+    await current(docs, stream);
+
+    // Renamed: the old name is gone and the new one is a document of its own.
+    renameSync(file, path.join(folder, 'documents', 'schedule.md'));
+    await current(docs, stream);
+    const renamed = await listed(docs);
+    assert.deepEqual(renamed.folders[0].documents.map((d: any) => d.name), ['schedule.md']);
+    assert.notEqual(renamed.folders[0].documents[0].id, id);
+    assert.ok(stream.told().length >= 4);
+
+    // A file put into the folder becomes a document.
+    put(path.join(folder, 'documents', 'ideas.md'), '# Ideas\n');
+    await current(docs, stream);
+    assert.deepEqual(namesOf(await listed(docs)), ['ideas.md', 'schedule.md']);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('nothing is told while the list does not change, however often the folders are looked at', async () => {
+  const { docs } = await withDocument('docs-list-quiet-', { pollMs: 20 });
+  try {
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    await pause(500);
+    assert.equal(stream.told().length, 1);
+    // A page that opens meanwhile is told the same version as the first.
+    const second = await docs.follow('/folders/events');
+    await second.until(() => second.told().length === 1, 'the second page\'s first message');
+    assert.equal(second.last(), stream.last());
+    await pause(200);
+    assert.deepEqual([stream.told().length, second.told().length], [1, 1]);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a folder that has no documents yet, and a chat that starts in another folder, are told when they have some', async () => {
+  const folder = realpathSync(scratch('docs-list-first-'));
+  const other = realpathSync(scratch('docs-list-other-'));
+  mkdirSync(path.join(other, 'documents'));
+  writeFileSync(path.join(other, 'documents', 'notes.md'), '# Notes\n');
+  const docs = await portal({ a: folder });
+  try {
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    assert.deepEqual((await listed(docs)).folders, []);
+    assert.equal(stream.last(), (await listed(docs)).version);
+    // Its first document: the folder was not on the page to have a stream of its own.
+    assert.equal((await docs.call('POST', `/folders/${folderIdOf(folder)}/documents`, { title: 'Plan' })).status, 201);
+    await stream.until(() => stream.told().length === 2, 'the first document');
+    assert.deepEqual(namesOf(await listed(docs)), ['plan.md']);
+    // A chat that starts in a folder that has documents.
+    docs.chats.b = other;
+    await stream.until(() => stream.told().length === 3, 'the other folder');
+    assert.deepEqual(namesOf(await listed(docs)), ['notes.md', 'plan.md']);
+    await current(docs, stream);
+    // And one that goes: its folder is not listed any more, as no chat works in it.
+    delete docs.chats.b;
+    await stream.until(() => stream.told().length === 4, 'the folder with no chat');
+    assert.deepEqual(namesOf(await listed(docs)), ['plan.md']);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a folder whose documents the portal may not read is told as it turns up and as it goes, and its failure is logged once, not at each look', { skip: !unprivileged }, async () => {
+  const { folder, docs } = await withDocument('docs-list-unreadable-');
+  const dir = path.join(folder, 'documents');
+  try {
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    const before = stream.last();
+    chmodSync(dir, 0o000);
+    await stream.until(() => stream.told().length === 2, 'the folder that cannot be read');
+    // Looked at many times meanwhile: said once (before the page asks for the list, which says it too).
+    await pause(400);
+    assert.equal(stream.told().length, 2);
+    assert.equal(docs.logged.filter((line) => /could not be listed/.test(line)).length, 1);
+    const broken = await listed(docs);
+    assert.deepEqual(broken.folders, []);
+    assert.match(broken.problems![0].error, /not allowed to read this folder's documents folder/);
+    assert.equal(stream.last(), broken.version, 'the page is told the version of the list that says why');
+    // Mended: the folder is listed again, as it was, and the page is told.
+    chmodSync(dir, 0o755);
+    await stream.until(() => stream.told().length === 3, 'the folder that can be read again');
+    const mended = await listed(docs);
+    assert.equal(mended.problems, undefined);
+    assert.deepEqual(namesOf(mended), ['plan.md']);
+    assert.equal(stream.last(), mended.version);
+    assert.equal(mended.version, before, 'nothing of the document changed');
+  } finally {
+    chmodSync(dir, 0o755);
+    await docs.close();
+  }
+});
+
+/** The intervals of `delay` ms that are set and not cleared yet: whatever looks at the folders on a timer. */
+function intervals(delay: number) {
+  const { setInterval: set, clearInterval: clear } = globalThis;
+  const active = new Set<unknown>();
+  globalThis.setInterval = ((handler: any, ms?: number, ...args: any[]) => {
+    const timer = set(handler, ms, ...args);
+    if (ms === delay) active.add(timer);
+    return timer;
+  }) as typeof setInterval;
+  globalThis.clearInterval = ((timer: any) => (active.delete(timer), clear(timer))) as typeof clearInterval;
+  return { active: () => active.size, restore: () => Object.assign(globalThis, { setInterval: set, clearInterval: clear }) };
+}
+
+test('the folders are looked at only while a page has the list open', async () => {
+  // A poll of its own length, to tell its timer from any other.
+  const timers = intervals(37);
+  const { folder, docs } = await withDocument('docs-list-idle-', { pollMs: 37 });
+  try {
+    assert.equal(timers.active(), 0, 'nobody listens');
+    const stream = await docs.follow('/folders/events');
+    const second = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    // One timer for every page that listens.
+    assert.equal(timers.active(), 1);
+    // Looked at, with the page listening: a file written outside is taken in as a revision.
+    writeFileSync(path.join(folder, 'documents', 'plan.md'), PLAN.replace('on Friday', 'on Wednesday'));
+    await stream.until(() => stream.told().length === 2, 'the outside change');
+    assert.equal(git(folder, 'rev-list', '--count', 'HEAD'), '2');
+    stream.close!();
+    await pause(150);
+    assert.equal(timers.active(), 1, 'the other page is still told');
+    second.close!();
+    await until(() => timers.active() === 0, 'the look to stop with the last page');
+    await pause(100);
+    // Let go of, and not looked at again.
+    writeFileSync(path.join(folder, 'documents', 'plan.md'), PLAN.replace('on Friday', 'on Tuesday'));
+    await pause(400);
+    assert.equal(git(folder, 'rev-list', '--count', 'HEAD'), '2');
+    // A page that comes back is told where the list stands now, which is not where it stood when the last one left.
+    const back = await docs.follow('/folders/events');
+    await back.until(() => back.told().length === 1, 'the first message');
+    assert.equal(back.last(), (await listed(docs)).version);
+    assert.equal(timers.active(), 1);
+  } finally {
+    timers.restore();
+    await docs.close();
+  }
+});
+
+test('a burst of changes made at once ends with the version the list has', async () => {
+  // No poll: only what the store tells is looked at, a look at a time.
+  const { docs, f, id } = await withDocument('docs-list-burst-', { pollMs: 0 });
+  try {
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    await Promise.all([
+      ...['One', 'Two', 'Three', 'Four'].map((title) => docs.call('POST', `/folders/${f}/documents`, { title })),
+      (async () => {
+        for (let n = 1; n <= 4; n++) assert.equal((await edit(docs, id, n, n === 1 ? 'on Friday' : `Friday ${n - 1}`, `Friday ${n}`)).ok, true);
+      })(),
+    ]);
+    await current(docs, stream);
+    assert.equal((await listed(docs)).folders[0].documents.length, 5);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a stream for the list is kept alive and ended with the extension, and one that is closed leaves the others to be told', async () => {
+  const { docs, f } = await withDocument('docs-list-ends-', { pingMs: 30 });
+  try {
+    const one = await docs.follow('/folders/events');
+    const two = await docs.follow('/folders/events');
+    await one.until(() => one.told().length === 1, 'the first message');
+    await two.until(() => two.told().length === 1, 'the first message');
+    // Kept alive, so that nothing between the portal and the page takes it for idle.
+    await one.until(() => one.frames.filter((frame) => frame.comment === 'ping').length >= 2, 'its pings');
+    // One page goes: the other is told still, as the look at the folders goes on for it.
+    one.close!();
+    await one.until(() => one.ended(), 'the stream to end');
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'More' })).status, 201);
+    await two.until(() => two.told().length === 2, 'the new document');
+    await docs.stop();
+    await two.until(() => two.ended(), 'the stream to be ended with the extension');
+    // One asked for after that is refused as a stopping extension's request.
+    const late = await docs.listen('/folders/events');
+    assert.equal(late.status, 503);
+    docs.closeServer();
+  } finally {
+    await docs.close().catch(() => {});
+  }
+});
+
+test('a folder that cannot be listed is logged once, though the page asks for the list at every change in another folder', { skip: !unprivileged }, async () => {
+  const folder = realpathSync(scratch('docs-list-logged-'));
+  const other = realpathSync(scratch('docs-list-logged-other-'));
+  mkdirSync(path.join(other, 'documents'));
+  writeFileSync(path.join(other, 'documents', 'notes.md'), '# Notes\n');
+  const docs = await portal({ a: folder, b: other });
+  const f = folderIdOf(folder);
+  try {
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'Plan' })).status, 201);
+    assert.equal((await listed(docs)).folders.length, 2, 'both can be read: its store is made');
+    chmodSync(path.join(other, 'documents'), 0o000);
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    // Each change in the healthy folder makes the page ask for the whole list again, the folder that cannot be read with it.
+    for (let n = 1; n <= 4; n++) {
+      assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: `Plan ${n}` })).status, 201);
+      await stream.until(() => stream.told().length === n + 1, `document ${n}`);
+      assert.equal((await listed(docs)).problems?.length, 1);
+    }
+    assert.equal(docs.logged.filter((line) => /could not be listed/.test(line)).length, 1);
+  } finally {
+    chmodSync(path.join(other, 'documents'), 0o755);
     await docs.close();
   }
 });

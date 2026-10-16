@@ -1,6 +1,7 @@
 /**
  * The agent's tools for the documents of the folder its chat works in: list,
- * read, create and edit, and comment on one, reply to a comment and resolve it.
+ * read, create and edit, and comment on one, reply to a comment, change or delete
+ * one of its own comments and resolve a thread.
  * They are registered in each chat's pi by the server
  * half (`chats.extend`), only where pi runs in the portal's process, and they
  * go through the same store as the page does (store.js): the same history,
@@ -20,13 +21,16 @@
  *   - a comment is the agent's, never the person's, and it answers a comment by
  *     changing only the passage the comment is on, and saying in the thread what
  *     it changed
+ *   - it changes and deletes its own comments and replies, and never the person's:
+ *     it answers those, or resolves the thread
  *   - it is woken only by the person's `@agent` in a comment (ping.js), with the
  *     thread to answer: that gives it the same tools and no others
  *
  * A refusal is an error the agent reads, which starts with its code:
  * `not_found`, `exists`, `too_large`, `secret`, `revision_mismatch`,
  * `quote_not_found`, `quote_ambiguous`, `edits_overlap`, `thread_not_found`,
- * `thread_resolved`, `thread_orphaned`, `too_many`, `invalid`, or
+ * `thread_resolved`, `thread_orphaned`, `comment_not_found`, `comment_not_yours`,
+ * `too_many`, `invalid`, or
  * `refused` for anything else the store will not do (its message says what: the
  * folder is full, `documents` is a link, the store is not ready yet).
  */
@@ -132,7 +136,8 @@ function describeThreads(threads, text, which) {
     const where = t.orphaned ? "its passage is no longer in the document" : `on line ${lineOf(text, t.start)}`;
     const said = t.comments.slice(-MOST_SHOWN);
     const omitted = t.comments.length - said.length;
-    const lines = said.map((c) => `${c.author === "agent" ? "agent" : "person"} (${minute(c.at)} UTC): ${c.body}`);
+    // The agent's own comments carry their ids, for doc_edit_comment and doc_delete_comment; an edited one says so.
+    const lines = said.map((c) => `${c.author === "agent" ? "agent" : "person"} (${[`${minute(c.at)} UTC`, c.author === "agent" && `comment ${c.id}`, c.edited && "edited"].filter(Boolean).join(", ")}): ${c.body}`);
     return [`Thread ${t.id} (${t.status}, ${where}${t.toAgent ? ", asks you" : ""})`, `Passage${t.orphaned ? " when it was last in the document" : ""}:`, ...clip(t.quote, PASSAGE_CHARS).split("\n").map((l) => `> ${l}`), ...(omitted ? [`[${omitted} earlier comment${omitted === 1 ? "" : "s"} not shown]`] : []), ...lines].join("\n");
   });
   const open = threads.filter((t) => t.status === "open").length;
@@ -525,6 +530,57 @@ export function documentTools(pi, chat, deps) {
       const title = deps.titleOf(doc.bytes, doc.name);
       const made = await store.reply(doc.id, typeof threadId === "string" ? threadId : "", { body: comment, author: "agent" });
       return text(`Replied in thread ${made.id} on "${title}" (${made.comments.length} comment${made.comments.length === 1 ? "" : "s"} in it).`, { ...about("reply", doc, title), thread: made.id });
+    }),
+  });
+
+  pi.registerTool({
+    name: "doc_edit_comment",
+    label: "Edit a comment",
+    description: `Change the text of one of your own comments or replies in a comment thread of a shared document: comment_id is the id doc_read shows on it. It is shown to the person as edited. Use it to correct what you said, not to answer: a thread that asks you (@agent) is answered with doc_reply. The person's comments are not yours to change. The new text is Markdown, at most ${MAX_BODY} bytes.`,
+    promptSnippet: "Change one of your own comments in a shared document's thread",
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The document's id." },
+        thread: { type: "string", description: "The thread's id, from doc_read." },
+        comment_id: { type: "string", description: "The id of your comment, as doc_read shows it." },
+        comment: { type: "string", description: "The new text of the comment." },
+      },
+      required: ["id", "thread", "comment_id", "comment"],
+    },
+    execute: guarded(async ({ id, thread: threadId, comment_id: commentId, comment }) => {
+      commentOf(comment);
+      const { store, doc } = await documentOf(id);
+      const title = deps.titleOf(doc.bytes, doc.name);
+      const { thread: made } = await store.edit(doc.id, threadId, commentId, { body: comment, author: "agent" });
+      return text(`Changed your comment in thread ${made.id} on "${title}".${made.toAgent ? " The thread still asks you: answer it with doc_reply." : ""}`, { ...about("edit_comment", doc, title), thread: made.id, comment: commentId });
+    }),
+  });
+
+  pi.registerTool({
+    name: "doc_delete_comment",
+    label: "Delete a comment",
+    description: "Delete one of your own comments or replies from a comment thread of a shared document: comment_id is the id doc_read shows on it. If it was the only comment of the thread, the thread goes with it. The person's comments are not yours to delete: to deal with one, answer it with doc_reply or close the thread with doc_resolve.",
+    promptSnippet: "Delete one of your own comments from a shared document's thread",
+    promptGuidelines: ["Change or delete only your own comments in a shared document's threads. A comment of the person's is theirs: answer it with doc_reply, or close the thread with doc_resolve, and do not try to remove it."],
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The document's id." },
+        thread: { type: "string", description: "The thread's id, from doc_read." },
+        comment_id: { type: "string", description: "The id of your comment, as doc_read shows it." },
+      },
+      required: ["id", "thread", "comment_id"],
+    },
+    execute: guarded(async ({ id, thread: threadId, comment_id: commentId }) => {
+      const { store, doc } = await documentOf(id);
+      const title = deps.titleOf(doc.bytes, doc.name);
+      const gone = await store.remove(doc.id, threadId, commentId, { author: "agent" });
+      const left = gone.thread?.comments.length;
+      const said = gone.removed === "thread" ? `Deleted your comment from "${title}". It was the only one in its thread, so the thread went with it.` : `Deleted your comment from thread ${gone.thread.id} on "${title}" (${left} comment${left === 1 ? "" : "s"} left in it).${gone.thread.toAgent ? " The thread still asks you: answer it with doc_reply." : ""}`;
+      return text(said, { ...about("delete_comment", doc, title), thread: threadId, comment: commentId, removed: gone.removed });
     }),
   });
 

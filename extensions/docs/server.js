@@ -8,7 +8,8 @@
  * folder (place.js), where no agent can change it. This half serves them to
  * the page, which has no chat of its own to ask:
  *
- *   GET  /api/x/pithagoras-docs/folders                                          every folder with documents, and its documents
+ *   GET  /api/x/pithagoras-docs/folders                                          every folder with documents, and its documents; `version` says which list it is
+ *   GET  /api/x/pithagoras-docs/folders/events                                   a stream of the changes to that list as they are made (server-sent events)
  *   POST /api/x/pithagoras-docs/folders/:folder/documents                        a new document { title, markdown?, scope?, chat? }
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
  *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
@@ -19,8 +20,9 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            its comment threads, each with its passage where it is in the text now
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            a new thread { base, quote, prefix?, suffix?, start?, body }: 422 when the passage is not in revision `base`
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments  a reply { body } to an open thread
- *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  changes the person's last comment { body }, which the page saves as it is typed
- *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  takes it away (the thread goes with its only comment)
+ *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  changes one of the person's comments { body }; with `draft` the last comment, which the page saves as it is typed
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  takes it away (the thread goes with its only comment); ?draft=1 for the one typed away
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread  takes away a thread the person started, with its comments, while the agent has not commented in it
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/seen      the person has read what the agent said in a thread
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/resolve   resolves a thread, with a last comment if `body` is given
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/reopen    opens a resolved thread again
@@ -40,11 +42,28 @@
  * folder is looked at every couple of seconds for what changed outside the
  * store's own writes, which is how the changes of Files and editors get told.
  *
+ * The page that lists the folders is told when the list changes, by one stream
+ * for all of them, not one for each: a browser keeps few connections to a
+ * server, and a folder that has no documents yet is not on the page to have a
+ * stream of its own. A message is only the list's `version` (a hash of what the
+ * page would show of every folder), and the list is asked for from its own
+ * route when that is not the version the page holds. The first message says where
+ * the list stands, as a document's does, so that a page that was away finds
+ * out at once and one that is up to date asks for nothing. While a stream is
+ * open, each folder chats work in is looked at every couple of seconds for what
+ * its list would show now (a document made, renamed, deleted or made again, a
+ * folder that cannot be read), and at once for what the store itself writes.
+ * Like every route it is behind the portal's login, and the portal ends it when
+ * the password changes: it says nothing of a folder that its list would not
+ * show, and nothing of the folder or its documents but that something changed.
+ *
  * A comment of the person's that has `@agent` in it asks the agent (ping.js): the
  * thread is marked as waiting for it, and the agent of the chat the page names
  * (the one the person is in) is woken with the comment, through the portal's own
  * `chats.tell`, to answer it with its tools. The wake is in the background, a few
  * seconds after the comment was last saved: nothing here waits for a chat to start.
+ * A comment that is changed asks as a new one would, only while it is the last of an open
+ * thread; one that is taken away, or its thread, takes the wake with it.
  */
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
@@ -412,6 +431,8 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   const live = {
     publish(folder, change) {
       for (const send of [...(watching.get(folder)?.documents.get(change.id) ?? [])]) send(change);
+      // The list shows each document's revision, size, time and open comments: a page that lists the folders is told at once.
+      if (lists.sends.size) void look(idOf(folder));
     },
     /** `send` is given each revision of document `id` in `folder`. Returns what stops it. */
     watch(folder, id, send) {
@@ -455,6 +476,13 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   /** The responses of the streams that are open, ended when the extension stops. */
   const streams = new Set();
   let stopped = false;
+
+  /**
+   * The streams of the list of folders, and what is known of the list. `seen`: what each folder's listing was when it was last looked at (a
+   * string for each folder that has anything to list), which is what a change is found against; it is made when the first stream opens and
+   * dropped with the last, so that nothing is looked at while no page listens. `sends`: told the list's version when it changed.
+   */
+  const lists = { sends: new Set(), seen: null, based: null, timer: null, running: null, all: false, due: new Set() };
 
   /** Each folder's store, opened once and kept while it is there: by the folder's path. */
   const stores = new Map();
@@ -637,7 +665,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const last = thread.comments.at(-1);
     try {
       if (!asksAgent(last.body)) {
-        const gone = await store.unping(id, thread.id);
+        const gone = await store.unping(id, thread.id, last.id);
         if (gone.ping !== undefined) unwake(folder, gone.comment);
         return gone.thread;
       }
@@ -695,31 +723,195 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   /** A comment and the passage it is on are small: nothing like a document's text. */
   const small = portal.http.json({ limit: "64kb" });
 
+  /**
+   * What the page lists of one folder: `listed` (the folder, with its documents and their titles) or `problem` (why its documents cannot be
+   * opened), and neither for a folder that has none. `say` is told what could not be listed. Without `titles` the documents come without
+   * them, which saves reading the start of each: a title is made of the text, and a change of the text is a new revision, which a look
+   * for what changed sees all the same.
+   */
+  async function described(folder, { say, titles = true }) {
+    const dir = documentsOf(folder.path);
+    if (!dir) return {};
+    const name = path.basename(folder.path) || folder.path;
+    let documents;
+    try {
+      const store = await storeFor(folder.path, { make: true });
+      documents = (await store.list(titles ? HEAD_BYTES : 0)).map(({ head, ...doc }) => (titles ? { ...doc, title: titleOf(head, doc.name) } : doc));
+    } catch (e) {
+      // One folder's store that cannot be opened (a link in its place, git missing) leaves the others listed, and is said on the page:
+      // a folder that is silently left out reads as one with no documents.
+      say(`The documents in ${folder.path} could not be listed: ${e?.message ?? e}`);
+      const known = explained(e);
+      return { problem: { id: folder.id, name, path: folder.path, error: known instanceof DocError ? known.message : "The documents store could not be opened: the portal's log says why" } };
+    }
+    if (titles) documents.sort((a, b) => a.title.localeCompare(b.title) || a.name.localeCompare(b.name));
+    return documents.length ? { listed: { ...folder, name, documents } } : {};
+  }
+
+  /**
+   * What a folder's list shows, as a string, or nothing where it shows nothing: what two looks at it are compared by. Without the titles
+   * and in the order of the names, so that a look that did not make them (`described`) and the page's own list come to the same.
+   */
+  const signatureOf = ({ listed, problem }) =>
+    listed || problem ? JSON.stringify([listed?.documents.map((doc) => ({ ...doc, title: undefined })).sort((a, b) => (a.name < b.name ? -1 : 1)), problem?.error]) : null;
+
+  /** The version of the list: a hash of what every folder shows (their signatures, by folder). The same for the same list, whoever looks and when. */
+  const versionOf = (signatures) => createHash("sha256").update(JSON.stringify([...signatures].sort(([a], [b]) => (a < b ? -1 : 1)))).digest("hex").slice(0, 16);
+
+  /**
+   * What was last said of a folder that could not be listed, by folder, until it is listed or says something else: the look at the list
+   * and the request for it say the same failure once, not at every look and every change of any folder that makes a page ask again.
+   */
+  const failed = new Map();
+  const saying = (folder) => (line) => {
+    if (failed.get(folder.id) !== line) portal.log(line);
+    failed.set(folder.id, line);
+  };
+
+  /** A folder as the page lists it (`described`), and that it could be listed is remembered. */
+  async function listing(folder, options) {
+    const found = await described(folder, { say: saying(folder), ...options });
+    if (!found.problem) failed.delete(folder.id);
+    return found;
+  }
+
+  /** A folder's signature, as the look at the list takes it. */
+  const signed = async (folder) => signatureOf(await listing(folder, { titles: false }));
+
+  /** The signatures of every folder that has something to list, by folder. */
+  async function seeing() {
+    const seen = new Map();
+    for (const folder of folders().values()) {
+      // Nothing is opened once the extension has stopped: its stores are closed.
+      if (stopped) break;
+      const signature = await signed(folder);
+      if (signature !== null) seen.set(folder.id, signature);
+    }
+    return seen;
+  }
+
+  /**
+   * Where the list stands when the first stream opens, made once for the streams that open while it is made. It is asked before the page
+   * asks for the list, so that what changes after is told, and what changed before is in the list the page gets.
+   */
+  function baseline() {
+    if (lists.based) return lists.based;
+    // Only if the stream it was for is still there when it is made: the streams were all let go meanwhile otherwise, and nothing is kept.
+    const based = seeing().then(
+      (seen) => {
+        if (lists.based === based) lists.seen = seen;
+        return seen;
+      },
+      (e) => {
+        if (lists.based === based) lists.based = null;
+        throw e;
+      },
+    );
+    return (lists.based = based);
+  }
+
+  /** The folders `ids` (all of them, with none) are looked at again, and the streams are told the new version if what any of them shows is not what it was. */
+  async function visit(ids) {
+    const seen = lists.seen;
+    const found = folders();
+    let changed = false;
+    for (const id of ids ?? new Set([...found.keys(), ...seen.keys()])) {
+      if (stopped) return;
+      const folder = found.get(id);
+      const now = folder ? await signed(folder) : null;
+      // The last stream was let go while it was looked at, and another may have opened since: this is not its list.
+      if (lists.seen !== seen) return;
+      if ((seen.get(id) ?? null) === now) continue;
+      if (now === null) seen.delete(id);
+      else seen.set(id, now);
+      changed = true;
+    }
+    if (!changed) return;
+    const version = versionOf(seen);
+    for (const send of [...lists.sends]) send(version);
+  }
+
+  /**
+   * Asks for a look at the folder `id` (every folder, with none): one at a time, so that a look that is on its way takes in what is asked
+   * meanwhile, and a burst of writes is a look or two. Never fails: what goes wrong is logged.
+   */
+  function look(id) {
+    if (id === undefined) lists.all = true;
+    else lists.due.add(id);
+    return (lists.running ??= (async () => {
+      try {
+        await lists.based;
+        while (lists.seen && (lists.all || lists.due.size) && !stopped) {
+          const ids = lists.all ? undefined : [...lists.due];
+          lists.all = false;
+          lists.due.clear();
+          await visit(ids);
+        }
+      } catch (e) {
+        portal.log(`The list of documents could not be looked at for changes: ${e?.stack ?? e}`);
+      } finally {
+        lists.running = null;
+      }
+    })());
+  }
+
+  /** `send` is given the list's version whenever it changes. Returns what stops it. */
+  function watchList(send) {
+    lists.sends.add(send);
+    // The folders are looked at every so often: a document that is made, renamed or deleted outside the store tells it nothing.
+    if (!lists.timer && pollMs > 0) {
+      lists.timer = setInterval(() => void look(), pollMs);
+      lists.timer.unref?.();
+    }
+    return () => {
+      if (!lists.sends.delete(send) || lists.sends.size) return;
+      clearInterval(lists.timer);
+      Object.assign(lists, { timer: null, seen: null, based: null, all: false });
+      lists.due.clear();
+      failed.clear();
+    };
+  }
+
   portal.router.get("/folders", route(async (_req, res) => {
     const list = [];
     const problems = [];
+    const signatures = new Map();
     for (const folder of folders().values()) {
-      const dir = documentsOf(folder.path);
-      if (!dir) continue;
-      const name = path.basename(folder.path) || folder.path;
-      let documents;
-      try {
-        const store = await storeFor(folder.path, { make: true });
-        documents = (await store.list(HEAD_BYTES)).map(({ head, ...doc }) => ({ ...doc, title: titleOf(head, doc.name) }));
-      } catch (e) {
-        // One folder's store that cannot be opened (a link in its place, git missing) leaves the others listed, and is said on the page:
-        // a folder that is silently left out reads as one with no documents.
-        portal.log(`The documents in ${folder.path} could not be listed: ${e?.message ?? e}`);
-        const known = explained(e);
-        problems.push({ id: folder.id, name, path: folder.path, error: known instanceof DocError ? known.message : "The documents store could not be opened: the portal's log says why" });
-        continue;
-      }
-      documents.sort((a, b) => a.title.localeCompare(b.title) || a.name.localeCompare(b.name));
-      if (documents.length) list.push({ ...folder, name, documents });
+      const found = await listing(folder);
+      if (found.listed) list.push(found.listed);
+      if (found.problem) problems.push(found.problem);
+      const signature = signatureOf(found);
+      if (signature !== null) signatures.set(folder.id, signature);
     }
     list.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
     problems.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
-    res.json({ folders: list, ...(problems.length ? { problems } : {}) });
+    res.json({ folders: list, ...(problems.length ? { problems } : {}), version: versionOf(signatures) });
+  }));
+
+  portal.router.get("/folders/events", route(async (req, res) => {
+    if (stopped) throw new DocError(503, "The documents extension is stopping");
+    let closed = false;
+    let send = () => {};
+    let ping;
+    // Listened to before it is asked where the list stands: a change made in between is told, and what came before is in the list the page asks for.
+    const unwatch = watchList((version) => send(version));
+    res.on("close", () => {
+      closed = true;
+      clearInterval(ping);
+      streams.delete(res);
+      unwatch();
+    });
+    await baseline();
+    if (stopped) throw new DocError(503, "The documents extension is stopping");
+    if (closed) return;
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+    res.write("retry: 2000\n\n");
+    send = (version) => res.write(`event: documents\ndata: ${JSON.stringify({ version })}\n\n`);
+    // Where the list stands, as the first message: a page that was away finds out whether it missed anything, whatever it was.
+    send(versionOf(lists.seen));
+    ping = setInterval(() => res.write(": ping\n\n"), pingMs);
+    ping.unref?.();
+    streams.add(res);
   }));
 
   portal.router.post("/folders/:folder/documents", json, route(async (req, res) => {
@@ -847,21 +1039,37 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.status(201).json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
   }));
 
-  // The page saves a comment as it is typed: the first save makes it (above), the next ones change it, and typing it all away takes it away.
+  // The page saves a comment as it is typed: the first save makes it (above), the next ones change it (`draft`), and typing it all away
+  // takes it away. Once it is let go the person changes or takes away any of their comments, in an open thread or a resolved one.
   portal.router.put("/folders/:folder/documents/:id/threads/:thread/comments/:comment", small, route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);
     const store = await storeFor(folder.path);
-    const thread = await store.edit(id, req.params.thread, req.params.comment, { body: req.body?.body, author: "user" });
-    res.json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
+    const { thread, changed } = await store.edit(id, req.params.thread, req.params.comment, { body: req.body?.body, author: "user", draft: req.body?.draft === true });
+    // The same words change nothing, and ask nobody: a save that is no change does not wake the agent, or ask again for an ask that failed.
+    if (!changed) return res.json(withChat(folder, thread));
+    // As a new comment asks: the last comment of a thread that is open. Any other has nothing to ask, but loses an ask that was not taken.
+    if (thread.status === "open" && thread.comments.at(-1)?.id === req.params.comment) return res.json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
+    if (asksAgent(thread.comments.find((c) => c.id === req.params.comment)?.body)) return res.json(withChat(folder, thread));
+    const gone = await store.unping(id, thread.id, req.params.comment);
+    if (gone.ping !== undefined) unwake(folder, gone.comment);
+    res.json(withChat(folder, gone.thread));
   }));
 
   portal.router.delete("/folders/:folder/documents/:id/threads/:thread/comments/:comment", route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);
-    const { removed, thread } = await (await storeFor(folder.path)).remove(id, req.params.thread, req.params.comment, { author: "user" });
+    const { removed, thread } = await (await storeFor(folder.path)).remove(id, req.params.thread, req.params.comment, { author: "user", draft: req.query.draft === "1" });
     unwake(folder, req.params.comment);
     res.json({ removed, thread: thread ? withChat(folder, thread) : null });
+  }));
+
+  portal.router.delete("/folders/:folder/documents/:id/threads/:thread", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const { removed, comments } = await (await storeFor(folder.path)).removeThread(id, req.params.thread);
+    for (const comment of comments) unwake(folder, comment);
+    res.json({ removed });
   }));
 
   portal.router.post("/folders/:folder/documents/:id/threads/:thread/seen", route(async (req, res) => {
@@ -887,6 +1095,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     for (const queued of wakes.values()) clearTimeout(queued.timer);
     wakes.clear();
     for (const entry of watching.values()) clearInterval(entry.timer);
+    clearInterval(lists.timer);
     for (const res of [...streams]) res.end();
     const open = [...stores.values()];
     stores.clear();

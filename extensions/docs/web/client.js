@@ -112,6 +112,19 @@ export default function (portal) {
     "The agent answered": "Der Agent hat geantwortet",
     "{n} answered by the agent": "{n} vom Agenten beantwortet",
     "Got it": "Verstanden",
+    Edit: "Bearbeiten",
+    Delete: "Löschen",
+    Save: "Speichern",
+    "Edit the comment": "Kommentar bearbeiten",
+    edited: "bearbeitet",
+    "Edited {date}": "Bearbeitet {date}",
+    "Delete this comment?": "Diesen Kommentar löschen?",
+    "The comment is deleted for good.": "Der Kommentar wird endgültig gelöscht.",
+    "Delete this thread?": "Diesen Kommentarthread löschen?",
+    "The thread and all its comments are deleted for good.": "Der Kommentarthread und alle seine Kommentare werden endgültig gelöscht.",
+    "Delete thread": "Kommentarthread löschen",
+    "Changed a comment": "Kommentar geändert",
+    "Deleted a comment": "Kommentar gelöscht",
     "Comments on {title}": "Kommentare zu {title}",
     "Could not open a chat to ask the agent in: {error}": "Es konnte kein Chat geöffnet werden, in dem der Agent gefragt wird: {error}",
   });
@@ -139,8 +152,87 @@ export default function (portal) {
     return { ...state, retry: () => setAsked((n) => n + 1) };
   }
 
+  /**
+   * The list of folders and their documents, kept up to date while it is on the page: the server half's stream says the list's version
+   * whenever it changes (and as its first message), and the list is asked for again when that is not the version the page holds. So what
+   * changed while there was no stream (the page's first request, a dropped connection) is found out at once, and a list that is current
+   * is not asked for again. What is shown stays while a request for it again fails, which is made again after a while; only a page that has
+   * no list yet says why.
+   */
+  function useFolders() {
+    const [state, setState] = useState({ body: null, error: null });
+    const [asked, setAsked] = useState(0);
+    useEffect(() => {
+      let gone = false;
+      let stream = null;
+      let reconnect = null;
+      let failed = 0;
+      // The version of the list the page holds, the newest one the stream said, and whether the list is being asked for.
+      let held = null;
+      let told = null;
+      let loading = false;
+      // A request that failed is made again after a wait, longer each time: the stream says nothing more until the list changes again.
+      let wait = null;
+      let failures = 0;
+      const load = async () => {
+        if (loading) return;
+        clearTimeout(wait);
+        loading = true;
+        const before = told;
+        try {
+          const body = await portal.api.json(portal.api.url("/folders"));
+          if (gone) return;
+          failures = 0;
+          held = body.version ?? null;
+          // The same list as before is left as it is, so that it is not drawn again.
+          setState((now) => (now.body && JSON.stringify(now.body) === JSON.stringify(body) ? now : { body, error: null }));
+        } catch (error) {
+          if (gone) return;
+          setState((now) => (now.body ? now : { body: null, error }));
+          // The list that is shown is not the one the stream said, and the stream says nothing again until the list changes once more.
+          if (told !== null && told !== held) wait = setTimeout(() => void load(), Math.min(2000 * 2 ** failures++, 30_000));
+          return;
+        } finally {
+          loading = false;
+        }
+        // The stream said something newer while it was asked for.
+        if (!gone && told !== before && told !== held) void load();
+      };
+      setState({ body: null, error: null });
+      void load();
+      const listen = () => {
+        const source = new EventSource(portal.api.url("/folders/events"));
+        stream = source;
+        source.addEventListener("documents", (e) => {
+          failed = 0;
+          try {
+            told = JSON.parse(e.data).version;
+          } catch {
+            // A message that is not one of ours: nothing to take from it.
+            return;
+          }
+          if (told !== held) void load();
+        });
+        // One that dropped is asked for again after a while, longer each time, as the document's own stream is: the first message of a new
+        // one says where the list stands, so nothing that happened meanwhile is missed.
+        source.addEventListener("error", () => {
+          source.close();
+          if (!gone) reconnect = setTimeout(listen, Math.min(2000 * 2 ** failed++, 30_000));
+        });
+      };
+      if (typeof EventSource !== "undefined") listen();
+      return () => {
+        gone = true;
+        clearTimeout(reconnect);
+        clearTimeout(wait);
+        stream?.close();
+      };
+    }, [asked]);
+    return { ...state, retry: () => setAsked((n) => n + 1) };
+  }
+
   function FolderList({ onOpen }) {
-    const { body, error, retry } = useAnswer(portal.api.url("/folders"));
+    const { body, error, retry } = useFolders();
     if (error) return h(ui.LoadFailed, { error, onRetry: retry });
     if (!body) return h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") });
     // A folder whose documents could not be opened is said, with the reason: left out without a word it reads as one with none.
@@ -201,13 +293,13 @@ export default function (portal) {
     portal.locale.use();
     const d = call.details;
     if (call.status !== "done" || typeof d?.id !== "string" || typeof d.folder !== "string") return card;
-    const heading = { create: t("Created a document"), edit: t("Edited a document"), read: t("Read a document"), comment: t("Commented on a document"), reply: t("Replied to a comment"), resolve: t("Resolved a comment") }[d.action];
+    const heading = { create: t("Created a document"), edit: t("Edited a document"), read: t("Read a document"), comment: t("Commented on a document"), reply: t("Replied to a comment"), resolve: t("Resolved a comment"), edit_comment: t("Changed a comment"), delete_comment: t("Deleted a comment") }[d.action];
     if (!heading) return card;
     const facts = [`documents/${d.name}`];
     if (d.action === "edit") {
       facts.push(d.changed ? t("Revision {from} to {to}", { from: d.from, to: d.revision }) : t("No change"), d.edits === 1 ? t("1 edit") : t("{n} edits", { n: d.edits }));
       if (d.thread) facts.push(t("answers a comment"));
-    } else if (d.action === "comment" || d.action === "reply" || d.action === "resolve") {
+    } else if (["comment", "reply", "resolve", "edit_comment", "delete_comment"].includes(d.action)) {
       facts.push(t("Revision {n}", { n: d.revision }));
     } else {
       facts.push(t("Revision {n}", { n: d.revision }));
@@ -243,5 +335,5 @@ export default function (portal) {
   }
 
   portal.slots.register("nav.page", { id: "documents", title: "Documents", icon: DocumentIcon, component: DocumentsPage });
-  for (const tool of ["doc_create", "doc_read", "doc_edit", "doc_comment", "doc_reply", "doc_resolve"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
+  for (const tool of ["doc_create", "doc_read", "doc_edit", "doc_comment", "doc_reply", "doc_edit_comment", "doc_delete_comment", "doc_resolve"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
 }

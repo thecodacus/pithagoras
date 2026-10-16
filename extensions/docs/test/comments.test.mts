@@ -654,46 +654,50 @@ test('the stream of a document tells of a change to its comments, with no revisi
   }
 });
 
-test('the person\'s last comment is changed as it is typed, and taken away when it is typed away: only while it is the last of an open thread', async () => {
+test('the comment the box saves as it is typed (a draft) is changed, and taken away when it is typed away, only while it is the last of an open thread', async () => {
   const { docs, comment, threads, url } = await withDocument('docs-comments-typed-');
   try {
     const made = (await comment(GREEN, 'Is')).body;
     const first = made.comments[0].id;
     const at = `${url}/threads/${made.id}/comments`;
+    // What the box sends: it is a draft. (Without that a comment is changed whatever its place, by the tests below.)
+    const put = (comment: string, body: object) => docs.call('PUT', `${at}/${comment}`, { draft: true, ...body });
+    const del = (comment: string) => docs.call('DELETE', `${at}/${comment}?draft=1`);
     // Changed: the same comment, with the new words, and the thread changed with it.
-    const changed = await docs.call('PUT', `${at}/${first}`, { body: 'Is it right?' });
+    const changed = await put(first, { body: 'Is it right?' });
     assert.equal(changed.status, 200, JSON.stringify(changed.body));
     assert.deepEqual(changed.body.comments.map((c: any) => [c.id, c.author, c.body]), [[first, 'user', 'Is it right?']]);
+    // A comment still being written is not an edited one.
+    assert.equal(changed.body.comments[0].edited, undefined);
     assert.ok(changed.body.updatedAt >= made.updatedAt);
     assert.deepEqual((await threads()).threads[0].comments.map((c: any) => c.body), ['Is it right?']);
     // Not empty, not too long, and a comment that is there.
-    assert.equal((await docs.call('PUT', `${at}/${first}`, { body: '  ' })).body.code, 'invalid');
-    assert.equal((await docs.call('PUT', `${at}/${first}`, { body: 'x'.repeat(4097) })).body.code, 'too_large');
-    assert.equal((await docs.call('PUT', `${at}/0123456789abcdef`, { body: 'Hi' })).body.code, 'comment_not_found');
-    assert.equal((await docs.call('PUT', `${at}/${first}`, {})).status, 400);
+    assert.equal((await put(first, { body: '  ' })).body.code, 'invalid');
+    assert.equal((await put(first, { body: 'x'.repeat(4097) })).body.code, 'too_large');
+    assert.equal((await put('0123456789abcdef', { body: 'Hi' })).body.code, 'comment_not_found');
+    assert.equal((await put(first, {})).status, 400);
     // A reply after it: the first is not the last any more, and neither is changed or taken away while it is not the last.
     const reply = (await docs.call('POST', at, { body: 'And?' })).body.comments[1].id;
-    for (const [method, body] of [['PUT', { body: 'Changed' }], ['DELETE', undefined]] as const) {
-      const refused = await docs.call(method, `${at}/${first}`, body);
-      assert.equal(refused.status, 409, method);
-      assert.equal(refused.body.code, 'comment_not_last', method);
+    for (const refused of [await put(first, { body: 'Changed' }), await del(first)]) {
+      assert.equal(refused.status, 409);
+      assert.equal(refused.body.code, 'comment_not_last');
     }
     assert.equal((await threads()).threads[0].comments[0].body, 'Is it right?');
     // The last is taken away: the thread is as it was; the only comment, with its thread.
-    const gone = await docs.call('DELETE', `${at}/${reply}`);
+    const gone = await del(reply);
     assert.equal(gone.status, 200);
     assert.deepEqual([gone.body.removed, gone.body.thread.comments.map((c: any) => c.body)], ['comment', ['Is it right?']]);
-    const alone = await docs.call('DELETE', `${at}/${first}`);
+    const alone = await del(first);
     assert.deepEqual(alone.body, { removed: 'thread', thread: null });
     assert.deepEqual((await threads()).threads, []);
     assert.equal((await docs.call('GET', '/folders')).body.folders[0].documents[0].openThreads, 0);
-    assert.equal((await docs.call('DELETE', `${at}/${first}`)).body.code, 'thread_not_found');
+    assert.equal((await del(first)).body.code, 'thread_not_found');
   } finally {
     await docs.close();
   }
 });
 
-test('a comment of a resolved thread is not changed or taken away, and the stream tells of each change that is made', async () => {
+test('a draft of a resolved thread is not changed or taken away, and the stream tells of each change that is made', async () => {
   const { docs, comment, url } = await withDocument('docs-comments-typed-closed-');
   try {
     const stream = await docs.listen(`${url}/events`);
@@ -701,22 +705,165 @@ test('a comment of a resolved thread is not changed or taken away, and the strea
     const made = (await comment(GREEN, 'Is it?')).body;
     assert.equal((await stream.frame())?.event, 'threads');
     const at = `${url}/threads/${made.id}/comments/${made.comments[0].id}`;
-    assert.equal((await docs.call('PUT', at, { body: 'Is it right?' })).status, 200);
+    assert.equal((await docs.call('PUT', at, { body: 'Is it right?', draft: true })).status, 200);
     assert.equal((await stream.frame())?.event, 'threads');
     await docs.call('POST', `${url}/threads/${made.id}/resolve`, {});
     assert.equal((await stream.frame())?.event, 'threads');
-    for (const method of ['PUT', 'DELETE']) {
-      const refused = await docs.call(method, at, method === 'PUT' ? { body: 'Late' } : undefined);
-      assert.equal(refused.status, 409, method);
-      assert.equal(refused.body.code, 'thread_resolved', method);
+    for (const refused of [await docs.call('PUT', at, { body: 'Late', draft: true }), await docs.call('DELETE', `${at}?draft=1`)]) {
+      assert.equal(refused.status, 409);
+      assert.equal(refused.body.code, 'thread_resolved');
     }
     // The thread that was resolved is what it was.
     assert.deepEqual((await docs.call('GET', `${url}/threads`)).body.threads[0].comments.map((c: any) => c.body), ['Is it right?']);
     await docs.call('POST', `${url}/threads/${made.id}/reopen`, {});
     assert.equal((await stream.frame())?.event, 'threads');
-    assert.equal((await docs.call('DELETE', at)).body.removed, 'thread');
+    assert.equal((await docs.call('DELETE', `${at}?draft=1`)).body.removed, 'thread');
     assert.equal((await stream.frame())?.event, 'threads');
   } finally {
     await docs.close();
+  }
+});
+
+test('a comment of the person is changed or taken away whatever its place in the thread: it is marked as edited, the passage and the other comments stay, and the stream tells of each', async () => {
+  const { docs, comment, threads, url } = await withDocument('docs-comments-edit-');
+  try {
+    const stream = await docs.listen(`${url}/events`);
+    await stream.next('revision');
+    const made = (await comment(GREEN, 'First.')).body;
+    assert.equal((await stream.frame())?.event, 'threads');
+    const at = `${url}/threads/${made.id}/comments`;
+    const first = made.comments[0].id;
+    const second = (await docs.call('POST', at, { body: 'Second.' })).body.comments[1].id;
+    assert.equal((await stream.frame())?.event, 'threads');
+    await docs.call('POST', at, { body: 'Third.' });
+    assert.equal((await stream.frame())?.event, 'threads');
+
+    // The first of three, which is no draft and not the last: changed, and nothing else with it.
+    const changed = await docs.call('PUT', `${at}/${first}`, { body: 'First, changed.' });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.deepEqual(changed.body.comments.map((c: any) => [c.author, c.body]), [['user', 'First, changed.'], ['user', 'Second.'], ['user', 'Third.']]);
+    assert.ok(!Number.isNaN(Date.parse(changed.body.comments[0].edited)), 'marked as edited, with when');
+    assert.deepEqual(changed.body.comments.slice(1).map((c: any) => c.edited), [undefined, undefined]);
+    // Its passage is where it was, and the thread is as open as it was.
+    assert.deepEqual([changed.body.quote, changed.body.start, changed.body.end, changed.body.status], [made.quote, made.start, made.end, 'open']);
+    assert.ok(changed.body.updatedAt >= made.updatedAt);
+    assert.equal((await stream.frame())?.event, 'threads');
+    assert.deepEqual((await threads()).threads[0].comments.map((c: any) => c.body), ['First, changed.', 'Second.', 'Third.']);
+
+    // The same words: it is not marked again, and nobody is told (the next thing told is the next change).
+    const edited = changed.body.comments[0].edited;
+    const same = await docs.call('PUT', `${at}/${first}`, { body: '  First, changed.  ' });
+    assert.equal(same.status, 200);
+    assert.equal(same.body.comments[0].edited, edited);
+    // Not empty, not too long, and a comment that is there; nothing was changed by them.
+    assert.equal((await docs.call('PUT', `${at}/${first}`, { body: '  ' })).body.code, 'invalid');
+    assert.equal((await docs.call('PUT', `${at}/${first}`, { body: 'x'.repeat(4097) })).body.code, 'too_large');
+    assert.equal((await docs.call('PUT', `${at}/0123456789abcdef`, { body: 'Hi' })).body.code, 'comment_not_found');
+    assert.equal((await docs.call('PUT', `${at}/${first}`, {})).status, 400);
+
+    // Taken away from the middle: the others stay, in their order, and the thread is open on its passage still.
+    const gone = await docs.call('DELETE', `${at}/${second}`);
+    assert.equal(gone.status, 200);
+    assert.deepEqual([gone.body.removed, gone.body.thread.comments.map((c: any) => c.body), gone.body.thread.quote, gone.body.thread.status], ['comment', ['First, changed.', 'Third.'], GREEN, 'open']);
+    assert.equal((await stream.frame())?.event, 'threads', 'only the change that was made was told');
+    assert.equal((await docs.call('DELETE', `${at}/${second}`)).body.code, 'comment_not_found');
+    // The first of two, then the only one: the thread goes with it.
+    assert.equal((await docs.call('DELETE', `${at}/${first}`)).body.removed, 'comment');
+    assert.equal((await stream.frame())?.event, 'threads');
+    const last = (await threads()).threads[0].comments[0].id;
+    assert.deepEqual((await docs.call('DELETE', `${at}/${last}`)).body, { removed: 'thread', thread: null });
+    assert.equal((await stream.frame())?.event, 'threads');
+    assert.deepEqual((await threads()).threads, []);
+    assert.equal((await docs.call('GET', '/folders')).body.folders[0].documents[0].openThreads, 0);
+    assert.equal((await docs.call('PUT', `${at}/${last}`, { body: 'Late' })).body.code, 'thread_not_found');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a comment of a resolved thread is changed or taken away all the same, and the thread stays resolved', async () => {
+  const { docs, comment, threads, url } = await withDocument('docs-comments-edit-closed-');
+  try {
+    const made = (await comment(GREEN, 'First.')).body;
+    const at = `${url}/threads/${made.id}/comments`;
+    const second = (await docs.call('POST', at, { body: 'Second.' })).body.comments[1].id;
+    await docs.call('POST', `${url}/threads/${made.id}/resolve`, {});
+    const changed = await docs.call('PUT', `${at}/${made.comments[0].id}`, { body: 'First, changed.' });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.deepEqual([changed.body.status, changed.body.comments.map((c: any) => c.body)], ['resolved', ['First, changed.', 'Second.']]);
+    assert.ok(changed.body.comments[0].edited);
+    const gone = await docs.call('DELETE', `${at}/${second}`);
+    assert.deepEqual([gone.body.removed, gone.body.thread.status, gone.body.thread.comments.map((c: any) => c.body)], ['comment', 'resolved', ['First, changed.']]);
+    // Nothing is added to it, as before; and its only comment goes with the thread.
+    assert.equal((await docs.call('POST', at, { body: 'Late.' })).body.code, 'thread_resolved');
+    assert.deepEqual((await docs.call('DELETE', `${at}/${made.comments[0].id}`)).body, { removed: 'thread', thread: null });
+    assert.deepEqual((await threads()).threads, []);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a thread the person started is taken away with its comments, open or resolved: the other threads stay, and the stream tells of it', async () => {
+  const { docs, comment, threads, url, folder } = await withDocument('docs-comments-thread-');
+  try {
+    const stream = await docs.listen(`${url}/events`);
+    await stream.next('revision');
+    const one = (await comment(GREEN, 'One.')).body;
+    const other = (await comment('Sign-off is on Monday.', 'Who signs off?')).body;
+    await stream.frame();
+    await stream.frame();
+    await docs.call('POST', `${url}/threads/${one.id}/comments`, { body: 'Two.' });
+    await stream.frame();
+    const gone = await docs.call('DELETE', `${url}/threads/${one.id}`);
+    assert.deepEqual([gone.status, gone.body], [200, { removed: 'thread' }]);
+    assert.equal((await stream.frame())?.event, 'threads');
+    assert.deepEqual((await threads()).threads.map((t: any) => t.id), [other.id]);
+    assert.equal((await docs.call('GET', '/folders')).body.folders[0].documents[0].openThreads, 1);
+    // Its comments went with it, not only the thread.
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(path.join(DATA, folderIdOf(folder), 'docs.sqlite'), { readonly: true });
+    assert.deepEqual(db.prepare('SELECT body FROM comments').all(), [{ body: 'Who signs off?' }]);
+    db.close();
+    // Not there any more, or never was.
+    assert.equal((await docs.call('DELETE', `${url}/threads/${one.id}`)).body.code, 'thread_not_found');
+    assert.equal((await docs.call('DELETE', `${url}/threads/nope`)).body.code, 'thread_not_found');
+    // A resolved thread is taken away as well.
+    await docs.call('POST', `${url}/threads/${other.id}/resolve`, {});
+    await stream.frame();
+    assert.equal((await docs.call('DELETE', `${url}/threads/${other.id}`)).status, 200);
+    assert.equal((await stream.frame())?.event, 'threads');
+    assert.deepEqual((await threads()).threads, []);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a database from before comments could be changed gets the mark added, and keeps its comments', async () => {
+  const folder = realpathSync(scratch('docs-comments-migrate-'));
+  const data = scratch('docs-comments-migrate-data-');
+  const f = folderIdOf(folder);
+  const first = await portal({ a: folder }, data);
+  let id: string;
+  let thread: any;
+  try {
+    id = (await first.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: PLAN })).body.id;
+    thread = (await first.call('POST', `/folders/${f}/documents/${id}/threads`, { base: 1, quote: GREEN, body: 'Is it?' })).body;
+  } finally {
+    await first.close();
+  }
+  const { default: Database } = await import('better-sqlite3');
+  const db = new Database(path.join(data, f, 'docs.sqlite'));
+  db.exec('ALTER TABLE comments DROP COLUMN edited_at');
+  assert.ok(!db.prepare('PRAGMA table_info(comments)').all().some((c: any) => c.name === 'edited_at'));
+  db.close();
+  const second = await portal({ a: folder }, data);
+  try {
+    const url = `/folders/${f}/documents/${id}/threads/${thread.id}/comments/${thread.comments[0].id}`;
+    assert.deepEqual((await second.call('GET', `/folders/${f}/documents/${id}/threads`)).body.threads.map((t: any) => t.comments.map((c: any) => [c.body, c.edited])), [[['Is it?', undefined]]]);
+    const changed = await second.call('PUT', url, { body: 'Is it right?' });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.deepEqual(changed.body.comments.map((c: any) => [c.body, Boolean(c.edited)]), [['Is it right?', true]]);
+  } finally {
+    await second.close();
   }
 });
