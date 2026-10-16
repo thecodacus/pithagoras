@@ -44,7 +44,10 @@ const FOLDERS = [
   { id: 'fedcba9876543210', name: 'tools', path: '/w/tools', chats: [{ id: 'b', title: 'Second chat' }], documents: [{ id: '3333333333333333', name: 'setup.md', title: 'Setting up', revision: 1, size: 20, modified: '2026-10-03T09:30:00.000Z' }] },
 ];
 
-async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' | 'open' = 'idle', problems: unknown[] = []) {
+/** What the server half answers for the list of folders, which a test may change: the list, the folders that could not be opened, its version and how often it was asked for. */
+interface Listing { folders: unknown[]; problems: unknown[]; version: string; asked: number; failing: boolean }
+
+async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' | 'open' = 'idle', problems: unknown[] = [], listing: Listing = { folders, problems, version: 'v1', asked: 0, failing: false }) {
   const at = new Date().toISOString();
   const sessions = [{ id: 'a', title: 'First chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null }];
   /** The documents the page asked for, as their addresses. */
@@ -53,7 +56,11 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
     if (p === '/api/extension-ui') return { extensions: [{ name: NAME, version: '0.1.0', entry: address('client.js') + '?v=1', style: address('client.css') + '?v=1', server: `/api/x/${NAME}` }] };
     // The folder the portal serves of the package: its modules, the editor among them, and its stylesheet.
     if (p.startsWith(address(''))) { await route.fulfill({ contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: web(p.slice(address('').length)) }); return DONE; }
-    if (p === `/api/x/${NAME}/folders`) return { folders, ...(problems.length ? { problems } : {}) };
+    if (p === `/api/x/${NAME}/folders`) {
+      listing.asked++;
+      if (listing.failing) return reply(503, { error: 'The portal is busy' });
+      return { folders: listing.folders, ...(listing.problems.length ? { problems: listing.problems } : {}), version: listing.version };
+    }
     if (p.startsWith(`/api/x/${NAME}/folders/`)) {
       // The comments on a document are asked for with it, and are none.
       if (p.endsWith('/threads')) return { revision: 3, threads: [] };
@@ -198,7 +205,7 @@ test('a call of one of the agent\'s document tools is drawn as what became of th
   await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
 });
 
-test('a comment, a reply, a resolved thread and an edit that answers a comment are drawn as what became of the document, in English and in German', async ({ page }) => {
+test('a comment, a reply, a changed or deleted comment, a resolved thread and an edit that answers a comment are drawn as what became of the document, in English and in German', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const { caughtUp, calls } = await portal(page, FOLDERS, 'open');
   await page.goto('/s/a');
@@ -208,14 +215,19 @@ test('a comment, a reply, a resolved thread and an edit that answers a comment a
   await calls('k2', 'doc_reply', { id: PLAN_AT.id, thread, comment: 'Done.' }, 'Replied', { ...PLAN_AT, action: 'reply', revision: 3, thread });
   await calls('k3', 'doc_resolve', { id: PLAN_AT.id, thread }, 'Resolved', { ...PLAN_AT, action: 'resolve', revision: 3, thread, changed: true });
   await calls('k4', 'doc_edit', { id: PLAN_AT.id, thread }, 'Edited', { ...PLAN_AT, action: 'edit', revision: 4, from: 3, edits: 1, changed: true, thread, replied: true });
+  await calls('k5', 'doc_edit_comment', { id: PLAN_AT.id, thread, comment_id: 'c1', comment: 'Fixed.' }, 'Changed', { ...PLAN_AT, action: 'edit_comment', revision: 4, thread, comment: 'c1' });
+  await calls('k6', 'doc_delete_comment', { id: PLAN_AT.id, thread, comment_id: 'c1' }, 'Deleted', { ...PLAN_AT, action: 'delete_comment', revision: 4, thread, comment: 'c1', removed: 'comment' });
   const cards = page.locator('.tool-row .pd-call');
-  await expect(cards).toHaveCount(4);
+  await expect(cards).toHaveCount(6);
   await expect(cards.nth(0)).toContainText('Commented on a document');
   await expect(cards.nth(0)).toContainText('documents/plan.md · Revision 3');
   await expect(cards.nth(1)).toContainText('Replied to a comment');
   await expect(cards.nth(2)).toContainText('Resolved a comment');
   await expect(cards.nth(3)).toContainText('Edited a document');
   await expect(cards.nth(3)).toContainText('documents/plan.md · Revision 3 to 4 · 1 edit · answers a comment');
+  await expect(cards.nth(4)).toContainText('Changed a comment');
+  await expect(cards.nth(4)).toContainText('documents/plan.md · Revision 4');
+  await expect(cards.nth(5)).toContainText('Deleted a comment');
   await expect(cards.nth(0).getByRole('button', { name: 'Open in Documents' })).toBeVisible();
 });
 
@@ -230,7 +242,11 @@ test('the cards of the agent\'s comments are in German in a German portal', asyn
   await calls('k2', 'doc_reply', { id: PLAN_AT.id }, 'Replied', { ...PLAN_AT, action: 'reply', revision: 3, thread });
   await calls('k3', 'doc_resolve', { id: PLAN_AT.id }, 'Resolved', { ...PLAN_AT, action: 'resolve', revision: 3, thread });
   await calls('k4', 'doc_edit', { id: PLAN_AT.id }, 'Edited', { ...PLAN_AT, action: 'edit', revision: 4, from: 3, edits: 1, changed: true, thread });
+  await calls('k5', 'doc_edit_comment', { id: PLAN_AT.id }, 'Changed', { ...PLAN_AT, action: 'edit_comment', revision: 4, thread, comment: 'c1' });
+  await calls('k6', 'doc_delete_comment', { id: PLAN_AT.id }, 'Deleted', { ...PLAN_AT, action: 'delete_comment', revision: 4, thread, comment: 'c1', removed: 'comment' });
   const cards = page.locator('.tool-row .pd-call');
+  await expect(cards.nth(4)).toContainText('Kommentar geändert');
+  await expect(cards.nth(5)).toContainText('Kommentar gelöscht');
   await expect(cards.nth(0)).toContainText('Dokument kommentiert');
   await expect(cards.nth(1)).toContainText('Auf einen Kommentar geantwortet');
   await expect(cards.nth(2)).toContainText('Kommentar erledigt');
@@ -248,4 +264,179 @@ test('the agent\'s document cards are in German in a German portal', async ({ pa
   await expect(card).toContainText('Dokument bearbeitet');
   await expect(card).toContainText('documents/plan.md · Revision 2 auf 3 · 1 Änderung');
   await expect(card.getByRole('button', { name: 'In Dokumenten öffnen' })).toBeVisible();
+});
+
+/**
+ * The list of documents keeps itself up to date: the page's own EventSource, which the test drives by hand, says the list's version
+ * (extensions/docs/server.js) as its first message and whenever it changes, and the page asks for the list again when that is not the
+ * version it holds.
+ */
+const NOTES = { id: '4444444444444444', name: 'notes.md', title: 'Field notes', revision: 1, size: 20, modified: '2026-10-04T09:30:00.000Z' };
+const listOf = (page: Page) => page.getByRole('region', { name: 'site' }).getByRole('listitem');
+
+/** What the stream of the list says, as the server half would: the list is at `version` now. */
+const listStream = (page: Page, version: string) =>
+  page.evaluate((version) => {
+    const stream = (window as any).streams.filter((s: any) => !s.closed && s.url.endsWith('/folders/events')).at(-1);
+    stream.emit('documents', { version });
+  }, version);
+/** Every stream of the list the page opened, as its address and whether it was let go of. Development React runs each effect twice, so the first is already closed. */
+const streamsOf = (page: Page) => page.evaluate(() => (window as any).streams.filter((s: any) => s.url.endsWith('/folders/events')).map((s: any) => ({ url: s.url, closed: s.closed })));
+const openStreams = async (page: Page) => (await streamsOf(page)).filter((s) => !s.closed);
+
+async function opened(page: Page, listing?: Partial<Listing>) {
+  const state: Listing = { folders: FOLDERS, problems: [], version: 'v1', asked: 0, failing: false, ...listing };
+  await portal(page, FOLDERS, 'open', [], state);
+  await page.goto(`/x/${NAME}/documents`);
+  await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
+  await expect.poll(() => openStreams(page)).toHaveLength(1);
+  // What was asked for while the page came up (twice in development) is not counted.
+  await page.waitForTimeout(300);
+  state.asked = 0;
+  return state;
+}
+
+/** The first folder with `documents` in place of its own. */
+const withDocuments = (documents: unknown[]) => [{ ...(FOLDERS[0] as object), documents }, FOLDERS[1]];
+
+test('the list opens one stream for all folders, and lets go of it when a document is opened and again when the list is back', async ({ page }) => {
+  const state = await opened(page);
+  expect(await openStreams(page)).toEqual([{ url: `/api/x/${NAME}/folders/events`, closed: false }]);
+  // The stream's first message says the version the page holds: nothing to ask for.
+  await listStream(page, 'v1');
+  await page.waitForTimeout(200);
+  expect(state.asked).toBe(0);
+
+  await listOf(page).first().getByRole('button').click();
+  await expect(page.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
+  expect(await openStreams(page)).toEqual([]);
+  await page.getByRole('button', { name: /All documents/ }).click();
+  await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
+  await expect.poll(() => openStreams(page)).toHaveLength(1);
+});
+
+test('a document made by the agent or in another window is in the list when the stream says the list changed, without a reload, and the list is not drawn again for the same version', async ({ page }) => {
+  const state = await opened(page);
+  await expect(listOf(page)).toHaveText([/^The plan\s*plan\.md/, /^Release notes\s*release notes\.md/]);
+  const [site] = FOLDERS;
+  state.folders = withDocuments([...site.documents, NOTES]);
+  state.version = 'v2';
+  await listStream(page, 'v2');
+  await expect(listOf(page)).toHaveText([/^The plan/, /^Release notes/, /^Field notes\s*notes\.md/]);
+  expect(state.asked).toBe(1);
+  // Said again, or at the first message of a stream that was opened again: the page holds this version already.
+  await listStream(page, 'v2');
+  await page.waitForTimeout(200);
+  expect(state.asked).toBe(1);
+});
+
+test('a document that is renamed, deleted or made again is in the list as it is now, and a folder with no document left is gone from it', async ({ page }) => {
+  const state = await opened(page);
+  const [site, tools] = FOLDERS;
+  const [plan, notes] = site.documents;
+  // Renamed: a document of its own under the new name.
+  const renamed = { ...notes, id: '5555555555555555', name: 'release.md' };
+  state.folders = [{ ...site, documents: [plan, renamed] }, tools];
+  state.version = 'v2';
+  await listStream(page, 'v2');
+  await expect(listOf(page)).toHaveText([/^The plan/, /^Release notes\s*release\.md/]);
+  // Deleted.
+  state.folders = [{ ...site, documents: [plan] }, tools];
+  state.version = 'v3';
+  await listStream(page, 'v3');
+  await expect(listOf(page)).toHaveCount(1);
+  // Made again under its name: the same document.
+  state.folders = FOLDERS;
+  state.version = 'v4';
+  await listStream(page, 'v4');
+  await expect(listOf(page)).toHaveText([/^The plan/, /^Release notes\s*release notes\.md/]);
+  // A folder whose last document was deleted is not listed: no section is left for it.
+  state.folders = [site];
+  state.version = 'v5';
+  await listStream(page, 'v5');
+  await expect(page.getByRole('region', { name: 'tools' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
+  // And the first document of a folder that had none makes its section.
+  state.folders = FOLDERS;
+  state.version = 'v6';
+  await listStream(page, 'v6');
+  await expect(page.getByRole('region', { name: 'tools' }).getByRole('listitem')).toHaveText([/^Setting up/]);
+});
+
+test('a folder the portal cannot read is said above the list as it turns up and goes as it is mended, and the other folders stay', async ({ page }) => {
+  const state = await opened(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  state.problems = PROBLEMS.slice(1);
+  state.folders = [FOLDERS[0]];
+  state.version = 'v2';
+  await listStream(page, 'v2');
+  await expect(page.getByRole('alert')).toHaveText("The documents in /w/locked could not be opened: The portal is not allowed to read this folder's documents folder (permission denied)");
+  await expect(page.getByRole('region', { name: 'site' }).getByRole('listitem')).toHaveCount(2);
+  // Mended: its documents are listed and the reason is gone.
+  state.problems = [];
+  state.folders = FOLDERS;
+  state.version = 'v3';
+  await listStream(page, 'v3');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'tools' })).toBeVisible();
+});
+
+test('the list that is shown stays while it cannot be asked for again, and what the next message says is taken', async ({ page }) => {
+  const state = await opened(page);
+  state.failing = true;
+  state.version = 'v2';
+  await listStream(page, 'v2');
+  await expect.poll(() => state.asked).toBe(1);
+  // Not taken away, and no error in its place.
+  await expect(listOf(page)).toHaveCount(2);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const [site] = FOLDERS;
+  state.failing = false;
+  state.folders = withDocuments([...site.documents, NOTES]);
+  state.version = 'v3';
+  await listStream(page, 'v3');
+  await expect(listOf(page)).toHaveCount(3);
+});
+
+test('a list that could not be asked for again is asked for again after a while, with the stream saying nothing more', async ({ page }) => {
+  const state = await opened(page);
+  const [site] = FOLDERS;
+  state.failing = true;
+  state.folders = withDocuments([...site.documents, NOTES]);
+  state.version = 'v2';
+  await listStream(page, 'v2');
+  await expect.poll(() => state.asked).toBe(1);
+  // The list that is shown is the old one, and the page does not give up on the new one.
+  await expect(listOf(page)).toHaveCount(2);
+  state.failing = false;
+  await expect(listOf(page)).toHaveCount(3, { timeout: 8000 });
+  expect(state.asked).toBe(2);
+});
+
+test('a stream that dropped is opened again after a while, and a change that was made while it was down is found by its first message', async ({ page }) => {
+  const state = await opened(page);
+  const made = (await streamsOf(page)).length;
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('error', null));
+  expect(await openStreams(page)).toEqual([]);
+  // After a wait, another is opened, and its first message is the list's version.
+  await expect.poll(async () => (await streamsOf(page)).length, { timeout: 6000 }).toBe(made + 1);
+  expect(await openStreams(page)).toHaveLength(1);
+  const [site] = FOLDERS;
+  state.folders = withDocuments([...site.documents, NOTES]);
+  state.version = 'v2';
+  await listStream(page, 'v2');
+  await expect(listOf(page)).toHaveCount(3);
+});
+
+test('a list that could not be asked for the first time says why, and is asked for again by the stream\'s first message', async ({ page }) => {
+  const state: Listing = { folders: FOLDERS, problems: [], version: 'v1', asked: 0, failing: true };
+  await portal(page, FOLDERS, 'open', [], state);
+  await page.goto(`/x/${NAME}/documents`);
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect.poll(() => openStreams(page)).toHaveLength(1);
+  // The portal is back, and the stream says where the list stands: the page asks again, with no button.
+  state.failing = false;
+  await listStream(page, 'v1');
+  await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

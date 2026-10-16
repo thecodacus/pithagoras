@@ -337,7 +337,8 @@ test('the stream is let go of when the document is left', async ({ page }) => {
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
   await page.getByRole('button', { name: /All documents/ }).click();
   await expect(page.getByText('The plan').first()).toBeVisible();
-  expect(await page.evaluate(() => (window as any).streams.map((s: any) => s.closed))).toEqual([true]);
+  // The list that is back has a stream of its own (documents.spec.mts): it is the document's that is closed.
+  expect(await page.evaluate((url) => (window as any).streams.filter((s: any) => s.url === url).map((s: any) => s.closed), DOCUMENT + '/events')).toEqual([true]);
 });
 
 test('the notes about a change that came from outside are in German in a German portal', async ({ page }) => {

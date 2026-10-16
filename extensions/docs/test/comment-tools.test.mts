@@ -472,7 +472,7 @@ test('the tools say what they are for, and the rule for answering a comment is i
   const docs = await portal({ a: realpathSync(scratch('docs-ct-describe-')) });
   try {
     const tools = docs.tools('a');
-    for (const name of ['doc_comment', 'doc_reply', 'doc_resolve']) {
+    for (const name of ['doc_comment', 'doc_reply', 'doc_resolve', 'doc_edit_comment', 'doc_delete_comment']) {
       const tool = tools.get(name);
       assert.ok(tool.description.length > 80 && tool.label && tool.promptSnippet, name);
       assert.ok(tool.parameters.required.includes('id'), name);
@@ -482,6 +482,10 @@ test('the tools say what they are for, and the rule for answering a comment is i
     // The rule for answering a comment is in the agent's instructions for the tools that carry it out.
     assert.ok(tools.get('doc_edit').promptGuidelines.some((g: string) => /comment/.test(g) && /thread/.test(g) && /reply/.test(g)));
     assert.ok(tools.get('doc_reply').promptGuidelines.some((g: string) => /what was done/.test(g)));
+    // And that the agent's own comments are its to change, and the person's never its to delete.
+    assert.ok(tools.get('doc_delete_comment').promptGuidelines.some((g: string) => /own comments/.test(g) && /person/.test(g) && /doc_reply/.test(g) && /doc_resolve/.test(g)));
+    assert.deepEqual(tools.get('doc_delete_comment').parameters.required, ['id', 'thread', 'comment_id']);
+    assert.deepEqual(tools.get('doc_edit_comment').parameters.required, ['id', 'thread', 'comment_id', 'comment']);
     assert.ok(tools.get('doc_edit').parameters.properties.thread && tools.get('doc_edit').parameters.properties.reply);
     assert.deepEqual(tools.get('doc_edit').parameters.required, ['id', 'expected_revision', 'edits']);
   } finally {
@@ -502,6 +506,165 @@ test('the agent\'s comments are not the person\'s to change or take away: the pa
       assert.equal(refused.body.code, 'comment_not_yours', method);
     }
     assert.deepEqual((await threads())[0].comments.map((c: any) => c.body), ['Why?', 'Because.']);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('the agent changes its own comments and replies, whichever they are: doc_read shows their ids, the person sees them as edited, and the thread is news again only if it was the last', async () => {
+  const { docs, id, agent, person, threads, url } = await withDocument('docs-ct-edit-comment-');
+  try {
+    const asked = await person('Ship it on Friday.', 'Why Friday?');
+    done(await agent('doc_reply', { id, thread: asked.id, comment: 'Because of the review.' }));
+    await docs.call('POST', `${url}/threads/${asked.id}/comments`, { body: 'And Monday?' });
+    done(await agent('doc_reply', { id, thread: asked.id, comment: 'Monday is sign-off.' }));
+    let [thread] = await threads();
+    const [mine, a1, theirs, a2] = thread.comments;
+    // The ids of the agent's own comments are in what it reads, and the person's are not.
+    const read = done(await agent('doc_read', { id })).text;
+    assert.ok(read.includes(`, comment ${a1.id}): Because of the review.`) && read.includes(`, comment ${a2.id}): Monday is sign-off.`), read);
+    assert.ok(!read.includes(mine.id) && !read.includes(theirs.id), 'a comment of the person has no id to give');
+    assert.ok(!/edited/.test(read.split('\n\nOpen comments: ')[1]));
+
+    // The person has seen the answer: the agent changing the first of its two comments (not the last) is no news.
+    await docs.call('POST', `${url}/threads/${asked.id}/seen`);
+    assert.equal((await threads())[0].answered, false);
+    const first = done(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: a1.id, comment: 'Because the review is on **Thursday**.' }));
+    assert.deepEqual([first.details.action, first.details.thread, first.details.comment, first.details.id], ['edit_comment', asked.id, a1.id, id]);
+    assert.ok(first.text.includes(asked.id));
+    [thread] = await threads();
+    assert.deepEqual(thread.comments.map((c: any) => [c.author, c.body, Boolean(c.edited)]), [
+      ['user', 'Why Friday?', false], ['agent', 'Because the review is on **Thursday**.', true], ['user', 'And Monday?', false], ['agent', 'Monday is sign-off.', false],
+    ]);
+    assert.equal(thread.answered, false);
+    // Its last comment: the person is told again, as of a new answer.
+    done(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: a2.id, comment: 'Monday is **sign-off**.' }));
+    [thread] = await threads();
+    assert.equal(thread.answered, true);
+    assert.equal(thread.comments[3].body, 'Monday is **sign-off**.');
+    // doc_read says which are edited.
+    const again = done(await agent('doc_read', { id })).text;
+    assert.ok(again.includes(`, comment ${a1.id}, edited): Because the review is on **Thursday**.`) && again.includes(`, comment ${a2.id}, edited): Monday is **sign-off**.`), again);
+    // The same words change nothing.
+    done(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: a1.id, comment: 'Because the review is on **Thursday**.' }));
+    // The passage and the document stay as they were.
+    assert.equal(thread.quote, 'Ship it on Friday.');
+    assert.equal((await docs.call('GET', url)).body.revision, 1);
+
+    // A resolved thread is corrected all the same.
+    await docs.call('POST', `${url}/threads/${asked.id}/resolve`, {});
+    done(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: a1.id, comment: 'Because the review is on Thursday.' }));
+    [thread] = await threads();
+    assert.deepEqual([thread.status, thread.comments[1].body], ['resolved', 'Because the review is on Thursday.']);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('the agent does not change what is not its own, or what is not there, or with no words, and a thread that still asks it is told so', async () => {
+  const { docs, id, agent, person, threads, url } = await withDocument('docs-ct-edit-comment-refused-');
+  try {
+    const asked = await person('Ship it on Friday.', 'Why Friday, @agent?');
+    const [ask] = (await threads())[0].comments;
+    done(await agent('doc_reply', { id, thread: asked.id, comment: 'Because.' }));
+    const a1 = (await threads())[0].comments[1].id;
+    // The person's comment is not the agent's to change.
+    refused(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: ask.id, comment: 'Changed' }), 'comment_not_yours');
+    refused(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: '0123456789abcdef', comment: 'Changed' }), 'comment_not_found');
+    refused(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: undefined, comment: 'Changed' }), 'comment_not_found');
+    refused(await agent('doc_edit_comment', { id, thread: '0000000000000000', comment_id: a1, comment: 'Changed' }), 'thread_not_found');
+    refused(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: a1, comment: '  ' }), 'invalid');
+    refused(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: a1, comment: 'x'.repeat(4097) }), 'too_large');
+    refused(await agent('doc_edit_comment', { id: '0000000000000000', thread: asked.id, comment_id: a1, comment: 'Changed' }), 'not_found');
+    const other = done(await agent('doc_create', { title: 'Other' }));
+    refused(await agent('doc_edit_comment', { id: other.details.id, thread: asked.id, comment_id: a1, comment: 'Changed' }), 'thread_not_found');
+    assert.deepEqual((await threads())[0].comments.map((c: any) => [c.body, Boolean(c.edited)]), [['Why Friday, @agent?', false], ['Because.', false]]);
+    // The agent's answer is gone and the person's question stands: the thread asks it again, and the tool says so. Editing is no answer.
+    const gone = done(await agent('doc_delete_comment', { id, thread: asked.id, comment_id: a1 }));
+    assert.ok(/still asks you/.test(gone.text), gone.text);
+    assert.equal((await threads())[0].toAgent, true);
+    await docs.call('PUT', `${url}/threads/${asked.id}/comments/${ask.id}`, { body: 'Why Friday, @agent? Please say.' });
+    done(await agent('doc_reply', { id, thread: asked.id, comment: 'Because the review.' }));
+    const b1 = (await threads())[0].comments[1].id;
+    const kept = done(await agent('doc_edit_comment', { id, thread: asked.id, comment_id: b1, comment: 'Because of the review.' }));
+    assert.ok(!/still asks you/.test(kept.text));
+    assert.equal((await threads())[0].toAgent, false);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('the agent deletes its own comments, never the person\'s: a thread goes with its only comment, and the person\'s words stay when they replied', async () => {
+  const { docs, id, agent, person, threads, url } = await withDocument('docs-ct-delete-comment-');
+  try {
+    const asked = await person('Ship it on Friday.', 'Why Friday?');
+    done(await agent('doc_reply', { id, thread: asked.id, comment: 'One.' }));
+    await docs.call('POST', `${url}/threads/${asked.id}/comments`, { body: 'Thanks.' });
+    done(await agent('doc_reply', { id, thread: asked.id, comment: 'Two.' }));
+    let [thread] = await threads();
+    const [ask, a1, thanks, a2] = thread.comments;
+    // Not the person's, not one that is not there, not in a thread that is not there.
+    refused(await agent('doc_delete_comment', { id, thread: asked.id, comment_id: ask.id }), 'comment_not_yours');
+    refused(await agent('doc_delete_comment', { id, thread: asked.id, comment_id: thanks.id }), 'comment_not_yours');
+    refused(await agent('doc_delete_comment', { id, thread: asked.id, comment_id: '0123456789abcdef' }), 'comment_not_found');
+    refused(await agent('doc_delete_comment', { id, thread: '0000000000000000', comment_id: a1.id }), 'thread_not_found');
+    assert.equal((await threads())[0].comments.length, 4);
+    // From the middle: the rest stays, the person's words too.
+    const gone = done(await agent('doc_delete_comment', { id, thread: asked.id, comment_id: a1.id }));
+    assert.deepEqual([gone.details.action, gone.details.removed, gone.details.thread, gone.details.comment], ['delete_comment', 'comment', asked.id, a1.id]);
+    assert.match(gone.text, /3 comments left/);
+    [thread] = await threads();
+    assert.deepEqual(thread.comments.map((c: any) => c.body), ['Why Friday?', 'Thanks.', 'Two.']);
+    // The last one: the person's comment is the last then, and there is nothing to read as news.
+    done(await agent('doc_delete_comment', { id, thread: asked.id, comment_id: a2.id }));
+    [thread] = await threads();
+    assert.deepEqual([thread.comments.map((c: any) => c.body), thread.answered, thread.status], [['Why Friday?', 'Thanks.'], false, 'open']);
+
+    // A thread of the agent's own goes with its only comment; the person's passage is not touched.
+    const own = done(await agent('doc_comment', { id, quote: 'The build is green, and the build is green again.', comment: 'Check this.' }));
+    assert.equal((await threads()).length, 2);
+    const removed = done(await agent('doc_delete_comment', { id, thread: own.details.thread, comment_id: (await threads())[1].comments[0].id }));
+    assert.equal(removed.details.removed, 'thread');
+    assert.match(removed.text, /thread went with it/);
+    assert.deepEqual((await threads()).map((t: any) => t.id), [asked.id]);
+    refused(await agent('doc_delete_comment', { id, thread: own.details.thread, comment_id: a1.id }), 'thread_not_found');
+
+    // The agent's thread that the person answered: its comment goes, the person's stays.
+    const mixed = done(await agent('doc_comment', { id, quote: 'Sign-off is on Monday.', comment: 'Is Monday right?' }));
+    await docs.call('POST', `${url}/threads/${mixed.details.thread}/comments`, { body: 'Yes.' });
+    const m = (await threads())[1];
+    assert.equal(done(await agent('doc_delete_comment', { id, thread: mixed.details.thread, comment_id: m.comments[0].id })).details.removed, 'comment');
+    assert.deepEqual((await threads())[1].comments.map((c: any) => [c.author, c.body]), [['user', 'Yes.']]);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a thread is taken away by the person only while it is theirs and the agent has not commented in it', async () => {
+  const { docs, id, agent, person, threads, url } = await withDocument('docs-ct-delete-thread-');
+  try {
+    // The agent answered: the person cannot delete the thread, and nothing is lost.
+    const asked = await person('Ship it on Friday.', 'Why Friday?');
+    done(await agent('doc_reply', { id, thread: asked.id, comment: 'Because.' }));
+    const refusedAnswered = await docs.call('DELETE', `${url}/threads/${asked.id}`);
+    assert.deepEqual([refusedAnswered.status, refusedAnswered.body.code], [409, 'thread_answered']);
+    // The agent's own thread is the agent's.
+    const own = done(await agent('doc_comment', { id, quote: 'Sign-off is on Monday.', comment: 'Is Monday right?' }));
+    const refusedOwn = await docs.call('DELETE', `${url}/threads/${own.details.thread}`);
+    assert.deepEqual([refusedOwn.status, refusedOwn.body.code], [409, 'thread_not_yours']);
+    assert.equal((await threads()).length, 2);
+    // A person's reply in the agent's thread does not make it theirs.
+    await docs.call('POST', `${url}/threads/${own.details.thread}/comments`, { body: 'Yes.' });
+    assert.equal((await docs.call('DELETE', `${url}/threads/${own.details.thread}`)).body.code, 'thread_not_yours');
+    // Once the agent has taken its comment away there is nothing of it in the thread, and it is the person's.
+    const a1 = (await threads())[0].comments[1].id;
+    done(await agent('doc_delete_comment', { id, thread: asked.id, comment_id: a1 }));
+    assert.deepEqual((await docs.call('DELETE', `${url}/threads/${asked.id}`)).body, { removed: 'thread' });
+    assert.deepEqual((await threads()).map((t: any) => t.id), [own.details.thread]);
+    // The agent resolving a thread without a word is no comment of its own: the person's thread can still go.
+    const quiet = await person('The build is green, and the build is green again.', 'Is it?');
+    done(await agent('doc_resolve', { id, thread: quiet.id }));
+    assert.equal((await docs.call('DELETE', `${url}/threads/${quiet.id}`)).status, 200);
   } finally {
     await docs.close();
   }
