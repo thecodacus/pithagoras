@@ -333,6 +333,27 @@ export function glide(el: HTMLElement, from: DOMRect, hold: HTMLElement[] = []):
   el.animate([at(`translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`), at("none")], { duration: 620, easing: SPRING }).finished.then(done, done);
 }
 
+/** Where `el` is laid out across its parent: as the layout has it, whatever transform is on it as it slides. */
+export const across = (el: HTMLElement): { left: number; width: number } => ({ left: el.offsetLeft, width: el.offsetWidth });
+
+/**
+ * `el` was made narrower or wider at a side (a panel docked beside it, or taken
+ * away): it slides over from where its middle was (`was`, as it was laid out
+ * last, by `across`) to where it is now, so that what is centred in it moves
+ * over instead of jumping. A transform only, so nothing is laid out again as it
+ * goes; one still going is let go for the new one. With reduced motion it is
+ * where it is at once.
+ */
+export function slideOver(el: HTMLElement, was: { left: number; width: number }): void {
+  if (reducedMotion() || typeof el.animate !== "function") return;
+  const now = across(el);
+  if (now.width < 1 || was.width < 1) return;
+  const dx = was.left + was.width / 2 - (now.left + now.width / 2);
+  if (Math.abs(dx) < 1) return;
+  for (const going of el.getAnimations()) going.cancel();
+  el.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], { duration: 380, easing: OUT });
+}
+
 /** The chat that was picked lights up for a moment. */
 export function pick(row: Element | null | undefined): void {
   if (!row || !fancy()) return;

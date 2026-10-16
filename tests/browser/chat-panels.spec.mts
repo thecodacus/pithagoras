@@ -156,6 +156,47 @@ test('each edge between the conversation and the panels sizes them the way it is
   }
 });
 
+test('the conversation slides over to stay in the middle when a panel docks at a side and back when it goes; an edge being dragged moves it with no slide', async ({ page }) => {
+  await page.getByRole('button', { name: 'Close Viewer' }).click();
+  await page.getByRole('button', { name: 'Close Console' }).click();
+  await expect(panels(page)).toHaveCount(0);
+  const column = page.locator('.chat-column');
+  /** Where each slide of the conversation going on starts: its first transform. */
+  const slides = () => column.evaluate((el) => el.getAnimations().map((a) => String((a.effect as KeyframeEffect).getKeyframes()[0].transform)));
+  const from = (transform: string) => Number(/^translateX\((-?[\d.]+)px\)$/.exec(transform)?.[1]);
+  const middle = async () => {
+    const b = (await page.locator('.chat-list').boundingBox())!;
+    return b.x + b.width / 2;
+  };
+  await expect.poll(slides).toEqual([]);
+  const alone = await middle();
+  // Docked at the right: it starts where it was, and slides left into the middle of what is left.
+  await page.getByRole('button', { name: 'Viewer', exact: true }).click();
+  const [opening] = await slides();
+  expect(from(opening)).toBeGreaterThan(50);
+  await expect.poll(slides).toEqual([]);
+  expect(await middle()).toBeLessThan(alone - 50);
+  // The edge dragged: the conversation follows it as it goes, and nothing slides.
+  const edge = (await page.locator('.chat-aside-edge').boundingBox())!;
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + edge.width / 2 - 80, edge.y + edge.height / 2, { steps: 6 });
+  expect(await slides()).toEqual([]);
+  await page.mouse.up();
+  expect(await slides()).toEqual([]);
+  // Taken away: it slides back right, to the middle of the whole chat.
+  await page.getByRole('button', { name: 'Close Viewer' }).click();
+  const [closing] = await slides();
+  expect(from(closing)).toBeLessThan(-50);
+  await expect.poll(slides).toEqual([]);
+  expect(Math.abs((await middle()) - alone)).toBeLessThan(2);
+  // With reduced motion it is where it goes at once.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: 'Viewer', exact: true }).click();
+  await expect(panels(page)).toHaveCount(1);
+  expect(await slides()).toEqual([]);
+});
+
 test('floating, a panel is a window carried by its header, sized by its corner, kept inside the chat, and docked again at an edge', async ({ page }) => {
   await page.getByRole('button', { name: 'Close Viewer' }).click();
   // Let go in the middle: a window, held by its header where it was let go.
