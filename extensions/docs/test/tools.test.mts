@@ -177,6 +177,9 @@ test('a new document is called by its first heading: the title is that heading o
     const tagged = done(await agent('doc_create', { title: 'Tagged', markdown: '---\ntitle: Elsewhere\ntags: [a]\n---\n\nBody.\n' }));
     assert.equal(fileOf(folder, 'tagged.md'), '---\ntitle: Elsewhere\ntags: [a]\n---\n\n# Tagged\n\nBody.\n');
     assert.equal(tagged.details.title, 'Tagged');
+    // One that ends the Markdown, with no line break after its closing marks, still closes, before the heading.
+    done(await agent('doc_create', { title: 'Only tags', markdown: '---\ntags: [a]\n---' }));
+    assert.equal(fileOf(folder, 'only-tags.md'), '---\ntags: [a]\n---\n\n# Only tags\n');
     // Blank lines before the text, and a title over more than one line, make one heading and one blank line.
     done(await agent('doc_create', { title: 'Two\nLines', markdown: '\n\n\nText.\n' }));
     assert.equal(fileOf(folder, 'two-lines.md'), '# Two Lines\n\nText.\n');
@@ -186,7 +189,7 @@ test('a new document is called by its first heading: the title is that heading o
     assert.equal(fileOf(folder, 'from-the-page.md'), '# From the page\n\nSome text.\n');
     const listed = (await docs.call('GET', '/folders')).body.folders[0].documents;
     assert.deepEqual(Object.fromEntries(listed.map((d: any) => [d.name, d.title])), {
-      'alpha-beta.md': 'Gamma Delta', 'from-the-page.md': 'From the page', 'scope-check.md': 'Scope check', 'tagged.md': 'Tagged', 'two-lines.md': 'Two Lines',
+      'alpha-beta.md': 'Gamma Delta', 'from-the-page.md': 'From the page', 'only-tags.md': 'Only tags', 'scope-check.md': 'Scope check', 'tagged.md': 'Tagged', 'two-lines.md': 'Two Lines',
     });
   } finally {
     await docs.close();

@@ -414,7 +414,8 @@ export function documentTools(pi, chat, deps) {
       // A quote of whole lines (a line, a paragraph) taken out leaves the line breaks on both sides of it, and so
       // more blank lines than either side had. They are made as many as the larger side had, or, at the start or
       // the end of the document, as it had there: a line removed leaves no gap. Only the line breaks between this
-      // edit and the next are looked at, and with a thread only those in its passage.
+      // edit and the next are looked at. With a thread they are counted as the document has them, and only those
+      // in its passage are taken out: a passage that starts or ends at a line break has the rest outside it.
       const eol = dos ? "\r\n" : "\n";
       const breaks = (run) => (run.match(/\n/g) ?? []).length;
       let out = "";
@@ -424,13 +425,16 @@ export function documentTools(pi, chat, deps) {
         from = edit.end;
         const quote = current.slice(edit.at, edit.end);
         if (edit.replacement || !/[^\r\n]/.test(quote)) return;
-        const left = /[\r\n]*$/.exec(current.slice(Math.max(found[i - 1]?.end ?? 0, scope.from), edit.at))[0];
-        const right = /^[\r\n]*/.exec(current.slice(edit.end, Math.min(found[i + 1]?.at ?? current.length, scope.to)))[0];
+        const left = /[\r\n]*$/.exec(current.slice(found[i - 1]?.end ?? 0, edit.at))[0];
+        const right = /^[\r\n]*/.exec(current.slice(edit.end, found[i + 1]?.at ?? current.length))[0];
         const sides = [breaks(left) + breaks(/^[\r\n]*/.exec(quote)[0]), breaks(/[\r\n]*$/.exec(quote)[0]) + breaks(right)];
         const keep = edit.at === left.length ? sides[0] : edit.end + right.length === current.length ? sides[1] : Math.max(...sides);
-        if (breaks(left) + breaks(right) <= keep) return;
-        out = out.slice(0, out.length - left.length) + eol.repeat(keep);
-        from = edit.end + right.length;
+        const ownLeft = left.slice(Math.max(0, scope.from - (edit.at - left.length)));
+        const ownRight = right.slice(0, Math.max(0, scope.to - edit.end));
+        const cut = Math.min(breaks(left) + breaks(right) - keep, breaks(ownLeft) + breaks(ownRight));
+        if (cut <= 0) return;
+        out = out.slice(0, out.length - ownLeft.length) + eol.repeat(breaks(ownLeft) + breaks(ownRight) - cut);
+        from = edit.end + ownRight.length;
       });
       out += current.slice(from);
       // What is written, not each replacement alone: a token can be made of the document's text and a replacement. One the

@@ -362,9 +362,12 @@ function headed(markdown, title) {
   if (headingOf(Buffer.from(markdown, "utf8").subarray(0, HEAD_BYTES).toString("utf8"))) return markdown;
   const at = frontMatterEnd(markdown, markdown.startsWith("\uFEFF") ? 1 : 0);
   const eol = markdown.includes("\r\n") ? "\r\n" : "\n";
+  const head = markdown.slice(0, at);
   // Blank lines before the text are the heading's blank line now.
   const rest = markdown.slice(at).replace(/^(?:[ \t]*\r?\n)+/, "");
-  return `${markdown.slice(0, at)}# ${title.replace(/\s+/g, " ")}${eol}${rest.trim() ? eol + rest : ""}`;
+  // A front matter block that ends the Markdown with no line break is given one: glued to its closing marks, the heading would keep it from closing.
+  const glued = at > 0 && !/[\n\uFEFF]$/.test(head);
+  return `${head}${glued ? eol + eol : ""}# ${title.replace(/\s+/g, " ")}${eol}${rest.trim() ? eol + rest : ""}`;
 }
 
 

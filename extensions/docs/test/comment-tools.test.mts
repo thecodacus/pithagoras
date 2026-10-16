@@ -355,6 +355,20 @@ test('with a thread, the quotes are looked for in the passage only: a word that 
   }
 });
 
+test('a paragraph taken out of a passage of two takes its line breaks with it, as it would without the thread', async () => {
+  const { folder, docs, id, agent, person, threads } = await withDocument('docs-ct-edit-paragraph-');
+  try {
+    // The passage starts at a paragraph and ends at the next: the blank line before it is outside, the one after it inside.
+    const asked = await person('Ship it on Friday.\n\nThe build is green, and the build is green again.', 'Is the first line needed?');
+    done(await agent('doc_edit', { id, expected_revision: 1, thread: asked.id, edits: [{ quote: 'Ship it on Friday.', replacement: '' }], reply: 'Took it out.' }));
+    assert.equal(fileOf(folder), PLAN.replace('Ship it on Friday.\n\n', ''));
+    const [thread] = await threads();
+    assert.equal(thread.quote, 'The build is green, and the build is green again.');
+  } finally {
+    await docs.close();
+  }
+});
+
 test('an edit with a thread is refused, and nothing is written, for a thread that is not open or not there, a missing reply, or a reply that cannot be kept', async () => {
   const { folder, docs, id, agent, person, threads, url } = await withDocument('docs-ct-edit-refused-');
   try {
