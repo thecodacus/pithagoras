@@ -297,8 +297,8 @@ puts it before entries with a higher one, or none.
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
-| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()` |
-| `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?` | |
+| `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `maximized`, `maximize()`, `restore()` |
+| `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?`, `useShown?` | |
 | `settings.page` | Your package's page in Settings, above the fields the portal found for it | | |
 
 `chat` is `{ id, title, workspace }`. `channel` reaches
@@ -397,8 +397,8 @@ the `name` its `chat.panel` entry gave it.
 
 ### A window in voice mode
 
-A `voice.window` has a button in voice mode's toolbar. Three more fields say
-how it behaves beside the portal's own windows:
+A `voice.window` has a button in voice mode's toolbar. More fields say how it
+behaves beside the portal's own windows:
 
 - `place`: `"side"` or `"middle"`, where it goes when it has the choice, as the
   terminal's window goes to the side and the browser to the middle. Without it,
@@ -414,6 +414,14 @@ how it behaves beside the portal's own windows:
 - `describe(call)`: what the card of such a call says, `{ label, detail? }`,
   in place of the portal's words for a tool it does not know ("Using canvas
   write"): Canvases' cards say "Writing in a document" and its title.
+- `maximizable`: its head gets a Maximize button, as the browser's has. The
+  window then fills the stage, over the other windows and above the dock,
+  until it is restored: by its button, by Escape, by being minimized, or by
+  another window opening. Your component is told `maximized`, and can call
+  `maximize()` and `restore()` itself.
+- `keepLoaded`: once it has opened, it stays while it is minimized, hidden and
+  out of reach, so a frame or a stream in it is not loaded again each time it
+  opens. Without it, a minimized window is gone until it opens again.
 
 ```js
 portal.slots.register("voice.window", {
@@ -425,6 +433,32 @@ portal.slots.register("voice.window", {
   component: Shell,
 });
 ```
+
+Escape pressed in a frame of your window's never reaches the stage: the frame
+has the key. If your window can be maximized and shows a page of the same
+origin, listen for Escape in the frame and restore the window there:
+
+```js
+function Viewer({ maximized, restore }) {
+  const latest = React.useRef({ maximized, restore });
+  latest.current = { maximized, restore };
+  const hear = (frame) =>
+    frame.contentWindow.addEventListener("keydown", (e) => {
+      if (e.code === "Escape" && latest.current.maximized) latest.current.restore();
+    }, true);
+  return h("iframe", { src: portal.api.url("/view/"), onLoad: (e) => hear(e.currentTarget) });
+}
+
+portal.slots.register("voice.window", { id: "viewer", title: "Viewer", place: "middle", maximizable: true, keepLoaded: true, component: Viewer });
+```
+
+### A page
+
+A `nav.page` is at `/x/<package>/<id>`, with an entry in the sidebar after
+the portal's own. `useShown()` is a hook, called as the sidebar is drawn:
+whether the entry is listed now. Use it for a page whose service is not set
+up, as the browser's page is not listed before there is a browser. Until it
+returns `true` the entry is not listed; the page is at its address either way.
 
 ### A part that only listens
 
@@ -1062,6 +1096,8 @@ the portal, and what gives the same to an extension:
 | The running tray's jobs opening its Jobs tab, and the jobs themselves | The `jobs.show` command; `background` in `portal.chats.use` |
 | An emulator fetched only when its tab is opened | `ui.lazy` |
 | A page in the sidebar; a page in Settings | `nav.page`, `settings.page` |
+| A window in voice mode that can fill the stage, with a page in it that is not loaded again each time | `maximizable`, `keepLoaded` and `restore()` on its `voice.window` |
+| A page in the sidebar only once its service is set up | `useShown` on its `nav.page` |
 | A slash command | `pi.registerCommand` in the pi extension, and the channel for what it does in the page |
 | The colours of everything | [A theme](#themes) |
 

@@ -483,3 +483,85 @@ test('the windows have their place at any width, not only on either side of the 
   });
   expect(unset).toBe(false);
 });
+
+// An extension's window that may be maximized and is kept loaded, as the browser's is: the portal's tests' stand-in for one.
+test.describe('a window an extension lets be maximized', () => {
+  test.use({ installed: ['tests/fixtures/extensions/console', 'tests/fixtures/extensions/viewer'] });
+  const viewerOf = (page: Page) => page.locator('.voice-extension-window[data-extension="test-viewer"]');
+
+  test('it fills the stage until it is restored: by its button, by Escape, by being minimized, or by another window opening', async ({ page }) => {
+    const viewer = viewerOf(page);
+    await page.getByRole('button', { name: 'Show Viewer' }).click();
+    await expect(viewer).toHaveClass(/is-open/);
+    await page.getByRole('button', { name: 'Maximize Viewer' }).click();
+    await expect(viewer).toHaveClass(/is-maximized/);
+    await settled(page);
+    expect((await box(viewer)).width).toBeGreaterThan((await box(page.locator('.voice-stage'))).width - 30);
+    await expect(page.locator('.voice-stage')).toHaveAttribute('data-orb', 'dock');
+    await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Restore the size of Viewer' }).click();
+    await expect(viewer).not.toHaveClass(/is-maximized/);
+    await page.getByRole('button', { name: 'Maximize Viewer' }).click();
+    await page.keyboard.press('Escape');
+    await expect(viewer).not.toHaveClass(/is-maximized/);
+    await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
+
+    // Minimized while large, it opens again at its usual size.
+    await page.getByRole('button', { name: 'Maximize Viewer' }).click();
+    await page.getByRole('button', { name: 'Minimize Viewer' }).click();
+    await expect(viewer).not.toHaveClass(/is-open/);
+    await page.getByRole('button', { name: 'Show Viewer' }).click();
+    await expect(viewer).toHaveClass(/is-open/);
+    await expect(viewer).not.toHaveClass(/is-maximized/);
+
+    // A window opening is there to be seen: the portal's own, and the browser.
+    await page.getByRole('button', { name: 'Maximize Viewer' }).click();
+    await page.getByRole('button', { name: 'Show files' }).click();
+    await expect(viewer).not.toHaveClass(/is-maximized/);
+    await page.getByRole('button', { name: 'Minimize files' }).click();
+    await page.getByRole('button', { name: 'Maximize Viewer' }).click();
+    await page.getByRole('button', { name: 'Use browser', exact: true }).click();
+    await expect(page.locator('.voice-browser-window')).toHaveClass(/is-open/);
+    await expect(viewer).not.toHaveClass(/is-maximized/);
+
+    // A window that does not ask for it has no such button.
+    await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+    await expect(page.locator('.voice-extension-window[data-extension="test-console"]')).toHaveClass(/is-open/);
+    await expect(page.getByRole('button', { name: 'Maximize Console' })).toHaveCount(0);
+  });
+
+  test('Escape in a frame of its own restores it, where the extension listens for it', async ({ page }) => {
+    const viewer = viewerOf(page);
+    await page.getByRole('button', { name: 'Show Viewer' }).click();
+    await page.getByRole('button', { name: 'Maximize Viewer' }).click();
+    await viewer.frameLocator('iframe').locator('body').click();
+    await page.keyboard.press('Escape');
+    await expect(viewer).not.toHaveClass(/is-maximized/);
+    await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible();
+  });
+
+  test('kept loaded, it is not drawn before it first opens, and its frame loads once however often it is minimized', async ({ page }) => {
+    const viewer = viewerOf(page);
+    const loads = () => page.evaluate(() => (window as any).viewerLoads);
+    await expect(page.getByRole('button', { name: 'Show Viewer' })).toBeVisible();
+    await expect(viewer).toHaveCount(0);
+    await page.getByRole('button', { name: 'Show Viewer' }).click();
+    await expect.poll(loads).toBe(1);
+    await page.getByRole('button', { name: 'Minimize Viewer' }).click();
+    await expect(viewer).not.toHaveClass(/is-open/);
+    // Hidden, and out of reach: nothing in it takes focus or a click.
+    await expect(viewer).toHaveAttribute('aria-hidden', 'true');
+    expect(await viewer.evaluate((el) => (el as HTMLElement).inert)).toBe(true);
+    await page.getByRole('button', { name: 'Show Viewer' }).click();
+    await expect(viewer).toHaveClass(/is-open/);
+    expect(await viewer.evaluate((el) => (el as HTMLElement).inert)).toBe(false);
+    expect(await loads()).toBe(1);
+    // One that does not ask to be kept is gone while minimized, as it always was.
+    await page.getByRole('button', { name: 'Use terminal', exact: true }).click();
+    const console = page.locator('.voice-extension-window[data-extension="test-console"]');
+    await expect(console).toHaveClass(/is-open/);
+    await page.getByRole('button', { name: 'Minimize Console' }).click();
+    await expect(console).toHaveCount(0);
+  });
+});

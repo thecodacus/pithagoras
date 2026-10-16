@@ -2195,6 +2195,8 @@ const de: Locale = {
     // components/VoiceStage.tsx
     "Show {panel}": "{panel} anzeigen",
     "Minimize {panel}": "{panel} minimieren",
+    "Maximize {panel}": "{panel} maximieren",
+    "Restore the size of {panel}": "Größe von {panel} wiederherstellen",
     "Minimize": "Minimieren",
     "The browser viewer is unavailable.": "Die Browseransicht ist nicht verfügbar.",
     "Could not connect to the browser viewer.": "Verbindung zur Browseransicht fehlgeschlagen.",

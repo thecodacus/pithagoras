@@ -28,12 +28,26 @@ import { pick, useFlip } from "../motion";
 import { HOME, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t, useLanguage } from "../i18n";
-import { useSlot } from "../extensions/slots";
+import { useSlot, type Registered } from "../extensions/slots";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 /** How many unpinned sessions the sidebar shows before deferring to Sessions. */
 const RECENTS_LIMIT = 12;
 /** How many of a folder's chats the sidebar shows before deferring to Sessions, opened at that folder. */
 const FOLDER_LIMIT = 8;
+
+/**
+ * Asks an extension's page whether its entry is listed now (`useShown`), and
+ * says so each time that changes. Drawn on its own, so that each page's hook is
+ * called the same way however many pages there are.
+ */
+function PageShown({ entry, onChange }: { entry: Registered<"nav.page">; onChange: (shown: boolean) => void }) {
+  const shown = entry.useShown!() === true;
+  const change = useRef(onChange);
+  change.current = onChange;
+  useEffect(() => change.current(shown), [shown]);
+  return null;
+}
 
 export const Sidebar = memo(function Sidebar({
   forceExpanded = false,
@@ -81,7 +95,10 @@ export const Sidebar = memo(function Sidebar({
 }) {
   // Not drawn again with every token of a chat, so the language is asked for here.
   useLanguage();
-  const pages = useSlot("nav.page");
+  const entries = useSlot("nav.page");
+  // The pages that ask whether they are listed, by their entry's key: those that said yes last.
+  const [shownPages, setShownPages] = useState<readonly string[]>([]);
+  const pages = entries.filter((page) => !page.useShown || shownPages.includes(page.key));
   const [storedCollapsed, setCollapsed] = useState(() => local.get("sidebarCollapsed") === "true");
   const collapsed = forceExpanded ? false : storedCollapsed;
   const toggleSidebar = () => {
@@ -208,6 +225,12 @@ export const Sidebar = memo(function Sidebar({
 
   return (
     <aside aria-label={t("Sidebar")} className={`relative flex shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-in-out motion-reduce:transition-none ${collapsed ? "w-12" : "w-64"}`}>
+      {/* One that fails to answer is not listed: its page is at its address all the same. */}
+      {entries.filter((page) => page.useShown).map((page) => (
+        <ErrorBoundary key={page.key} resetKey={page.key} fallback={() => null}>
+          <PageShown entry={page} onChange={(shown) => setShownPages((keys) => (shown ? (keys.includes(page.key) ? keys : [...keys, page.key]) : keys.filter((key) => key !== page.key)))} />
+        </ErrorBoundary>
+      ))}
       <button type="button" onClick={toggleSidebar} aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
         title={collapsed ? t("Expand sidebar") : t("Collapse sidebar")} aria-expanded={!collapsed} aria-controls="sidebar-content"
         className="hidden md:grid absolute right-2 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-canvas hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">

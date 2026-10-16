@@ -56,19 +56,30 @@ const editing = (target: EventTarget | null) => !!(target as Element | null)?.cl
 /**
  * A window an extension brought to voice mode: placed and sized as Files, the
  * pictures and the conversation are, with what the extension draws in it. It
- * is there only while open; one that fails to draw says so in its window.
+ * is there while open, and one kept loaded (`keepLoaded`) from when it first
+ * opens, hidden while minimized; one that fails to draw says so in its window.
  */
-function BroughtWindow({ entry, main, onClose, ...props }: ChatProps & { entry: Registered<"voice.window">; main: boolean; onClose: () => void }) {
+function BroughtWindow({ entry, main, open, maximized, onClose, onMaximize, onRestore, ...props }: ChatProps & {
+  entry: Registered<"voice.window">; main: boolean; open: boolean; maximized: boolean; onClose: () => void; onMaximize: () => void; onRestore: () => void;
+}) {
   const section = useRef<HTMLElement>(null);
-  // The same function each time it is drawn: what is in the window is drawn again only for what is new in what it is handed.
-  const latest = useRef(onClose);
-  latest.current = onClose;
-  const close = useCallback(() => latest.current(), []);
+  useEffect(() => { if (section.current) section.current.inert = !open; }, [open]);
+  // The same functions each time it is drawn: what is in the window is drawn again only for what is new in what it is handed.
+  const latest = useRef({ onClose, onMaximize, onRestore });
+  latest.current = { onClose, onMaximize, onRestore };
+  const close = useCallback(() => latest.current.onClose(), []);
+  const maximize = useCallback(() => latest.current.onMaximize(), []);
+  const restore = useCallback(() => latest.current.onRestore(), []);
   return (
-    <section ref={section} className={`voice-files-window voice-extension-window ${main ? "as-main" : "as-side"} is-open`} aria-label={entry.title} data-extension={entry.extension}>
-      <header><span>{entry.icon ? <entry.icon /> : <LuPuzzle />}{entry.title}</span><div><button type="button" aria-label={t("Minimize {panel}", { panel: entry.title })} title={t("Minimize")} onClick={onClose}><LuMinus /></button></div></header>
+    <section ref={section} className={`voice-files-window voice-extension-window ${main ? "as-main" : "as-side"} ${open ? "is-open" : ""} ${maximized ? "is-maximized" : ""}`} aria-label={entry.title} aria-hidden={!open} data-extension={entry.extension}>
+      <header><span>{entry.icon ? <entry.icon /> : <LuPuzzle />}{entry.title}</span><div>
+        {entry.maximizable && (maximized
+          ? <button type="button" aria-label={t("Restore the size of {panel}", { panel: entry.title })} title={t("Restore size (Esc)")} onClick={restore}><LuMinimize2 /></button>
+          : <button type="button" aria-label={t("Maximize {panel}", { panel: entry.title })} title={t("Maximize")} onClick={maximize}><LuMaximize2 /></button>)}
+        <button type="button" aria-label={t("Minimize {panel}", { panel: entry.title })} title={t("Minimize")} onClick={onClose}><LuMinus /></button>
+      </div></header>
       <ErrorBoundary resetKey={`${entry.key}:${props.chat.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
-        <entry.component key={props.chat.id} {...props} close={close} />
+        <entry.component key={props.chat.id} {...props} close={close} maximized={maximized} maximize={maximize} restore={restore} />
       </ErrorBoundary>
       <ResizeHandles target={section} />
     </section>
@@ -112,10 +123,11 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   ptt: boolean; onPtt: (ptt: boolean) => void; holding: boolean; onHold: (down: boolean) => void;
 }) {
   const end = useRef<HTMLButtonElement>(null), browser = useRef<HTMLElement>(null), stage = useRef<HTMLElement>(null);
-  // The browser made as large as the stage allows. Not the browser's own
-  // fullscreen: that took the whole of the person's browser with it, and
-  // closing the window here did not give it back.
-  const [browserMax, setBrowserMax] = useState(false);
+  // The window made as large as the stage allows, by its name among the
+  // stage's windows: "browser", or an extension's (`x:` and its entry's key).
+  // Not the browser's own fullscreen: that took the whole of the person's
+  // browser with it, and closing the window here did not give it back.
+  const [maxed, setMaxed] = useState<string | null>(null);
   // Where the orb stands once a window has been sized by hand: in a gap, or
   // in its dock. Measured after the windows have moved, for the arrangement
   // they were in then — and for no other: see `presence` below.
@@ -149,10 +161,16 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   // The windows the installed extensions brought (the `voice.window` slot), by their entry's key: those still there.
   const windowEntries = useSlot("voice.window");
   const [broughtOpen, setBroughtOpen] = useState<readonly string[]>([]);
+  // Every one opened in this chat's voice mode: one kept loaded stays from then on.
+  const [broughtOnce, setBroughtOnce] = useState<readonly string[]>([]);
   const brought = windowEntries.filter((entry) => broughtOpen.includes(entry.key));
   const broughtShown = Object.fromEntries(brought.map((entry) => [`x:${entry.key}`, true])) as Record<`x:${string}`, boolean>;
   const closeBrought = (key: string) => setBroughtOpen((open) => open.filter((k) => k !== key));
-  const openBrought = (key: string) => { setBroughtOpen((open) => (open.includes(key) ? open : [...open, key])); onCue("focus"); };
+  const openBrought = (key: string) => {
+    setBroughtOpen((open) => (open.includes(key) ? open : [...open, key]));
+    setBroughtOnce((once) => (once.includes(key) ? once : [...once, key]));
+    onCue("focus");
+  };
   /** An extension's own windows, by the ids it registered them with: for its shortcuts. */
   const windowsOf = (extension: string): VoiceWindows => ({
     isOpen: (id) => broughtOpen.includes(`${extension}/${id}`),
@@ -170,7 +188,8 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       }
     });
   const chat = useMemo(() => ({ id: sessionId, title, workspace: folder }), [sessionId, title, folder]);
-  useWorkPanels({ browser: shown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown }, panel => {
+  const windows: Record<string, boolean> = { browser: shown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown };
+  useWorkPanels(windows, panel => {
     if (panel.startsWith("x:")) closeBrought(panel.slice(2)); else
     if (panel === "browser") setShown(false); else if (panel === "files") setFilesShown(false); else if (panel === "pictures") setPicturesShown(false); else if (panel === "conversation") setConversation(false);
   });
@@ -188,7 +207,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   // classes say whether there is a window in the middle and one at the side,
   // for where the orb goes; which window is open is the window's own `is-open`.
   const place = placeWindows(
-    { browser: shown, files: filesShown, pictures: picturesShown, conversation, ...broughtShown },
+    windows,
     Object.fromEntries(brought.filter((entry) => entry.place).map((entry) => [`x:${entry.key}`, entry.place])),
   );
   const filesMain = place.main === "files", picturesMain = place.main === "pictures", conversationMain = place.main === "conversation";
@@ -285,7 +304,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     "voice.ptt": () => { onPtt(!ptt); },
     "voice.sounds": () => { onSounds(); },
   };
-  const maximized = browserMax && shown;
+  const maximized = maxed !== null && windows[maxed] === true;
   const keys = useRef({ bindings, actions, ptt, onHold, maximized, chat, windowsOf }); keys.current = { bindings, actions, ptt, onHold, maximized, chat, windowsOf };
   useEffect(() => {
     // In the capture phase, before a focused button: holding Space for
@@ -296,9 +315,9 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       // So has the confirmation a link in a reply asks before it leaves: it is no aria-modal, and Escape there would otherwise stop the agent or end voice mode.
       if (e.defaultPrevented || document.querySelector('[aria-modal="true"], [data-streamdown="link-safety-modal"]')) return;
       if (e.code === "Escape" && document.querySelector(".voice-settings")) return;
-      // Escape gives a maximized browser its place back before it stops anything.
+      // Escape gives a maximized window its place back before it stops anything.
       if (e.code === "Escape" && keys.current.maximized && !editing(e.target)) {
-        e.preventDefault(); e.stopPropagation(); setBrowserMax(false);
+        e.preventDefault(); e.stopPropagation(); setMaxed(null);
         return;
       }
       const typing = editing(e.target);
@@ -342,24 +361,18 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   }, [browserActivity, onCue]);
   const open = () => { setLoaded(true); setShown(true); onCue('focus'); };
   const minimize = () => { setShown(false); end.current?.focus({ preventScroll: true }); };
-  // However the browser was put away — minimized, or closed for a third
-  // window — it comes back at its usual size, and Escape is Stop's again.
-  useEffect(() => { if (!shown) setBrowserMax(false); }, [shown]);
+  // However a maximized window was put away — minimized, or closed for a
+  // third window — it comes back at its usual size, and Escape is Stop's again.
+  useEffect(() => { if (maxed !== null && !maximized) setMaxed(null); }, [maxed, maximized]);
   // A window opening — by the person or for what the agent does — is there
-  // to be seen, and would open under the browser: it gives its place back.
-  // Each window by itself: one opening can close another for room.
-  const others = [filesShown, picturesShown, conversation];
-  const othersBefore = useRef(others);
+  // to be seen, and would open under the maximized one: that gives its place
+  // back. Each window by itself: one opening can close another for room.
+  const openNow = Object.keys(windows).filter((name) => windows[name]);
+  const openBefore = useRef(openNow);
   useEffect(() => {
-    if (others.some((open, i) => open && !othersBefore.current[i])) setBrowserMax(false);
-    othersBefore.current = others;
-  }, others);
-  // An extension's window the same: one not open before.
-  const broughtBefore = useRef(broughtOpen);
-  useEffect(() => {
-    if (broughtOpen.some((key) => !broughtBefore.current.includes(key))) setBrowserMax(false);
-    broughtBefore.current = broughtOpen;
-  }, [broughtOpen]);
+    if (openNow.some((name) => !openBefore.current.includes(name))) setMaxed(null);
+    openBefore.current = openNow;
+  }, [openNow.join("\n")]);
   // Escape restores the browser from inside it too, as it left fullscreen:
   // once the page in it has focus, the key is that page's and never reaches
   // the stage. Heard before the viewer, which would pass it on to the page.
@@ -371,7 +384,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       frame.contentWindow?.addEventListener("keydown", e => {
         if (e.code !== "Escape" || !keys.current.maximized) return;
         if (editing(e.target) && !(e.target as Element).matches(VIEWER_KEYS)) return;
-        e.preventDefault(); e.stopPropagation(); setBrowserMax(false);
+        e.preventDefault(); e.stopPropagation(); setMaxed(null);
       }, true);
     } catch { /* not the portal's page: its keys stay its own */ }
   };
@@ -506,11 +519,11 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
     </div>}
     {dropping && <div className="voice-drop-hint" aria-hidden="true"><LuImagePlus />{t("Drop pictures to send them with what you say next")}</div>}
     <input ref={picker} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ""; if (files.length) onAddPictures(files); }} />
-    <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''} ${maximized ? 'is-maximized' : ''}`} aria-label={t("Live browser")} aria-hidden={!shown}>
+    <section ref={browser} className={`voice-browser-window ${shown ? 'is-open' : ''} ${maximized && maxed === "browser" ? 'is-maximized' : ''}`} aria-label={t("Live browser")} aria-hidden={!shown}>
       <header><span><i />{t("Live browser")}</span><div>
-        {maximized
-          ? <button type="button" aria-label={t("Restore browser size")} title={t("Restore size (Esc)")} onClick={() => setBrowserMax(false)}><LuMinimize2 /></button>
-          : <button type="button" aria-label={t("Maximize browser")} title={t("Maximize")} onClick={() => setBrowserMax(true)}><LuMaximize2 /></button>}
+        {maximized && maxed === "browser"
+          ? <button type="button" aria-label={t("Restore browser size")} title={t("Restore size (Esc)")} onClick={() => setMaxed(null)}><LuMinimize2 /></button>
+          : <button type="button" aria-label={t("Maximize browser")} title={t("Maximize")} onClick={() => setMaxed("browser")}><LuMaximize2 /></button>}
         <button type="button" aria-label={t("Minimize browser")} title={t("Minimize browser")} onClick={minimize}><LuMinus /></button>
       </div></header>
       {loaded && <iframe onLoad={e => frameKeys(e.currentTarget)} src="/browser-ui/" title={t("The agent's browser")} allow="clipboard-read; clipboard-write; fullscreen" />}
@@ -531,9 +544,10 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       {conversation && <VoiceConversation sessionId={sessionId} items={items} />}
       <ResizeHandles target={conversationWindow} />
     </section>
-    {brought.map((entry) => (
-      <BroughtWindow key={entry.key} entry={entry} main={place.main === `x:${entry.key}`} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)}
-        onClose={() => { closeBrought(entry.key); end.current?.focus({ preventScroll: true }); }} />
+    {windowEntries.filter((entry) => broughtOpen.includes(entry.key) || (entry.keepLoaded && broughtOnce.includes(entry.key))).map((entry) => (
+      <BroughtWindow key={entry.key} entry={entry} main={place.main === `x:${entry.key}`} open={broughtOpen.includes(entry.key)} maximized={maximized && maxed === `x:${entry.key}`}
+        chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)}
+        onClose={() => { closeBrought(entry.key); end.current?.focus({ preventScroll: true }); }} onMaximize={() => setMaxed(`x:${entry.key}`)} onRestore={() => setMaxed(null)} />
     ))}
     {windowEntries.filter((entry) => entry.useAutoOpen).map((entry) => (
       <ErrorBoundary key={`${entry.key}:${sessionId}`} resetKey={`${entry.key}:${sessionId}`} fallback={() => null}>

@@ -40,6 +40,6 @@ export default defineConfig({
   // put a copy beside a package that names React as a peer, and a component drawn with another copy cannot use hooks.
   resolve: { dedupe: ["react", "react-dom"] },
   // The portal's default port. A test run points it at a dead one (PITHAGORAS_API), so that a request no test
-  // answered cannot reach a portal that happens to run on this machine.
-  server: { port: 5190, proxy: { "/api": process.env.PITHAGORAS_API ?? "http://localhost:4100" } },
+  // answered cannot reach a portal that happens to run on this machine. Streams too: an extension's, under /api/x.
+  server: { port: 5190, proxy: { "/api": { target: process.env.PITHAGORAS_API ?? "http://localhost:4100", ws: true } } },
 });

@@ -343,10 +343,11 @@ body.is-resizing { user-select: none; -webkit-user-select: none; }
 body.is-resizing iframe { pointer-events: none; }
 @media (max-width: 600px) { .resize-handle { display: none; } }
 
-/* The browser made as large as the stage allows (not the page's fullscreen):
-   over the other windows, with the dock and the stage's buttons still in
-   reach under it. Above a size set by hand, which it gives back when restored. */
-.voice-stage .voice-browser-window.is-open.is-maximized { left: 12px !important; top: 12px !important; right: 12px !important; bottom: calc(var(--dock-middle) + var(--dock-height) / 2 + 14px) !important; width: auto !important; height: auto !important; max-width: none !important; max-height: none !important; transform: none !important; z-index: 4; border-radius: 14px; }
-.voice-browser-window.is-maximized > .resize-handle { display: none; }
-/* Pictures waiting to be sent sit at the top right, over where the browser's buttons would be. */
-.voice-stage:has(.voice-attachments) .voice-browser-window.is-open.is-maximized { top: 56px !important; }
+/* A window made as large as the stage allows (not the page's fullscreen): the
+   browser, or an extension's that may be. Over the other windows, with the dock
+   and the stage's buttons still in reach under it. Above a size set by hand,
+   which it gives back when restored. */
+.voice-stage :is(.voice-browser-window, .voice-extension-window).is-open.is-maximized { left: 12px !important; top: 12px !important; right: 12px !important; bottom: calc(var(--dock-middle) + var(--dock-height) / 2 + 14px) !important; width: auto !important; height: auto !important; max-width: none !important; max-height: none !important; transform: none !important; z-index: 4; border-radius: 14px; }
+.is-maximized > .resize-handle { display: none; }
+/* Pictures waiting to be sent sit at the top right, over where the window's buttons would be. */
+.voice-stage:has(.voice-attachments) :is(.voice-browser-window, .voice-extension-window).is-open.is-maximized { top: 56px !important; }

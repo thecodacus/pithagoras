@@ -125,21 +125,37 @@ export interface SlotMap {
    * card of a call in voice mode that `opensFor` says yes to opens it when
    * tapped, for calls the portal's own windows are not for. Its own shortcut
    * is `portal.shortcuts`.
+   *
+   * `maximizable` gives its head a Maximize button: the window then fills the
+   * stage, over the others and above the dock, until it is restored by its
+   * button, by Escape, by being minimized, or by another window opening.
+   * `maximized` says which it is, and `maximize()` and `restore()` change it.
+   * Escape pressed in a frame of its own never reaches the stage: listen for
+   * it there and call `restore()`. `keepLoaded` keeps it, once opened, while
+   * it is minimized, hidden: what it holds (a frame, a stream) is not loaded
+   * again each time it opens.
    */
   "voice.window": {
     entry: {
       title: string;
       icon?: ComponentType;
       place?: "side" | "middle";
+      maximizable?: boolean;
+      keepLoaded?: boolean;
       useAutoOpen?: (props: ChatProps) => number;
       opensFor?: (call: ToolCallView) => boolean;
       /** What the card of a call it opens for says, in place of the portal's words for a tool it does not know ("Using canvas write"). */
       describe?: (call: ToolCallView) => { label: string; detail?: string } | undefined;
     };
-    props: ChatProps & { close(): void };
+    props: ChatProps & { close(): void; maximized: boolean; maximize(): void; restore(): void };
   };
-  /** A page of the portal, at /x/<extension>/<id>, with an entry in the sidebar. */
-  "nav.page": { entry: { title: string; icon?: ComponentType }; props: {} };
+  /**
+   * A page of the portal, at /x/<extension>/<id>, with an entry in the
+   * sidebar. `useShown` is a hook, called as the sidebar is drawn: whether the
+   * entry is listed now (not while the service the page is for is not set
+   * up). Until it says yes, it is not. The page is at its address either way.
+   */
+  "nav.page": { entry: { title: string; icon?: ComponentType; useShown?: () => boolean }; props: {} };
   /** The extension's page in Settings, above the fields the portal found for it. */
   "settings.page": { entry: {}; props: {} };
 }

@@ -509,3 +509,23 @@ test('a theme an extension brought is chosen in Settings or switched to by an ex
   await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('combobox', { name: 'Colours' })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('pithagoras.palette'))).toBe(null);
 });
+
+// A page for a service that may not be set up, as the browser's is: the portal's tests' stand-in for one.
+test.describe('a page that says whether it is listed', () => {
+  test.use({ installed: ['tests/fixtures/extensions/viewer'] });
+
+  test('is in the sidebar while it says so, and at its address either way', async ({ page }) => {
+    await mockPortal(page);
+    await page.goto('/');
+    await page.waitForFunction(() => typeof (window as any).viewerListed === 'function');
+    const listed = sidebar(page).getByRole('button', { name: 'Viewer' });
+    await expect(sidebar(page).getByRole('button', { name: 'Audit' })).toBeVisible();
+    await expect(listed).toHaveCount(0);
+    await page.evaluate(() => (window as any).viewerListed(true));
+    await expect(listed).toBeVisible();
+    await page.evaluate(() => (window as any).viewerListed(false));
+    await expect(listed).toHaveCount(0);
+    await page.goto('/x/test-viewer/viewer');
+    await expect(page.getByText("The viewer's page")).toBeVisible();
+  });
+});
