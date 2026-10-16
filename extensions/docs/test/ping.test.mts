@@ -87,6 +87,12 @@ async function portal(chats: Record<string, string>, options: Options = {}) {
       list: () => state.order.map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(chats[id]),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
+      // What follows the agent's writing (writing.js): heard in its own test.
+      onEvent: () => {},
+      onOpen: () => {},
+      on: () => {},
+      offers: () => undefined,
+      send: () => {},
       // As the portal's: the chat's pi is started if it was let go, and the package's extension is rung on its bus.
       async tell(id: string, data: unknown) {
         told.push({ chat: id, data });

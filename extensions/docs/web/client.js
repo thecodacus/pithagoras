@@ -11,6 +11,7 @@
  * the listing gives it, never by its file's name.
  */
 import { documentEditor } from "./document-editor.js";
+import { shownNew, writingStore } from "./writing.js";
 
 export default function (portal) {
   const { React, ui, t } = portal;
@@ -134,7 +135,17 @@ export default function (portal) {
     "Deleted a comment": "Kommentar gelöscht",
     "Comments on {title}": "Kommentare zu {title}",
     "Could not open a chat to ask the agent in: {error}": "Es konnte kein Chat geöffnet werden, in dem der Agent gefragt wird: {error}",
+    "The agent is writing a new document…": "Der Agent schreibt ein neues Dokument…",
+    "The agent's new document was not made.": "Das neue Dokument des Agenten wurde nicht angelegt.",
+    "The agent is writing in this document…": "Der Agent schreibt in diesem Dokument…",
+    "The agent is writing in this document. What it writes comes in when it is done.": "Der Agent schreibt in diesem Dokument. Was er schreibt, kommt hinzu, sobald er fertig ist.",
+    "Show the saved text": "Den gespeicherten Text zeigen",
   });
+
+  // What the agent is writing in documents, as the server half tells this chat's pages (writing.js): drawn in the panel as it comes.
+  const writes = writingStore();
+  portal.server.on((chat, data) => writes.hear(chat, data));
+  const useWriting = (chat) => React.useSyncExternalStore(writes.subscribe, () => writes.of(chat));
 
   const icon = (path) => () =>
     h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true }, h("path", { d: path }));
@@ -381,22 +392,85 @@ export default function (portal) {
     );
   }
 
-  function DocumentsPanel({ chat, panel }) {
-    portal.locale.use();
-    // A tool card asked for one (`open("documents", { folder, doc })`): each ask anew, also for the same document.
-    const asked = panel.params;
-    const [open, setOpen] = useState(() => (asked?.doc ? { folder: asked.folder, id: asked.doc } : null));
+  /** Follows the end of a text that grows, in the panel that scrolls around `inside`, for as long as the person has not scrolled up from it. */
+  function useFollowEnd(inside, text) {
+    const atEnd = React.useRef(true);
     useEffect(() => {
-      if (asked?.doc) setOpen({ folder: asked.folder, id: asked.doc });
-    }, [asked]);
+      const scroller = inside.current?.closest(".pd-panel");
+      if (!scroller) return;
+      const look = () => void (atEnd.current = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48);
+      scroller.addEventListener("scroll", look, { passive: true });
+      return () => scroller.removeEventListener("scroll", look);
+    }, []);
+    React.useLayoutEffect(() => {
+      const scroller = inside.current?.closest(".pd-panel");
+      if (scroller && atEnd.current) scroller.scrollTop = scroller.scrollHeight;
+    }, [text]);
+  }
+
+  /** A new document the agent is writing, as far as it has come, drawn as the portal draws Markdown until it is made and opens in the editor. */
+  function Drafting({ writing, onBack }) {
+    portal.locale.use();
+    const box = React.useRef(null);
+    const shown = shownNew(writing.title, writing.markdown);
+    useFollowEnd(box, shown);
+    const failed = writing.done && !writing.ok;
     return h(
-      "div",
-      { className: "pd-page pd-panel" },
-      open ? h(DocumentEditor, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }) : h(ChatDocuments, { chat, onOpen: setOpen }),
+      "article",
+      { className: "pd-document", ref: box },
+      h("button", { type: "button", className: "pd-back", onClick: onBack }, `← ${t("All documents")}`),
+      h("div", { className: `pd-note pd-writing${failed ? " is-failed" : ""}`, role: "status" }, h("span", null, failed ? t("The agent's new document was not made.") : t("The agent is writing a new document…"))),
+      shown.trim() && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shown)),
     );
   }
 
+  /** What a panel is asked to show: a document; the same, with what the agent is writing in it (`writing`, its call); or a new one the agent is writing. */
+  const openOf = (asked) => (asked?.doc ? { folder: asked.folder, id: asked.doc, ...(asked.writing ? { writing: asked.writing } : {}) } : asked?.writing ? { writing: asked.writing } : null);
+
+  function DocumentsPanel({ chat, panel }) {
+    portal.locale.use();
+    // A tool card asked for one (`open("documents", { folder, doc })`), or the agent began to write one (`writing`): each ask anew, also for the same document.
+    const asked = panel.params;
+    const [open, setOpen] = useState(() => openOf(asked));
+    useEffect(() => {
+      const next = openOf(asked);
+      if (next) setOpen(next);
+    }, [asked]);
+    const calls = useWriting(chat.id);
+    const writing = open?.writing ? calls.get(open.writing) : undefined;
+    // A new document the agent was writing opens in the editor once it is made.
+    useEffect(() => {
+      if (open && !open.id && writing?.done && writing.ok) setOpen({ folder: writing.folder, id: writing.id });
+    }, [open, writing]);
+    const back = () => setOpen(null);
+    const draft = writing?.tool === "edit" && !writing.done && writing.id === open?.id ? writing : null;
+    return h(
+      "div",
+      { className: "pd-page pd-panel" },
+      open?.id
+        ? h(DocumentEditor, { folder: open.folder, id: open.id, key: `${open.folder}/${open.id}`, draft, onBack: back })
+        : writing
+          ? h(Drafting, { writing, onBack: back })
+          : h(ChatDocuments, { chat, onOpen: setOpen }),
+    );
+  }
+
+  /** Opens the panel when the agent begins to write in a document in this chat, on that document, or on the new one it is writing. */
+  function Follow({ chat, panels }) {
+    const now = useWriting(chat.id);
+    const seen = React.useRef(new Set());
+    useEffect(() => {
+      for (const [call, write] of now) {
+        if (seen.current.has(call)) continue;
+        seen.current.add(call);
+        if (!write.done) panels.open("documents", write.tool === "edit" ? { folder: write.folder, doc: write.id, writing: call } : { writing: call });
+      }
+    }, [now]);
+    return null;
+  }
+
   portal.slots.register("nav.page", { id: "documents", title: "Documents", icon: DocumentIcon, component: DocumentsPage });
+  portal.slots.register("chat.background", { id: "follow", component: Follow });
   portal.slots.register("chat.panel", {
     id: "documents",
     name: "documents",

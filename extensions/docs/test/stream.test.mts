@@ -56,6 +56,12 @@ async function portal(folder: string | Record<string, string>, { pingMs, pollMs 
       list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => chats[id],
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
+      // What follows the agent's writing (writing.js): heard in its own test.
+      onEvent: () => {},
+      onOpen: () => {},
+      on: () => {},
+      offers: () => undefined,
+      send: () => {},
     },
   }, { dependencies: async () => true, pingMs, pollMs }) as () => Promise<void>;
   const app = express();

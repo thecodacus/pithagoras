@@ -241,6 +241,80 @@ test('a chat has a Documents panel beside it: its folder\'s documents, opened in
   expect(made).toEqual([{ title: 'Ideas' }]);
 });
 
+/** What the server half tells the chat's pages as the model writes a call (writing.js), as the chat's stream carries it. */
+const serverSays = (page: Page) => (data: unknown) =>
+  page.evaluate((message) => (window as any).streams.find((s: any) => !s.closed && s.url.includes('/api/sessions/a/events')).emit('extension', message), { extension: NAME, data });
+
+test('the panel opens when the agent begins a new document, shows it as it is written, and opens it in the editor once it is made', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { caughtUp } = await portal(page, FOLDERS, 'open');
+  await page.goto('/s/a');
+  await caughtUp();
+  const writes = serverSays(page);
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await writes({ type: 'writing', call: 'c9', tool: 'create', folder: '0123456789abcdef', title: 'Ideas', markdown: 'The first' });
+  await expect(panels.getByText('The agent is writing a new document…')).toBeVisible();
+  // As doc_create will make it: its title as its heading, where the Markdown has none.
+  await expect(panels.locator('.pd-draft h1')).toHaveText('Ideas');
+  await expect(panels.locator('.pd-draft')).toContainText('The first');
+  await writes({ type: 'writing', call: 'c9', tool: 'create', folder: '0123456789abcdef', title: 'Ideas', markdown: 'The first idea, and the second.' });
+  await expect(panels.locator('.pd-draft')).toContainText('The first idea, and the second.');
+  // Made: the document as it is stored, in the editor.
+  await writes({ type: 'written', call: 'c9', ok: true, folder: '0123456789abcdef', id: '4444444444444444' });
+  await expect(panels.getByText('The agent is writing a new document…')).toHaveCount(0);
+  await expect(panels.locator('.pd-editor .ProseMirror h1')).toHaveText('Ideas');
+  // One that was not made says so, and the list is a click away.
+  await writes({ type: 'writing', call: 'c10', tool: 'create', folder: '0123456789abcdef', title: 'Taken', markdown: 'Text' });
+  await expect(panels.getByText('The agent is writing a new document…')).toBeVisible();
+  await writes({ type: 'written', call: 'c10', ok: false });
+  await expect(panels.getByText("The agent's new document was not made.")).toBeVisible();
+  await panels.getByRole('button', { name: /All documents/ }).click();
+  await expect(panels.getByRole('button', { name: /The plan/ })).toBeVisible();
+});
+
+test('an edit the agent is writing is shown on its document while nothing of the person\'s is unsaved, the saved text a click away, and the panel opens once for each', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { caughtUp } = await portal(page, FOLDERS, 'open');
+  await page.goto('/s/a');
+  await caughtUp();
+  const writes = serverSays(page);
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  const edit = (call: string, markdown: string) => writes({ type: 'writing', call, tool: 'edit', folder: '0123456789abcdef', id: '1111111111111111', revision: 3, markdown });
+  await edit('e9', PLAN.replace('Friday', 'Monday'));
+  await expect(panels.getByText('The agent is writing in this document…')).toBeVisible();
+  await expect(panels.locator('.pd-draft')).toContainText('Ship it on Monday.');
+  await edit('e9', PLAN.replace('Friday', 'Monday afternoon'));
+  await expect(panels.locator('.pd-draft')).toContainText('Ship it on Monday afternoon.');
+  // The saved text instead, for the rest of this call.
+  await panels.getByRole('button', { name: 'Show the saved text' }).click();
+  await expect(panels.locator('.pd-draft')).toHaveCount(0);
+  await expect(panels.getByText('Ship it on Friday.', { exact: true })).toBeVisible();
+  await expect(panels.getByText('The agent is writing in this document. What it writes comes in when it is done.')).toBeVisible();
+  await writes({ type: 'written', call: 'e9', ok: true, folder: '0123456789abcdef', id: '1111111111111111' });
+  await expect(panels.getByText(/The agent is writing in this document/)).toHaveCount(0);
+
+  // Closed while a call is written, it stays closed for that call; the next one opens it again.
+  await edit('e10', PLAN);
+  await expect(panels.locator('.pd-draft')).toBeVisible();
+  await page.getByRole('button', { name: 'Close Documents' }).click();
+  await expect(panels.locator('.pd-page')).toHaveCount(0);
+  await edit('e10', PLAN.replace('Friday', 'Sunday'));
+  await expect(page.locator('.pd-page')).toHaveCount(0);
+  await writes({ type: 'written', call: 'e10', ok: false });
+  await edit('e11', PLAN.replace('Friday', 'Saturday'));
+  await expect(panels.locator('.pd-draft')).toContainText('Ship it on Saturday.');
+
+  // With text of the person's own unsaved, theirs stays in front of them.
+  await panels.getByRole('button', { name: 'Show the saved text' }).click();
+  await writes({ type: 'written', call: 'e11', ok: false });
+  await panels.locator('.pd-editor .ProseMirror p').first().click();
+  await page.keyboard.type(' Mine.');
+  await edit('e12', PLAN.replace('Friday', 'Tuesday'));
+  await expect(panels.getByText('The agent is writing in this document. What it writes comes in when it is done.')).toBeVisible();
+  await expect(panels.locator('.pd-draft')).toHaveCount(0);
+  await expect(panels.locator('.pd-editor .ProseMirror')).toContainText('Mine.');
+});
+
 test('a comment, a reply, a changed or deleted comment, a resolved thread and an edit that answers a comment are drawn as what became of the document, in English and in German', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   const { caughtUp, calls } = await portal(page, FOLDERS, 'open');

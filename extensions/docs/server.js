@@ -77,6 +77,7 @@ import { SECRET, SECRET_WARNING } from "./secret.js";
 import { frontMatterEnd } from "./src/frame.js";
 import { DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
 import { documentTools } from "./tools.js";
+import { followWriting } from "./writing.js";
 import { asksAgent } from "./web/mention.js";
 
 /** Where a document's title is looked for: its first heading, near its top. */
@@ -552,6 +553,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
 
   // The agent's tools, in each chat's pi, where pi runs in the portal's process: they share the store the routes use. So does
   // what hears the bell that wakes the chat (ping.js).
+  let writing = null;
   if (portal.executor === "host") {
     portal.chats.extend((pi, chat) => {
       documentTools(pi, chat, {
@@ -566,6 +568,29 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       });
       hearPings(pi, { extension: portal.extension, take: () => takeWaking(chat.id) });
     });
+    // What the agent writes in a document is shown on the chat's pages while the model writes the call (writing.js).
+    writing = followWriting({
+      offers: (chat, tool) => portal.chats.offers(chat, tool),
+      folderOf: (chat) => idOf(portal.chats.folder(chat)),
+      async documentOf(chat, id) {
+        const folder = portal.chats.folder(chat);
+        try {
+          const doc = await (await storeFor(folder)).read(id);
+          // A document of another chat is not this chat's to see: the tool refuses it, and nothing of it is shown.
+          return doc.scope === "project" || doc.chat === chat ? { folder: idOf(folder), id: doc.id, revision: doc.revision, markdown: doc.bytes.toString("utf8") } : undefined;
+        } catch (e) {
+          // One that is not there is the tool's to refuse.
+          if (e instanceof DocError && e.status === 404) return undefined;
+          throw e;
+        }
+      },
+      send: (chat, message) => portal.chats.send(chat, message),
+      log: (line) => portal.log(line),
+    });
+    portal.chats.onEvent((chat, event) => writing.observe(chat, event));
+    portal.chats.onOpen((chat) => writing.opened(chat));
+    portal.chats.on("stopped", (chat) => writing.forget(chat));
+    portal.chats.on("deleted", (chat) => writing.forget(chat));
   }
 
   /** The folder a request names by its id, or a 404. */
@@ -1137,6 +1162,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
 
   return async () => {
     stopped = true;
+    writing?.stop();
     for (const queued of wakes.values()) clearTimeout(queued.timer);
     wakes.clear();
     for (const entry of watching.values()) clearInterval(entry.timer);

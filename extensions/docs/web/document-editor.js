@@ -13,6 +13,7 @@ import { comments } from "./comments.js";
 import { createLive } from "./live.js";
 import { asksAgent } from "./mention.js";
 import { createSaver } from "./saver.js";
+import { shownOf } from "./writing.js";
 
 /** What the person's text was, kept while it is not saved (a conflict, a save that failed, a page that went away): per document, for the tab. */
 const DRAFT = "pithagoras-docs/draft";
@@ -152,8 +153,13 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     );
   }
 
-  /** The document in the editor: saved as it is edited, with what to do when it was changed meanwhile. */
-  function Editing({ folder, id, doc, edit, onBack }) {
+  /**
+   * The document in the editor: saved as it is edited, with what to do when it was changed meanwhile. `draft`: what the agent is
+   * writing in it now (web/writing.js), shown in the editor's place as it comes. Not over a person who is working in the text when
+   * the call begins (it has the focus, or something unsaved): they keep their text, and the agent's change comes in when it is
+   * done, as any change from elsewhere does.
+   */
+  function Editing({ folder, id, doc, edit, onBack, draft }) {
     const host = useRef(null);
     // The editor and its saver, once the editor is drawn.
     const parts = useRef(null);
@@ -164,6 +170,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const [problem, setProblem] = useState(null);
     const [history, setHistory] = useState(false);
     const [busy, setBusy] = useState(false);
+    // The call whose draft the person chose not to watch, or that began while they were working in the text: the text is shown.
+    const [unwatched, setUnwatched] = useState(null);
     // The comments: the threads as the server has them, what their marked passages read as, whether something is selected to
     // comment on, the comment being written, and the thread looked at.
     const [threads, setThreads] = useState({ items: [], loaded: false, error: null });
@@ -358,6 +366,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       };
     }, [folder, id]);
 
+    // Decided once, as the agent's call begins, and before it is drawn: whether the person is working in the text then.
+    React.useLayoutEffect(() => {
+      if (draft?.call && (host.current?.contains(document.activeElement) || parts.current?.saver.unsaved())) setUnwatched(draft.call);
+    }, [draft?.call]);
+
     /** Back to the list, once what was typed is saved: with text that cannot be, the page stays and says why. */
     const leave = async () => {
       if (!parts.current || (await parts.current.saver.flush())) onBack();
@@ -541,6 +554,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const ordered = [...threads.items].sort((a, b) => (a.start ?? Infinity) - (b.start ?? Infinity) || a.createdAt.localeCompare(b.createdAt));
 
     const { status, base, conflict, error, warning } = view;
+    // What the agent is writing is shown as it comes while the person has nothing unsaved, unless they chose the saved text.
+    const watching = Boolean(draft) && status === "saved" && unwatched !== draft.call;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
     return h(
       React.Fragment,
@@ -577,6 +592,13 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       commentProblem && h(ui.ErrorBanner, { onClose: () => setCommentProblem(null) }, t("Could not comment: {error}", { error: commentProblem })),
       askProblem && h(ui.WarnBanner, { onClose: () => setAskProblem(null) }, t("Could not open a chat to ask the agent in: {error}", { error: askProblem })),
       warning && h(ui.WarnBanner, { onClose: () => parts.current?.saver.dismissWarning() }, warningText(warning)),
+      draft &&
+        h(
+          "div",
+          { className: "pd-note pd-writing", role: "status" },
+          h("span", null, watching ? t("The agent is writing in this document…") : t("The agent is writing in this document. What it writes comes in when it is done.")),
+          watching && h("button", { type: "button", className: ui.classes.ghost, onClick: () => setUnwatched(draft.call) }, t("Show the saved text")),
+        ),
       notice &&
         h(
           "div",
@@ -601,7 +623,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       h(
         "div",
         { ref: workspace, className: "pd-workspace" },
-        h("div", { ref: host, className: "pd-editor", hidden: !ready }),
+        watching && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shownOf(draft.markdown))),
+        h("div", { ref: host, className: "pd-editor", hidden: !ready || watching }),
         ready &&
           h(Comments, {
             threads: ordered,
@@ -628,7 +651,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
   }
 
   /** A document of a folder, for reading and writing. Without the editor (it could not be loaded) it is read as the portal draws Markdown. */
-  return function DocumentEditor({ folder, id, onBack }) {
+  return function DocumentEditor({ folder, id, onBack, draft = null }) {
     const { body, error, retry } = useAnswer(documentUrl(folder, id));
     const [edit, setEdit] = useState(null);
     const [failed, setFailed] = useState(null);
@@ -656,6 +679,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         body.markdown.trim() ? h("div", { className: "pd-body" }, h(ui.Markdown, null, body.markdown)) : h(ui.Empty, null, t("This document is empty.")),
       );
     }
-    return h("article", { className: "pd-document" }, h(Editing, { folder, id, doc: body, edit, onBack }));
+    return h("article", { className: "pd-document" }, h(Editing, { folder, id, doc: body, edit, onBack, draft }));
   };
 }

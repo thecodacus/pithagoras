@@ -40,6 +40,9 @@
 .pd-conflict summary { cursor: pointer; color: rgb(var(--fg-muted)); font-size: 13px; }
 .pd-conflict .pd-body { margin-top: 8px; max-height: 20rem; overflow: auto; }
 .pd-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 6px 12px; font-size: 13px; }
+/* What the agent is writing, as it comes: the note says so, and the draft is drawn in the editor's place until the call is done. */
+.pd-writing { border-color: rgb(var(--accent) / .4); }
+.pd-writing.is-failed { border-color: rgb(var(--warn) / .5); }
 .pd-history { border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 10px; }
 .pd-revisions { display: flex; flex-direction: column; gap: 6px; max-height: 14rem; margin: 0 0 8px; padding: 0; overflow-y: auto; list-style: none; }
 .pd-revisions button { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 6px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
