@@ -5,7 +5,7 @@ test.use({ installed: ['extensions/files'] });
 
 /** A file's size reads in the unit it is nearest, up to gigabytes: the same words as the project pages use. */
 test('the size of a file in Files goes up to gigabytes', async ({ page }) => {
-  await page.route('**/api/sessions/preview/files**', (route) =>
+  await page.route('**/api/x/pithagoras-files/chats/preview/files**', (route) =>
     route.fulfill({
       json: {
         path: '',

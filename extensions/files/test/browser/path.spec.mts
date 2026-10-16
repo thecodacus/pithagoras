@@ -4,7 +4,7 @@ import { test, expect } from '../../../../tests/browser/portal-mock';
 test.use({ installed: ['extensions/files'] });
 
 test("a chat's full path is not drawn under its title, and the Files panel shows it on request", async ({ page }) => {
-  await page.route('**/api/sessions/*/files*', (route) =>
+  await page.route('**/api/x/pithagoras-files/chats/*/files*', (route) =>
     route.fulfill({ json: { path: '', entries: [{ name: 'notes.md', type: 'file', size: 4, mtime: 1 }], truncated: false } }),
   );
   await page.setViewportSize({ width: 1300, height: 800 });

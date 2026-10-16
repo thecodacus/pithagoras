@@ -25,6 +25,39 @@ export type Ran = { code: number | null; stdout: Buffer; stderr: string };
 /** What a git or gh step printed. `cut`: it printed more than `max`, and the rest was not read. */
 export type GitRan = { stdout: string; stderr: string; code: number; cut: boolean };
 
+/** One thing in a folder. "link" is a link that could not be followed to something inside it. */
+export interface FileEntry {
+  name: string;
+  type: "dir" | "file" | "link";
+  /** A link, whatever `type` says: one to a folder inside is listed as a "dir", but removing it removes the link. */
+  link?: boolean;
+  size: number;
+  mtime: number;
+}
+
+/** A file's text, or the fact that it is not text or is over 1 MB. */
+export type FileContent = { binary: true; size: number; mtime: number } | { binary: false; size: number; mtime: number; content: string };
+
+/** What removing a folder would lose that nothing else has: git work only it holds. */
+export interface Unsaved {
+  /** Changes that are not committed. */
+  changed: number;
+  /** Commits that no remote has. */
+  unpushed: number;
+  stashes: number;
+  /** Not everything could be read, so there may be more. */
+  unknown?: true;
+}
+
+/**
+ * Why `portal.files` refused, on the error it throws (`code`): a path that is
+ * not one (`invalid`), nothing there (`missing`), a save over a file that
+ * changed since it was read (`conflict`), a name that is taken (`exists`),
+ * too large (`too_large`), the system refusing (`failed`), and a folder that
+ * holds git work nothing else has (`unsaved`, with `unsaved` on the error).
+ */
+export type FileRefusal = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
+
 export interface GitStepOptions {
   /** What the step reads on its standard input. */
   input?: string;
@@ -125,9 +158,43 @@ export interface ServerPortal {
      */
     personEnv(): NodeJS.ProcessEnv;
   };
+  /**
+   * A chat's folder, read and changed safely from the portal's own process:
+   * what the portal does for itself, for every server half to do the same.
+   * The agent writes in that folder, links included, and the portal may run
+   * with more rights than the agent does. So a path is checked as text and
+   * again where every link along it leads, a file is opened without following
+   * a link in its last place and used through what was opened, and a save is
+   * put in place whole. `base` is a folder from `chats.folder`; `rel` a path
+   * in it, as the page sent it. What is refused throws an error with a `code`
+   * (see FileRefusal). Use these rather than `fs` on a chat's folder: see
+   * "A chat's folder" in the guide.
+   */
   files: {
     /** `rel` inside `base`, checked: throws for `..`, an absolute path, or a link that leads out. */
     inside(base: string, rel: string): string;
+    /** What is directly in a folder, folders first; `.git` is left out. At most 2,000 entries, and `truncated` says when there were more. */
+    list(base: string, rel: string): { path: string; entries: FileEntry[]; truncated: boolean };
+    /** A file's text, or that it has none to show. */
+    read(base: string, rel: string): FileContent;
+    /**
+     * Saves a file's text, at most 1 MB, through a file beside it put in place by a rename, keeping its mode and
+     * its owner. With `expected`, the modification time it was read at, a file changed since is refused
+     * (`conflict`); with `create`, one that is there already (`exists`).
+     */
+    write(base: string, rel: string, content: string, options?: { expected?: number; create?: boolean }): { size: number; mtime: number };
+    /** Another name in the same folder, never over something there; a link is renamed as the link. The new path, from `base`. */
+    rename(base: string, rel: string, name: string): string;
+    /** What removing `rel` would lose that nothing else has, or null for nothing. */
+    unsaved(base: string, rel: string): Promise<Unsaved | null>;
+    /** Removes a file, or a folder and all in it, a link as the link. A folder holding git work only it has is refused (`unsaved`) unless `discard`. */
+    remove(base: string, rel: string, options?: { discard?: boolean }): Promise<void>;
+    /** A new folder `name` in the folder `rel`; its path, from `base`. */
+    makeFolder(base: string, rel: string, name: string): string;
+    /** The checked path of a folder in `base`, for what reads the whole of it (an archive). */
+    folder(base: string, rel: string): string;
+    /** A plain file opened once, for sending: read from `fd`, not from the path again. The caller closes it. */
+    open(base: string, rel: string): { fd: number; size: number; name: string };
   };
   git: {
     /**

@@ -1,10 +1,9 @@
 /**
  * Builds Files: its browser half (src/client.tsx) into web/, with the Tailwind
  * utilities its components use made into its own stylesheet from the portal's
- * preset. It has no server half: what it reads and writes, it asks of the
- * portal's own routes for a chat's folder. The portal's own `npm run build`
- * runs this, so a checkout and the image build it the same way; what it makes
- * is not kept in git.
+ * preset, and its server half (src/server.ts) into server.js. The portal's own
+ * `npm run build` runs this, so a checkout and the image build it the same
+ * way; what it makes is not kept in git.
  *
  * What it is built with (the icons) is this package's own (devDependencies),
  * installed here first when it is not there yet, or not at the version its
@@ -35,5 +34,5 @@ if (missing.length) {
   execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"], { cwd: HERE, stdio: "inherit" });
 }
 
-await buildExtension({ dir: HERE, tailwind: true });
-console.log("pithagoras-files: built web/");
+await buildExtension({ dir: HERE, tailwind: true, server: "src/server.ts" });
+console.log("pithagoras-files: built web/ and server.js");

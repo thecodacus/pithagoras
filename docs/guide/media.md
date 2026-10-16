@@ -491,7 +491,7 @@ The page lists and serves pictures and videos only from the places the portal kn
 `images` and `videos`, under the portal's data folder, and the `generated-images` and `generated-videos` folders
 of the folders the agent works in — the home of every agent, the projects, and the folder of every chat. It
 never opens a path the page names — a picture or video is asked for by its id — and every file is
-opened with the checks the Files panel's pictures have: a path inside the folder, no
+opened with the checks a picture of a chat's folder has: a path inside the folder, no
 link followed out of it, and what its bytes say it is.
 
 #### Pictures

@@ -9,7 +9,7 @@ const home = inProcessHome("pithagoras-upload-");
 const { default: express } = await import("express");
 const { filesRouter } = await import("../dist/api/files.js");
 const { createSession } = await import("../dist/db.js");
-const { numbered, writeText, baseDir } = await import("../dist/workspace-files.js");
+const { numbered } = await import("../dist/workspace-files.js");
 
 const work = path.join(home, "work");
 const outside = path.join(home, "outside");
@@ -79,28 +79,6 @@ test("an upload cannot be sent out of the folder, by path or by name", async () 
     assert.equal((await upload(base, "missing", "x.txt", "x")).status, 404);
   });
   assert.deepEqual(readdirSync(outside), []);
-});
-
-test("a new folder is made once, and a new file never replaces one", async () => {
-  await withApi(async (base) => {
-    const post = (url, body) =>
-      fetch(base + url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(
-        async (r) => ({ status: r.status, ...(await r.json()) }),
-      );
-    const made = await post("/folder?path=", { name: "notes" });
-    assert.equal(made.path, "notes");
-    assert.equal((await post("/folder?path=", { name: "notes" })).status, 409);
-    assert.equal((await post("/folder?path=", { name: "a/b" })).status, 400);
-
-    writeFileSync(path.join(work, "notes", "keep.md"), "mine");
-    const put = (body) =>
-      fetch(`${base}/file?path=notes/keep.md`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    assert.equal((await put({ content: "", create: true })).status, 409);
-    assert.equal(readFileSync(path.join(work, "notes", "keep.md"), "utf8"), "mine");
-  });
-  // And one that is not there is made.
-  writeText(baseDir(work), "notes/new.md", "", undefined, true);
-  assert.ok(existsSync(path.join(work, "notes", "new.md")));
 });
 
 test("numbers go before the extension, and on the end without one", () => {

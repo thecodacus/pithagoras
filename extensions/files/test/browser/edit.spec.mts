@@ -17,7 +17,7 @@ type Put = { content: string; mtime?: number };
 async function files(page: Page, put: (n: number) => Parameters<Route['fulfill']>[0] | null = () => null, shown: 'source' | 'page' = 'source', content = 'one\n') {
   const saves: Put[] = [];
   const disk = { content, mtime: 1 };
-  await page.route('**/api/sessions/*/file*', (route) => {
+  await page.route('**/api/x/pithagoras-files/chats/*/file*', (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith('/files')) {
       return route.fulfill({ json: { path: '', entries: [{ name: 'notes.md', type: 'file', size: 4, mtime: 1 }], truncated: false } });

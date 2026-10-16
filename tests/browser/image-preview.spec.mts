@@ -402,7 +402,6 @@ test.describe('in voice mode', () => {
     await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
     await page.route('**/voice/speech', (route) => route.fulfill({ status: 204 }));
     await folder(page, 'test');
-    await page.route('**/api/sessions/test/files?**', (route) => route.fulfill({ json: { path: '', entries: [], truncated: false } }));
     await page.goto('/tests/voice.html');
     await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
     await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });

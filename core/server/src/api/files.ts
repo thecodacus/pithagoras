@@ -1,30 +1,16 @@
-import { spawn } from "node:child_process";
 import { closeSync, createReadStream, createWriteStream, fstatSync } from "node:fs";
-import path from "node:path";
 import express, { type Request, type Response, type Router } from "express";
 import { getSession } from "../db.js";
 import { unsavedRefusal } from "../git.js";
 import { parseRange } from "../http-range.js";
 import { openVideo } from "../video-files.js";
-import {
-  ARCHIVE_EXCLUDES,
-  FileError,
-  baseDir,
-  listDir,
-  folderPath,
-  makeFolder,
-  uploadTarget,
-  openDownload,
-  openPicture,
-  readText,
-  removeEntry,
-  unsavedAt,
-  renameEntry,
-  writeText,
-} from "../workspace-files.js";
+import { FileError, baseDir, uploadTarget, openPicture } from "../workspace-files.js";
 
 /**
- * The files in a chat's folder, for the Files panel.
+ * What the portal itself serves of a chat's folder: a picture or a clip to be
+ * drawn in the page (the conversation, show_image, show_video, Canvases), and
+ * a file put there from the message box. Browsing and changing the folder is
+ * an extension's (Files'), with the same checks through `portal.files`.
  *
  * Keyed by chat, not by folder name: a chat can be in a project, in the
  * workspace root, or in Home, which is outside it, and "the folder this chat
@@ -144,58 +130,9 @@ export function filesRouter(): Router {
     }
   };
 
-  router.get("/sessions/:id/files", (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
-    try {
-      res.json(listDir(base, req.query.path));
-    } catch (e) {
-      fail(res, e);
-    }
-  });
-
-  router.get("/sessions/:id/file", (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
-    try {
-      if (req.query.download === "1") {
-        // Sent from the descriptor that was checked, not from the path again: see openDownload.
-        const { fd, size, name } = openDownload(base, req.query.path);
-        res.attachment(name);
-        res.setHeader("Content-Length", size);
-        if (size === 0) {
-          closeSync(fd);
-          return void res.end();
-        }
-        // Up to the size that was announced, even if the file has grown since.
-        const stream = createReadStream("", { fd, start: 0, end: size - 1 });
-        let sent = 0;
-        stream.on("data", (chunk) => (sent += chunk.length));
-        // If it has shrunk since, the body ends short of the length that was
-        // announced, and a client waits for the rest until it gives up. The
-        // connection is cut instead, so the download fails at once.
-        stream.on("end", () => {
-          if (sent < size) {
-            console.error(`[portal] files: ${name} changed while it was sent (${sent} of ${size} bytes)`);
-            res.destroy();
-          }
-        });
-        stream.on("error", (e) => {
-          console.error("[portal] files: download failed:", e.message);
-          res.destroy();
-        });
-        res.on("close", () => stream.destroy());
-        return void stream.pipe(res);
-      }
-      res.json(readText(base, req.query.path));
-    } catch (e) {
-      fail(res, e);
-    }
-  });
-
   /**
    * A picture in the folder, drawn in the page rather than downloaded: for the
-   * Files panel, an extension's page that shows one (a canvas), and what the agent puts in front of
+   * conversation, an extension that shows one (Files, a canvas), and what the agent puts in front of
    * the person with show_image. Only what its bytes say is a picture is sent,
    * with that type, and under a policy that would stop it running anything
    * even if a browser disagreed.
@@ -229,30 +166,6 @@ export function filesRouter(): Router {
       return fail(res, e);
     }
     sendVideo(req, res, opened, "private, no-cache");
-  });
-
-  router.put("/sessions/:id/file", (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
-    const { content, mtime, create } = req.body ?? {};
-    if (typeof content !== "string") return res.status(400).json({ error: "content is required" });
-    if (mtime !== undefined && typeof mtime !== "number") return res.status(400).json({ error: "mtime must be a number" });
-    try {
-      res.json({ ok: true, ...writeText(base, req.query.path, content, mtime, create === true) });
-    } catch (e) {
-      fail(res, e);
-    }
-  });
-
-  /** A new folder, named `name`, in the folder at `path`. */
-  router.post("/sessions/:id/folder", (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
-    try {
-      res.json({ ok: true, path: makeFolder(base, req.query.path, req.body?.name) });
-    } catch (e) {
-      fail(res, e);
-    }
   });
 
   /**
@@ -315,102 +228,6 @@ export function filesRouter(): Router {
       }
     });
     req.pipe(out);
-  });
-
-  router.patch("/sessions/:id/file", (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
-    try {
-      res.json({ ok: true, path: renameEntry(base, req.query.path, req.body?.name) });
-    } catch (e) {
-      fail(res, e);
-    }
-  });
-
-  /** What deleting `path` would lose that nothing else has, so the question can name it: `{ unsaved }`, null for nothing. */
-  router.get("/sessions/:id/unsaved", async (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
-    try {
-      res.json({ unsaved: await unsavedAt(base, req.query.path) });
-    } catch (e) {
-      fail(res, e);
-    }
-  });
-
-  /** `discard=1` says that git work the folder holds, which nothing else has, may go with it. */
-  router.delete("/sessions/:id/file", async (req, res) => {
-    const base = folderOf(req.params.id, res);
-    if (!base) return;
-    try {
-      await removeEntry(base, req.query.path, req.query.discard === "1");
-      res.json({ ok: true });
-    } catch (e) {
-      fail(res, e);
-    }
-  });
-
-  /**
-   * The folder — the chat's, or one inside it with `path` — as a .tar.gz,
-   * streamed out of `tar` rather than staged on disk first: a big project would
-   * need the space twice, and a clean-up.
-   */
-  router.get("/sessions/:id/archive", (req, res) => {
-    const chat = folderOf(req.params.id, res);
-    if (!chat) return;
-    let base: string;
-    try {
-      base = folderPath(chat, req.query.path);
-    } catch (e) {
-      return fail(res, e);
-    }
-    const name = path.basename(base).replace(/[^a-zA-Z0-9_.-]/g, "_") || "workspace";
-    const tar = spawn("tar", ["-czf", "-", ...ARCHIVE_EXCLUDES.map((d) => `--exclude=${d}`), "-C", base, "."]);
-    // The download is not announced until tar has produced something: a tar that
-    // cannot start, or dies at once, is then an error the person is told about,
-    // not a file of zero bytes that the browser calls finished.
-    let started = false;
-    // Answered already, by an error: whatever tar does after that is not heard.
-    let answered = false;
-    let complaints = "";
-    tar.stderr.on("data", (chunk) => {
-      if (complaints.length < 2_000) complaints += chunk;
-    });
-    const begin = () => {
-      started = true;
-      res.setHeader("Content-Type", "application/gzip");
-      res.setHeader("Content-Disposition", `attachment; filename="${name}.tar.gz"`);
-    };
-    tar.stdout.once("data", (first: Buffer) => {
-      begin();
-      res.write(first);
-      // Not ended by the pipe: how tar ended decides how this one does, below.
-      tar.stdout.pipe(res, { end: false });
-    });
-    tar.on("error", (e) => {
-      console.error("[portal] archive: could not run tar:", e.message);
-      answered = true;
-      if (started) res.destroy();
-      else res.status(500).json({ error: "Could not make the archive: tar is not available" });
-    });
-    tar.on("close", (code) => {
-      // Already answered, or killed because nobody was waiting any more.
-      if (answered || code === null || res.destroyed) return;
-      answered = true;
-      // 1 is "a file changed or vanished while it was read": what was read is in
-      // the archive, and that is the ordinary way a busy folder ends. Anything
-      // else means the archive is not the folder, so the download is cut off and
-      // fails, rather than ending as if it were whole.
-      if (code > 1) {
-        console.error(`[portal] archive: tar exited ${code}: ${complaints.trim()}`);
-        if (started) return void res.destroy();
-        return void res.status(500).json({ error: "Could not make the archive" });
-      }
-      if (!started) begin();
-      res.end();
-    });
-    // Nobody is waiting any more.
-    res.on("close", () => tar.kill());
   });
 
   return router;

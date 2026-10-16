@@ -262,7 +262,7 @@ What was decided for it:
   dropped or picked in the message box go to the model with the message and are
   kept beside the chat, not in its folder, so `edit_image` has no path for them.
   The tool's description says so: the agent tells you and asks you to put the
-  picture in the chat's folder (the Files panel), or to change it on the
+  picture in the chat's folder, or to change it on the
   [Media page](/guide/media#changing-a-picture), rather than guess a path or
   edit another picture. Taking attached pictures straight into an edit is not
   built.

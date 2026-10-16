@@ -16,7 +16,7 @@ async function files(page: Page, opts: { unsaved?: Unsaved | null; found?: Unsav
   const asked: string[] = [];
   const deletes: string[] = [];
   const gone = new Set<string>();
-  await page.route('**/api/sessions/preview/files**', (route) => {
+  await page.route('**/api/x/pithagoras-files/chats/preview/files**', (route) => {
     const at = new URL(route.request().url()).searchParams.get('path') ?? '';
     if (gone.has(at)) return route.fulfill({ status: 404, json: { error: 'There is no such folder' } });
     const entries = at === 'other'
@@ -26,12 +26,12 @@ async function files(page: Page, opts: { unsaved?: Unsaved | null; found?: Unsav
       : [{ name: 'api', type: 'dir', size: 0, mtime: 1 }, { name: 'other', type: 'dir', size: 0, mtime: 1 }, { name: 'notes.md', type: 'file', size: 3, mtime: 1 }].filter((e) => !gone.has(e.name));
     return route.fulfill({ json: { path: at, entries, truncated: false } });
   });
-  await page.route('**/api/sessions/preview/unsaved?**', async (route) => {
+  await page.route('**/api/x/pithagoras-files/chats/preview/unsaved?**', async (route) => {
     asked.push(new URL(route.request().url()).search);
     await opts.hold;
     return route.fulfill({ json: { unsaved: opts.unsaved ?? null } });
   });
-  await page.route('**/api/sessions/preview/file?**', (route) => {
+  await page.route('**/api/x/pithagoras-files/chats/preview/file?**', (route) => {
     const url = new URL(route.request().url());
     if (route.request().method() !== 'DELETE') return route.fulfill({ status: 404, json: {} });
     deletes.push(url.search);

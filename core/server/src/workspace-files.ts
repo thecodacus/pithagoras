@@ -45,8 +45,6 @@ import { isWithinText, pathBelow } from "./within.js";
 export const MAX_EDIT_BYTES = 1024 * 1024;
 /** A folder with more than this is cut off, and says so. */
 export const MAX_ENTRIES = 2_000;
-/** Left out of the whole-folder archive: regenerable, or huge, and not the work itself. */
-export const ARCHIVE_EXCLUDES = ["node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build"];
 
 export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 

@@ -8,8 +8,8 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/sessions/test/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/test/config', route => route.fulfill({ status: 503, json: {} }));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
-  await page.route('**/api/sessions/test/files?**', route => route.fulfill({ json: { path: 'src', entries: [{ name: 'app.ts', type: 'file', size: 3, mtime: 1 }], truncated: false } }));
-  await page.route('**/api/sessions/test/file?**', route => route.fulfill({ json: { binary: false, size: 3, mtime: 1, content: 'abc' } }));
+  await page.route('**/api/x/pithagoras-files/chats/test/files?**', route => route.fulfill({ json: { path: 'src', entries: [{ name: 'app.ts', type: 'file', size: 3, mtime: 1 }], truncated: false } }));
+  await page.route('**/api/x/pithagoras-files/chats/test/file?**', route => route.fulfill({ json: { binary: false, size: 3, mtime: 1, content: 'abc' } }));
 });
 
 /** The window, open or minimized: hidden, it is kept, out of reach of a reader. */

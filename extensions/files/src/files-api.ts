@@ -1,11 +1,10 @@
 import { isApiError, portal, t } from "./portal";
 
 /**
- * The portal's routes for a chat's folder, which Files is drawn on: listing,
- * reading, writing, uploading, renaming, deleting and downloading. They are
- * the portal's own and any extension's to use (see the API reference): the
- * portal decides what is inside a chat's folder and reads and writes it
- * safely, whoever draws it.
+ * What Files asks of a chat's folder: its own server half's routes for
+ * listing, reading, saving, renaming, deleting and downloading (src/server.ts,
+ * on the portal's `portal.files`), and the portal's own for uploading and for
+ * pictures, which its message box and its conversation use as well.
  */
 
 /** One thing in a chat's folder. "link" leads out of it, or nowhere, and is left alone. */
@@ -32,23 +31,27 @@ export interface Unsaved {
   unknown?: true;
 }
 
+/** A route of the portal's own for a chat's folder. */
 const at = (sessionId: string, route: string, path: string, more = "") =>
   `/api/sessions/${encodeURIComponent(sessionId)}/${route}?path=${encodeURIComponent(path)}${more}`;
+/** A route of Files' own server half. */
+const own = (sessionId: string, route: string, path: string, more = "") =>
+  portal.api.url(`/chats/${encodeURIComponent(sessionId)}/${route}?path=${encodeURIComponent(path)}${more}`);
 
 export const api = {
-  listFiles: (sessionId: string, dir: string) => portal.api.json<{ path: string; entries: FileEntry[]; truncated: boolean }>(at(sessionId, "files", dir)),
-  readFile: (sessionId: string, file: string) => portal.api.json<FileContent>(at(sessionId, "file", file)),
+  listFiles: (sessionId: string, dir: string) => portal.api.json<{ path: string; entries: FileEntry[]; truncated: boolean }>(own(sessionId, "files", dir)),
+  readFile: (sessionId: string, file: string) => portal.api.json<FileContent>(own(sessionId, "file", file)),
   /** `mtime` is the time the text on screen was read at; the save is refused if the file has changed since. */
   saveFile: (sessionId: string, file: string, content: string, mtime?: number) =>
-    portal.api.json<{ ok: true; size: number; mtime: number }>(at(sessionId, "file", file), { method: "PUT", body: JSON.stringify({ content, mtime }) }),
+    portal.api.json<{ ok: true; size: number; mtime: number }>(own(sessionId, "file", file), { method: "PUT", body: JSON.stringify({ content, mtime }) }),
   /** Gives a file or folder another name in the same folder; answers with its new path. */
   renameFile: (sessionId: string, file: string, name: string) =>
-    portal.api.json<{ ok: true; path: string }>(at(sessionId, "file", file), { method: "PATCH", body: JSON.stringify({ name }) }),
+    portal.api.json<{ ok: true; path: string }>(own(sessionId, "file", file), { method: "PATCH", body: JSON.stringify({ name }) }),
   /** A new, empty file; refused if something already has the name. */
   createFile: (sessionId: string, file: string) =>
-    portal.api.json<{ ok: true; size: number; mtime: number }>(at(sessionId, "file", file), { method: "PUT", body: JSON.stringify({ content: "", create: true }) }),
+    portal.api.json<{ ok: true; size: number; mtime: number }>(own(sessionId, "file", file), { method: "PUT", body: JSON.stringify({ content: "", create: true }) }),
   createFolder: (sessionId: string, dir: string, name: string) =>
-    portal.api.json<{ ok: true; path: string }>(at(sessionId, "folder", dir), { method: "POST", body: JSON.stringify({ name }) }),
+    portal.api.json<{ ok: true; path: string }>(own(sessionId, "folder", dir), { method: "POST", body: JSON.stringify({ name }) }),
   /**
    * A file from this computer into the chat's folder, as it is. A taken name
    * gets a number rather than replacing anything; the answer says what it is called.
@@ -67,14 +70,13 @@ export const api = {
     }
   },
   /** What deleting `file` would lose that nothing else has (see Unsaved), null for nothing. */
-  fileUnsaved: (sessionId: string, file: string) => portal.api.json<{ unsaved: Unsaved | null }>(at(sessionId, "unsaved", file)),
+  fileUnsaved: (sessionId: string, file: string) => portal.api.json<{ unsaved: Unsaved | null }>(own(sessionId, "unsaved", file)),
   /** `discard` says that git work in a folder, which nothing else has, may go with it; without it the server refuses, with code "unsaved-work". */
   deleteFile: (sessionId: string, file: string, discard = false) =>
-    portal.api.json<{ ok: true }>(at(sessionId, "file", file, discard ? "&discard=1" : ""), { method: "DELETE" }),
-  fileDownloadUrl: (sessionId: string, file: string) => at(sessionId, "file", file, "&download=1"),
+    portal.api.json<{ ok: true }>(own(sessionId, "file", file, discard ? "&discard=1" : ""), { method: "DELETE" }),
+  fileDownloadUrl: (sessionId: string, file: string) => own(sessionId, "file", file, "&download=1"),
   /** The whole folder, or a folder in it. */
-  archiveDownloadUrl: (sessionId: string, dir = "") =>
-    `/api/sessions/${encodeURIComponent(sessionId)}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`,
+  archiveDownloadUrl: (sessionId: string, dir = "") => portal.api.url(`/chats/${encodeURIComponent(sessionId)}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`),
   /** A picture in the chat's folder, by its path there. `version` is anything that changes when the file does. */
   pictureUrl: (sessionId: string, path: string, version?: string | number) => at(sessionId, "picture", path, version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`),
 };

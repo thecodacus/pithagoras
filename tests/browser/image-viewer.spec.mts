@@ -576,7 +576,6 @@ async function openApp(page: Page, ids: string[], { collapsed = true } = {}) {
       return DONE;
     }
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model: { id: 'm', name: 'Model', provider: 'x' }, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
-    if (/^\/api\/sessions\/\w+\/files$/.test(p)) return { path: '', entries: [], truncated: false };
   }, { streams: 'none', settings: true });
   await page.addInitScript(({ events, collapsed }) => {
     if (collapsed) localStorage.setItem('sidebarCollapsed', 'true');

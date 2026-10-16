@@ -107,8 +107,13 @@ saved when the portal was upgraded comes back as it was. Where a panel's place
 or size was set by hand, Files starts at the place the panels have by default
 once, and keeps what it is given from then on; a key chosen for "Show or hide
 files" under Settings → Shortcuts is <kbd>F</kbd> again. Switched off or
-removed, a chat's folder is still the agent's, and still reached through the
-portal's routes for it.
+removed, a chat's folder is still the agent's.
+
+Its routes moved with it: what was `/api/sessions/:id/files`, `file`, `folder`,
+`unsaved` and `archive` is now `/api/x/pithagoras-files/chats/:id/…` (see
+[Files' routes](/guide/files#its-routes)), answered the same way. A script that
+used the old addresses needs the new ones. Uploads (`/upload`), pictures and
+clips stay where they were.
 
 ## Upgrading from the first release
 
