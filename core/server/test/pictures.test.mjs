@@ -99,6 +99,25 @@ test("the tool answers with the path the page fetches the picture by", async () 
   showImageTool(work)({ registerTool: (t) => (tool = t) });
   assert.equal(tool.name, "show_image");
   const result = await tool.execute("call", { path: "./plots/../plots/chart.png", title: "  Sales  " });
-  assert.deepEqual(result.details, { path: "plots/chart.png", title: "Sales" });
+  assert.deepEqual(result.details, { files: [{ path: "plots/chart.png", title: "Sales" }] });
   await assert.rejects(tool.execute("call", { path: "missing.png" }));
+});
+
+test("a file a call gave that is no picture or clip is sent to be saved, as bytes, whatever its name says; and only from the folder", async () => {
+  writeFileSync(path.join(work, "plots", "sales.csv"), "a,b\n1,2\n");
+  await withApi(async (base) => {
+    const file = base.replace("/picture?", "/file?");
+    for (const [name, body] of [["plots/sales.csv", "a,b\n1,2\n"], ["evil.png", "<html><script>alert(1)</script></html>"]]) {
+      const res = await fetch(file + encodeURIComponent(name));
+      assert.equal(res.status, 200, name);
+      assert.equal(res.headers.get("content-type"), "application/octet-stream");
+      assert.match(res.headers.get("content-disposition"), new RegExp(`^attachment; filename="${path.basename(name)}"`));
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+      assert.match(res.headers.get("content-security-policy"), /sandbox/);
+      assert.equal(await res.text(), body);
+    }
+    for (const [name, status] of [["link.png", 400], ["../outside/secret.png", 400], ["gone.csv", 404], ["plots", 400]]) {
+      assert.equal((await fetch(file + encodeURIComponent(name))).status, status, name);
+    }
+  });
 });

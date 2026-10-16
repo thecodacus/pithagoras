@@ -3,8 +3,9 @@ import { unwrapCall } from "./tool-activity";
 import { argsSummary } from "./tool-args";
 import { toolArgsOf, toolNameOf } from "./tool-payload";
 import { msg, t } from "./i18n";
-import { GENERATED_PICTURE_MARK, shownPicture, type ShownPicture } from "../../server/src/generated-picture";
+import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
 import { GENERATED_VIDEO_MARK } from "../../server/src/generated-video";
+import { shownFiles, type FileKind, type ShownFile } from "../../server/src/file-outputs";
 import type { AgentQuestion } from "./components/QuestionCard";
 
 /** A picture that went with a message, by the name the server keeps it under. */
@@ -19,35 +20,10 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
   return list.length ? list : undefined;
 };
 
-// The picture a show_image, generate_image or edit_image call ended with: read
-// on the server's side as well, where a channel sends it on.
-export { shownPicture, type ShownPicture } from "../../server/src/generated-picture";
+export type { ShownFile } from "../../server/src/file-outputs";
 
-/** A clip the agent put in front of the person with show_video, or made for them with generate_video: its path in the chat's folder. */
-export interface ShownVideo {
-  path: string;
-  title?: string;
-  /** For a clip a browser cannot play, which generate_video kept as it is: what the file is, in words. It is not played in the chat. */
-  notPlayable?: string;
-}
-
-/**
- * The clip a show_video or generate_video call ended with, when it succeeded. Both answer with a path in the
- * chat's folder and a title; generate_video is taken only with the mark the portal's own tool sets, as an
- * extension may bring a tool of that name whose path is not one in the chat's folder.
- */
-export function shownVideo(payload: any): ShownVideo | undefined {
-  if (payload?.isError) return undefined;
-  const name = toolNameOf(payload);
-  const details = payload?.result?.details;
-  if (name === "generate_video" ? details?.[GENERATED_VIDEO_MARK] !== true : name !== "show_video") return undefined;
-  if (typeof details?.path !== "string" || !details.path) return undefined;
-  return {
-    path: details.path,
-    ...(typeof details.title === "string" && details.title ? { title: details.title } : {}),
-    ...(name === "generate_video" && typeof details.notPlayable === "string" && details.notPlayable ? { notPlayable: details.notPlayable.slice(0, 40) } : {}),
-  };
-}
+/** The first file of a kind a call gave the person, if it gave one. */
+export const fileOf = (item: { files?: ShownFile[] }, kind: FileKind): ShownFile | undefined => item.files?.find((file) => file.kind === kind);
 
 /**
  * What answering took, for the line under a reply: the prompt it read and the
@@ -137,14 +113,12 @@ export type Item =
       callId?: string;
       status: "running" | "done" | "error";
       detail?: string;
-      picture?: ShownPicture;
-      /** The seq of the end that showed `picture`: what versions its URL, so that every place that draws it asks for the same one (see PictureCall). */
-      pictureSeq?: number;
+      /** The files the call gave the person, as its end says (see file-outputs.ts). */
+      files?: ShownFile[];
+      /** The seq of the end that gave `files`: what versions their URLs, so that every place that draws one asks for the same one (see PictureCall). */
+      filesSeq?: number;
       /** A call of the portal's own generate_image or edit_image, as its start says (see generated-picture.ts), not of a tool of that name an extension brings. */
       portalPicture?: true;
-      /** The clip a show_video or generate_video call ended with, and the seq of the end that showed it: what versions its URL. */
-      video?: ShownVideo;
-      videoSeq?: number;
       /** A call of the portal's own generate_video, as its start says (see generated-video.ts), not of a tool of that name an extension brings. */
       portalVideo?: true;
       args?: unknown;
@@ -611,15 +585,10 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
             if (p.result?.details !== undefined) it.details = p.result.details;
             // Its updates were live only; how many there were is kept on its end.
             if (typeof p.updates === "number") it.updates = Math.max(it.updates ?? 0, p.updates);
-            const picture = shownPicture(p);
-            if (picture) {
-              it.picture = picture;
-              it.pictureSeq = ev.seq;
-            }
-            const video = shownVideo(p);
-            if (video) {
-              it.video = video;
-              it.videoSeq = ev.seq;
+            const files = shownFiles(p);
+            if (files.length) {
+              it.files = files;
+              it.filesSeq = ev.seq;
             }
             break;
           }

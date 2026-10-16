@@ -25,7 +25,6 @@ const { filesRouter } = await import("../core/server/src/api/files.ts");
 const { featuresRouter } = await import("../core/server/src/api/features.ts");
 const { GenerateVideoTool } = await import("../core/server/src/pi/generate-video-tool.ts");
 const { showVideoTool, videoIn } = await import("../core/server/src/pi/show-video-tool.ts");
-const { GENERATED_VIDEO_MARK } = await import("../core/server/src/generated-video.ts");
 const { MAX_RUNNING_VIDEOS } = await import("../core/server/src/video-settings.ts");
 const { MAX_VIDEO_BYTES } = await import("../core/server/src/video-files.ts");
 const { createSession, deleteSession, getDb } = await import("../core/server/src/db.ts");
@@ -598,14 +597,14 @@ test("the tool keeps a clip a browser cannot play, says so to the agent, lists i
     setup(sd.origin);
     const { run } = load(folder, "tool-avi");
     const result = await run({ prompt: "an avi", title: "Old format" });
-    assert.match(result.details.path, new RegExp(`^${GENERATED_VIDEOS_DIR}/video-\\d{8}-\\d{6}-[0-9a-f]{6}\\.avi$`));
-    assert.deepEqual(result.details, { path: result.details.path, title: "Old format", notPlayable: "AVI", [GENERATED_VIDEO_MARK]: true });
+    assert.match(result.details.files[0].path, new RegExp(`^${GENERATED_VIDEOS_DIR}/video-\\d{8}-\\d{6}-[0-9a-f]{6}\\.avi$`));
+    assert.deepEqual(result.details, { files: [{ path: result.details.files[0].path, title: "Old format" }], notPlayable: "AVI" });
     assert.match(result.content[0].text, /^Generated and saved: .*\.avi\. Its format is AVI, which a browser cannot play in the chat\. It is kept as it is and listed in the Media gallery, where the person can download it\./);
-    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), AVI, "kept whole");
+    assert.deepEqual(readFileSync(path.join(folder, result.details.files[0].path)), AVI, "kept whole");
     const [video] = (await listed("?origin=chat&limit=100")).videos.filter((v: any) => v.chat?.id === "tool-avi");
     assert.deepEqual([video.format.id, video.format.playable, video.prompt], ["avi", false, "an avi"]);
     // The chat's own player route does not play it; the gallery's file route gives it to be saved.
-    assert.equal((await fetch(`${at}/sessions/tool-avi/video?path=${encodeURIComponent(result.details.path)}`)).status, 400);
+    assert.equal((await fetch(`${at}/sessions/tool-avi/video?path=${encodeURIComponent(result.details.files[0].path)}`)).status, 400);
     const file = await call("GET", `/videos/${video.id}/file`);
     assert.match(file.headers.get("content-disposition") ?? "", /^attachment;/);
     assert.deepEqual(file.bytes, AVI);
@@ -624,30 +623,30 @@ test("the tool makes a clip in the chat's folder, answers as show_image does, an
     assert.ok(!JSON.stringify(registered[0]).includes(KEY));
 
     const result = await run({ prompt: "  a fox in the snow  ", title: "Fox", size: "832x480", seconds: 2 });
-    assert.match(result.details.path, new RegExp(`^${GENERATED_VIDEOS_DIR}/video-\\d{8}-\\d{6}-[0-9a-f]{6}\\.webm$`));
-    assert.deepEqual(result.details, { path: result.details.path, title: "Fox", [GENERATED_VIDEO_MARK]: true });
-    assert.ok(!path.isAbsolute(result.details.path), "a path in the chat's folder, which is what the page asks for");
+    assert.match(result.details.files[0].path, new RegExp(`^${GENERATED_VIDEOS_DIR}/video-\\d{8}-\\d{6}-[0-9a-f]{6}\\.webm$`));
+    assert.deepEqual(result.details, { files: [{ path: result.details.files[0].path, title: "Fox" }] });
+    assert.ok(!path.isAbsolute(result.details.files[0].path), "a path in the chat's folder, which is what the page asks for");
     assert.match(result.content[0].text, /shown to the user/i);
-    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBM);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.files[0].path)), WEBM);
     assert.deepEqual(readdirSync(folder), [GENERATED_VIDEOS_DIR], "nothing else was made in the folder");
     assert.deepEqual(sd.to("POST", "/sdcpp/v1/vid_gen")[0].body, { prompt: "a fox in the snow", model: "video-model", width: 832, height: 480, video_frames: 40, fps: 20, output_format: "webm" });
 
     // Listed with what it was asked for, as a clip of this chat.
     const [video] = (await listed("?origin=chat&limit=100")).videos.filter((v: any) => v.chat?.id === "tool-chat");
-    assert.deepEqual([video.origin, video.kind, video.prompt, video.chat, video.fileName], ["chat", "generated", "a fox in the snow", { id: "tool-chat", title: "The tool's chat" }, path.basename(result.details.path)]);
+    assert.deepEqual([video.origin, video.kind, video.prompt, video.chat, video.fileName], ["chat", "generated", "a fox in the snow", { id: "tool-chat", title: "The tool's chat" }, path.basename(result.details.files[0].path)]);
     assert.deepEqual([video.params.model, video.params.size, video.params.madeFrames, video.params.madeFps], ["video-model", "832x480", 33, 16]);
     assert.equal((await call("GET", `/videos/${video.id}/file`)).status, 200);
 
     // The page plays it from the chat's folder, by its path.
-    const played = await fetch(`${at}/sessions/tool-chat/video?path=${encodeURIComponent(result.details.path)}`, { headers: { range: "bytes=0-3" } });
+    const played = await fetch(`${at}/sessions/tool-chat/video?path=${encodeURIComponent(result.details.files[0].path)}`, { headers: { range: "bytes=0-3" } });
     assert.equal(played.status, 206);
     assert.deepEqual(Buffer.from(await played.arrayBuffer()), WEBM.subarray(0, 4));
     assert.equal(played.headers.get("content-type"), "video/webm");
 
     // Without a title the prompt is the caption; a second one never takes the first's place.
     const again = await run({ prompt: "a fox\nin   the snow" });
-    assert.equal(again.details.title, "a fox in the snow");
-    assert.notEqual(again.details.path, result.details.path);
+    assert.equal(again.details.files[0].title, "a fox in the snow");
+    assert.notEqual(again.details.files[0].path, result.details.files[0].path);
     assert.equal(readdirSync(path.join(folder, GENERATED_VIDEOS_DIR)).length, 2);
   } finally {
     sd.server.close();
@@ -671,7 +670,7 @@ test("the tool starts from a picture of the chat's folder, and only from one", a
     assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen")[0].body.init_image, `data:image/png;base64,${PNG.toString("base64")}`);
     const [video] = (await listed("?limit=100")).videos.filter((v: any) => v.chat?.id === "tool-frame");
     assert.deepEqual([video.kind, video.params.firstFrame], ["animated", { path: "start.png" }]);
-    assert.equal(made.details.path, video.fileName ? `${GENERATED_VIDEOS_DIR}/${video.fileName}` : "");
+    assert.equal(made.details.files[0].path, video.fileName ? `${GENERATED_VIDEOS_DIR}/${video.fileName}` : "");
     await run({ prompt: "absolute", path: path.join(folder, "sub", "later.png") });
     assert.equal(sd.to("POST", "/sdcpp/v1/vid_gen").length, 2);
 
@@ -795,8 +794,8 @@ test("show_video shows a clip of the chat's folder by its bytes, and nothing els
   const tools: any[] = [];
   showVideoTool(folder)({ registerTool: (t: any) => tools.push(t) });
   const show = (p: any) => tools[0].execute("id", p);
-  assert.deepEqual((await show({ path: "clips/a.webm", title: " A clip " })).details, { path: "clips/a.webm", title: "A clip" });
-  assert.deepEqual((await show({ path: path.join(folder, "b.mp4") })).details, { path: "b.mp4" });
+  assert.deepEqual((await show({ path: "clips/a.webm", title: " A clip " })).details, { files: [{ path: "clips/a.webm", title: "A clip" }] });
+  assert.deepEqual((await show({ path: path.join(folder, "b.mp4") })).details, { files: [{ path: "b.mp4" }] });
   await assert.rejects(show({ path: "c.webm" }), /not a WebM or MP4/);
   await assert.rejects(show({ path: "d.png" }), /not a WebM or MP4/);
   await assert.rejects(show({ path: path.join(temp, "outside.webm") }), /Only a video in the chat's folder/);

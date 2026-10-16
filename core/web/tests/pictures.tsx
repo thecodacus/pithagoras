@@ -2,6 +2,7 @@
 // Open /tests/pictures.html. `window.emit(type, payload)` adds an event as the server would send it, to finish a picture that is being made.
 // Pictures are fetched from /api/sessions/preview/picture?path=…, which a test answers.
 // The portal's own calls say so when they start (`portalImage`), as its server passes them on; a tool of the same name from an extension does not.
+// The end of a call says what the portal found of the files it gave (`portalFiles`).
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
@@ -16,7 +17,7 @@ const now = Date.now();
 let seq = 0;
 const ev = (type: string, payload: any = {}, ago = 0): PortalEvent => ({ seq: ++seq, type, at: now - ago * 1000, payload });
 const own = { portalImage: true };
-const made = (id: string, path: string, title: string) => ({ toolCallId: id, toolName: 'generate_image', result: { content: [{ type: 'text', text: `Generated and shown to the user: ${path}` }], details: { path, title, portalImage: true } } });
+const made = (id: string, path: string, title: string) => ({ toolCallId: id, toolName: 'generate_image', result: { content: [{ type: 'text', text: `Generated and shown to the user: ${path}` }], details: { files: [{ path, title }] } }, portalFiles: [{ path, kind: 'picture', title }] });
 const events: PortalEvent[] = [
   ev('portal_prompt', { message: 'Paint a few pictures.' }, 60),
   ev('turn_start', {}, 59),

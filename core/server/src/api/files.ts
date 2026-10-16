@@ -4,12 +4,13 @@ import { getSession } from "../db.js";
 import { unsavedRefusal } from "../git.js";
 import { parseRange } from "../http-range.js";
 import { openVideo } from "../video-files.js";
-import { FileError, baseDir, uploadTarget, openPicture } from "../workspace-files.js";
+import { FileError, baseDir, uploadTarget, openDownload, openPicture } from "../workspace-files.js";
 
 /**
  * What the portal itself serves of a chat's folder: a picture or a clip to be
- * drawn in the page (the conversation, show_image, show_video, Canvases), and
- * a file put there from the message box. Browsing and changing the folder is
+ * drawn in the page (the conversation, show_image, show_video, Canvases), a
+ * file a call gave the person to download, and a file put there from the
+ * message box. Browsing and changing the folder is
  * an extension's (Files'), with the same checks through `portal.files`.
  *
  * Keyed by chat, not by folder name: a chat can be in a project, in the
@@ -69,9 +70,9 @@ export function sendPicture(req: Request, res: Response, opened: ReturnType<type
  * what a player needs: it asks for the part of the file it is about to show (`Range`), and is answered with just
  * that, so that a clip of tens of megabytes starts at once and can be moved around in. The descriptor is
  * closed with the response, or at once if the response is already gone. With `download` (a file name) the file is sent
- * to be saved and never shown: for a clip a browser does not play, whatever it is.
+ * to be saved and never shown: for a clip a browser does not play, and for any other file.
  */
-export function sendVideo(req: Request, res: Response, opened: ReturnType<typeof openVideo>, cache: string, download?: string): void {
+export function sendFile(req: Request, res: Response, opened: { fd: number; size: number; mimeType: string }, cache: string, download?: string): void {
   const { fd, size, mimeType } = opened;
   if (res.destroyed) return void closeSync(fd);
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -165,7 +166,23 @@ export function filesRouter(): Router {
     } catch (e) {
       return fail(res, e);
     }
-    sendVideo(req, res, opened, "private, no-cache");
+    sendFile(req, res, opened, "private, no-cache");
+  });
+
+  /**
+   * Any file in the folder, to be saved and never shown: for a file a call gave the person that is neither a picture
+   * nor a clip (see file-outputs.ts), which the chat links to. Sent as bytes, whatever it is called.
+   */
+  router.get("/sessions/:id/file", (req, res) => {
+    const base = folderOf(req.params.id, res);
+    if (!base) return;
+    let opened: ReturnType<typeof openDownload>;
+    try {
+      opened = openDownload(base, req.query.path);
+    } catch (e) {
+      return fail(res, e);
+    }
+    sendFile(req, res, { ...opened, mimeType: "application/octet-stream" }, "private, no-cache", opened.name);
   });
 
   /**

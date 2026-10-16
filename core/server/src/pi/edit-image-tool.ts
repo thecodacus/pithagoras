@@ -1,6 +1,5 @@
 import path from "node:path";
 import { Type } from "typebox";
-import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { recordChatPicture } from "../image-gallery.js";
 import { MAX_EDIT_PICTURES, MAX_EDIT_TOTAL_BYTES, checkCount, editImage } from "../image-editing.js";
 import {
@@ -180,7 +179,7 @@ export class EditImageTool {
         // Listed in the Media page's gallery, tied to the pictures it was made from that are listed there.
         if (sessionId) recordChatPicture({ sessionId, path: rel, kind: "edited", prompt, from: originals, bytes: bytes.length, params: target.model ? { model: target.model } : {} });
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
-        const details = { path: rel, ...(title ? { title } : {}), [GENERATED_PICTURE_MARK]: true };
+        const details = { files: [{ path: rel, ...(title ? { title } : {}), from: originals }] };
         const made = originals.length > 1 ? `Made from ${originals.join(", ")} (in this order)` : `Edited ${originals[0]}`;
         // What was scaled to make the picture fit is said, so that the agent can tell the person the result may be smaller than the original.
         const scaled = notes.length ? `. ${notes.join(" ")}` : "";

@@ -11,10 +11,10 @@ export const isVideoTool = (name: string): boolean => name === "generate_video";
 
 /**
  * Whether a call is drawn as a clip rather than as a tool card: a call of the portal's own generate_video, which
- * says so when it starts, and one from before that, which says so when it ends with a clip. A tool of that name
- * that an extension brings is the plain card it always was, in every state.
+ * says so when it starts, and one from before that, which ended with a file. A tool of that name that an extension
+ * brings is the plain card it always was while it runs.
  */
-export const isVideoCall = (item: Extract<Item, { kind: "tool" }>): boolean => isVideoTool(item.name) && (item.portalVideo === true || !!item.video);
+export const isVideoCall = (item: Extract<Item, { kind: "tool" }>): boolean => isVideoTool(item.name) && (item.portalVideo === true || !!item.files?.length);
 
 export interface VideoCall {
   /** What it is of, on one line: the title the agent gave, or else the prompt. */

@@ -1,6 +1,7 @@
 import { memo, useMemo, type ComponentProps } from "react";
 import { Streamdown, type DiagramPlugin, type ExtraProps, type StreamdownProps } from "streamdown";
 import { t, useLanguage } from "../i18n";
+import { ChatVideo } from "./ChatVideo";
 
 /**
  * The host of a picture the portal does not load, or null for one it may.
@@ -28,10 +29,15 @@ export function foreignPictureHost(src: string, page: string): string | null {
   }
 }
 
+/** The portal's address of a clip in a chat's folder, which a player plays and an `<img>` does not. */
+const CLIP = /^\/api\/sessions\/[^/]+\/video$/;
+
 function SafePicture({ node: _node, src, alt, ...rest }: ComponentProps<"img"> & ExtraProps) {
   useLanguage();
   if (typeof src !== "string" || !src) return null;
   const host = foreignPictureHost(src, window.location.href);
+  // A clip of the chat's, written as a picture, is played.
+  if (host === null && CLIP.test(new URL(src, window.location.href).pathname)) return <ChatVideo src={src} title={alt || src} />;
   if (host === null) return <img src={src} alt={alt} loading="lazy" className="max-w-full rounded-lg" {...rest} />;
   return (
     <span className="inline-block max-w-full truncate rounded bg-raised px-2 py-0.5 align-bottom text-xs text-fg-subtle" title={alt || undefined}>

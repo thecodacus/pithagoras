@@ -3,7 +3,7 @@ import type { DiagramPlugin } from "streamdown";
 import { LuAudioLines, LuCheck, LuChevronLeft, LuChevronRight, LuClock, LuCopy, LuPencil, LuRotateCw, LuSend, LuShieldAlert, LuTrash2 } from "react-icons/lu";
 import { api } from "../api";
 import { copyText } from "../clipboard";
-import { sentPictureId, shownPictureId } from "../chat-pictures";
+import { sentPictureId } from "../chat-pictures";
 import { splitContext } from "../context-blocks";
 import { msg, t, tp, useLanguage } from "../i18n";
 import { isPictureCall } from "../picture-call";
@@ -18,7 +18,8 @@ import { PictureButton } from "./ChatPictures";
 import { CompactionMarker, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { Markdown, type MarkdownProps } from "./Markdown";
 import { PictureCall } from "./PictureCall";
-import { ChatVideo, VideoCall } from "./VideoCall";
+import { VideoCall } from "./VideoCall";
+import { CallFiles } from "./CallFiles";
 import { QuestionRecord } from "./QuestionCard";
 import { ReplyStatsLine } from "./ReplyStats";
 
@@ -414,30 +415,12 @@ export const TranscriptRow = memo(function TranscriptRow({
     }
     return (
       <div data-key={item.id} className={`tool-row${enter}`}>
-      {/* The card for it, or what an extension draws for its own tool: see extensions/ToolView.tsx. */}
+      {/* The card for it with the files the call gave, or what an extension draws for its own tool: see extensions/ToolView.tsx. */}
       <ToolView item={item} chat={chat}>
         <ToolCall item={item} chat={chat} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
+        <CallFiles item={item} sessionId={sessionId} onOpenPicture={act.openPicture} />
       </ToolView>
       {item.flagged && <FlaggedNotice flag={item.flagged} act={act} />}
-      {item.picture && (
-        // In the middle of the column, with as much room above as below. Contained, never cropped: a wide or tall picture is smaller here, and whole in the viewer.
-        <div className="chat-picture my-3 flex justify-center">
-          <PictureButton id={shownPictureId(item.id)} onOpen={act.openPicture} title={item.picture.title ?? item.picture.path}>
-            <img
-              src={api.pictureUrl(sessionId, item.picture.path, item.pictureSeq)}
-              alt={item.picture.title ?? item.picture.path}
-              loading="lazy"
-              className="max-h-80 max-w-full rounded-lg border border-line object-contain"
-            />
-          </PictureButton>
-        </div>
-      )}
-      {item.video && !item.video.notPlayable && (
-        // What show_video put in front of the person: the player, in the middle of the column as a picture is.
-        <div className="chat-picture my-3 flex justify-center">
-          <ChatVideo src={api.videoUrl(sessionId, item.video.path, item.videoSeq)} title={item.video.title ?? item.video.path} />
-        </div>
-      )}
       </div>
     );
   }

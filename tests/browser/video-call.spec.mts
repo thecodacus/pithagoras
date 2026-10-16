@@ -84,7 +84,9 @@ test('a clip that was made but that a browser cannot play is saved, said so with
     (window as any).emit('tool_execution_end', {
       toolCallId: 'avi',
       toolName: 'generate_video',
-      result: { content: [{ type: 'text', text: 'Generated and saved: generated-videos/video-1.avi.' }], details: { path: 'generated-videos/video-1.avi', title: 'Old format', notPlayable: 'AVI', portalVideo: true } },
+      result: { content: [{ type: 'text', text: 'Generated and saved: generated-videos/video-1.avi.' }], details: { files: [{ path: 'generated-videos/video-1.avi', title: 'Old format' }], notPlayable: 'AVI' } },
+      // A file a browser does not play, as the portal finds it by its bytes.
+      portalFiles: [{ path: 'generated-videos/video-1.avi', kind: 'file', title: 'Old format' }],
     });
   });
   const card = page.locator('.video-call-player', { hasText: 'Old format' });

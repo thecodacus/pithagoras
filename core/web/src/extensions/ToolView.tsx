@@ -1,4 +1,5 @@
 import { useMemo, type ComponentType, type ReactNode } from "react";
+import { api } from "../api";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { unwrapCall } from "../tool-activity";
 import type { Item } from "../transcript";
@@ -14,7 +15,7 @@ import { useSlot, type Chat, type ToolCallView } from "./slots";
  */
 export function ToolView({ item, chat, children }: { item: ToolItem; chat?: Chat; children: ReactNode }) {
   const entries = useSlot("chat.tool");
-  const call = useCallView(item);
+  const call = useCallView(item, chat?.id);
   const entry = entries.find((e) => e.tool === call.name);
   if (!entry || !chat) return <>{children}</>;
   return (
@@ -26,12 +27,23 @@ export function ToolView({ item, chat, children }: { item: ToolItem; chat?: Chat
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
-/** A call as an extension is told of it: the tool inside the one that reached it, with what that was given. */
-function useCallView(item: ToolItem): ToolCallView {
+/** Where the page fetches a file a call gave, by its kind: see file-outputs.ts. */
+const fileUrl = { picture: api.pictureUrl, video: api.videoUrl, file: api.fileUrl };
+
+/** A call as an extension is told of it: the tool inside the one that reached it, with what that was given, and the files it gave in the chat `chatId`. */
+function useCallView(item: ToolItem, chatId?: string): ToolCallView {
   const { name, input } = useMemo(() => unwrapCall(item.name, item.args), [item.name, item.args]);
   return useMemo<ToolCallView>(
-    () => ({ name, callId: item.callId, status: item.status, input, output: item.output, details: item.details }),
-    [name, input, item.callId, item.status, item.output, item.details],
+    () => ({
+      name,
+      callId: item.callId,
+      status: item.status,
+      input,
+      output: item.output,
+      details: item.details,
+      ...(item.files && chatId ? { files: item.files.map((file) => ({ ...file, url: fileUrl[file.kind](chatId, file.path, item.filesSeq) })) } : {}),
+    }),
+    [name, input, item.callId, item.status, item.output, item.details, item.files, item.filesSeq, chatId],
   );
 }
 
@@ -61,7 +73,7 @@ const forTool = (tool: unknown, name: string) => {
  */
 export function ToolActions({ item, cut, chat }: { item: ToolItem; cut: boolean; chat?: Chat }) {
   const entries = useSlot("chat.tool.action");
-  const call = useCallView(item);
+  const call = useCallView(item, chat?.id);
   const offered = entries.filter((entry) => forTool(entry.tool, call.name));
   if (!offered.length) return null;
   return (

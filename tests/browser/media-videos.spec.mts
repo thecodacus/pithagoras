@@ -432,9 +432,11 @@ test('where ffmpeg is there a clip a browser cannot play offers a WebM copy to p
   await expect(open.getByRole('link', { name: 'Download the video' })).toHaveAttribute('href', `/api/videos/${avi.id}/file`);
   expect(p.state.copies).toEqual([avi.id]);
 
-  // A copy that was made before is played at once. The viewer is closed first: Escape goes one step back in history, and a reload that does not wait for it is cut short.
+  // A copy that was made before is played at once. The viewer is closed first: Escape goes one step back in history, a moment
+  // after the viewer is gone (use-back-to-close.ts), and a reload that does not wait for that step is cut short.
   await page.keyboard.press('Escape');
   await expect(viewer(page)).toHaveCount(0);
+  await page.waitForFunction(() => !history.state?.pithagorasOverlay);
   await page.reload();
   await tile(page, 'Convert me').click();
   await expect(viewer(page).locator('video')).toHaveAttribute('src', `/api/videos/${avi.id}/copy`);

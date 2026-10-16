@@ -52,6 +52,7 @@ after(() => endpoint.close());
 writeFileSync(path.join(process.env.PI_CODING_AGENT_DIR, "models.json"), JSON.stringify(model.models()));
 
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+const { withFiles } = await import("../dist/output-files.js");
 const { saveImageGeneration } = await import("../dist/image-generation.js");
 
 /** The start of every call the runs saw, as the chat is told of it. */
@@ -95,7 +96,9 @@ test("a model that calls edit_image gets a new picture in the chat's folder, sho
     // The start of the call already says it is the portal's own: the chat draws its picture from then on, and a call that fails or is cut off never says it at its end.
     assert.equal(started.at(-1).toolName, "edit_image");
     assert.equal(started.at(-1).portalImage, true);
-    assert.deepEqual(result.result.details, { path: "generated-images/photo-edited.jpg", title: "Red", portalImage: true });
+    assert.deepEqual(result.result.details, { files: [{ path: "generated-images/photo-edited.jpg", title: "Red", from: ["photo.png"] }] });
+    // What it gave is a picture made from the original, as the portal finds it when the call ends (see file-outputs.ts).
+    assert.deepEqual(withFiles(result, folder).portalFiles, [{ path: "generated-images/photo-edited.jpg", kind: "picture", title: "Red", from: ["photo.png"] }]);
     assert.deepEqual(readFileSync(path.join(folder, "generated-images", "photo-edited.jpg")), JPEG);
     assert.deepEqual(readFileSync(path.join(folder, "photo.png")), PNG, "the original stays");
     assert.equal(asked.length, 1);
@@ -122,7 +125,7 @@ test("an edit_image that is lazy is the portal's own to the chat as well: its st
     assert.equal(started.at(-1).toolName, "tools");
     assert.equal(started.at(-1).portalImage, true, "the start says the call is of the portal's tool, as a direct call's does");
     assert.equal(result.portalCalledTool, "edit_image");
-    assert.deepEqual(result.result.details, { path: "generated-images/photo-edited.jpg", title: "Red", portalImage: true });
+    assert.deepEqual(result.result.details, { files: [{ path: "generated-images/photo-edited.jpg", title: "Red", from: ["photo.png"] }] });
   } finally {
     named = "edit_image";
     saveImageGeneration({ baseUrl: "", apiKey: "", editEnabled: false, editModel: "" });
@@ -185,7 +188,7 @@ test("with several pictures switched on the model gets a list, pi holds it to it
     assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["paths", "prompt", "title"], "the model is given a list, not a path");
     assert.equal(tool.parameters.properties.paths.type, "array");
     assert.equal(result.isError, false);
-    assert.deepEqual(result.result.details, { path: "generated-images/photo-edited.jpg", title: "Painted", portalImage: true });
+    assert.deepEqual(result.result.details, { files: [{ path: "generated-images/photo-edited.jpg", title: "Painted", from: ["photo.png", "style.jpg", "pattern.gif"] }] });
     assert.deepEqual(readFileSync(path.join(folder, "generated-images", "photo-edited.jpg")), JPEG);
     assert.equal(asked.length, before + 1, "one request");
     const body = asked.at(-1).body;

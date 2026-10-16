@@ -1,19 +1,20 @@
 import { useEffect, useState } from "react";
 import { LuChevronLeft, LuChevronRight, LuExternalLink } from "react-icons/lu";
 import { api, type PortalEvent } from "../api";
-import { shownPicture, type ShownPicture } from "../transcript";
+import { shownFiles } from "../../../server/src/file-outputs";
 import { t } from "../i18n";
 
-/** A picture the agent showed, and the event it was shown at: the same file shown again is a new picture. */
-export type Shown = ShownPicture & { seq: number };
+/** A picture a call gave, and the event it was given at: the same file shown again is a new picture. */
+export type Shown = { path: string; title?: string; seq: number };
 
-/** Every picture shown in this conversation, oldest first. */
+/** Every picture calls gave in this conversation, oldest first (see file-outputs.ts). */
 export function shownPictures(events: PortalEvent[]): Shown[] {
   const list: Shown[] = [];
   for (const event of events) {
     if (event.type !== "tool_execution_end") continue;
-    const picture = shownPicture(event.payload);
-    if (picture) list.push({ ...picture, seq: event.seq });
+    for (const { path, title, kind } of shownFiles(event.payload)) {
+      if (kind === "picture") list.push({ path, ...(title ? { title } : {}), seq: event.seq });
+    }
   }
   return list;
 }

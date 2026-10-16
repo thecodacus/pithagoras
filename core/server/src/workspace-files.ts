@@ -291,7 +291,11 @@ export function openPicture(base: string, rel: unknown): { fd: number; size: num
  * bytes and its size, and never through a link out of the folder.
  */
 export function readPicture(base: string, rel: unknown): { bytes: Buffer; mimeType: string; name: string } {
-  const opened = openPicture(base, rel);
+  return readOpened(openPicture(base, rel));
+}
+
+/** A file opened by openPicture or openVideo, read whole and closed. */
+export function readOpened(opened: { fd: number; size: number; name: string; mimeType: string }): { bytes: Buffer; mimeType: string; name: string } {
   try {
     const bytes = Buffer.alloc(opened.size);
     let read = 0;

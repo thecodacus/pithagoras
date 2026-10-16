@@ -2422,6 +2422,8 @@ const de: Locale = {
     "Next video": "Nächstes Video",
     "The video could not be loaded.": "Das Video konnte nicht geladen werden.",
     "This video is no longer in the folder.": "Dieses Video ist nicht mehr im Ordner.",
+    "Download {name}": "{name} herunterladen",
+    "Unknown": "Unbekannt",
     "No video was made": "Es wurde kein Video erstellt",
     "The video is ready": "Das Video ist fertig",
     "Loading the video": "Das Video wird geladen",

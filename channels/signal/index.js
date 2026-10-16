@@ -509,7 +509,8 @@ export async function start(ctx) {
         from,
         ...(images.length ? { images } : {}),
         onReply: say,
-        onPicture: (picture) => queue(key, () => sendPicture(target, picture)),
+        onPicture: (picture) => queue(key, () => sendAttachment(target, picture)),
+        onVideo: (video) => queue(key, () => sendAttachment(target, video)),
       });
       // Non-empty only when the portal was not relaying as it went.
       if (reply) await say(reply);
@@ -553,12 +554,12 @@ export async function start(ctx) {
     }
   }
 
-  async function sendPicture(target, picture) {
-    const name = String(picture.name ?? "picture").replace(/[^\w.-]+/g, "_") || "picture";
+  async function sendAttachment(target, file) {
+    const name = String(file.name ?? "file").replace(/[^\w.-]+/g, "_") || "file";
     await call("send", {
       ...to(target),
-      message: picture.title ?? "",
-      attachments: [`data:${picture.mimeType};filename=${name};base64,${picture.data}`],
+      message: file.title ?? "",
+      attachments: [`data:${file.mimeType};filename=${name};base64,${file.data}`],
     });
   }
 

@@ -2,6 +2,7 @@
 // Open /tests/videos.html. `window.emit(type, payload)` adds an event as the server would send it, to finish a clip that is being made.
 // Clips are fetched from /api/sessions/preview/video?path=…, which a test answers.
 // The portal's own generate_video says so when it starts (`portalVideo`), as its server passes it on; a tool of the same name from an extension does not.
+// The end of a call says what the portal found of the files it gave (`portalFiles`).
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
@@ -16,7 +17,7 @@ const now = Date.now();
 let seq = 0;
 const ev = (type: string, payload: any = {}, ago = 0): PortalEvent => ({ seq: ++seq, type, at: now - ago * 1000, payload });
 const own = { portalVideo: true };
-const made = (id: string, path: string, title: string) => ({ toolCallId: id, toolName: 'generate_video', result: { content: [{ type: 'text', text: `Generated and shown to the user: ${path}` }], details: { path, title, portalVideo: true } } });
+const made = (id: string, path: string, title: string) => ({ toolCallId: id, toolName: 'generate_video', result: { content: [{ type: 'text', text: `Generated and shown to the user: ${path}` }], details: { files: [{ path, title }] } }, portalFiles: [{ path, kind: 'video', title }] });
 const events: PortalEvent[] = [
   ev('portal_prompt', { message: 'Make a few videos.' }, 60),
   ev('turn_start', {}, 59),
@@ -35,7 +36,7 @@ const events: PortalEvent[] = [
   ev('tool_execution_end', { toolCallId: 'theirs-failed', toolName: 'generate_video', isError: true, result: { content: [{ type: 'text', text: 'No key set for the video service' }] } }, 7),
   // A clip shown that was not made here.
   ev('tool_execution_start', { toolCallId: 'shown', toolName: 'show_video', args: { path: 'clips/harbour.mp4', title: 'The harbour' } }, 7),
-  ev('tool_execution_end', { toolCallId: 'shown', toolName: 'show_video', result: { content: [{ type: 'text', text: 'Shown to the user: clips/harbour.mp4' }], details: { path: 'clips/harbour.mp4', title: 'The harbour' } } }, 6),
+  ev('tool_execution_end', { toolCallId: 'shown', toolName: 'show_video', result: { content: [{ type: 'text', text: 'Shown to the user: clips/harbour.mp4' }], details: { files: [{ path: 'clips/harbour.mp4', title: 'The harbour' }] } }, portalFiles: [{ path: 'clips/harbour.mp4', kind: 'video', title: 'The harbour' }] }, 6),
   // Being made.
   ev('tool_execution_start', { toolCallId: 'making', toolName: 'generate_video', ...own, args: { prompt: 'A foggy harbour at first light', title: 'A foggy harbour', size: '832x480' } }, 6),
 ];

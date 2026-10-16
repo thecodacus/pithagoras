@@ -12,7 +12,7 @@ import {
 } from "../db.js";
 import { resolveChannelSession, scopeKey, unscopeKey } from "../agent.js";
 import { EXECUTOR_KIND } from "../executor-kind.js";
-import { sessions, CommandFailed, IMAGE_ROOT, stripThinkingMarkers, type SentPicture } from "../session-manager.js";
+import { sessions, CommandFailed, IMAGE_ROOT, stripThinkingMarkers, type SentFile } from "../session-manager.js";
 import { ImageError, parseImages, saveImages } from "../prompt-images.js";
 import { picturesRefused } from "../pi/builtins.js";
 import { ruleApplies } from "../pi/guard.js";
@@ -721,11 +721,15 @@ class ChannelSupervisor {
       typeof meta.onReply === "function"
         ? (meta.onReply as (text: string) => void | Promise<void>)
         : undefined;
-    // Optional too: a package that cannot send a picture leaves it out, and the
-    // agent's words are all that go back.
+    // Optional too: a package that cannot send a picture or a clip leaves it
+    // out, and the file is named among the agent's words instead.
     const packagePicture =
       typeof meta.onPicture === "function"
-        ? (meta.onPicture as (picture: SentPicture) => void | Promise<void>)
+        ? (meta.onPicture as (picture: SentFile) => void | Promise<void>)
+        : undefined;
+    const packageVideo =
+      typeof meta.onVideo === "function"
+        ? (meta.onVideo as (video: SentFile) => void | Promise<void>)
         : undefined;
 
     // Both off and nothing is relayed: the package gets one reply at the end,
@@ -776,6 +780,7 @@ class ChannelSupervisor {
           : undefined,
       streamText: wantsProgress,
       onPicture: packagePicture,
+      onVideo: packageVideo,
       // Dialogs are relayed whatever the toggles say. They are not progress
       // chatter — the run is stopped until somebody answers, and silence here
       // means the command hangs until it times out.

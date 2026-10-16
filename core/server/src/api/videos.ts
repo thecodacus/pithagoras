@@ -14,7 +14,7 @@ import {
 } from "../video-gallery.js";
 import { VideoJobRefusal, listJobs, startVideos, stopJob, type GenerateVideoJob } from "../video-jobs.js";
 import { MAX_RUNNING_VIDEOS, MAX_VIDEO_PROMPT, parseVideoSettings } from "../video-settings.js";
-import { fail, sendPicture, sendVideo } from "./files.js";
+import { fail, sendFile, sendPicture } from "./files.js";
 
 /**
  * The Media page: making clips with the video endpoint the person set up in
@@ -149,7 +149,7 @@ export function videosRouter(): Router {
       return fail(res, e);
     }
     // One of the page's own never changes under its id; one in a chat's folder is that folder's, and the browser asks.
-    sendVideo(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache", opened.format.playable ? undefined : opened.fileName);
+    sendFile(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache", opened.format.playable ? undefined : opened.fileName);
   });
 
   /** The playable copy of a clip a browser does not play, where one was made. */
@@ -161,7 +161,7 @@ export function videosRouter(): Router {
       return fail(res, e);
     }
     if (!opened) return res.status(404).json({ error: "This video has no playable copy", code: "missing" });
-    sendVideo(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache");
+    sendFile(req, res, opened, opened.origin === "page" ? "private, max-age=86400" : "private, no-cache");
   });
 
   /**

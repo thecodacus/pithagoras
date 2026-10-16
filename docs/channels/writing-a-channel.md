@@ -193,6 +193,7 @@ const reply = await ctx.ask(text, {
   images: [{ data: base64, mimeType: "image/png" }],
   onReply: (body) => send(chatId, body),
   onPicture: (picture) => sendPicture(chatId, picture),
+  onVideo: (video) => sendVideo(chatId, video),
 });
 ```
 
@@ -203,13 +204,16 @@ sees none of it. Leave out what your platform says is not a picture, or too
 large, before you ask, and tell the person: what is dropped silently is waited
 for. `text` may be empty when there are pictures.
 
-`meta.onPicture` is how pictures come back. When the agent shows one
-(`show_image`, or one it made with `generate_image` or `edit_image`), it is
-handed to you as `{ data, mimeType, name, title? }`, `data` in base64, at the
-moment it is shown and whatever **Progress** and **Tool activity** say. With
-**Progress** on it falls between the words around it, as long as you send in
-the order you are handed things. A package without `onPicture` gets the words
-only.
+`meta.onPicture` is how pictures come back, and `meta.onVideo` clips. When a
+call of the agent's gives one ([any tool's](/guide/extension-ui#files-a-tool-gives):
+`show_image`, `generate_image`, an extension's), it is handed to you as
+`{ data, mimeType, name, title? }`, `data` in base64, at the moment it is given
+and whatever **Progress** and **Tool activity** say. A picture is a PNG, JPEG,
+GIF or WebP of at most 25 MB, a clip a WebM or MP4 of at most 100 MB, by their
+bytes. With **Progress** on it falls between the words around it, as long as you
+send in the order you are handed things. Any other file, and a picture or clip
+your package has no way to send, is named among the words instead
+(`📎 Sales by month (plots/sales.png)`).
 
 Honour `ctx.signal`. A polling loop should check `signal.aborted` and pass the
 signal to `fetch`, or disabling the channel will leave it running.

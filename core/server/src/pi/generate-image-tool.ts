@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
-import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { GENERATED_DIR, recordChatPicture } from "../image-gallery.js";
 import { GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, MAX_PROMPT, generateImage, imageGenerationConfig, imageGenerationReady } from "../image-generation.js";
 import { parseSize } from "../image-settings.js";
@@ -110,7 +109,7 @@ export class GenerateImageTool {
           recordChatPicture({ sessionId, path: rel, kind: "generated", prompt, bytes: bytes.length, params: { ...(config.model ? { model: config.model } : {}), ...(asked ? { size: asked } : {}) } });
         }
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
-        const details = { path: rel, ...(title ? { title } : {}), [GENERATED_PICTURE_MARK]: true };
+        const details = { files: [{ path: rel, ...(title ? { title } : {}) }] };
         return { content: [{ type: "text", text: `Generated and shown to the user: ${rel}` }], details };
       },
     });

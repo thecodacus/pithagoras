@@ -501,7 +501,7 @@ test("a call of a lazy tool tells the portal's pages which tool it called, and a
   assert.deepEqual(through.starts[0].args, { action: "call", name: "show_image", args: shown }, "its start has the tool in its arguments");
   assert.equal(through.results[0].portalCalledTool, "show_image", "its end says which tool it was");
   assert.deepEqual(through.results[0].result, direct.results[0].result, "and the result is the tool's own");
-  assert.deepEqual(through.results[0].result.details, shown);
+  assert.deepEqual(through.results[0].result.details, { files: [shown] });
   // A search calls nothing, so it is of no tool.
   assert.equal(through.results[1].toolName, "tools");
   assert.equal(through.results[1].portalCalledTool, undefined);

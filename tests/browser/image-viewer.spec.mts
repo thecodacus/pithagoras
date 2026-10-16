@@ -558,7 +558,7 @@ async function openApp(page: Page, ids: string[], { collapsed = true } = {}) {
   const events = [
     ev('portal_prompt', { message: 'Paint a lighthouse.' }),
     ev('tool_execution_start', { toolCallId: 'g1', toolName: 'generate_image', args: { prompt: 'A lighthouse' } }),
-    ev('tool_execution_end', { toolCallId: 'g1', toolName: 'generate_image', result: { content: [{ type: 'text', text: 'Generated' }], details: { path: 'generated-images/lighthouse.png', title: 'A lighthouse at dusk', portalImage: true } } }),
+    ev('tool_execution_end', { toolCallId: 'g1', toolName: 'generate_image', result: { content: [{ type: 'text', text: 'Generated' }], details: { files: [{ path: 'generated-images/lighthouse.png', title: 'A lighthouse at dusk' }] } }, portalFiles: [{ path: 'generated-images/lighthouse.png', kind: 'picture', title: 'A lighthouse at dusk' }] }),
     ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } }),
     ev('agent_end'),
   ];

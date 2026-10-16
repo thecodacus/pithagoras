@@ -60,16 +60,28 @@ if (phase === 'commands') {
 }
 if (phase === 'compacting') events.push(ev('compaction_start', {}, 6));
 // Pictures: one sent, one made, one made from that, and one shown without a title. Their files are what the test serves.
-// An edit's path is the original's, as the agent gave it; the folder is the chat's, so a path inside it is the same file.
+// Each end says what the portal found of its files, as its server passes it on; an edit, what it was made from.
 if (phase === 'pictures') events.push(
   ev('portal_prompt', { message: 'Paint a lighthouse, then make it blue.', images: [{ name: 'sketch.png', mimeType: 'image/png' }] }, 9),
   ev('tool_execution_start', { toolCallId: 'g1', toolName: 'generate_image', args: { prompt: 'A lighthouse at dusk', title: 'A lighthouse at dusk' } }, 8),
-  ev('tool_execution_end', { toolCallId: 'g1', toolName: 'generate_image', result: { content: [{ type: 'text', text: 'Generated and shown to the user: generated-images/lighthouse.png' }], details: { path: 'generated-images/lighthouse.png', title: 'A lighthouse at dusk', portalImage: true } } }, 7),
+  ev('tool_execution_end', { toolCallId: 'g1', toolName: 'generate_image', result: { content: [{ type: 'text', text: 'Generated and shown to the user: generated-images/lighthouse.png' }], details: { files: [{ path: 'generated-images/lighthouse.png', title: 'A lighthouse at dusk' }] } }, portalFiles: [{ path: 'generated-images/lighthouse.png', kind: 'picture', title: 'A lighthouse at dusk' }] }, 7),
   ev('tool_execution_start', { toolCallId: 'e1', toolName: 'edit_image', args: { path: '/workspaces/pithagoras/generated-images/lighthouse.png', prompt: 'Make it blue' } }, 6),
-  ev('tool_execution_end', { toolCallId: 'e1', toolName: 'edit_image', result: { content: [{ type: 'text', text: 'Edited and shown to the user: generated-images/lighthouse-edited.png' }], details: { path: 'generated-images/lighthouse-edited.png', title: 'The lighthouse, in blue', portalImage: true } } }, 5),
+  ev('tool_execution_end', { toolCallId: 'e1', toolName: 'edit_image', result: { content: [{ type: 'text', text: 'Edited and shown to the user: generated-images/lighthouse-edited.png' }], details: { files: [{ path: 'generated-images/lighthouse-edited.png', title: 'The lighthouse, in blue', from: ['/workspaces/pithagoras/generated-images/lighthouse.png'] }] } }, portalFiles: [{ path: 'generated-images/lighthouse-edited.png', kind: 'picture', title: 'The lighthouse, in blue', from: ['generated-images/lighthouse.png'] }] }, 5),
   ev('tool_execution_start', { toolCallId: 's1', toolName: 'show_image', args: { path: 'docs/diagram.png' } }, 4),
-  ev('tool_execution_end', { toolCallId: 's1', toolName: 'show_image', result: { content: [{ type: 'text', text: 'Shown: docs/diagram.png' }], details: { path: 'docs/diagram.png' } } }, 3),
+  ev('tool_execution_end', { toolCallId: 's1', toolName: 'show_image', result: { content: [{ type: 'text', text: 'Shown: docs/diagram.png' }], details: { files: [{ path: 'docs/diagram.png' }] } }, portalFiles: [{ path: 'docs/diagram.png', kind: 'picture' }] }, 3),
   ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Here they are.' }] } }, 2),
+  ev('agent_end', {}, 1),
+);
+// What a tool gave, under its card: a picture, a clip and a file to save, as the portal found them by their bytes. `?phase=outputs`.
+if (phase === 'outputs') events.push(
+  ev('portal_prompt', { message: 'Plot the sales.' }, 9),
+  ev('tool_execution_start', { toolCallId: 'p1', toolName: 'plot_sales', args: { months: 12 } }, 8),
+  ev('tool_execution_end', {
+    toolCallId: 'p1', toolName: 'plot_sales',
+    result: { content: [{ type: 'text', text: 'Plotted the sales.' }], details: { files: [{ path: 'plots/sales.png', title: 'Sales by month' }, { path: 'plots/sales.mp4', title: 'Sales, month by month' }, { path: 'plots/sales.csv' }] } },
+    portalFiles: [{ path: 'plots/sales.png', kind: 'picture', title: 'Sales by month' }, { path: 'plots/sales.mp4', kind: 'video', title: 'Sales, month by month' }, { path: 'plots/sales.csv', kind: 'file' }],
+  }, 7),
+  ev('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'Sales doubled.' }] } }, 2),
   ev('agent_end', {}, 1),
 );
 // A finished reply with what writing it took, as llama.cpp measured it: `?phase=stats`.
@@ -259,7 +271,7 @@ if (phase === 'codemode') {
   });
 }
 
-const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
+const session: Session = { id: 'preview', title: 'Fix the build', workspace: '/workspaces/pithagoras', executor: 'host', status: phase === 'interrupted' ? 'interrupted' : phase === 'args' || phase === 'pictures' || phase === 'outputs' || phase === 'stats' || phase === 'flagged' || phase === 'flagged-lazy' ? 'idle' : 'running', created_at: '', updated_at: '', last_error: null, pinned: false, provider: 'llama-server', model: 'Model A', thinking_level: 'medium' } as Session;
 const noop = async () => {};
 // An extension moves its status twenty times a second: how often the chat asks for /background is counted.
 if (phase === 'nudge') {

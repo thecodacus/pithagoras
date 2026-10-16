@@ -17,7 +17,7 @@ import { freePort, inProcessHome } from "./server-harness.mjs";
 // src/schema-version.ts (once for the release, not once for each change),
 // pin the new version and fingerprint here, and have an upgrade test for what
 // changed (below) that starts from a database made before it.
-const PINNED = { version: 5, fingerprint: "06e47b6fe66c1c572ae81987761da0aad10656b2f72825fdff93f74f342ed6cc" };
+const PINNED = { version: 6, fingerprint: "06e47b6fe66c1c572ae81987761da0aad10656b2f72825fdff93f74f342ed6cc" };
 
 const home = inProcessHome("pithagoras-schema-");
 
