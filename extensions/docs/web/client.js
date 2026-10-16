@@ -156,7 +156,8 @@ export default function (portal) {
    * The list of folders and their documents, kept up to date while it is on the page: the server half's stream says the list's version
    * whenever it changes (and as its first message), and the list is asked for again when that is not the version the page holds. So what
    * changed while there was no stream (the page's first request, a dropped connection) is found out at once, and a list that is current
-   * is not asked for again. What is shown stays while a request for it again fails; only a page that has no list yet says why.
+   * is not asked for again. What is shown stays while a request for it again fails, which is made again after a while; only a page that has
+   * no list yet says why.
    */
   function useFolders() {
     const [state, setState] = useState({ body: null, error: null });
@@ -170,18 +171,26 @@ export default function (portal) {
       let held = null;
       let told = null;
       let loading = false;
+      // A request that failed is made again after a wait, longer each time: the stream says nothing more until the list changes again.
+      let wait = null;
+      let failures = 0;
       const load = async () => {
         if (loading) return;
+        clearTimeout(wait);
         loading = true;
         const before = told;
         try {
           const body = await portal.api.json(portal.api.url("/folders"));
           if (gone) return;
+          failures = 0;
           held = body.version ?? null;
           // The same list as before is left as it is, so that it is not drawn again.
           setState((now) => (now.body && JSON.stringify(now.body) === JSON.stringify(body) ? now : { body, error: null }));
         } catch (error) {
-          if (!gone) setState((now) => (now.body ? now : { body: null, error }));
+          if (gone) return;
+          setState((now) => (now.body ? now : { body: null, error }));
+          // The list that is shown is not the one the stream said, and the stream says nothing again until the list changes once more.
+          if (told !== null && told !== held) wait = setTimeout(() => void load(), Math.min(2000 * 2 ** failures++, 30_000));
           return;
         } finally {
           loading = false;
@@ -215,6 +224,7 @@ export default function (portal) {
       return () => {
         gone = true;
         clearTimeout(reconnect);
+        clearTimeout(wait);
         stream?.close();
       };
     }, [asked]);

@@ -43,14 +43,12 @@ async function portal(folder: string | Record<string, string>, { pingMs, pollMs 
   const factories: ((pi: unknown, chat: unknown) => void)[] = [];
   const logged: string[] = [];
   const chats: Record<string, string> = typeof folder === 'string' ? { a: folder } : folder;
-  /** What ends with the login, for each stream that asked to: the portal's `http.endWithLogin`. */
-  const logins = new Set<() => void>();
   const stop = docsServer({
     extension: 'pithagoras-docs',
     executor: 'host',
     log: (line: string) => logged.push(line),
     router,
-    http: { json: express.json, endWithLogin: (end: () => void) => (logins.add(end), () => void logins.delete(end)) },
+    http: { json: express.json },
     files: { inside: resolveInside },
     sandbox: { on: () => false },
     dataDir: () => DATA,
@@ -145,7 +143,6 @@ async function portal(folder: string | Record<string, string>, { pingMs, pollMs 
     call,
     listen,
     follow,
-    logins,
     chats,
     agent: agent(),
     logged,
@@ -689,11 +686,10 @@ test('the folders are looked at only while a page has the list open', async () =
     await stream.until(() => stream.told().length === 2, 'the outside change');
     assert.equal(git(folder, 'rev-list', '--count', 'HEAD'), '2');
     stream.close!();
-    await until(() => docs.logins.size === 1, 'the first stream to be let go of');
+    await pause(150);
     assert.equal(timers.active(), 1, 'the other page is still told');
     second.close!();
-    await until(() => docs.logins.size === 0, 'the stream to be let go of');
-    assert.equal(timers.active(), 0, 'the last page went: the look stops');
+    await until(() => timers.active() === 0, 'the look to stop with the last page');
     await pause(100);
     // Let go of, and not looked at again.
     writeFileSync(path.join(folder, 'documents', 'plan.md'), PLAN.replace('on Friday', 'on Tuesday'));
@@ -729,7 +725,7 @@ test('a burst of changes made at once ends with the version the list has', async
   }
 });
 
-test('a stream for the list ends with the login it was opened under, with the extension, and one that ends leaves the others to be told', async () => {
+test('a stream for the list is kept alive and ended with the extension, and one that is closed leaves the others to be told', async () => {
   const { docs, f } = await withDocument('docs-list-ends-', { pingMs: 30 });
   try {
     const one = await docs.follow('/folders/events');
@@ -738,12 +734,9 @@ test('a stream for the list ends with the login it was opened under, with the ex
     await two.until(() => two.told().length === 1, 'the first message');
     // Kept alive, so that nothing between the portal and the page takes it for idle.
     await one.until(() => one.frames.filter((frame) => frame.comment === 'ping').length >= 2, 'its pings');
-    // Each stream asked to end with the login; the password changes, and the first goes.
-    assert.equal(docs.logins.size, 2);
-    [...docs.logins][0]();
+    // One page goes: the other is told still, as the look at the folders goes on for it.
+    one.close!();
     await one.until(() => one.ended(), 'the stream to end');
-    assert.equal(docs.logins.size, 1, 'let go of with it');
-    // The other is told still: the look at the folders goes on for it.
     assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'More' })).status, 201);
     await two.until(() => two.told().length === 2, 'the new document');
     await docs.stop();
@@ -754,5 +747,31 @@ test('a stream for the list ends with the login it was opened under, with the ex
     docs.closeServer();
   } finally {
     await docs.close().catch(() => {});
+  }
+});
+
+test('a folder that cannot be listed is logged once, though the page asks for the list at every change in another folder', { skip: !unprivileged }, async () => {
+  const folder = realpathSync(scratch('docs-list-logged-'));
+  const other = realpathSync(scratch('docs-list-logged-other-'));
+  mkdirSync(path.join(other, 'documents'));
+  writeFileSync(path.join(other, 'documents', 'notes.md'), '# Notes\n');
+  const docs = await portal({ a: folder, b: other });
+  const f = folderIdOf(folder);
+  try {
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'Plan' })).status, 201);
+    assert.equal((await listed(docs)).folders.length, 2, 'both can be read: its store is made');
+    chmodSync(path.join(other, 'documents'), 0o000);
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    // Each change in the healthy folder makes the page ask for the whole list again, the folder that cannot be read with it.
+    for (let n = 1; n <= 4; n++) {
+      assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: `Plan ${n}` })).status, 201);
+      await stream.until(() => stream.told().length === n + 1, `document ${n}`);
+      assert.equal((await listed(docs)).problems?.length, 1);
+    }
+    assert.equal(docs.logged.filter((line) => /could not be listed/.test(line)).length, 1);
+  } finally {
+    chmodSync(path.join(other, 'documents'), 0o755);
+    await docs.close();
   }
 });

@@ -53,9 +53,9 @@
  * open, each folder chats work in is looked at every couple of seconds for what
  * its list would show now (a document made, renamed, deleted or made again, a
  * folder that cannot be read), and at once for what the store itself writes.
- * Like every route it is behind the portal's login, which it is also ended
- * with: it says nothing of a folder that its list would not show, and nothing
- * of the folder or its documents but that something changed.
+ * Like every route it is behind the portal's login, and the portal ends it when
+ * the password changes: it says nothing of a folder that its list would not
+ * show, and nothing of the folder or its documents but that something changed.
  *
  * A comment of the person's that has `@agent` in it asks the agent (ping.js): the
  * thread is marked as waiting for it, and the agent of the chat the page names
@@ -758,21 +758,25 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   /** The version of the list: a hash of what every folder shows (their signatures, by folder). The same for the same list, whoever looks and when. */
   const versionOf = (signatures) => createHash("sha256").update(JSON.stringify([...signatures].sort(([a], [b]) => (a < b ? -1 : 1)))).digest("hex").slice(0, 16);
 
-  /** What was last said of a folder that could not be listed, by folder: the look at the list says it once while it stays the same. */
+  /**
+   * What was last said of a folder that could not be listed, by folder, until it is listed or says something else: the look at the list
+   * and the request for it say the same failure once, not at every look and every change of any folder that makes a page ask again.
+   */
   const failed = new Map();
+  const saying = (folder) => (line) => {
+    if (failed.get(folder.id) !== line) portal.log(line);
+    failed.set(folder.id, line);
+  };
+
+  /** A folder as the page lists it (`described`), and that it could be listed is remembered. */
+  async function listing(folder, options) {
+    const found = await described(folder, { say: saying(folder), ...options });
+    if (!found.problem) failed.delete(folder.id);
+    return found;
+  }
 
   /** A folder's signature, as the look at the list takes it. */
-  async function signed(folder) {
-    const found = await described(folder, {
-      titles: false,
-      say: (line) => {
-        if (failed.get(folder.id) !== line) portal.log(line);
-        failed.set(folder.id, line);
-      },
-    });
-    if (!found.problem) failed.delete(folder.id);
-    return signatureOf(found);
-  }
+  const signed = async (folder) => signatureOf(await listing(folder, { titles: false }));
 
   /** The signatures of every folder that has something to list, by folder. */
   async function seeing() {
@@ -873,7 +877,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const problems = [];
     const signatures = new Map();
     for (const folder of folders().values()) {
-      const found = await described(folder, { say: (line) => portal.log(line) });
+      const found = await listing(folder);
       if (found.listed) list.push(found.listed);
       if (found.problem) problems.push(found.problem);
       const signature = signatureOf(found);
@@ -889,15 +893,12 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     let closed = false;
     let send = () => {};
     let ping;
-    // A stream is checked as it opens only: one that is open when the password changes is ended, as the portal's own are.
-    const unlogin = portal.http.endWithLogin(() => res.destroy());
     // Listened to before it is asked where the list stands: a change made in between is told, and what came before is in the list the page asks for.
     const unwatch = watchList((version) => send(version));
     res.on("close", () => {
       closed = true;
       clearInterval(ping);
       streams.delete(res);
-      unlogin();
       unwatch();
     });
     await baseline();

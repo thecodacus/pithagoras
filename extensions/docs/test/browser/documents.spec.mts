@@ -399,6 +399,21 @@ test('the list that is shown stays while it cannot be asked for again, and what 
   await expect(listOf(page)).toHaveCount(3);
 });
 
+test('a list that could not be asked for again is asked for again after a while, with the stream saying nothing more', async ({ page }) => {
+  const state = await opened(page);
+  const [site] = FOLDERS;
+  state.failing = true;
+  state.folders = withDocuments([...site.documents, NOTES]);
+  state.version = 'v2';
+  await listStream(page, 'v2');
+  await expect.poll(() => state.asked).toBe(1);
+  // The list that is shown is the old one, and the page does not give up on the new one.
+  await expect(listOf(page)).toHaveCount(2);
+  state.failing = false;
+  await expect(listOf(page)).toHaveCount(3, { timeout: 8000 });
+  expect(state.asked).toBe(2);
+});
+
 test('a stream that dropped is opened again after a while, and a change that was made while it was down is found by its first message', async ({ page }) => {
   const state = await opened(page);
   const made = (await streamsOf(page)).length;
