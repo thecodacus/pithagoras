@@ -156,7 +156,7 @@ test('each edge between the conversation and the panels sizes them the way it is
   }
 });
 
-test('the conversation slides over to stay in the middle when a panel docks at a side and back when it goes; an edge being dragged moves it with no slide', async ({ page }) => {
+test('the conversation slides over to stay in the middle when a panel docks at a side, moves to the other or goes; an edge being dragged moves it with no slide', async ({ page }) => {
   await page.getByRole('button', { name: 'Close Viewer' }).click();
   await page.getByRole('button', { name: 'Close Console' }).click();
   await expect(panels(page)).toHaveCount(0);
@@ -176,6 +176,18 @@ test('the conversation slides over to stay in the middle when a panel docks at a
   expect(from(opening)).toBeGreaterThan(50);
   await expect.poll(slides).toEqual([]);
   expect(await middle()).toBeLessThan(alone - 50);
+  // Carried to the other side, where it is as wide, and back: the conversation is no narrower or wider, and it slides each way.
+  const atRight = await middle();
+  await carry(page, 'Left');
+  const [toRight] = await slides();
+  expect(from(toRight)).toBeLessThan(-50);
+  await expect.poll(slides).toEqual([]);
+  expect(await middle()).toBeGreaterThan(alone + 50);
+  await carry(page, 'Right');
+  const [toLeft] = await slides();
+  expect(from(toLeft)).toBeGreaterThan(50);
+  await expect.poll(slides).toEqual([]);
+  expect(Math.abs((await middle()) - atRight)).toBeLessThan(2);
   // The edge dragged: the conversation follows it as it goes, and nothing slides.
   const edge = (await page.locator('.chat-aside-edge').boundingBox())!;
   await page.mouse.move(edge.x + edge.width / 2, edge.y + edge.height / 2);

@@ -445,6 +445,8 @@ export function Chat({
   // The conversation between the panels at the sides. A panel docked at a side, or taken away from one, moves its middle: it
   // slides over from where it was (slideOver) instead of jumping, so that it stays in the middle of the room it has. Where it was
   // is kept as the page lays it out, in a ref: nothing is drawn again for it, and an edge being dragged is followed as it goes.
+  // A panel carried to the other side at the same width moves the conversation without changing its size, which the observer is
+  // not told of: where it is now is kept after each slide too.
   const column = useRef<HTMLDivElement>(null);
   const columnWas = useRef<{ left: number; width: number } | null>(null);
   useEffect(() => {
@@ -456,7 +458,10 @@ export function Chat({
   }, []);
   const sides = `${groupAt("left")?.kinds.join(",") ?? ""}|${groupAt("right")?.kinds.join(",") ?? ""}`;
   useLayoutEffect(() => {
-    if (column.current && columnWas.current) slideOver(column.current, columnWas.current);
+    const el = column.current;
+    if (!el) return;
+    if (columnWas.current) slideOver(el, columnWas.current);
+    columnWas.current = laidAcross(el);
   }, [sides]);
   const floaters = groupAt("float")?.kinds ?? [];
   // Of two floating windows, the one last carried, sized or pressed in is on top.
