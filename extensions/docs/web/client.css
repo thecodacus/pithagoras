@@ -1,5 +1,10 @@
 /* In the portal's own colours: its theme is a set of variables on the page, each the three numbers of a colour. */
-.pd-page { margin: 0 auto; max-width: 52rem; padding: 24px 16px; color: rgb(var(--fg)); font-size: 14px; }
+/* A container: the editor and its comments stand side by side where it is wide enough, on the page or in the panel beside a chat. */
+.pd-page { margin: 0 auto; max-width: 52rem; padding: 24px 16px; color: rgb(var(--fg)); font-size: 14px; container-type: inline-size; }
+/* Beside a chat: all the panel's width (no auto margins, which would keep a contained box from stretching), scrolled in it. */
+.pd-page.pd-panel { flex: 1; min-height: 0; margin: 0; max-width: none; padding: 12px; overflow-y: auto; background: rgb(var(--surface)); }
+.pd-new { display: flex; gap: 6px; margin-bottom: 12px; }
+.pd-new input { flex: 1; min-width: 0; }
 .pd-folder { margin-top: 24px; }
 .pd-folder h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .pd-path { margin: 2px 0 8px; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
@@ -85,9 +90,9 @@
 /* The comments: the text and the threads side by side where there is room, one under the other where there is not. */
 .pd-page:has(.pd-workspace) { max-width: 76rem; }
 .pd-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
-@media (min-width: 62rem) { .pd-workspace { grid-template-columns: minmax(0, 1fr) 20rem; } }
+@container (min-width: 62rem) { .pd-workspace { grid-template-columns: minmax(0, 1fr) 20rem; } }
 .pd-threads { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-@media (min-width: 62rem) { .pd-threads { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; } }
+@container (min-width: 62rem) { .pd-threads { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; } }
 .pd-threads h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
 .pd-count { border-radius: 999px; background: rgb(var(--accent) / .15); padding: 0 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 600; }
 .pd-hint { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; }

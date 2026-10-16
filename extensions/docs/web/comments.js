@@ -1,10 +1,10 @@
 /**
  * The comments of a document on the Documents page: the list of threads beside
- * the editor, a thread with its comments and the box a comment is written in. A
- * comment is saved as it is typed (draft.js), as the document is, with no button
- * to send it: the box is the comment while it is the last of its thread, and the
- * comment is in the list of comments once the box is let go (Ctrl+Enter) or is
- * answered. Plain JavaScript like the rest of the browser half, made with the
+ * the editor, a thread with its comments and the box a comment is written in.
+ * What is typed in the box stays in the page until it is sent, with Send or
+ * Ctrl+Enter: only then is it saved, seen by anyone else, and, with
+ * @agent in it, asked of the agent. A comment half written is nobody's but the
+ * person's. Plain JavaScript like the rest of the browser half, made with the
  * portal's React and building blocks (`portal.ui`).
  *
  * A comment of the person's, once it is in the list, can be changed or deleted with
@@ -15,8 +15,6 @@
  * threads, tells the editor where their passages are, and hands both over, with
  * what to do when a comment is saved, changed, taken away, resolved or opened again.
  */
-import { createDraft } from "./draft.js";
-
 /** The most characters of the text of a passage a card shows. */
 const SHOWN_CHARS = 240;
 
@@ -30,7 +28,7 @@ export function comments(portal, { when }) {
 
   const WHO = () => ({ user: t("You"), agent: t("The agent") });
 
-  /** The box a comment is typed in: Ctrl+Enter (or Cmd+Enter) lets it go, and what was typed is saved first. Escape gives up, where that means something. */
+  /** The box a comment is typed in: Ctrl+Enter (or Cmd+Enter) sends it, or saves an edit. Escape gives up, where that means something. */
   function Writing({ value, onChange, onBlur, onDone, onCancel, label, placeholder, autoFocus }) {
     const box = useRef(null);
     useEffect(() => {
@@ -65,13 +63,6 @@ export function comments(portal, { when }) {
       { type: onClick ? "button" : undefined, className: "pd-quote", onClick, title: onClick ? t("Show in the text") : undefined },
       short(text),
     );
-
-  /** What the box says of the comment it holds: saved, being saved, or why it was not. */
-  function Saved({ draft }) {
-    if (draft.error) return h("p", { className: "pd-meta pd-gone", role: "alert" }, t("Could not comment: {error}", { error: draft.error.message }));
-    if (draft.saving) return h("p", { className: "pd-meta" }, t("Saving…"));
-    return draft.id ? h("p", { className: "pd-meta" }, t("Saved")) : null;
-  }
 
   /**
    * One comment of a thread, in the list. The person's own has **Edit** (the comment becomes a box with Save and Cancel; it is
@@ -139,42 +130,33 @@ export function comments(portal, { when }) {
 
   /**
    * One thread: its passage, its comments in the order they were made, and the box to write the next in. `composing` is the
-   * card of a comment that is being written on a passage: with no thread yet (`thread.id` is null) until the first thing typed
-   * is saved, which makes it, and then it is the thread's card as any other.
+   * card of a comment that is being written on a passage: with no thread yet (`thread.id` is null) until it is sent, which
+   * makes the thread, and the card is the thread's in the list from then on.
    */
-  function Thread({ thread, text, marked, settled, active, composing, onActivate, onWrite, onClear, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
+  function Thread({ thread, text, marked, settled, active, composing, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
     const [value, setValue] = useState("");
-    const [draft, setDraft] = useState({ id: null, saving: false, error: null });
+    const [sending, setSending] = useState(false);
     const [error, setError] = useState(null);
     const open = thread.status === "open";
-    // What the box saves with, as it is now: the box lives on through the thread's being made and changed.
+    // What it sends with, as it is now: the card lives on through the thread's being made and changed.
     const now = useRef(null);
-    now.current = { thread, onWrite, onClear };
-    // The thread of a card that is composing, as the box's saves have left it: the one its first save made, until a removal takes it
-    // away again (typing the only comment away takes the thread with it). The card has it as a prop only after it is drawn again,
-    // which is later than the save that follows the first (text typed meanwhile), the removal that follows it (Cancel meanwhile)
-    // and the save that follows a removal (text typed meanwhile): each of those has to go by this, and not by the prop.
-    const made = useRef(null);
-    const here = () => (composing ? { ...now.current.thread, id: made.current } : now.current.thread);
-    const typed = useRef(null);
-    typed.current ??= createDraft({
-      save: async (words, id) => {
-        const saved = await now.current.onWrite(here(), words, id);
-        made.current = saved.thread;
-        return saved.comment;
-      },
-      remove: async (id) => {
-        if ((await now.current.onClear(here(), id)) === "thread") made.current = null;
-      },
-      onState: setDraft,
-    });
-    // What was typed is saved when the card goes.
-    useEffect(() => () => void typed.current.flush(), []);
+    now.current = { thread, onWrite };
     const mounted = useRef(true);
     useEffect(() => {
       mounted.current = true;
       return () => void (mounted.current = false);
     }, []);
+    // A comment typed and not sent is lost with the page: the browser asks first, as it does for a document not saved.
+    const unsent = Boolean(value.trim());
+    useEffect(() => {
+      if (!unsent) return;
+      const warn = (e) => {
+        e.preventDefault();
+        e.returnValue = "";
+      };
+      window.addEventListener("beforeunload", warn);
+      return () => window.removeEventListener("beforeunload", warn);
+    }, [unsent]);
 
     /** Does `work`, and says why if it did not go through. */
     const run = async (work) => {
@@ -185,35 +167,31 @@ export function comments(portal, { when }) {
         if (mounted.current) setError(e.message);
       }
     };
-    /** The comment typed is let go: the box is empty for the next one, and this one is in the list. */
-    const done = () =>
-      run(async () => {
-        if (!(await typed.current.settle())) return;
-        if (mounted.current) setValue("");
-        if (composing) onFinish(here());
-      });
-    // Somebody else said something after the comment in the box (the agent answered it): it is let go, and the box is for the next.
-    useEffect(() => {
-      const last = thread.comments.at(-1);
-      if (draft.id && last && last.id !== draft.id && last.author !== "user") void done();
-    }, [thread.comments.length, draft.id]);
+    /** Sends what was typed: a comment of the thread's (and the thread, for the first on a passage). The box is empty for the next. */
+    const sent = async () => {
+      setSending(true);
+      try {
+        const saved = await now.current.onWrite(now.current.thread, value, null);
+        if (!mounted.current) return;
+        setValue("");
+        if (composing) onFinish({ ...now.current.thread, id: saved.thread });
+      } finally {
+        if (mounted.current) setSending(false);
+      }
+    };
+    const send = () => run(async () => value.trim() && !sending && (await sent()));
+    // What was typed goes with the thread's being resolved, as the last word in it.
     const resolve = () =>
       run(async () => {
-        if (await typed.current.settle()) await onResolve(thread);
-      });
-    const cancel = () =>
-      run(async () => {
-        if (await typed.current.discard()) onCancel();
+        if (value.trim()) await sent();
+        await onResolve(now.current.thread);
       });
     // A thread the person started, while the agent has not commented in it, is theirs to delete as a whole.
     const deletable = !composing && Boolean(thread.id) && thread.comments[0]?.author === "user" && !thread.comments.some((comment) => comment.author === "agent");
     const removeThread = async () => {
       const ok = await ui.confirm({ title: t("Delete this thread?"), message: t("The thread and all its comments are deleted for good."), confirmLabel: t("Delete thread"), danger: true, deletes: true });
       if (!ok) return;
-      // What was typed in the box is not saved to a thread that is going.
-      await run(async () => {
-        if (await typed.current.discard()) await onDeleteThread(thread);
-      });
+      await run(() => onDeleteThread(thread));
     };
     // Where the thread stands with the agent: asked and not answered yet, or answered and not reacted to.
     const asked = thread.answered
@@ -248,10 +226,7 @@ export function comments(portal, { when }) {
       h(
         "ol",
         { className: "pd-comments" },
-        // The comment in the box is not in the list as well.
-        thread.comments
-          .filter((comment) => comment.id !== draft.id)
-          .map((comment) => h(Comment, { key: comment.id, comment, only: thread.comments.length === 1 && deletable, onEdit: (c, words) => onEdit(thread, c, words), onDelete: (c) => onDelete(thread, c), run })),
+        thread.comments.map((comment) => h(Comment, { key: comment.id, comment, only: thread.comments.length === 1 && deletable, onEdit: (c, words) => onEdit(thread, c, words), onDelete: (c) => onDelete(thread, c), run })),
       ),
       error && h(ui.ErrorBanner, { onClose: () => setError(null) }, t("Could not comment: {error}", { error })),
       open
@@ -260,26 +235,21 @@ export function comments(portal, { when }) {
             { className: "pd-reply" },
             h(Writing, {
               value,
-              onChange: (next) => {
-                setValue(next);
-                typed.current.changed(next);
-              },
-              onBlur: () => void typed.current.flush(),
-              onDone: done,
+              onChange: setValue,
+              onDone: send,
               label: composing ? t("Write a comment") : t("Reply"),
               placeholder: composing ? t("Write a comment…") : t("Reply…"),
               autoFocus: composing,
             }),
-            // The buttons above what is said of the saving, which comes and goes: they do not move under a click.
             h(
               "div",
               { className: "pd-actions" },
+              h("button", { type: "button", className: ui.classes.primarySmall, disabled: sending || !value.trim(), title: t("Ctrl+Enter"), onClick: () => void send() }, t("Send")),
               composing
-                ? h("button", { type: "button", className: ui.classes.ghost, onClick: cancel }, t("Cancel"))
-                : h("button", { type: "button", className: ui.classes.button, onClick: resolve }, t("Resolve")),
-              deletable && h("button", { type: "button", className: ui.classes.ghost, onClick: () => void removeThread() }, t("Delete thread")),
+                ? h("button", { type: "button", className: ui.classes.ghost, disabled: sending, onClick: onCancel }, t("Cancel"))
+                : h("button", { type: "button", className: ui.classes.button, disabled: sending, onClick: () => void resolve() }, t("Resolve")),
+              deletable && h("button", { type: "button", className: ui.classes.ghost, disabled: sending, onClick: () => void removeThread() }, t("Delete thread")),
             ),
-            h(Saved, { draft }),
           )
         : h(
             "div",
@@ -293,10 +263,10 @@ export function comments(portal, { when }) {
   /**
    * The panel: `threads` as the server has them (document order, open ones first), `texts` what the marked passages read as
    * by thread id (`settled`: the editor has been asked to mark these threads, so one that is not marked cannot be), `error` why they could
-   * not be fetched. `compose` is the comment being written on a passage, if one is: its `threadId` is the thread its first save
-   * made, which is its card and not one of the list's.
+   * not be fetched. `compose` is the comment being written on a passage, if one is: its `threadId` is the thread sending it made,
+   * which is its card and not one of the list's until the card is let go.
    */
-  return function Comments({ threads, loaded, error, texts, settled, active, compose, onRetry, onActivate, onWrite, onClear, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
+  return function Comments({ threads, loaded, error, texts, settled, active, compose, onRetry, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
     const [resolved, setResolved] = useState(false);
     const listed = threads.filter((thread) => thread.id !== compose?.threadId);
     const open = listed.filter((thread) => thread.status === "open");
@@ -318,7 +288,6 @@ export function comments(portal, { when }) {
         active: active === thread.id,
         onActivate,
         onWrite,
-        onClear,
         onFinish,
         onCancel,
         onResolve,
@@ -348,7 +317,6 @@ export function comments(portal, { when }) {
           composing: true,
           onActivate,
           onWrite: (thread, words, id) => onWrite(thread, words, id, compose),
-          onClear: (thread, id) => onClear(thread, id, compose),
           onFinish,
           onCancel: () => onCancel(compose),
           onResolve,

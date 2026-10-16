@@ -458,15 +458,15 @@ test('what a merge writes keeps the file\'s mode, like any save', async () => {
 });
 
 test('two changes that fit in a megabyte each but not together are refused, and nothing is written', async () => {
-  const { folder, docs, id, url } = await withDocument('docs-stream-size-', {}, 'a\n\nb\n\nc\n');
+  const { folder, docs, id, url } = await withDocument('docs-stream-size-', {}, '# Plan\n\na\n\nb\n\nc\n');
   try {
     const part = (tag: string) => `${tag}${'x'.repeat(600 * 1024)}`;
-    assert.equal((await edit(docs, id, 1, 'a', part('A'))).ok, true);
+    assert.equal((await edit(docs, id, 1, '\na\n', `\n${part('A')}\n`)).ok, true);
     const was = git(folder, 'rev-parse', 'HEAD');
-    const stale = await docs.call('PUT', url, { markdown: `a\n\nb\n\n${part('C')}\n`, base: 1 });
+    const stale = await docs.call('PUT', url, { markdown: `# Plan\n\na\n\nb\n\n${part('C')}\n`, base: 1 });
     assert.equal(stale.status, 413);
     assert.equal(git(folder, 'rev-parse', 'HEAD'), was);
-    assert.ok(fileOf(folder).startsWith('A'));
+    assert.ok(fileOf(folder).startsWith('# Plan\n\nA'));
   } finally {
     await docs.close();
   }

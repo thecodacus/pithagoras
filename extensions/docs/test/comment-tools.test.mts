@@ -169,7 +169,7 @@ test('what doc_read says of the comments: the open threads after the text, with 
     const own = done(await agent('doc_comment', { id, quote: 'Ship it on Friday.', comment: 'Why Friday?' }));
     const read = done(await agent('doc_read', { id })).text;
     const [text, comments] = read.split('\n\nOpen comments: ');
-    assert.ok(text.endsWith('Sign-off is on Monday.\n'), 'the text comes first, whole');
+    assert.ok(text.endsWith('Sign-off is on Monday.\n[End of the document.]'), 'the text comes first, whole, and says where it ends');
     assert.match(comments, /^2\. Answer one with doc_reply/);
     assert.ok(comments.includes(`Thread ${asked.id} (open, on line 7)\nPassage:\n> Sign-off is on Monday.\nperson (`));
     assert.ok(comments.includes(`): Who signs off?\nagent (`));
