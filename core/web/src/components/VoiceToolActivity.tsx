@@ -4,8 +4,8 @@ import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/
 import { api, type PortalEvent } from '../api';
 import { describeCall, describeOutcome, elapsed, unwrap, type ToolCall, type ToolTarget } from '../tool-activity';
 import { isPictureTool, pictureCall, type PictureCall } from '../picture-call';
-import { shownPicture } from '../transcript';
 import { GENERATED_PICTURE_MARK } from '../../../server/src/generated-picture';
+import { shownFiles } from '../../../server/src/file-outputs';
 import { msg, t } from "../i18n";
 import { ImagePreview } from './ImagePreview';
 import type { ToolCallView } from '@pithagoras/extension-api';
@@ -95,8 +95,8 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, wo
         const card = next.find(c => c.callId && c.callId === String(p.toolCallId ?? '') && c.status === 'running');
         if (!card) continue;
         const status = p.isError ? 'failed' as const : 'done' as const;
-        // A card leads to the pictures once its call has shown one: a generate_image or edit_image has no picture to open before that, nor when it is another extension's tool.
-        const picture = shownPicture(p);
+        // A card leads to the pictures once its call has given one (see file-outputs.ts): a call that makes one has none to open before that.
+        const picture = shownFiles(p).find(file => file.kind === 'picture');
         const target = picture ? 'pictures' as const : undefined;
         next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}), ...(picture ? { picture: picture.path, pictureSeq: event.seq } : {}) } : c);
         later(STAYS[status], () => leave(card.id));

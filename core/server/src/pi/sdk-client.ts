@@ -682,7 +682,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       const ending = event?.type === "tool_execution_end";
       const called = starting && event.toolName === GATEWAY_TOOL && !gateway.taken() ? calledThrough(event.args)?.name : undefined;
       if (called) lazyCalls.set(String(event.toolCallId), called);
-      // The start of a call of the portal's own picture tools says so: the page draws a picture for those from then on, and never for the tool of that name an extension may bring, which pi keeps instead. Only here is it known which of the two it is, and only the end of a call that made a picture would say so later.
+      // The start of a call of the portal's own picture tools says so: the page draws the preview of a picture for those from then on, and never for the tool of that name an extension may bring, which pi keeps instead. Only here is it known which of the two it is; the end says only which files the call gave, as any call's does.
       const tool = called ?? event?.toolName;
       const own = starting && ((tool === GENERATE_IMAGE_TOOL && imageTool?.registered()) || (tool === EDIT_IMAGE_TOOL && editTool?.registered()));
       // The same for the portal's generate_video, with a mark of its own.

@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { Type } from "typebox";
-import { GENERATED_VIDEO_MARK } from "../generated-video.js";
 import { pictureIn } from "./show-image-tool.js";
 import { takenByAnother } from "./generate-image-tool.js";
 import { videoIn } from "./show-video-tool.js";
@@ -161,7 +160,7 @@ export class GenerateVideoTool {
         }
         const title = (typeof p.title === "string" && p.title.trim() ? p.title : prompt).replace(/\s+/g, " ").trim().slice(0, 120);
         const format = sniffVideo(made.bytes.subarray(0, 64));
-        const details = { path: rel, ...(title ? { title } : {}), ...(format.playable ? {} : { notPlayable: format.label }), [GENERATED_VIDEO_MARK]: true };
+        const details = { files: [{ path: rel, ...(title ? { title } : {}) }], ...(format.playable ? {} : { notPlayable: format.label }) };
         if (!format.playable) {
           const text = `Generated and saved: ${rel}. Its format is ${format.id === "bin" ? "one the portal does not know" : format.label}, which a browser cannot play in the chat. It is kept as it is and listed in the Media gallery, where the person can download it. Tell them so.`;
           return { content: [{ type: "text", text }], details };

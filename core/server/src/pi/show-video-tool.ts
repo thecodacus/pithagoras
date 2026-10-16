@@ -52,7 +52,7 @@ export function showVideoTool(folder: string) {
       execute: async (_id: string, p: { path: string; title?: string }) => {
         const rel = videoIn(folder, p.path);
         const title = typeof p.title === "string" ? p.title.trim().slice(0, 120) : "";
-        const details = { path: rel, ...(title ? { title } : {}) };
+        const details = { files: [{ path: rel, ...(title ? { title } : {}) }] };
         return { content: [{ type: "text", text: `Shown to the user: ${rel}` }], details };
       },
     });

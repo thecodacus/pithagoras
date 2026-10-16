@@ -86,7 +86,8 @@ The model has to take images; if it does not, the chat says so.
 
 **The agent showing you a picture.** The agent has a `show_image` tool: it saves
 a chart, a diagram or a screenshot in the chat's folder and calls it, and a
-**Pictures** window opens on it, like the browser and terminal do. Tap the
+**Pictures** window opens on it, like the browser and terminal do. A picture
+any other tool [gives](/guide/extension-ui#files-a-tool-gives) is there too. Tap the
 picture to see it at full size, use the arrows to go back through earlier ones,
 or open it in a new tab. Outside voice mode the picture appears in the chat. With
 [image generation](/guide/features#image-generation) switched on, the agent also

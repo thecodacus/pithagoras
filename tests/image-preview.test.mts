@@ -5,6 +5,7 @@ import path from 'node:path';
 import { buildTranscript } from '../core/web/src/transcript.ts';
 import { failureReason, isPictureCall, isPictureTool, pictureCall, shapeOf, sizeRatio } from '../core/web/src/picture-call.ts';
 import { GENERATED_PICTURE_MARK } from '../core/server/src/generated-picture.ts';
+import { FILES_KEY } from '../core/server/src/file-outputs.ts';
 
 /** The start of a call as the portal's SDK client passes it on: a call of the portal's own picture tools has the mark, an extension's tool of that name does not. */
 const start = (toolName: string, input: any, own = true, toolCallId = 'c1') => ({ seq: 1, type: 'tool_execution_start', payload: { toolName, toolCallId, input, ...(own ? { [GENERATED_PICTURE_MARK]: true } : {}) } });
@@ -47,7 +48,9 @@ test('what went wrong is the first of it, on one line', () => {
 });
 
 test('a call of the portal’s picture tools is a preview in every state; another extension’s tool of that name is always its plain card', () => {
-  const mark = { path: 'generated-images/a.png', title: 'A', [GENERATED_PICTURE_MARK]: true };
+  // The end of a call that made a picture, with what the portal found of it (see file-outputs.ts).
+  const made_ = { files: [{ path: 'generated-images/a.png', title: 'A' }] };
+  const found = { [FILES_KEY]: [{ path: 'generated-images/a.png', kind: 'picture', title: 'A' }] };
   assert.equal(isPictureTool('generate_image'), true);
   assert.equal(isPictureTool('edit_image'), true);
   assert.equal(isPictureTool('show_image'), false, 'show_image is a picture shown, not made');
@@ -59,7 +62,7 @@ test('a call of the portal’s picture tools is a preview in every state; anothe
   assert.equal(isPictureCall(running), true);
   assert.equal(isPictureCall(tool([start('edit_image', { path: 'a.png', prompt: 'a' })])), true);
 
-  const made = tool([start('generate_image', { prompt: 'a' }), end('generate_image', mark)]);
+  const made = tool([start('generate_image', { prompt: 'a' }), end('generate_image', made_, found)]);
   assert.equal(made.status, 'done');
   assert.equal(isPictureCall(made), true);
 
@@ -73,7 +76,7 @@ test('a call of the portal’s picture tools is a preview in every state; anothe
   assert.equal(isPictureCall(cut), true);
 
   // A picture made before the start said so: its end does.
-  assert.equal(isPictureCall(tool([start('generate_image', { prompt: 'a' }, false), end('generate_image', mark)])), true);
+  assert.equal(isPictureCall(tool([start('generate_image', { prompt: 'a' }, false), end('generate_image', made_, found)])), true);
 
   // Another extension's tool of the name, which pi may keep in the portal's place: no mark at its start, and in no state a preview.
   const theirs = (events: any[]) => tool([start('generate_image', { prompt: 'a' }, false), ...events]);
@@ -81,7 +84,7 @@ test('a call of the portal’s picture tools is a preview in every state; anothe
   assert.equal(isPictureCall(theirs([])), false, 'while it runs');
   assert.equal(isPictureCall(theirs([end('generate_image', undefined, { isError: true })])), false, 'when it failed');
   assert.equal(isPictureCall(theirs([{ seq: 2, type: 'agent_start', payload: {} }])), false, 'when it was cut off');
-  assert.equal(isPictureCall(theirs([end('generate_image', { path: '/out/cat.png' })])), false, 'when it answered with a path of its own kind');
+  assert.equal(isPictureCall(theirs([end('generate_image', { files: [{ path: '/out/cat.png' }] })])), false, 'when it named a file the portal did not find in the folder');
   assert.equal(isPictureCall(tool([start('bash', { command: 'ls' }, false)])), false);
 });
 

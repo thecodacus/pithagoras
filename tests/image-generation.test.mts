@@ -10,7 +10,6 @@ const temp = inProcessHome("pitha-images-");
 
 const { getSetting, putSetting } = await import("../core/server/src/db.ts");
 const gen = await import("../core/server/src/image-generation.ts");
-const { GENERATED_PICTURE_MARK } = await import("../core/server/src/generated-picture.ts");
 const { GenerateImageTool, takenByAnother } = await import("../core/server/src/pi/generate-image-tool.ts");
 const { GENERATED_DIR } = await import("../core/server/src/image-gallery.ts");
 const editing = await import("../core/server/src/image-editing.ts");
@@ -442,18 +441,18 @@ test("the tool makes a picture in the chat's folder and answers as show_image do
     assert.ok(!JSON.stringify(registered[0]).includes(KEY));
 
     const result = await call({ prompt: "  a lighthouse at dusk  ", title: "Lighthouse", size: "1024x1024" });
-    assert.match(result.details.path, new RegExp(`^${GENERATED_DIR}/image-\\d{8}-\\d{6}-[0-9a-f]{6}\\.png$`));
-    // The same details as show_image's, and the mark that tells this tool's answer from another extension's of the name.
-    assert.deepEqual(result.details, { path: result.details.path, title: "Lighthouse", [GENERATED_PICTURE_MARK]: true });
-    assert.ok(!path.isAbsolute(result.details.path), "a path in the chat's folder, which is what the page asks for");
+    assert.match(result.details.files[0].path, new RegExp(`^${GENERATED_DIR}/image-\\d{8}-\\d{6}-[0-9a-f]{6}\\.png$`));
+    // The file it made, as any call says what it gave: see file-outputs.ts.
+    assert.deepEqual(result.details, { files: [{ path: result.details.files[0].path, title: "Lighthouse" }] });
+    assert.ok(!path.isAbsolute(result.details.files[0].path), "a path in the chat's folder, which is what the page asks for");
     assert.match(result.content[0].text, /shown to the user/i);
-    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), PNG);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.files[0].path)), PNG);
     assert.deepEqual(seen[0].body, { model: "image-model", prompt: "a lighthouse at dusk", n: 1, size: "1024x1024" });
 
     // Without a title, the prompt is the caption; a second one never takes the first's place.
     const again = await call({ prompt: "a lighthouse\nat   dusk" });
-    assert.equal(again.details.title, "a lighthouse at dusk");
-    assert.notEqual(again.details.path, result.details.path);
+    assert.equal(again.details.files[0].title, "a lighthouse at dusk");
+    assert.notEqual(again.details.files[0].path, result.details.files[0].path);
     assert.equal(readdirSync(path.join(folder, GENERATED_DIR)).length, 2);
     assert.deepEqual(readdirSync(folder), [GENERATED_DIR], "nothing else was made in the folder");
   } finally {
@@ -468,7 +467,7 @@ test("the name is made by the portal: nothing the agent or the endpoint says rea
     gen.saveImageGeneration({ baseUrl: origin, enabled: true });
     const { call } = load(folder);
     const result = await call({ prompt: "../../../etc/passwd", title: "../../x.png" });
-    assert.match(result.details.path, /^generated-images\/image-[\d-]+-[0-9a-f]{6}\.jpg$/);
+    assert.match(result.details.files[0].path, /^generated-images\/image-[\d-]+-[0-9a-f]{6}\.jpg$/);
     assert.equal(existsSync(path.join(folder, "..", "escape")), false);
     assert.deepEqual(readdirSync(folder), [GENERATED_DIR]);
   } finally {
@@ -1147,10 +1146,10 @@ test("the tool changes a picture of the chat's folder into a new one next to its
     assert.ok(!JSON.stringify(registered[0]).includes(KEY));
 
     const result = await call({ path: "photo.png", prompt: "  make the sky purple  ", title: "Purple sky" });
-    assert.equal(result.details.path, "generated-images/photo-edited.webp", "named after the original, with the type of the result");
-    assert.deepEqual(result.details, { path: "generated-images/photo-edited.webp", title: "Purple sky", [GENERATED_PICTURE_MARK]: true });
+    assert.equal(result.details.files[0].path, "generated-images/photo-edited.webp", "named after the original, with the type of the result");
+    assert.deepEqual(result.details, { files: [{ path: "generated-images/photo-edited.webp", title: "Purple sky", from: ["photo.png"] }] });
     assert.match(result.content[0].text, /Edited photo\.png, and shown to the user: generated-images\/photo-edited\.webp/);
-    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBP);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.files[0].path)), WEBP);
     assert.deepEqual(readFileSync(path.join(folder, "photo.png")), PNG, "the original stays as it was");
 
     // What was sent: the picture from the folder, the prompt, and the model of editing, not of generation.
@@ -1163,15 +1162,15 @@ test("the tool changes a picture of the chat's folder into a new one next to its
 
     // A second edit of the same picture never takes the first's place; one of an edit does not stack the mark.
     const again = await call({ path: "photo.png", prompt: "make the sky green" });
-    assert.equal(again.details.path, "generated-images/photo-edited (2).webp");
-    assert.equal(again.details.title, "make the sky green", "without a title, the prompt is the caption");
-    const ofEdit = await call({ path: result.details.path, prompt: "and add a moon" });
-    assert.equal(ofEdit.details.path, "generated-images/photo-edited (3).webp");
-    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBP, "the first is as it was");
+    assert.equal(again.details.files[0].path, "generated-images/photo-edited (2).webp");
+    assert.equal(again.details.files[0].title, "make the sky green", "without a title, the prompt is the caption");
+    const ofEdit = await call({ path: result.details.files[0].path, prompt: "and add a moon" });
+    assert.equal(ofEdit.details.files[0].path, "generated-images/photo-edited (3).webp");
+    assert.deepEqual(readFileSync(path.join(folder, result.details.files[0].path)), WEBP, "the first is as it was");
 
     // An absolute path inside the folder, and a picture in a folder of its own: the result is still where the pictures go.
     const inner = await call({ path: path.join(folder, "shots", "other.jpg"), prompt: "p" });
-    assert.equal(inner.details.path, "generated-images/other-edited.webp");
+    assert.equal(inner.details.files[0].path, "generated-images/other-edited.webp");
     assert.deepEqual(readdirSync(folder).sort(), [GENERATED_DIR, "photo.png", "shots"], "nothing else was made in the folder");
     assert.deepEqual(readdirSync(path.join(folder, "shots")), ["other.jpg"]);
   } finally {
@@ -1205,10 +1204,10 @@ test("an original with a long name of four-byte letters is edited as any other, 
     const { call } = loadEdit(folder);
     const first = await call({ path: name, prompt: "p" });
     const second = await call({ path: name, prompt: "p" });
-    assert.notEqual(first.details.path, second.details.path);
+    assert.notEqual(first.details.files[0].path, second.details.files[0].path);
     for (const result of [first, second]) {
-      assert.ok(existsSync(path.join(folder, result.details.path)));
-      assert.ok(Buffer.byteLength(path.basename(result.details.path)) <= 255);
+      assert.ok(existsSync(path.join(folder, result.details.files[0].path)));
+      assert.ok(Buffer.byteLength(path.basename(result.details.files[0].path)) <= 255);
     }
     assert.equal(seen.length, 2);
   } finally {
@@ -1260,7 +1259,7 @@ test("a picture over the limit is refused as too large for an edit, not told to 
     });
     assert.equal(seen.length, 0, "nothing was sent");
     assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "and nothing kept");
-    assert.equal((await call({ path: "small.png", prompt: "p" })).details.path, "generated-images/small-edited.png", "a picture within the limit is edited as ever");
+    assert.equal((await call({ path: "small.png", prompt: "p" })).details.files[0].path, "generated-images/small-edited.png", "a picture within the limit is edited as ever");
   } finally {
     server.close();
     reset();
@@ -1320,8 +1319,8 @@ test("a picture made by the portal can be edited, and the result sits beside it 
     reset();
     gen.saveImageGeneration({ baseUrl: origin, enabled: true, editEnabled: true });
     const made = await load(folder).call({ prompt: "a lighthouse" });
-    const edited = await loadEdit(folder).call({ path: made.details.path, prompt: "at night" });
-    assert.equal(edited.details.path, made.details.path.replace(/\.png$/, "-edited.png"));
+    const edited = await loadEdit(folder).call({ path: made.details.files[0].path, prompt: "at night" });
+    assert.equal(edited.details.files[0].path, made.details.files[0].path.replace(/\.png$/, "-edited.png"));
     assert.deepEqual(readdirSync(path.join(folder, GENERATED_DIR)).length, 2);
   } finally {
     server.close();
@@ -1415,9 +1414,9 @@ test("the tool makes one picture of several, in the order given, named after the
     gen.saveImageGeneration({ baseUrl: origin, apiKey: KEY, editEnabled: true, editMultiple: true, editModel: "edit-model" });
     const { call } = loadEdit(folder);
     const result = await call({ paths: ["person.png", "style.jpg", path.join(folder, "shots", "pattern.gif")], prompt: "the person from the first, painted as the second, on the third", title: "Painted" });
-    assert.deepEqual(result.details, { path: "generated-images/person-edited.webp", title: "Painted", [GENERATED_PICTURE_MARK]: true }, "answers as for one picture: the page draws it the same");
+    assert.deepEqual(result.details, { files: [{ path: "generated-images/person-edited.webp", title: "Painted", from: ["person.png", "style.jpg", "shots/pattern.gif"] }] }, "one picture, made from all of them, in their order");
     assert.match(result.content[0].text, /Made from person\.png, style\.jpg, shots\/pattern\.gif \(in this order\), and shown to the user: generated-images\/person-edited\.webp/);
-    assert.deepEqual(readFileSync(path.join(folder, result.details.path)), WEBP);
+    assert.deepEqual(readFileSync(path.join(folder, result.details.files[0].path)), WEBP);
     assert.equal(seen.length, 1, "one request for all");
     assert.equal(seen[0].auth, `Bearer ${KEY}`);
     const list = partList(seen[0]);
@@ -1430,12 +1429,12 @@ test("the tool makes one picture of several, in the order given, named after the
     assert.deepEqual(readdirSync(folder).sort(), [GENERATED_DIR, "person.png", "shots", "style.jpg"], "nothing else was made");
 
     // A second one with the same first picture takes the next number, as an edit does; a list of one is one picture.
-    assert.equal((await call({ paths: ["person.png", "style.jpg"], prompt: "p" })).details.path, "generated-images/person-edited (2).webp");
+    assert.equal((await call({ paths: ["person.png", "style.jpg"], prompt: "p" })).details.files[0].path, "generated-images/person-edited (2).webp");
     const single = await call({ paths: ["style.jpg"], prompt: "p" });
     assert.match(single.content[0].text, /^Edited style\.jpg, and shown/);
     assert.deepEqual(partList(seen.at(-1)!).map((part) => part.name), ["image", "prompt", "model", "n"], "sent as one picture is");
     // One path still does as it did, where the tool was loaded with a list.
-    assert.equal((await call({ path: "style.jpg", prompt: "p" })).details.path, "generated-images/style-edited (2).webp");
+    assert.equal((await call({ path: "style.jpg", prompt: "p" })).details.files[0].path, "generated-images/style-edited (2).webp");
   } finally {
     server.close();
     reset();
@@ -1474,8 +1473,8 @@ test("a picture of a list that is refused refuses the call, says which it is, an
     assert.equal(existsSync(path.join(folder, GENERATED_DIR)), false, "and nothing kept");
     assert.deepEqual(readdirSync(outside), ["secret.png"]);
     // What is in bounds is made as ever.
-    assert.equal((await call({ paths: ["big-1.png", "big-2.png"], prompt: "p" })).details.path, "generated-images/big-1-edited.png");
-    assert.equal((await call({ paths: Array(editing.MAX_EDIT_PICTURES).fill("a.png"), prompt: "p" })).details.path, "generated-images/a-edited.png");
+    assert.equal((await call({ paths: ["big-1.png", "big-2.png"], prompt: "p" })).details.files[0].path, "generated-images/big-1-edited.png");
+    assert.equal((await call({ paths: Array(editing.MAX_EDIT_PICTURES).fill("a.png"), prompt: "p" })).details.files[0].path, "generated-images/a-edited.png");
   } finally {
     server.close();
     reset();
@@ -1492,12 +1491,12 @@ test("the setting is read at each call: a list is refused once the endpoint is n
     gen.saveImageGeneration({ editMultiple: false });
     await assert.rejects(withList.call({ paths: ["a.png", "b.jpg"], prompt: "p" }), /not set up to take several pictures, so none was sent/);
     assert.equal(seen.length, 0, "nothing was sent");
-    assert.ok((await withList.call({ paths: ["a.png"], prompt: "p" })).details.path, "one picture is as ever");
+    assert.ok((await withList.call({ paths: ["a.png"], prompt: "p" })).details.files[0].path, "one picture is as ever");
 
     // Switched on since the tool was loaded with one path: the person's setting is in force at once, for the call that names several.
     const withPath = loadEdit(folder);
     gen.saveImageGeneration({ editMultiple: true });
-    assert.equal((await withPath.call({ paths: ["a.png", "b.jpg"], prompt: "p" })).details.path, "generated-images/a-edited (2).webp");
+    assert.equal((await withPath.call({ paths: ["a.png", "b.jpg"], prompt: "p" })).details.files[0].path, "generated-images/a-edited (2).webp");
     assert.equal(partList(seen.at(-1)!).filter((part) => part.name === "image[]").length, 2);
     // And switched off with editing since: there is nothing to call.
     gen.saveImageGeneration({ editEnabled: false });

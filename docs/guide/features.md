@@ -138,16 +138,15 @@ in-process agent (`EXECUTOR=host`), as `show_image` does.
 it. The picture is written to a `generated-images` folder inside the chat's
 folder — the one place the page serves pictures from — under a name the portal
 makes (`image-20261001-101500-a1b2c3.png`), never one the agent or the endpoint
-chose, and never over an existing file. Its answer is the picture's path and a
-title, the same as `show_image`'s, so the chat draws the picture, in a preview
+chose, and never over an existing file. Its answer names the picture as a [file it gave](/guide/extension-ui#files-a-tool-gives),
+with a title, as `show_image`'s does, so the chat draws the picture, in a preview
 that holds its place while it is made (see
 [Sessions](/guide/sessions#pictures-the-agent-makes)) and opens in the
 [viewer](/guide/sessions#looking-at-a-picture) on a click, and voice mode opens
-the Pictures window through the path `show_image` already has. The portal marks
-its own calls, when they start and in their answer, and the page draws a call as
-a picture only with that mark: another extension's tool of the same name, which
-pi may keep in the portal's place, has no such mark and stays a plain tool card,
-whether it is running, failed or done. A failure — nothing configured, the endpoint's error, a reply that is
+the Pictures window on it. The portal marks its own calls when they start, and
+the page draws a call as that preview only with the mark: another extension's
+tool of the same name, which pi may keep in the portal's place, has no such mark
+and stays a plain tool card while it runs or fails, with what it gave under it. A failure — nothing configured, the endpoint's error, a reply that is
 no picture — is an error result the agent sees and can pass on, never a
 silent success.
 

@@ -366,10 +366,13 @@ function NoteCall({ call, panels, card }) {
 }
 ```
 
-`call` is `{ name, callId, status, input, output, details }`: what the tool
-was called with, what it has returned so far as text, and its result's
-`details`. `card` is the portal's own card for the call, to return as it is or
-to draw beside something of your own.
+`call` is `{ name, callId, status, input, output, details, files }`: what the
+tool was called with, what it has returned so far as text, its result's
+`details`, and the [files it gave](#files-a-tool-gives) once it ended, each
+`{ path, kind, title?, from?, url }`. `card` is the portal's own card for the
+call, with those files drawn under it, to return as it is or to draw beside
+something of your own. A card that leaves `card` out draws the files its own
+way, from `url`.
 
 ### An action on a call's card
 
@@ -842,6 +845,40 @@ tool is on, once however many tools have the same line:
 ```js
 pi.registerTool({ name: "canvas_write", /* … */ voiceGuidelines: ["Write the full report in a canvas and give only a brief spoken summary."] });
 ```
+
+### Files a tool gives
+
+A tool says it gave the person a file the same way whoever made it, the
+portal or an extension, in a pi extension or a server half: its result's
+`details` has `files`, each a path in the chat's folder, with a title if it
+has one and the files it was made from (`from`) if it is a changed copy.
+
+```js
+return {
+  content: [{ type: "text", text: "Plotted the sales: plots/sales.png" }],
+  details: { files: [{ path: "plots/sales.png", title: "Sales by month" }] },
+};
+```
+
+Everything else a tool answers is text. When the call ends, the portal looks
+at each file's bytes, not its name: a PNG, JPEG, GIF or WebP is a picture, a
+WebM or MP4 a clip, and any other file in the folder a file to save. One that
+is not there, is outside the folder or is reached through a link out of it is
+left out. What it found is on the end of the call, and everything goes by it:
+
+- The chat draws them under the call's card: a picture, which opens in the
+  [viewer](/guide/sessions#looking-at-a-picture), a clip in its player, and
+  any other file as a link that saves it.
+- The viewer steps through the pictures with the rest of the chat's, and one
+  made `from` a picture shown before is tied to it.
+- Voice mode's **Pictures** window shows the pictures.
+- A [channel](/channels/writing-a-channel) sends pictures and clips on as they
+  are given, and names any other file in the reply.
+
+A picture in the agent's own words is not a file a call gave: one it writes in
+Markdown loads only from the portal (a clip of the chat's, written the same
+way, plays), and one from anywhere else is not fetched, so that a page the
+agent read cannot have the browser send something somewhere else.
 
 ### Running things as the chat's agent
 

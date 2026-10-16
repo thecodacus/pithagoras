@@ -1,6 +1,6 @@
 import { closeSync, readSync } from "node:fs";
 import path from "node:path";
-import { FileError, openDownload } from "./workspace-files.js";
+import { FileError, openDownload, readOpened } from "./workspace-files.js";
 
 /**
  * What a clip is, by its first bytes, and how one is opened to be shown.
@@ -159,6 +159,9 @@ export function openVideo(base: string, rel: unknown): { fd: number; size: numbe
     throw e;
   }
 }
+
+/** A clip in the folder, read whole, for a channel to send on: opened as one that is played is. */
+export const readVideo = (base: string, rel: unknown): { bytes: Buffer; mimeType: string; name: string } => readOpened(openVideo(base, rel));
 
 /** What the open file is, by its first bytes. */
 function formatAt(fd: number): VideoFormat {

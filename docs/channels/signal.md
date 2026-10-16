@@ -153,9 +153,9 @@ them in the channel first, then give them a role under **Settings → People**.
   umlauts, Cyrillic, Chinese or emoji. A long message you send arrives whole.
   While the agent works, Signal shows it typing.
 - **Pictures** you send (PNG, JPEG, GIF or WebP, up to 5 MB, up to eight with
-  a message) reach the agent with your message. Pictures the agent shows with
-  `show_image`, or makes with `generate_image` and `edit_image`, come back as
-  pictures, with their title as the caption. Voice notes and other files are
+  a message) reach the agent with your message. Pictures and clips the agent shows
+  or makes come back as attachments, with their title as the caption, and any
+  other file it gives is named in the reply. Voice notes and other files are
   not taken yet. The channel says it left them out, so you are not waiting for
   an answer about them.
 - **Mentions** reach the agent as `@name`.

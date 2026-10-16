@@ -6,8 +6,8 @@ import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
 // What a channel package gets beyond words: pictures sent with a message reach
-// the agent, a picture the agent shows goes back out, and a code the package
-// needs scanned is on the channel's page while it waits for it.
+// the agent, a picture or a clip a call gives goes back out, and a code the
+// package needs scanned is on the channel's page while it waits for it.
 
 const home = inProcessHome("pithagoras-channel-pictures-");
 
@@ -19,6 +19,7 @@ const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
 getDb().prepare("INSERT INTO channels (id, slug, kind, name, config) VALUES ('c1', 'sig', 'test', 'Test', '{}')").run();
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2, 3]);
+const MP4 = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypisom"), Buffer.alloc(20)]);
 
 class FakePi extends EventEmitter {
   running = true;
@@ -55,86 +56,54 @@ test("pictures a channel hands over go to the agent with the message, kept besid
   }
 });
 
-test("a picture the agent shows in a channel's chat goes to the channel as it is shown, with its words after it", async () => {
+test("what a call gives goes to a channel as it is given, with the words after it: a picture and a clip sent, any other file named", async () => {
   const workspace = path.join(home, "pictures-ws");
   mkdirSync(workspace, { recursive: true });
   writeFileSync(path.join(workspace, "chart.png"), PNG);
+  writeFileSync(path.join(workspace, "fox.mp4"), MP4);
+  writeFileSync(path.join(workspace, "sales.csv"), "a,b\n1,2\n");
   createSession({ id: "shown", title: "shown", workspace, executor: "host" });
   const realSubmit = sessions.submit;
+  const ended = (toolCallId, toolName, files, extra = {}) =>
+    pi.emit("event", { type: "tool_execution_end", toolCallId, toolName, result: { content: [{ type: "text", text: "done" }], details: { files } }, ...extra });
   sessions.submit = async () => {
     setImmediate(() => {
       pi.emit("event", { type: "agent_start" });
       pi.emit("event", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Drawing it." } });
       pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Drawing it." }] } });
       pi.emit("event", { type: "tool_execution_start", toolCallId: "t1", toolName: "show_image", args: { path: "chart.png", title: "Sales" } });
-      pi.emit("event", { type: "tool_execution_end", toolCallId: "t1", toolName: "show_image", result: { content: [{ type: "text", text: "Shown to the user: chart.png" }], details: { path: "chart.png", title: "Sales" } } });
-      // One that failed, and one an extension brought under the portal's name: neither is a picture of the chat's folder.
-      pi.emit("event", { type: "tool_execution_end", toolCallId: "t2", toolName: "show_image", isError: true, result: { details: { path: "chart.png" } } });
-      pi.emit("event", { type: "tool_execution_end", toolCallId: "t3", toolName: "generate_image", result: { details: { path: "/etc/passwd" } } });
+      ended("t1", "show_image", [{ path: "chart.png", title: "Sales" }]);
+      // Any tool's, called through the lazy tools' gateway too: a clip, and a file that is neither, in one call.
+      ended("t2", "tools", [{ path: "fox.mp4", title: "A fox" }, { path: path.join(workspace, "sales.csv") }], { portalCalledTool: "plot_tool" });
+      // What is not given: a failed call's, a file outside the folder, one that is not there.
+      ended("t3", "show_image", [{ path: "chart.png" }], { isError: true });
+      ended("t4", "generate_image", [{ path: "/etc/passwd" }, { path: "../outside.png" }, { path: "gone.png" }]);
       pi.emit("event", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Sales doubled." } });
       pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Sales doubled." }] } });
       pi.emit("event", { type: "agent_settled" });
     });
   };
   try {
-    const said = [];
+    const sent = [];
     const reply = await sessions.ask("shown", "chart the sales", {
       streamText: false,
-      onPicture: (picture) => said.push(picture),
+      onPicture: (picture) => sent.push(picture),
+      onVideo: (video) => sent.push(video),
     });
-    assert.deepEqual(said, [{ data: PNG.toString("base64"), mimeType: "image/png", name: "chart.png", title: "Sales" }]);
-    assert.equal(reply, "Drawing it.\n\nSales doubled.", "with Progress off the words still come at the end");
+    assert.deepEqual(sent, [
+      { data: PNG.toString("base64"), mimeType: "image/png", name: "chart.png", title: "Sales" },
+      { data: MP4.toString("base64"), mimeType: "video/mp4", name: "fox.mp4", title: "A fox" },
+    ]);
+    assert.equal(reply, "Drawing it.\n\n📎 sales.csv\n\nSales doubled.", "with Progress off the words still come at the end, the file named among them");
 
-    // With Progress on, the picture sits between the words it came between.
+    // With Progress on, each sits between the words it came between. A channel that cannot send a clip has it named.
     const order = [];
     await sessions.ask("shown", "again", {
       streamText: true,
       onReply: (line) => order.push(line),
       onPicture: (picture) => order.push(`[${picture.name}]`),
     });
-    assert.deepEqual(order.filter((l) => !l.startsWith("⚙")), ["Drawing it.", "[chart.png]", "Sales doubled."]);
-  } finally {
-    sessions.submit = realSubmit;
-  }
-});
-
-test("a picture a lazy tool shows or makes goes to the channel as one of a direct call does: the call is of the tools tool, and its end says which tool it was", async () => {
-  const workspace = path.join(home, "lazy-pictures-ws");
-  mkdirSync(workspace, { recursive: true });
-  writeFileSync(path.join(workspace, "chart.png"), PNG);
-  writeFileSync(path.join(workspace, "made.png"), PNG);
-  createSession({ id: "lazy-shown", title: "lazy-shown", workspace, executor: "host" });
-  const realSubmit = sessions.submit;
-  /** The call of a lazy tool as the portal passes it on: the start has the call in its arguments, the end names the tool. */
-  const through = (id, name, args, result, extra = {}) => {
-    pi.emit("event", { type: "tool_execution_start", toolCallId: id, toolName: "tools", args: { action: "call", name, args } });
-    pi.emit("event", { type: "tool_execution_end", toolCallId: id, toolName: "tools", portalCalledTool: name, result: { content: [{ type: "text", text: "done" }], details: result }, ...extra });
-  };
-  sessions.submit = async () => {
-    setImmediate(() => {
-      pi.emit("event", { type: "agent_start" });
-      pi.emit("event", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Drawing it." } });
-      pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Drawing it." }] } });
-      through("l1", "show_image", { path: "chart.png", title: "Sales" }, { path: "chart.png", title: "Sales" });
-      // The portal's own generate_image, which says so; and what is no picture: a failed call, another tool's path, a search, one an extension brought.
-      through("l2", "generate_image", { prompt: "a cat" }, { path: "made.png", title: "A cat", portalImage: true });
-      through("l3", "show_image", { path: "chart.png" }, { path: "chart.png" }, { isError: true });
-      through("l4", "docs_open", { id: "d" }, { path: "chart.png" });
-      pi.emit("event", { type: "tool_execution_end", toolCallId: "l5", toolName: "tools", result: { details: { path: "chart.png" } } });
-      through("l6", "generate_image", { prompt: "an extension's" }, { path: "/etc/passwd" });
-      pi.emit("event", { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "There." } });
-      pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "There." }] } });
-      pi.emit("event", { type: "agent_settled" });
-    });
-  };
-  try {
-    const said = [];
-    const reply = await sessions.ask("lazy-shown", "chart the sales", { streamText: false, onPicture: (picture) => said.push(picture) });
-    assert.deepEqual(said, [
-      { data: PNG.toString("base64"), mimeType: "image/png", name: "chart.png", title: "Sales" },
-      { data: PNG.toString("base64"), mimeType: "image/png", name: "made.png", title: "A cat" },
-    ]);
-    assert.equal(reply, "Drawing it.\n\nThere.");
+    assert.deepEqual(order.filter((l) => !l.startsWith("⚙")), ["Drawing it.", "[chart.png]", "📎 A fox (fox.mp4)", "📎 sales.csv", "Sales doubled."]);
   } finally {
     sessions.submit = realSubmit;
   }

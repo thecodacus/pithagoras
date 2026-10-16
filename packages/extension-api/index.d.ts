@@ -71,6 +71,25 @@ export interface ToolCallView {
   output?: string;
   /** What it reported about itself beside its text: a tool result's `details`. */
   details?: unknown;
+  /**
+   * The files it gave the person, once it ended: what its `details.files`
+   * named, as the portal found them in the chat's folder by their bytes. `url`
+   * is where the page fetches each: drawn, played, or saved for a `file`.
+   * The portal's card draws them; an extension's own card that leaves out
+   * `card` draws them its own way.
+   */
+  files?: CallFile[];
+}
+
+/** A file a call gave the person, in the chat's folder: see ToolCallView.files. */
+export interface CallFile {
+  /** Relative to the chat's folder. */
+  path: string;
+  kind: "picture" | "video" | "file";
+  title?: string;
+  /** The files it was made from, relative to the chat's folder. */
+  from?: string[];
+  url: string;
 }
 
 export interface SlotMap {

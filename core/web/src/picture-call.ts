@@ -1,6 +1,6 @@
 import { insideFolder } from "./file-activity";
 import { toolName, unwrapCall } from "./tool-activity";
-import type { Item } from "./transcript";
+import { fileOf, type Item } from "./transcript";
 
 /**
  * What the page knows of a picture that is being made, before it exists: from
@@ -14,11 +14,11 @@ export const isPictureTool = (name: string): boolean => name === "generate_image
 /**
  * Whether a call is drawn as a picture preview rather than as a tool card: a
  * call of the portal's own picture tools, which says so when it starts, and
- * one from before that, which says so when it ends with a picture. A tool of
- * that name that an extension brings is the plain card it always was, in every
- * state: pi keeps one tool of a name, and the portal's is not always it.
+ * one from before that, which ended with a picture. A tool of that name that
+ * an extension brings is the plain card it always was while it runs: pi keeps
+ * one tool of a name, and the portal's is not always it.
  */
-export const isPictureCall = (item: Extract<Item, { kind: "tool" }>): boolean => isPictureTool(toolName(item.name, item.args)) && (item.portalPicture === true || !!item.picture);
+export const isPictureCall = (item: Extract<Item, { kind: "tool" }>): boolean => isPictureTool(toolName(item.name, item.args)) && (item.portalPicture === true || !!fileOf(item, "picture"));
 
 /**
  * Narrowest and widest a preview is drawn: past that a picture is shown whole in a

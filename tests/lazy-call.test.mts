@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, shownPicture } from '../core/web/src/transcript.ts';
+import { buildTranscript } from '../core/web/src/transcript.ts';
 import { describeCall } from '../core/web/src/tool-activity.ts';
 import { isPictureCall, pictureCall } from '../core/web/src/picture-call.ts';
 import { chatPictures } from '../core/web/src/chat-pictures.ts';
@@ -8,6 +8,7 @@ import { latestBrowserActivity } from '../core/web/src/voice-browser.ts';
 import { latestCommand } from '../extensions/terminal/src/runs.ts';
 import { GENERATED_PICTURE_MARK } from '../core/server/src/generated-picture.ts';
 import { CALLED_TOOL_KEY } from '../core/server/src/pi/tools-gateway-names.ts';
+import { FILES_KEY } from '../core/server/src/file-outputs.ts';
 
 /**
  * A lazy tool is called through the `tools` tool, and pi's events name that one: the pictures and the
@@ -21,33 +22,19 @@ const end = (toolName: string, details: any, extra: any = {}, seq = 2, toolCallI
 /** The end of a call of `name` through `tools`, as the portal passes it on. */
 const lazyEnd = (name: string, details: any, extra: any = {}, seq = 2, toolCallId = 'c1') => end('tools', details, { [CALLED_TOOL_KEY]: name, ...extra }, seq, toolCallId);
 
-test('a lazy show_image shows the picture a direct one does, in the chat and in voice mode', () => {
-  const shown = { path: 'p.png', title: 't' };
-  const direct = shownPicture(end('show_image', shown).payload);
-  assert.deepEqual(direct, shown);
-  assert.deepEqual(shownPicture(lazyEnd('show_image', shown).payload), direct);
+/** What the portal found of the files a call gave, on its end: see file-outputs.ts. */
+const gave = (...files: any[]) => ({ [FILES_KEY]: files });
 
-  const items = buildTranscript([start('tools', via('show_image', shown)), lazyEnd('show_image', shown)]);
+test('a lazy show_image gives the picture a direct one does, in the chat, and reads as a call of the tool it made', () => {
+  const shown = { path: 'p.png', title: 't' };
+  const file = { ...shown, kind: 'picture' };
+  const items = buildTranscript([start('tools', via('show_image', shown)), lazyEnd('show_image', { files: [shown] }, gave(file))]);
   const line = items.find((i) => i.kind === 'tool') as any;
-  assert.deepEqual(line.picture, shown, 'under the tool line, as for a direct call');
-  assert.equal(line.pictureSeq, 2);
+  assert.deepEqual(line.files, [file], 'under the tool line, as for a direct call');
+  assert.equal(line.filesSeq, 2);
   // The line reads as the call of the tool it made, as one through the MCP adapter does.
   assert.equal(describeCall(start('tools', via('show_image', shown)).payload, '/work').label, 'Showing a picture');
   assert.equal(describeCall(start('tools', via('show_image', shown)).payload, '/work').target, 'pictures');
-});
-
-test('a call through tools shows a picture only when it was a call of a picture tool that succeeded', () => {
-  const shown = { path: 'p.png' };
-  assert.equal(shownPicture(lazyEnd('show_image', shown, { isError: true }).payload), undefined, 'a failed call shows nothing');
-  assert.equal(shownPicture(lazyEnd('docs_open', shown).payload), undefined, 'another tool is not taken for one');
-  assert.equal(shownPicture(end('tools', shown).payload), undefined, 'a search names no tool, so shows nothing');
-  // The end says which tool only for the tool that reaches the others: anywhere else it is nothing to go by.
-  assert.equal(shownPicture(end('docs_open', shown, { [CALLED_TOOL_KEY]: 'show_image' }).payload), undefined);
-  // And as for a direct call, a generated picture is the portal's own only with the mark its tool sets.
-  const generated = { path: 'generated-images/a.png', title: 'A', [GENERATED_PICTURE_MARK]: true };
-  assert.deepEqual(shownPicture(lazyEnd('generate_image', generated).payload), { path: generated.path, title: 'A' });
-  assert.equal(shownPicture(lazyEnd('generate_image', { path: 'cat.png' }).payload), undefined);
-  assert.equal(shownPicture(lazyEnd('edit_image', { ...generated, [GENERATED_PICTURE_MARK]: 'yes' }).payload), undefined);
 });
 
 test('a lazy generate_image is the preview of a picture being made, as a direct one is', () => {
@@ -59,14 +46,14 @@ test('a lazy generate_image is the preview of a picture being made, as a direct 
   assert.deepEqual(pictureCall(running.name, running.args, '/work'), pictureCall('generate_image', asked, '/work'));
   assert.deepEqual(pictureCall(running.name, running.args, '/work'), { edit: false, title: 'A lighthouse at dusk', ratio: 2 / 3 });
 
-  const made = { path: 'generated-images/a.png', title: 'A', ...own };
-  const done = buildTranscript([start('tools', via('generate_image', asked), own), lazyEnd('generate_image', made)]).find((i) => i.kind === 'tool') as any;
-  assert.deepEqual(done.picture, { path: made.path, title: 'A' });
+  const made = { path: 'generated-images/a.png', title: 'A' };
+  const done = buildTranscript([start('tools', via('generate_image', asked), own), lazyEnd('generate_image', { files: [made] }, gave({ ...made, kind: 'picture' }))]).find((i) => i.kind === 'tool') as any;
+  assert.deepEqual(done.files, [{ ...made, kind: 'picture' }]);
   assert.equal(isPictureCall(done), true);
   // The arguments may come as the JSON text of an object, as the gateway takes them.
   assert.equal(pictureCall('tools', via('generate_image', JSON.stringify(asked)), '/work').ratio, 2 / 3);
 
-  // Another extension's generate_image, called the same way, is the plain card it always was.
+  // Another extension's generate_image, called the same way, is the plain card it always was: with what it gave under it.
   const theirs = buildTranscript([start('tools', via('generate_image', asked)), lazyEnd('generate_image', { path: 'cat.png' })]).find((i) => i.kind === 'tool') as any;
   assert.equal(isPictureCall(theirs), false);
   // And a call that is no call of a picture tool is none either.
@@ -76,11 +63,11 @@ test('a lazy generate_image is the preview of a picture being made, as a direct 
 test('a lazy edit_image is tied to the picture it changed, as a direct one is', () => {
   const urls = { sent: (name: string) => `/sent/${name}`, shown: (path: string, version: string) => `/shown/${path}?v=${version}` };
   const own = { [GENERATED_PICTURE_MARK]: true };
-  const edited = { path: 'generated-images/photo-edited.png', title: 'Snow', ...own };
+  const edited = gave({ path: 'generated-images/photo-edited.png', title: 'Snow', kind: 'picture', from: ['photo.png'] });
   const list = (events: any[]) => chatPictures(buildTranscript(events), '/work', urls);
-  const first = [start('show_image', { path: 'photo.png' }, {}, 1, 'a'), end('show_image', { path: 'photo.png' }, {}, 2, 'a')];
-  const direct = list([...first, start('edit_image', { path: 'photo.png', prompt: 'snow' }, own, 3, 'b'), end('edit_image', edited, {}, 4, 'b')]);
-  const through = list([...first, start('tools', via('edit_image', { path: 'photo.png', prompt: 'snow' }), own, 3, 'b'), lazyEnd('edit_image', edited, {}, 4, 'b')]);
+  const first = [start('show_image', { path: 'photo.png' }, {}, 1, 'a'), end('show_image', {}, gave({ path: 'photo.png', kind: 'picture' }), 2, 'a')];
+  const direct = list([...first, start('edit_image', { path: 'photo.png', prompt: 'snow' }, own, 3, 'b'), end('edit_image', {}, edited, 4, 'b')]);
+  const through = list([...first, start('tools', via('edit_image', { path: 'photo.png', prompt: 'snow' }), own, 3, 'b'), lazyEnd('edit_image', {}, edited, 4, 'b')]);
   assert.equal(direct.length, 2);
   assert.ok(direct[1].from, 'a direct edit is linked to its original');
   assert.deepEqual(through.map((p) => p.from), direct.map((p) => p.from));

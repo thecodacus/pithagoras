@@ -124,8 +124,10 @@ group named `ask-question`, and can be switched off there.
 
 ## Looking at a picture
 
-The pictures the agent shows with `show_image` are drawn under their tool line,
-in the middle of the conversation, with the same room above and below. One it
+What a call gives you is drawn under its tool line, in the middle of the
+conversation, with the same room above and below: a picture (`show_image`, or
+any tool's that [gives one](/guide/extension-ui#files-a-tool-gives)), a clip in
+its player, and any other file as a link that saves it. A picture the agent
 makes with `generate_image` or changes with `edit_image` has no tool line: it is
 the [preview](#pictures-the-agent-makes) that held its place while it was made,
 in the middle of the conversation as well. A very wide or very tall picture is

@@ -34,8 +34,10 @@ import { forTranscript } from "./stored-event.js";
 import { buildExecutor, type Executor } from "./executors/index.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { describeToolCall } from "./tool-summary.js";
-import { shownPicture } from "./generated-picture.js";
+import { withFiles } from "./output-files.js";
+import { shownFiles, type ShownFile } from "./file-outputs.js";
 import { baseDir, readPicture } from "./workspace-files.js";
+import { readVideo } from "./video-files.js";
 import {
   appendEvent,
   deleteEvent,
@@ -305,8 +307,8 @@ const CALL_WINDOWS_KEPT = 5000;
 /** What a channel's ask hands pi, once it is its turn: the words, and pictures already checked and kept. */
 export type PreparedPrompt = { message: string; images?: Attached[]; onAccepted?: () => void };
 
-/** A picture the agent showed, read from the chat's folder for a channel to send on. */
-export interface SentPicture {
+/** A picture or a clip a call gave the person, read from the chat's folder for a channel to send on. */
+export interface SentFile {
   /** Base64. */
   data: string;
   mimeType: string;
@@ -1232,10 +1234,12 @@ class SessionManager extends EventEmitter {
 
     // A new pi process knows nothing of what the last one was retrying.
     this.modelErrors.forget(sessionId);
-    client.on("event", (msg) => {
+    client.on("event", (event) => {
       // A client stopped for an edit or a restart can still have a settle in
       // hand; it speaks for a conversation that is no longer this one.
       if (this.stopping.has(client)) return;
+      // The end of a call that gave files says what they are, for everything that hears of it: see output-files.ts.
+      const msg = withFiles(event, session.workspace);
       // The installed extensions' server halves hear all of it, as it is said.
       chatEvent(sessionId, msg);
       rememberSessionFile();
@@ -2294,11 +2298,13 @@ class SessionManager extends EventEmitter {
        */
       onUi?: (request: any) => void;
       /**
-       * A picture the agent put in front of the person (show_image, or one it
-       * made or changed), read from the chat's folder: a channel has no page
-       * to draw it on, so it is sent on as it is shown.
+       * A picture a call gave the person (see file-outputs.ts), read from the
+       * chat's folder: a channel has no page to draw it on, so it is sent on
+       * as it is shown. `onVideo` is the same for a clip. A file the channel
+       * has no way to send is named in the reply instead.
        */
-      onPicture?: (picture: SentPicture) => void | Promise<void>;
+      onPicture?: (picture: SentFile) => void | Promise<void>;
+      onVideo?: (video: SentFile) => void | Promise<void>;
     } = {}
   ): Promise<string> {
     const previous = this.asking.get(sessionId) ?? Promise.resolve("");
@@ -2315,7 +2321,7 @@ class SessionManager extends EventEmitter {
           opts.streamText,
           opts.onUi,
           opts.onStopped,
-          opts.onPicture
+          { picture: opts.onPicture, video: opts.onVideo }
         );
       });
     // Kept only while it is the newest, so a finished chain is not held forever.
@@ -2346,7 +2352,7 @@ class SessionManager extends EventEmitter {
     streamText = true,
     onUi?: (request: any) => void,
     onStopped?: () => void,
-    onPicture?: (picture: SentPicture) => void | Promise<void>
+    send: { picture?: (picture: SentFile) => void | Promise<void>; video?: (video: SentFile) => void | Promise<void> } = {}
   ): Promise<string> {
     // Counted before pi is started here, not in submit: a Stop that comes while
     // it starts is counted by then, and submit would take it for one that was
@@ -2399,15 +2405,25 @@ class SessionManager extends EventEmitter {
           flush();
           break;
 
-        // A picture shown is part of the answer, whatever the channel relays
-        // of the work: the words that go with it are the agent's, after it.
+        // What a call gave the person is part of the answer, whatever the
+        // channel relays of the work: a picture or a clip is sent on as it is
+        // shown, where the channel can send one, and any other file is named.
+        // The words that go with it are the agent's, after it.
         case "tool_execution_end": {
-          const shown = onPicture && shownPicture(payload);
-          if (!shown) break;
-          const picture = this.pictureShown(sessionId, shown.path);
-          if (!picture) break;
+          const files = shownFiles(payload);
+          if (!files.length) break;
           flush();
-          void Promise.resolve(onPicture!({ ...picture, ...(shown.title ? { title: shown.title } : {}) })).catch(() => {});
+          for (const file of files) {
+            const to = file.kind === "picture" ? send.picture : file.kind === "video" ? send.video : undefined;
+            const read = to && this.fileShown(sessionId, file);
+            if (read) {
+              void Promise.resolve(to!({ ...read, ...(file.title ? { title: file.title } : {}) })).catch(() => {});
+              continue;
+            }
+            const named = `📎 ${file.title ? `${file.title} (${file.path})` : file.path}`;
+            all.push(named);
+            if (streamText) relay(named);
+          }
           break;
         }
 
@@ -2514,15 +2530,16 @@ class SessionManager extends EventEmitter {
   }
 
   /**
-   * A picture in the chat's folder, as the page would fetch it: checked by its
-   * bytes, and never through a link out of the folder. Undefined for one that
-   * is gone since, or never was one: there is nothing to send then.
+   * A picture or a clip in the chat's folder, as the page would fetch it:
+   * checked by its bytes, and never through a link out of the folder.
+   * Undefined for one that is gone since, or is no longer one: there is
+   * nothing to send then.
    */
-  private pictureShown(sessionId: string, rel: string): Omit<SentPicture, "title"> | undefined {
+  private fileShown(sessionId: string, file: ShownFile): Omit<SentFile, "title"> | undefined {
     const session = getSession(sessionId);
     if (!session) return undefined;
     try {
-      const { bytes, mimeType, name } = readPicture(baseDir(session.workspace), rel);
+      const { bytes, mimeType, name } = (file.kind === "video" ? readVideo : readPicture)(baseDir(session.workspace), file.path);
       return { data: bytes.toString("base64"), mimeType, name };
     } catch {
       return undefined;

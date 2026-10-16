@@ -74,3 +74,10 @@
 .chat-picture .chat-video { width: auto; max-width: 100%; }
 .chat-video-gone { padding: 11px 13px; border: 1px dashed rgb(var(--line)); border-radius: 8px; font-size: 12.5px; color: rgb(var(--fg-muted)); }
 .video-call .image-preview-caption { margin-top: 5px; }
+
+/* A file a call gave that is no picture or clip: its name, to save it. */
+.chat-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border: 1px solid rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .6); font-size: 12.5px; color: rgb(var(--fg)); transition: border-color .18s, background .18s; }
+.chat-file:hover { border-color: rgb(var(--fg-faint)); background: rgb(var(--raised)); }
+.chat-file svg { flex-shrink: 0; width: 15px; height: 15px; color: rgb(var(--fg-muted)); }
+.chat-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .chat-file { transition: none; } }

@@ -591,6 +591,9 @@ export const api = {
   /** A clip in the chat's folder, by its path there, as pictureUrl is for a picture: the player asks for the parts it needs. */
   videoUrl: (id: string, path: string, version?: string | number) =>
     `/api/sessions/${id}/video?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
+  /** Any file in the chat's folder, by its path there, to be saved: a file a call gave that is neither a picture nor a clip. */
+  fileUrl: (id: string, path: string, version?: string | number) =>
+    `/api/sessions/${id}/file?path=${encodeURIComponent(path)}${version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   /**
    * A picture in the chat's folder, by its path there. `version` is anything
    * that changes when the file does — the agent rewrites pictures in place.

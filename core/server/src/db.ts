@@ -20,6 +20,7 @@ import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
 import { debugLog } from "./logs.js";
+import { filesOnOldCalls } from "./old-call-files.js";
 
 export type SessionStatus = "idle" | "running" | "error" | "interrupted";
 
@@ -669,6 +670,7 @@ function migrate(d: Database.Database): void {
     d.exec("UPDATE people SET renamed = 1 WHERE notes != ''");
   }
   writeOutCanvases(d);
+  if ((d.pragma("user_version", { simple: true }) as number) < 6) filesOnOldCalls(d);
   const agentCols = (d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name);
   for (const col of ["voice", "quiet_start", "quiet_end", "last_heartbeat", "heartbeat_status"]) {
     if (!agentCols.includes(col)) d.exec(`ALTER TABLE agents ADD COLUMN ${col} TEXT`);
