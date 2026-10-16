@@ -10,6 +10,7 @@
  *
  *   GET  /api/x/pithagoras-docs/folders                                          every folder with documents, and its documents; `version` says which list it is
  *   GET  /api/x/pithagoras-docs/folders/events                                   a stream of the changes to that list as they are made (server-sent events)
+ *   GET  /api/x/pithagoras-docs/chats/:chat/documents                            the documents one chat sees (the project's and its own), and their folder: for the panel beside it
  *   POST /api/x/pithagoras-docs/folders/:folder/documents                        a new document { title, markdown?, scope?, chat? }
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
  *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
@@ -20,7 +21,7 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            its comment threads, each with its passage where it is in the text now
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads            a new thread { base, quote, prefix?, suffix?, start?, body }: 422 when the passage is not in revision `base`
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments  a reply { body } to an open thread
- *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  changes one of the person's comments { body }; with `draft` the last comment, which the page saves as it is typed
+ *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  changes one of the person's comments { body }; with `draft` the last comment while it is the last, not marked as edited (for a client that saves a comment as it is typed)
  *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/comments/:comment  takes it away (the thread goes with its only comment); ?draft=1 for the one typed away
  *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread  takes away a thread the person started, with its comments, while the agent has not commented in it
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/threads/:thread/seen      the person has read what the agent said in a thread
@@ -73,6 +74,7 @@ import { explained } from "./errors.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
 import { hearPings, wakeMessage } from "./ping.js";
 import { SECRET, SECRET_WARNING } from "./secret.js";
+import { frontMatterEnd } from "./src/frame.js";
 import { DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
 import { documentTools } from "./tools.js";
 import { asksAgent } from "./web/mention.js";
@@ -260,14 +262,17 @@ const STARTS_BLOCK = "#>*+-=_`~<|0123456789";
  * The first heading of a Markdown text, as plain text, or nothing: a `#` line,
  * or a paragraph underlined with `=` or `-`, as CommonMark (and so the page)
  * has them, at the top or in a quote or a list item. What is in a code block,
- * an HTML block or a comment is not drawn as a heading, whatever it looks like.
+ * an HTML block or a comment is not drawn as a heading, whatever it looks like,
+ * and neither is a YAML front matter block at the top, which the editor keeps
+ * apart (src/frame.js): its closing `---` would underline its keys.
  */
 function headingOf(text) {
   let fence = null;
   let html = null;
   // The paragraph the lines so far make, where it is: { lines, quotes, column }.
   let paragraph = null;
-  for (const raw of text.replace(/^\uFEFF/, "").split("\n")) {
+  const body = text.replace(/^\uFEFF/, "");
+  for (const raw of body.slice(frontMatterEnd(body, 0)).split("\n")) {
     const line = untab((raw.endsWith("\r") ? raw.slice(0, -1) : raw).slice(0, LINE_CHARS));
     if (fence) {
       // A code block in a quote or a list item ends with its fence, or with the quote or the item.
@@ -347,14 +352,32 @@ function headingOf(text) {
 /** A document's title: its first heading near its top (the first HEAD_BYTES), or else its name. Listed and read alike. */
 const titleOf = (bytes, name) => headingOf(bytes.subarray(0, HEAD_BYTES).toString("utf8")) || name.replace(/\.md$/i, "");
 
+/**
+ * The Markdown a new document called `title` starts with. What it is called is
+ * its first heading, so Markdown with none near its top is given `# title`
+ * there, after a front matter block. Markdown with a heading of its own keeps
+ * it as it is, and is called by it.
+ */
+function headed(markdown, title) {
+  if (headingOf(Buffer.from(markdown, "utf8").subarray(0, HEAD_BYTES).toString("utf8"))) return markdown;
+  const at = frontMatterEnd(markdown, markdown.startsWith("\uFEFF") ? 1 : 0);
+  const eol = markdown.includes("\r\n") ? "\r\n" : "\n";
+  const head = markdown.slice(0, at);
+  // Blank lines before the text are the heading's blank line now.
+  const rest = markdown.slice(at).replace(/^(?:[ \t]*\r?\n)+/, "");
+  // A front matter block that ends the Markdown with no line break is given one: glued to its closing marks, the heading would keep it from closing.
+  const glued = at > 0 && !/[\n\uFEFF]$/.test(head);
+  return `${head}${glued ? eol + eol : ""}# ${title.replace(/\s+/g, " ")}${eol}${rest.trim() ? eol + rest : ""}`;
+}
+
 
 /** How often an open stream is sent a comment line, so that nothing between the portal and the page (a proxy) takes it for idle. */
 const PING_MS = 25_000;
 /** How often a folder with an open stream is looked at for changes outside the store's own writes. */
 const POLL_MS = 2_000;
 /**
- * How long a comment that asks the agent has to be left alone before the agent is woken: the page saves a comment as it is typed,
- * and the agent is to be woken with what was written, not with the words typed so far.
+ * How long a comment that asks the agent has to be left alone before the agent is woken: a moment to take it back or change it,
+ * and for a client that saves a comment as it is typed, the words written, not the words typed so far.
  */
 const WAKE_MS = 3_000;
 /**
@@ -537,6 +560,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         hasDocuments: (folder) => documentsOf(folder) !== null,
         folderId: idOf,
         titleOf,
+        headed,
         headBytes: HEAD_BYTES,
         log: (line) => portal.log(line),
       });
@@ -888,6 +912,26 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.json({ folders: list, ...(problems.length ? { problems } : {}), version: versionOf(signatures) });
   }));
 
+  /**
+   * The documents a chat sees, for the panel beside it: the project's and the chat's own, as its agent's tools see them, and the
+   * folder they are in (its id, to open one or make one). No other chat's own document is listed. The panel keeps it current with
+   * the list's stream (/folders/events), and asks again when that says the list changed.
+   */
+  portal.router.get("/chats/:chat/documents", route(async (req, res) => {
+    const chat = String(req.params.chat);
+    let where;
+    try {
+      where = portal.chats.folder(chat);
+    } catch {
+      throw new DocError(404, "This chat is not there, or its folder is gone");
+    }
+    const folder = { id: idOf(where), path: where };
+    const found = await listing(folder);
+    if (found.problem) throw new DocError(503, found.problem.error);
+    const documents = (found.listed?.documents ?? []).filter((doc) => doc.scope === "project" || doc.chat === chat);
+    res.json({ folder: { id: folder.id, name: path.basename(where) || where, path: where }, documents });
+  }));
+
   portal.router.get("/folders/events", route(async (req, res) => {
     if (stopped) throw new DocError(503, "The documents extension is stopping");
     let closed = false;
@@ -919,7 +963,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const body = req.body ?? {};
     const title = typeof body.title === "string" ? body.title.trim() : "";
     if (!title || title.length > 200) throw new DocError(400, "A document needs a title of at most 200 characters");
-    const markdown = body.markdown === undefined || body.markdown === "" ? `# ${title}\n` : markdownOf(body);
+    const markdown = headed(body.markdown === undefined ? "" : markdownOf(body), title);
     const scope = body.scope ?? "project";
     if (scope !== "project" && scope !== "chat") throw new DocError(400, "scope is project or chat");
     // A chat's own document belongs to one of the chats that work in this folder.
@@ -1039,8 +1083,9 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.status(201).json(withChat(folder, await asked(folder, store, id, thread, req.body?.chat)));
   }));
 
-  // The page saves a comment as it is typed: the first save makes it (above), the next ones change it (`draft`), and typing it all away
-  // takes it away. Once it is let go the person changes or takes away any of their comments, in an open thread or a resolved one.
+  // The page makes a comment when it is sent (above). A client that saves one as it is typed changes it with `draft` while it is the last of
+  // its thread, and takes it away with `?draft=1` when it is typed away. The person changes or takes away any of their comments, in an open
+  // thread or a resolved one.
   portal.router.put("/folders/:folder/documents/:id/threads/:thread/comments/:comment", small, route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);

@@ -294,7 +294,8 @@ work in one folder, and that folder is shown once. A document is listed by its
 title. The title is its first heading in its first 4 KB: a `#` line, or a line
 underlined with `=` or `-`, also inside a quote or a list. A heading-like line
 in a code block (fenced, or indented by four spaces or a tab), in an HTML
-comment or in a block of HTML is not a heading.
+comment or in a block of HTML is not a heading, and neither is a YAML front
+matter block at the top (`---`, `title: …`, `---`).
 
 The title is shown as plain text. Links and pictures are shown by their text,
 emphasis, code and HTML tags lose their marks however long they are, and
@@ -306,6 +307,18 @@ the agent has answered, open or resolved, that you have not reacted to yet
 
 **All documents** goes back to the list. A folder whose documents could not be
 opened is said above the list, with the reason ([above](#when-a-folders-documents-cannot-be-opened)).
+
+### Beside a chat
+
+**Documents** in a chat's header opens a panel beside the conversation, docked
+or floating like the other panels, with the documents that chat sees: the
+project's, and the chat's own, as its agent sees them. A document opens there in
+the same editor as on the page, with its comments and its history; the comments
+are under the text where the panel is narrow. A title and **New document** make
+one in the chat's folder and open it (the title is its heading, as below), and
+**Open in Documents** on the card of one of the agent's document tools opens
+that document in the panel, without leaving the chat. The list keeps itself up
+to date as the page's does.
 
 ### The list keeps itself up to date
 
@@ -495,21 +508,18 @@ are made, without a reload.
 
 ### Writing a comment
 
-A comment is saved as you type it, as the document is, with no button to send it:
-a moment after you stop typing (well under a second) it is made, and each pause
-after that changes it. The box says **Saving…** and **Saved**, and a comment that
-could not be saved stays in the box with the reason, to be sent again with the
-next thing you type or when you leave the box. Typing it all away takes it away
-again (a thread with its only comment goes with it), and **Cancel** on a new
-comment does the same. The comment you are writing is the box's, and not in the
-list of comments as well; **Ctrl+Enter** lets it go, so that it is in the list and
-the box is empty for the next, and so does an answer from the agent. Text typed
-after the agent answered is a comment of its own.
+What you type in a comment's box stays there until you send it, with **Send** or
+**Ctrl+Enter**: only then is it saved, seen by the agent when it reads the
+document, and, with `@agent` in it, asked of the agent. Nothing goes while you
+type, so a comment half written is nobody's but yours. **Cancel** on a new
+comment drops it; nothing was sent, so nothing is taken away. A comment that
+could not be sent stays in the box with the reason, to be sent again. The
+browser asks before a reload or a closed tab would lose a comment you had not
+sent. An answer from the agent that comes while you type is added to the
+thread, and what you are typing stays in the box.
 
-A comment is the last of its thread while it is written, and it is only then
-that the box changes or takes it away as you type: once the agent has answered
-(or you have said anything after it) the comment is as it was. You change or
-delete it afterwards with the buttons beside it ([below](#changing-and-deleting-comments)).
+Once it is sent the comment is in the list. You change or delete it afterwards
+with the buttons beside it ([below](#changing-and-deleting-comments)).
 
 A comment on text you have just typed is made on that text: what you typed is
 saved first (a revision of its own), so that the passage is in a revision the
@@ -522,9 +532,9 @@ What is in a thread:
 - The comments in it, in the order they were made, each with who made it (you or
   the agent) and when. A comment is Markdown, drawn as the conversation draws
   it.
-- A box to **Reply** in. **Resolve** closes the thread: it is no longer marked in
-  the text and is out of the list until you press **Show resolved**; what you
-  typed is saved first. **Reopen** opens a resolved thread again. Nothing is added
+- A box to **Reply** in, sent with **Send**. **Resolve** closes the thread: it is no
+  longer marked in the text and is out of the list until you press **Show
+  resolved**; what you typed in the box is sent first, as the last word in it. **Reopen** opens a resolved thread again. Nothing is added
   to a resolved thread until it is opened.
 
 You and the agent can both start a thread, answer it and resolve it.
@@ -586,14 +596,14 @@ quotes your comment (the first thousand characters; the thread has all of it),
 and the agent reads the thread and answers in it with the tools described
 [below](#answering-a-comment).
 
-- The comment is saved first, as above, and the agent is woken in the background
-  a few seconds after you last changed it, so that it is told what you wrote and
-  not what you had typed so far. Nothing waits for the chat to start: you can go
-  on writing, and the thread says where the ask stands. A comment you change
-  after the agent was woken with it, or while the chat is still starting up for
-  it, is changed in the thread and wakes nobody again; one you take the mention out of, or type away, before the agent is woken
-  does not wake it at all. A comment you change later with **Edit** asks as a
-  new one would, as [above](#changing-and-deleting-comments) says.
+- Only a comment you sent asks: the agent is woken in the background a few
+  seconds after you send it, so a mention in a comment you are still writing
+  wakes nobody, and no chat is looked for or opened for it. Nothing waits for the
+  chat to start: you can go on writing, and the thread says where the ask
+  stands. A comment you change with **Edit** before the agent is woken is asked
+  as it is then; one you take the mention out of does not wake it at all. One
+  you change after it was woken wakes nobody again, unless it asks as a new one
+  would, as [above](#changing-and-deleting-comments) says.
 - Only a comment of yours wakes the agent, and only with `@agent` as a name of
   its own, in any case: `@agents`, `me@agent.example` and `@agent` straight after
   a backtick do not (a mention elsewhere in a code span or block still counts).
@@ -707,8 +717,8 @@ the runner image does not get extensions.
 | Tool | What it does |
 | --- | --- |
 | `doc_list` | The documents the chat sees: id, title, file, revision, whether it is the project's or the chat's own, and how many comments on it are open. `scope` narrows it to one of the two. |
-| `doc_read` | One document's Markdown and revision, and after the text the comment threads on it that are open (`comments` asks for all of them, or none), with the ids of the agent's own comments and whether they were edited. `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). The comments come with the first part, for the document as it is now: at most 30 threads, the last 10 comments of each, and a passage cut to 400 characters, with a line saying how many more there are. |
-| `doc_create` | A new document from a title and its Markdown, at revision 1. |
+| `doc_read` | One document's Markdown and revision, and after the text the comment threads on it that are open (`comments` asks for all of them, or none), with the ids of the agent's own comments and whether they were edited. Where comments follow the text, `[End of the document.]` comes right after its last character, so that the blank lines it ends with are seen as its own. `revision` reads an earlier one from the history; a long document is returned in parts of about 60,000 characters, and the end of a part says where to read on (`from_line`, and `char_offset` inside a line that is longer than a part). The comments come with the first part, for the document as it is now: at most 30 threads, the last 10 comments of each, and a passage cut to 400 characters, with a line saying how many more there are. |
+| `doc_create` | A new document from a title and its Markdown, at revision 1. The file is named from the title. What the document is called is its first heading: Markdown with none is given the title as its heading at the top (after a front matter block); Markdown with a heading of its own keeps it, and is called by it. A heading changed later changes what it is called, never its file name. |
 | `doc_edit` | Replaces quoted passages with new text, on the revision the agent read. With a `thread` and a `reply` it answers a comment ([below](#answering-a-comment)). |
 | `doc_comment` | Starts a thread on a passage the agent quotes, with its first comment. The document is not changed. |
 | `doc_reply` | Adds a comment to an open thread. |
@@ -733,6 +743,9 @@ What the tools check is what keeps the agent from overwriting you:
 - Each edit is a quote and its replacement. The quote must be in the document
   exactly once, as `doc_read` shows it. All of a call's edits are looked for in
   the document as it was, none may overlap, and either all are made or none.
+  Whole lines taken out (a quote of a line or a paragraph with an empty
+  replacement) take their line breaks with them: no extra blank lines are left
+  where they were, and the document starts and ends as it did.
   Each call that changes the text makes one revision, by the agent; one whose
   replacements give the same text changes nothing, and says so.
 - `doc_create` never replaces anything: a title whose file name is taken by a
@@ -831,8 +844,8 @@ In the conversation a call of `doc_create`, `doc_read`, `doc_edit`,
 `doc_resolve` is drawn as a card that names the document and says what became of
 it (created, read, commented on, a comment changed or deleted, edited from
 revision 2 to 3 with how many edits, and whether that answered a comment).
-**Open in Documents** opens the document on the page. A call that failed, and a
-list, are drawn as any tool call is.
+**Open in Documents** opens the document in the panel beside the chat. A call
+that failed, and a list, are drawn as any tool call is.
 
 ## Limits
 
@@ -907,12 +920,13 @@ its path and a document by an id the store gave it, never by a path:
 | | |
 | --- | --- |
 | `GET /folders` | The folders chats work in that have documents, with their documents, and `problems` for the ones that could not be opened |
-| `POST /folders/:folder/documents` | A new document |
+| `GET /chats/:chat/documents` | The documents a chat sees (the project's and its own) and their folder `{ id, name, path }`, for the panel beside it |
+| `POST /folders/:folder/documents` | A new document `{ title, markdown?, scope?, chat? }`: Markdown with no heading near its top is given the title as its heading |
 | `GET`, `PUT /folders/:folder/documents/:id` | A document's Markdown and revision; a save `{ markdown, base }`, answered 409 with the current text when its changes meet later ones |
 | `GET …/:id/events` | A stream (server-sent events) of its revisions and comment changes |
 | `GET …/:id/history`, `…/revisions/:n`, `POST …/restore` | The history, one revision's text, and bringing one back |
 | `GET`, `POST …/:id/threads`, `…/threads/:thread/{comments,resolve,reopen,seen}` | The comment threads, and a reply |
-| `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away one of the person's comments `{ body }`. With `draft` (`?draft=1` for the delete) it is the page's box, as it is typed: only the last comment of an open thread. Otherwise any of theirs, open thread or resolved; a change is marked as edited |
+| `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away one of the person's comments `{ body }`. With `draft` (`?draft=1` for the delete) it is a comment saved as it is typed, by a client that does that (the page sends one only when it is sent): only the last comment of an open thread, not marked as edited. Otherwise any of theirs, open thread or resolved; a change is marked as edited |
 | `DELETE …/threads/:thread` | Take away a thread the person started, with its comments, while the agent has not commented in it (409 `thread_answered`, or `thread_not_yours` for one the agent started) |
 
 A stream's first message says where the document stands (`revision`, with
@@ -943,7 +957,7 @@ alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:
 | `tools` | The agent's tools |
 | `stream`, `live`, `merge`, `saver` | Telling a page of changes, and taking them in |
 | `frame` | What the editor keeps apart from the Markdown: front matter and line endings |
-| `comments`, `comment-tools`, `anchor`, `draft` | The comments and where their passages are |
+| `comments`, `comment-tools`, `anchor` | The comments and where their passages are |
 | `ping` | `@agent` and the wake |
 | `browser/*.spec.mts` | The page, in a browser, against a stand-in for the server half. They build the editor first |
 

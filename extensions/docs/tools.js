@@ -153,7 +153,8 @@ function describeThreads(threads, text, which) {
  * chat's folder (`folder()`, which throws when it is gone), the folder's
  * store (`store(folder, { make })`), whether it has a documents folder yet
  * (`hasDocuments`), the id the page knows a folder by (`folderId`), a
- * document's title from the start of its text (`titleOf`, `headBytes`) and the
+ * document's title from the start of its text (`titleOf`, `headBytes`), the
+ * Markdown a new document called by a title starts with (`headed`) and the
  * portal's log.
  */
 export function documentTools(pi, chat, deps) {
@@ -285,20 +286,23 @@ export function documentTools(pi, chat, deps) {
         // The text the passages are in is the one the store followed them to: if the document moved meanwhile, they are not shown against this one.
         if (listed.revision === doc.revision) comments = describeThreads(listed.threads, markdown, which);
       }
-      return text(`"${title}" (id ${doc.id}, ${pathOf(doc.name)}, ${where}, ${kind(doc)} document)\n\n${shown}${more}${comments}`, { ...about("read", doc, title), revision: at, current: doc.revision });
+      // Where the text ends, where the comments follow it: right after its last character, so that the blank lines it
+      // ends with (or a last line with no line break) are seen as they are, and not as the space before the comments.
+      const end = comments && !more ? "[End of the document.]" : "";
+      return text(`"${title}" (id ${doc.id}, ${pathOf(doc.name)}, ${where}, ${kind(doc)} document)\n\n${shown}${more}${end}${comments}`, { ...about("read", doc, title), revision: at, current: doc.revision });
     }),
   });
 
   pi.registerTool({
     name: "doc_create",
     label: "Create a document",
-    description: "Make a new shared document, a Markdown file in the project's documents folder that the person sees on the Documents page and can edit with you. It is made at revision 1 and never replaces a document: a title whose file name is taken is refused (read or edit that document, or choose another title). Does not accept secrets.",
+    description: "Make a new shared document, a Markdown file in the project's documents folder that the person sees on the Documents page and can edit with you. It is made at revision 1 and never replaces a document: a title whose file name is taken is refused (read or edit that document, or choose another title). A document is called by its first heading: Markdown without one starts with the title as its heading, Markdown with one is called by it. Changing that heading later changes what it is called, never its file name. Does not accept secrets.",
     promptSnippet: "Make a new shared document: a title and its Markdown",
     executionMode: "sequential",
     parameters: {
       type: "object",
       properties: {
-        title: { type: "string", description: "The document's title (at most 200 characters). Its file name is made from it." },
+        title: { type: "string", description: "The document's title (at most 200 characters). Its file name is made from it, and it is the first heading unless the Markdown has one." },
         markdown: { type: "string", description: "Its Markdown (at most 1 MB). Left out, the document is its title as a heading." },
         scope: { type: "string", enum: ["project", "chat"], description: "project (the default): every chat in this project sees it. chat: only this chat." },
       },
@@ -309,7 +313,7 @@ export function documentTools(pi, chat, deps) {
       if (!title || title.length > 200) throw new Refusal("invalid", "A document needs a title of at most 200 characters");
       if (markdown !== undefined && typeof markdown !== "string") throw new Refusal("invalid", "markdown must be text");
       if (scope !== "project" && scope !== "chat") throw new Refusal("invalid", "scope is project or chat");
-      markdown = markdown === undefined || markdown === "" ? `# ${title}\n` : markdown;
+      markdown = deps.headed(markdown ?? "", title);
       if (secretsIn(markdown).length) throw new Refusal("secret", "The text looks like it holds a secret (a private key or a token). A document keeps every revision: leave it out");
       const store = await deps.store(folderOf(), { make: true });
       const doc = await store.create({ title, markdown, scope, chat: scope === "chat" ? chat.id : null, author: "agent", exclusive: true });
@@ -341,7 +345,7 @@ export function documentTools(pi, chat, deps) {
             type: "object",
             properties: {
               quote: { type: "string", description: "Text to replace, exactly as it is in the document, once (with thread: once in the comment's passage)." },
-              replacement: { type: "string", description: "What takes its place: Markdown, or empty to remove the quote." },
+              replacement: { type: "string", description: "What takes its place: Markdown, or empty to remove the quote (whole lines removed take their line breaks with them)." },
             },
             required: ["quote", "replacement"],
           },
@@ -407,12 +411,31 @@ export function documentTools(pi, chat, deps) {
       for (let i = 1; i < found.length; i++) {
         if (found[i].at < found[i - 1].end) throw new Refusal("edits_overlap", `edits ${found[i - 1].n} and ${found[i].n} change text that overlaps. Join them into one edit. Nothing was written.`);
       }
+      // A quote of whole lines (a line, a paragraph) taken out leaves the line breaks on both sides of it, and so
+      // more blank lines than either side had. They are made as many as the larger side had, or, at the start or
+      // the end of the document, as it had there: a line removed leaves no gap. Only the line breaks between this
+      // edit and the next are looked at. With a thread they are counted as the document has them, and only those
+      // in its passage are taken out: a passage that starts or ends at a line break has the rest outside it.
+      const eol = dos ? "\r\n" : "\n";
+      const breaks = (run) => (run.match(/\n/g) ?? []).length;
       let out = "";
       let from = 0;
-      for (const edit of found) {
+      found.forEach((edit, i) => {
         out += current.slice(from, edit.at) + edit.replacement;
         from = edit.end;
-      }
+        const quote = current.slice(edit.at, edit.end);
+        if (edit.replacement || !/[^\r\n]/.test(quote)) return;
+        const left = /[\r\n]*$/.exec(current.slice(found[i - 1]?.end ?? 0, edit.at))[0];
+        const right = /^[\r\n]*/.exec(current.slice(edit.end, found[i + 1]?.at ?? current.length))[0];
+        const sides = [breaks(left) + breaks(/^[\r\n]*/.exec(quote)[0]), breaks(/[\r\n]*$/.exec(quote)[0]) + breaks(right)];
+        const keep = edit.at === left.length ? sides[0] : edit.end + right.length === current.length ? sides[1] : Math.max(...sides);
+        const ownLeft = left.slice(Math.max(0, scope.from - (edit.at - left.length)));
+        const ownRight = right.slice(0, Math.max(0, scope.to - edit.end));
+        const cut = Math.min(breaks(left) + breaks(right) - keep, breaks(ownLeft) + breaks(ownRight));
+        if (cut <= 0) return;
+        out = out.slice(0, out.length - ownLeft.length) + eol.repeat(breaks(ownLeft) + breaks(ownRight) - cut);
+        from = edit.end + ownRight.length;
+      });
       out += current.slice(from);
       // What is written, not each replacement alone: a token can be made of the document's text and a replacement. One the
       // document holds already stays (the person was warned of it, and may keep it); a new one, or a changed one, is not let in.

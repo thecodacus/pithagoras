@@ -159,6 +159,43 @@ test('a document the agent makes is a revision 1 file in the documents folder, b
   }
 });
 
+test('a new document is called by its first heading: the title is that heading only where the Markdown has none of its own', async () => {
+  const folder = folderWith('docs-tools-title-');
+  const docs = await portal({ a: folder });
+  try {
+    const agent = docs.agent('a');
+    // No heading: the title is put at the top, as it was given, capitals and all.
+    const plain = done(await agent('doc_create', { title: 'Scope check', markdown: 'What is in, what is out.\n' }));
+    assert.equal(fileOf(folder, 'scope-check.md'), '# Scope check\n\nWhat is in, what is out.\n');
+    assert.equal(plain.details.title, 'Scope check');
+    // A heading of its own: kept as it is, and the document is called by it; the file is named from the title.
+    const own = done(await agent('doc_create', { title: 'Alpha Beta', markdown: '# Gamma Delta\n\nBody.\n' }));
+    assert.equal(fileOf(folder, 'alpha-beta.md'), '# Gamma Delta\n\nBody.\n');
+    assert.equal(own.details.title, 'Gamma Delta');
+    assert.equal(own.details.path, 'documents/alpha-beta.md');
+    // A front matter block stays first, and is not taken for a heading (its closing marks would underline its keys).
+    const tagged = done(await agent('doc_create', { title: 'Tagged', markdown: '---\ntitle: Elsewhere\ntags: [a]\n---\n\nBody.\n' }));
+    assert.equal(fileOf(folder, 'tagged.md'), '---\ntitle: Elsewhere\ntags: [a]\n---\n\n# Tagged\n\nBody.\n');
+    assert.equal(tagged.details.title, 'Tagged');
+    // One that ends the Markdown, with no line break after its closing marks, still closes, before the heading.
+    done(await agent('doc_create', { title: 'Only tags', markdown: '---\ntags: [a]\n---' }));
+    assert.equal(fileOf(folder, 'only-tags.md'), '---\ntags: [a]\n---\n\n# Only tags\n');
+    // Blank lines before the text, and a title over more than one line, make one heading and one blank line.
+    done(await agent('doc_create', { title: 'Two\nLines', markdown: '\n\n\nText.\n' }));
+    assert.equal(fileOf(folder, 'two-lines.md'), '# Two Lines\n\nText.\n');
+    // The page makes them the same way.
+    const page = await docs.call('POST', `/folders/${folderIdOf(folder)}/documents`, { title: 'From the page', markdown: 'Some text.\n' });
+    assert.equal(page.body.title, 'From the page');
+    assert.equal(fileOf(folder, 'from-the-page.md'), '# From the page\n\nSome text.\n');
+    const listed = (await docs.call('GET', '/folders')).body.folders[0].documents;
+    assert.deepEqual(Object.fromEntries(listed.map((d: any) => [d.name, d.title])), {
+      'alpha-beta.md': 'Gamma Delta', 'from-the-page.md': 'From the page', 'only-tags.md': 'Only tags', 'scope-check.md': 'Scope check', 'tagged.md': 'Tagged', 'two-lines.md': 'Two Lines',
+    });
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a document is never made in place of another: a title whose name is taken is refused, and the other is as it was', async () => {
   const folder = folderWith('docs-tools-exists-', { 'documents/guide.md': '# The user\'s guide\n' });
   const docs = await portal({ a: folder });
@@ -241,6 +278,15 @@ test('the agent lists the project\'s documents and its own chat\'s, by scope, an
     const page = await docs.call('GET', '/folders');
     assert.equal(page.body.folders[0].documents.length, 4);
     assert.ok(theirs.details.id);
+    // The panel beside a chat lists what that chat sees, as its agent does, with the folder they are in; nothing for a chat that is not there.
+    const beside = await docs.call('GET', '/chats/a/documents');
+    assert.deepEqual(beside.body.folder, { id: folderIdOf(folder), name: path.basename(folder), path: folder });
+    assert.deepEqual(beside.body.documents.map((d: any) => [d.title, d.scope]), [['by-hand', 'project'], ['Plan', 'project'], ['Scratch pad', 'chat']]);
+    assert.deepEqual((await docs.call('GET', '/chats/b/documents')).body.documents.map((d: any) => d.title), ['by-hand', 'Plan', 'Second chat only']);
+    const none = await docs.call('GET', '/chats/c/documents');
+    assert.deepEqual(none.body, { folder: { id: folderIdOf(empty), name: path.basename(empty), path: empty }, documents: [] });
+    assert.deepEqual(readdirSync(empty), [], 'asking makes nothing in a folder with no documents');
+    assert.equal((await docs.call('GET', '/chats/gone/documents')).status, 404);
   } finally {
     await docs.close();
   }
@@ -505,6 +551,45 @@ test('edits are all made or none, each found in the text as it was, and none ove
     // Given in any order, they are made where they are.
     done(await edit({ quote: 'The build is green.', replacement: 'Green.' }, { quote: '# Plan', replacement: '# Plan B' }));
     assert.equal(fileOf(folder, 'plan.md'), '# Plan B\n\nShip it on Friday.\n\nGreen.\n');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('whole lines taken out take their line breaks with them: no blank lines are left where they were', async () => {
+  const cases: [string, string, string][] = [
+    // A paragraph between two others: one blank line stays between them.
+    ['# Plan\n\nA.\n\nB.\n\nC.\n', 'B.', '# Plan\n\nA.\n\nC.\n'],
+    // The same, quoted with its line breaks.
+    ['# Plan\n\nA.\n\nB.\n\nC.\n', 'B.\n\n', '# Plan\n\nA.\n\nC.\n'],
+    // A line of a list: the list closes up.
+    ['# Plan\n\n- a\n- b\n- c\n', '- b', '# Plan\n\n- a\n- c\n'],
+    // The last paragraph: the document ends as it did, with one line break.
+    ['# Plan\n\nA.\n\nC.\n', 'C.', '# Plan\n\nA.\n'],
+    // The first line: nothing is left in front of what follows.
+    ['# Plan\n\nA.\n', '# Plan', 'A.\n'],
+    // Words in a line: only the words go.
+    ['# Plan\n\nA very good day.\n', 'very ', '# Plan\n\nA good day.\n'],
+    ['# Plan\n\nA word\nB.\n', ' word', '# Plan\n\nA\nB.\n'],
+    // Written with CRLF, it stays CRLF.
+    ['# Plan\r\n\r\nA.\r\n\r\nB.\r\n\r\nC.\r\n', 'B.', '# Plan\r\n\r\nA.\r\n\r\nC.\r\n'],
+  ];
+  for (const [markdown, quote, after] of cases) {
+    const { folder, docs, id, agent } = await withDocument('docs-tools-remove-', markdown);
+    try {
+      done(await agent('doc_edit', { id, expected_revision: 1, edits: [{ quote, replacement: '' }] }));
+      assert.equal(fileOf(folder, 'plan.md'), after, JSON.stringify({ markdown, quote }));
+    } finally {
+      await docs.close();
+    }
+  }
+  // Two lines removed in one call, next to each other, and line breaks the agent quotes on their own are its to take.
+  const { folder, docs, id, agent } = await withDocument('docs-tools-remove-two-', '# Plan\n\nA.\n\nB.\n\nC.\n\nD.\n');
+  try {
+    done(await agent('doc_edit', { id, expected_revision: 1, edits: [{ quote: 'B.', replacement: '' }, { quote: 'C.', replacement: '' }] }));
+    assert.equal(fileOf(folder, 'plan.md'), '# Plan\n\nA.\n\nD.\n');
+    done(await agent('doc_edit', { id, expected_revision: 2, edits: [{ quote: 'A.\n\n', replacement: 'A.\n' }] }));
+    assert.equal(fileOf(folder, 'plan.md'), '# Plan\n\nA.\nD.\n');
   } finally {
     await docs.close();
   }

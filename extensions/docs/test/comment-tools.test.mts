@@ -169,7 +169,7 @@ test('what doc_read says of the comments: the open threads after the text, with 
     const own = done(await agent('doc_comment', { id, quote: 'Ship it on Friday.', comment: 'Why Friday?' }));
     const read = done(await agent('doc_read', { id })).text;
     const [text, comments] = read.split('\n\nOpen comments: ');
-    assert.ok(text.endsWith('Sign-off is on Monday.\n'), 'the text comes first, whole');
+    assert.ok(text.endsWith('Sign-off is on Monday.\n[End of the document.]'), 'the text comes first, whole, and says where it ends');
     assert.match(comments, /^2\. Answer one with doc_reply/);
     assert.ok(comments.includes(`Thread ${asked.id} (open, on line 7)\nPassage:\n> Sign-off is on Monday.\nperson (`));
     assert.ok(comments.includes(`): Who signs off?\nagent (`));
@@ -350,6 +350,20 @@ test('with a thread, the quotes are looked for in the passage only: a word that 
     assert.ok(out.details.replied);
     assert.equal(fileOf(folder), PLAN.replace(', and the build is green again', ' again'));
     assert.equal((await threads())[0].quote, 'The build is green again.');
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a paragraph taken out of a passage of two takes its line breaks with it, as it would without the thread', async () => {
+  const { folder, docs, id, agent, person, threads } = await withDocument('docs-ct-edit-paragraph-');
+  try {
+    // The passage starts at a paragraph and ends at the next: the blank line before it is outside, the one after it inside.
+    const asked = await person('Ship it on Friday.\n\nThe build is green, and the build is green again.', 'Is the first line needed?');
+    done(await agent('doc_edit', { id, expected_revision: 1, thread: asked.id, edits: [{ quote: 'Ship it on Friday.', replacement: '' }], reply: 'Took it out.' }));
+    assert.equal(fileOf(folder), PLAN.replace('Ship it on Friday.\n\n', ''));
+    const [thread] = await threads();
+    assert.equal(thread.quote, 'The build is green, and the build is green again.');
   } finally {
     await docs.close();
   }

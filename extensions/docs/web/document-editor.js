@@ -437,7 +437,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       if (!passage) return;
       if (passage.quote.length > MAX_QUOTE) return setCommentProblem(t("Select less text: a comment can be on at most {n} characters.", { n: MAX_QUOTE }));
       setActive(null);
-      // One that was being written is let go: what was typed in it is saved as the card goes.
       setCompose({ key: ++composed.current, passage, base: saver.state().base, threadId: null });
     };
 
@@ -474,16 +473,14 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     };
 
     /**
-     * Saves a comment of the person's as it is typed: `words` is all of it, `id` its id once it is made (null before). The first
-     * save makes the thread, when it is the first comment of a passage (`thread.id` is null), or the next comment of one. Returns
-     * the comment's id and the thread's. A comment that cannot be changed any more (the agent answered it meanwhile) is followed by
-     * one of its own.
+     * Sends a comment of the person's, once they send it: the thread with it, when it is the first comment of a passage
+     * (`thread.id` is null), or the next comment of one. Only now is a chat looked for (or opened) to ask, for one with @agent in
+     * it. Returns the comment's id and the thread's.
      */
-    const write = async (thread, words, id, writing) => {
+    const write = async (thread, words, _id, writing) => {
       const text = words.trim();
       const chat = await chatFor(text);
       const body = { body: text, ...(chat === undefined ? {} : { chat }) };
-      const send = (path, method, extra = {}) => portal.api.json(`${url}/threads/${path}`, { method, body: JSON.stringify({ ...body, ...extra }), keepalive: true });
       if (!thread.id) {
         const { passage, base, key } = writing;
         const made = await portal.api.json(`${url}/threads`, { method: "POST", body: JSON.stringify({ ...body, base, quote: passage.quote, prefix: passage.prefix, suffix: passage.suffix, start: passage.start }), keepalive: true });
@@ -492,36 +489,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         setActive(made.id);
         return { comment: made.comments.at(-1).id, thread: made.id };
       }
-      if (id !== null) {
-        try {
-          // The box's comment: it is changed only while nothing has been said after it.
-          const changed = await send(`${thread.id}/comments/${id}`, "PUT", { draft: true });
-          taken(changed);
-          return { comment: id, thread: thread.id };
-        } catch (e) {
-          if (!["comment_not_last", "comment_not_found"].includes(e.body?.code)) throw e;
-        }
-      }
-      const added = await send(`${thread.id}/comments`, "POST");
+      const added = await portal.api.json(`${url}/threads/${thread.id}/comments`, { method: "POST", body: JSON.stringify(body), keepalive: true });
       taken(added);
       return { comment: added.comments.at(-1).id, thread: thread.id };
     };
 
-    /** What was saved was typed away: the comment is taken away, and its thread with it if it was the only comment (which it answers). */
-    const clear = async (thread, id, writing) => {
-      let gone;
-      try {
-        gone = await portal.api.json(`${url}/threads/${thread.id}/comments/${id}?draft=1`, { method: "DELETE", keepalive: true });
-      } catch (e) {
-        // Not there any more (another window): the threads are asked for again.
-        if (["comment_not_found", "thread_not_found"].includes(e.body?.code)) return void refresh.current();
-        throw e;
-      }
-      if (gone.removed === "comment") return void taken(gone.thread);
-      setThreads((now) => ({ ...now, items: now.items.filter((x) => x.id !== thread.id) }));
-      if (writing) setCompose((now) => (now?.key === writing.key ? { ...now, threadId: null } : now));
-      return "thread";
-    };
     /** The comment that was being written is let go: it is a thread in the list like the others. */
     const finish = (thread) => {
       setCompose(null);
@@ -642,7 +614,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             onRetry: () => void refresh.current(),
             onActivate: show,
             onWrite: write,
-            onClear: clear,
             onFinish: finish,
             onCancel: cancel,
             onResolve: resolve,

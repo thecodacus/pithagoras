@@ -25,6 +25,11 @@ export default function (portal) {
       "Noch hat kein Ordner Dokumente. Ein Dokument ist eine Markdown-Datei im Unterordner documents des Ordners, in dem ein Chat arbeitet.",
     "The documents in {folder} could not be opened: {error}": "Die Dokumente in {folder} konnten nicht geöffnet werden: {error}",
     "All documents": "Alle Dokumente",
+    "Title of a new document": "Titel eines neuen Dokuments",
+    "New document": "Neues Dokument",
+    "The document could not be made: {error}": "Das Dokument konnte nicht angelegt werden: {error}",
+    "No documents in {folder} yet. Make one here, or ask the agent to.": "Noch keine Dokumente in {folder}. Lege hier eines an, oder bitte den Agenten darum.",
+    "The documents of this chat's folder, to read, edit and comment on": "Die Dokumente im Ordner dieses Chats, zum Lesen, Bearbeiten und Kommentieren",
     "Changed {date}": "Geändert {date}",
     "This document is empty.": "Dieses Dokument ist leer.",
     Saved: "Gespeichert",
@@ -89,6 +94,8 @@ export default function (portal) {
     "Write a comment": "Kommentar schreiben",
     "Write a comment…": "Kommentar schreiben…",
     Cancel: "Abbrechen",
+    Send: "Senden",
+    "Ctrl+Enter": "Strg+Eingabe",
     Reply: "Antworten",
     "Reply…": "Antworten…",
     Resolve: "Erledigen",
@@ -153,13 +160,13 @@ export default function (portal) {
   }
 
   /**
-   * The list of folders and their documents, kept up to date while it is on the page: the server half's stream says the list's version
-   * whenever it changes (and as its first message), and the list is asked for again when that is not the version the page holds. So what
-   * changed while there was no stream (the page's first request, a dropped connection) is found out at once, and a list that is current
-   * is not asked for again. What is shown stays while a request for it again fails, which is made again after a while; only a page that has
-   * no list yet says why.
+   * A list of documents (`path`, a route of the server half's), kept up to date while it is on the page: the server half's stream says the
+   * list's version whenever it changes (and as its first message), and the list is asked for again when that is not the version the page
+   * holds (a list without a version, one chat's, is asked for again whenever the stream says anything). So what changed while there was no
+   * stream (the first request, a dropped connection) is found out at once, and a list that is current is not asked for again. What is shown
+   * stays while a request for it again fails, which is made again after a while; only a page that has no list yet says why.
    */
-  function useFolders() {
+  function useListed(path) {
     const [state, setState] = useState({ body: null, error: null });
     const [asked, setAsked] = useState(0);
     useEffect(() => {
@@ -180,7 +187,7 @@ export default function (portal) {
         loading = true;
         const before = told;
         try {
-          const body = await portal.api.json(portal.api.url("/folders"));
+          const body = await portal.api.json(portal.api.url(path));
           if (gone) return;
           failures = 0;
           held = body.version ?? null;
@@ -227,12 +234,21 @@ export default function (portal) {
         clearTimeout(wait);
         stream?.close();
       };
-    }, [asked]);
+    }, [path, asked]);
     return { ...state, retry: () => setAsked((n) => n + 1) };
   }
 
+  /** A document in a list: its title, and its file, when it changed and what its comments wait for. */
+  const DocumentButton = ({ doc, onOpen }) =>
+    h(
+      "button",
+      { type: "button", onClick: onOpen },
+      h("span", { className: "pd-title" }, doc.title),
+      h("span", { className: "pd-meta" }, [doc.name, t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads })), doc.answeredThreads > 0 && t("{n} answered by the agent", { n: doc.answeredThreads })].filter(Boolean).join(" · ")),
+    );
+
   function FolderList({ onOpen }) {
-    const { body, error, retry } = useFolders();
+    const { body, error, retry } = useListed("/folders");
     if (error) return h(ui.LoadFailed, { error, onRetry: retry });
     if (!body) return h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") });
     // A folder whose documents could not be opened is said, with the reason: left out without a word it reads as one with none.
@@ -247,18 +263,7 @@ export default function (portal) {
         h(
           "ul",
           { className: "pd-list" },
-          folder.documents.map((doc) =>
-            h(
-              "li",
-              { key: doc.id },
-              h(
-                "button",
-                { type: "button", onClick: () => onOpen({ folder: folder.id, id: doc.id }) },
-                h("span", { className: "pd-title" }, doc.title),
-                h("span", { className: "pd-meta" }, [doc.name, t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads })), doc.answeredThreads > 0 && t("{n} answered by the agent", { n: doc.answeredThreads })].filter(Boolean).join(" · ")),
-              ),
-            ),
-          ),
+          folder.documents.map((doc) => h("li", { key: doc.id }, h(DocumentButton, { doc, onOpen: () => onOpen({ folder: folder.id, id: doc.id }) }))),
         ),
       );
     return [...problems, ...body.folders.map(section)];
@@ -289,7 +294,7 @@ export default function (portal) {
    * on the page. The portal's own card says it best while the call runs, when
    * it failed, and for a list.
    */
-  function DocumentCall({ call, card }) {
+  function DocumentCall({ call, card, panels }) {
     portal.locale.use();
     const d = call.details;
     if (call.status !== "done" || typeof d?.id !== "string" || typeof d.folder !== "string") return card;
@@ -310,7 +315,8 @@ export default function (portal) {
       { className: "pd-call" },
       h(DocumentIcon),
       h("div", null, h("span", { className: "pd-by" }, heading), h("p", { className: "pd-call-title" }, d.title), h("p", { className: "pd-meta" }, facts.join(" · "))),
-      h("button", { type: "button", onClick: () => portal.navigate(`/x/${portal.extension}/documents?${new URLSearchParams({ folder: d.folder, doc: d.id })}`) }, t("Open in Documents")),
+      // Beside the chat, in its panel: the chat stays on screen.
+      h("button", { type: "button", onClick: () => panels.open("documents", { folder: d.folder, doc: d.id }) }, t("Open in Documents")),
     );
   }
 
@@ -334,6 +340,73 @@ export default function (portal) {
     );
   }
 
+  /**
+   * The documents of one chat, beside it: the project's and the chat's own, as its agent sees them. Made here with a title (the
+   * project's, as the agent's are unless it says otherwise), and opened in the same editor as on the page, with the comments and the
+   * history. What is beside it is kept current as the page's list is.
+   */
+  function ChatDocuments({ chat, onOpen }) {
+    const { body, error, retry } = useListed(`/chats/${encodeURIComponent(chat.id)}/documents`);
+    const [title, setTitle] = useState("");
+    const [making, setMaking] = useState(false);
+    const [problem, setProblem] = useState(null);
+    if (error) return h(ui.LoadFailed, { error, onRetry: retry });
+    if (!body) return h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") });
+    const create = async () => {
+      setMaking(true);
+      setProblem(null);
+      try {
+        const made = await portal.api.json(portal.api.url(`/folders/${body.folder.id}/documents`), { method: "POST", body: JSON.stringify({ title: title.trim() }) });
+        setTitle("");
+        onOpen({ folder: body.folder.id, id: made.id });
+      } catch (e) {
+        setProblem(e.message);
+      } finally {
+        setMaking(false);
+      }
+    };
+    return h(
+      React.Fragment,
+      null,
+      h(
+        "form",
+        { className: "pd-new", onSubmit: (e) => (e.preventDefault(), void create()) },
+        h("input", { className: ui.classes.input, value: title, maxLength: 200, placeholder: t("Title of a new document"), "aria-label": t("Title of a new document"), onChange: (e) => setTitle(e.target.value) }),
+        h("button", { type: "submit", className: ui.classes.primarySmall, disabled: making || !title.trim() }, t("New document")),
+      ),
+      problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("The document could not be made: {error}", { error: problem })),
+      body.documents.length
+        ? h("ul", { className: "pd-list" }, body.documents.map((doc) => h("li", { key: doc.id }, h(DocumentButton, { doc, onOpen: () => onOpen({ folder: body.folder.id, id: doc.id }) }))))
+        : h(ui.Empty, null, t("No documents in {folder} yet. Make one here, or ask the agent to.", { folder: body.folder.name })),
+    );
+  }
+
+  function DocumentsPanel({ chat, panel }) {
+    portal.locale.use();
+    // A tool card asked for one (`open("documents", { folder, doc })`): each ask anew, also for the same document.
+    const asked = panel.params;
+    const [open, setOpen] = useState(() => (asked?.doc ? { folder: asked.folder, id: asked.doc } : null));
+    useEffect(() => {
+      if (asked?.doc) setOpen({ folder: asked.folder, id: asked.doc });
+    }, [asked]);
+    return h(
+      "div",
+      { className: "pd-page pd-panel" },
+      open ? h(DocumentEditor, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }) : h(ChatDocuments, { chat, onOpen: setOpen }),
+    );
+  }
+
   portal.slots.register("nav.page", { id: "documents", title: "Documents", icon: DocumentIcon, component: DocumentsPage });
+  portal.slots.register("chat.panel", {
+    id: "documents",
+    name: "documents",
+    title: "Documents",
+    icon: DocumentIcon,
+    component: DocumentsPanel,
+    useButton: () => {
+      portal.locale.use();
+      return { title: t("The documents of this chat's folder, to read, edit and comment on") };
+    },
+  });
   for (const tool of ["doc_create", "doc_read", "doc_edit", "doc_comment", "doc_reply", "doc_edit_comment", "doc_delete_comment", "doc_resolve"]) portal.slots.register("chat.tool", { id: tool, tool, component: DocumentCall });
 }

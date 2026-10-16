@@ -389,7 +389,7 @@ test('the comments of a document are beside it, by whom they are, and their pass
   await expect(page.locator(`.pd-editor [data-active-thread="${friday.id}"]`)).toHaveCount(1);
 });
 
-test('text that is selected is commented on: the passage is marked while the comment is written, and the thread is made on it as soon as something is typed, with no button to send it', async ({ page }) => {
+test('text that is selected is commented on: the passage is marked while the comment is written, nothing is sent while it is typed, and Send makes the thread on it', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await expect(commentButton(page)).toBeDisabled();
@@ -400,37 +400,41 @@ test('text that is selected is commented on: the passage is marked while the com
   const compose = panel(page).locator('.pd-compose');
   await expect(compose).toContainText('Friday, see the guide');
   expect(await editorOf(page).locator('.pd-thread-pending').evaluateAll((spans) => spans.map((s) => s.textContent).join(''))).toBe('Friday, see the guide');
-  await expect(compose.getByRole('button', { name: 'Add comment' })).toHaveCount(0);
-  expect(store.made).toEqual([]);
+  const send = compose.getByRole('button', { name: 'Send' });
+  await expect(send).toBeDisabled();
   await compose.getByRole('textbox').fill('Is the guide up to date?');
-  // Saved as it is typed, after a pause, as the document is.
-  await expect.poll(() => store.made.length).toBe(1);
-  await expect(compose.getByText('Saved', { exact: true })).toBeVisible();
-  // What the page sent: the revision it saw, the passage as Markdown (with its marks in it) and what is around it. No chat: it asks nobody.
-  expect(store.made[0]).toEqual({ base: 3, quote: '**Friday**, [see the guide](https://example.com/guide)', prefix: '# The plan\n\nShip it on ', suffix: ' now.\n\nThe build is green.\n\nSign', start: PLAN.indexOf('**Friday**'), body: 'Is the guide up to date?' });
-  expect(store.threads[0].quote).toBe('**Friday**, [see the guide](https://example.com/guide)');
-  // The thread is made, and is the card being written in: marked in the text as its own, not as one being written, and not in the list as well.
-  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveCount(0);
-  await expectMarked(page, store.threads[0].id, 'Friday, see the guide');
-  await expect(compose.locator('li')).toHaveCount(0);
-  await expect(cards(page)).toHaveCount(0);
-  // Typed on: it is the same comment that is changed, and no other is made.
+  // Nothing goes while it is typed, however long the pause: the comment is the person's until it is sent.
+  await page.waitForTimeout(1500);
+  expect(store.made).toEqual([]);
   await compose.getByRole('textbox').fill('Is the guide up to date? Really?');
-  await expect.poll(() => store.requests.length).toBe(1);
-  expect(store.requests[0]).toEqual({ method: 'PUT', comment: store.threads[0].comments[0].id, body: { body: 'Is the guide up to date? Really?', draft: true } });
-  expect(store.threads[0].comments.map((c) => c.body)).toEqual(['Is the guide up to date? Really?']);
-  expect(store.made).toHaveLength(1);
-  // Ctrl+Enter lets it go: it is a thread of the list, with the comment in it, and the document was not changed by any of it.
-  await compose.getByRole('textbox').press('Control+Enter');
+  await send.click();
+  await expect.poll(() => store.made.length).toBe(1);
+  // What the page sent: the revision it saw, the passage as Markdown (with its marks in it) and what is around it. No chat: it asks nobody.
+  expect(store.made[0]).toEqual({ base: 3, quote: '**Friday**, [see the guide](https://example.com/guide)', prefix: '# The plan\n\nShip it on ', suffix: ' now.\n\nThe build is green.\n\nSign', start: PLAN.indexOf('**Friday**'), body: 'Is the guide up to date? Really?' });
+  expect(store.threads[0].quote).toBe('**Friday**, [see the guide](https://example.com/guide)');
+  // It is a thread of the list, with the comment in it, marked in the text as its own; the document was not changed by any of it.
   await expect(compose).toHaveCount(0);
   await expect(cards(page)).toHaveCount(1);
   await expect(cards(page).first()).toContainText('Is the guide up to date? Really?');
   await expect(cards(page).first()).toContainText('You');
   await expect(cards(page).first()).toHaveAttribute('aria-current', 'true');
+  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveCount(0);
+  await expectMarked(page, store.threads[0].id, 'Friday, see the guide');
+  expect(store.requests).toEqual([]);
   expect(store.puts).toEqual([]);
+  // Ctrl+Enter sends it as well; with nothing typed it sends nothing.
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  const box = panel(page).locator('.pd-compose').getByRole('textbox');
+  await box.press('Control+Enter');
+  await box.fill('Green?');
+  await box.press('Control+Enter');
+  await expect.poll(() => store.made.length).toBe(2);
+  expect(store.made[1]).toMatchObject({ body: 'Green?' });
+  await expect(cards(page)).toHaveCount(2);
 });
 
-test('a comment that is dropped leaves nothing marked, one that is typed away is taken away, and one on text that was typed and not saved yet is made on the revision that save made', async ({ page }) => {
+test('a comment that is dropped leaves nothing marked and sends nothing, and one on text that was typed and not saved yet is made on the revision that save made', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await select(page, 'The build is green.');
@@ -439,30 +443,16 @@ test('a comment that is dropped leaves nothing marked, one that is typed away is
   await panel(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(editorOf(page).locator('.pd-thread-pending')).toHaveCount(0);
   await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
-  expect(store.made).toEqual([]);
-
-  // Typed and saved, and then typed away: nothing is left of it, and the passage is not marked for a comment that is not there.
+  // Typed, and dropped: nothing was sent, so nothing is taken away either.
   await select(page, 'The build is green.');
   await commentButton(page).click();
-  const box = panel(page).locator('.pd-compose').getByRole('textbox');
-  await box.fill('Hm.');
-  await expect.poll(() => store.threads.length).toBe(1);
-  await expectMarked(page, store.threads[0].id, 'The build is green.');
-  const gone = store.threads[0].id;
-  await box.fill('');
-  await expect.poll(() => store.threads.length).toBe(0);
-  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String), draft: true }]);
-  await expect(panel(page).locator('.pd-compose')).toContainText('The build is green.');
-  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('The build is green.');
-  await expect(editorOf(page).locator(`[data-pd-thread="${gone}"]`)).toHaveCount(0);
-  // Typed again, it is made again; and Cancel after it was saved takes it away.
-  await box.fill('Again.');
-  await expect.poll(() => store.threads.length).toBe(1);
+  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Hm.');
+  await page.waitForTimeout(1000);
   await panel(page).getByRole('button', { name: 'Cancel' }).click();
   await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
-  expect(store.threads).toEqual([]);
   await expect(editorOf(page).locator('.pd-thread, .pd-thread-pending')).toHaveCount(0);
-  store.made.length = 0;
+  expect(store.made).toEqual([]);
+  expect(store.requests).toEqual([]);
 
   // Typed, and the second's wait for the save not yet over: the save is made before the comment is started.
   await editorOf(page).getByText('Sign-off is on Monday.').click();
@@ -475,6 +465,7 @@ test('a comment that is dropped leaves nothing marked, one that is typed away is
   await expect(panel(page).locator('.pd-compose')).toBeVisible();
   expect(store.puts).toEqual([{ markdown: PLAN.replace('Monday.', 'Monday. Maybe.'), base: 3 }]);
   await panel(page).locator('.pd-compose').getByRole('textbox').fill('Maybe?');
+  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.made.length).toBe(1);
   expect(store.made[0]).toMatchObject({ base: 4, quote: 'Maybe.' });
   expect(store.threads[0].quote).toBe('Maybe.');
@@ -494,34 +485,33 @@ test('the passage is refused when it is too long for a comment, and a reason is 
   expect(store.made).toEqual([]);
 });
 
-test('a thread is answered as it is typed, resolved and opened again; a resolved one is out of the way until asked for, and what was typed is saved before it is resolved', async ({ page }) => {
+test('a thread is answered with Send, resolved and opened again; a resolved one is out of the way until asked for, and what was typed goes with it when it is resolved', async ({ page }) => {
   const store = new Store();
   const green = seeded(store, 'The build is green.', 'Is it?', 'agent');
   await open(page, store);
   const card = cards(page).first();
   const box = card.getByRole('textbox', { name: 'Reply' });
-  // Nothing to press to send it, and nothing typed is nothing sent.
-  await expect(card.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
+  const send = card.getByRole('button', { name: 'Send' });
+  // Nothing typed is nothing to send.
+  await expect(send).toBeDisabled();
   await box.press('Control+Enter');
   await expect(card.locator('li')).toHaveCount(1);
+  // Typed, and not sent while it waits: it is the box's, not the thread's.
   await box.fill('Yes, it is.');
+  await page.waitForTimeout(1000);
+  expect(store.threads[0].comments).toHaveLength(1);
+  await send.click();
   await expect.poll(() => store.threads[0].comments.length).toBe(2);
-  // While it is typed the comment is the box's, not the list's as well.
-  await expect(card.locator('li')).toHaveCount(1);
-  await expect(card.getByText('Saved', { exact: true })).toBeVisible();
-  await box.press('Control+Enter');
   await expect(card.locator('li')).toHaveCount(2);
   await expect(card.locator('li').nth(1)).toContainText('Yes, it is.');
   await expect(box).toHaveValue('');
-  // What is typed next is a comment of its own.
+  // Typed, and the thread resolved: what was typed is sent first, as the last word.
   await box.fill('And another.');
-  await expect.poll(() => store.threads[0].comments.length).toBe(3);
-  expect(store.requests).toEqual([]);
-  // Typed, and the thread resolved before the wait is over: it is saved first.
   await card.getByRole('button', { name: 'Resolve', exact: true }).click();
   await expect(cards(page)).toHaveCount(0);
   expect(store.threads[0].status).toBe('resolved');
   expect(store.threads[0].comments.map((c) => c.body)).toEqual(['Is it?', 'Yes, it is.', 'And another.']);
+  expect(store.requests).toEqual([]);
   // No longer marked in the text; counted, and shown on request.
   await expect(editorOf(page).locator('.pd-thread')).toHaveCount(0);
   await expect(panel(page).getByRole('button', { name: 'Show resolved (1)' })).toBeVisible();
@@ -539,89 +529,48 @@ test('a thread is answered as it is typed, resolved and opened again; a resolved
   expect(store.threads[0].comments).toHaveLength(3);
 });
 
-test('text typed while the first save of a new comment is on its way changes that comment, and does not make a second thread', async ({ page }) => {
+test('a comment is sent once: Send again while it is on its way sends nothing more, and its buttons wait for it', async ({ page }) => {
   const store = new Store();
   store.delay = 1500;
-  await open(page, store);
-  await select(page, 'The build is green.');
-  await commentButton(page).click();
-  const box = panel(page).locator('.pd-compose').getByRole('textbox');
-  await box.fill('Hello');
-  await expect.poll(() => store.started).toBe(1);
-  // The thread is not there yet: the page has not been answered.
-  expect(store.threads).toEqual([]);
-  await box.fill('Hello world');
-  await expect.poll(() => store.threads.length).toBe(1);
-  await expect.poll(() => store.threads[0].comments[0].body).toBe('Hello world');
-  // Long enough for a second thread to have been made, which it was not: the words that came after went to the first.
-  await page.waitForTimeout(1500);
-  expect(store.threads.map((t) => t.comments.map((c) => c.body))).toEqual([['Hello world']]);
-  expect(store.started).toBe(1);
-  expect(store.requests.map((r) => r.method)).toEqual(['PUT']);
-  await expect(panel(page).locator('.pd-compose').getByText('Saved', { exact: true })).toBeVisible();
-});
-
-test('Cancel while the first save of a new comment is on its way takes the thread it made away, and says nothing is wrong', async ({ page }) => {
-  const store = new Store();
-  store.delay = 1500;
-  await open(page, store);
-  await select(page, 'The build is green.');
-  await commentButton(page).click();
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Hello');
-  await expect.poll(() => store.started).toBe(1);
-  await panel(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
-  expect(store.threads).toEqual([]);
-  // The comment that was made is the one taken away, in its own thread: not in `threads/null`.
-  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String), draft: true }]);
-  await expect(page.getByRole('alert')).toHaveCount(0);
-  await expect(editorOf(page).locator('.pd-thread, .pd-thread-pending')).toHaveCount(0);
-});
-
-test('text typed while a new comment that was typed away is being taken away makes a new thread, and is saved', async ({ page }) => {
-  const store = new Store();
   await open(page, store);
   await select(page, 'The build is green.');
   await commentButton(page).click();
   const compose = panel(page).locator('.pd-compose');
   await compose.getByRole('textbox').fill('Hello');
-  await expect.poll(() => store.threads.length).toBe(1);
-  await expect(compose.getByText('Saved', { exact: true })).toBeVisible();
-  // Typed away, and typed again before the server has answered: the thread is going, so the words are for a new one.
-  store.deleteDelay = 1500;
-  await compose.getByRole('textbox').fill('');
-  await expect.poll(() => store.deleting).toBe(1);
-  await compose.getByRole('textbox').fill('Hi');
-  await expect.poll(() => store.threads.map((t) => t.comments.map((c) => c.body)), { timeout: 10_000 }).toEqual([['Hi']]);
-  expect(store.made).toHaveLength(2);
-  await expect(compose.getByText('Saved', { exact: true })).toBeVisible();
+  await compose.getByRole('button', { name: 'Send' }).click();
+  await expect.poll(() => store.started).toBe(1);
+  await expect(compose.getByRole('button', { name: 'Send' })).toBeDisabled();
+  await expect(compose.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  await compose.getByRole('textbox').press('Control+Enter');
+  await expect.poll(() => store.threads.length, { timeout: 10_000 }).toBe(1);
+  await expect(compose).toHaveCount(0);
+  expect(store.started).toBe(1);
+  expect(store.threads.map((t) => t.comments.map((c) => c.body))).toEqual([['Hello']]);
   await expect(page.getByRole('alert')).toHaveCount(0);
-  // Nothing was sent to the thread that was taken away.
-  expect(store.requests).toEqual([{ method: 'DELETE', comment: expect.any(String), draft: true }]);
-  await expectMarked(page, store.threads[0].id, 'The build is green.');
 });
 
-test('a comment that could not be saved keeps what was typed and says why, and the next change or leaving the box sends it again', async ({ page }) => {
+test('a comment that could not be sent keeps what was typed and says why, and Send tries again', async ({ page }) => {
   const store = new Store();
   seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
   const card = cards(page).first();
   store.refuse = { status: 500, error: 'The documents store could not do that' };
   await card.getByRole('textbox', { name: 'Reply' }).fill('A long answer I would not want to lose.');
+  await card.getByRole('button', { name: 'Send' }).click();
   await expect(card.getByRole('alert')).toContainText('Could not comment: The documents store could not do that');
   await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('A long answer I would not want to lose.');
   await expect(card.locator('li')).toHaveCount(1);
-  // Leaving the box tries again.
   store.refuse = null;
-  await card.getByRole('textbox', { name: 'Reply' }).blur();
+  await card.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.threads[0].comments.length).toBe(2);
   await expect(card.getByRole('alert')).toHaveCount(0);
-  await expect(card.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('');
   // A new comment that was refused stays open, with the reason, and its words kept.
   await select(page, 'Sign-off is on Monday.');
   await commentButton(page).click();
   store.refuse = { status: 422, error: 'That passage is not in the document at revision 3' };
   await panel(page).locator('.pd-compose').getByRole('textbox').fill('Who signs?');
+  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
   await expect(panel(page).locator('.pd-compose')).toContainText('That passage is not in the document at revision 3');
   await expect(panel(page).locator('.pd-compose').getByRole('textbox')).toHaveValue('Who signs?');
   await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('Sign-off is on Monday.');
@@ -754,7 +703,7 @@ test('what the comments say is in German in a German portal', async ({ page }) =
   await expect(panel(page).locator('.pd-compose').getByRole('textbox', { name: 'Kommentar schreiben' })).toBeVisible();
   await expect(panel(page).locator('.pd-compose').getByRole('button', { name: 'Abbrechen' })).toBeVisible();
   await panel(page).locator('.pd-compose').getByRole('textbox').fill('Gut?');
-  await expect(panel(page).locator('.pd-compose').getByText('Gespeichert', { exact: true })).toBeVisible();
+  await expect(panel(page).locator('.pd-compose').getByRole('button', { name: 'Senden' })).toBeEnabled();
 });
 
 test('the list of documents says how many comments are open on each', async ({ page }) => {
@@ -773,79 +722,86 @@ test('the list of documents says how many comments are open on each', async ({ p
 /** The chat the page last remembered the person in, in this tab. */
 const remembered = (page: Page) => page.evaluate(() => sessionStorage.getItem('pithagoras-docs/chat'));
 
-/** A comment typed on `quote`, with nothing pressed to send it. */
+/** A comment typed on `quote` and sent: the card of its thread in the list. */
 async function compose(page: Page, quote: string, text: string) {
   await select(page, quote);
   await commentButton(page).click();
-  const box = panel(page).locator('.pd-compose').getByRole('textbox');
-  await box.fill(text);
-  return box;
+  const card = panel(page).locator('.pd-compose');
+  await card.getByRole('textbox').fill(text);
+  await card.getByRole('button', { name: 'Send' }).click();
+  await expect(card).toHaveCount(0);
+  return cards(page).filter({ hasText: text });
 }
 
-test('a comment with @agent asks the agent of the chat the person is in: the thread says so, and says when the agent answered, until the person has seen it or reacts', async ({ page }) => {
+test('a comment with @agent asks the agent of the chat the person is in once it is sent: the thread says so, and says when the agent answered, until the person has seen it or reacts', async ({ page }) => {
   const store = new Store();
   await open(page, store, { chat: 'a' });
   await expect(panel(page)).toContainText('Write @agent in a comment to ask the agent to answer it.');
   // One that does not ask names no chat.
   const quiet = await compose(page, 'Sign-off is on Monday.', 'Who signs?');
-  await expect.poll(() => store.made.length).toBe(1);
   expect(store.made[0]).not.toHaveProperty('chat');
-  await quiet.press('Control+Enter');
-  await expect(cards(page).first().locator('.pd-asked')).toHaveCount(0);
-  // One that does: sent as it was written, with the chat the page knows the person is in.
-  await compose(page, 'The build is green.', 'Is it? @agent, please check.');
+  await expect(quiet.locator('.pd-asked')).toHaveCount(0);
+  // Typed with @agent and not finished: nobody is asked, however long it waits.
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  const box = panel(page).locator('.pd-compose').getByRole('textbox');
+  await box.fill('Is it? @agent, please');
+  await page.waitForTimeout(1500);
+  expect(store.made).toHaveLength(1);
+  // Sent: as it was written, with the chat the page knows the person is in.
+  await box.fill('Is it? @agent, please check.');
+  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.made.length).toBe(2);
   expect(store.made[1]).toMatchObject({ body: 'Is it? @agent, please check.', chat: 'a' });
-  const asked = panel(page).locator('.pd-compose .pd-asked');
-  await expect(asked).toHaveText('Asked the agent · First chat');
-  await expect(asked).toHaveAttribute('data-asked', 'waiting');
+  const card = cards(page).filter({ hasText: 'Is it?' });
+  await expect(card.locator('.pd-asked')).toHaveText('Asked the agent · First chat');
+  await expect(card.locator('.pd-asked')).toHaveAttribute('data-asked', 'waiting');
   // The server has the chat take it, and the agent answers; the page is told the comments changed.
   const thread = store.threads[1];
   thread.ping = { ...thread.ping!, sent: true, state: 'sent' };
   store.comment(thread.id, 'Yes, it is.', 'agent');
   await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
-  // The comment that was answered is let go: it is a thread of the list, with the answer, and the box is empty.
-  const answered = cards(page).filter({ hasText: 'Yes, it is.' });
-  const news = answered.locator('.pd-asked');
+  const news = card.locator('.pd-asked');
   await expect(news).toHaveText(/^The agent answered/);
   await expect(news).toHaveAttribute('data-asked', 'answered');
-  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
-  await expect(answered.locator('li')).toHaveCount(2);
-  await expect(answered.getByRole('textbox', { name: 'Reply' })).toHaveValue('');
+  await expect(card.locator('li')).toHaveCount(2);
   // Saying it was read is the reaction.
   await news.getByRole('button', { name: 'Got it' }).click();
   await expect(news).toHaveCount(0);
   expect(thread.answered).toBe(false);
-  // A reply that asks again is asked again, in the chat; taking the mention away takes the ask back, before anyone is woken.
-  await cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' }).fill('Once more, @agent.');
+  // A reply that asks again is asked again, in the chat, once it is sent.
+  await card.getByRole('textbox', { name: 'Reply' }).fill('Once more, @agent.');
+  await page.waitForTimeout(1000);
+  expect(thread.comments).toHaveLength(2);
+  await card.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => thread.ping?.state).toBe('pending');
   expect(thread.ping?.chat).toBe('a');
-  await expect(cards(page).filter({ hasText: 'Is it?' }).locator('.pd-asked')).toHaveText('Asked the agent · First chat');
-  await cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' }).fill('Once more.');
-  await expect.poll(() => thread.toAgent).toBe(false);
-  await expect(cards(page).filter({ hasText: 'Is it?' }).locator('.pd-asked')).toHaveCount(0);
-  expect(store.requests.at(-1)).toMatchObject({ method: 'PUT', body: { body: 'Once more.' } });
-  expect(store.requests.at(-1)!.body).not.toHaveProperty('chat');
+  await expect(card.locator('.pd-asked')).toHaveText('Asked the agent · First chat');
+  expect(store.requests).toEqual([]);
 });
 
-test('a comment that asks the agent when the person is in no chat of the folder opens one for it, and is asked in that chat from then on', async ({ page }) => {
+test('a comment that asks the agent when the person is in no chat of the folder opens one for it when it is sent, and is asked in that chat from then on', async ({ page }) => {
   const store = new Store();
   // The chat the person was last in is another folder's: nobody here can be asked in it.
   await open(page, store, { chat: 'elsewhere' });
+  // While it is typed, no chat is opened for it.
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Is it? @agent');
+  await page.waitForTimeout(1500);
   expect(store.opened).toEqual([]);
-  const first = await compose(page, 'The build is green.', 'Is it? @agent');
+  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.made.length).toBe(1);
   expect(store.opened).toEqual([{ title: 'Comments on The plan', workspace: '/w/site' }]);
   expect(store.made[0]).toMatchObject({ chat: 'n1' });
   expect(await remembered(page)).toBe('n1');
-  await expect(panel(page).locator('.pd-compose .pd-asked')).toHaveText('Asked the agent · Comments on The plan');
-  await first.press('Control+Enter');
-  // The same chat for the next one, and for a change to this: no second chat is opened.
-  const second = await compose(page, 'Sign-off is on Monday.', 'Who signs? @agent');
-  await expect.poll(() => store.made.length).toBe(2);
+  const first = cards(page).filter({ hasText: 'Is it?' });
+  await expect(first.locator('.pd-asked')).toHaveText('Asked the agent · Comments on The plan');
+  // The same chat for the next one, and for a reply: no second chat is opened.
+  await compose(page, 'Sign-off is on Monday.', 'Who signs? @agent');
   expect(store.made[1]).toMatchObject({ chat: 'n1' });
-  await second.press('Control+Enter');
-  await cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' }).fill('And you? @agent');
+  await first.getByRole('textbox', { name: 'Reply' }).fill('And you? @agent');
+  await first.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.threads[0].comments.length).toBe(2);
   expect(store.opened).toHaveLength(1);
 });
@@ -854,12 +810,12 @@ test('a chat that cannot be opened is said, and the comment is kept and says it 
   const store = new Store();
   await open(page, store);
   await page.route('**/api/sessions', (route) => (route.request().method() === 'POST' ? route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'That folder is not one a chat may start in' }) }) : route.fallback()));
-  await compose(page, 'The build is green.', 'Is it? @agent');
+  const card = await compose(page, 'The build is green.', 'Is it? @agent');
   await expect.poll(() => store.made.length).toBe(1);
   await expect(page.getByRole('status').filter({ hasText: 'Could not open a chat to ask the agent in: That folder is not one a chat may start in' })).toBeVisible();
   expect(store.made[0].body).toBe('Is it? @agent');
   expect(store.made[0]).toMatchObject({ chat: null });
-  await expect(panel(page).locator('.pd-compose .pd-asked')).toHaveText('Not delivered to the agent · The chat to ask is not one that works in this folder');
+  await expect(card.locator('.pd-asked')).toHaveText('Not delivered to the agent · The chat to ask is not one that works in this folder');
   await page.getByRole('status').filter({ hasText: 'Could not open a chat' }).getByRole('button', { name: 'Dismiss' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Could not open a chat' })).toHaveCount(0);
 });
@@ -868,11 +824,11 @@ test('a chat\'s own document is asked in its own chat, wherever the person is, a
   const store = new Store();
   store.ask = { chats: [{ id: 'own', title: 'The owner' }], own: true, workspace: '/w/site' };
   await open(page, store, { chat: 'a' });
-  await compose(page, 'The build is green.', 'Is it? @agent');
+  const card = await compose(page, 'The build is green.', 'Is it? @agent');
   await expect.poll(() => store.made.length).toBe(1);
   expect(store.made[0]).toMatchObject({ chat: 'own' });
   expect(store.opened).toEqual([]);
-  await expect(panel(page).locator('.pd-compose .pd-asked')).toHaveText('Asked the agent · The owner');
+  await expect(card.locator('.pd-asked')).toHaveText('Asked the agent · The owner');
 });
 
 test('the chat that was on screen last is the one the person is in when the page is opened from it', async ({ page }) => {
@@ -911,32 +867,22 @@ test('a comment whose chat is gone from the thread says it was not delivered; on
   expect(resolved.answered).toBe(false);
 });
 
-test('a comment the agent answered is let go: the box is empty for the next, and what is typed after it is a comment of its own; one the page did not know was answered is not changed either', async ({ page }) => {
+test('a reply being typed when the agent answers stays in the box, and is sent after the answer', async ({ page }) => {
   const store = new Store();
   seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
   const card = cards(page).first();
   const box = card.getByRole('textbox', { name: 'Reply' });
   await box.fill('Please check.');
-  await expect.poll(() => store.threads[0].comments.length).toBe(2);
-  await expect(card.locator('li')).toHaveCount(1);
-  // The agent answers and the page is told: the comment it answered is in the list, and the box is empty.
+  // The agent answers and the page is told: the answer is in the list, and what is being typed is still the person's.
   store.comment(store.threads[0].id, 'Checked.', 'agent');
   await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
-  await expect(card.locator('li')).toHaveCount(3);
-  await expect(box).toHaveValue('');
-  await expect(card.locator('li').nth(1)).toContainText('Please check.');
-  await box.fill('Thanks.');
-  await expect.poll(() => store.threads[0].comments.length).toBe(4);
+  await expect(card.locator('li')).toHaveCount(2);
+  await expect(box).toHaveValue('Please check.');
+  await card.getByRole('button', { name: 'Send' }).click();
+  await expect.poll(() => store.threads[0].comments.length).toBe(3);
+  expect(store.threads[0].comments.map((c) => [c.author, c.body])).toEqual([['user', 'Is it?'], ['agent', 'Checked.'], ['user', 'Please check.']]);
   expect(store.requests).toEqual([]);
-  // Answered again, and nothing tells the page: what is typed on cannot change the comment, and goes in as a comment of its own.
-  store.comment(store.threads[0].id, 'Welcome.', 'agent');
-  await box.fill('Thanks. And again.');
-  await expect.poll(() => store.threads[0].comments.length).toBe(6);
-  expect(store.threads[0].comments.map((c) => [c.author, c.body])).toEqual([
-    ['user', 'Is it?'], ['user', 'Please check.'], ['agent', 'Checked.'], ['user', 'Thanks.'], ['agent', 'Welcome.'], ['user', 'Thanks. And again.'],
-  ]);
-  expect(store.requests.map((r) => r.method)).toEqual(['PUT']);
   await expect(card.getByRole('alert')).toHaveCount(0);
 });
 
@@ -957,6 +903,7 @@ test('what asking the agent says is in German in a German portal, and the chat o
   await select(page, 'Ship it on');
   await page.getByRole('button', { name: 'Kommentieren', exact: true }).click();
   await panel(page).locator('.pd-compose').getByRole('textbox').fill('@agent?');
+  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Senden' }).click();
   await expect.poll(() => store.opened.length).toBe(1);
   expect(store.opened[0].title).toBe('Kommentare zu The plan');
 });
@@ -1124,19 +1071,17 @@ test('a thread is deleted as a whole only while it is the person\'s and the agen
   expect(store.threads.map((t) => t.id)).toEqual([mine.id, theirs.id]);
 });
 
-test('a thread deleted while a comment was being typed in it takes the box with it, and says nothing is wrong', async ({ page }) => {
+test('a thread deleted while a comment was being typed in it takes the box with it, sends nothing of it, and says nothing is wrong', async ({ page }) => {
   const store = new Store();
   seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
   const card = cards(page).first();
   await card.getByRole('textbox', { name: 'Reply' }).fill('Typed on.');
-  await expect.poll(() => store.threads[0].comments.length).toBe(2);
   await card.getByRole('button', { name: 'Delete thread' }).click();
   await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
   await expect(cards(page)).toHaveCount(0);
   expect(store.threads).toEqual([]);
-  // What was typed was taken away with the rest, not saved to a thread that is gone.
-  expect(store.requests.map((r) => r.method)).toEqual(['DELETE', 'DELETE-THREAD']);
+  expect(store.requests.map((r) => r.method)).toEqual(['DELETE-THREAD']);
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 

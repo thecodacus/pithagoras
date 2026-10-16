@@ -50,9 +50,10 @@ interface Listing { folders: unknown[]; problems: unknown[]; version: string; as
 async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' | 'open' = 'idle', problems: unknown[] = [], listing: Listing = { folders, problems, version: 'v1', asked: 0, failing: false }) {
   const at = new Date().toISOString();
   const sessions = [{ id: 'a', title: 'First chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: at, provider: null, model: null, thinking_level: null }];
-  /** The documents the page asked for, as their addresses. */
+  /** The documents the page asked for, as their addresses; the documents it made, as it asked for them. */
   const asked: string[] = [];
-  await mockPortal(page, async ({ path: p, route }) => {
+  const made: unknown[] = [];
+  await mockPortal(page, async ({ path: p, method, route, json }) => {
     if (p === '/api/extension-ui') return { extensions: [{ name: NAME, version: '0.1.0', entry: address('client.js') + '?v=1', style: address('client.css') + '?v=1', server: `/api/x/${NAME}` }] };
     // The folder the portal serves of the package: its modules, the editor among them, and its stylesheet.
     if (p.startsWith(address(''))) { await route.fulfill({ contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body: web(p.slice(address('').length)) }); return DONE; }
@@ -61,6 +62,13 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
       if (listing.failing) return reply(503, { error: 'The portal is busy' });
       return { folders: listing.folders, ...(listing.problems.length ? { problems: listing.problems } : {}), version: listing.version };
     }
+    // What the first chat sees, for the panel beside it: the documents of its folder.
+    if (p === `/api/x/${NAME}/chats/a/documents`) return { folder: { id: '0123456789abcdef', name: 'site', path: '/w/site' }, documents: (listing.folders[0] as { documents: unknown[] } | undefined)?.documents ?? [] };
+    if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents` && method === 'POST') {
+      made.push(json());
+      return reply(201, { id: '4444444444444444', name: 'ideas.md', title: 'Ideas', revision: 1, scope: 'project', chat: null });
+    }
+    if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents/4444444444444444`) return { id: '4444444444444444', name: 'ideas.md', title: 'Ideas', revision: 1, markdown: '# Ideas\n', modified: '2026-10-04T09:30:00.000Z' };
     if (p.startsWith(`/api/x/${NAME}/folders/`)) {
       // The comments on a document are asked for with it, and are none.
       if (p.endsWith('/threads')) return { revision: 3, threads: [] };
@@ -87,7 +95,7 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
     await says('tool_execution_start', { toolCallId: callId, toolName, args });
     await says('tool_execution_end', { toolCallId: callId, toolName, isError, result: { content: [{ type: 'text', text }], ...(details ? { details } : {}) } });
   };
-  return { asked, says, caughtUp, calls };
+  return { asked, made, says, caughtUp, calls };
 }
 
 const sidebar = (page: Page) => page.getByRole('navigation', { name: 'Destinations' });
@@ -194,15 +202,43 @@ test('a call of one of the agent\'s document tools is drawn as what became of th
   await expect(page.locator('.tool-row')).toHaveCount(6);
   await expect(page.locator('.pd-call')).toHaveCount(4);
 
-  // Open in Documents: the page, with that document open, asked for by its id.
+  // Open in Documents: the panel beside the chat, with that document open, asked for by its id; the chat stays.
   await edited.getByRole('button', { name: 'Open in Documents' }).click();
-  await expect(page).toHaveURL(`/x/${NAME}/documents?folder=0123456789abcdef&doc=1111111111111111`);
-  await expect(page.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
-  await expect(page.getByText('Ship it on Friday.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: /All documents/ })).toBeVisible();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await expect(panels.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
+  await expect(panels.getByText('Ship it on Friday.', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL('/s/a');
   expect([...new Set(asked)]).toEqual([`/api/x/${NAME}/folders/0123456789abcdef/documents/1111111111111111`]);
-  await page.getByRole('button', { name: /All documents/ }).click();
-  await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
+  await panels.getByRole('button', { name: /All documents/ }).click();
+  await expect(panels.getByRole('button', { name: /Release notes/ })).toBeVisible();
+});
+
+test('a chat has a Documents panel beside it: its folder\'s documents, opened in the editor there, and a new one made with a title', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { made } = await portal(page);
+  await page.goto('/s/a');
+  // The chat's header has its button (the sidebar has the page's).
+  const toggle = page.locator('.panel-toggle[aria-label="Documents"]');
+  await expect(toggle).toHaveAttribute('title', "The documents of this chat's folder, to read, edit and comment on");
+  await toggle.click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await expect(panels.getByRole('listitem')).toHaveText([/^The plan\s*plan\.md · Changed /, /^Release notes\s*release notes\.md · Changed /]);
+  // Another folder's documents are not this chat's.
+  await expect(panels.getByText('Setting up')).toHaveCount(0);
+  await panels.getByRole('button', { name: /The plan/ }).click();
+  await expect(panels.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
+  // At a panel's width the comments are under the text, not squeezed beside it.
+  const editor = await panels.locator('.pd-editor').boundingBox();
+  const comments = await panels.locator('.pd-threads').boundingBox();
+  expect(comments!.y).toBeGreaterThan(editor!.y + editor!.height - 1);
+  await panels.getByRole('button', { name: /All documents/ }).click();
+  // A new one, by its title: made in the chat's folder, and open at once.
+  const create = panels.getByRole('button', { name: 'New document' });
+  await expect(create).toBeDisabled();
+  await panels.getByRole('textbox', { name: 'Title of a new document' }).fill('Ideas');
+  await create.click();
+  await expect(panels.getByRole('heading', { name: 'Ideas', level: 1 })).toBeVisible();
+  expect(made).toEqual([{ title: 'Ideas' }]);
 });
 
 test('a comment, a reply, a changed or deleted comment, a resolved thread and an edit that answers a comment are drawn as what became of the document, in English and in German', async ({ page }) => {

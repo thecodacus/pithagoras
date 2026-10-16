@@ -37,7 +37,7 @@ import { TitleInput } from "./TitleInput";
 import { caretFrom, drafts, withUnsent } from "../drafts";
 import { onFill } from "../editor-fills";
 import { local } from "../safe-storage";
-import { fancy, glide, launch, leaveRef, mark, settle, useLeaveRef, type Mark } from "../motion";
+import { across as laidAcross, fancy, glide, launch, leaveRef, mark, settle, slideOver, useLeaveRef, type Mark } from "../motion";
 import { CLIENT_COMMANDS, isClientCommand, isCommand } from "../client-commands";
 import { isComposing, isEnter, opensComposer, stopsRun } from "../shortcuts";
 import { DOCKED_MIN, EDGE, KEEP, SPLIT, SPLIT_LEAST, across, dockedFrameAmong, dockedSize, dropTarget, fitFrame, groupPanels, isDock, readFrame, readFrames, readPlaceSizes, readPlaces, spreadFrames, type Dock, type Frame, type Frames, type PlaceSizes, type Places, type Size } from "../panel-dock";
@@ -442,6 +442,27 @@ export function Chat({
   const heightAt = () => sizes.bottom ?? before.height;
   const groups = groupPanels(asidePanels, placeOf);
   const groupAt = (place: Dock) => groups.find((g) => g.place === place);
+  // The conversation between the panels at the sides. A panel docked at a side, or taken away from one, moves its middle: it
+  // slides over from where it was (slideOver) instead of jumping, so that it stays in the middle of the room it has. Where it was
+  // is kept as the page lays it out, in a ref: nothing is drawn again for it, and an edge being dragged is followed as it goes.
+  // A panel carried to the other side at the same width moves the conversation without changing its size, which the observer is
+  // not told of: where it is now is kept after each slide too.
+  const column = useRef<HTMLDivElement>(null);
+  const columnWas = useRef<{ left: number; width: number } | null>(null);
+  useEffect(() => {
+    const el = column.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => void (columnWas.current = laidAcross(el)));
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, []);
+  const sides = `${groupAt("left")?.kinds.join(",") ?? ""}|${groupAt("right")?.kinds.join(",") ?? ""}`;
+  useLayoutEffect(() => {
+    const el = column.current;
+    if (!el) return;
+    if (columnWas.current) slideOver(el, columnWas.current);
+    columnWas.current = laidAcross(el);
+  }, [sides]);
   const floaters = groupAt("float")?.kinds ?? [];
   // Of two floating windows, the one last carried, sized or pressed in is on top.
   const [onTop, setOnTop] = useState<AsidePanel | null>(null);
@@ -1858,7 +1879,7 @@ export function Chat({
       <div ref={body} className={voiceMode ? "hidden" : "chat-body relative flex min-h-0 flex-1 flex-row"}>
       {placeAside("left")}
       {/* No narrower than 320px beside panels at a side: they give way instead (see placeAside). */}
-      <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${groupAt("left") || groupAt("right") ? "md:min-w-[320px]" : ""}`}>
+      <div ref={column} className={`chat-column flex min-h-0 min-w-0 flex-1 flex-col ${groupAt("left") || groupAt("right") ? "md:min-w-[320px]" : ""}`}>
       <div
         ref={scroller.attach}
         onScroll={scroller.onScroll}

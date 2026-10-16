@@ -27,7 +27,7 @@ function lineAt(text, at) {
  * lines and blank ones between its two marks): `---` … `---` with prose in it
  * is two rules, which Markdown has.
  */
-function frontMatterEnd(text, from) {
+export function frontMatterEnd(text, from) {
   const first = lineAt(text, from);
   if (!/^---[ \t]*$/.test(first.line)) return from;
   let keys = 0;
