@@ -63,8 +63,9 @@ read and write them like any other file in its folder.
 There is no button for a new document: ask the agent to make one (it has a
 tool for it, [below](#the-agents-tools)), or put a Markdown file into
 `documents`. It becomes a document the next time the page lists the folder
-(or the agent lists them), with the file's text as its first revision. Left
-out are:
+(or the agent lists them), with the file's text as its first revision, and
+within a couple of seconds while the page shows the list of documents
+([below](#the-page)). Left out are:
 
 - names that start with a dot
 - files in folders below `documents`
@@ -93,7 +94,8 @@ new revision, so the history only grows and nothing in it is replaced.
 A change made outside the page, by the agent with its own tools, in Files or
 in an editor, is not lost either. The next time the document is listed, read
 or saved, or within a couple of seconds while the document is open on the
-page, it is kept as a revision of its own, marked as an outside change. The
+page or the list of documents is, it is kept as a revision of its own, marked
+as an outside change. The
 portal sees the file as it is at that moment, so several outside changes made
 between two looks are one revision. The same happens to a save that the portal
 could not finish (it stopped in the middle, say): what reached the disk is kept
@@ -106,9 +108,10 @@ editor can delete it or give it another name while you have it open. What
 happens then:
 
 - The document is no longer listed, and asking for it is answered with "There
-  is no such document". Its history and its comments are kept in the store
-  ([below](#where-the-history-is-kept)) and are there again as soon as a file of
-  that name is.
+  is no such document". The list of documents on the page drops it within a
+  couple of seconds ([The page](#the-page)). Its history and its comments are
+  kept in the store ([below](#where-the-history-is-kept)) and are there again
+  as soon as a file of that name is: the list shows it again then, too.
 - The page is not told. The text stays in the editor, and nothing is lost: the
   next time it is saved, the save makes the file again from your text, under
   its name, as the next revision, and the page says so ("This document's file
@@ -303,6 +306,32 @@ the agent has answered, open or resolved, that you have not reacted to yet
 
 **All documents** goes back to the list. A folder whose documents could not be
 opened is said above the list, with the reason ([above](#when-a-folders-documents-cannot-be-opened)).
+
+### The list keeps itself up to date
+
+You do not reload the list. While it is on the page it shows a document that
+the agent or another window made, one that was renamed or deleted (in Files,
+in an editor or by the agent's own file tools) or made again, a change to a
+document's title, time or comments, a folder that gets its first document, and
+a folder whose documents the portal can (or can no longer) open: the reason
+appears above the list, and goes when the folder can be opened again. What the
+agent does through its document tools, and what is saved on the page, shows at
+once; what is changed outside the portal is noticed within a couple of
+seconds.
+
+The page keeps one connection open for the whole list (server-sent events),
+not one for each folder. The portal says over it only that the list is not what
+it was, and the page asks for the list again; the first message of a connection
+says where the list stands, so a change made while the connection was down is
+found as soon as it is back, and a page whose list is current asks for nothing.
+If the connection drops, the page opens it again after a few seconds, with longer
+waits. The list that is shown stays while it cannot be fetched.
+
+The connection is open only while the list is on the page: opening a document,
+or going to another page of the portal, closes it, and so does closing the
+tab. The portal looks at the folders only while some page has the list open.
+Like the rest of the page it needs the portal's login, and it ends when the
+password changes. It names no folder, document or path; it says only that something changed.
 
 ## Editing a document
 
