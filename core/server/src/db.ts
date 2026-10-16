@@ -505,6 +505,7 @@ function schema(db: Database.Database): void {
  */
 function writeOutCanvases(d: Database.Database): void {
   if (!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'canvases'").get()) return;
+  canvasSetMoved(d);
   const rows = d.prepare("SELECT c.id, c.title, c.content, s.workspace FROM canvases c LEFT JOIN sessions s ON s.id = c.session_id").all() as { id: string; title: string; content: string; workspace: string | null }[];
   const gone = d.prepare("DELETE FROM canvases WHERE id = ?");
   const folderOf = (workspace: string | null) => {
@@ -528,6 +529,29 @@ function writeOutCanvases(d: Database.Database): void {
     }
   }
   if (!(d.prepare("SELECT count(*) AS n FROM canvases").get() as { n: number }).n) d.exec("DROP TABLE canvases");
+}
+
+/**
+ * Core filed its canvas tools as the set "canvases"; the extension's are filed
+ * under its package's name. A lazy mark on the set, and a name somebody gave
+ * its box, go with them.
+ */
+function canvasSetMoved(d: Database.Database): void {
+  const OLD = "canvases", NEW = "pithagoras-canvas";
+  const setting = (key: string) => (d.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value;
+  const put = d.prepare("UPDATE settings SET value = ? WHERE key = ?");
+  const marks = parseToolsOff(setting("tools_lazy"));
+  if (marks.includes(OLD)) put.run([...new Set(marks.map((mark) => (mark === OLD ? NEW : mark)))].sort().join("\n"), "tools_lazy");
+  try {
+    const names = JSON.parse(setting("tool_group_names") ?? "{}");
+    if (names && typeof names === "object" && OLD in names && !(NEW in names)) {
+      names[NEW] = names[OLD];
+      delete names[OLD];
+      put.run(JSON.stringify(names), "tool_group_names");
+    }
+  } catch {
+    // Not JSON: toolGroupNames reads it as no names, and so it stays.
+  }
 }
 
 /**

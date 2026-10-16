@@ -231,7 +231,8 @@ test("a database of v0.1.0 is brought to the pinned schema, and each routine kee
 
 // Canvases are an extension's from version 5 (extensions/canvas), with a store of its own. Two canvases of a chat stored
 // in a database of v0.1.0, with the same title, and one of a chat whose folder is gone: each becomes a Markdown file,
-// in its chat's folder where there is one, and the table goes.
+// in its chat's folder where there is one, and the table goes. The canvas tools' set marked lazy and given a name: both
+// go to the set the extension's tools are filed in.
 test("the canvases a portal stored are written out as Markdown in their chat's folder, and the table goes", async () => {
   const dir = path.join(home, "canvases-out");
   const folder = path.join(dir, "ws", "site");
@@ -246,6 +247,9 @@ test("the canvases a portal stored are written out as Markdown in their chat's f
   canvas.run("k1", "c1", "Launch plan", "# Launch\n\nFirst draft.");
   canvas.run("k2", "c1", "Launch plan", "Second draft.");
   canvas.run("k3", "c2", "Notes/2026: draft?", "Kept anyway.");
+  const setting = before.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+  setting.run("tools_lazy", "<tool>web_fetch\ncanvases");
+  setting.run("tool_group_names", JSON.stringify({ canvases: "Documents", "pi-web": "Web" }));
   before.close();
 
   const run = startUpgrade(dir, await freePort());
@@ -255,6 +259,9 @@ test("the canvases a portal stored are written out as Markdown in their chat's f
   const d = new Database(file, { readonly: true });
   assert.ok(!d.prepare("SELECT 1 FROM sqlite_master WHERE name = 'canvases'").get(), run.output());
   assert.equal(schemaFingerprint(d), PINNED.fingerprint);
+  const value = (key) => d.prepare("SELECT value FROM settings WHERE key = ?").get(key).value;
+  assert.equal(value("tools_lazy"), "<tool>web_fetch\npithagoras-canvas");
+  assert.deepEqual(JSON.parse(value("tool_group_names")), { "pi-web": "Web", "pithagoras-canvas": "Documents" });
   d.close();
   // In the chat's folder, a taken name numbered as an upload's is; nothing over anything.
   assert.deepEqual(readdirSync(path.join(folder, "canvases")).sort(), ["Launch plan (2).md", "Launch plan.md"]);

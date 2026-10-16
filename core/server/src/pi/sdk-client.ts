@@ -38,7 +38,7 @@ import { ASK_QUESTION_SOURCE, askQuestionTool } from "./ask-question.js";
 import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
-import { hostExtension } from "../extension-host.js";
+import { hostExtensions } from "../extension-host.js";
 import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, portalBrowserOn, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
@@ -189,7 +189,7 @@ function framing(): string[] {
 }
 
 /** pi's resource loader with the rule for spoken replies: see portalLoader. */
-let PortalLoader: (new (options: unknown, rule: AudioRule, said?: () => string[]) => any) | undefined;
+let PortalLoader: (new (options: unknown, rule: AudioRule, said?: () => string[], more?: () => unknown[]) => any) | undefined;
 
 /**
  * pi's resource loader, adding the rule for spoken replies to what pi appends
@@ -199,18 +199,23 @@ let PortalLoader: (new (options: unknown, rule: AudioRule, said?: () => string[]
  * and stays through every rebuild. Made once, the first time pi is loaded:
  * pi is imported lazily, so the class cannot exist before.
  */
-function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: () => string[]) => any {
+function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: () => string[], more?: () => unknown[]) => any {
   return (PortalLoader ??= class extends pi.DefaultResourceLoader {
     private readonly rule: AudioRule;
     /** Lines that depend on how the portal is set up now, asked each time like the rule. */
     private readonly said: () => string[];
     /** The skill paths the portal gives, before a folder's own are added to them. */
     private readonly portalSkillPaths: string[];
-    constructor(options: unknown, rule: AudioRule, said: () => string[] = () => []) {
+    /** The portal's own extensions, as they were given; what the server halves add is asked for at each load (`more`). */
+    private readonly portalFactories: unknown[];
+    private readonly more: () => unknown[];
+    constructor(options: unknown, rule: AudioRule, said: () => string[] = () => [], more: () => unknown[] = () => []) {
       super(options);
       this.rule = rule;
       this.said = said;
       this.portalSkillPaths = [...((options as { additionalSkillPaths?: string[] }).additionalSkillPaths ?? [])];
+      this.portalFactories = [...this.extensionFactories];
+      this.more = more;
     }
     /**
      * While the sandbox is on, the chat's folder is the agent's to write, and
@@ -222,6 +227,8 @@ function portalLoader(pi: any): new (options: unknown, rule: AudioRule, said?: (
       const sandboxed = sandboxOn();
       this.settingsManager.setProjectTrusted(!sandboxed);
       this.additionalSkillPaths = [...this.portalSkillPaths, ...(sandboxed ? projectSkillPaths(this.cwd) : [])];
+      // The server halves as they are now: one installed since the chat's pi started is in it after a reload.
+      this.extensionFactories = [...this.portalFactories, ...this.more()];
       return super.reload(options);
     }
     getAppendSystemPrompt(): string[] {
@@ -539,8 +546,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       if (opts.heartbeatAgent && opts.sessionId) {
         factories.push({ name: "heartbeat", factory: heartbeatTool(opts.heartbeatAgent, opts.sessionId) });
       }
-      // What the installed extensions' server halves add to a chat's pi: see extension-host.ts.
-      if (opts.sessionId) factories.push({ name: "extension-host", factory: hostExtension(opts.sessionId) });
       resourceLoader = new (portalLoader(pi))({
         cwd: opts.cwd,
         // One for the loader and the session, so the folder's trust the loader decides holds for both.
@@ -582,7 +587,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // Where its own skills go: only for the person it works for; a look or a colleague does not write them.
         ...(skillsOf && (!opts.role || opts.role === "primary") && !opts.heartbeatAgent ? [skillsLine(skillsOf)] : []),
         ...((!opts.role || opts.role === "primary") && understoryAt(opts.cwd) ? [UNDERSTORY_RULE] : []),
-      ]);
+      ],
+      // What the installed extensions' server halves add to the chat's pi, each under its package's name, as they are
+      // at each load: see extension-host.ts.
+      () => (opts.sessionId ? hostExtensions(opts.sessionId) : []));
       await resourceLoader.reload();
     } catch (e) {
       console.error(`[portal] resource loader unavailable: ${(e as Error).message}`);

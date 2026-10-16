@@ -193,11 +193,13 @@ test("a server half hears a chat's pi start and stop, the chat deleted, and all 
   assert.deepEqual(seen().events, [["a", "message_update"], ["a", "portal_extension_ui"]]);
 });
 
-test("what a server half adds to a chat's pi is registered as that pi loads, for that chat", () => {
+test("what a server half adds to a chat's pi is registered as that pi loads, for that chat, under the package's name", () => {
   const tools = [];
-  host.hostExtension("quiet")({ registerTool: (tool) => tools.push(tool.name) });
+  const quiet = host.hostExtensions("quiet");
+  assert.deepEqual(quiet.map((ext) => ext.name), [NAME], "pi files its tools under the package, as it would a package's pi extension's");
+  quiet[0].factory({ registerTool: (tool) => tools.push(tool.name) });
   assert.deepEqual(tools, ["from_quiet"]);
-  host.hostExtension("gone")({ registerTool: (tool) => tools.push(tool.name) });
+  host.hostExtensions("gone")[0].factory({ registerTool: (tool) => tools.push(tool.name) });
   assert.deepEqual(tools, ["from_quiet"], "nothing for a chat that is not there");
 });
 

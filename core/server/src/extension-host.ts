@@ -382,16 +382,21 @@ export function extensionHolds(chatId: string): boolean {
 }
 
 /**
- * The pi extension every chat's pi is given for the server halves: it
- * registers what each of them asked to add, as they are when pi loads its
- * extensions, so a reload has what was installed since.
+ * The pi extensions a chat's pi is given for the server halves, one for each
+ * that adds to it: what it asked to add, registered for this chat. Asked for at
+ * each load, so a reload has what was installed since.
  */
-export function hostExtension(chatId: string): (pi: any) => void {
-  return (pi) => {
-    const row = getSession(chatId);
-    if (!row) return;
-    for (const ext of running.values()) {
-      for (const factory of ext.factories) guarded(ext.half.name, "adding to a chat's pi", () => factory(pi, chatOf(row)));
-    }
-  };
+export function hostExtensions(chatId: string): { name: string; factory: (pi: any) => void }[] {
+  // One for each package, by its name: pi files what each registers under it, so its tools are a group of their own
+  // in the settings, as a package's pi extension's are, and not one heap of every server half's.
+  return [...running.values()]
+    .filter((ext) => ext.factories.length)
+    .map((ext) => ({
+      name: ext.half.name,
+      factory: (pi: any) => {
+        const row = getSession(chatId);
+        if (!row) return;
+        for (const factory of ext.factories) guarded(ext.half.name, "adding to a chat's pi", () => factory(pi, chatOf(row)));
+      },
+    }));
 }

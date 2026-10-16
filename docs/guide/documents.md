@@ -623,8 +623,7 @@ its comments, and restoring a revision brings back text, not comments.
 With the host executor (pi runs in the portal's own process) each chat's agent
 has seven tools for the documents. Like any tool they can be switched off for
 a chat or by default under Settings → Tools, where they are listed in the group
-`extension-host`: the name the portal gives to what extensions add to a chat's
-pi through their server half. With `EXECUTOR=container` the agent has none:
+`pithagoras-docs`, the package's name, as every extension's tools are. With `EXECUTOR=container` the agent has none:
 the runner image does not get extensions.
 
 | Tool | What it does |
