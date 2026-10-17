@@ -146,8 +146,9 @@ function detectSettingKeys(pkgPath: string): string[] {
           if (/^[A-Za-z_$][\w$]*$/.test(key) && !SKIP.has(key)) keys.add(key);
         }
       }
-      // settings.foo / settings["foo"]
+      // settings.foo / settings["foo"]; not in a string, where it is a name such as the slot "settings.page", which reads no setting
       for (const m of src.matchAll(/\b\w*[sS]ettings(?:\.(\w+)|\[["'](\w+)["']\])/g)) {
+        if (/["'`]/.test(src[m.index - 1] ?? "")) continue;
         const key = m[1] || m[2];
         if (key && !SKIP.has(key) && !/^(get|set)[A-Z]/.test(key)) keys.add(key);
       }

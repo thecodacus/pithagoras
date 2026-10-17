@@ -27,3 +27,9 @@ test("one installed from npm is scanned again only when it is installed again", 
   writeFileSync(path.join(dir, "package.json"), '{"name":"x","version":"1.0.1"}');
   assert.deepEqual(settingKeysOf(dir, true), ["first", "second"]);
 });
+
+test("a name in a string is no setting read: an extension's own page in Settings is registered as \"settings.page\"", () => {
+  const dir = scratch("ext-");
+  writeFileSync(path.join(dir, "client.js"), `portal.slots.register("settings.page", { id: "own" }); portal.slots.register('settings.page', {}); const s = \`settings.page\`; settings.real;`);
+  assert.deepEqual(settingKeysOf(dir, false), ["real"]);
+});
