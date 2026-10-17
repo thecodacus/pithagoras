@@ -960,10 +960,8 @@ build on it name it in their package.json and ask for it with
 `portal.extensions.use`.
 
 ```js
-// pithagoras-docker: what each extension that builds on it gets, kept apart by its name.
-portal.provide((consumer) => ({
-  run: (name, spec) => createContainer(`${consumer.name}/${name}`, spec),
-}));
+// pithagoras-docker: what each extension that builds on it gets, its own, by its name.
+portal.provide((consumer) => dockerFor(consumer.name));
 ```
 
 ```json
@@ -979,8 +977,12 @@ portal.provide((consumer) => ({
 ```js
 // pithagoras-browser
 const docker = portal.extensions.use("pithagoras-docker");
-await docker.run("chromium", { image: "lscr.io/linuxserver/chromium" });
+await docker.images.ensure("lscr.io/linuxserver/chromium:latest");
+await docker.containers.create("pithagoras-browser", { Image: "lscr.io/linuxserver/chromium:latest" });
+await docker.containers.start("pithagoras-browser");
 ```
+
+[Docker for extensions](/guide/docker) is the one the portal ships.
 
 - **`requires`**: the extensions it cannot work without, each with the versions
   it takes (a semver range). Without one of them, or with one in a version it

@@ -1,0 +1,10 @@
+/* Docker's page in Settings: a row for each container and volume, with what can be done to it. */
+.dk-docker { display: flex; flex-direction: column; gap: 16px; }
+.dk-docker-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.dk-docker-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); }
+.dk-docker-what { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.dk-docker-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: rgb(var(--fg)); }
+.dk-docker-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: rgb(var(--fg-muted)); }
+.dk-docker-logs { max-height: 18rem; margin: 6px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--canvas)); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dk-docker-hint { margin: 8px 0 0; font-size: 13px; color: rgb(var(--fg-muted)); }
+.dk-docker-hint code { font-size: 12px; }
