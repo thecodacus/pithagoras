@@ -1,4 +1,5 @@
-import { DEFAULT_VAD } from '../api';
+import { DEFAULT_SMART_TURN, DEFAULT_VAD } from '../api';
+import { SmartTurnWorker, TurnEnd } from '../smart-turn';
 import { local, session } from '../safe-storage';
 import { VoiceProfiler, replyMarks } from '../voice-profile';
 import { VoiceProfile } from './VoiceProfile';
@@ -170,6 +171,10 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
   const [sequentialMode, setSequentialMode] = useState(false);
   const context = useRef<AudioContext | null>(null);
   const stream = useRef<MediaStream | null>(null);
+  const smartTurnSettings = useRef(DEFAULT_SMART_TURN);
+  // When a turn is over: Smart Turn's model, and the decision it drives (smart-turn.ts).
+  const smartTurn = useRef<SmartTurnWorker | null>(null);
+  const turnEnd = useRef<TurnEnd | null>(null);
   const managed = useRef(false);
   const connection = useRef<string | null>(null);
   const heartbeat = useRef<ReturnType<typeof setInterval>>();
@@ -204,6 +209,8 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
     transcription.current?.reset(); transcription.current = null;
     const detector = vad.current; vad.current = null;
     void detector?.destroy().catch(() => {});
+    turnEnd.current = null;
+    smartTurn.current?.close(); smartTurn.current = null;
     stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
     const audio = context.current; context.current = null;
     if (audio && audio.state !== "closed") void audio.close();
@@ -223,6 +230,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       ttsPrefetch.current = config.ttsPrefetch === true;
       setPrefetchMode(ttsPrefetch.current);
       vadSettings.current = { ...DEFAULT_VAD, ...config.vad };
+      smartTurnSettings.current = { ...DEFAULT_SMART_TURN, ...config.smartTurn };
       // Voice mode speaks its replies: without speech synthesis there is nothing for it to do. Dictation, which only listens, stays.
       const usable = config.enabled && config.speech !== false;
       setAvailable(usable);
@@ -255,7 +263,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
     clearTimeout(maxTurn.current);
     levels.current.input = 0;
     voice.current?.setMuted(next);
-    if (next) {transcription.current?.reset();profiler.current?.close('muted');}
+    if (next) {transcription.current?.reset();profiler.current?.close('muted');turnEnd.current?.ended();}
     try {
       if (next) {
         stream.current?.getTracks().forEach(track => { track.enabled = false; });
@@ -322,7 +330,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
     setPtt(on); pushToTalk.current = on;
     if (!on && held.current) { clearTimeout(held.current.timer); held.current = null; setHolding(false); voice.current?.speechCancel(); transcription.current?.discard(); }
     // Anything said hands-free so far is dropped: its end is no longer listened for.
-    if (on && !held.current) { clearTimeout(maxTurn.current); voice.current?.speechCancel(); transcription.current?.discard(); }
+    if (on && !held.current) { clearTimeout(maxTurn.current); voice.current?.speechCancel(); transcription.current?.discard(); turnEnd.current?.ended(); }
     if (!vad.current) return;
     // Push-to-talk has no mute of its own; it starts from an open detector.
     if (on && mutedRef.current) await toggleMute();
@@ -516,6 +524,14 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       void json(`/api/sessions/${sessionId}/voice/error-line`, { method: 'POST', body: JSON.stringify({ text: t("An error occurred.") }) }).catch(() => {});
       const detectorModule = await import("@ricky0123/vad-web");
       if (!current()) return;
+      // Loaded alongside Silero. Until it is ready, and if it cannot be, turns end after the plain silence.
+      const model = smartTurnSettings.current.enabled ? new SmartTurnWorker() : null;
+      smartTurn.current = model;
+      const turns = model && new TurnEnd(vadSettings.current, smartTurnSettings.current, {
+        predict: turn => model.predict(turn),
+        redemption: ms => vad.current?.setOptions({ redemptionMs: ms }),
+      });
+      turnEnd.current = turns;
       const live = new LiveTranscription(async (samples, signal) => {
         const trace=profiling.current?profiler.current!.current:undefined;
         const started=performance.now();if(trace)profiler.current!.mark('stt_request',{audioMs:samples.length/16},trace);
@@ -578,7 +594,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
         ...vadSettings.current,
         submitUserSpeechOnPause: true,
         onSpeechStart: () => { if (current() && !pushToTalk.current && !mutedRef.current && !latest.current.compacting) {if(profiling.current)profiler.current!.begin();live.begin();} },
-        onVADMisfire: () => { if (current() && !pushToTalk.current) {live.discard();if(profiling.current)profiler.current!.close('vad_misfire');} },
+        onVADMisfire: () => { turns?.ended(); if (current() && !pushToTalk.current) {live.discard();if(profiling.current)profiler.current!.close('vad_misfire');} },
         onFrameProcessed: (probabilities, frame) => {
           if (pushToTalk.current) {
             // Only what is said while the button or Space is held counts.
@@ -592,6 +608,8 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
             return;
           }
           if(current()&&!mutedRef.current&&profiling.current&&probabilities.isSpeech>=0.35)profiler.current!.lastSpeech();
+          // Before Silero looks at this frame, so that a turn found finished ends on it.
+          if (current() && !mutedRef.current) turns?.frame(probabilities.isSpeech, frame);
           if (current() && !mutedRef.current && !latest.current.compacting) live.frame(probabilities.isSpeech, frame);
           if (current() && !mutedRef.current) levels.current.input = Math.min(1, Math.sqrt(frame.reduce((sum, value) => sum + value * value, 0) / frame.length) * 7);
         },
@@ -612,6 +630,7 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
           }, 60000);
         },
         onSpeechEnd: samples => {
+          turns?.ended();
           if (pushToTalk.current) return;
           clearTimeout(maxTurn.current);
           if (current() && !mutedRef.current) { if (!latest.current.compacting) {profileMark('endpoint');live.end(samples);} controller.speechEnd(samples); }
@@ -619,6 +638,8 @@ export function VoiceControl({ sessionId, folder, items, running, work, onSend, 
       });
       if (!current()) { await detector.destroy(); return; }
       vad.current = detector;
+      // Only now, as it changes how long the detector waits.
+      model?.ready.then(() => { if (current()) turns?.ready(); }, () => { if (current()) turns?.failed(); });
       for (const track of mic.getTracks()) track.onended = () => {
         if (current()) { setError(t("Microphone disconnected. Reconnect it and turn the mic on again.")); stop(); }
       };

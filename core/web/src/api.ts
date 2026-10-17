@@ -1,5 +1,6 @@
 import { t } from "./i18n";
 import { samplesWav } from "./voice";
+import type { SmartTurnSettings } from "./smart-turn";
 import type { Host, VoiceChoice } from "../../server/src/voice-engines";
 import type { OrbStyle } from "../../server/src/orb-style";
 import type { OutputFormat } from "../../server/src/image-settings";
@@ -397,6 +398,7 @@ async function uploadBytes(url: string, file: File, name: string): Promise<any> 
 }
 
 export const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
+export const DEFAULT_SMART_TURN: SmartTurnSettings = { enabled: true, checkMs: 400, recheck: false, threshold: 0.5, fallbackMs: 2000 };
 export interface VoiceConfig {
   sentenceChunks?: boolean;
   ttsPrefetch?: boolean;
@@ -415,6 +417,8 @@ export interface VoiceConfig {
   // False with no speech synthesis (runtime "none"): the page can listen, but replies are not spoken.
   speech?: boolean;
   vad?: typeof DEFAULT_VAD;
+  // Semantic end of turn in voice mode (smart-turn.ts).
+  smartTurn?: SmartTurnSettings;
   enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox" | "kokoro" | "none"; sttModel?: string; dictationModel?: string; dictationUrl?: string; exaggeration?: number; kokoroVoice?: string; speed?: number;
 }
 

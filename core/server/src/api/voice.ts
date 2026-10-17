@@ -15,8 +15,13 @@ import { agentFor } from "../project-agent.js";
 import { errorLineKey, readErrorLine, saveErrorLine, touchErrorLine } from "../voice-error-line.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
+// Voice mode asks Smart Turn whether a turn is over after `checkMs` of silence (with `recheck`, again each further
+// `checkMs`), ends it if the answer is at least `threshold`, and ends it after `fallbackMs` of silence regardless
+// (web/src/smart-turn.ts).
+const DEFAULT_SMART_TURN = { enabled: true, checkMs: 400, recheck: false, threshold: 0.5, fallbackMs: 2000 };
 export interface VoiceConfig {
   vad?: typeof DEFAULT_VAD;
+  smartTurn?: typeof DEFAULT_SMART_TURN;
   enabled: boolean;
   lazyLoad?: boolean;
   whisperUrl: string;
@@ -129,7 +134,14 @@ export function validateConfig(value: any): VoiceConfig {
     if (typeof vad[key] !== 'number' || !Number.isFinite(vad[key]) || vad[key] < min || vad[key] > max) throw new Error(`Invalid VAD ${key}: expected ${min}–${max}`);
   }
   if (vad.negativeSpeechThreshold >= vad.positiveSpeechThreshold) throw new Error('Speech-end threshold must be lower than speech-start threshold');
-  return { vad, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
+  const smartTurn = { ...DEFAULT_SMART_TURN, ...value.smartTurn };
+  if (typeof smartTurn.enabled !== 'boolean') throw new Error('Smart Turn enabled must be true or false');
+  if (typeof smartTurn.recheck !== 'boolean') throw new Error('Smart Turn recheck must be true or false');
+  for (const [key, min, max] of [['checkMs', 100, 1000], ['threshold', 0.1, 0.9], ['fallbackMs', 1000, 5000]] as const) {
+    if (typeof smartTurn[key] !== 'number' || !Number.isFinite(smartTurn[key]) || smartTurn[key] < min || smartTurn[key] > max) throw new Error(`Invalid Smart Turn ${key}: expected ${min}–${max}`);
+  }
+  if (smartTurn.fallbackMs <= smartTurn.checkMs) throw new Error('The Smart Turn fallback must be longer than the pause before the check');
+  return { vad, smartTurn, lazyLoad: value.lazyLoad !== false, runtime, voice, language, cfgScale, sttModel, dictationModel, dictationUrl: dictationUrl.trim(), exaggeration, kokoroVoice, speed, responseInstructions: savedInstructions(responseInstructions), skipThinkingProviders, voiceModel, enabled: value.enabled, whisperUrl: value.whisperUrl.trim(), breezeUrl: value.breezeUrl.trim(), instruction: value.instruction.trim() };
 }
 /**
  * The providers as saved: names as the model menu shows them, each once. The

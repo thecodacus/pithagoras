@@ -57,6 +57,16 @@ test('the notices give the licence of every file the web build copies into voice
   assert.match(notices, /MIT License\s+Copyright \(c\) Microsoft Corporation/);
 });
 
+test('the notices give the licence of the Smart Turn model the web build downloads, at the revision it downloads', async () => {
+  const notices = read('THIRD_PARTY_NOTICES.md');
+  const { SMART_TURN } = await import('../core/web/scripts/smart-turn-model.mjs');
+  assert.ok(read('core/web/scripts/copy-vad-assets.mjs').includes('downloadSmartTurn('), 'the build still downloads it');
+  assert.ok(notices.includes(`\`${SMART_TURN.file}\``), `${SMART_TURN.file} is named in the notices`);
+  const revision = SMART_TURN.url.match(/\/resolve\/([0-9a-f]{40})\//)![1];
+  assert.ok(notices.includes(`https://huggingface.co/pipecat-ai/smart-turn-v3/tree/${revision}`), 'the notices name the revision that is downloaded');
+  assert.match(notices, /BSD 2-Clause License\s+Copyright \(c\) 2024–2025, Daily/);
+});
+
 test('the notices name sharp at the version that is installed, and libvips, which comes with it under the LGPL', () => {
   const notices = read('THIRD_PARTY_NOTICES.md');
   const { version, license } = installed('sharp');

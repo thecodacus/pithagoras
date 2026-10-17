@@ -13,6 +13,10 @@ const root = path.resolve(process.argv[2] ?? "dist");
 const TEXT = new Set([".js", ".mjs", ".css", ".html", ".svg", ".json", ".webmanifest", ".txt", ".map", ".wasm", ".onnx"]);
 // A file this small costs more to ask for twice than it saves.
 const MIN = 1024;
+// A copy has to save at least this share of the file to be kept. Some models are already dense: Smart Turn's int8
+// weights save 15%: 1.3 MB on a file a browser fetches once, for 15 MB more in the image for the two copies.
+// Silero's float weights save 21%, and text saves 60-80%.
+const WORTH = 0.2;
 
 let packed = 0;
 let before = 0;
@@ -32,8 +36,8 @@ function pack(file) {
     [".gz", gzipSync(body, { level: 9 })],
   ];
   for (const [ext, data] of copies) {
-    // Only where it is smaller, so a file the server finds a copy of is one it is worth sending.
-    if (data.length >= body.length) continue;
+    // Only where it is enough smaller, so a file the server finds a copy of is one it is worth sending.
+    if (data.length > body.length * (1 - WORTH)) continue;
     writeFileSync(file + ext, data);
     packed++;
     if (ext === ".br") {
