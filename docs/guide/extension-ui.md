@@ -674,6 +674,7 @@ restart the portal.
 | `files.list`, `read`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
+| `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
 ### Routes
@@ -949,6 +950,64 @@ installed. `ok` lists exit codes that are answers rather than failures,
 `timeout` and `max` bound a step (20 seconds for reading and three minutes for
 writing; 16 MB of output). What reading turns off is looked up once for each
 handle: make one for each request rather than keeping it.
+
+### Building on another extension
+
+An extension can give others something to build on, as a library does: a
+Docker extension that runs containers, say, for the extensions that need one.
+The one that gives it says what it gives with `portal.provide`, and those that
+build on it name it in their package.json and ask for it with
+`portal.extensions.use`.
+
+```js
+// pithagoras-docker: what each extension that builds on it gets, kept apart by its name.
+portal.provide((consumer) => ({
+  run: (name, spec) => createContainer(`${consumer.name}/${name}`, spec),
+}));
+```
+
+```json
+{
+  "name": "pithagoras-browser",
+  "pithagoras": {
+    "server": "./server.js",
+    "requires": { "pithagoras-docker": "^1.0.0" }
+  }
+}
+```
+
+```js
+// pithagoras-browser
+const docker = portal.extensions.use("pithagoras-docker");
+await docker.run("chromium", { image: "lscr.io/linuxserver/chromium" });
+```
+
+- **`requires`**: the extensions it cannot work without, each with the versions
+  it takes (a semver range). Without one of them, or with one in a version it
+  does not take, it does not start, and Settings → Extensions says why ("It
+  needs pithagoras-docker (^1.0.0), which is not installed, or is switched
+  off"). Nothing is installed for it: the person installs what it needs.
+- **`optional`**: the ones it uses when they are there. It starts without them,
+  and `use` gives nothing then, or while one is there in a version it does not
+  take.
+- **Order.** An extension starts after all it builds on, and is stopped before
+  them. When one it builds on is started anew (updated, switched off and on,
+  installed or removed, for an optional one), so is it, after it: it never
+  holds on to what a provider that is gone gave it. One that is not affected is
+  left running.
+- **Each its own.** The function given to `provide` is called once for each
+  extension that asks, with its name, and what it returns is that one's alone:
+  a provider keeps apart what each does with it. `use` gives the same thing each
+  time it is asked.
+- **What can go wrong** is said where the person looks: a provider that fails
+  to start keeps those that require it from starting ("whose server half could
+  not start"), and extensions that build on one another in a circle start none
+  of them.
+- `use` may only name an extension in `requires` or `optional`: the portal
+  starts and restarts an extension by what it says it builds on.
+
+This is for server halves. A provider's routes are its own, as any extension's
+are: a page asks its own server half, which asks the provider.
 
 ## Panels and commands
 

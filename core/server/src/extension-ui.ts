@@ -68,6 +68,17 @@ export interface ServerHalf {
   file: string;
   /** Changes when the file does, so the portal loads it again rather than the one it has. */
   rev: string;
+  /** The extensions it builds on and cannot start without, by name, with the versions it takes (`pithagoras.requires`). */
+  requires?: Record<string, string>;
+  /** Those it uses when they are there, and starts without (`pithagoras.optional`). */
+  optional?: Record<string, string>;
+}
+
+/** What a package says it builds on: extensions by name, each with a version range. What is not that is not read. */
+function buildsOn(given: unknown): Record<string, string> | undefined {
+  if (!given || typeof given !== "object" || Array.isArray(given)) return undefined;
+  const entries = Object.entries(given).filter(([name, range]) => validName(name) && typeof range === "string");
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 /**
@@ -171,7 +182,15 @@ export function serverHalf(packageDir: string): ServerHalf | undefined {
   const root = path.resolve(packageDir);
   const file = path.resolve(root, meta.pithagoras.server);
   if (!fileIn(root, file)) return undefined;
-  return { name: meta.name, ...(typeof meta.version === "string" ? { version: meta.version } : {}), file, rev: revOf(file) };
+  const requires = buildsOn(meta.pithagoras.requires), optional = buildsOn(meta.pithagoras.optional);
+  return {
+    name: meta.name,
+    ...(typeof meta.version === "string" ? { version: meta.version } : {}),
+    file,
+    rev: revOf(file),
+    ...(requires ? { requires } : {}),
+    ...(optional ? { optional } : {}),
+  };
 }
 
 /** What a package brings: something for pi (the agent), something drawn or run by the portal, colours for the portal. */

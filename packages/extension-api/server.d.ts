@@ -90,6 +90,22 @@ export interface ServerPortal {
   executor: string;
   log(text: string): void;
   /**
+   * What this extension gives the extensions that build on it, those that name it in `pithagoras.requires` or
+   * `pithagoras.optional` in their package.json. `factory` is called once for each of them, with its name, when it first
+   * asks (`extensions.use`), and what it returns is what that one gets: one for each lets an extension keep apart what each
+   * does with it. Those that build on it start after it, and are stopped before it and started again whenever it is.
+   */
+  provide(factory: (consumer: { name: string }) => unknown): void;
+  extensions: {
+    /**
+     * What an extension this one builds on gives it (see `provide`): one its package.json names in `pithagoras.requires`,
+     * which is always there (without it this one does not start, and Settings → Extensions says why), or in
+     * `pithagoras.optional`, which may not be: nothing then, or while it is not in a version this one takes. This one is
+     * started again when such an extension comes or goes. Naming one that is in neither is an error.
+     */
+    use<T = unknown>(name: string): T | undefined;
+  };
+  /**
    * The package's own routes, at /api/x/<package>/…, behind the portal's
    * login. No body is read for them: a route that takes JSON says so with
    * `portal.http.json()`, and one that takes a file reads the request itself.

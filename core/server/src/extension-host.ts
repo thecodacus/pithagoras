@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdirSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
+import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
@@ -56,6 +57,13 @@ interface Running {
   factories: ((pi: any, chat: Chat) => void)[];
   upgrade?: Upgrade;
   holds: Map<string, number>;
+  /** What it gives the extensions that build on it (`provide`), and what each it builds on gave it (`extensions.use`). */
+  provider?: (consumer: { name: string }) => unknown;
+  apis: Map<string, unknown>;
+  /** The extensions it may use, as it started: those it requires, and the optional ones that were there in a version it takes. */
+  uses: Set<string>;
+  /** Its file's revision and those of all it builds on, as it started: a change in any is a start anew. See plan. */
+  sig: string;
 }
 
 const running = new Map<string, Running>();
@@ -157,6 +165,22 @@ function portalFor(ext: Running): ServerPortal {
     extension: name,
     executor: EXECUTOR_KIND,
     log: (text) => say(name, text),
+    provide(factory) {
+      if (typeof factory !== "function") throw new TypeError("provide takes a function: (consumer) => what that consumer is given");
+      ext.provider = factory;
+    },
+    extensions: {
+      use(of) {
+        if (ext.half.requires?.[of] === undefined && ext.half.optional?.[of] === undefined) {
+          throw new Error(`${of} is not one ${name} builds on: name it in "requires" or "optional" under "pithagoras" in its package.json`);
+        }
+        const provider = running.get(of);
+        // An optional one that is not there, or not in a version this one takes: nothing. A required one is there, or this would not be running.
+        if (!ext.uses.has(of) || !provider?.provider) return undefined;
+        if (!ext.apis.has(of)) ext.apis.set(of, provider.provider({ name }));
+        return ext.apis.get(of) as never;
+      },
+    },
     router: ext.router,
     http: {
       json: express.json,
@@ -227,8 +251,8 @@ async function stop(ext: Running): Promise<void> {
   ext.life.removeAllListeners();
 }
 
-async function start(half: ServerHalf): Promise<void> {
-  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map() };
+async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<void> {
+  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig };
   try {
     // By its revision: the same file changed is another module, and the one already loaded is not served again.
     const stopper = await within(
@@ -250,19 +274,93 @@ async function start(half: ServerHalf): Promise<void> {
   }
 }
 
+/** Whether `version` of an extension is one that `range` takes; a range that is none takes nothing. */
+const takes = (range: string, version: string | undefined) => Boolean(version && semver.validRange(range) && semver.satisfies(version, range, { includePrerelease: true }));
+
+/**
+ * How the halves that are wanted are to run, as they build on one another (`pithagoras.requires` and `optional`): the
+ * order to start them in, an extension before those that build on it; those that cannot start, and why (what they
+ * require is not there, or not in a version they take, or they build on themselves through others); what each may use;
+ * and each one's signature, its revision with those of all it builds on, so that one whose provider changed, came or
+ * went is started anew with it, and never holds on to what a provider that is gone gave it.
+ */
+function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string, string>; sigs: Map<string, string>; uses: Map<string, Set<string>> } {
+  const byName = new Map(halves.map((half) => [half.name, half]));
+  const blocked = new Map<string, string>();
+  const sigs = new Map<string, string>();
+  const uses = new Map<string, Set<string>>();
+  const order: ServerHalf[] = [];
+  const visiting: string[] = [];
+  const visit = (half: ServerHalf): boolean => {
+    if (sigs.has(half.name)) return true;
+    if (blocked.has(half.name)) return false;
+    if (visiting.includes(half.name)) {
+      const circle = [...visiting.slice(visiting.indexOf(half.name)), half.name];
+      for (const name of circle) blocked.set(name, `It builds on itself, through ${circle.join(" → ")}`);
+      return false;
+    }
+    visiting.push(half.name);
+    const using = new Set<string>();
+    const parts = [half.rev];
+    let why: string | undefined;
+    for (const [dep, range] of Object.entries(half.requires ?? {})) {
+      const provider = byName.get(dep);
+      if (!semver.validRange(range)) why ??= `It asks for ${dep} at "${range}", which is not a version range`;
+      else if (!provider) why ??= `It needs ${dep} (${range}), which is not installed, or is switched off`;
+      else if (!takes(range, provider.version)) why ??= `It needs ${dep} ${range}, and ${dep} ${provider.version ?? "with no version"} is installed`;
+      else if (!visit(provider)) why ??= `It needs ${dep}, which cannot start: ${blocked.get(dep) ?? "it builds on itself"}`;
+      else {
+        using.add(dep);
+        parts.push(`${dep}=${sigs.get(dep)}`);
+      }
+    }
+    for (const [dep, range] of Object.entries(half.optional ?? {})) {
+      const provider = byName.get(dep);
+      const there = Boolean(provider && takes(range, provider.version) && visit(provider));
+      if (there) using.add(dep);
+      parts.push(`${dep}=${there ? sigs.get(dep) : "-"}`);
+    }
+    visiting.pop();
+    // Blocked by a circle met while looking at what it builds on.
+    if (blocked.has(half.name)) return false;
+    if (why) {
+      blocked.set(half.name, why);
+      return false;
+    }
+    sigs.set(half.name, parts.join(" "));
+    uses.set(half.name, using);
+    order.push(half);
+    return true;
+  };
+  for (const half of halves) visit(half);
+  return { order, blocked, sigs, uses };
+}
+
 let queue: Promise<void> = Promise.resolve();
 /**
  * Bring what is running in line with `halves`: the installed packages that are
  * switched on and have a server half. One gone or changed is stopped, one new
- * or changed is started. One at a time: a second ask waits for the first.
+ * or changed is started, and so is one that builds on another that was (see
+ * plan): those that build on another are stopped before it, and started after
+ * it. One at a time: a second ask waits for the first.
  */
 export function syncServerHalves(halves: ServerHalf[]): Promise<void> {
   const run = async () => {
-    for (const ext of [...running.values()]) {
-      if (!halves.some((half) => half.name === ext.half.name && half.rev === ext.half.rev)) await stop(ext);
-    }
+    const { order, blocked, sigs, uses } = plan(halves);
+    // Latest started first: what builds on another started after it, and goes before it.
+    for (const ext of [...running.values()].reverse()) if (sigs.get(ext.half.name) !== ext.sig) await stop(ext);
     for (const name of [...failures.keys()]) if (!halves.some((half) => half.name === name)) failures.delete(name);
-    for (const half of halves) if (!running.has(half.name)) await start(half);
+    for (const [name, why] of blocked) failures.set(name, why);
+    for (const half of order) {
+      if (running.has(half.name)) continue;
+      // What it requires did not start after all: it is said why, and it waits for the next change.
+      const down = Object.keys(half.requires ?? {}).find((dep) => !running.has(dep));
+      if (down) {
+        failures.set(half.name, `It needs ${down}, whose server half could not start`);
+        continue;
+      }
+      await start(half, sigs.get(half.name)!, uses.get(half.name)!);
+    }
   };
   return (queue = queue.then(run, run));
 }

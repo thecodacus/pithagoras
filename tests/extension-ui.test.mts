@@ -228,6 +228,15 @@ test('a package may name a server half anywhere in itself, and has none where th
   assert.ok(serverHalf(pkg({ server: './lib/server.js' }, ['lib/server.js'])), 'a server half alone, with no browser half');
 });
 
+test('a server half says what it builds on, by name and version range, and what is not that is not read', () => {
+  const builds = serverHalf(pkg({ server: './server.js', requires: { 'pithagoras-docker': '^1.0.0', '../up': '*', bad: 2 }, optional: { '@a/b': '>=0.2' } }, ['server.js']))!;
+  assert.deepEqual(builds.requires, { 'pithagoras-docker': '^1.0.0' });
+  assert.deepEqual(builds.optional, { '@a/b': '>=0.2' });
+  const none = serverHalf(pkg({ server: './server.js', requires: ['pithagoras-docker'] }, ['server.js']))!;
+  assert.equal(none.requires, undefined, 'a list says no versions: not read');
+  assert.equal(none.optional, undefined);
+});
+
 test('a package goes by a name its addresses can carry, and has no halves under any other', () => {
   for (const name of ['notes', 'pithagoras-notes', '@codacus/notes', 'a.b_c~d', '@a/b.c']) assert.equal(validName(name), true, name);
   for (const name of ['', '..', '.hidden', 'a/b', '@a/b/c', '@a/..', 'a b', 'a?b', '../up', '@/x', 42, undefined]) assert.equal(validName(name), false, String(name));
