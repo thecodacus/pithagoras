@@ -147,7 +147,8 @@ export interface ServerPortal {
     /**
      * A pi extension of the package's, made here: registered in every chat's
      * pi as it starts, so its tools hold what this module holds. Only where pi
-     * runs in the portal's own process.
+     * runs in the portal's own process. A tool registered with
+     * `offByDefault: true` is off in every chat until somebody switches it on.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**

@@ -2706,10 +2706,10 @@ class SessionManager extends EventEmitter {
   }
 
   /** What pi is told about the tools when a conversation starts: the ones that are off, and the lazy ones that are on. */
-  private toolsFor(sessionId: string): { toolsOff: string[]; toolsLazy: string[]; lazySets: string[] } {
+  private toolsFor(sessionId: string): { toolsOff: string[]; toolsLazy: string[]; lazySets: string[]; toolsSeen: () => ReadonlySet<string> } {
     const toolsOff = this.piOff(sessionId);
     const lazy = this.piLazy(toolsOff);
-    return { toolsOff, toolsLazy: lazy.tools, lazySets: lazy.sets };
+    return { toolsOff, toolsLazy: lazy.tools, lazySets: lazy.sets, toolsSeen: () => new Set(knownTools().map((t) => t.name)) };
   }
 
   /**

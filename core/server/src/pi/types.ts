@@ -41,6 +41,8 @@ export interface PiTool {
   scriptsOnly?: true;
   /** An MCP server's tool listed from the adapter's cache, its server not started until the tool is first used. */
   cached?: true;
+  /** Registered with `offByDefault: true`: off in every chat until somebody switches it on. */
+  offByDefault?: true;
   /** False when this conversation has it switched off. */
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */

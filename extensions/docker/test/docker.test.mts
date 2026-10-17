@@ -135,11 +135,22 @@ test("without Docker's socket it is not available, and what is asked of it says 
   }
 });
 
-test("the server half gives each extension its own, and its page sees and acts on every extension's, and nobody's is not shown", async () => {
+test("the server half gives each extension its own, each chat the agent's tools, off until switched on, and its page sees and acts on every extension's, and nobody's is not shown", async () => {
   const given: ((consumer: { name: string }) => unknown)[] = [];
+  const extended: ((pi: unknown, chat: { id: string }) => void)[] = [];
   const router = express.Router();
-  serverHalf({ dataDir: dataDir, provide: (factory: (consumer: { name: string }) => unknown) => given.push(factory), router } as never);
+  serverHalf({
+    extension: "pithagoras-docker",
+    dataDir: dataDir,
+    provide: (factory: (consumer: { name: string }) => unknown) => given.push(factory),
+    router,
+    chats: { extend: (factory: (pi: unknown, chat: { id: string }) => void) => extended.push(factory), folder: () => dataDir() },
+    files: { inside: (base: string, rel: string) => path.join(base, rel) },
+  } as never);
   assert.equal(given.length, 1);
+  const tools: { name: string; offByDefault?: boolean }[] = [];
+  extended[0]({ registerTool: (tool: { name: string; offByDefault?: boolean }) => tools.push(tool) }, { id: "chat" });
+  assert.deepEqual(tools.map((t) => [t.name, t.offByDefault]), ["docker_run", "docker_list", "docker_start", "docker_stop", "docker_delete", "docker_logs"].map((name) => [name, true]));
   const browser = given[0]({ name: "pithagoras-browser" }) as Docker;
   await browser.containers.create("dk-page", { Image: "chromium:1" });
   Object.assign(docker.containers.find((c) => c.Name === "dk-page")!, { out: "hello\n" });

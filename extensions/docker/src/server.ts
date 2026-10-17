@@ -1,12 +1,16 @@
 import type { Response } from "express";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
+import { agentDocker } from "./agent";
+import { composeRunner } from "./compose";
 import { dockerFor } from "./docker";
 import { DockerError } from "./engine";
+import { hostPaths } from "./host-paths";
+import { registerTools } from "./tools";
 
 /**
- * Docker's server half: what each extension that builds on it is given (api.ts, `portal.provide`), and the routes of
- * its page in Settings, at /api/x/pithagoras-docker/…, where the person sees every extension's containers and volumes
- * and may start, stop and remove them, and read what a container wrote.
+ * Docker's server half: what each extension that builds on it is given (api.ts, `portal.provide`), the agent's tools in
+ * each chat (tools.ts), and the routes of its page in Settings, at /api/x/pithagoras-docker/…, where the person sees
+ * every extension's containers and volumes and may start, stop and remove them, and read what a container wrote.
  *
  *   GET    /overview                      whether Docker is reached, its version, and every extension's containers and volumes
  *   POST   /containers/:name/start|stop
@@ -24,6 +28,13 @@ function fail(res: Response, e: unknown) {
 export default function docker(portal: ServerPortal) {
   const { forExtension, person } = dockerFor(portal.dataDir());
   portal.provide((consumer) => forExtension(consumer.name));
+
+  // What the agent runs is this extension's, by the chat's folder.
+  const own = forExtension(portal.extension);
+  const onHost = hostPaths();
+  const runner = composeRunner(portal.extension, (image) => own.images.ensure(image), onHost);
+  const agent = agentDocker({ owner: portal.extension, runner, onHost, inside: portal.files.inside });
+  portal.chats.extend((pi, chat) => registerTools(pi, () => agent(portal.chats.folder(chat.id))));
 
   const route = (work: (req: { params: Record<string, string>; query: Record<string, unknown> }, res: Response) => Promise<unknown>) => (req: any, res: Response) =>
     void work(req, res).catch((e) => fail(res, e));

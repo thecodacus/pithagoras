@@ -21,7 +21,7 @@ export class DockerError extends Error {
   }
 }
 
-/** A request, answered with its status and the whole of its body as bytes. Given up after `timeoutMs` in all. */
+/** A request, answered with its status and the whole of its body as bytes. Given up after `timeoutMs` in all; 0 waits as long as it takes. */
 function send(method: string, path: string, body?: unknown, timeoutMs = 30_000): Promise<{ status: number; bytes: Buffer }> {
   if (!socketThere()) return Promise.reject(new DockerError(`Docker cannot be reached: there is no socket at ${socketPath()}`));
   return new Promise((resolve, reject) => {
@@ -36,8 +36,10 @@ function send(method: string, path: string, body?: unknown, timeoutMs = 30_000):
         res.on("error", reject);
       },
     );
-    const deadline = setTimeout(() => req.destroy(new DockerError("Docker did not answer in time")), timeoutMs);
-    req.on("close", () => clearTimeout(deadline));
+    if (timeoutMs > 0) {
+      const deadline = setTimeout(() => req.destroy(new DockerError("Docker did not answer in time")), timeoutMs);
+      req.on("close", () => clearTimeout(deadline));
+    }
     req.on("error", (e) => reject(e instanceof DockerError ? e : new DockerError(`Docker cannot be reached: ${e.message}`)));
     if (payload) req.write(payload);
     req.end();
@@ -45,8 +47,8 @@ function send(method: string, path: string, body?: unknown, timeoutMs = 30_000):
 }
 
 /** A request whose answer is JSON, or nothing. */
-export async function request<T = unknown>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
-  const { status, bytes } = await send(method, path, body);
+export async function request<T = unknown>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<{ status: number; body: T }> {
+  const { status, bytes } = await send(method, path, body, timeoutMs);
   const text = bytes.toString("utf8");
   let parsed: unknown = text;
   try {
@@ -58,8 +60,8 @@ export async function request<T = unknown>(method: string, path: string, body?: 
 }
 
 /** A request that has to come out right: what Docker says when it does not, as the error. */
-export async function checked<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
-  const { status, body: said } = await request<T & { message?: string }>(method, path, body);
+export async function checked<T = unknown>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
+  const { status, body: said } = await request<T & { message?: string }>(method, path, body, timeoutMs);
   if (status >= 400) throw new DockerError((said as { message?: string } | null)?.message || `Docker answered ${status}`, status);
   return said;
 }
@@ -136,9 +138,9 @@ export function demux(bytes: Buffer, tty: boolean): string {
   return Buffer.concat(parts).toString("utf8");
 }
 
-/** The end of what a container wrote, its output and its errors, as text. */
-export async function logs(id: string, tail: number, tty: boolean): Promise<string> {
-  const { status, bytes } = await send("GET", `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&tail=${tail}`);
+/** The end of what a container wrote, as text: its output and its errors, or the one of them asked for. */
+export async function logs(id: string, tail: number | "all", tty: boolean, streams: { stdout: boolean; stderr: boolean } = { stdout: true, stderr: true }): Promise<string> {
+  const { status, bytes } = await send("GET", `/containers/${encodeURIComponent(id)}/logs?stdout=${Number(streams.stdout)}&stderr=${Number(streams.stderr)}&tail=${tail}`);
   if (status >= 400) {
     let message = "";
     try {

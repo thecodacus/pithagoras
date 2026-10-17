@@ -432,6 +432,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     role?: string;
     /** Tools this conversation has switched off, by name. */
     toolsOff?: string[];
+    /** The tools the portal has seen, for one that says it is off until switched on: see `unseenOff`. */
+    toolsSeen?: () => ReadonlySet<string>;
     /** The tools that are on and lazy: not offered one by one, and found through the `tools` tool instead. */
     toolsLazy?: string[];
     /** What the lazy tools are called as sets, for the one line that tells the model they exist. */
@@ -703,7 +705,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // unbound host makes ctx.ui.select() return a default immediately, so a
     // command that asks the user something silently does nothing.
 
-    client.switchedOff = new Set(opts.toolsOff ?? []);
+    client.toolsSeen = opts.toolsSeen;
+    client.switchedOff = new Set([...(opts.toolsOff ?? []), ...client.unseenOff()]);
     client.lazy = new Set((opts.toolsLazy ?? []).filter((name) => !client.switchedOff.has(name)));
     client.gateway = gateway;
     try {
@@ -1346,6 +1349,24 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    */
   switchedOff = new Set<string>();
 
+  toolsSeen?: () => ReadonlySet<string>;
+
+  /**
+   * The tools that say they are off until switched on (`offByDefault: true` where they are registered) and that the
+   * portal has not seen yet. Off here from the start, and after a reload that brings one: the portal writes the
+   * default down once it is told of the tool (rememberTools), and its switches have the last word from then on.
+   */
+  unseenOff(): string[] {
+    const seen = this.toolsSeen?.();
+    if (!seen) return [];
+    return (this.session.getAllTools?.() ?? []).map((tool: { name: unknown }) => String(tool.name)).filter((name: string) => !seen.has(name) && this.offByDefault(name));
+  }
+
+  /** A field of the tool's own definition, which pi keeps as it was registered. */
+  private offByDefault(name: string): boolean {
+    return (this.session.getToolDefinition(name) as { offByDefault?: unknown } | undefined)?.offByDefault === true;
+  }
+
   /**
    * The tools that are on and lazy: out of the model's list, and found and called through the `tools`
    * tool. Never in `switchedOff`: a lazy tool that is switched off is off for good, and no way leads to it.
@@ -1609,6 +1630,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       package: packageOf(tool.sourceInfo),
       ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
       ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
+      ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }
@@ -1757,6 +1779,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     this.applyLimitQuietly();
     // And has pi switch every extension tool back on — which is every MCP tool,
     // the browser's among them. The switches are the portal's to keep.
+    for (const name of this.unseenOff()) this.switchedOff.add(name);
     this.applyToolsOff();
     this.sayAudioRuleAgain();
   }

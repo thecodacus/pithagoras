@@ -2606,16 +2606,19 @@ export interface KnownTool {
    * carries it. Set only where it is so; a later report without it takes it back.
    */
   scriptsOnly?: true;
+  /** Said by the tool: off until somebody switches it on. Read the first time the tool is seen, and not kept. */
+  offByDefault?: true;
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
   package: t.package ?? null,
   inline: t.inline === true,
   ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
+  ...(t.offByDefault ? { offByDefault: true } : {}),
 });
 
 /**
@@ -3028,8 +3031,11 @@ export async function packageRemoved(source: string): Promise<void> {
  * session may have extensions this one does not, and an extension that is
  * merely not loaded today should not lose the default somebody set for it.
  *
- * Returns the tools that arrived just now and are lazy, for a caller that has conversations running
- * which were started without knowing them: they offer the tool one by one until they are told.
+ * A tool that arrives saying it is off until switched on (`offByDefault`) is switched off by default here, once:
+ * from then on it is a default like any other, and somebody who switches it on by default has it on.
+ *
+ * Returns the tools that arrived just now and are lazy or off by default, for a caller that has conversations
+ * running which were started without knowing them: they offer the tool, or offer it one by one, until they are told.
  */
 export function rememberTools(reported: KnownTool[]): string[] {
   // A session that still has a package loaded which has since been uninstalled
@@ -3081,11 +3087,13 @@ export function rememberTools(reported: KnownTool[]): string[] {
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   putSetting("tools_seen", JSON.stringify(sorted));
+  const off = tools.filter((t) => t.offByDefault && fresh.includes(t.name)).map((t) => t.name);
+  if (off.length) setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...off])]);
   // The first moment the browser's tools can be told apart from the rest, and
   // every moment a new one turns up.
   adoptBrowserGrants(getDb(), fresh);
   const lazy = lazyToolNames();
-  return fresh.filter((name) => lazy.has(name));
+  return fresh.filter((name) => lazy.has(name) || off.includes(name));
 }
 
 /**

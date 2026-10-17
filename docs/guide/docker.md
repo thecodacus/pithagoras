@@ -1,11 +1,13 @@
 # Docker for extensions
 
 **Docker** (`extensions/docker`, the package `pithagoras-docker`) lets other
-extensions run containers: a browser, a speech model, a database. It does
-nothing by itself. It gives each extension that
+extensions run containers: a browser, a speech model, a database. It gives each
+extension that
 [builds on it](/guide/extension-ui#building-on-another-extension) a way to
 download images and to make, start, stop and remove containers and volumes,
-and shows you in Settings what each of them runs.
+and shows you in Settings what each of them runs. It also gives the agent
+[tools](#the-agent-s-tools) to run containers from a Dockerfile or a compose
+file in its chat's folder, which are off until you switch them on.
 
 It is not installed by default. Install it from Settings → Extensions →
 Discover, where the extensions that come with the portal are listed, when an
@@ -49,7 +51,63 @@ list) shows:
   you say so.
 
 A container that no extension made, such as one you started by hand, is not
-shown, and not acted on from here.
+shown, and not acted on from here. What the agent runs is listed under Docker
+itself.
+
+## The agent's tools
+
+With Docker installed, each chat has these tools, **off until you switch them
+on** in Settings → Tools (for every chat) or in a chat's own tools:
+
+| | |
+| --- | --- |
+| `docker_run` | Builds and starts containers from a Dockerfile or a compose file in the chat's folder. A `.yml` or `.yaml` file is a compose file, any other a Dockerfile. Run again, it brings them up to date |
+| `docker_list` | The containers the chat's folder runs: name, project, service, image, state and published ports |
+| `docker_start`, `docker_stop` | A container, or every container of a project |
+| `docker_delete` | A container, or a project's. Once a project has no container left, its networks and the images built for it go too, and its volumes only when the agent asks |
+| `docker_logs` | The end of what a container wrote |
+
+What the agent runs belongs to the chat's folder: the chats in one folder share
+it, and the agent can see and act on only that. Each file is a project of its
+own, named after its folder. A Dockerfile is a project of one service, and the
+agent may give it ports (`"8080:80"`, the machine's port first) and an
+environment; a compose file publishes the ports it says.
+
+compose runs in Docker's own command-line image (`docker:29.8.1-cli`, downloaded
+the first time), which needs no compose installed in the portal's. It is given
+the chat's folder read-only, at the path the folder has on Docker's machine:
+where the portal runs in a container, the folder it mounts there (your
+`/workspaces` may be `/root/pithagoras-workspaces` on the machine), found from
+the portal's own container. A chat's folder that is in the portal's container
+only, on no folder mounted into it, cannot be run from.
+
+Before any of it starts, what compose made is read back from Docker, and the
+run is refused, and what it made removed, where a container:
+
+- mounts a folder outside the chat's folder, or one reached by a link;
+- runs privileged, adds capabilities, or is given the machine's devices;
+- shares the machine's network, processes, IPC, host name, users or cgroups,
+  or another container's that is not the project's;
+- drops its confinement (`security_opt` other than `no-new-privileges`);
+- uses a volume or joins a network the project did not make, or a volume
+  made with a driver or options of its own.
+
+What compose would do before that is refused from the file: a build on the
+machine's network, privileged or with entitlements, a `provider` service (a
+program compose runs itself), and models. GPUs (`gpus`, or a device
+reservation under `deploy`) are allowed.
+
+::: warning Ports and the network
+A published port is open on the machine's network, as with `docker run -p`.
+And a container reaches whatever the machine reaches. The limits above keep it
+in the chat's folder; they do not keep it off the network.
+:::
+
+Two things the limits do not cover. A link in the chat's folder that is
+changed between the check and the start could still lead a mount elsewhere.
+And with the [sandbox](/guide/sandbox) off, the agent runs as the portal's own
+user, which can use Docker's socket without these tools. Switch them on for an
+agent you would let run containers.
 
 ## For an extension that builds on it
 

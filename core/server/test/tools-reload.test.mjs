@@ -21,6 +21,7 @@ function fakeSession() {
     active: ["read", "bash", "edit", "write", "web_search", "browser_browser_click"],
     extension: ["web_search", "browser_browser_click"],
     getAllTools: () => session.registry.map((name) => ({ name })),
+    getToolDefinition: (name) => (session.registry.includes(name) ? { name } : undefined),
     getActiveToolNames: () => [...session.active],
     _setActiveTools(names) {
       session.active = [...new Set(names)].filter((name) => session.registry.includes(name));

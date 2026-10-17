@@ -875,6 +875,18 @@ tool is on, once however many tools have the same line:
 pi.registerTool({ name: "canvas_write", /* … */ voiceGuidelines: ["Write the full report in a canvas and give only a brief spoken summary."] });
 ```
 
+A tool that does something a person should choose to allow (Docker's tools
+run containers on the portal's machine) is registered with
+`offByDefault: true`. The first time the portal sees it, it is switched off by
+default in Settings → Tools, and it is off in every chat, from the first
+message of the first chat that has it, until somebody switches it on there or
+by default. After that it is a default like any other: one switched on by
+default stays on. This works for a tool of any package's pi extension too.
+
+```js
+pi.registerTool({ name: "docker_run", /* … */ offByDefault: true });
+```
+
 ### Files a tool gives
 
 A tool says it gave the person a file the same way whoever made it, the

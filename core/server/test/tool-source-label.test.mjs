@@ -10,7 +10,7 @@ async function labels(infos) {
   const client = Object.create(SdkPiClient.prototype);
   client.wanted = new Set();
   client.switchedOff = new Set();
-  client.session = { getAllTools: () => infos.map((sourceInfo, i) => ({ name: `t${i}`, sourceInfo })) };
+  client.session = { getAllTools: () => infos.map((sourceInfo, i) => ({ name: `t${i}`, sourceInfo })), getToolDefinition: (name) => ({ name }) };
   return (await client.getTools()).map((t) => t.source);
 }
 

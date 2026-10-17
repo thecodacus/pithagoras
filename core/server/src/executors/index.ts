@@ -38,6 +38,8 @@ export interface LaunchOptions {
   browserNow?: () => { allowed: boolean; allowlist: string[] };
   /** Tools this conversation has switched off, by name. */
   toolsOff?: string[];
+  /** The tools the portal has seen, for one that says it is off until switched on. */
+  toolsSeen?: () => ReadonlySet<string>;
   /** The tools that are on and lazy: found through the `tools` tool, not offered one by one. */
   toolsLazy?: string[];
   /** What those tools are called as sets, for the hint to the model. */
@@ -104,6 +106,7 @@ export class HostExecutor implements Executor {
       enforceTaint: opts.enforceTaint,
       browserNow: opts.browserNow,
       toolsOff: opts.toolsOff,
+      toolsSeen: opts.toolsSeen,
       toolsLazy: opts.toolsLazy,
       lazySets: opts.lazySets,
       subagentModel: opts.subagentModel,
