@@ -100,7 +100,8 @@ test("an optional one: started without it, given nothing, and started again as i
   assert.equal(globalThis.got.browser, null, "nothing while it is not there");
   const docker = half("docker", PROVIDES("v1"));
   await host.syncServerHalves([browser, docker]);
-  assert.deepEqual(log(), ["browser stop", "docker start", "browser start"]);
+  // It goes on until the provider is there, and starts again with it.
+  assert.deepEqual(log(), ["docker start", "browser stop", "browser start"]);
   assert.equal(globalThis.got.browser.from, "v1");
   await host.syncServerHalves([browser]);
   assert.deepEqual(log(), ["browser stop", "docker stop", "browser start"]);
@@ -131,6 +132,26 @@ test("one whose provider fails to start waits and says why; an optional one goes
   assert.equal(host.isServing("a") || host.isServing("b"), false);
   assert.match(host.serverFailure("a"), /It builds on itself, through a → b → a/);
   assert.match(host.serverFailure("b"), /It builds on itself/);
+  await host.syncServerHalves([]);
+  log();
+});
+
+test("an optional provider that failed to start and starts later, as it was, brings what builds on it up again with it; one that keeps failing does not", async () => {
+  globalThis.got = {};
+  globalThis.dockerUp = false;
+  const docker = half("docker", `if (!globalThis.dockerUp) throw new Error("not yet");\n${PROVIDES("v1")}`);
+  const browser = half("browser", USES("docker"), { optional: { docker: "^1.0.0" } });
+  await host.syncServerHalves([docker, browser]);
+  assert.deepEqual(log(), ["docker start", "browser start"]);
+  assert.equal(globalThis.got.browser, null);
+  // Asked again with the same halves, while it still fails: what builds on it is left as it is.
+  await host.syncServerHalves([docker, browser]);
+  assert.deepEqual(log(), ["docker start"]);
+  // The same file, starting now.
+  globalThis.dockerUp = true;
+  await host.syncServerHalves([docker, browser]);
+  assert.deepEqual(log(), ["docker start", "browser stop", "browser start"]);
+  assert.equal(globalThis.got.browser.from, "v1");
   await host.syncServerHalves([]);
   log();
 });

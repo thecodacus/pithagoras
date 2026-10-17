@@ -280,19 +280,17 @@ const takes = (range: string, version: string | undefined) => Boolean(version &&
 /**
  * How the halves that are wanted are to run, as they build on one another (`pithagoras.requires` and `optional`): the
  * order to start them in, an extension before those that build on it; those that cannot start, and why (what they
- * require is not there, or not in a version they take, or they build on themselves through others); what each may use;
- * and each one's signature, its revision with those of all it builds on, so that one whose provider changed, came or
- * went is started anew with it, and never holds on to what a provider that is gone gave it.
+ * require is not there, or not in a version they take, or they build on themselves through others); and what each may
+ * use: what it requires, and the optional ones that are there in a version it takes.
  */
-function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string, string>; sigs: Map<string, string>; uses: Map<string, Set<string>> } {
+function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string, string>; uses: Map<string, Set<string>> } {
   const byName = new Map(halves.map((half) => [half.name, half]));
   const blocked = new Map<string, string>();
-  const sigs = new Map<string, string>();
   const uses = new Map<string, Set<string>>();
   const order: ServerHalf[] = [];
   const visiting: string[] = [];
   const visit = (half: ServerHalf): boolean => {
-    if (sigs.has(half.name)) return true;
+    if (uses.has(half.name)) return true;
     if (blocked.has(half.name)) return false;
     if (visiting.includes(half.name)) {
       const circle = [...visiting.slice(visiting.indexOf(half.name)), half.name];
@@ -301,7 +299,6 @@ function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string,
     }
     visiting.push(half.name);
     const using = new Set<string>();
-    const parts = [half.rev];
     let why: string | undefined;
     for (const [dep, range] of Object.entries(half.requires ?? {})) {
       const provider = byName.get(dep);
@@ -309,16 +306,11 @@ function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string,
       else if (!provider) why ??= `It needs ${dep} (${range}), which is not installed, or is switched off`;
       else if (!takes(range, provider.version)) why ??= `It needs ${dep} ${range}, and ${dep} ${provider.version ?? "with no version"} is installed`;
       else if (!visit(provider)) why ??= `It needs ${dep}, which cannot start: ${blocked.get(dep) ?? "it builds on itself"}`;
-      else {
-        using.add(dep);
-        parts.push(`${dep}=${sigs.get(dep)}`);
-      }
+      else using.add(dep);
     }
     for (const [dep, range] of Object.entries(half.optional ?? {})) {
       const provider = byName.get(dep);
-      const there = Boolean(provider && takes(range, provider.version) && visit(provider));
-      if (there) using.add(dep);
-      parts.push(`${dep}=${there ? sigs.get(dep) : "-"}`);
+      if (provider && takes(range, provider.version) && visit(provider)) using.add(dep);
     }
     visiting.pop();
     // Blocked by a circle met while looking at what it builds on.
@@ -327,13 +319,31 @@ function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string,
       blocked.set(half.name, why);
       return false;
     }
-    sigs.set(half.name, parts.join(" "));
     uses.set(half.name, using);
     order.push(half);
     return true;
   };
   for (const half of halves) visit(half);
-  return { order, blocked, sigs, uses };
+  return { order, blocked, uses };
+}
+
+/**
+ * An extension's signature as things are now: its revision, and for each it builds on that one's signature, or that it
+ * is not running. One whose signature is no longer the one it started with holds what a provider that changed, came or
+ * went gave it, or nothing where there is something now, and is started anew.
+ */
+function signature(half: ServerHalf, uses: Set<string>): string {
+  const of = (dep: string) => `${dep}=${(uses.has(dep) && running.get(dep)?.sig) || "-"}`;
+  return [half.rev, ...Object.keys(half.requires ?? {}).map(of), ...Object.keys(half.optional ?? {}).map(of)].join(" ");
+}
+
+/** Stops an extension, and before it those that build on it, theirs first. */
+async function stopWithDependents(ext: Running): Promise<void> {
+  if (running.get(ext.half.name) !== ext) return;
+  for (const other of [...running.values()].reverse()) {
+    if (other !== ext && (other.half.requires?.[ext.half.name] !== undefined || other.half.optional?.[ext.half.name] !== undefined)) await stopWithDependents(other);
+  }
+  await stop(ext);
 }
 
 let queue: Promise<void> = Promise.resolve();
@@ -341,25 +351,36 @@ let queue: Promise<void> = Promise.resolve();
  * Bring what is running in line with `halves`: the installed packages that are
  * switched on and have a server half. One gone or changed is stopped, one new
  * or changed is started, and so is one that builds on another that was (see
- * plan): those that build on another are stopped before it, and started after
- * it. One at a time: a second ask waits for the first.
+ * signature): those that build on another are stopped before it, and started
+ * after it. One at a time: a second ask waits for the first.
  */
 export function syncServerHalves(halves: ServerHalf[]): Promise<void> {
   const run = async () => {
-    const { order, blocked, sigs, uses } = plan(halves);
-    // Latest started first: what builds on another started after it, and goes before it.
-    for (const ext of [...running.values()].reverse()) if (sigs.get(ext.half.name) !== ext.sig) await stop(ext);
+    const { order, blocked, uses } = plan(halves);
+    const wanted = new Map(order.map((half) => [half.name, half]));
+    // What is not wanted any more, or changed, goes, with what builds on it: the latest started first.
+    for (const ext of [...running.values()].reverse()) {
+      const half = wanted.get(ext.half.name);
+      if (!half || ext.sig !== signature(half, uses.get(half.name)!)) await stopWithDependents(ext);
+    }
     for (const name of [...failures.keys()]) if (!halves.some((half) => half.name === name)) failures.delete(name);
     for (const [name, why] of blocked) failures.set(name, why);
-    for (const half of order) {
-      if (running.has(half.name)) continue;
-      // What it requires did not start after all: it is said why, and it waits for the next change.
-      const down = Object.keys(half.requires ?? {}).find((dep) => !running.has(dep));
-      if (down) {
-        failures.set(half.name, `It needs ${down}, whose server half could not start`);
-        continue;
+    // Started in order, what each builds on before it; then again for any whose provider has only now started (one
+    // that failed before, say), until nothing more changes.
+    for (let round = 0; round <= order.length; round++) {
+      for (const half of order) {
+        if (running.has(half.name)) continue;
+        // What it requires did not start after all: it is said why, and it waits for the next change.
+        const down = Object.keys(half.requires ?? {}).find((dep) => !running.has(dep));
+        if (down) {
+          failures.set(half.name, `It needs ${down}, whose server half could not start`);
+          continue;
+        }
+        await start(half, signature(half, uses.get(half.name)!), uses.get(half.name)!);
       }
-      await start(half, sigs.get(half.name)!, uses.get(half.name)!);
+      const stale = [...running.values()].find((ext) => wanted.has(ext.half.name) && ext.sig !== signature(ext.half, uses.get(ext.half.name)!));
+      if (!stale) break;
+      await stopWithDependents(stale);
     }
   };
   return (queue = queue.then(run, run));
