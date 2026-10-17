@@ -111,6 +111,9 @@ test("one the portal has not seen yet is off from the first message, says so, an
     const reported = await client.getTools();
     assert.deepEqual(reported.find((t) => t.name === "box_run"), { ...reported.find((t) => t.name === "box_run"), offByDefault: true, enabled: false });
     assert.equal("offByDefault" in reported.find((t) => t.name === "box_look"), false);
+    // Switches the portal sends before it has seen the tool (another default changed) do not name it: it stays off.
+    await client.setToolsOff(["codemode"]);
+    assert.ok(!names(await ask()).includes("box_run"));
     // The portal was told of it, and somebody switched it on: the portal's switches are the last word.
     for (const tool of reported) seen.add(tool.name);
     await client.setToolsOff(["codemode"]);

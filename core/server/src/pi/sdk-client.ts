@@ -1353,8 +1353,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   /**
    * The tools that say they are off until switched on (`offByDefault: true` where they are registered) and that the
-   * portal has not seen yet. Off here from the start, and after a reload that brings one: the portal writes the
-   * default down once it is told of the tool (rememberTools), and its switches have the last word from then on.
+   * portal has not seen yet. Off here from the start, after a reload that brings one, and whatever switches the portal
+   * sends before it has seen it: the portal writes the default down once it is told of the tool (rememberTools), and
+   * its switches have the last word from then on.
    */
   unseenOff(): string[] {
     const seen = this.toolsSeen?.();
@@ -1644,7 +1645,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
    * active set is computed from what pi wants right now, every time.
    */
   async setToolsOff(names: string[], lazy: { tools: string[]; sets: string[] } = { tools: [], sets: [] }): Promise<void> {
-    this.switchedOff = new Set(names);
+    // The portal's switches name a tool that is off until switched on only once it has seen it: until then it stays off.
+    this.switchedOff = new Set([...names, ...this.unseenOff()]);
     this.lazy = new Set(lazy.tools.filter((name) => !this.switchedOff.has(name)));
     this.applyToolsOff();
     // After the switches: registering the tool again has pi set its active tools, and by then the

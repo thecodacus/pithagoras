@@ -88,7 +88,8 @@ run is refused, and what it made removed, where a container:
 - runs privileged, adds capabilities, or is given the machine's devices;
 - shares the machine's network, processes, IPC, host name, users or cgroups,
   or another container's that is not the project's;
-- drops its confinement (`security_opt` other than `no-new-privileges`);
+- drops its confinement (`security_opt` other than `no-new-privileges`,
+  `systempaths=unconfined` among them);
 - uses a volume or joins a network the project did not make, or a volume
   made with a driver or options of its own.
 

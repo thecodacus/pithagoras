@@ -22,7 +22,10 @@ export type Runner = (args: string[], options: { folder: string; input?: string;
 
 export function composeRunner(own: string, ensure: (image: string) => Promise<void>, onHost: (where: string) => Promise<string>): Runner {
   return async (args, { folder, input, signal }) => {
+    // A call stopped before this step, or while the image downloads, runs nothing more.
+    signal?.throwIfAborted();
     await ensure(RUNNER_IMAGE);
+    signal?.throwIfAborted();
     const socket = await onHost(socketPath());
     const { Id } = await checked<{ Id: string }>("POST", `/containers/create?name=pithagoras-docker-compose-${randomBytes(4).toString("hex")}`, {
       Image: RUNNER_IMAGE,
@@ -36,6 +39,8 @@ export function composeRunner(own: string, ensure: (image: string) => Promise<vo
     const kill = () => void request("POST", `/containers/${Id}/kill`).catch(() => {});
     signal?.addEventListener("abort", kill, { once: true });
     try {
+      // Stopped while it was being made: it is not started.
+      signal?.throwIfAborted();
       await checked("POST", `/containers/${Id}/start`);
       // As long as it takes: a build can take many minutes.
       const { StatusCode } = await checked<{ StatusCode: number }>("POST", `/containers/${Id}/wait`, undefined, 0);

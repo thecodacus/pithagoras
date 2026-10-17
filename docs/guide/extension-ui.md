@@ -881,7 +881,9 @@ run containers on the portal's machine) is registered with
 default in Settings → Tools, and it is off in every chat, from the first
 message of the first chat that has it, until somebody switches it on there or
 by default. After that it is a default like any other: one switched on by
-default stays on. This works for a tool of any package's pi extension too.
+default stays on. It works for a tool of any package's pi extension too, in a
+chat whose pi runs in the portal's own process (the host executor, where
+`chats.extend` works); a chat run in a container of its own does not read it.
 
 ```js
 pi.registerTool({ name: "docker_run", /* … */ offByDefault: true });

@@ -54,6 +54,8 @@ type Inspected = {
     UsernsMode?: string;
     CgroupnsMode?: string;
     SecurityOpt?: string[] | null;
+    MaskedPaths?: string[] | null;
+    ReadonlyPaths?: string[] | null;
     VolumesFrom?: string[] | null;
   };
   Mounts?: { Type: string; Source?: string; Name?: string }[];
@@ -199,6 +201,9 @@ export function agentDocker({ owner, runner, onHost, inside }: AgentOptions) {
           else if (mode?.startsWith("container:") && !own.has(mode.slice("container:".length))) say(`shares the ${what} of ${mode.slice("container:".length)}, which is not this project's`);
         }
         for (const option of host.SecurityOpt ?? []) if (!/^no-new-privileges([:=]true)?$/.test(option)) say(`is run with ${option}`);
+        // `systempaths=unconfined` does not reach Docker as an option: compose sends these lists empty instead.
+        if (host.MaskedPaths?.length === 0) say("is run with the kernel's files under /proc unmasked");
+        if (host.ReadonlyPaths?.length === 0) say("is run with the kernel's files under /proc writable");
         for (const from of host.VolumesFrom ?? []) if (!own.has(from.split(":")[0])) say(`takes the volumes of ${from.split(":")[0]}, which is not this project's`);
         for (const mount of c.Mounts ?? []) {
           if (mount.Type === "bind") {

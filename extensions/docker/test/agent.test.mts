@@ -186,6 +186,8 @@ test("what Docker made is read back and refused before any of it starts, where i
         HostConfig: {
           Privileged: true, CapAdd: ["SYS_ADMIN"], Devices: [{ PathOnHost: "/dev/sda" }], NetworkMode: "host", PidMode: "container:someone", IpcMode: `container:${project}-db-id`,
           SecurityOpt: ["no-new-privileges:true", "seccomp=unconfined"], VolumesFrom: ["someone:ro"],
+          // As compose sends `systempaths=unconfined`.
+          MaskedPaths: [], ReadonlyPaths: [],
         },
         Mounts: [
           { Type: "bind", Source: path.join(folder, "data") },
@@ -211,6 +213,8 @@ test("what Docker made is read back and refused before any of it starts, where i
       "web: shares the machine's network",
       "web: shares the processes of someone, which is not this project's",
       "web: is run with seccomp=unconfined",
+      "web: is run with the kernel's files under /proc unmasked",
+      "web: is run with the kernel's files under /proc writable",
       "web: takes the volumes of someone, which is not this project's",
       "web: mounts /var/run/docker.sock, which is outside this chat's folder",
       "web: mounts alias, which is reached by a link: mount the folder it leads to by its own path",
@@ -299,6 +303,14 @@ test("compose runs in Docker's command-line image, a container of this extension
   assert.equal((await going).code, 137, "killed");
   release();
   docker.runs.onStart = undefined;
+
+  // Stopped before this step, or while the image downloads: nothing is made.
+  const before = docker.containers.length;
+  await assert.rejects(runner(["up"], { folder, signal: AbortSignal.abort() }), { name: "AbortError" });
+  const stopping = new AbortController();
+  const slow = composeRunner(OWNER, async () => void stopping.abort(), async (p) => p);
+  await assert.rejects(slow(["up"], { folder, signal: stopping.signal }), { name: "AbortError" });
+  assert.equal(docker.containers.length, before);
 
   // With input: given by its environment, and read by compose from `-`.
   docker.runs.onStart = (c) => {
