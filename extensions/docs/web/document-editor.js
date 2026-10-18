@@ -18,7 +18,7 @@
  * React and building blocks (`portal.ui`).
  */
 import { MAX_QUOTE } from "./anchor.js";
-import { comments, PENDING } from "./comments.js";
+import { comments, MARGIN_ROOM, PENDING } from "./comments.js";
 import { createLive } from "./live.js";
 import { asksAgent } from "./mention.js";
 import { createSaver } from "./saver.js";
@@ -32,9 +32,9 @@ const DRAFT = "pithagoras-docs/draft";
 const KEEPALIVE_BYTES = 60 * 1024;
 /** How wide the document has to be for the list of comments to stand beside the page; narrower, it comes in over the page from the right. */
 const LIST_BESIDE = 900;
-/** The markers of comments in the right margin: how high one is, and how wide the page has to be for it to have a margin to stand in (as a card beside a passage). */
+/** The markers of comments in the right margin: how high one is, and how far from the text column. */
 const MARKER_HEIGHT = 22;
-const MARGIN_MIN = 720;
+const MARKER_GAP = 12;
 
 /** How a printed copy of a document looks: plain, black on white, as a page. */
 const PRINT_CSS = `
@@ -337,6 +337,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     }, [threads]);
     const workspace = useRef(null);
     const sheet = useRef(null);
+    // Whether the mouse button was pressed in the text.
+    const pressed = useRef(false);
     // The whole of it, measured for whether the list of comments fits beside the sheet.
     const root = useRef(null);
     const [wide, setWide] = useState(false);
@@ -354,7 +356,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const listed = side === "comments";
     const history = side === "history";
     const [takeFocus, setTakeFocus] = useState(null);
-    const [, setRelayout] = useState(0);
     // What the editor's callbacks, which are made once, need of what the page is now.
     const now = useRef({});
     // Asks the server for the threads again: set once the page has a document to ask about.
@@ -408,7 +409,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             if (answer.recreated) setNotice({ kind: "recreated", revision: answer.revision });
             return answer;
           }),
-        onMerged: (answer, sent) => live?.merged(answer, sent),
+        onMerged: (answer, sent) => {
+          // The file is what the server made of the save and the later revision.
+          filed.current = answer.markdown;
+          live?.merged(answer, sent);
+        },
         onState: (state) => {
           // Kept while it cannot be saved, and let go once it is, also when the page is gone by then.
           if (state.status === "conflict" || state.status === "error") keepDraft(folder, id, { base: state.base, markdown: read() });
@@ -476,19 +481,15 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           if (sourceBox.current) replaceText(sourceBox.current, next);
           typed.current = sourceBox.current ? sourceBox.current.value : next;
         };
-        // What the box says the text is: the text as it was saved where it is only written in another style (the editor writes Markdown in its own, and
-        // the same words are not a change), else as it is typed.
-        let seenText = { raw: null, base: null, out: null };
-        const boxText = () => {
-          const raw = sourceBox.current ? sourceBox.current.value : typed.current;
-          const base = saver.baseline();
-          if (seenText.raw !== raw || seenText.base !== base) seenText = { raw, base, out: raw === base ? raw : editor.normalize(raw) === base ? base : raw };
-          return seenText.out;
-        };
         const inSource = () => modeNow.current === "markdown";
+        // While the text is written as Markdown the box is the text: saving, what counts as a change, the merge of what the agent changed
+        // meanwhile and the draft all go by what is typed in it, character for character, against the file as it is stored, and the editor's
+        // way of writing the same words (`-` for `*`, its blank lines) is nowhere in it. The editor is given the text again when the person
+        // goes back to it.
         proxy = {
           ...editor,
-          markdown: () => (inSource() ? boxText() : editor.markdown()),
+          normalize: (text) => (inSource() ? text : editor.normalize(text)),
+          markdown: () => (inSource() ? (sourceBox.current ? sourceBox.current.value : typed.current) : editor.markdown()),
           apply: (next) => (inSource() ? put(next) : editor.apply(next)),
           replace: (next) => (inSource() ? put(next) : editor.replace(next)),
           focus: () => (inSource() ? sourceBox.current?.focus({ preventScroll: true }) : editor.focus()),
@@ -497,12 +498,24 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             sourceBox.current?.focus({ preventScroll: true });
             sourceBox.current?.setSelectionRange(sourceBox.current.value.length, sourceBox.current.value.length);
           },
+          // A click on the page outside the text: below the last of it the caret goes to the end; beside a line it goes to that line.
+          // (A box has no way to say where a point is in it: a click beside it gives it the focus, where its caret is.)
+          focusAt: (x, y) => {
+            const text = inSource() ? sourceBox.current : mount;
+            if (!text || y > text.getBoundingClientRect().bottom) return proxy.focusEnd();
+            if (!inSource()) return editor.focusAt(x, y);
+            sourceBox.current.focus({ preventScroll: true });
+          },
         };
-        // What an earlier visit left unsaved, read before the document is taken as it stands (that forgets it).
+        // What an earlier visit left unsaved, read before the document is taken as it stands (that forgets it). Opened as Markdown the
+        // file's text is the baseline and the draft goes into the box as it was typed; in the editor, the editor writes both.
         const kept = readDraft(folder, id);
-        saver.adopt(doc.revision, editor.markdown());
-        if (kept && kept.markdown !== editor.markdown()) {
-          editor.replace(kept.markdown);
+        const first = inSource() ? doc.markdown : editor.markdown();
+        saver.adopt(doc.revision, first);
+        if (inSource()) put(first);
+        if (kept && kept.markdown !== first) {
+          if (inSource()) put(kept.markdown);
+          else editor.replace(kept.markdown);
           keepDraft(folder, id, kept);
           // Written on the revision the document is at: saved as it is. On another one: the document was changed since, and the person chooses.
           if (kept.base === doc.revision) saver.changed();
@@ -514,10 +527,14 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           visual: editor,
           saver,
           url,
-          // The box is given the text: the file's, where that is the editor's text in the file's own style, else the editor's.
+          // The box is given the text: the file's own, where the editor's text is that text written in the editor's style (nothing unsaved),
+          // and then it is the saver's baseline as the file has it; else the editor's, which has what is not saved.
           seed: () => {
             const text = editor.markdown();
-            put(editor.normalize(filed.current) === text ? filed.current : text);
+            const clean = saver.state().status === "saved" && !saver.unsaved();
+            const raw = clean && editor.normalize(filed.current) === text ? filed.current : text;
+            put(raw);
+            if (clean) saver.adopt(saver.state().base, raw);
           },
           // The editor is given the text of the box, where it differs from its own.
           toVisual: () => {
@@ -525,7 +542,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             if (editor.normalize(text) !== editor.markdown()) editor.replace(text);
           },
         };
-        if (inSource()) parts.current.seed();
         live = createLive({
           editor: proxy,
           saver,
@@ -619,35 +635,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       setWide(box.clientWidth >= LIST_BESIDE);
       return () => watch.disconnect();
     }, []);
-    // The sheet changes its height as the text is typed: the card of a comment is placed again at its passage.
+    // The sheet changes its height as the text is typed, and its width as the window or a panel at the side changes: the card of a comment
+    // is placed again at its passage, and the markers in the margin are measured again.
+    const [relayout, setRelayout] = useState(0);
     useEffect(() => {
-      const sheet = host.current;
-      if (!sheet || typeof ResizeObserver === "undefined") return;
+      if (typeof ResizeObserver === "undefined") return;
       const watch = new ResizeObserver(() => setRelayout((n) => n + 1));
-      watch.observe(sheet);
+      if (host.current) watch.observe(host.current);
+      if (sheet.current) watch.observe(sheet.current);
       return () => watch.disconnect();
     }, []);
-    // The markers of the comments in the right margin, level with their passages: one for each thread that is marked in the text and whose
-    // card is not open, stacked where passages share a line. Measured after each drawing; drawn again only when one moved.
     const [markers, setMarkers] = useState([]);
-    React.useLayoutEffect(() => {
-      const frame = sheet.current?.getBoundingClientRect();
-      let found = [];
-      if (ready && !watching && !old && !plain && frame && frame.width >= MARGIN_MIN) {
-        for (const thread of threads.items) {
-          if (thread.status !== "open" || thread.orphaned || thread.id === active || !texts.has(thread.id)) continue;
-          const line = rectsOf(thread.id)[0];
-          if (line) found.push({ id: thread.id, count: thread.comments.length, text: texts.get(thread.id), top: line.top - frame.top - sheet.current.clientTop + (line.height - MARKER_HEIGHT) / 2 });
-        }
-        found.sort((a, b) => a.top - b.top);
-        let low = -Infinity;
-        for (const marker of found) {
-          marker.top = Math.round(Math.max(marker.top, low));
-          low = marker.top + MARKER_HEIGHT + 2;
-        }
-      }
-      setMarkers((now) => (now.length === found.length && now.every((m, i) => m.id === found[i].id && m.top === found[i].top && m.count === found[i].count && m.text === found[i].text) ? now : found));
-    });
     /** Where on the screen the passage of thread `thread` is, a rectangle for each line of it (none where it is not marked). */
     const rectsOf = (thread) => [...(host.current?.querySelectorAll(`[data-pd-thread="${CSS.escape(thread)}"]`) ?? [])].flatMap((el) => [...el.getClientRects()]).filter((r) => r.width > 0 || r.height > 0);
 
@@ -666,6 +664,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       const { editor, saver } = parts.current;
       const { conflict } = saver.state();
       if (!ok || !conflict) return;
+      filed.current = conflict.markdown;
       editor.replace(conflict.markdown);
       saver.adopt(conflict.revision, editor.markdown());
       setNotice(null);
@@ -691,7 +690,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         } catch (e) {
           if (e.status !== 409 || !Number.isInteger(e.body?.revision)) throw e;
           // Changed since the page last saved or loaded it: shown as it is now, and the person asks again if it is still wanted.
-          editor.replace(e.body.markdown ?? "");
+          filed.current = e.body.markdown ?? "";
+          editor.replace(filed.current);
           saver.adopt(e.body.revision, editor.markdown());
           setNotice({ kind: "moved", revision: e.body.revision, from: revision });
           // The page is the document as it is now, not the old text beside a note that says it moved on.
@@ -917,7 +917,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         if (id) show(id);
       }
     };
-    now.current = { active, compose, clicked, comment, close: closeCard };
+    now.current = { active, compose, clicked, comment, show, close: closeCard };
     // In the order of the text, those that have no place last.
     const ordered = [...threads.items].sort((a, b) => (a.start ?? Infinity) - (b.start ?? Infinity) || a.createdAt.localeCompare(b.createdAt));
 
@@ -947,7 +947,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         const clean = p.saver.state().status === "saved" && !p.saver.unsaved();
         modeNow.current = next;
         if (clean) p.saver.adopt(p.saver.state().base, p.visual.markdown());
-        else p.saver.changed();
+        else {
+          // The text of the last revision, which the baseline has as the box had it, is the editor's from here on, as what changed from outside is.
+          p.saver.restyle(p.visual.normalize(p.saver.baseline()));
+          p.saver.changed();
+        }
         // The editor was not told of what changed in the box: the passages of the comments are asked for again.
         void refresh.current();
       }
@@ -1003,6 +1007,79 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     }, [side]);
     // An earlier revision is on the page in the text's place (the current one is the text itself); one that cannot be read is said in the panel.
     const old = history && looking && looking.revision !== base && !looking.error ? looking : null;
+    // The markers of the comments in the right margin, level with their passages: one for each thread that is marked in the text and whose
+    // card is not open, stacked where passages share a line, and only where the margin is wide enough to hold them (measured: the panel at
+    // the side takes from it). Measured once in a frame, and only when something that can move them has changed (not after each key), with
+    // one query for the marked passages of all the threads.
+    const measure = useRef(() => {});
+    measure.current = () => {
+      const frame = sheet.current?.getBoundingClientRect();
+      const column = host.current?.getBoundingClientRect();
+      let found = [];
+      if (ready && !watching && !old && !plain && frame && column && frame.right - sheet.current.clientLeft - column.right >= MARGIN_ROOM) {
+        const lines = new Map();
+        for (const el of host.current.querySelectorAll("[data-pd-thread]")) {
+          const id = el.dataset.pdThread;
+          if (lines.has(id)) continue;
+          const line = [...el.getClientRects()].find((r) => r.width > 0 || r.height > 0);
+          if (line) lines.set(id, line);
+        }
+        const left = Math.round(column.right - frame.left - sheet.current.clientLeft + MARKER_GAP);
+        for (const thread of threads.items) {
+          const line = lines.get(thread.id);
+          if (thread.status !== "open" || thread.orphaned || thread.id === active || !texts.has(thread.id) || !line) continue;
+          found.push({ id: thread.id, count: thread.comments.length, text: texts.get(thread.id), left, top: line.top - frame.top - sheet.current.clientTop + (line.height - MARKER_HEIGHT) / 2 });
+        }
+        found.sort((a, b) => a.top - b.top);
+        let low = -Infinity;
+        for (const marker of found) {
+          marker.top = Math.round(Math.max(marker.top, low));
+          low = marker.top + MARKER_HEIGHT + 2;
+        }
+      }
+      setMarkers((now) => (now.length === found.length && now.every((m, i) => m.id === found[i].id && m.top === found[i].top && m.left === found[i].left && m.count === found[i].count && m.text === found[i].text) ? now : found));
+    };
+    const frameQueued = useRef(0);
+    useEffect(() => {
+      if (frameQueued.current) return;
+      frameQueued.current = requestAnimationFrame(() => {
+        frameQueued.current = 0;
+        measure.current();
+      });
+    }, [ready, watching, old, plain, threads.items, texts, active, relayout, wide, side]);
+    // Drawn again only when a marker is: the page is drawn on each key, and a hundred buttons are not to be compared with themselves each time.
+    const markerButtons = React.useMemo(
+      () =>
+        markers.length > 0 &&
+        h(
+          "div",
+          { className: "pd-markers" },
+          markers.map((marker) =>
+            h(
+              "button",
+              {
+                key: marker.id,
+                type: "button",
+                className: "pd-marker",
+                style: { top: `${marker.top}px`, left: `${marker.left}px` },
+                "aria-label": t("Comments on “{passage}”: {n}", { passage: marker.text.length > 30 ? `${marker.text.slice(0, 30)}…` : marker.text, n: marker.count }),
+                // A click opens the card as a click on the words does; with the keyboard (no pointer: detail 0) the box has the focus too.
+                onClick: (e) => (e.detail === 0 ? now.current.show(marker.id) : now.current.clicked(marker.id)),
+              },
+              h(Icon, { name: "comments" }),
+              h("span", null, marker.count),
+            ),
+          ),
+        ),
+      [markers, t],
+    );
+    useEffect(
+      () => () => {
+        cancelAnimationFrame(frameQueued.current);
+        frameQueued.current = 0;
+      },
+      [],
+    );
     // A restore ends in the text, once the earlier revision is off the page (the editor is not there to take the focus before).
     useEffect(() => {
       if (!toText.current || old) return;
@@ -1077,7 +1154,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           h(
             "div",
             { className: "pd-modes", role: "group", "aria-label": t("Editing mode") },
-            ["visual", "markdown"].map((way) => h("button", { key: way, type: "button", "aria-pressed": mode === way, disabled: !ready, onClick: () => void switchTo(way) }, way === "visual" ? t("Visual") : t("Markdown"))),
+            ["visual", "markdown"].map((way) => {
+              const name = way === "visual" ? t("Visual") : t("Markdown");
+              // Where the bar is narrow only the icon is left (the name stays the button's name and its tooltip).
+              return h("button", { key: way, type: "button", title: name, "aria-label": name, "aria-pressed": mode === way, disabled: !ready, onClick: () => void switchTo(way) }, h(Icon, { name: way === "visual" ? "visual" : "inlineCode" }), h("span", { className: "pd-modelabel" }, name));
+            }),
           ),
           h(BarButton, { icon: "comments", label: t("Comments"), expanded: listed, badge: openCount || null, buttonRef: commentsButton, onClick: () => toggleSide("comments") }),
           h(BarButton, { icon: "history", label: t("History"), expanded: history, disabled: !ready, buttonRef: historyButton, onClick: () => toggleSide("history") }),
@@ -1157,9 +1238,19 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             {
               className: "pd-sheet",
               ref: sheet,
-              // A click on the page under the text, or beside it, is a click in the text: the caret goes to its end, as on a word processor's page.
+              // A press that began in the text: the click that follows it, wherever the mouse is let go, ends a selection the browser has made.
+              onMouseDownCapture: (e) => void (pressed.current = Boolean(e.target.closest?.(".ProseMirror, textarea"))),
+              // A click on the page under the text, or beside it, is a click in the text, as on a word processor's page: below the text the
+              // caret goes to its end, beside a line to that line. Not the end of a drag that began in the text (a selection let go of beside
+              // a line), and never where something is selected: that is the person's, and is left as it is.
               onClick: (e) => {
-                if (!e.target.closest(".ProseMirror, .pd-popover, .pd-draft, button, a, input, textarea") && parts.current && !watching && !old) parts.current.editor.focusEnd();
+                const began = pressed.current;
+                pressed.current = false;
+                if (began || e.target.closest(".ProseMirror, .pd-popover, .pd-draft, button, a, input, textarea") || !parts.current || watching || old) return;
+                const selection = window.getSelection();
+                const box = sourceBox.current;
+                if ((selection && !selection.isCollapsed && host.current?.contains(selection.anchorNode)) || (plain && box && box.selectionStart !== box.selectionEnd)) return;
+                parts.current.editor.focusAt(e.clientX, e.clientY);
               },
             },
             !ready && !broken && h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
@@ -1219,27 +1310,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
                 onDeleteThread: removeThread,
               }),
             // After the card in the order of the page, so that Tab goes from the text to the card first.
-            markers.length > 0 &&
-              h(
-                "div",
-                { className: "pd-markers" },
-                markers.map((marker) =>
-                  h(
-                    "button",
-                    {
-                      key: marker.id,
-                      type: "button",
-                      className: "pd-marker",
-                      style: { top: `${marker.top}px` },
-                      "aria-label": t("Comments on “{passage}”: {n}", { passage: marker.text.length > 30 ? `${marker.text.slice(0, 30)}…` : marker.text, n: marker.count }),
-                      // A click opens the card as a click on the words does; with the keyboard (no pointer: detail 0) the box has the focus too.
-                      onClick: (e) => (e.detail === 0 ? show(marker.id) : now.current.clicked(marker.id)),
-                    },
-                    h(Icon, { name: "comments" }),
-                    h("span", null, marker.count),
-                  ),
-                ),
-              ),
+            markerButtons,
           ),
         ),
         list,

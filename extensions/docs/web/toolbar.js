@@ -31,6 +31,7 @@ export const ICONS = {
   printer: "M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z",
   file: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5ZM14 3v5h5",
   chevron: "m6 9 6 6 6-6",
+  visual: "M4 7V4h16v3M9 20h6M12 4v16",
 };
 
 export function toolbar(portal) {

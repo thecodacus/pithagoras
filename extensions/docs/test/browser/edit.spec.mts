@@ -1261,3 +1261,123 @@ test('restoring a revision shows it in the source too', async ({ page }) => {
   await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it soon.\n');
   expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
 });
+
+/* The page under and beside the text is the text's, as on a word processor's page: but a selection is the person's. */
+const paragraphs = (n: number) => `# The plan\n\n${Array.from({ length: n }, (_, i) => `Paragraph ${i + 1} of the text.`).join('\n\n')}\n`;
+const scrollTopOf = (page: Page) => page.evaluate(() => document.querySelector('.pd-scroll')!.scrollTop);
+
+test('a selection made by dragging and let go of beside its line stays selected, the page stays where it is, and it can be commented on', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const store = new Store(paragraphs(60));
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Paragraph 60 of the text.');
+  const line = editorOf(page).getByText('Paragraph 30 of the text.', { exact: true });
+  await line.scrollIntoViewIfNeeded();
+  const before = await scrollTopOf(page);
+  const box = (await line.boundingBox())!;
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 1, y);
+  await page.mouse.down();
+  await page.mouse.move(sheet.x + sheet.width - 60, y, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => getSelection()!.toString().trim())).toBe('Paragraph 30 of the text.');
+  expect(Math.abs((await scrollTopOf(page)) - before)).toBeLessThan(4);
+  await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeEnabled();
+});
+
+test('a click beside a line puts the caret on that line, and the page stays where it is', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const store = new Store(paragraphs(60));
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Paragraph 60 of the text.');
+  const line = editorOf(page).getByText('Paragraph 30 of the text.', { exact: true });
+  await line.scrollIntoViewIfNeeded();
+  const before = await scrollTopOf(page);
+  const box = (await line.boundingBox())!;
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  await page.mouse.click(sheet.x + sheet.width - 40, box.y + box.height / 2);
+  await page.keyboard.type('X');
+  await expect(editorOf(page).getByText('Paragraph 30 of the text.X', { exact: true })).toBeVisible();
+  expect(Math.abs((await scrollTopOf(page)) - before)).toBeLessThan(40);
+  // The left margin too: the start of the line.
+  await page.mouse.click(sheet.x + 10, box.y + box.height / 2);
+  await page.keyboard.type('Y');
+  await expect(editorOf(page).getByText('YParagraph 30 of the text.X', { exact: true })).toBeVisible();
+});
+
+test('a click on the page below the text puts the caret at its end', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const area = (await page.locator('.pd-scroll').boundingBox())!;
+  await page.mouse.click(sheet.x + sheet.width / 2, area.y + area.height - 30);
+  await page.keyboard.type(' The end.');
+  await expect(editorOf(page)).toContainText('Ship it on Friday. The end.');
+  await page.mouse.click(sheet.x + 10, area.y + area.height - 30);
+  await page.keyboard.type(' More.');
+  await expect(editorOf(page)).toContainText('Ship it on Friday. The end. More.');
+});
+
+test('Markdown that is only written another way is saved as it was typed, and the bar says Saved only when it is', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store('# The plan\n\n- One\n- Two\n\nText.\n');
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\n- One\n- Two\n\nText.\n');
+  // The bullets written with a star: the editor writes them the same, and it is still a change to the file.
+  await sourceOf(page).fill('# The plan\n\n* One\n* Two\n\nText.\n');
+  await page.keyboard.press('Control+s');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.puts).toEqual([{ markdown: '# The plan\n\n* One\n* Two\n\nText.\n', base: 3 }]);
+  // The heading in the other style, and more blank lines.
+  await sourceOf(page).fill('The plan\n========\n\n\n* One\n* Two\n\nText.\n');
+  await expect(state(page)).toHaveText('Unsaved changes · Revision 4');
+  await page.keyboard.press('Control+s');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.markdown).toBe('The plan\n========\n\n\n* One\n* Two\n\nText.\n');
+  await page.reload();
+  await expect(sourceOf(page)).toHaveValue('The plan\n========\n\n\n* One\n* Two\n\nText.\n');
+});
+
+test('text typed in the Markdown that could not be saved comes back as it was typed, and is saved so', async ({ page }) => {
+  await inMarkdown(page);
+  const raw = '# The plan\n\n* One\n* Two\n\nText.\n';
+  const store = new Store(raw);
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(raw);
+  let fail = true;
+  await page.route(`**${DOCUMENT}`, (route) => (fail && route.request().method() === 'PUT' ? route.fulfill({ status: 500, json: { error: 'The documents store could not do that' } }) : route.fallback()));
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('* Three\n');
+  await expect(state(page)).toHaveText('Not saved · Revision 3');
+  await page.reload();
+  // Not the editor's way of writing it (a dash, a blank line before the item).
+  await expect(sourceOf(page)).toHaveValue(`${raw}* Three\n`);
+  await expect(page.locator('.pd-note')).toContainText('Text you had not saved was brought back.');
+  fail = false;
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.markdown).toBe(`${raw}* Three\n`);
+});
+
+test('the bar keeps the room for the name of the document at a window of 1060 pixels with the sidebar open: the switch is two icons there', async ({ page }) => {
+  await page.setViewportSize({ width: 1060, height: 800 });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  const name = page.locator('.pd-doctitle');
+  await expect(name).toHaveText('The plan');
+  const fits = await name.evaluate((el) => ({ cut: el.scrollWidth > el.clientWidth, width: el.getBoundingClientRect().width }));
+  expect(fits.cut).toBe(false);
+  expect(fits.width).toBeGreaterThan(50);
+  // The switch is still there and named, with icons for words.
+  await expect(modeButton(page, 'Visual')).toBeVisible();
+  await expect(modeButton(page, 'Markdown')).toBeVisible();
+  await expect(modeSwitch(page).locator('.pd-modelabel').first()).toBeHidden();
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('title', 'Markdown');
+  // A wide window has the words.
+  await page.setViewportSize({ width: 1700, height: 800 });
+  await expect(modeSwitch(page).locator('.pd-modelabel').first()).toBeVisible();
+});

@@ -400,8 +400,10 @@ and **Download** (the first two open a panel at the side, [below](#history)); a 
 of the area under the toolbar, one continuous surface with no box or frame around
 it (in the chat's panel as well as on the Documents page), in a column of a
 readable width with room at its sides. It scrolls by itself, so that the bar and
-the toolbar stay. A click anywhere on it under the text, or beside it, puts the
-cursor at the end of the document, as on a word processor's page. Nothing else is
+the toolbar stay. A click on it beside a line of the text puts the cursor on that
+line, and one under the last of the text puts it at the end of the document, as
+on a word processor's page. Selecting text with the mouse and letting go beside
+it, in the margin, keeps the selection. Nothing else is
 shown with the text: the comments are on the page when you open one, and in a list
 when you ask for it ([below](#comments)). On the Documents page an open document
 takes the whole page.
@@ -427,6 +429,8 @@ box. It is a plain text box, so the browser's own undo and redo, spelling and
 selection work in it, and so does **Tab**, which leaves the box rather than
 writing a tab. The browser remembers the choice (per browser, not per document),
 and a document opens the way you left it last.
+Where the bar is narrow (a window with the portal's sidebar open) the switch is
+two icons, with the names as tooltips, so that the document's name keeps its room.
 
 Everything else works as it does in the editor:
 
@@ -438,11 +442,17 @@ Everything else works as it does in the editor:
   comes into the box as it does into the editor: at once if you have typed
   nothing unsaved, merged into your text where the changes do not meet, and a
   conflict that you choose in ([below](#when-the-document-changed-meanwhile)) where
-  they do. Your cursor stays at the words it was at. (A change from outside is
-  not something the browser's undo takes back.)
+  they do. The box is the text for all of it: what the agent changed is merged
+  into what is in the box, in the style it is written in (a document that uses `*`
+  for list items keeps them), and a line the agent changed is no conflict because
+  of the style of another. Your cursor stays at the words it was at, and the
+  browser's own undo keeps what you typed: the change from outside is a step of
+  its own in it (the first Ctrl+Z takes it back, as an edit of yours that you can
+  redo; a browser that does not allow this starts its undo over).
 - A page that is closed with text not saved is kept, restored, and warned of in
-  the same way. **History** works the same, and a revision restored shows in the
-  box.
+  the same way. What was typed in the box comes back in it as it was typed. In
+  **Visual** the same text is written by the editor, in its style. **History**
+  works the same, and a revision restored shows in the box.
 - Going from one to the other loses nothing, also text that is not saved yet,
   which stays unsaved. Going to **Visual** saves the text first where it can. If
   you only looked at a document, or went from one to the other without changing
@@ -640,16 +650,17 @@ as the text, and nothing of them is shown until you ask:
   opens as a card on the page. On a wide page the card is **beside the passage**,
   level with it at the right edge of the page, so that the highlighted words stay
   visible at its left (the text it overlaps on the right goes behind it); where
-  the passage runs into the card's place, or the page is narrow (a narrow panel,
-  a phone), the card is just under the words (above them where there is no room
-  under them). It stays inside the page. It has the comments of the thread, each
+  the passage runs into the card's place, or the page has no room beside the text
+  for it (a narrow panel, a phone, or a panel open at the side: the room right of
+  the text column is measured, not the window), the card is just under the words
+  (above them where there is no room under them). It stays inside the page. It has the comments of the thread, each
   with who wrote it and when, a check to **Resolve** the thread (**Reopen** on a
   resolved one) and **Delete thread** where that is yours to do. A thread with
   many comments shows its first and its last, and **Show _n_ replies** for the
   rest. The box to **Reply** in is one line, and says in its own words that
   **@agent** asks the agent. Only one card is open at a time: a click on another
-  passage opens that one instead. It follows its words as you scroll and as the
-  text changes, and a click in the text elsewhere, a click outside the card or
+  passage opens that one instead. It follows its words as you scroll (it scrolls off with them when they do)
+  and as the text changes, and a click in the text elsewhere, a click outside the card or
   **Escape** (also when the card was opened by a click and the cursor is still in
   the text) closes it (the text has the focus again). What was typed in its box
   is kept when it is closed ([below](#writing-a-comment)). If its words are gone
@@ -661,8 +672,10 @@ as the text, and nothing of them is shown until you ask:
   the thread's card as a click on the words does, and **Enter** on it opens the
   card with the focus in its box. Threads on one line have a marker each, one
   under the other. A marker follows its passage and is not there while its card
-  is open. Where there is no margin (a narrow panel, a phone) there are no
-  markers: the highlighted words are the way in.
+  is open. Markers are drawn only where the margin right of the text is wide
+  enough to hold them without touching a word (measured, so a panel open at the
+  side counts): where there is not (a narrow window or panel, a phone) there are
+  no markers, and the highlighted words are the way in.
 - A new comment opens its card in the same way at the words you selected, with
   the box ready to write in. The page stays where it is, also far down a long
   document.

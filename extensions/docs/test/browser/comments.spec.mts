@@ -1928,6 +1928,106 @@ test('in a narrow page, where there is no margin, there are no markers: the high
   await openThread(page, green.id);
 });
 
+test('a card beside its passage goes with it when the page is scrolled, however far, and does not stay at the top of the view over other text', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const filler = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of what is between.`).join('\n\n');
+  const store = new Store();
+  store.texts.set(3, `# The plan\n\nThe first point.\n\n${filler}\n\nThe last point.\n`);
+  const first = seeded(store, 'The first point.', 'One.');
+  await open(page, store, { ready: 'The last point.' });
+  await openThread(page, first.id);
+  await expect(popover(page)).toHaveAttribute('data-side', 'true');
+  const level = async () => Math.abs((await popover(page).boundingBox())!.y - (await rectsOf(page, first.id))[0].top);
+  expect(await level()).toBeLessThan(8);
+  // Scrolled on to read: the passage is far above the view, and the card is with it, not over the lines being read.
+  // (Waited for in the page: a frame has passed, so that the scroll was told, and then longer than the card waits to be placed again.)
+  await page.evaluate(() => new Promise<void>((done) => {
+    document.querySelector('.pd-scroll')!.scrollTo(0, 1500);
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 300)));
+  }));
+  expect((await rectsOf(page, first.id))[0].bottom).toBeLessThan(0);
+  expect(await level()).toBeLessThan(8);
+  const area = (await page.locator('.pd-scroll').boundingBox())!;
+  const card = (await popover(page).boundingBox())!;
+  expect(card.y + card.height).toBeLessThan(area.y);
+  // And back: beside the passage again.
+  await page.evaluate(() => document.querySelector('.pd-scroll')!.scrollTo(0, 0));
+  await expect.poll(level).toBeLessThan(8);
+});
+
+/** The room right of the text column, and where each marker is: what has to be clear of the words. */
+const margins = (page: Page) =>
+  page.evaluate(() => {
+    const sheet = document.querySelector('.pd-sheet')!.getBoundingClientRect();
+    const column = document.querySelector('.pd-editor')!.getBoundingClientRect();
+    return { sheet: sheet.width, margin: sheet.right - column.right, markers: [...document.querySelectorAll('.pd-marker')].map((m) => { const r = m.getBoundingClientRect(); return { left: r.left - column.right, right: sheet.right - r.right }; }) };
+  });
+
+test('the markers in the margin are drawn only where the margin is wide enough to hold them, also with a panel beside the page, and never touch the text', async ({ page }) => {
+  const edge = `${'word '.repeat(30)}the end of a long line`;
+  const store = new Store();
+  store.texts.set(3, `# The plan\n\n${edge}\n\nThe last point.\n`);
+  const long = seeded(store, edge, 'Long.');
+  await page.setViewportSize({ width: 1700, height: 900 });
+  await open(page, store, { ready: 'The last point.' });
+  await expectMarked(page, long.id, edge);
+  // Without the panel the margin is wide: a marker, clear of the column.
+  await expect(page.locator('.pd-marker')).toHaveCount(1);
+  let room = await margins(page);
+  expect(room.markers[0].left).toBeGreaterThanOrEqual(0);
+  expect(room.markers[0].right).toBeGreaterThanOrEqual(0);
+  await showList(page);
+  // The panel takes from the page: at a sheet of about 760 and 880 pixels the margin is narrow, and it is the words that open a card.
+  for (const width of [1320, 1440, 1700]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(async () => (await margins(page)).sheet).toBeLessThan(width - 300);
+    // Measured again until steady: the page is laid out again after the window changed.
+    await expect.poll(async () => {
+      room = await margins(page);
+      return room.markers.length === (room.margin >= 76 ? 1 : 0);
+    }).toBe(true);
+    for (const marker of room.markers) {
+      expect(marker.left).toBeGreaterThanOrEqual(0);
+      expect(marker.right).toBeGreaterThanOrEqual(0);
+    }
+  }
+  // The sheets of about 760 and 880 pixels were among them: no marker, no overlap.
+  await page.setViewportSize({ width: 1320, height: 900 });
+  await expect.poll(async () => Math.round((await margins(page)).sheet)).toBeLessThan(800);
+  await expect(page.locator('.pd-marker')).toHaveCount(0);
+  // The card is under the passage there (its words are not covered), as they open it.
+  await openThread(page, long.id);
+  await expect(popover(page)).not.toHaveAttribute('data-side', 'true');
+  expect(await clearOf(page, long.id)).toBe(true);
+});
+
+test('the markers are measured once in a frame, and not after every key: typing in a document with many comments costs the passages one look, not one each', async ({ page }) => {
+  await page.setViewportSize({ width: 1700, height: 900 });
+  const paragraphs = Array.from({ length: 40 }, (_, i) => `Point ${i + 1} is stated here.`);
+  const store = new Store();
+  store.texts.set(3, `# The plan\n\n${paragraphs.join('\n\n')}\n\nThe last point.\n`);
+  for (const text of paragraphs) seeded(store, text, 'Why?');
+  await open(page, store, { ready: 'The last point.' });
+  await expect(page.locator('.pd-marker')).toHaveCount(40);
+  // How often the editor's marked passages are asked for, as the page looks for where they are.
+  await page.evaluate(() => {
+    const asked = { count: 0 };
+    (window as any).asked = asked;
+    const query = Element.prototype.querySelectorAll;
+    Element.prototype.querySelectorAll = function (selector: string) {
+      if (typeof selector === 'string' && selector.includes('data-pd-thread')) asked.count++;
+      return query.call(this, selector);
+    };
+  });
+  await editorOf(page).getByText('The last point.').click();
+  await page.keyboard.press('End');
+  await page.waitForTimeout(100);
+  await page.keyboard.type('x'.repeat(30), { delay: 5 });
+  await page.waitForTimeout(500);
+  // (One look for each frame at most, as the text settled; a look for each passage on each key would be over a thousand.)
+  expect(await page.evaluate(() => (window as any).asked.count)).toBeLessThan(60);
+});
+
 /* The document written as Markdown (the bar's Markdown): the comments are not drawn in the source, and the list still has them. */
 test('in the Markdown nothing of the comments is drawn on the text, the list has them all, and choosing one goes to the editor and opens its card', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });

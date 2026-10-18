@@ -36,6 +36,9 @@ export function fit(box) {
 /**
  * Puts `next` in the box in place of what it holds, changing what differs and no more: the caret and the selection stay at the
  * words they were at (or at the nearest place that is left of them), and the page does not move. Where nothing differs, nothing happens.
+ * In a box that has the focus the change is made as typing is (`insertText` over the span that differs), so that the browser's own undo
+ * keeps what the person typed before it and takes the change back as one step of its own; else (and where the browser refuses) the
+ * value is set, which starts the box's undo history over.
  */
 export function replaceText(box, next) {
   const was = box.value;
@@ -48,8 +51,22 @@ export function replaceText(box, next) {
   // Where a position of the old text is in the new: before the change stays, after it moves by what the change added.
   const moved = (at) => (at <= head ? at : at >= was.length - tail ? at + (next.length - was.length) : head);
   const [start, end, direction] = [box.selectionStart, box.selectionEnd, box.selectionDirection];
-  box.value = next;
+  const focused = document.activeElement === box;
+  const scroller = box.closest(".pd-scroll");
+  const scrolled = scroller ? scroller.scrollTop : 0;
+  let typed = false;
+  if (focused) {
+    try {
+      box.setSelectionRange(head, was.length - tail);
+      const middle = next.slice(head, next.length - tail);
+      typed = (middle ? document.execCommand("insertText", false, middle) : document.execCommand("delete")) && box.value === next;
+    } catch {
+      typed = false;
+    }
+  }
+  if (!typed) box.value = next;
   // A box that is not shown has no selection to keep, and setting one would give it the focus in some browsers.
-  if (document.activeElement === box) box.setSelectionRange(moved(start), moved(end), direction);
+  if (focused) box.setSelectionRange(moved(start), moved(end), direction);
   fit(box);
+  if (scroller) scroller.scrollTop = scrolled;
 }

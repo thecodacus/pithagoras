@@ -31,10 +31,16 @@ export const PENDING = "pending";
 const CARD_WIDTH = 352;
 const GAP = 6;
 const EDGE = 8;
-/** Beside the passage, at the right edge of the page: how wide the card is, how much room the page has to be for that, and how far it keeps from the words. */
+/** Beside the passage, at the right edge of the page: how wide the card is, how wide the page has to be for that, and how far it keeps from the words. */
 const SIDE_WIDTH = 320;
 const SIDE_MIN = 720;
 const SIDE_GAP = 16;
+/**
+ * How much room the margin right of the text column has to have (measured, not guessed from the window's width: the side panel takes
+ * from it) for the markers of the comments to stand in it without touching a word, and for a card to be beside its passage. Where it
+ * has less, the words are the way to a comment, and its card is under them.
+ */
+export const MARGIN_ROOM = 76;
 
 /** `text` cut to what a card shows. */
 const short = (text) => (text.length > SHOWN_CHARS ? `${text.slice(0, SHOWN_CHARS)}…` : text);
@@ -319,6 +325,7 @@ export function comments(portal, { when }) {
       const rects = anchor();
       if (!card || !sheet || !rects?.length) return;
       const frame = sheet.getBoundingClientRect();
+      const margin = editor ? frame.right - sheet.clientLeft - editor.getBoundingClientRect().right : 0;
       const first = rects[0];
       const last = rects.at(-1);
       const width = Math.min(CARD_WIDTH, frame.width - 2 * EDGE);
@@ -329,10 +336,16 @@ export function comments(portal, { when }) {
       const top = view.top;
       // Where the page is wide enough: level with the passage, at the right edge, clear of every word of it (the text under the card goes
       // behind it). Where it is not, or the card would be over the passage: under it, above where there is no room under.
-      if (frame.width >= SIDE_MIN) {
+      if (frame.width >= SIDE_MIN && margin >= MARGIN_ROOM) {
         const x = frame.width - SIDE_WIDTH - EDGE;
-        // As high as the passage, and no lower than the page's end: moved up (still clear of the passage) where it would run past.
-        const y = Math.max(top + EDGE, Math.min(first.top, Math.min(view.bottom, window.innerHeight) - height - EDGE));
+        // As high as the passage, so that it goes with it when the page scrolls. Where the passage is in view the card is kept in view too
+        // (moved up, still clear of the passage, where it would run past the end); one whose passage is out of it goes off with it. Never
+        // past the sheet's own ends.
+        const bottom = Math.min(view.bottom, window.innerHeight);
+        const seen = first.bottom > top && first.top < bottom;
+        let y = first.top;
+        if (seen) y = Math.max(top + EDGE, Math.min(y, bottom - height - EDGE));
+        y = Math.max(frame.top + EDGE, Math.min(y, frame.bottom - height - EDGE));
         const clear = rects.every((r) => r.right + SIDE_GAP <= frame.left + x || r.bottom <= y || r.top >= y + height);
         if (clear) {
           const side = { top: Math.round(y - frame.top - sheet.clientTop), left: Math.round(x - sheet.clientLeft), width: SIDE_WIDTH, above: false, side: true };
