@@ -323,6 +323,16 @@ export async function syncExtensionServers(): Promise<void> {
 export const followPackages = (): Promise<void> =>
   syncExtensionServers().catch((e) => console.error("[extensions] could not bring the server halves in line with what is installed:", e));
 
+/**
+ * The list of extensions is being put right at the start (see replaceRetiredExtensions): a page asking meanwhile waits
+ * for it, or it would find a theme chosen before the upgrade gone, and give it up.
+ */
+let preparing: Promise<unknown> = Promise.resolve();
+export const preparingExtensions = <T>(work: Promise<T>): Promise<T> => {
+  preparing = work.catch(() => {});
+  return work;
+};
+
 /** Where a page fetches a file of a package's web folder from. */
 const clientUrl = (half: ClientHalf, file: string) =>
   `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}?v=${half.rev}`;
@@ -333,6 +343,7 @@ export function extensionsRouter(): Router {
   router.get("/extension-ui", async (_req, res) => {
     try {
       // What is being started or stopped is waited for: a page is told where a server half's routes are only once they are there.
+      await preparing;
       await serversSettled();
       const { clients, servers, themed } = await halves();
       const names = [...new Set([...clients, ...servers, ...themed].map((half) => half.name))];

@@ -28,8 +28,9 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
     /** Themes the Notes package names beside its module. */
     notesThemes: undefined as unknown[] | undefined,
   };
-  // The example that is only a theme, as its package.json names it.
-  const dusk = JSON.parse(readFileSync(new URL('../../extensions/theme-dusk/package.json', import.meta.url), 'utf8'));
+  // The example that is only themes, as its package.json names it: Dusk is the one this uses.
+  const pack = JSON.parse(readFileSync(new URL('../../extensions/themes/package.json', import.meta.url), 'utf8'));
+  const dusk = { name: pack.name, version: pack.version, themes: pack.pithagoras.themes.filter((theme: { id: string }) => theme.id === 'dusk') };
   /** What the browser half said to its extension, by chat. */
   const said: { chat: string; extension: string; data: any }[] = [];
   await mockPortal(page, async ({ path: p, method, route, json }) => {
@@ -39,7 +40,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
       const v = `?v=${state.revision}`;
       return {
         extensions: [
-          ...(state.themed ? [{ name: dusk.name, version: dusk.version, themes: dusk.pithagoras.themes }] : []),
+          ...(state.themed ? [{ name: dusk.name, version: dusk.version, themes: dusk.themes }] : []),
           // A second package with themes of its own, two of them, one under the id the first uses.
           ...(state.themed ? [{ name: 'more-themes', version: '1.0.0', themes: [{ id: 'dusk', name: 'Noon', light: { accent: '#0055aa' } }, { id: 'midnight', name: 'Midnight', dark: { canvas: '#05070d' } }] }] : []),
           ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}`, ...(state.notesThemes ? { themes: state.notesThemes } : {}) }] : []),
@@ -135,7 +136,7 @@ const PROBE = `export default function (portal) {
   // A theme changer: it switches the portal to a theme another package brought, and back.
   portal.slots.register("chat.header.action", { id: "theme", component: () => {
     const now = portal.theme.use();
-    return h("button", { type: "button", "data-mode": now.mode, onClick: () => portal.theme.set(now.theme ? null : "pithagoras-theme-dusk/dusk") }, now.theme ? "Back to the portal's colours" : "Switch to Dusk");
+    return h("button", { type: "button", "data-mode": now.mode, onClick: () => portal.theme.set(now.theme ? null : "pithagoras-themes/dusk") }, now.theme ? "Back to the portal's colours" : "Switch to Dusk");
   } });
 }`;
 
@@ -491,7 +492,7 @@ test('a theme an extension brought is chosen in Settings or switched to by an ex
   await expect(colours).toHaveText(/The portal's own/);
   await colours.click();
   // Every theme of every installed extension is here, each with the package it came from, after the portal's own.
-  await expect(page.getByRole('option')).toHaveText([/^The portal's own/, /^Dusk.*pithagoras-theme-dusk/, /^Noon.*more-themes/, /^Midnight.*more-themes/]);
+  await expect(page.getByRole('option')).toHaveText([/^The portal's own/, /^Dusk.*pithagoras-themes/, /^Noon.*more-themes/, /^Midnight.*more-themes/]);
   // One of the second package's: it alone is in effect, and nothing of another theme with it.
   await page.getByRole('option', { name: /Midnight/ }).click();
   await expect.poll(() => colour('--canvas')).toBe('5 7 13');

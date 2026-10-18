@@ -25,7 +25,7 @@ is what there is to install, in three parts: **Comes with Pithagoras**, **Find
 packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
-(the Dusk and Warm themes, a pack of five more, the terminal, Git, Files, Canvases and [Documents](/guide/documents)), each installed from the portal's own
+(a pack of seven themes, the terminal, Git, Files, Canvases and [Documents](/guide/documents)), each installed from the portal's own
 folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
@@ -53,7 +53,7 @@ started from then on have the package; open ones pick it up with `/reload`.
 
 A fresh portal installs the extensions its own `extensions/defaults.json` names,
 once: today the [terminal](/guide/terminal), [Git](/guide/git), [Files](/guide/files), [Canvases](/guide/canvases) and the theme pack (Forest, Ocean,
-Rose, Amber and Mono, chosen under Settings → This browser → Colours). They are ordinary packages from then on: listed under **Installed**,
+Rose, Amber, Mono, Dusk and Warm, chosen under Settings → This browser → Colours). They are ordinary packages from then on: listed under **Installed**,
 switched off or removed like any other, and one you removed is not put back
 when the portal starts again. To use your own in place of one of them, remove
 it and install yours. `PORTAL_DEFAULT_EXTENSIONS=off` installs none of them.
