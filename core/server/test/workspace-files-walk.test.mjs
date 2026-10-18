@@ -208,6 +208,20 @@ test('the last name of what is renamed swapped for a link as the rename is made:
   }
 });
 
+test('a name that became a folder before the old name was taken away leaves nothing renamed: the new name is dropped, and the folder is left', async () => {
+  const { base, sub, outside, done } = swappable();
+  symlinkSync(outside, path.join(sub, 'ln'));
+  // The link that was looked at goes and a folder is made in its place, right before the old name is taken away.
+  const folder = () => { rmSync(path.join(sub, 'ln')); mkdirSync(path.join(sub, 'ln')); };
+  let got;
+  assert.ok(await swappedAt({ names: ['unlinkSync'], when: (_name, [where]) => String(where).endsWith('/ln') }, folder, async () => { got = await codeOf(() => renameEntry(base, 'sub/ln', 'moved')); }));
+  assert.equal(got, 'conflict');
+  assert.deepEqual(names(sub), ['doc.md', 'ln']);
+  assert.ok(lstatSync(path.join(sub, 'ln')).isDirectory());
+  assert.deepEqual(names(outside), ['doc.md', 'secret']);
+  done();
+});
+
 test('a rename never puts a file over one that took the new name since it was looked at', async () => {
   const { base, sub, aside, done } = swappable();
   let got;
@@ -337,7 +351,7 @@ test('the checked path of a folder is a folder that is opened without following 
 test('the portal as root gives nothing away through a link: what the link leads to keeps its owner and mode', { skip: !root }, async () => {
   const { base, outside, aside, swap, done } = swappable();
   const before = statSync(outside);
-  assert.ok(await swappedAt({ names: ['renameSync'], when: () => true }, swap, async () => { await codeOf(() => renameEntry(base, 'sub/doc.md', 'renamed.md')); }));
+  assert.ok(await swappedAt({ names: ['linkSync', 'renameSync'], when: () => true }, swap, async () => { await codeOf(() => renameEntry(base, 'sub/doc.md', 'renamed.md')); }));
   const after = lstatSync(outside);
   assert.deepEqual([after.uid, after.gid, after.mode], [before.uid, before.gid, before.mode], 'what the link leads to keeps its owner and mode');
   assert.deepEqual([statSync(path.join(aside, 'renamed.md')).uid, statSync(path.join(aside, 'renamed.md')).gid], [AGENT, AGENT]);

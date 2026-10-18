@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type Ref, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLeaveRef } from "../motion";
 import { useDismiss } from "../use-dismiss";
@@ -37,6 +37,7 @@ export function Menu({
   className,
   disabled,
   placement = "below",
+  buttonRef,
 }: {
   /** What the button and the list are called, for a screen reader. */
   label: string;
@@ -45,10 +46,12 @@ export function Menu({
   className?: string;
   disabled?: boolean;
   placement?: "below" | "beside";
+  /** The button, for a caller that gives the focus back to it. */
+  buttonRef?: Ref<HTMLButtonElement>;
 }) {
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<Place | null>(null);
-  const button = useRef<HTMLButtonElement>(null);
+  const button = useRef<HTMLButtonElement | null>(null);
   const menu = useRef<HTMLDivElement>(null);
   const menuRef = useLeaveRef<HTMLDivElement>("menu", menu);
   const menuId = useId();
@@ -117,7 +120,11 @@ export function Menu({
   return (
     <>
       <button
-        ref={button}
+        ref={(el) => {
+          button.current = el;
+          if (typeof buttonRef === "function") buttonRef(el);
+          else if (buttonRef) (buttonRef as { current: HTMLButtonElement | null }).current = el;
+        }}
         type="button"
         title={label}
         aria-label={label}

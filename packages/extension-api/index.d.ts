@@ -6,7 +6,7 @@
  *
  * See docs/guide/extension-ui.md, "Building an extension".
  */
-import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, LazyExoticComponent, ReactNode } from "react";
+import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, LazyExoticComponent, ReactNode, Ref } from "react";
 import type * as ReactNamespace from "react";
 
 // --- the chat, and what is drawn in it ---
@@ -413,6 +413,8 @@ export interface Ui {
     className?: string;
     disabled?: boolean;
     placement?: "below" | "beside";
+    /** The button, for a caller that gives the focus back to it. */
+    buttonRef?: Ref<HTMLButtonElement>;
   }>;
   /** A small button with an icon in it, named by `label` (its hover text and its name for a screen reader). `onClick` does not reach the row it is in. */
   IconButton: ComponentType<{ label: string; onClick: () => void; children: ReactNode; disabled?: boolean; danger?: boolean; className?: string }>;

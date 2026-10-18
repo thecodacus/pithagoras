@@ -83,13 +83,9 @@
 .pd-barbutton:hover:not(:disabled), .pd-barbutton[aria-pressed="true"], .pd-barbutton[aria-expanded="true"] { background: rgb(var(--raised)); color: rgb(var(--fg)); }
 .pd-barbutton[aria-expanded="true"] { box-shadow: inset 0 -2px 0 rgb(var(--accent)); }
 .pd-barbutton:disabled { opacity: .5; cursor: default; }
-.pd-barbutton:focus-visible, .pd-tool:focus-visible, .pd-menu-item:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-barbutton:focus-visible, .pd-tool:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-barlabel { display: inline-flex; align-items: center; gap: 6px; }
 @container (max-width: 480px) { .pd-barlabel { display: none; } }
-.pd-menu { position: relative; }
-.pd-menu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: flex; min-width: 13rem; flex-direction: column; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--surface)); padding: 4px; box-shadow: 0 10px 30px rgb(0 0 0 / .18); }
-.pd-menu-item { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: none; padding: 7px 10px; color: rgb(var(--fg)); font: inherit; font-size: 13px; text-align: left; text-decoration: none; cursor: pointer; }
-.pd-menu-item:hover { background: rgb(var(--raised)); }
 .pd-state { color: rgb(var(--fg-subtle)); font-size: 12px; white-space: nowrap; }
 .pd-state[data-status="conflict"], .pd-state[data-status="error"] { color: rgb(var(--warn)); }
 .pd-conflict { border: 1px solid rgb(var(--warn) / .35); border-radius: 12px; background: rgb(var(--warn) / .1); padding: 10px 12px; }

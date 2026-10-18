@@ -1126,10 +1126,13 @@ function renameIn(held: Held, from: string, to: string, seen: BigIntStats): void
   try {
     unlinkSync(source);
   } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
     // Gone meanwhile (the agent removed it): the new name is the file, which is what was asked.
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    if (code === "ENOENT") return;
     // The old name cannot be taken away: the file has both names now, and the new one is not kept.
     dropName(target);
+    // A folder took the old name since the new one was looked at (`unlink` says so, and leaves it alone).
+    if (code === "EISDIR" || code === "EPERM") throw new FileError("conflict", "The file changed while it was renamed");
     throw ioFailure(e, "It could not be renamed", "It keeps its name.");
   }
 }

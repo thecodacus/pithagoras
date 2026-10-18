@@ -106,66 +106,22 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     );
 
   /**
-   * A menu that opens from a button of the bar, and closes with a choice, Escape (the focus goes back to the button) or a click elsewhere. Its
-   * first entry has the focus when it opens, and the arrow keys go through the entries. `iconOnly`: the button has no words (its label is its name).
+   * A menu that opens from a button of the bar: the portal's own (`ui.Menu`), which closes with a choice, Escape (the focus goes back to the
+   * button) or a press elsewhere, has the first entry in focus when it opens and goes through the entries with the arrow keys. `iconOnly`: the
+   * button has no words (its label is its name).
    */
   function Menu({ icon, label, items, disabled, iconOnly = false, buttonRef }) {
-    const [open, setOpen] = useState(false);
-    const box = useRef(null);
-    const own = useRef(null);
-    const button = buttonRef ?? own;
-    useEffect(() => {
-      if (!open) return;
-      box.current?.querySelector('[role="menuitem"]')?.focus();
-      const away = (e) => !box.current?.contains(e.target) && setOpen(false);
-      const key = (e) => {
-        if (e.key !== "Escape") return;
-        setOpen(false);
-        button.current?.focus();
-      };
-      document.addEventListener("mousedown", away);
-      document.addEventListener("keydown", key);
-      return () => {
-        document.removeEventListener("mousedown", away);
-        document.removeEventListener("keydown", key);
-      };
-    }, [open]);
-    const onListKey = (e) => {
-      const entries = [...(box.current?.querySelectorAll('[role="menuitem"]') ?? [])];
-      const at = entries.indexOf(document.activeElement);
-      const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: entries.length - 1 }[e.key];
-      if (to === undefined || !entries.length) return;
-      e.preventDefault();
-      entries[(to + entries.length) % entries.length].focus();
-    };
     return h(
-      "div",
-      { className: "pd-menu", ref: box },
-      h(BarButton, { icon, label, expanded: open, disabled, buttonRef: button, onClick: () => setOpen((on) => !on) }, iconOnly ? "" : undefined),
-      open &&
-        h(
-          "div",
-          { className: "pd-menu-list", role: "menu", onKeyDown: onListKey },
-          items.map((item) =>
-            item.href
-              ? h("a", { key: item.key, role: "menuitem", href: item.href, download: item.download ?? "", className: "pd-menu-item", onClick: () => setOpen(false) }, h(Icon, { name: item.icon }), item.label)
-              : h(
-                  "button",
-                  {
-                    key: item.key,
-                    type: "button",
-                    role: "menuitem",
-                    className: "pd-menu-item",
-                    onClick: () => {
-                      setOpen(false);
-                      item.onClick();
-                    },
-                  },
-                  h(Icon, { name: item.icon }),
-                  item.label,
-                ),
-          ),
-        ),
+      ui.Menu,
+      {
+        label,
+        disabled,
+        buttonRef,
+        className: "pd-barbutton",
+        items: items.map(({ key, icon: name, label: text, href, download, onClick }) => ({ key, label: text, icon: h(Icon, { name }), href, download, onSelect: onClick })),
+      },
+      h(Icon, { name: icon }),
+      h("span", { className: "pd-barlabel" }, iconOnly ? "" : label),
     );
   }
 
