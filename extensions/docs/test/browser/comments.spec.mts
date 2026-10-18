@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import { carry, locate, passage } from '../../web/anchor.js';
 import { merge3 } from '../../web/merge.js';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
@@ -346,6 +346,14 @@ async function select(page: Page, text: string) {
 }
 
 const commentButton = (page: Page) => page.getByRole('button', { name: 'Comment', exact: true });
+/**
+ * A card in the margin is made the one looked at, as a click on it does: only that card has the box to answer in and its
+ * buttons. Clicked at its corner, where none of its buttons is.
+ */
+const pick = async (card: Locator) => {
+  await card.click({ position: { x: 4, y: 4 } });
+  await expect(card).toHaveAttribute('aria-current', 'true');
+};
 
 /** A thread made on `quote`, in the store, as if it had been there when the page opened. */
 function seeded(store: Store, quote: string, body: string, author: 'user' | 'agent' = 'user') {
@@ -490,6 +498,9 @@ test('a thread is answered with Send, resolved and opened again; a resolved one 
   const green = seeded(store, 'The build is green.', 'Is it?', 'agent');
   await open(page, store);
   const card = cards(page).first();
+  // Answered in the card that is looked at: the others have no box.
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveCount(0);
+  await pick(card);
   const box = card.getByRole('textbox', { name: 'Reply' });
   const send = card.getByRole('button', { name: 'Send' });
   // Nothing typed is nothing to send.
@@ -555,6 +566,7 @@ test('a comment that could not be sent keeps what was typed and says why, and Se
   await open(page, store);
   const card = cards(page).first();
   store.refuse = { status: 500, error: 'The documents store could not do that' };
+  await pick(card);
   await card.getByRole('textbox', { name: 'Reply' }).fill('A long answer I would not want to lose.');
   await card.getByRole('button', { name: 'Send' }).click();
   await expect(card.getByRole('alert')).toContainText('Could not comment: The documents store could not do that');
@@ -649,6 +661,7 @@ test('a comment whose passage is no longer in the document says so, can still be
   const first = cards(page).filter({ hasText: 'Who signs off?' });
   await expect(first).toContainText('The passage this comment was on is no longer in the document.');
   await expect(first.locator('.pd-quote')).toHaveText('Sign-off is on Monday.');
+  await pick(first);
   await first.getByRole('textbox', { name: 'Reply' }).fill('Nobody now.');
   await first.getByRole('textbox', { name: 'Reply' }).press('Control+Enter');
   await expect(first.locator('li')).toHaveCount(2);
@@ -693,6 +706,7 @@ test('what the comments say is in German in a German portal', async ({ page }) =
   await open(page, store, { language: 'de' });
   await expect(panel(page).getByRole('heading', { name: 'Kommentare' })).toBeVisible();
   await expect(cards(page).first()).toContainText('Der Agent');
+  await pick(cards(page).first());
   await expect(cards(page).first().getByRole('textbox', { name: 'Antworten' })).toBeVisible();
   await expect(cards(page).first().getByRole('button', { name: 'Erledigen', exact: true })).toBeVisible();
   await expect(panel(page).getByRole('button', { name: 'Erledigte anzeigen (1)' })).toBeVisible();
@@ -800,6 +814,7 @@ test('a comment that asks the agent when the person is in no chat of the folder 
   // The same chat for the next one, and for a reply: no second chat is opened.
   await compose(page, 'Sign-off is on Monday.', 'Who signs? @agent');
   expect(store.made[1]).toMatchObject({ chat: 'n1' });
+  await pick(first);
   await first.getByRole('textbox', { name: 'Reply' }).fill('And you? @agent');
   await first.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.threads[0].comments.length).toBe(2);
@@ -872,6 +887,7 @@ test('a reply being typed when the agent answers stays in the box, and is sent a
   seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
   const card = cards(page).first();
+  await pick(card);
   const box = card.getByRole('textbox', { name: 'Reply' });
   await box.fill('Please check.');
   // The agent answers and the page is told: the answer is in the list, and what is being typed is still the person's.
@@ -1044,19 +1060,27 @@ test('a thread is deleted as a whole only while it is the person\'s and the agen
   store.settle(closed.id, 'resolved');
   await open(page, store);
   const card = (words: string) => cards(page).filter({ hasText: words });
+  await pick(card('Is it?'));
   await expect(card('Is it?').getByRole('button', { name: 'Delete thread' })).toBeVisible();
+  await pick(card('Who signs off?'));
+  await expect(card('Who signs off?').getByRole('button', { name: 'Resolve' })).toBeVisible();
   await expect(card('Who signs off?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
+  await pick(card('Why Friday?'));
+  await expect(card('Why Friday?').getByRole('button', { name: 'Resolve' })).toBeVisible();
   await expect(card('Why Friday?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
   // The person's comment in a thread of the answered kind can still go by itself.
   await expect(card('Who signs off?').locator('li').first().getByRole('button', { name: 'Delete' })).toBeVisible();
   // A resolved thread of the person's is theirs to delete too, beside Reopen.
   await panel(page).getByRole('button', { name: 'Show resolved (1)' }).click();
+  await pick(card('Old.'));
   await expect(card('Old.').getByRole('button', { name: 'Reopen' })).toBeVisible();
   await expect(card('Old.').getByRole('button', { name: 'Delete thread' })).toBeVisible();
   // The agent comments in the person's thread: the button goes, when the page is told.
   store.comment(mine.id, 'Yes.', 'agent');
   await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
   await expect(card('Is it?').locator('li')).toHaveCount(3);
+  await pick(card('Is it?'));
+  await expect(card('Is it?').getByRole('button', { name: 'Resolve' })).toBeVisible();
   await expect(card('Is it?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
   // A thread that is deleted elsewhere is gone from here when the page is told, with its mark in the text.
   await expectMarked(page, answered.id, 'Sign-off is on Monday.');
@@ -1065,6 +1089,7 @@ test('a thread is deleted as a whole only while it is the person\'s and the agen
   await expect(card('Who signs off?')).toHaveCount(0);
   await expect(editorOf(page).locator(`[data-pd-thread="${answered.id}"]`)).toHaveCount(0);
   // The resolved one is deleted from here.
+  await pick(card('Old.'));
   await card('Old.').getByRole('button', { name: 'Delete thread' }).click();
   await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
   await expect(card('Old.')).toHaveCount(0);
@@ -1076,6 +1101,7 @@ test('a thread deleted while a comment was being typed in it takes the box with 
   seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
   const card = cards(page).first();
+  await pick(card);
   await card.getByRole('textbox', { name: 'Reply' }).fill('Typed on.');
   await card.getByRole('button', { name: 'Delete thread' }).click();
   await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
@@ -1121,6 +1147,7 @@ test('what changing and deleting comments says is in German in a German portal',
   const first = card.locator('li').first();
   await expect(first.getByText('bearbeitet', { exact: true })).toBeVisible();
   await expect(first.getByText('bearbeitet', { exact: true })).toHaveAttribute('title', /^Bearbeitet /);
+  await pick(card);
   await expect(card.getByRole('button', { name: 'Kommentarthread löschen' })).toBeVisible();
   await first.getByRole('button', { name: 'Bearbeiten' }).click();
   await expect(card.getByRole('textbox', { name: 'Kommentar bearbeiten' })).toBeVisible();
@@ -1166,4 +1193,48 @@ test('Ctrl+Enter in the Edit box with the words unchanged just closes it: nothin
   await box.press('Control+Enter');
   await expect(box).toHaveCount(0);
   expect(store.requests).toEqual([]);
+});
+
+test('on a wide page each card is in the margin level with its passage, and the one looked at goes to its passage with the others moved out of its way', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  const filler = Array.from({ length: 8 }, (_, i) => `Paragraph ${i + 1} of what is between.`).join('\n\n');
+  const store = new Store();
+  store.texts.set(3, `# The plan\n\nThe first point.\n\nThe second point.\n\n${filler}\n\nThe last point.\n`);
+  const first = seeded(store, 'The first point.', 'One.');
+  const second = seeded(store, 'The second point.', 'Two.');
+  const last = seeded(store, 'The last point.', 'Three.');
+  await open(page, store, { ready: 'The last point.' });
+  await expect(cards(page)).toHaveCount(3);
+  await expectMarked(page, last.id, 'The last point.');
+  const top = async (selector: string) => (await page.locator(selector).first().boundingBox())!.y;
+  const card = (id: string) => `.pd-thread-card[data-thread="${id}"]`;
+  const mark = (id: string) => `.pd-editor [data-pd-thread="${id}"]`;
+  // Beside the sheet, each where its words are: the first two are close, so the second is under the first.
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  expect((await page.locator(card(first.id)).boundingBox())!.x).toBeGreaterThan(sheet.x + sheet.width - 12);
+  await expect.poll(async () => Math.abs((await top(card(first.id))) - (await top(mark(first.id))))).toBeLessThan(4);
+  await expect.poll(async () => Math.abs((await top(card(last.id))) - (await top(mark(last.id))))).toBeLessThan(4);
+  const firstBox = (await page.locator(card(first.id)).boundingBox())!;
+  expect(await top(card(second.id))).toBeGreaterThanOrEqual(firstBox.y + firstBox.height);
+  // The second looked at: it is at its words, and the first is moved up above it.
+  await page.locator(mark(second.id)).first().click();
+  await expect(page.locator(card(second.id))).toHaveAttribute('aria-current', 'true');
+  await expect.poll(async () => Math.abs((await top(card(second.id))) - (await top(mark(second.id))))).toBeLessThan(4);
+  const moved = (await page.locator(card(first.id)).boundingBox())!;
+  expect(moved.y + moved.height).toBeLessThanOrEqual((await top(card(second.id))) + 1);
+  // Text typed above the passages moves their cards down with them.
+  const before = await top(card(last.id));
+  await editorOf(page).getByText('Paragraph 1 of').click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('A new paragraph.');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('And another.');
+  await expect.poll(async () => (await top(card(last.id))) - before).toBeGreaterThan(30);
+  await expect.poll(async () => Math.abs((await top(card(last.id))) - (await top(mark(last.id))))).toBeLessThan(4);
+  // Hidden with the bar's button, and shown again.
+  await page.getByRole('button', { name: /Comments/ }).first().click();
+  await expect(panel(page)).toHaveCount(0);
+  await page.getByRole('button', { name: /Comments/ }).first().click();
+  await expect(cards(page)).toHaveCount(3);
 });

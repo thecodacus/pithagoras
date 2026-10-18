@@ -689,3 +689,151 @@ test('a document of the largest size opens in the editor, takes what is typed at
   expect(store.puts.length).toBe(1);
   expect(store.puts[0].markdown).toBe(text.replace(/\n$/, ' Last words.\n'));
 });
+
+/** Selects the words `text` in the editor's text, within one block, as a person would by dragging over them. */
+async function selectWords(page: Page, text: string) {
+  await editorOf(page).getByText(text, { exact: false }).first().click();
+  await page.evaluate((text) => {
+    const walker = document.createTreeWalker(document.querySelector('.pd-editor .ProseMirror')!, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent!.indexOf(text);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + text.length);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+      return;
+    }
+    throw new Error(`${text} is not in the editor`);
+  }, text);
+}
+
+const tool = (page: Page, name: string) => page.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name, exact: true });
+/** What the page saves at once (Ctrl+S), once the editor has the change. */
+async function saved(page: Page, store: Store) {
+  const before = store.puts.length;
+  await editorOf(page).press('Control+s');
+  await expect.poll(() => store.puts.length).toBeGreaterThan(before);
+  return store.puts.at(-1)!.markdown;
+}
+
+test('the toolbar makes the selected words bold or a link, a paragraph a heading or a list, and says what is on where the selection is', async ({ page }) => {
+  const store = new Store('# The plan\n\nShip it on Friday.\n\nThe build is green.\n');
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('The build is green.');
+  // Nothing to undo yet, and nothing selected to comment on.
+  await expect(tool(page, 'Undo')).toBeDisabled();
+  await expect(tool(page, 'Comment')).toBeDisabled();
+
+  await selectWords(page, 'Friday');
+  await expect(tool(page, 'Bold')).toHaveAttribute('aria-pressed', 'false');
+  await expect(tool(page, 'Comment')).toBeEnabled();
+  await tool(page, 'Bold').click();
+  await expect(tool(page, 'Bold')).toHaveAttribute('aria-pressed', 'true');
+  await tool(page, 'Italic').click();
+  expect(await saved(page, store)).toBe('# The plan\n\nShip it on ***Friday***.\n\nThe build is green.\n');
+  await expect(tool(page, 'Undo')).toBeEnabled();
+
+  // The kind of paragraph, from the list of styles; it says the kind where the caret is.
+  const style = page.getByRole('combobox', { name: 'Text style' });
+  await expect(style).toHaveValue('paragraph');
+  await style.selectOption('h2');
+  await expect(style).toHaveValue('h2');
+  expect(await saved(page, store)).toBe('# The plan\n\n## Ship it on ***Friday***.\n\nThe build is green.\n');
+  await editorOf(page).getByText('The plan').click();
+  await expect(style).toHaveValue('h1');
+
+  // Lists, one kind for another, and off again.
+  await editorOf(page).getByText('The build is green.').click();
+  await tool(page, 'Bulleted list').click();
+  await expect(tool(page, 'Bulleted list')).toHaveAttribute('aria-pressed', 'true');
+  expect(await saved(page, store)).toMatch(/\n- The build is green\.\n$/);
+  await tool(page, 'Checklist').click();
+  await expect(tool(page, 'Checklist')).toHaveAttribute('aria-pressed', 'true');
+  expect(await saved(page, store)).toMatch(/\n- \[ \] The build is green\.\n$/);
+  // A box is ticked with a click before its item.
+  const item = editorOf(page).locator('li[data-item-type="task"]');
+  const box = (await item.boundingBox())!;
+  await page.mouse.click(box.x - 10, box.y + box.height / 2);
+  await expect(item).toHaveAttribute('data-checked', 'true');
+  expect(await saved(page, store)).toMatch(/\n- \[x\] The build is green\.\n$/);
+  await tool(page, 'Numbered list').click();
+  expect(await saved(page, store)).toMatch(/\n1\. The build is green\.\n$/);
+  await tool(page, 'Numbered list').click();
+  expect(await saved(page, store)).toMatch(/\n\nThe build is green\.\n$/);
+
+  // A link: its address is asked for in the toolbar, and it is taken off again with the same button.
+  await selectWords(page, 'green');
+  await tool(page, 'Link').click();
+  const address = page.getByRole('textbox', { name: 'Address of the link' });
+  await address.fill('https://example.com/ci');
+  await address.press('Enter');
+  expect(await saved(page, store)).toMatch(/The build is \[green\]\(https:\/\/example\.com\/ci\)\.\n$/);
+  await editorOf(page).getByRole('link', { name: 'green' }).click();
+  await tool(page, 'Remove link').click();
+  expect(await saved(page, store)).toMatch(/\n\nThe build is green\.\n$/);
+
+  // Undo takes back the last change.
+  await tool(page, 'Undo').click();
+  expect(await saved(page, store)).toMatch(/\[green\]\(https:\/\/example\.com\/ci\)/);
+});
+
+test('a table and a rule are put in from the toolbar, and a quote is made and taken off', async ({ page }) => {
+  const store = new Store('# The plan\n\nShip it on Friday.\n');
+  await open(page, store);
+  await editorOf(page).getByText('Ship it on Friday.').click();
+  await tool(page, 'Quote').click();
+  await expect(tool(page, 'Quote')).toHaveAttribute('aria-pressed', 'true');
+  expect(await saved(page, store)).toBe('# The plan\n\n> Ship it on Friday.\n');
+  await tool(page, 'Quote').click();
+  expect(await saved(page, store)).toBe('# The plan\n\nShip it on Friday.\n');
+  await tool(page, 'Horizontal line').click();
+  await tool(page, 'Insert table').click();
+  await expect(editorOf(page).locator('table tr')).toHaveCount(3);
+  // The caret is in the table: another one is not put in it.
+  await expect(tool(page, 'Insert table')).toBeDisabled();
+  expect(await saved(page, store)).toMatch(/^# The plan\n\nShip it on Friday\.\n\n---\n\n\| +\| +\| +\|\n\| :?-+ \| :?-+ \| :?-+ \|\n/);
+});
+
+test('a document is downloaded as its Markdown file, or printed on its own to be saved as a PDF', async ({ page }) => {
+  // What is printed: the frame the page prints is read as it is printed.
+  await page.addInitScript(() => {
+    (window as any).printed = [];
+    new MutationObserver((changes) => {
+      for (const change of changes) for (const node of change.addedNodes) if (node instanceof HTMLIFrameElement) setTimeout(() => (window as any).printed.push({ title: node.contentDocument?.title, text: node.contentDocument?.querySelector('article')?.textContent, sandbox: node.getAttribute('sandbox') }));
+    }).observe(document, { childList: true, subtree: true });
+  });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await page.getByRole('button', { name: 'Download' }).click();
+  const markdown = page.getByRole('menuitem', { name: 'Markdown (.md)' });
+  await expect(markdown).toHaveAttribute('href', `${DOCUMENT}/download`);
+  await expect(markdown).toHaveAttribute('download', 'plan.md');
+  await page.getByRole('menuitem', { name: 'PDF (print)' }).click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as any).printed)).toEqual([{ title: 'The plan', text: 'The planShip it on Friday.', sandbox: 'allow-same-origin allow-modals' }]);
+  // Escape closes the menu, as a click elsewhere does.
+  await page.getByRole('button', { name: 'Download' }).click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+});
+
+test('a document opened on the page is the whole page: its bar, the toolbar and the sheet, with no list above it', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toHaveCount(0);
+  await expect(page.locator('.pd-titlebar')).toContainText('The plan');
+  await expect(page.locator('.pd-titlebar')).toContainText('documents/plan.md');
+  await expect(page.getByRole('toolbar', { name: 'Formatting' })).toBeVisible();
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  expect(sheet.width).toBeLessThanOrEqual(816);
+  // A page's own document has no button to open it on a page of its own.
+  await expect(page.getByRole('button', { name: /Full page|Open on its own page/ })).toHaveCount(0);
+  // Back to the list, which has its heading again.
+  await page.getByRole('button', { name: /All documents/ }).click();
+  await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
+});

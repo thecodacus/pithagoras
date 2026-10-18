@@ -14,8 +14,8 @@ import { scratch } from '../../../tests/helpers.mts';
 /** The portal's data folder for the stores. */
 const DATA = scratch('docs-ext-data-');
 
-type Res = { status(code: number): Res; json(body: unknown): void };
-type Handler = (req: { params: Record<string, string>; query: Record<string, string>; method: string; path: string }, res: Res) => unknown;
+type Res = { status(code: number): Res; json(body: unknown): void; setHeader(name: string, value: string): void; end(body?: Buffer | string): void };
+type Handler = (req: { params: Record<string, string>; query: Record<string, string>; method: string; path: string; body?: unknown }, res: Res) => unknown;
 
 /** The Documents extension's server half, given chats that work in these folders, as the portal gives it them. */
 function server(folders: Record<string, string>, logged: string[] = []) {
@@ -38,18 +38,22 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     // What it needs to run is there: the test does not install anything.
     dependencies: (log: (line: string) => void) => (log('dependencies checked'), Promise.resolve(true)),
   });
-  const ask = async (route: string, params: Record<string, string> = {}) => {
-    let answer: { status: number; body: any } = { status: 200, body: undefined };
+  const call = async (method: string, route: string, params: Record<string, string> = {}, body?: unknown) => {
+    const answer: { status: number; body: any; headers: Record<string, string> } = { status: 200, body: undefined, headers: {} };
     const res: Res = {
       status: (code) => ((answer.status = code), res),
       json: (body) => void (answer.body = body),
+      setHeader: (name, value) => void (answer.headers[name.toLowerCase()] = value),
+      end: (body) => void (answer.body = body),
     };
-    await routes.get(`GET ${route}`)!({ params, query: {}, method: 'GET', path: route }, res);
+    await routes.get(`${method} ${route}`)!({ params, query: {}, method, path: route, body }, res);
     return answer;
   };
+  const ask = (route: string, params: Record<string, string> = {}) => call('GET', route, params);
   return {
     folders: async () => (await ask('/folders')).body.folders,
     read: (folder: string, id: string) => ask('/folders/:folder/documents/:id', { folder, id }),
+    call,
   };
 }
 
@@ -140,6 +144,35 @@ test('a document is read by its folder\'s id and its own, and nothing else is', 
   assert.equal((await docs.read('0123456789abcdef', id)).status, 404);
   assert.equal((await docs.read(realpathSync(site), id)).status, 404);
   assert.equal((await server({ b: outside }).read(folder.id, id)).status, 404, 'the chat that worked there is gone');
+});
+
+test('a Markdown file the person uploads is a document as it is, under its own name, and a document is downloaded as its file', async () => {
+  const site = folderWith('docs-upload-', { 'documents/plan.md': '# The plan\n' });
+  const docs = server({ a: site });
+  const [folder] = await docs.folders();
+  const upload = (body: unknown) => docs.call('POST', '/folders/:folder/documents/upload', { folder: folder.id }, body);
+  // Kept as it is: no heading is added, and the name is the file's.
+  const made = await upload({ name: 'Meeting notes.md', markdown: 'No heading here.\n' });
+  assert.equal(made.status, 201);
+  assert.equal(made.body.name, 'Meeting notes.md');
+  assert.equal(made.body.title, 'Meeting notes');
+  assert.equal(readFileSync(path.join(site, 'documents', 'Meeting notes.md'), 'utf8'), 'No heading here.\n');
+  // A name that is taken gets a number; a .markdown file is kept as .md; what would leave the folder stays in it.
+  assert.equal((await upload({ name: 'plan.md', markdown: '# Another plan\n' })).body.name, 'plan-2.md');
+  assert.equal((await upload({ name: 'ideas.markdown', markdown: '# Ideas\n' })).body.name, 'ideas.md');
+  assert.equal((await upload({ name: '../../../evil.md', markdown: 'x' })).body.name, 'evil.md');
+  assert.equal((await upload({ name: '.hidden.md', markdown: 'x' })).body.name, 'hidden.md');
+  assert.deepEqual(readdirSync(path.join(site, 'documents')).sort(), ['Meeting notes.md', 'evil.md', 'hidden.md', 'ideas.md', 'plan-2.md', 'plan.md']);
+  // Only Markdown, and only text.
+  for (const body of [{ name: 'picture.png', markdown: 'x' }, { name: 'notes.md' }, { markdown: 'x' }]) assert.equal((await upload(body)).status, 400, JSON.stringify(body));
+  assert.equal((await upload({ name: 'big.md', markdown: 'x'.repeat(1024 * 1024 + 1) })).status, 413);
+
+  const down = await docs.call('GET', '/folders/:folder/documents/:id/download', { folder: folder.id, id: made.body.id });
+  assert.equal(down.status, 200);
+  assert.equal(String(down.body), 'No heading here.\n');
+  assert.match(down.headers['content-type'], /^text\/markdown/);
+  assert.equal(down.headers['content-disposition'], `attachment; filename="Meeting notes.md"; filename*=UTF-8''Meeting%20notes.md`);
+  assert.equal((await docs.call('GET', '/folders/:folder/documents/:id/download', { folder: folder.id, id: '0123456789abcdef' })).status, 404);
 });
 
 test('a pipe named like a document is no document, and asking for one does not hold the portal', () => {

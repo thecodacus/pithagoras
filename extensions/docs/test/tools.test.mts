@@ -278,11 +278,12 @@ test('the agent lists the project\'s documents and its own chat\'s, by scope, an
     const page = await docs.call('GET', '/folders');
     assert.equal(page.body.folders[0].documents.length, 4);
     assert.ok(theirs.details.id);
-    // The panel beside a chat lists what that chat sees, as its agent does, with the folder they are in; nothing for a chat that is not there.
+    // The panel beside a chat lists every document of its folder, as the page does, with the folder they are in: another chat's own
+    // is marked as that chat's (its agent does not see it). Nothing for a chat that is not there.
     const beside = await docs.call('GET', '/chats/a/documents');
     assert.deepEqual(beside.body.folder, { id: folderIdOf(folder), name: path.basename(folder), path: folder });
-    assert.deepEqual(beside.body.documents.map((d: any) => [d.title, d.scope]), [['by-hand', 'project'], ['Plan', 'project'], ['Scratch pad', 'chat']]);
-    assert.deepEqual((await docs.call('GET', '/chats/b/documents')).body.documents.map((d: any) => d.title), ['by-hand', 'Plan', 'Second chat only']);
+    assert.deepEqual(beside.body.documents.map((d: any) => [d.title, d.scope, d.otherChat ?? false, d.chatTitle ?? null]), [['by-hand', 'project', false, null], ['Plan', 'project', false, null], ['Scratch pad', 'chat', false, null], ['Second chat only', 'chat', true, 'Chat b']]);
+    assert.deepEqual((await docs.call('GET', '/chats/b/documents')).body.documents.map((d: any) => [d.title, d.otherChat ?? false]), [['by-hand', false], ['Plan', false], ['Scratch pad', true], ['Second chat only', false]]);
     const none = await docs.call('GET', '/chats/c/documents');
     assert.deepEqual(none.body, { folder: { id: folderIdOf(empty), name: path.basename(empty), path: empty }, documents: [] });
     assert.deepEqual(readdirSync(empty), [], 'asking makes nothing in a folder with no documents');

@@ -579,6 +579,20 @@ test('a document that is deleted, renamed or made again outside the page is told
   }
 });
 
+test('a Markdown file put into a documents folder (an upload in Files) is told at once, not at the next look of the folders', async () => {
+  // The folders are looked at once a minute here: what is told sooner is told by the watch on the documents folder.
+  const { folder, docs } = await withDocument('docs-list-watched-', { pollMs: 60_000 });
+  try {
+    const stream = await docs.follow('/folders/events');
+    await stream.until(() => stream.told().length === 1, 'the first message');
+    writeFileSync(path.join(folder, 'documents', 'uploaded.md'), '# Uploaded\n');
+    await stream.until(() => stream.told().length === 2, 'the file put there');
+    assert.deepEqual(namesOf(await listed(docs)), ['plan.md', 'uploaded.md']);
+  } finally {
+    await docs.close();
+  }
+});
+
 test('nothing is told while the list does not change, however often the folders are looked at', async () => {
   const { docs } = await withDocument('docs-list-quiet-', { pollMs: 20 });
   try {

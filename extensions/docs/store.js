@@ -88,6 +88,21 @@ export function slugOf(title) {
   return slug || "document";
 }
 
+/**
+ * A file's own name (without `.md`), for a document that keeps it (an upload): the last part of a path, what cannot be in a file
+ * name on one line taken out, no leading dot, at most 80 characters. Empty where nothing is left.
+ */
+export function fileNameOf(name) {
+  return String(name ?? "")
+    .normalize("NFC")
+    .split(/[\/\\]/)
+    .at(-1)
+    .replace(/[\x00-\x1f\x7f]+/g, "-")
+    .replace(/^[\s.]+/, "")
+    .slice(0, 80)
+    .trim();
+}
+
 /** The slug, or the slug with a number, cut so that the whole stays within 80 characters. */
 const numbered = (slug, n) => (n === 1 ? slug : `${slug.slice(0, 80 - String(n).length - 1).replace(/-+$/, "")}-${n}`);
 
@@ -617,14 +632,14 @@ export class Store {
    * `exclusive` is refused (409, with the taken document's id as `exists`
    * where it is one), for a caller that would rather not make a second one.
    */
-  create({ title, markdown, scope = "project", chat = null, author = "user", exclusive = false }) {
+  create({ title, markdown, scope = "project", chat = null, author = "user", exclusive = false, name: given }) {
     const bytes = Buffer.from(markdown, "utf8");
     if (bytes.length > MAX_BYTES) throw new DocError(413, "A document can be at most 1 MB");
     return this.locked(async () => {
       await this.recover();
       if (this.rows().length >= MAX_DOCUMENTS) throw new DocError(409, `A folder holds at most ${MAX_DOCUMENTS} documents`);
       const dir = this.makeDocumentsDir();
-      const slug = slugOf(title);
+      const slug = given === undefined ? slugOf(title) : fileNameOf(given) || slugOf(title);
       const id = randomBytes(8).toString("hex");
       const now = new Date().toISOString();
       for (let n = 1; n < 1000; n++) {

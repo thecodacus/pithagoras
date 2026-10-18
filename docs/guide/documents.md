@@ -308,13 +308,30 @@ the agent has answered, open or resolved, that you have not reacted to yet
 **All documents** goes back to the list. A folder whose documents could not be
 opened is said above the list, with the reason ([above](#when-a-folders-documents-cannot-be-opened)).
 
+### Uploading Markdown files
+
+**Upload** beside a folder (and in the panel beside a chat) adds Markdown files
+(`.md` or `.markdown`) to that folder's `documents` folder, several at once. You
+can also drop them on the list. A file is kept as it is, under its own name
+(a `.markdown` file is saved as `.md`); a name that is taken gets a number. A
+file that is not Markdown, or is bigger than 1 MB, is not sent, and the list
+says so. A single file uploaded on its own opens at once.
+
+A Markdown file put into a `documents` folder any other way (an upload in
+[Files](/guide/files), an editor, a copy) is a document too. While the page or a
+panel lists the documents, the portal watches each `documents` folder, and such
+a file is in the list a moment later.
+
 ### Beside a chat
 
 **Documents** in a chat's header opens a panel beside the conversation, docked
-or floating like the other panels, with the documents that chat sees: the
-project's, and the chat's own, as its agent sees them. A document opens there in
-the same editor as on the page, with its comments and its history; the comments
-are under the text where the panel is narrow. A title and **New document** make
+or floating like the other panels, with every document of the chat's folder,
+as on the page. A folder such as the agent's home is shared by many chats: a
+document another chat made as its own says **From the chat …** (its agent sees
+it; the agent of this chat does not). A document opens there in the same editor
+as on the page, with its toolbar, its comments and its history; the comments
+are under the text where the panel is narrow. **Full page** opens it on the
+Documents page, the whole of it. A title and **New document** make
 one in the chat's folder and open it (the title is its heading, as below), and
 **Open in Documents** on the card of one of the agent's document tools opens
 that document in the panel, without leaving the chat. The list keeps itself up
@@ -374,11 +391,26 @@ password changes. It names no folder, document or path; it says only that someth
 
 ## Editing a document
 
-Click a document to open it in the editor. You edit the text as it will look:
-headings, lists, task lists, tables, quotes, links and code. What you write is
-saved as Markdown, in the document's file. The usual Markdown shortcuts work as
-you type (`#` and a space for a heading, `-` for a list, `>` for a quote,
-three backticks for code), and so do Ctrl+B and Ctrl+I.
+Click a document to open it in the editor. It is laid out as a word processor
+is: a bar with the document's name, where it stands, **Comments**, **History**
+and **Download**; a toolbar; and the text on a sheet the width of a page, with
+the comments in the margin beside it. On the Documents page an open document
+takes the whole page.
+
+You edit the text as it will look: headings, lists, task lists, tables, quotes,
+links and code. What you write is saved as Markdown, in the document's file.
+The toolbar has undo and redo, the text style (normal text, three levels of
+heading, a code block), bold, italic, strikethrough, code, a link (its address
+is asked for in the toolbar; the same button takes a link off), bulleted,
+numbered and check lists, a quote, a table, a horizontal line, and
+**Comment**. Each button shows whether it is on where the cursor is. A task's
+box is ticked with a click. The usual Markdown shortcuts work as you type (`#`
+and a space for a heading, `-` for a list, `>` for a quote, three backticks for
+code), and so do Ctrl+B, Ctrl+I and Ctrl+E.
+
+**Download** saves the document's file as it is (**Markdown (.md)**), or prints
+the text on its own (**PDF (print)**), where the browser's print dialog saves it
+as a PDF.
 
 What the editor does not do yet:
 
@@ -396,7 +428,7 @@ the portal, when the browser tab is hidden or closed, and at Ctrl+S. Each save
 is one revision. A page that is being closed can send only a small request (the
 browsers allow 64 KiB): when the document is larger than about 60 KB and you
 closed the tab with text not yet saved, the browser asks first whether to leave.
-Beside the **History** button the page says where the
+In the bar, beside the document's name, the page says where the
 document stands: **Saved**, **Unsaved changes**, **Saving…** or **Not saved**,
 and the revision.
 
@@ -526,9 +558,13 @@ Markdown, with the reason and **Try again**.
 ## Comments
 
 A comment is on a passage of a document: you select some words, press
-**Comment** in the bar above the text and write what you want to say. The words
-are marked in the text, and the comment is a **thread** in the list of comments
-beside the text (under it on a narrow screen). The agent starts threads too, with
+**Comment** in the toolbar and write what you want to say. The words
+are marked in the text, and the comment is a **thread** in the margin beside
+the text, level with its words (under the text on a narrow screen or in a
+narrow panel). Cards whose words are close are put one under the other; the
+one you click goes to its words, with the others moved out of its way, and only
+that one has the box to answer in and its buttons. **Comments** in the bar hides
+the margin and shows it again. The agent starts threads too, with
 its tools ([below](#the-agents-tools)), and your page shows them as soon as they
 are made, without a reload.
 
@@ -947,8 +983,10 @@ its path and a document by an id the store gave it, never by a path:
 | | |
 | --- | --- |
 | `GET /folders` | The folders chats work in that have documents, with their documents, and `problems` for the ones that could not be opened |
-| `GET /chats/:chat/documents` | The documents a chat sees (the project's and its own) and their folder `{ id, name, path }`, for the panel beside it |
+| `GET /chats/:chat/documents` | Every document of a chat's folder (another chat's own marked `otherChat`, with `chatTitle`) and the folder `{ id, name, path }`, for the panel beside it |
 | `POST /folders/:folder/documents` | A new document `{ title, markdown?, scope?, chat? }`: Markdown with no heading near its top is given the title as its heading |
+| `POST /folders/:folder/documents/upload` | A Markdown file the person uploaded `{ name, markdown }`, kept as it is under its own name |
+| `GET …/:id/download` | The document's file, as an attachment |
 | `GET`, `PUT /folders/:folder/documents/:id` | A document's Markdown and revision; a save `{ markdown, base }`, answered 409 with the current text when its changes meet later ones |
 | `GET …/:id/events` | A stream (server-sent events) of its revisions and comment changes |
 | `GET …/:id/history`, `…/revisions/:n`, `POST …/restore` | The history, one revision's text, and bringing one back |

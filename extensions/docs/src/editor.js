@@ -13,8 +13,11 @@ import { history } from "@milkdown/plugin-history";
 import { listener, listenerCtx } from "@milkdown/plugin-listener";
 import { commonmark, imageSchema } from "@milkdown/preset-commonmark";
 import { gfm, remarkGFMPlugin } from "@milkdown/preset-gfm";
+import { lift, setBlockType, toggleMark, wrapIn } from "@milkdown/prose/commands";
+import { redo, redoDepth, undo, undoDepth } from "@milkdown/prose/history";
 import { Slice } from "@milkdown/prose/model";
-import { Plugin, PluginKey } from "@milkdown/prose/state";
+import { liftListItem, wrapInList } from "@milkdown/prose/schema-list";
+import { Plugin, PluginKey, TextSelection } from "@milkdown/prose/state";
 import { Decoration, DecorationSet } from "@milkdown/prose/view";
 import { $prose, getMarkdown, replaceAll } from "@milkdown/utils";
 import { diff } from "../web/merge.js";
@@ -111,6 +114,200 @@ const threads = ({ click, select, texts }) =>
       }),
   );
 
+/** The marks the toolbar shows, by their names in the editor's schema. */
+const MARKS = ["strong", "emphasis", "strike_through", "inlineCode", "link"];
+
+/**
+ * What the toolbar shows of where the selection is: the marks on it, the kind of block (`paragraph`, `h1`…`h6`, `code`), the list
+ * it is in (`bullet`, `ordered`, `task`, or null), whether it is in a quote or a table, and whether there is something to undo or redo.
+ */
+function formatOf(state) {
+  const { schema, selection } = state;
+  const { $from, from, to, empty } = selection;
+  const marks = {};
+  for (const name of MARKS) {
+    const type = schema.marks[name];
+    if (type) marks[name] = empty ? Boolean(type.isInSet(state.storedMarks || $from.marks())) : state.doc.rangeHasMark(from, to, type);
+  }
+  const parent = $from.parent;
+  const block = parent.type.name === "heading" ? `h${parent.attrs.level}` : parent.type.name === "code_block" ? "code" : "paragraph";
+  let list = null;
+  let quote = false;
+  let table = false;
+  // From the innermost out: the item a task's box is on is inside its list.
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const node = $from.node(depth);
+    const name = node.type.name;
+    if (!list && name === "list_item" && node.attrs.checked != null) list = "task";
+    else if (!list && name === "bullet_list") list = "bullet";
+    else if (!list && name === "ordered_list") list = "ordered";
+    if (name === "blockquote") quote = true;
+    if (name === "table") table = true;
+  }
+  return { marks, block, list, quote, table, undo: undoDepth(state) > 0, redo: redoDepth(state) > 0, selected: !empty };
+}
+
+/** The depth of the innermost list the selection is in, or nothing. */
+function listDepth($from) {
+  for (let depth = $from.depth; depth > 0; depth--) if (["bullet_list", "ordered_list"].includes($from.node(depth).type.name)) return depth;
+  return null;
+}
+
+/** The items of the list at `pos` given a box (`checked` false) or none (`checked` null): a task list is a bullet list whose items have one. */
+function boxItems(tr, pos, task) {
+  const list = tr.doc.nodeAt(pos);
+  if (!list) return tr;
+  list.forEach((item, offset) => {
+    if (!("checked" in item.attrs)) return;
+    tr.setNodeMarkup(pos + 1 + offset, null, { ...item.attrs, checked: task ? (item.attrs.checked ?? false) : null });
+  });
+  return tr;
+}
+
+/** A list of this kind (`bullet`, `ordered`, `task`) where the selection is: taken away where it is one already, changed where it is another. */
+const toggleList = (kind) => (state, dispatch) => {
+  const { schema } = state;
+  const now = formatOf(state).list;
+  if (now === kind) return liftListItem(schema.nodes.list_item)(state, dispatch);
+  const type = kind === "ordered" ? schema.nodes.ordered_list : schema.nodes.bullet_list;
+  const depth = listDepth(state.selection.$from);
+  if (depth !== null) {
+    if (!dispatch) return true;
+    const pos = state.selection.$from.before(depth);
+    const tr = state.tr;
+    if (tr.doc.nodeAt(pos).type !== type) tr.setNodeMarkup(pos, type);
+    dispatch(boxItems(tr, pos, kind === "task"));
+    return true;
+  }
+  return wrapInList(type)(state, dispatch && ((tr) => {
+    const at = listDepth(tr.selection.$from);
+    dispatch(kind === "task" && at !== null ? boxItems(tr, tr.selection.$from.before(at), true) : tr);
+  }));
+};
+
+/** A block of this kind (`paragraph`, `h1`…`h3`, `code`): the same again makes it a paragraph. */
+const toggleBlock = (kind) => (state, dispatch) => {
+  const { schema } = state;
+  const now = formatOf(state).block;
+  if (kind === "paragraph" || now === kind) return setBlockType(schema.nodes.paragraph)(state, dispatch);
+  if (kind === "code") return setBlockType(schema.nodes.code_block)(state, dispatch);
+  return setBlockType(schema.nodes.heading, { level: Number(kind.slice(1)) })(state, dispatch);
+};
+
+/** A link to `href` on what is selected (its address as its text where nothing is), or the link taken off where there is one. */
+const toggleLink = (href) => (state, dispatch) => {
+  const type = state.schema.marks.link;
+  const { from, to, empty } = state.selection;
+  if (formatOf(state).marks.link) {
+    if (!dispatch) return true;
+    // The whole link around the caret, not only what is selected of it.
+    const $from = state.doc.resolve(from);
+    let start = from;
+    let end = to;
+    if (empty) {
+      const parent = $from.parent;
+      const offset = $from.parentOffset;
+      let pos = $from.start();
+      parent.forEach((child, at) => {
+        if (at <= offset && offset <= at + child.nodeSize && type.isInSet(child.marks)) {
+          start = Math.min(start, pos + at);
+          end = Math.max(end, pos + at + child.nodeSize);
+        }
+      });
+    }
+    dispatch(state.tr.removeMark(start, end, type));
+    return true;
+  }
+  if (!href) return false;
+  if (!dispatch) return true;
+  const mark = type.create({ href });
+  dispatch(empty ? state.tr.insert(from, state.schema.text(href, [mark])) : state.tr.addMark(from, to, mark));
+  return true;
+};
+
+/**
+ * A block (a rule, a table) put after the block the caret is in, or in the place of an empty paragraph it is in, with a paragraph
+ * after it where nothing follows to write in. The caret goes `inside` it (a table's first cell) or to what follows it.
+ */
+const insertBlock = (node, inside = false) => (state, dispatch) => {
+  if (!dispatch) return true;
+  const { $from } = state.selection;
+  const tr = state.tr;
+  let at;
+  if ($from.depth === 1 && $from.parent.isTextblock && $from.parent.content.size === 0) {
+    at = $from.before(1);
+    tr.replaceWith(at, $from.after(1), node);
+  } else {
+    at = $from.depth > 0 ? $from.after(1) : state.selection.to;
+    tr.insert(at, node);
+  }
+  const after = at + node.nodeSize;
+  if (!tr.doc.resolve(after).nodeAfter?.isTextblock) tr.insert(after, state.schema.nodes.paragraph.create());
+  tr.setSelection(TextSelection.near(tr.doc.resolve(inside ? at + 1 : after + 1)));
+  dispatch(tr.scrollIntoView());
+  return true;
+};
+
+/** A table of three columns and three rows, the first its head, after the block the caret is in. */
+function insertTable(state, dispatch) {
+  const { nodes } = state.schema;
+  if (!nodes.table) return false;
+  const row = (type, cell) => type.create(null, [0, 1, 2].map(() => cell.createAndFill()));
+  const table = nodes.table.create(null, [row(nodes.table_header_row, nodes.table_header), row(nodes.table_row, nodes.table_cell), row(nodes.table_row, nodes.table_cell)]);
+  return insertBlock(table, true)(state, dispatch);
+}
+
+/** What the toolbar can ask of the editor, by name: each a ProseMirror command. */
+const COMMANDS = {
+  undo: () => undo,
+  redo: () => redo,
+  strong: () => (state, dispatch) => toggleMark(state.schema.marks.strong)(state, dispatch),
+  emphasis: () => (state, dispatch) => toggleMark(state.schema.marks.emphasis)(state, dispatch),
+  strike_through: () => (state, dispatch) => toggleMark(state.schema.marks.strike_through)(state, dispatch),
+  inlineCode: () => (state, dispatch) => toggleMark(state.schema.marks.inlineCode)(state, dispatch),
+  link: (href) => toggleLink(href),
+  block: (kind) => toggleBlock(kind),
+  list: (kind) => toggleList(kind),
+  quote: () => (state, dispatch) => (formatOf(state).quote ? lift(state, dispatch) : wrapIn(state.schema.nodes.blockquote)(state, dispatch)),
+  hr: () => (state, dispatch) => insertBlock(state.schema.nodes.hr.create())(state, dispatch),
+  table: () => insertTable,
+};
+
+/**
+ * Tells the page where the selection is, as the toolbar shows it (`formatOf`), whenever that may have changed; and ticks a
+ * task's box when it is clicked, which is drawn before the item (client.css).
+ */
+const formatting = (told) =>
+  $prose(
+    () =>
+      new Plugin({
+        view: (view) => {
+          told(formatOf(view.state));
+          return {
+            update(view, before) {
+              if (before.doc !== view.state.doc || !before.selection.eq(view.state.selection) || before.storedMarks !== view.state.storedMarks) told(formatOf(view.state));
+            },
+          };
+        },
+        props: {
+          handleDOMEvents: {
+            mousedown(view, event) {
+              const item = event.target instanceof Element ? event.target.closest('li[data-item-type="task"]') : null;
+              if (!item || !view.editable) return false;
+              // The box is the space before the item's text.
+              if (event.clientX >= item.getBoundingClientRect().left) return false;
+              const pos = view.posAtDOM(item, 0) - 1;
+              const node = view.state.doc.nodeAt(pos);
+              if (!node || node.attrs.checked == null) return false;
+              event.preventDefault();
+              view.dispatch(view.state.tr.setNodeMarkup(pos, null, { ...node.attrs, checked: !node.attrs.checked }));
+              return true;
+            },
+          },
+        },
+      }),
+  );
+
 /** The positions at which a document's blocks start, and where the last ends. */
 function starts(doc) {
   const at = [0];
@@ -173,7 +370,7 @@ function applyChanges(ctx, body, flash) {
  * selected or not, `onThread(id)` when a marked passage is clicked, and
  * `onPlaced(map)` which passages are marked, by thread, with what they read as.
  */
-export async function createEditor({ root, markdown = "", onChange, editable = true, onSelect, onThread, onPlaced }) {
+export async function createEditor({ root, markdown = "", onChange, editable = true, onSelect, onThread, onPlaced, onFormat }) {
   let kept = frame(markdown);
   // The threads last given (`mark`), to be put again where they are when the document is replaced.
   let marked = [];
@@ -193,6 +390,7 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
     .use(listener)
     .use(flashing)
     .use(threads({ click: (id) => onThread?.(id), select: (on) => onSelect?.(on), texts: () => report() }))
+    .use(formatting((format) => onFormat?.(format)))
     .create();
   editor.action((ctx) => ctx.get(editorViewCtx).setProps({ editable: () => editable }));
   /** What each marked passage reads as now, told to the page. */
@@ -257,6 +455,25 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
       if (marked.length) mark(marked);
       report();
     },
+    /**
+     * Does what the toolbar asks (`COMMANDS`: `strong`, `block` with `h1`, `list` with `task`, `link` with an address…), and
+     * gives the text the focus back. False where it could not be done there.
+     */
+    command: (name, arg) =>
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const make = COMMANDS[name];
+        if (!make || view.isDestroyed) return false;
+        const done = make(arg)(view.state, view.dispatch, view);
+        view.focus();
+        return done;
+      }),
+    /** Where the selection is, as the toolbar shows it. */
+    format: () => editor.action((ctx) => formatOf(ctx.get(editorViewCtx).state)),
+    /** The text as it is drawn, for a printed copy. */
+    html: () => editor.action((ctx) => ctx.get(editorViewCtx).dom.innerHTML),
+    /** Gives the text the focus. */
+    focus: () => editor.action((ctx) => ctx.get(editorViewCtx).focus()),
     /** The passage the selection is (see anchors.js), or nothing. */
     selection: () => editor.action((ctx) => selected(ctx, kept)),
     /** Marks these threads' passages (see `mark`): the ones that are to be shown. */

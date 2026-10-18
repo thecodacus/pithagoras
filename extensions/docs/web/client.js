@@ -11,6 +11,8 @@
  * the listing gives it, never by its file's name.
  */
 import { documentEditor } from "./document-editor.js";
+import { ICONS } from "./toolbar.js";
+import { uploads } from "./upload.js";
 import { WRITING_TOOLS, isDocumentId, sameCall, sameCalls, shownNew } from "./writing.js";
 
 export default function (portal) {
@@ -29,7 +31,6 @@ export default function (portal) {
     "Title of a new document": "Titel eines neuen Dokuments",
     "New document": "Neues Dokument",
     "The document could not be made: {error}": "Das Dokument konnte nicht angelegt werden: {error}",
-    "No documents in {folder} yet. Make one here, or ask the agent to.": "Noch keine Dokumente in {folder}. Lege hier eines an, oder bitte den Agenten darum.",
     "The documents of this chat's folder, to read, edit and comment on": "Die Dokumente im Ordner dieses Chats, zum Lesen, Bearbeiten und Kommentieren",
     "Changed {date}": "Geändert {date}",
     "This document is empty.": "Dieses Dokument ist leer.",
@@ -86,7 +87,6 @@ export default function (portal) {
     "Open in Documents": "In Dokumenten öffnen",
     Comments: "Kommentare",
     Comment: "Kommentieren",
-    "Select the text you want to comment on.": "Wähle den Text aus, den du kommentieren willst.",
     "Select less text: a comment can be on at most {n} characters.": "Wähle weniger Text aus: Ein Kommentar kann sich auf höchstens {n} Zeichen beziehen.",
     "No comments yet. Select some text, then press Comment.": "Noch keine Kommentare. Wähle Text aus und drücke Kommentieren.",
     "Comments could not be loaded: {error}": "Kommentare konnten nicht geladen werden: {error}",
@@ -140,6 +140,46 @@ export default function (portal) {
     "The agent is writing in this document…": "Der Agent schreibt in diesem Dokument…",
     "The agent is writing in this document. What it writes comes in when it is done.": "Der Agent schreibt in diesem Dokument. Was er schreibt, kommt hinzu, sobald er fertig ist.",
     "Show the saved text": "Den gespeicherten Text zeigen",
+    "No documents in {folder} yet. Make one here, upload a Markdown file, or ask the agent to.": "Noch keine Dokumente in {folder}. Lege hier eines an, lade eine Markdown-Datei hoch, oder bitte den Agenten darum.",
+    "From the chat {chat}": "Aus dem Chat {chat}",
+    "From another chat": "Aus einem anderen Chat",
+    Upload: "Hochladen",
+    "Uploading…": "Wird hochgeladen…",
+    "Upload Markdown files (.md) — or drop them on the list": "Markdown-Dateien (.md) hochladen — oder auf der Liste ablegen",
+    "Drop Markdown files here to add them as documents": "Markdown-Dateien hier ablegen, um sie als Dokumente hinzuzufügen",
+    "{name} is not a Markdown file (.md).": "{name} ist keine Markdown-Datei (.md).",
+    "{name} is bigger than 1 MB.": "{name} ist größer als 1 MB.",
+    "{name} could not be uploaded: {error}": "{name} konnte nicht hochgeladen werden: {error}",
+    Download: "Herunterladen",
+    "Markdown (.md)": "Markdown (.md)",
+    "PDF (print)": "PDF (Drucken)",
+    "Full page": "Vollbild",
+    "Open on its own page": "Auf einer eigenen Seite öffnen",
+    "Show comments": "Kommentare einblenden",
+    "Hide comments": "Kommentare ausblenden",
+    Formatting: "Formatierung",
+    Undo: "Rückgängig",
+    Redo: "Wiederholen",
+    "Text style": "Formatvorlage",
+    "Normal text": "Standardtext",
+    "Heading 1": "Überschrift 1",
+    "Heading 2": "Überschrift 2",
+    "Heading 3": "Überschrift 3",
+    "Code block": "Codeblock",
+    Bold: "Fett",
+    Italic: "Kursiv",
+    Strikethrough: "Durchgestrichen",
+    Code: "Code",
+    Link: "Link",
+    "Remove link": "Link entfernen",
+    "Address of the link": "Adresse des Links",
+    Insert: "Einfügen",
+    "Bulleted list": "Aufzählung",
+    "Numbered list": "Nummerierte Liste",
+    Checklist: "Checkliste",
+    Quote: "Zitat",
+    "Insert table": "Tabelle einfügen",
+    "Horizontal line": "Horizontale Linie",
   });
 
   // What the agent is writing in a document, from the chat's calls as this page has them (writing.js): drawn in the panel as it
@@ -150,6 +190,28 @@ export default function (portal) {
   const icon = (path) => () =>
     h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true }, h("path", { d: path }));
   const DocumentIcon = icon("M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5ZM14 3v5h5M9 13h6M9 17h6M9 9h1");
+  const UploadIcon = icon(ICONS.upload);
+  const { useUpload } = uploads(portal);
+
+  /**
+   * Where Markdown files are brought into folder `folder`: the button that picks them, what is said of those that could not be
+   * taken, and the mark of the list they are dropped on (the `zone` of `upload`, spread on it).
+   */
+  function UploadButton({ upload }) {
+    return h(
+      React.Fragment,
+      null,
+      upload.input,
+      h(
+        "button",
+        { type: "button", className: `${ui.classes.button} pd-upload`, title: t("Upload Markdown files (.md) — or drop them on the list"), disabled: upload.busy > 0, onClick: upload.pick },
+        h(UploadIcon),
+        upload.busy > 0 ? t("Uploading…") : t("Upload"),
+      ),
+    );
+  }
+  const UploadProblems = ({ upload }) => upload.problems.length > 0 && h(ui.ErrorBanner, { onClose: upload.clear }, upload.problems.join(" "));
+  const DropHint = ({ upload }) => upload.dropping && h("div", { className: "pd-drop-hint", "aria-hidden": true }, t("Drop Markdown files here to add them as documents"));
 
   const when = (iso) => new Intl.DateTimeFormat(document.documentElement.lang || undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
   const documentUrl = (folder, id) => portal.api.url(`/folders/${encodeURIComponent(folder)}/documents/${encodeURIComponent(id)}`);
@@ -255,7 +317,7 @@ export default function (portal) {
       "button",
       { type: "button", onClick: onOpen },
       h("span", { className: "pd-title" }, doc.title),
-      h("span", { className: "pd-meta" }, [doc.name, t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads })), doc.answeredThreads > 0 && t("{n} answered by the agent", { n: doc.answeredThreads })].filter(Boolean).join(" · ")),
+      h("span", { className: "pd-meta" }, [doc.name, doc.otherChat && (doc.chatTitle ? t("From the chat {chat}", { chat: doc.chatTitle }) : t("From another chat")), t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads })), doc.answeredThreads > 0 && t("{n} answered by the agent", { n: doc.answeredThreads })].filter(Boolean).join(" · ")),
     );
 
   function FolderList({ onOpen }) {
@@ -265,19 +327,27 @@ export default function (portal) {
     // A folder whose documents could not be opened is said, with the reason: left out without a word it reads as one with none.
     const problems = (body.problems ?? []).map((problem) => h(ui.ErrorBanner, { key: `problem-${problem.id}` }, t("The documents in {folder} could not be opened: {error}", { folder: problem.path, error: problem.error })));
     if (!body.folders.length) return problems.length ? problems : h(ui.Empty, null, t("No folder has documents yet. A document is a Markdown file in a folder called documents, in the folder a chat works in."));
-    const section = (folder) =>
+    return [...problems, ...body.folders.map((folder) => h(FolderSection, { key: folder.id, folder, onOpen }))];
+  }
+
+  /**
+   * One folder's documents on the page, with Markdown files to be uploaded into it (the button, or dropped on it). One file
+   * uploaded on its own is opened; with others, or with what could not be taken, the list stays to say so.
+   */
+  function FolderSection({ folder, onOpen }) {
+    const upload = useUpload(folder.id, (made, problems) => made.length === 1 && !problems.length && onOpen({ folder: folder.id, id: made[0].id }));
+    return h(
+      "section",
+      { className: "pd-folder pd-dropzone", "aria-labelledby": `pd-folder-${folder.id}`, ...upload.zone },
+      h("div", { className: "pd-folder-head" }, h("div", null, h("h2", { id: `pd-folder-${folder.id}` }, folder.name), h("p", { className: "pd-path" }, folder.path)), h(UploadButton, { upload })),
+      h(UploadProblems, { upload }),
       h(
-        "section",
-        { key: folder.id, className: "pd-folder", "aria-labelledby": `pd-folder-${folder.id}` },
-        h("h2", { id: `pd-folder-${folder.id}` }, folder.name),
-        h("p", { className: "pd-path" }, folder.path),
-        h(
-          "ul",
-          { className: "pd-list" },
-          folder.documents.map((doc) => h("li", { key: doc.id }, h(DocumentButton, { doc, onOpen: () => onOpen({ folder: folder.id, id: doc.id }) }))),
-        ),
-      );
-    return [...problems, ...body.folders.map(section)];
+        "ul",
+        { className: "pd-list" },
+        folder.documents.map((doc) => h("li", { key: doc.id }, h(DocumentButton, { doc, onOpen: () => onOpen({ folder: folder.id, id: doc.id }) }))),
+      ),
+      h(DropHint, { upload }),
+    );
   }
 
   // The Documents page is not in a chat, so it cannot tell which chat the person is in. The chat that was on screen last, in this window,
@@ -343,11 +413,13 @@ export default function (portal) {
     portal.locale.use();
     // The document open on the page, or the list of them all.
     const [open, setOpen] = useState(linked);
+    // A document open is the whole page, as a word processor's is: its sheet on the desk, and nothing of the list above it.
+    if (open) return h("div", { className: "pd-page pd-full" }, h(DocumentEditor, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }));
     return h(
       "div",
       { className: "pd-page" },
       h(ui.PageHeader, { icon: h(DocumentIcon), title: t("Documents"), description: t("The Markdown files in the documents folder of each folder your chats work in.") }),
-      open ? h(DocumentEditor, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }) : h(FolderList, { onOpen: setOpen }),
+      h(FolderList, { onOpen: setOpen }),
     );
   }
 
@@ -361,6 +433,7 @@ export default function (portal) {
     const [title, setTitle] = useState("");
     const [making, setMaking] = useState(false);
     const [problem, setProblem] = useState(null);
+    const upload = useUpload(body?.folder.id, (made, problems) => made.length === 1 && !problems.length && onOpen({ folder: body.folder.id, id: made[0].id }));
     if (error) return h(ui.LoadFailed, { error, onRetry: retry });
     if (!body) return h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") });
     const create = async () => {
@@ -377,18 +450,21 @@ export default function (portal) {
       }
     };
     return h(
-      React.Fragment,
-      null,
+      "div",
+      { className: "pd-dropzone pd-chat-documents", ...upload.zone },
       h(
         "form",
         { className: "pd-new", onSubmit: (e) => (e.preventDefault(), void create()) },
         h("input", { className: ui.classes.input, value: title, maxLength: 200, placeholder: t("Title of a new document"), "aria-label": t("Title of a new document"), onChange: (e) => setTitle(e.target.value) }),
         h("button", { type: "submit", className: ui.classes.primarySmall, disabled: making || !title.trim() }, t("New document")),
+        h(UploadButton, { upload }),
       ),
       problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("The document could not be made: {error}", { error: problem })),
+      h(UploadProblems, { upload }),
       body.documents.length
         ? h("ul", { className: "pd-list" }, body.documents.map((doc) => h("li", { key: doc.id }, h(DocumentButton, { doc, onOpen: () => onOpen({ folder: body.folder.id, id: doc.id }) }))))
-        : h(ui.Empty, null, t("No documents in {folder} yet. Make one here, or ask the agent to.", { folder: body.folder.name })),
+        : h(ui.Empty, null, t("No documents in {folder} yet. Make one here, upload a Markdown file, or ask the agent to.", { folder: body.folder.name })),
+      h(DropHint, { upload }),
     );
   }
 
@@ -469,7 +545,7 @@ export default function (portal) {
       "div",
       { className: "pd-page pd-panel" },
       open?.id && folder
-        ? h(DocumentEditor, { folder, id: open.id, key: `${folder}/${open.id}`, draft, onBack: back })
+        ? h(DocumentEditor, { folder, id: open.id, key: `${folder}/${open.id}`, draft, onBack: back, onExpand: () => portal.navigate(`/x/${portal.extension}/documents?${new URLSearchParams({ folder, doc: open.id })}`) })
         : open?.id && !chatFolder.failed
           ? h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") })
           : call && open?.writing && !open.id

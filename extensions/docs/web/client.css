@@ -29,10 +29,44 @@
 .pd-call button:hover { background: rgb(var(--accent) / .1); }
 .pd-call button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 
-/* A document in the editor: its bar (back, where it stands, history), what to do about a change made meanwhile, and the text. */
-.pd-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.pd-bar-end { display: flex; align-items: center; gap: 8px; }
-.pd-state { color: rgb(var(--fg-subtle)); font-size: 12px; }
+/* Markdown files brought in: the button, and a list they are dropped on, marked while they are over it. */
+.pd-folder-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pd-upload { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.pd-upload svg { width: 14px; height: 14px; }
+.pd-dropzone { position: relative; }
+.pd-dropzone[data-dropping] { outline: 2px dashed rgb(var(--accent) / .7); outline-offset: 4px; border-radius: 12px; }
+.pd-drop-hint { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgb(var(--accent) / .1); padding: 16px; color: rgb(var(--accent)); font-weight: 600; text-align: center; pointer-events: none; }
+.pd-chat-documents { min-height: 12rem; }
+
+/*
+ * A document open, laid out as a word processor's: its bar (back, its name, where it stands, comments, history, download), the
+ * toolbar, what to say about it, and the desk with the sheet the text is written on and the comments in the margin beside it.
+ */
+.pd-page.pd-full { display: flex; min-height: 100%; max-width: none; flex-direction: column; padding: 0; }
+.pd-page.pd-panel:has(.pd-doc) { padding: 0; }
+.pd-document:has(> .pd-doc) { flex: 1; margin: 0; gap: 0; }
+.pd-doc { display: flex; min-height: 100%; flex: 1; flex-direction: column; container-type: inline-size; background: rgb(var(--raised) / .6); }
+.pd-doc > .pd-conflict, .pd-doc > .pd-note, .pd-doc > .pd-history, .pd-doc > [role="alert"], .pd-doc > [role="status"], .pd-doc > div:not([class]) { margin: 8px 16px 0; }
+.pd-icon { width: 16px; height: 16px; flex: none; }
+.pd-titlebar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 8px 16px; }
+.pd-titlebar .pd-back { margin-left: -6px; }
+.pd-docname { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
+.pd-docname > .pd-icon { color: rgb(var(--accent)); }
+.pd-docname > div { display: flex; min-width: 0; flex-direction: column; }
+.pd-doctitle { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pd-docname .pd-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-bar-end { display: flex; align-items: center; gap: 2px; }
+.pd-barbutton { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 8px; background: none; padding: 6px 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-barbutton:hover:not(:disabled), .pd-barbutton[aria-pressed="true"], .pd-barbutton[aria-expanded="true"] { background: rgb(var(--raised)); color: rgb(var(--fg)); }
+.pd-barbutton:disabled { opacity: .5; cursor: default; }
+.pd-barbutton:focus-visible, .pd-tool:focus-visible, .pd-menu-item:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-barlabel { display: inline-flex; align-items: center; gap: 6px; }
+@container (max-width: 480px) { .pd-barlabel { display: none; } }
+.pd-menu { position: relative; }
+.pd-menu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: flex; min-width: 13rem; flex-direction: column; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--surface)); padding: 4px; box-shadow: 0 10px 30px rgb(0 0 0 / .18); }
+.pd-menu-item { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: none; padding: 7px 10px; color: rgb(var(--fg)); font: inherit; font-size: 13px; text-align: left; text-decoration: none; cursor: pointer; }
+.pd-menu-item:hover { background: rgb(var(--raised)); }
+.pd-state { color: rgb(var(--fg-subtle)); font-size: 12px; white-space: nowrap; }
 .pd-state[data-status="conflict"], .pd-state[data-status="error"] { color: rgb(var(--warn)); }
 .pd-conflict { border: 1px solid rgb(var(--warn) / .35); border-radius: 12px; background: rgb(var(--warn) / .1); padding: 10px 12px; }
 .pd-conflict p { margin: 0; }
@@ -52,6 +86,34 @@
 .pd-preview { margin-top: 8px; }
 .pd-preview-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .pd-preview .pd-body { max-height: 20rem; overflow: auto; }
+
+/* The toolbar: stays at the top while the text scrolls under it. */
+.pd-toolbar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 4px 12px; }
+.pd-tool { display: inline-flex; height: 30px; min-width: 30px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 6px; background: none; padding: 0 6px; color: rgb(var(--fg-muted)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-tool:hover:not(:disabled) { background: rgb(var(--raised)); color: rgb(var(--fg)); }
+.pd-tool[aria-pressed="true"] { background: rgb(var(--accent) / .15); color: rgb(var(--accent)); }
+.pd-tool:disabled { opacity: .4; cursor: default; }
+.pd-tool-wide { padding: 0 10px; }
+.pd-tool-divider { width: 1px; height: 20px; margin: 0 4px; background: rgb(var(--line)); }
+.pd-style { width: auto; min-width: 9.5rem; height: 30px; padding-top: 0; padding-bottom: 0; }
+.pd-linkbox { display: flex; flex-basis: 100%; align-items: center; gap: 6px; padding: 4px 0; }
+.pd-linkbox input { max-width: 28rem; flex: 1; }
+
+/* The desk, and the sheet on it: as wide as a page, and as long as the text, a page at least where there is the room. */
+.pd-desk { flex: 1; padding: 24px 16px 64px; }
+.pd-row { position: relative; display: flex; align-items: flex-start; justify-content: center; gap: 20px; }
+.pd-sheet { min-width: 0; flex: 0 1 816px; border: 1px solid rgb(var(--line)); border-radius: 4px; background: rgb(var(--surface)); padding: 64px 72px; box-shadow: 0 1px 3px rgb(0 0 0 / .08), 0 8px 24px rgb(0 0 0 / .06); }
+.pd-doc[data-layout="float"] .pd-sheet { min-height: 1056px; }
+.pd-doc[data-layout="list"] .pd-row { flex-direction: column; align-items: stretch; }
+.pd-doc[data-layout="list"] .pd-sheet { flex: none; padding: 28px 24px; min-height: 60vh; }
+.pd-doc[data-layout="list"] .pd-desk { padding: 12px 12px 48px; }
+.pd-sheet .pd-editor { min-height: 0; border: 0; border-radius: 0; background: none; padding: 0; }
+.pd-sheet .pd-editor:focus-within { border-color: transparent; }
+.pd-sheet .pd-editor .ProseMirror { min-height: 24rem; font-size: 15px; line-height: 1.65; }
+.pd-doc[data-layout="list"] .pd-sheet .pd-editor .ProseMirror { min-height: 50vh; }
+/* Paragraphs apart as on a page: the space after a block, more before a heading. */
+.pd-sheet .pd-editor .ProseMirror > * + *, .pd-sheet .pd-draft > * + * { margin-top: .8em; }
+.pd-sheet .pd-editor .ProseMirror > :is(h1, h2, h3, h4, h5, h6):not(:first-child) { margin-top: 1.4em; }
 
 /* The editor's text, drawn in the portal's colours: the portal's own reset takes the marks off lists and headings, and the editor brings no stylesheet. */
 .pd-editor { min-height: 16rem; border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--surface)); padding: 12px 20px; overflow-wrap: anywhere; }
@@ -90,12 +152,18 @@
 @keyframes pd-changed { from { background: rgb(var(--accent) / .22); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .pd-editor .ProseMirror .pd-changed { animation: none; background: rgb(var(--accent) / .12); } }
 
-/* The comments: the text and the threads side by side where there is room, one under the other where there is not. */
-.pd-page:has(.pd-workspace) { max-width: 76rem; }
-.pd-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
-@container (min-width: 62rem) { .pd-workspace { grid-template-columns: minmax(0, 1fr) 20rem; } }
+/* The comments: in the margin beside the sheet, each card level with its passage; under the sheet where there is no room for a margin. */
 .pd-threads { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-@container (min-width: 62rem) { .pd-threads { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; } }
+.pd-margin { position: relative; display: block; flex: 0 0 18.5rem; }
+.pd-slot { position: absolute; right: 0; left: 0; transition: top .18s var(--ease-out, ease-out); }
+@media (prefers-reduced-motion: reduce) { .pd-slot { transition: none; } }
+.pd-margin .pd-thread-card { background: rgb(var(--surface)); box-shadow: 0 1px 2px rgb(0 0 0 / .06); transition: transform .18s var(--ease-out, ease-out), box-shadow .18s; }
+.pd-margin .pd-thread-card:not([aria-current="true"]):not(.pd-compose) { cursor: pointer; }
+.pd-margin .pd-thread-card[aria-current="true"], .pd-margin .pd-compose { transform: translateX(-10px); box-shadow: 0 6px 20px rgb(0 0 0 / .14); }
+.pd-margin .pd-thread-list { position: relative; margin-top: 8px; }
+.pd-margin-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pd-margin > .pd-hint { margin-top: 2px; }
+.pd-doc[data-layout="list"] .pd-threads { margin-top: 4px; }
 .pd-threads h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
 .pd-count { border-radius: 999px; background: rgb(var(--accent) / .15); padding: 0 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 600; }
 .pd-hint { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; }

@@ -53,6 +53,8 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
   /** The documents the page asked for, as their addresses; the documents it made, as it asked for them. */
   const asked: string[] = [];
   const made: unknown[] = [];
+  /** The files the page uploaded, as it sent them. */
+  const uploaded: { name: string; markdown: string }[] = [];
   await mockPortal(page, async ({ path: p, method, route, json }) => {
     if (p === '/api/extension-ui') return { extensions: [{ name: NAME, version: '0.1.0', entry: address('client.js') + '?v=1', style: address('client.css') + '?v=1', server: `/api/x/${NAME}` }] };
     // The folder the portal serves of the package: its modules, the editor among them, and its stylesheet.
@@ -67,6 +69,11 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
     if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents` && method === 'POST') {
       made.push(json());
       return reply(201, { id: '4444444444444444', name: 'ideas.md', title: 'Ideas', revision: 1, scope: 'project', chat: null });
+    }
+    if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents/upload` && method === 'POST') {
+      const file = json() as { name: string; markdown: string };
+      uploaded.push(file);
+      return reply(201, { id: '4444444444444444', name: file.name, title: 'Ideas', revision: 1, scope: 'project', chat: null });
     }
     if (p === `/api/x/${NAME}/folders/0123456789abcdef/documents/4444444444444444`) return { id: '4444444444444444', name: 'ideas.md', title: 'Ideas', revision: 1, markdown: '# Ideas\n', modified: '2026-10-04T09:30:00.000Z' };
     if (p.startsWith(`/api/x/${NAME}/folders/`)) {
@@ -95,7 +102,7 @@ async function portal(page: Page, folders: unknown[] = FOLDERS, streams: 'idle' 
     await says('tool_execution_start', { toolCallId: callId, toolName, args });
     await says('tool_execution_end', { toolCallId: callId, toolName, isError, result: { content: [{ type: 'text', text }], ...(details ? { details } : {}) } });
   };
-  return { asked, made, says, caughtUp, calls };
+  return { asked, made, uploaded, says, caughtUp, calls };
 }
 
 const sidebar = (page: Page) => page.getByRole('navigation', { name: 'Destinations' });
@@ -570,4 +577,67 @@ test('a list that could not be asked for the first time says why, and is asked f
   await listStream(page, 'v1');
   await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('the panel beside a chat lists every document of its folder, another chat\'s own marked as that chat\'s', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const documents = [
+    ...(FOLDERS[0].documents as object[]),
+    { id: '5555555555555555', name: 'scratch.md', title: 'Scratch pad', revision: 1, size: 10, modified: '2026-10-02T09:30:00.000Z', scope: 'chat', chat: 'b', otherChat: true, chatTitle: 'Second chat' },
+  ];
+  await portal(page, [{ ...FOLDERS[0], documents }, FOLDERS[1]]);
+  await page.goto('/s/a');
+  await page.locator('.panel-toggle[aria-label="Documents"]').click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await expect(panels.getByRole('listitem')).toHaveCount(3);
+  await expect(panels.getByRole('button', { name: /Scratch pad/ })).toContainText('scratch.md · From the chat Second chat · Changed');
+});
+
+test('Markdown files are uploaded into the chat\'s folder from the panel, with the button or dropped on the list, and one that is not Markdown is said', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { uploaded } = await portal(page);
+  await page.goto('/s/a');
+  await page.locator('.panel-toggle[aria-label="Documents"]').click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await expect(panels.getByRole('button', { name: 'Upload' })).toBeVisible();
+  const picker = panels.locator('input[type="file"]');
+  await expect(picker).toHaveAttribute('accept', '.md,.markdown,text/markdown');
+  // A picture is not sent; a Markdown file is, as it is, under its name.
+  await picker.setInputFiles([
+    { name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('not text') },
+    { name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Notes\n\nKept as it is.\n') },
+  ]);
+  await expect(panels.getByRole('alert')).toContainText('photo.png is not a Markdown file (.md).');
+  await expect.poll(() => uploaded).toEqual([{ name: 'notes.md', markdown: '# Notes\n\nKept as it is.\n' }]);
+
+  // Dropped on the list: it is marked while the files are over it, and both are sent.
+  const files = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(['# One\n'], 'one.md', { type: 'text/markdown' }));
+    data.items.add(new File(['# Two\n'], 'two.markdown', { type: 'text/markdown' }));
+    return data;
+  });
+  const zone = panels.locator('.pd-dropzone');
+  await zone.dispatchEvent('dragenter', { dataTransfer: files });
+  await expect(panels.getByText('Drop Markdown files here to add them as documents')).toBeVisible();
+  await zone.dispatchEvent('drop', { dataTransfer: files });
+  await expect(panels.getByText('Drop Markdown files here to add them as documents')).toHaveCount(0);
+  await expect.poll(() => uploaded.map((f) => f.name)).toEqual(['notes.md', 'one.md', 'two.markdown']);
+  // One file on its own, and nothing refused: it is opened.
+  await picker.setInputFiles([{ name: 'ideas.md', mimeType: 'text/markdown', buffer: Buffer.from('# Ideas\n') }]);
+  await expect(panels.locator('.ProseMirror h1')).toHaveText('Ideas');
+});
+
+test('a document open in the panel opens on a page of its own, the whole of it, with Full page', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await portal(page);
+  await page.goto('/s/a');
+  await page.locator('.panel-toggle[aria-label="Documents"]').click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await panels.getByRole('button', { name: /The plan/ }).click();
+  await expect(panels.getByRole('toolbar', { name: 'Formatting' })).toBeVisible();
+  await panels.getByRole('button', { name: /Full page|Open on its own page/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/x/${NAME}/documents\\?folder=0123456789abcdef&doc=1111111111111111$`));
+  await expect(page.locator('.pd-full .ProseMirror h1')).toHaveText('The plan');
+  await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toHaveCount(0);
 });

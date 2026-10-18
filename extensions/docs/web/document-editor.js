@@ -5,6 +5,11 @@
  * document's history with a way back to an earlier revision, and the comments
  * on its passages (comments.js).
  *
+ * It is laid out as a word processor is: a bar with the document's name, where
+ * it stands and what can be done with it (its history, a download, the page of
+ * its own), the toolbar (toolbar.js), and the text on a sheet, with the
+ * comments in the margin beside it where there is room for them.
+ *
  * Plain JavaScript like the rest of the browser half, made with the portal's
  * React and building blocks (`portal.ui`).
  */
@@ -13,6 +18,7 @@ import { comments } from "./comments.js";
 import { createLive } from "./live.js";
 import { asksAgent } from "./mention.js";
 import { createSaver } from "./saver.js";
+import { ICONS, toolbar } from "./toolbar.js";
 import { drafted, shownOf } from "./writing.js";
 
 /** What the person's text was, kept while it is not saved (a conflict, a save that failed, a page that went away): per document, for the tab. */
@@ -21,12 +27,117 @@ const DRAFT = "pithagoras-docs/draft";
 const KEEPALIVE_BYTES = 60 * 1024;
 /** The id the passage of a comment that is being written is marked by in the editor: no thread has it. */
 const PENDING = "pending";
+/** How wide the document has to be for the comments to be in a margin beside the sheet, not under it. */
+const FLOAT_WIDTH = 900;
+
+/** How a printed copy of a document looks: plain, black on white, as a page. */
+const PRINT_CSS = `
+@page { margin: 2cm; }
+body { margin: 0; color: #111; font: 11pt/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.2em 0 .4em; break-after: avoid; }
+h1 { font-size: 1.9em; } h2 { font-size: 1.45em; } h3 { font-size: 1.2em; }
+p { margin: 0 0 .6em; } ul, ol { padding-left: 1.6em; }
+li[data-item-type="task"] { list-style: none; position: relative; }
+li[data-item-type="task"]::before { position: absolute; left: -1.4em; content: "\\2610"; }
+li[data-item-type="task"][data-checked="true"]::before { content: "\\2611"; }
+blockquote { margin: .6em 0; border-left: 3px solid #ccc; padding-left: 1em; color: #444; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; background: #f2f2f2; padding: 0 .2em; border-radius: 3px; }
+pre { background: #f6f6f6; padding: .7em 1em; border-radius: 4px; white-space: pre-wrap; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; margin: .6em 0; } th, td { border: 1px solid #bbb; padding: 4px 8px; text-align: left; } th { background: #f2f2f2; }
+hr { border: 0; border-top: 1px solid #ccc; }
+a { color: inherit; }
+.pd-thread, .pd-changed { background: none !important; box-shadow: none !important; }
+`;
+
+/** Prints `html` (the text as the editor draws it) on its own, as `title`: the browser's print, where it can be saved as a PDF. */
+function printDocument(title, html) {
+  const frame = document.createElement("iframe");
+  // Nothing in it runs: it is the text and its look, and the browser's print.
+  frame.setAttribute("sandbox", "allow-same-origin allow-modals");
+  frame.setAttribute("aria-hidden", "true");
+  frame.tabIndex = -1;
+  frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+  document.body.append(frame);
+  const page = frame.contentDocument;
+  page.open();
+  page.write("<!doctype html><html><head><meta charset=\"utf-8\"><title></title><style></style></head><body><article></article></body></html>");
+  page.close();
+  page.title = title;
+  page.querySelector("style").textContent = PRINT_CSS;
+  page.querySelector("article").innerHTML = html;
+  const gone = () => setTimeout(() => frame.remove(), 1000);
+  frame.contentWindow.addEventListener("afterprint", gone, { once: true });
+  frame.contentWindow.focus();
+  frame.contentWindow.print();
+  // A browser that tells nothing after printing: the frame goes after a while all the same.
+  setTimeout(() => frame.isConnected && frame.remove(), 60_000);
+}
 
 export function documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember }) {
   const { React, ui, t } = portal;
   const { useEffect, useRef, useState } = React;
   const h = React.createElement;
   const Comments = comments(portal, { when });
+  const Toolbar = toolbar(portal);
+
+  const Icon = ({ name }) =>
+    h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, className: "pd-icon" }, h("path", { d: ICONS[name] }));
+
+  /** A button of the document's bar: an icon, and its words where there is room for them. */
+  const BarButton = ({ icon, label, pressed, expanded, disabled, onClick, children }) =>
+    h(
+      "button",
+      { type: "button", className: "pd-barbutton", title: label, "aria-pressed": pressed, "aria-expanded": expanded, disabled, onClick },
+      h(Icon, { name: icon }),
+      h("span", { className: "pd-barlabel" }, children ?? label),
+    );
+
+  /** A menu that opens from a button of the bar, and closes with a choice, Escape or a click elsewhere. */
+  function Menu({ icon, label, items, disabled }) {
+    const [open, setOpen] = useState(false);
+    const box = useRef(null);
+    useEffect(() => {
+      if (!open) return;
+      const away = (e) => !box.current?.contains(e.target) && setOpen(false);
+      const key = (e) => e.key === "Escape" && setOpen(false);
+      document.addEventListener("mousedown", away);
+      document.addEventListener("keydown", key);
+      return () => {
+        document.removeEventListener("mousedown", away);
+        document.removeEventListener("keydown", key);
+      };
+    }, [open]);
+    return h(
+      "div",
+      { className: "pd-menu", ref: box },
+      h(BarButton, { icon, label, expanded: open, disabled, onClick: () => setOpen((on) => !on) }),
+      open &&
+        h(
+          "div",
+          { className: "pd-menu-list", role: "menu" },
+          items.map((item) =>
+            item.href
+              ? h("a", { key: item.key, role: "menuitem", href: item.href, download: item.download ?? "", className: "pd-menu-item", onClick: () => setOpen(false) }, h(Icon, { name: item.icon }), item.label)
+              : h(
+                  "button",
+                  {
+                    key: item.key,
+                    type: "button",
+                    role: "menuitem",
+                    className: "pd-menu-item",
+                    onClick: () => {
+                      setOpen(false);
+                      item.onClick();
+                    },
+                  },
+                  h(Icon, { name: item.icon }),
+                  item.label,
+                ),
+          ),
+        ),
+    );
+  }
 
   /** The editor's module, loaded once and when first wanted; one that failed to load is asked for again. */
   let bundle = null;
@@ -159,7 +270,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
    * comes. Not over a person who is working in the text when the call begins (it has the focus, or something unsaved): they keep
    * their text, and the agent's change comes in when it is done, as any change from elsewhere does.
    */
-  function Editing({ folder, id, doc, edit, onBack, draft }) {
+  function Editing({ folder, id, doc, edit, onBack, onExpand, draft }) {
     const host = useRef(null);
     // The editor and its saver, once the editor is drawn.
     const parts = useRef(null);
@@ -192,6 +303,13 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const opening = useRef(null);
     const composed = useRef(0);
     const workspace = useRef(null);
+    // The whole of it, measured for whether the comments fit beside the sheet.
+    const root = useRef(null);
+    const [float, setFloat] = useState(false);
+    // Where the selection is, for the toolbar; whether the margin is shown; a count that moves the comments again when the text moved.
+    const [format, setFormat] = useState(null);
+    const [showComments, setShowComments] = useState(true);
+    const [relayout, setRelayout] = useState(0);
     // Asks the server for the threads again: set once the page has a document to ask about.
     const refresh = useRef(() => {});
     // Whether there are any, which is when a save is followed by asking after them (see `send`).
@@ -284,7 +402,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             onChange: () => saver.changed(),
             onSelect: (on) => setSelected(on),
             onThread: (thread) => setActive(thread),
-            onPlaced: (placed) => setTexts(placed),
+            onPlaced: (placed) => {
+              setTexts(placed);
+              setRelayout((n) => n + 1);
+            },
+            onFormat: (now) => setFormat(now),
           });
         } catch (e) {
           if (!gone) setBroken(e);
@@ -382,6 +504,26 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       return () => void (here = false);
     }, [draft?.call]);
     const edited = React.useMemo(() => (draft && stored?.call === draft.call ? drafted(stored.markdown, draft.edits) : null), [draft?.call, draft?.edits, stored]);
+
+    // Wide enough for the comments beside the sheet: as the page or the panel is now.
+    useEffect(() => {
+      const box = root.current;
+      if (!box || typeof ResizeObserver === "undefined") return;
+      const watch = new ResizeObserver(() => setFloat(box.clientWidth >= FLOAT_WIDTH));
+      watch.observe(box);
+      setFloat(box.clientWidth >= FLOAT_WIDTH);
+      return () => watch.disconnect();
+    }, []);
+    // The sheet changes its height as the text is typed: the comments beside it are moved with their passages.
+    useEffect(() => {
+      const sheet = host.current;
+      if (!sheet || typeof ResizeObserver === "undefined") return;
+      const watch = new ResizeObserver(() => setRelayout((n) => n + 1));
+      watch.observe(sheet);
+      return () => watch.disconnect();
+    }, []);
+    /** Where on the screen the passage of thread `thread` begins (its top), or nothing where it is not marked. */
+    const anchor = (thread) => host.current?.querySelector(`[data-pd-thread="${CSS.escape(thread)}"]`)?.getBoundingClientRect().top ?? null;
 
     /** Back to the list, once what was typed is saved: with text that cannot be, the page stays and says why. */
     const leave = async () => {
@@ -569,23 +711,49 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // What the agent is writing is shown as it comes while the person has nothing unsaved, unless they chose the saved text.
     const watching = edited !== null && status === "saved" && unwatched !== draft.call;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
+    const openCount = threads.items.filter((x) => x.status === "open").length;
+    // In the margin while it is shown; under the sheet where there is no room beside it.
+    const margin = float && showComments;
+    const print = () => {
+      const editor = parts.current?.editor;
+      if (editor) printDocument(doc.title, editor.html());
+    };
+    const comment = () => {
+      if (float) setShowComments(true);
+      void startComment();
+    };
     return h(
-      React.Fragment,
-      null,
+      "div",
+      { className: "pd-doc", ref: root, "data-layout": float ? "float" : "list" },
       h(
         "div",
-        { className: "pd-bar" },
+        { className: "pd-titlebar" },
         h("button", { type: "button", className: "pd-back", onClick: leave }, `← ${t("All documents")}`),
         h(
           "div",
+          { className: "pd-docname" },
+          h(Icon, { name: "file" }),
+          h("div", null, h("strong", { className: "pd-doctitle" }, doc.title), h("span", { className: "pd-meta" }, `documents/${doc.name}`)),
+        ),
+        h("span", { className: "pd-state", "data-status": status, "aria-live": "polite" }, `${label} · ${t("Revision {n}", { n: base })}`),
+        h(
+          "div",
           { className: "pd-bar-end" },
-          h("span", { className: "pd-state", "data-status": status, "aria-live": "polite" }, `${label} · ${t("Revision {n}", { n: base })}`),
-          h("button", { type: "button", className: ui.classes.ghost, disabled: !ready || !selected, title: selected ? undefined : t("Select the text you want to comment on."), onClick: () => void startComment() }, t("Comment")),
-          h("button", { type: "button", className: ui.classes.ghost, "aria-expanded": history, disabled: !ready, onClick: () => setHistory((on) => !on) }, history ? t("Hide history") : t("History")),
+          float && h(BarButton, { icon: "comments", label: showComments ? t("Hide comments") : t("Show comments"), pressed: showComments, onClick: () => setShowComments((on) => !on) }, [t("Comments"), openCount > 0 && h("span", { key: "n", className: "pd-count" }, openCount)]),
+          h(BarButton, { icon: "history", label: history ? t("Hide history") : t("History"), expanded: history, disabled: !ready, onClick: () => setHistory((on) => !on) }),
+          h(Menu, {
+            icon: "download",
+            label: t("Download"),
+            disabled: !ready,
+            items: [
+              { key: "md", icon: "file", label: t("Markdown (.md)"), href: `${url}/download`, download: doc.name },
+              { key: "pdf", icon: "printer", label: t("PDF (print)"), onClick: print },
+            ],
+          }),
+          onExpand && h(BarButton, { icon: "expand", label: t("Open on its own page"), onClick: async () => (!parts.current || (await parts.current.saver.flush())) && onExpand() }, t("Full page")),
         ),
       ),
-      // Where it is, not when it changed: that was when the page opened it, and the history has the times.
-      h("p", { className: "pd-meta" }, `documents/${doc.name}`),
+      h(Toolbar, { format, disabled: !ready || watching, onCommand: (name, arg) => parts.current?.editor.command(name, arg), onComment: comment, onFocusText: () => parts.current?.editor.focus() }),
       conflict &&
         h(
           "div",
@@ -631,39 +799,52 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         ),
       history && ready && h(History, { folder, id, current: base, busy, onRestore: restore }),
       broken && h(ui.ErrorBanner, null, t("The editor could not be loaded: {error}", { error: broken.message })),
-      !ready && !broken && h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
       h(
         "div",
-        { ref: workspace, className: "pd-workspace" },
-        watching && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shownOf(edited))),
-        h("div", { ref: host, className: "pd-editor", hidden: !ready || watching }),
-        ready &&
-          h(Comments, {
-            threads: ordered,
-            loaded: threads.loaded,
-            error: threads.error,
-            texts,
-            settled: asked === wanted,
-            active,
-            compose,
-            onRetry: () => void refresh.current(),
-            onActivate: show,
-            onWrite: write,
-            onFinish: finish,
-            onCancel: cancel,
-            onResolve: resolve,
-            onReopen: reopen,
-            onSeen: seen,
-            onEdit: changeComment,
-            onDelete: removeComment,
-            onDeleteThread: removeThread,
-          }),
+        { ref: workspace, className: "pd-desk pd-workspace" },
+        h(
+          "div",
+          { className: `pd-row${margin ? " has-margin" : ""}` },
+          h(
+            "div",
+            { className: "pd-sheet" },
+            !ready && !broken && h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
+            watching && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shownOf(edited))),
+            h("div", { ref: host, className: "pd-editor", hidden: !ready || watching, onClick: (e) => e.target === host.current && parts.current?.editor.focus() }),
+          ),
+          ready &&
+            (!float || showComments) &&
+            h(Comments, {
+              threads: ordered,
+              loaded: threads.loaded,
+              error: threads.error,
+              texts,
+              settled: asked === wanted,
+              active,
+              compose,
+              float: margin,
+              anchor,
+              relayout: `${relayout}/${active}/${float}`,
+              onPick: setActive,
+              onRetry: () => void refresh.current(),
+              onActivate: show,
+              onWrite: write,
+              onFinish: finish,
+              onCancel: cancel,
+              onResolve: resolve,
+              onReopen: reopen,
+              onSeen: seen,
+              onEdit: changeComment,
+              onDelete: removeComment,
+              onDeleteThread: removeThread,
+            }),
+        ),
       ),
     );
   }
 
   /** A document of a folder, for reading and writing. Without the editor (it could not be loaded) it is read as the portal draws Markdown. */
-  return function DocumentEditor({ folder, id, onBack, draft = null }) {
+  return function DocumentEditor({ folder, id, onBack, onExpand, draft = null }) {
     const { body, error, retry } = useAnswer(documentUrl(folder, id));
     const [edit, setEdit] = useState(null);
     const [failed, setFailed] = useState(null);
@@ -687,10 +868,10 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         { className: "pd-document" },
         back,
         h(ui.LoadFailed, { error: t("The editor could not be loaded: {error}", { error: failed.message }), onRetry: () => setAttempt((n) => n + 1) }),
-        h("p", { className: "pd-meta" }, `documents/${body.name} · ${t("Changed {date}", { date: when(body.modified) })}`),
+        h("p", { className: "pd-meta" }, `documents/${body.name} · ${t("Changed {date}", { date: when(body.modified) })} · `, h("a", { href: `${documentUrl(folder, id)}/download`, download: body.name }, t("Download"))),
         body.markdown.trim() ? h("div", { className: "pd-body" }, h(ui.Markdown, null, body.markdown)) : h(ui.Empty, null, t("This document is empty.")),
       );
     }
-    return h("article", { className: "pd-document" }, h(Editing, { folder, id, doc: body, edit, onBack, draft }));
+    return h("article", { className: "pd-document" }, h(Editing, { folder, id, doc: body, edit, onBack, onExpand, draft }));
   };
 }

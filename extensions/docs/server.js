@@ -10,8 +10,10 @@
  *
  *   GET  /api/x/pithagoras-docs/folders                                          every folder with documents, and its documents; `version` says which list it is
  *   GET  /api/x/pithagoras-docs/folders/events                                   a stream of the changes to that list as they are made (server-sent events)
- *   GET  /api/x/pithagoras-docs/chats/:chat/documents                            the documents one chat sees (the project's and its own), and their folder: for the panel beside it
+ *   GET  /api/x/pithagoras-docs/chats/:chat/documents                            the documents of one chat's folder (other chats' own marked), and the folder: for the panel beside it
  *   POST /api/x/pithagoras-docs/folders/:folder/documents                        a new document { title, markdown?, scope?, chat? }
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/upload                 a Markdown file the person uploaded { name, markdown }, kept as it is
+ *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/download           the document's file, as an attachment
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
  *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/events             a stream of its revisions as they are made (server-sent events)
@@ -67,7 +69,7 @@
  * thread; one that is taken away, or its thread, takes the wake with it.
  */
 import { createHash } from "node:crypto";
-import { lstatSync } from "node:fs";
+import { lstatSync, watch } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
 import { explained } from "./errors.js";
@@ -505,7 +507,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
    * string for each folder that has anything to list), which is what a change is found against; it is made when the first stream opens and
    * dropped with the last, so that nothing is looked at while no page listens. `sends`: told the list's version when it changed.
    */
-  const lists = { sends: new Set(), seen: null, based: null, timer: null, running: null, all: false, due: new Set() };
+  const lists = { sends: new Set(), seen: null, based: null, timer: null, running: null, all: false, due: new Set(), watchers: new Map() };
 
   /** Each folder's store, opened once and kept while it is there: by the folder's path. */
   const stores = new Map();
@@ -879,17 +881,59 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     })());
   }
 
+  /** Stops watching the documents folder of folder `id`. */
+  function unwatchDir(id) {
+    const watched = lists.watchers.get(id);
+    if (!watched) return;
+    clearTimeout(watched.timer);
+    watched.watcher.close();
+    lists.watchers.delete(id);
+  }
+
+  /**
+   * The documents folders of the folders chats work in, watched while a page lists them: a file put there (an upload in Files, an
+   * editor, a copy) is looked at a moment after, not at the next look of every couple of seconds. What cannot be watched is left to
+   * those looks, which also find a documents folder that was made since.
+   */
+  function watchDirs() {
+    const found = folders();
+    for (const [id, watched] of lists.watchers) if (!found.has(id) || documentsOf(found.get(id).path) !== watched.dir) unwatchDir(id);
+    for (const [id, folder] of found) {
+      if (lists.watchers.has(id)) continue;
+      const dir = documentsOf(folder.path);
+      if (!dir) continue;
+      try {
+        const watched = { dir, watcher: null, timer: null };
+        // A burst of events (a write through a temporary file, a copy of many) is one look.
+        watched.watcher = watch(dir, { persistent: false }, () => {
+          clearTimeout(watched.timer);
+          watched.timer = setTimeout(() => void look(id), 100);
+          watched.timer.unref?.();
+        });
+        watched.watcher.on("error", () => unwatchDir(id));
+        lists.watchers.set(id, watched);
+      } catch {
+        // Not to be watched here (too many watches, a file system that has none): the looks find what changes.
+      }
+    }
+  }
+
   /** `send` is given the list's version whenever it changes. Returns what stops it. */
   function watchList(send) {
     lists.sends.add(send);
     // The folders are looked at every so often: a document that is made, renamed or deleted outside the store tells it nothing.
     if (!lists.timer && pollMs > 0) {
-      lists.timer = setInterval(() => void look(), pollMs);
+      watchDirs();
+      lists.timer = setInterval(() => {
+        watchDirs();
+        void look();
+      }, pollMs);
       lists.timer.unref?.();
     }
     return () => {
       if (!lists.sends.delete(send) || lists.sends.size) return;
       clearInterval(lists.timer);
+      for (const id of [...lists.watchers.keys()]) unwatchDir(id);
       Object.assign(lists, { timer: null, seen: null, based: null, all: false });
       lists.due.clear();
       failed.clear();
@@ -913,8 +957,8 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   }));
 
   /**
-   * The documents a chat sees, for the panel beside it: the project's and the chat's own, as its agent's tools see them, and the
-   * folder they are in (its id, to open one or make one). No other chat's own document is listed. The panel keeps it current with
+   * The documents of a chat's folder, for the panel beside it, and the folder they are in (its id, to open one or make one): all of
+   * them, the other chats' own documents too, which are marked as such. The panel keeps it current with
    * the list's stream (/folders/events), and asks again when that says the list changed.
    */
   portal.router.get("/chats/:chat/documents", route(async (req, res) => {
@@ -928,7 +972,10 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const folder = { id: idOf(where), path: where };
     const found = await listing(folder);
     if (found.problem) throw new DocError(503, found.problem.error);
-    const documents = (found.listed?.documents ?? []).filter((doc) => doc.scope === "project" || doc.chat === chat);
+    // Every document of the folder, as on the Documents page: a folder such as the agent's home is many chats', and the person sees
+    // the documents of each in any of them. One that is another chat's own says which chat (`chatTitle`): its agent does not see it here.
+    const titles = new Map(portal.chats.list().map((c) => [c.id, c.title]));
+    const documents = (found.listed?.documents ?? []).map((doc) => (doc.scope === "chat" && doc.chat !== chat ? { ...doc, otherChat: true, chatTitle: titles.get(doc.chat) ?? null } : doc));
     res.json({ folder: { id: folder.id, name: path.basename(where) || where, path: where }, documents });
   }));
 
@@ -971,6 +1018,34 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const store = await storeFor(folder.path, { make: true });
     const doc = await store.create({ title, markdown, scope, chat: scope === "chat" ? body.chat : null });
     res.status(201).json({ ...doc, title: titleOf(Buffer.from(markdown, "utf8"), doc.name), ...warn(markdown) });
+  }));
+
+  /**
+   * A Markdown file the person uploaded, as a document of the folder: its text as it is (no heading is added), under its own name,
+   * or with a number where that is taken. `name` is the file's name, `.md` or `.markdown`.
+   */
+  portal.router.post("/folders/:folder/documents/upload", json, route(async (req, res) => {
+    const folder = folderOf(req);
+    const body = req.body ?? {};
+    const markdown = markdownOf(body);
+    const given = typeof body.name === "string" ? body.name.trim() : "";
+    if (!/\.(md|markdown)$/i.test(given) || given.length > 255) throw new DocError(400, "Only Markdown files (.md) can be uploaded as documents");
+    const base = given.replace(/\.(md|markdown)$/i, "");
+    const store = await storeFor(folder.path, { make: true });
+    const doc = await store.create({ title: base, name: base, markdown });
+    res.status(201).json({ ...doc, title: titleOf(Buffer.from(markdown, "utf8"), doc.name), ...warn(markdown) });
+  }));
+
+  /** A document's file as it is, to be saved by the browser. */
+  portal.router.get("/folders/:folder/documents/:id/download", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const doc = await (await storeFor(folder.path)).read(id);
+    const ascii = doc.name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(doc.name)}`);
+    res.setHeader("Cache-Control", "no-store");
+    res.end(doc.bytes);
   }));
 
   portal.router.get("/folders/:folder/documents/:id", route(async (req, res) => {
@@ -1141,6 +1216,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     wakes.clear();
     for (const entry of watching.values()) clearInterval(entry.timer);
     clearInterval(lists.timer);
+    for (const id of [...lists.watchers.keys()]) unwatchDir(id);
     for (const res of [...streams]) res.end();
     const open = [...stores.values()];
     stores.clear();
