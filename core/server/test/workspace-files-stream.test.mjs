@@ -152,6 +152,37 @@ test('a watch is on the folder that was checked: a link put in its place does no
   done();
 });
 
+test('a watch is set on the folder that was held, not on what its path leads to by the time it is set', async () => {
+  const { base, sub, outside, done } = setup();
+  const aside = `${sub}.aside`;
+  const real = fs.watch;
+  let swapped = false;
+  // The folder goes aside and a link to the one outside stands in its place, right before the watch is asked for.
+  fs.watch = (...args) => {
+    if (!swapped) { swapped = true; renameSync(sub, aside); symlinkSync(outside, sub); }
+    return real(...args);
+  };
+  syncBuiltinESMExports();
+  const told = [];
+  let watch;
+  try {
+    watch = watchFolder(base, 'sub', (change) => told.push(change), { debounceMs: 20 });
+  } finally {
+    fs.watch = real;
+    syncBuiltinESMExports();
+  }
+  assert.ok(swapped);
+  // What happens where the link leads is not this watch's: nothing is told of it.
+  writeFileSync(path.join(outside, 'new.txt'), 'x');
+  await sleep(200);
+  assert.deepEqual(told, []);
+  // The folder it was set on is the one held, which is now gone from its place.
+  writeFileSync(path.join(aside, 'inside.txt'), 'x');
+  await until(() => told.some((change) => change.gone), 'a change in the folder that was held is told');
+  watch.close();
+  done();
+});
+
 test('a watch that was swapped for a link before it was set is refused, and one that cannot be set is failed, with the system\'s code', async () => {
   const { base, sub, outside, done } = setup();
   mkdirSync(path.join(sub, 'inner'));
