@@ -69,6 +69,18 @@ test.describe('with extension pages', () => {
     // Held open by the page, so the fold does nothing and keeps what was chosen.
     await expect(header(page)).toHaveAttribute('aria-disabled', 'true');
     expect(await stored(page)).toBe('false');
+    // It says why, and pressing it neither folds the group nor changes what is kept: a plain click is refused as the disabled it announces.
+    await expect(header(page)).toHaveAttribute('title', 'Open while one of its pages is showing');
+    expect(await header(page).evaluate((b) => getComputedStyle(b).cursor)).toBe('default');
+    await header(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(header(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(nav(page).getByRole('button', { name: 'Notes' })).toBeVisible();
+    expect(await stored(page)).toBe('false');
+    // Each press on its own: two that flipped the kept choice would put it back.
+    await header(page).click({ force: true });
+    await expect(header(page)).toHaveAttribute('aria-expanded', 'true');
+    expect(await stored(page)).toBe('false');
     await nav(page).getByRole('button', { name: 'Sessions' }).click();
     await expect(header(page)).toHaveAttribute('aria-expanded', 'false');
     await expect(nav(page).getByRole('button', { name: 'Notes' })).toHaveCount(0);
@@ -139,6 +151,42 @@ test.describe('with extension pages', () => {
     await expect(trigger).toHaveAttribute('aria-current', 'page');
     await rail.getByRole('button', { name: 'Sessions' }).click();
     await expect(trigger).not.toHaveAttribute('aria-current', /.+/);
+  });
+
+  test('on the rail Tab leaves the menu from the button\'s place, and the arrows go on when the page they are on is unlisted', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('sidebarCollapsed', 'true'));
+    await portal(page);
+    await page.goto('/sessions');
+    const rail = page.getByRole('navigation', { name: 'Destinations' });
+    const trigger = rail.getByRole('button', { name: 'Extensions' });
+    const menu = page.getByRole('menu', { name: 'Extensions' });
+    await expect(trigger).toBeVisible();
+    await listViewer(page);
+
+    // Tab goes on to the next button of the rail, Shift+Tab back to the one before: not to the start of the page.
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(rail.getByRole('button', { name: 'Settings' })).toBeFocused();
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Shift+Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(rail.getByRole('button', { name: 'Audit' })).toBeFocused();
+
+    // The page the focus is on is unlisted: the focus is on the one now in its place, and Enter still picks.
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('End');
+    await expect(menu.getByRole('menuitem', { name: 'Viewer' })).toBeFocused();
+    await listViewer(page, false);
+    await expect(menu.getByRole('menuitem')).toHaveText(['Notes']);
+    await expect(menu.getByRole('menuitem', { name: 'Notes' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`${NOTES}$`));
   });
 
   test('on the rail a press outside the menu shuts it, and a page not listed is not in it', async ({ page }) => {

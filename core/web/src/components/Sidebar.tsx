@@ -446,9 +446,11 @@ function NavItem({
       aria-expanded={fold?.open}
       aria-controls={fold?.controls}
       aria-disabled={fold?.held || undefined}
+      title={fold?.held ? t("Open while one of its pages is showing") : undefined}
       data-new={isNew || undefined}
+      // Held open, it does nothing when pressed, and does not look as if it did.
       className={`nav-item group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
-        active ? "bg-fg/[0.07] text-fg" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
+        active ? "bg-fg/[0.07] text-fg" : fold?.held ? "cursor-default text-fg-muted" : "text-fg-muted hover:bg-fg/5 hover:text-fg"
       }`}
     >
       <span
@@ -460,7 +462,7 @@ function NavItem({
         {icon}
       </span>
       {label}
-      {fold && <LuChevronRight aria-hidden className={`ml-auto h-3 w-3 shrink-0 text-fg-faint transition-transform motion-reduce:transition-none ${fold.open ? "rotate-90" : ""}`} />}
+      {fold && <LuChevronRight aria-hidden className={`ml-auto h-3 w-3 shrink-0 text-fg-faint transition-transform motion-reduce:transition-none ${fold.open ? "rotate-90" : ""} ${fold.held ? "opacity-40" : ""}`} />}
     </button>
   );
 }
@@ -536,6 +538,8 @@ function RailMenu({
     setPlace({ left: b.right + 8, ...(flip ? { bottom: window.innerHeight - b.bottom } : { top: b.top }), maxHeight: Math.max(120, flip ? b.bottom - 8 : below) });
     setOpen(true);
   };
+  /** Which entry had the focus last: where it goes if that entry is unlisted. */
+  const lastAt = useRef(0);
   const entries = () => Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
   // The page showing is where the arrows start, if it is one of these.
   useEffect(() => {
@@ -543,6 +547,19 @@ function RailMenu({
     const at = Math.max(0, items.findIndex((d) => d.to === current));
     entries()[at]?.focus();
   }, [open]);
+  // An entry unlisted under the focus takes it along to body, where the arrows are not heard: it goes to the one
+  // now in its place, or to the button if none is left.
+  const listed = items.map((d) => d.to).join("\n");
+  useEffect(() => {
+    if (!open || menu.current?.contains(document.activeElement)) return;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const all = entries();
+    if (all.length) all[Math.min(lastAt.current, all.length - 1)].focus();
+    else {
+      setOpen(false);
+      button.current?.focus();
+    }
+  }, [listed]);
 
   const onMenuKey = (e: KeyboardEvent) => {
     const all = entries();
@@ -555,8 +572,12 @@ function RailMenu({
     else if (e.key === "ArrowUp") go(at < 0 ? -1 : at - 1);
     else if (e.key === "Home") go(0);
     else if (e.key === "End") go(-1);
-    // Away from the menu with the keys is away from it: not left open behind the focus.
-    else if (e.key === "Tab") setOpen(false);
+    // Away from the menu with the keys is away from it, and on from where the button is, not from the end of the page
+    // the menu is drawn at: the focus goes to the button before the Tab is carried out.
+    else if (e.key === "Tab") {
+      button.current?.focus();
+      setOpen(false);
+    }
   };
 
   return (
@@ -590,7 +611,8 @@ function RailMenu({
             role="menu"
             aria-label={label}
             onKeyDown={onMenuKey}
-            className="ui-select-list"
+            onFocus={(e) => (lastAt.current = Math.max(0, entries().indexOf(e.target as HTMLElement)))}
+            className={`ui-select-list ${place.bottom !== undefined ? "is-above" : ""}`}
             style={{ left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxHeight, minWidth: 180 }}
           >
             {items.map((d) => (
