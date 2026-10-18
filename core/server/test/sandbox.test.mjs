@@ -180,6 +180,23 @@ test("the sandbox holds against the ways round it", { skip: why }, async (t) => 
     await assert.rejects(ops.write.writeFile(path.join(DATA, "bin", "hello"), "changed"), { code: "EACCES" });
   });
 
+  await t.test("pi's read gives a vision model a picture as a picture, told by its bytes as the agent reads them", async () => {
+    const pi = await import("@earendil-works/pi-coding-agent");
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    writeFileSync(path.join(WORK, "project", "dot.png"), png);
+    // By its bytes, not its name.
+    writeFileSync(path.join(WORK, "project", "dot.txt"), png);
+    const read = pi.createReadToolDefinition(path.join(WORK, "project"), { operations: ops.read });
+    const model = { input: ["text", "image"] };
+    const kinds = async (p) => (await read.execute("t", { path: p }, undefined, undefined, { model })).content.map((c) => (c.type === "image" ? c.mimeType : c.type));
+    assert.deepEqual(await kinds("dot.png"), ["text", "image/png"]);
+    assert.deepEqual(await kinds("dot.txt"), ["text", "image/png"]);
+    assert.deepEqual(await kinds("notes.txt"), ["text"]);
+    // One the agent may not read is refused, whatever it is.
+    writeFileSync(path.join(DATA, ".secrets", "face.png"), png);
+    await assert.rejects(read.execute("t", { path: path.join(DATA, ".secrets", "face.png") }, undefined, undefined, { model }));
+  });
+
   await t.test("git works in a project that belongs to root, without the agent trusting it first", () => {
     // Made before the policy went on, as the projects on a portal are.
     const ran = bash("git status --short && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m first && git log --format=%s -1", path.join(WORK, "existing"));

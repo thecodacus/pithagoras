@@ -139,8 +139,22 @@ export function fileOperations(who: Who) {
     if (ran.code !== 0) throw fsError("access", p, ran);
     if (write && !(await test("-w", p))) throw fsError("access", p, { code: 1, stdout: Buffer.alloc(0), stderr: "Permission denied" });
   };
+  /**
+   * Whether a file is a picture pi sends the model as one, and which kind, told
+   * by its bytes as the agent reads them. Without it pi's read takes every file
+   * for text, and a vision model is given a picture's bytes as characters. pi's
+   * own check opens the file in the portal's process, which is root here; this
+   * is how pi's example of operations done elsewhere does it (`file`, in
+   * examples/extensions/ssh.ts), for the kinds pi's own check takes.
+   */
+  const detectImageMimeType = async (p: string) => {
+    const ran = await run(["file", "--brief", "--mime-type", "--", p]);
+    if (ran.code !== 0) throw fsError("read", p, ran);
+    const type = ran.stdout.toString("utf8").trim();
+    return PICTURE_TYPES.has(type) ? type : null;
+  };
   return {
-    read: { readFile, access: (p: string) => access(p) },
+    read: { readFile, access: (p: string) => access(p), detectImageMimeType },
     write: {
       writeFile,
       mkdir: async (dir: string) => {
@@ -165,6 +179,9 @@ export function fileOperations(who: Who) {
     },
   };
 }
+
+/** The kinds of picture pi's read sends the model as pictures, as `file` names them. */
+const PICTURE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"]);
 
 /** Where pi is, for a process of the agent's own to load it from. */
 const PI_MODULE = import.meta.resolve("@earendil-works/pi-coding-agent");
