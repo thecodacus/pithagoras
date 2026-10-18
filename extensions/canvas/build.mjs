@@ -4,7 +4,7 @@
  * own `npm run build` runs this, so a checkout and the image build it the same
  * way; what it makes is not kept in git.
  *
- * What it is built and runs with (the icons, better-sqlite3) is this package's
+ * What it is built with (the icons) is this package's
  * own, installed here first when it is not there yet, or not at the version its
  * lock file names. esbuild is the repository's.
  */

@@ -7,9 +7,6 @@
   "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
   "scripts": { "build": "node build.mjs" },
-  "dependencies": {
-    "better-sqlite3": "^13.0.3"
-  },
   "devDependencies": {
     "@milkdown/core": "7.22.3",
     "@milkdown/ctx": "7.22.3",

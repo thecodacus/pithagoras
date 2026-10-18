@@ -388,10 +388,6 @@ const WAKE_MS = 3_000;
 const WAKE_LIMIT_MS = 120_000;
 
 export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeMs = WAKE_MS, wakeLimitMs = WAKE_LIMIT_MS } = {}) {
-  // What it needs to run is in its folder before it is started: the image installs it when it is built, and the portal installs
-  // it from the lock file for a folder that came without (a checkout run as it is).
-  let Database;
-
   /** The folders chats work in now, by id, with the chats that work in each. */
   function folders() {
     const found = new Map();
@@ -527,16 +523,8 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
     const id = idOf(folder);
     if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document");
     const opening = (async () => {
-      if (!Database) {
-        try {
-          Database = (await import("better-sqlite3")).default;
-        } catch (e) {
-          portal.log(`The documents store's database could not be loaded: ${e?.message ?? e}`);
-          throw new DocError(503, "The documents store's packages are not installed");
-        }
-      }
-      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: portal.files, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
-      return Store.open(folder, { dir, files: portal.files, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
+      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: portal.files, Database: portal.sqlite, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
+      return Store.open(folder, { dir, files: portal.files, Database: portal.sqlite, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
     })();
     stores.set(folder, opening);
     return opening;

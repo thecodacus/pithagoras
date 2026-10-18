@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import Database from 'better-sqlite3';
 import { openStore } from '../src/store.ts';
 import { CanvasTools, WriteStream, GatewayWriteStream, canvasWritePrefix } from '../src/tools.ts';
+import { portalSqlite } from '@pithagoras/extension-api/testing';
+
+const Database = await portalSqlite();
 
 /** The store in a database of its own, for the chats s1 and s2. */
 const db = new Database(':memory:');

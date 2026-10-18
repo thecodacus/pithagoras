@@ -1,15 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 import express from 'express';
 import canvas from '../src/server.ts';
+import { portalSqlite } from '@pithagoras/extension-api/testing';
 import { scratch } from '../../../tests/helpers.mts';
+
+const sqlite = await portalSqlite();
 
 /**
  * The server half over a stand-in for the portal: what it tells the pages open on a chat, the agent's tools in each
  * chat as its pi starts, what it hears of a chat's pi, and a chat that goes.
  */
-function portal() {
+function portal(dir = scratch('canvas-data-'), driver: any = sqlite) {
   const sent: [string, any][] = [];
   const life = new EventEmitter();
   let open: (chat: string) => unknown = () => undefined;
@@ -19,7 +23,8 @@ function portal() {
   const given = {
     router: express.Router(),
     http: { json: express.json },
-    dataDir: () => scratch('canvas-data-'),
+    dataDir: () => dir,
+    sqlite: driver,
     chats: {
       get: (id: string) => (['a', 'b'].includes(id) ? { id, title: id, workspace: '/w', status: 'idle' } : undefined),
       send: (chat: string, data: unknown) => sent.push([chat, data]),
@@ -92,4 +97,40 @@ test('the tools are a chat\'s own, a write is followed only by the chat that mak
   } finally {
     p.stop();
   }
+});
+
+test('a database file made before is opened as it is, and the one the package makes is a plain SQLite file', async () => {
+  const dir = scratch('canvas-data-');
+  const Database = sqlite as any;
+  // A file as the package made it before it had the portal's driver: its table, and a stored canvas in it.
+  const old = new Database(path.join(dir, 'canvases.db'));
+  old.pragma('journal_mode = WAL');
+  old.exec(`CREATE TABLE canvases (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'saved', active_call TEXT, agent_read_revision INTEGER, updated_at TEXT NOT NULL, previous_content TEXT)`);
+  old.prepare("INSERT INTO canvases (id, session_id, title, content, revision, updated_at) VALUES ('c1', 'a', 'Kept', 'Words', 4, '2026-10-01T10:00:00.000Z')").run();
+  old.close();
+  const p = portal(dir);
+  const snapshot: any = p.opened('a');
+  assert.deepEqual(snapshot.canvases.map((c: any) => [c.id, c.title, c.content, c.revision, c.persisted]), [['c1', 'Kept', 'Words', 4, true]]);
+  // What the package writes into it is in the same table, for anyone's SQLite to read.
+  const tools = p.start('a');
+  const row = await value(tools.canvas_create.execute('create', { title: 'Another', content: 'More' }));
+  p.stop();
+  const plain = new Database(path.join(dir, 'canvases.db'), { readonly: true, fileMustExist: true });
+  assert.equal(plain.pragma('journal_mode', { simple: true }), 'wal');
+  assert.deepEqual(plain.prepare('SELECT id, title FROM canvases ORDER BY id').all().map((r: any) => r.id), ['c1']);
+  assert.ok(row.id);
+  plain.close();
+});
+
+test('the database is opened with the portal\'s driver, in the package\'s data folder', () => {
+  const dir = scratch('canvas-data-');
+  const opened: string[] = [];
+  class Recording extends (sqlite as any) {
+    constructor(file: string, options?: unknown) {
+      super(file, options);
+      opened.push(file);
+    }
+  }
+  portal(dir, Recording).stop();
+  assert.deepEqual(opened, [path.join(dir, 'canvases.db')]);
 });

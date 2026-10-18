@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { SqliteDatabase } from "@pithagoras/extension-api/server";
 
 /**
  * A chat's canvases: documents the agent writes beside the conversation, and
@@ -43,7 +43,7 @@ const FLUSH_MS = 750;
 /** What a row is read with: the text from before a write is for restoring, and is not sent along with every row. */
 const COLUMNS = "id, session_id, title, content, revision, status, active_call, agent_read_revision, updated_at, previous_content IS NOT NULL AS restorable";
 
-export function openStore(db: Database.Database, chatExists: (id: string) => boolean) {
+export function openStore(db: SqliteDatabase, chatExists: (id: string) => boolean) {
   db.pragma("journal_mode = WAL");
   db.exec(`
     CREATE TABLE IF NOT EXISTS canvases (

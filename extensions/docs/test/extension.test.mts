@@ -7,10 +7,12 @@ import path from 'node:path';
 import ts from 'typescript';
 import { SECRET_WARNING } from '../secret.js';
 import docsServer from '../server.js';
-import { portalFiles, scratch } from '@pithagoras/extension-api/testing';
+import { portalFiles, portalSqlite, scratch } from '@pithagoras/extension-api/testing';
 
 /** The portal's own `portal.files`: what a server half is given for a chat's folder. */
 const folderFiles = await portalFiles();
+/** The portal's own `portal.sqlite`. */
+const sqlite = await portalSqlite();
 
 /** The portal's data folder for the stores. */
 const DATA = scratch('docs-ext-data-');
@@ -30,6 +32,7 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     push: () => {},
     onListen: () => {},
     files: folderFiles,
+    sqlite,
     sandbox: { on: () => false },
     // The portal's data folder for the stores: one for the file, the stores are told apart by their folders' ids.
     dataDir: () => DATA,
@@ -205,8 +208,9 @@ test('a pipe named like a document is no document, and asking for one does not h
   // A document whose file is swapped for a pipe after it was listed is asked for as well.
   const asking = `
     import docsServer from ${JSON.stringify(new URL('../server.js', import.meta.url).href)};
-    import { portalFiles } from '@pithagoras/extension-api/testing';
+    import { portalFiles, portalSqlite } from '@pithagoras/extension-api/testing';
     const folderFiles = await portalFiles();
+    const sqlite = await portalSqlite();
     import { execFileSync } from 'node:child_process';
     import { realpathSync, rmSync } from 'node:fs';
     const routes = new Map();
@@ -218,6 +222,7 @@ test('a pipe named like a document is no document, and asking for one does not h
       push: () => {},
       onListen: () => {},
       files: folderFiles,
+      sqlite,
       sandbox: { on: () => false },
       dataDir: () => process.env.DATA,
       chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },

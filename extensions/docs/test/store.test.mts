@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import docsServer from '../server.js';
-import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
+import { mockPortal, scratch, portalSqlite } from '@pithagoras/extension-api/testing';
 
 /**
  * The Documents extension's store, through its server half's routes: a real
@@ -481,7 +481,7 @@ test('a store that fails to open does not keep its database open on every reques
   const { folder, docs } = await withDocument('docs-store-leak-');
   await docs.close();
   // A database of a later version cannot be opened by this store.
-  const { default: Database } = await import('better-sqlite3');
+  const Database = await portalSqlite();
   const db = new Database(path.join(storeOf(folder), 'docs.sqlite'));
   db.prepare("UPDATE meta SET value = '9' WHERE key = 'schema'").run();
   db.close();
@@ -535,7 +535,7 @@ test('a folder too big to be listed whole does not say that a document was never
     rmSync(file);
     pastTheListing(path.join(folder, 'documents'));
     await docs.call('GET', '/folders');
-    const { default: Database } = await import('better-sqlite3');
+    const Database = await portalSqlite();
     const db = new Database(path.join(storeOf(folder), 'docs.sqlite'), { readonly: true });
     try {
       assert.equal(db.prepare("SELECT COUNT(*) AS n FROM documents WHERE name = 'notes.md'").get().n, 1, 'the row is kept');

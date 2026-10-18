@@ -155,6 +155,46 @@ export interface PageListener {
   send(data: unknown): void;
 }
 
+/** What running a statement of a SQLite database gives back. */
+export interface SqliteRunResult {
+  changes: number;
+  lastInsertRowid: number | bigint;
+}
+
+/** A prepared statement (better-sqlite3's): the values go in as parameters, in the order of the `?`, or as one object for `@name`s. */
+export interface SqliteStatement {
+  /** Runs it for what it changes: an insert, an update, a delete. */
+  run(...params: unknown[]): SqliteRunResult;
+  /** The first row, or undefined. */
+  get(...params: unknown[]): any;
+  /** Every row. */
+  all(...params: unknown[]): any[];
+  /** The rows one at a time, without holding all of them. */
+  iterate(...params: unknown[]): IterableIterator<any>;
+  /** Makes it give the first column of a row, not the row. */
+  pluck(toggle?: boolean): this;
+}
+
+/** An open SQLite database (better-sqlite3's), in one call at a time: its calls are synchronous. */
+export interface SqliteDatabase {
+  readonly name: string;
+  readonly open: boolean;
+  readonly inTransaction: boolean;
+  prepare(sql: string): SqliteStatement;
+  /** Runs one or more statements that return nothing. */
+  exec(sql: string): this;
+  /** A PRAGMA, as `pragma("journal_mode = WAL")`; what it answers, or the one value with `{ simple: true }`. */
+  pragma(source: string, options?: { simple?: boolean }): any;
+  /** `fn` as a function that does all it does in one transaction, undone if it throws; `.immediate` takes the write lock first. */
+  transaction<F extends (...args: any[]) => any>(fn: F): F & { deferred: F; immediate: F; exclusive: F };
+  close(): this;
+}
+
+/** Opens a database file: `new portal.sqlite(file)` makes it if it is not there. */
+export interface SqliteDriver {
+  new (file: string, options?: { readonly?: boolean; fileMustExist?: boolean; timeout?: number }): SqliteDatabase;
+}
+
 /**
  * Whether a page may listen to a topic, and what to do when it stops. Return `false` (or throw) to refuse; return a
  * function to be called once when the page stops listening (it left, its tab closed, its login ended, or this half
@@ -447,6 +487,12 @@ export interface ServerPortal {
    * or a database.
    */
   dataDir(): string;
+  /**
+   * SQLite, as the portal has it (better-sqlite3, the version the portal's own database runs on): a package that keeps
+   * a database does not bring a driver of its own, with a native binary to install for the system it runs on.
+   * `new portal.sqlite(path.join(portal.dataDir(), "notes.db"))`; the files are SQLite's own, the same whoever opens them.
+   */
+  sqlite: SqliteDriver;
 }
 
 /** An extension's server half: the default export of its module. It may return what stops it. */

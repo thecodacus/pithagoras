@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import docsServer from '../server.js';
-import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
+import { mockPortal, scratch, portalSqlite } from '@pithagoras/extension-api/testing';
 import { follow } from './follow.mts';
 
 /**
@@ -208,7 +208,7 @@ test('a thread has at most 100 comments, and a document at most 1000 threads', a
   try {
     const made = (await comment(GREEN)).body;
     // The most are put straight into the database (a hundred requests would be the same test, slower).
-    const { default: Database } = await import('better-sqlite3');
+    const Database = await portalSqlite();
     const db = new Database(path.join(DATA, folderIdOf(folder), 'docs.sqlite'));
     const now = new Date().toISOString();
     const addComment = db.prepare("INSERT INTO comments (id, thread_id, author, body, created_at) VALUES (?, ?, 'user', ?, ?)");
@@ -748,7 +748,7 @@ test('a thread the person started is taken away with its comments, open or resol
     assert.deepEqual((await threads()).threads.map((t: any) => t.id), [other.id]);
     assert.equal((await docs.call('GET', '/folders')).body.folders[0].documents[0].openThreads, 1);
     // Its comments went with it, not only the thread.
-    const { default: Database } = await import('better-sqlite3');
+    const Database = await portalSqlite();
     const db = new Database(path.join(DATA, folderIdOf(folder), 'docs.sqlite'), { readonly: true });
     assert.deepEqual(db.prepare('SELECT body FROM comments').all(), [{ body: 'Who signs off?' }]);
     db.close();
@@ -779,7 +779,7 @@ test('a database from before comments could be changed gets the mark added, and 
   } finally {
     await first.close();
   }
-  const { default: Database } = await import('better-sqlite3');
+  const Database = await portalSqlite();
   const db = new Database(path.join(data, f, 'docs.sqlite'));
   db.exec('ALTER TABLE comments DROP COLUMN edited_at');
   assert.ok(!db.prepare('PRAGMA table_info(comments)').all().some((c: any) => c.name === 'edited_at'));

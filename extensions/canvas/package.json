@@ -7,11 +7,7 @@
   "pi": {},
   "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
   "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
-  "dependencies": {
-    "better-sqlite3": "^13.0.3"
-  },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
     "react-icons": "5.7.0"
   },
   "license": "Apache-2.0"

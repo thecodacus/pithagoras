@@ -48,6 +48,8 @@ export interface MockPortalOptions {
   sandbox?: boolean;
   /** `portal.files`; the portal's own by default. */
   files?: ServerPortal["files"];
+  /** `portal.sqlite`; the portal's own driver by default. */
+  sqlite?: ServerPortal["sqlite"];
   /** Without `portal.git`. */
   git?: false;
   /** What `portal.extensions.use(name)` gives, by name. */
@@ -115,6 +117,9 @@ export function portalFiles(): Promise<ServerPortal["files"]>;
 
 /** The portal's own `portal.proc` (`/proc` of the host), for a test that calls a server half by hand and needs no more of a portal than that. */
 export function portalProc(): Promise<ServerPortal["proc"]>;
+
+/** The portal's own `portal.sqlite` (the better-sqlite3 it runs on), for a test that calls a server half by hand. */
+export function portalSqlite(): Promise<ServerPortal["sqlite"]>;
 
 /** A new folder (its real path) in the system's temp directory, removed when the process ends. */
 export function scratch(prefix?: string): string;

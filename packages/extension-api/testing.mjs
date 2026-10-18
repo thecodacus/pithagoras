@@ -48,6 +48,13 @@ export async function portalProc() {
   return { stat: (pid) => statOf(pid), signalSession };
 }
 
+/** The portal's own `portal.sqlite` (the better-sqlite3 the portal runs on), for a test that calls a server half by hand. */
+export async function portalSqlite() {
+  const { createRequire } = await import("node:module");
+  // From the portal's server, whose driver it is: beside this package in a checkout.
+  return createRequire(new URL("../../core/server/package.json", import.meta.url))("better-sqlite3");
+}
+
 const scratches = [];
 process.on("exit", () => {
   for (const folder of scratches) rmSync(folder, { recursive: true, force: true });
@@ -125,6 +132,7 @@ export async function mockPortal(options = {}) {
   const { default: express } = await import("express");
   const { folderFiles } = options.files ? { folderFiles: options.files } : await core("folder-files");
   const proc = await portalProc();
+  const sqlite = options.sqlite ?? (await portalSqlite());
   const hub = await core("extension-push");
   const git = options.git === false ? undefined : (await core("git")).gitAt;
   const extension = options.extension ?? "pithagoras-test";
@@ -278,6 +286,7 @@ export async function mockPortal(options = {}) {
     },
     files: folderFiles,
     proc,
+    sqlite,
     git: { at: (folder) => (git ? git(folder) : (() => { throw new Error("The mock was made without git"); })()) },
     dataDir: dataFolder,
   };

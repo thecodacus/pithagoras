@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import docsServer from '../server.js';
-import { mockPortal, portalFiles, type MockPage } from '@pithagoras/extension-api/testing';
+import { mockPortal, portalFiles, type MockPage, portalSqlite } from '@pithagoras/extension-api/testing';
 import { follow as followTopic } from './follow.mts';
 import { scratch } from '../../../tests/helpers.mts';
 
@@ -25,12 +25,14 @@ type Options = {
   /** `faults.after`: runs after each step of a write, and throws to cut it off. */
   onStep?: (step: string) => void;
   data?: string;
+  /** `portal.sqlite`: the portal's own by default. */
+  sqlite?: any;
 };
 
 /** The server half for chats that work in these folders. `fault` breaks the next write after that step. */
 async function portal(folders: Record<string, string>, options: Options = {}) {
   let armed: string | null = null;
-  const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats: folders, dataDir: options.data ?? DATA, files: options.files });
+  const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats: folders, dataDir: options.data ?? DATA, files: options.files, sqlite: options.sqlite });
   await mock.start(docsServer, {
     pollMs: 40,
     faults: {
@@ -408,7 +410,7 @@ test('a deleted document is gone: its file, its comments and its history on the 
     assert.deepEqual((await docs.call('GET', '/folders')).body.folders ?? [], []);
     assert.deepEqual((await docs.call('GET', '/chats/a/documents')).body.documents, []);
     // Nothing of it is left in the database: its revisions, its comments and their threads went with it.
-    const { default: Database } = await import('better-sqlite3');
+    const Database = await portalSqlite();
     const db = new Database(path.join(storeOf(folder), 'docs.sqlite'), { readonly: true });
     try {
       for (const table of ['documents', 'revisions', 'threads', 'comments', 'pings']) assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n, 0, table);
@@ -656,4 +658,27 @@ test('the agent has no tool to rename or delete a document', async () => {
   const names = [...source.matchAll(/name:\s*"(doc_[a-z_]+)"/g)].map((m) => m[1]);
   assert.ok(names.length > 0);
   assert.deepEqual(names.filter((n) => /rename|delete_doc|remove|move/.test(n)), []);
+});
+
+test('the store\'s database is opened with the portal\'s driver, and the file it made in the folder\'s store is a plain SQLite file', async () => {
+  const opened: string[] = [];
+  const sqlite = await portalSqlite();
+  class Recording extends (sqlite as any) {
+    constructor(file: string, options?: unknown) {
+      super(file, options);
+      opened.push(file);
+    }
+  }
+  const { folder, docs, id } = await withDocument('docs-driver-', { sqlite: Recording });
+  try {
+    // By the descriptor of the store's folder, as the store opens it.
+    assert.ok(opened.some((file) => path.basename(file) === 'docs.sqlite'), JSON.stringify(opened));
+    // The file is anyone's SQLite: it holds the document in its table.
+    const plain = new (sqlite as any)(path.join(storeOf(folder), 'docs.sqlite'), { readonly: true, fileMustExist: true });
+    assert.equal(plain.pragma('journal_mode', { simple: true }), 'wal');
+    assert.deepEqual(plain.prepare('SELECT id FROM documents').all().map((row: any) => row.id), [id]);
+    plain.close();
+  } finally {
+    await docs.close();
+  }
 });

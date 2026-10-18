@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, realpathSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
+import Database from "better-sqlite3";
 import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent } from "./agents.js";
@@ -257,6 +258,7 @@ function portalFor(ext: Running): ServerPortal {
     files: folderFiles,
     git: { at: gitAt },
     proc: { stat: (pid) => statOf(pid), signalSession },
+    sqlite: Database as unknown as ServerPortal["sqlite"],
     dataDir: () => {
       // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
       const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));

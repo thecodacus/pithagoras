@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import docsServer from '../server.js';
-import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
+import { mockPortal, scratch, portalSqlite } from '@pithagoras/extension-api/testing';
 
 /**
  * The agent's tools for comments (extensions/docs/tools.js): doc_comment, doc_reply and doc_resolve, the comments in
@@ -362,7 +362,7 @@ test('an edit with a thread is refused before anything is written when the threa
   try {
     const asked = await person('Ship it on Friday.', 'Hm');
     // 99 comments in the thread, put in the database straight (ninety-eight requests would be the same test, slower).
-    const { default: Database } = await import('better-sqlite3');
+    const Database = await portalSqlite();
     const db = new Database(path.join(DATA, folderIdOf(folder), 'docs.sqlite'));
     const insert = db.prepare("INSERT INTO comments (id, thread_id, author, body, created_at) VALUES (?, ?, 'user', ?, ?)");
     db.transaction(() => { for (let n = 2; n < 100; n++) insert.run(n.toString(16).padStart(16, '0'), asked.id, `Reply ${n}`, new Date().toISOString()); })();
@@ -385,7 +385,7 @@ test('an edit with a thread whose reply cannot be added after the change says so
   const { folder, docs, id, agent, person, threads } = await withDocument('docs-ct-edit-late-', PLAN, { after: (step) => step === 'commit' && resolve() });
   try {
     const asked = await person('Ship it on Friday.', 'Hm');
-    const { default: Database } = await import('better-sqlite3');
+    const Database = await portalSqlite();
     resolve = () => {
       resolve = () => {};
       const db = new Database(path.join(DATA, folderIdOf(folder), 'docs.sqlite'));

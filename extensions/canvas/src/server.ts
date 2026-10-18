@@ -1,5 +1,4 @@
 import path from "node:path";
-import Database from "better-sqlite3";
 import type { RequestHandler, Response, Router } from "express";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import { openStore, type CanvasMessage, type CanvasStore } from "./store";
@@ -22,7 +21,7 @@ const EVERY_MS = 250;
 const fail = (res: Response, status: number, e: unknown) => res.status(status).json({ error: (e as Error).message });
 
 export default function canvas(portal: ServerPortal) {
-  const db = new Database(path.join(portal.dataDir(), "canvases.db"));
+  const db = new portal.sqlite(path.join(portal.dataDir(), "canvases.db"));
   const store = openStore(db, (id) => Boolean(portal.chats.get(id)));
   store.interruptAll();
 

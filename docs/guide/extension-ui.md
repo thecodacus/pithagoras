@@ -710,6 +710,7 @@ restart the portal.
 | `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `identity`, `hold`, `upload`, `watch`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
+| `sqlite` | [SQLite](#a-database), the driver the portal's own database runs on: `new portal.sqlite(file)` |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
@@ -777,6 +778,33 @@ const store = path.join(portal.dataDir(), folderId);   // the portal's alone: no
 ```
 
 [Documents](/guide/documents#where-the-history-is-kept) keeps its history there.
+
+#### A database
+
+A package that keeps a database does not bring a driver of its own, with a native
+binary to install for the system it runs on: `portal.sqlite` is the one the portal's
+own database runs on (better-sqlite3), and a server half opens its files with it.
+Calls are synchronous, as that library's are.
+
+```js
+import path from "node:path";
+
+const db = new portal.sqlite(path.join(portal.dataDir(), "notes.db"));   // made if it is not there
+db.pragma("journal_mode = WAL");
+db.exec("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT NOT NULL)");
+const add = db.transaction((texts) => texts.map((text) => db.prepare("INSERT INTO notes (text) VALUES (?)").run(text).lastInsertRowid));
+add(["one", "two"]);
+db.prepare("SELECT text FROM notes").pluck().all();   // ["one", "two"]
+```
+
+`new portal.sqlite(file, { readonly, fileMustExist, timeout })` is what a package needs
+of it; `prepare` (`run`, `get`, `all`, `iterate`, `pluck`), `exec`, `pragma`,
+`transaction` (`.immediate` takes the write lock first) and `close` are typed in
+`@pithagoras/extension-api/server`. The files are SQLite's own, the same whoever opens
+them, so a database made by a package that had a driver of its own is opened as it is.
+Keep a database an agent must not change in `portal.dataDir()`, not in a chat's folder
+(see above). `@pithagoras/extension-api/testing` gives a test the same driver
+(`portalSqlite()`, and `mockPortal` has it).
 
 ### A chat's folder
 
