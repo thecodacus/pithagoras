@@ -1181,6 +1181,38 @@ test('a folder is made closed until it has its mode, and an ordinary one is give
   done();
 });
 
+test('a folder is made and given away on a file system that gives a new folder another owner than the one who made it', () => {
+  const { dir, base, done } = setup();
+  chmodSync(dir, 0o775);
+  // What NFS with root_squash, a CIFS or vfat mount with a uid, or a FUSE mount with a fixed owner does: the folder that was just
+  // made is reported as someone else's. The folder is the portal's own all the same, and is no reason to refuse it.
+  const realOpen = fs.openSync;
+  const realStat = fs.fstatSync;
+  const made = new Set();
+  fs.openSync = (where, flags, ...rest) => {
+    const fd = realOpen(where, flags, ...rest);
+    if (String(where).endsWith('/squashed') && (flags & constants.O_DIRECTORY) !== 0) made.add(fd);
+    return fd;
+  };
+  fs.fstatSync = (fd, ...rest) => {
+    const st = realStat(fd, ...rest);
+    if (made.has(fd)) st.uid += 4242;
+    return st;
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.equal(makeFolder(base, '', 'squashed'), 'squashed');
+  } finally {
+    fs.openSync = realOpen;
+    fs.fstatSync = realStat;
+    syncBuiltinESMExports();
+  }
+  assert.ok(made.size > 0, 'the made folder was looked at');
+  assert.equal(statSync(path.join(dir, 'squashed')).mode & 0o7777, 0o775, 'and it has the folder\'s mode');
+  assert.equal(code(() => makeFolder(base, '', 'squashed')), 'exists');
+  done();
+});
+
 test('a folder the portal may search but not read is walked through, written in and made folders in', { skip: root }, () => {
   const { dir, base, done } = setup();
   const sub = path.join(dir, 'sub');
