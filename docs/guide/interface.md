@@ -29,6 +29,16 @@ itself, with a **Try again** button for impatience. It does not fall back to the
 password form: your login is still good, and only a portal that says you are not
 signed in shows that.
 
+## The sidebar and extensions' pages
+
+The pages that installed extensions bring are not among the portal's own in the
+sidebar: they are together under **Extensions**, a line that folds like a
+folder and is remembered in this browser. It is open until you fold it, and
+stays open while one of its pages is showing. Folded to the rail of icons, the
+sidebar has one puzzle button instead, which opens a menu of those pages: the
+arrow keys move, Enter picks one, Esc closes the menu. With no extension page
+there is no group and no button.
+
 ## Theme
 
 **Settings → This browser → Theme** is light, dark or **System**, the default,
