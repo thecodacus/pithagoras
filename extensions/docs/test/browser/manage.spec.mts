@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { test, expect, mockPortal, reply, DONE, listeningTo, pushed } from '../../../../tests/browser/portal-mock';
 
 /**
  * A document renamed and deleted from the Documents page: from a row of the list (on the page and in the panel beside a chat) and from the
@@ -152,10 +152,12 @@ const dialog = (page: Page) => page.getByRole('alertdialog');
 const editorOf = (page: Page) => page.locator('.pd-editor .ProseMirror');
 const asksNot = (page: Page) => page.addInitScript(() => localStorage.setItem('confirmDeletes', 'off'));
 
-/** What a stream of the page says, as the server half would. */
-const say = (page: Page, suffix: string, event: string, data: unknown) =>
-  page.evaluate(([suffix, event, data]) => (window as any).streams.find((s: any) => !s.closed && s.url.endsWith(suffix)).emit(event, data), [suffix, event, data] as const);
-const tell = (page: Page, id: string, revision: number, author = 'user') => say(page, `/documents/${id}/events`, 'revision', { revision, author, at: '2026-10-02T10:00:00.000Z' });
+/** The topic a document is listened to by. */
+const topicOf = (id: string) => `doc/${FOLDER}/${id}`;
+/** What a document's topic says, as the server half would. */
+const tell = (page: Page, id: string, revision: number, author = 'user') => pushed(page, NAME, topicOf(id), { revision, author, at: '2026-10-02T10:00:00.000Z' });
+/** That the document was deleted from elsewhere. */
+const wentAway = (page: Page, id: string, first = false) => pushed(page, NAME, topicOf(id), { deleted: true, at: '2026-10-02T10:00:00.000Z', ...(first ? { first: true } : {}) });
 
 test('a document is renamed from its row with the keyboard alone: the name without .md is selected, Enter renames, and the focus goes back to the row', async ({ page }) => {
   const shelf = new Shelf();
@@ -471,7 +473,7 @@ test('a document that is deleted from elsewhere says so on the page that has it 
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   shelf.deleteElsewhere(PLAN.id);
-  await say(page, `/documents/${PLAN.id}/events`, 'deleted', { at: '2026-10-02T10:00:00.000Z' });
+  await wentAway(page, PLAN.id);
   await expect(page.getByRole('alert')).toContainText('This document was deleted. Your text is kept here and is not saved.');
   await expect(editorOf(page)).toContainText('The build is green. Typed.');
   // The text goes on being the person's: it is not sent, and nothing says it could not be saved.
@@ -495,7 +497,7 @@ test('the text of a document deleted from elsewhere is saved as a new document w
   await page.keyboard.press('End');
   await page.keyboard.type(' Typed.');
   shelf.deleteElsewhere(PLAN.id);
-  await say(page, `/documents/${PLAN.id}/events`, 'deleted', { at: '2026-10-02T10:00:00.000Z' });
+  await wentAway(page, PLAN.id);
   await expect(page.getByRole('alert')).toBeVisible();
   await page.getByRole('button', { name: 'Save as a new document' }).click();
   await expect(bar(page)).toContainText('documents/saved.md');
@@ -520,14 +522,17 @@ test('a save that finds the document gone says so as a deletion does, and Close 
   await expect(site(page)).toBeVisible();
 });
 
-test('a stream that dropped on a document that was deleted meanwhile finds that out and stops asking', async ({ page }) => {
+test('a connection that dropped while the document was deleted finds that out when it is back, and stops listening', async ({ page }) => {
   const shelf = new Shelf();
   await openDocument(page, shelf);
+  await expect.poll(() => listeningTo(page)).toContainEqual([NAME, topicOf(PLAN.id)]);
   shelf.deleteElsewhere(PLAN.id);
-  await page.evaluate(() => (window as any).streams.find((s: any) => s.url.endsWith('/events') && !s.closed).emit('error', {}));
-  await expect(page.getByRole('alert')).toContainText('This document was deleted.', { timeout: 10_000 });
-  const streams = () => page.evaluate(() => (window as any).streams.filter((s: any) => s.url.includes('/documents/') && !s.closed).length);
-  expect(await streams()).toBe(0);
+  // The connection fails: the portal's page lets go of it and asks again, and the new listening's first message says that the document is gone.
+  await page.evaluate(() => (window as any).streams.find((s: any) => !s.closed && s.url === '/api/pushes').emit('error', null));
+  await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => s.url === '/api/pushes').length), { timeout: 10_000 }).toBe(2);
+  await wentAway(page, PLAN.id, true);
+  await expect(page.getByRole('alert')).toContainText('This document was deleted.');
+  await expect.poll(() => listeningTo(page).map(([, topic]) => topic)).not.toContain(topicOf(PLAN.id));
 });
 
 test('a document with no heading is called by its file name, which a rename changes in the bar, and the question before it is deleted says the new one', async ({ page }) => {

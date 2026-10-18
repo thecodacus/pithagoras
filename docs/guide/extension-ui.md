@@ -707,7 +707,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `hold`, `upload`, `watch`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `identity`, `hold`, `upload`, `watch`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -876,6 +876,15 @@ portal.router.put("/chats/:id/file", portal.http.json(), (req, res) => {
   }
 });
 ```
+
+**Which folder it is.** A store a package keeps for a folder needs to tell "the same
+folder, moved" from "another folder at the old path". `files.identity(base, rel)`
+is the folder's device and inode as text (`{ dev, ino }`), read from the folder as
+it is held, so that it is the folder the checks were made on and not what its path
+leads to by then. Two folders never have the same pair at once, a folder that is moved
+keeps it and one that is deleted and made again does not; a number can be given to the next
+folder made, so it says that a folder is the one it was while it exists, not for ever
+(compare something of its contents too, as Documents does).
 
 What reads a whole folder, such as an archive, holds it: `files.hold(base, rel)`
 opens the folder without following a link in any place on the way, and a child

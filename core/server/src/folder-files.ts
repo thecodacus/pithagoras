@@ -1,5 +1,6 @@
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import {
+  folderIdentity,
   folderPath,
   holdForReading,
   listDir,
@@ -42,6 +43,7 @@ export const folderFiles: ServerPortal["files"] = {
   renameFile: (base, rel, name, options = {}) => renameFile(base, rel, name, options),
   makeFolder: (base, rel, name) => makeFolder(base, rel, name),
   folder: (base, rel, options = {}) => folderPath(base, rel, options),
+  identity: (base, rel, options = {}) => folderIdentity(base, rel, options),
   hold: (base, rel, options = {}) => holdForReading(base, rel, options),
   sweepTemp: (base, rel, options = {}) => sweepTemp(base, rel, options.olderThanMs, { likeParent: options.likeParent }),
   open: (base, rel, options = {}) => openFile(base, rel, options),

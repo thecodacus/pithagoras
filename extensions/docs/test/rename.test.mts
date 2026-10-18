@@ -483,7 +483,7 @@ test('a name that is something else now is not deleted: a folder, a link and a f
   }
 });
 
-test('a page that has the document open is told that it was deleted, once, and a request for it is a 404 after', async () => {
+test('a page that has the document open is told that it was deleted, once, and one that listens to it after is told that it is gone', async () => {
   const { docs, f, id, url } = await withDocument('docs-delete-told-');
   try {
     const stream = await docs.listen(`${url}/events`);
@@ -497,7 +497,11 @@ test('a page that has the document open is told that it was deleted, once, and a
     const after = await docs.call('POST', `/folders/${f}/documents`, { title: 'Next', markdown: '# Next\n' });
     assert.equal(after.status, 201);
     assert.notEqual((await list.next('documents'))!.data.version, first);
-    assert.equal((await docs.listen(`${url}/events`)).status, 404);
+    // A page that comes to listen to it afterwards (its connection was down while it went) is told at once that it is gone.
+    const late = await docs.listen(`${url}/events`);
+    const gone = await late.frame();
+    assert.deepEqual([gone!.event, gone!.first, typeof gone!.data.at], ['deleted', true, 'string']);
+    assert.equal((await docs.call('GET', url)).status, 404);
     assert.notEqual(after.body.id, id);
   } finally {
     await docs.close();

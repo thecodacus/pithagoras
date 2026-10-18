@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import { scratch } from './server-harness.mjs';
-const { FileError, baseDir, listDir, removeEntry, renameEntry, folderPath, holdForReading, readBytes, readText, writeText, openFile, sweepTemp, removeFile, renameFile } = await import('../dist/workspace-files.js');
+const { FileError, baseDir, listDir, removeEntry, renameEntry, folderPath, holdForReading, readBytes, readText, writeText, openFile, sweepTemp, removeFile, renameFile, folderIdentity } = await import('../dist/workspace-files.js');
 
 /**
  * What is removed, renamed, listed or read whole in a chat's folder, with a folder on the way to it swapped for a link
@@ -294,6 +294,30 @@ test('a link in a folder that is listed is shown by where it leads, as the held 
   done();
 });
 
+test('a folder is told apart by its device and inode as it is held: a move keeps them, another folder has others, and a link put in its place is refused', async () => {
+  const { dir, base, sub, aside, swap, done } = swappable();
+  const mine = folderIdentity(base, 'sub');
+  const stat = statSync(sub, { bigint: true });
+  assert.deepEqual(mine, { dev: String(stat.dev), ino: String(stat.ino) });
+  assert.notDeepEqual(folderIdentity(base, ''), mine);
+  assert.deepEqual(folderIdentity(base, ''), { dev: String(statSync(dir, { bigint: true }).dev), ino: String(statSync(dir, { bigint: true }).ino) });
+  // Moved, it is the same folder; a new one in its place is another.
+  renameSync(sub, path.join(dir, 'moved'));
+  assert.deepEqual(folderIdentity(base, 'moved'), mine);
+  mkdirSync(sub);
+  assert.notDeepEqual(folderIdentity(base, 'sub'), mine);
+  // Told about the folder that was checked: one swapped for a link right before it is held is refused, not the one it leads to.
+  rmSync(sub, { recursive: true });
+  renameSync(path.join(dir, 'moved'), sub);
+  let got;
+  assert.ok(await swappedAt(FIRST, swap, async () => { got = await codeOf(() => folderIdentity(base, 'sub')); }));
+  assert.equal(got, 'invalid');
+  assert.equal(await codeOf(() => folderIdentity(base, 'nowhere')), 'missing');
+  assert.equal(await codeOf(() => folderIdentity(base, 'sub/doc.md')), 'invalid');
+  assert.ok(existsSync(aside));
+  done();
+});
+
 test('the checked path of a folder is a folder that is opened without following a link on the way: one put there after the check is refused', async () => {
   const { base, outside, sub, aside, swap, done } = swappable();
   mkdirSync(path.join(sub, 'inner'));
@@ -399,6 +423,8 @@ test('a folder the sandbox closed to the agent is not used under another name: i
     ['renameEntry', async () => renameEntry(documents, 'secret.md', 'other.md', { direct: true, likeParent: true })],
   ]) assert.equal(await codeOf(call), 'invalid', what);
   assert.deepEqual(names(documents), ['secret.md']);
+  assert.equal(await codeOf(() => folderIdentity(base, 'documents', { direct: true, likeParent: true })), 'invalid');
+  assert.deepEqual(folderIdentity(base, 'documents', { direct: true }), folderIdentity(base, 'documents'), 'without the option nothing is asked of its owner');
   // Without the option nothing is asked of its owner: the portal\'s other uses of a folder are as ever.
   assert.equal(readBytes(documents, 'secret.md', { direct: true }).bytes.toString(), '# the sandbox kept this from the agent');
   assert.equal(statSync(dir).uid, AGENT);

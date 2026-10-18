@@ -1154,9 +1154,9 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
   /**
    * Who may listen to what, and what a page hears first. The list of folders, to anyone who is signed in: it tells that
    * something changed, and what it is a hash of. A document's revisions, only if a chat works in its folder now (a page
-   * cannot listen to a folder the portal does not list) and the folder's store has the document; the page hears where the
-   * document stands as it begins to, then each revision and each change to its comments. What a page is not allowed to
-   * hear is refused, and it hears nothing of it.
+   * cannot listen to a folder the portal does not list); the page hears where the document stands as it begins to (or that it
+   * is gone), then each revision and each change to its comments. What a page is not allowed to hear is refused, and it hears
+   * nothing of it.
    */
   portal.onListen(async (topic, page) => {
     if (stopped) return false;
@@ -1188,7 +1188,10 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
     };
   }
 
-  /** A page listens to a document: it is told where the document stands, then each revision and each change to its comments. */
+  /**
+   * A page listens to a document: it is told where the document stands, then each revision and each change to its comments. For a document
+   * that is gone it is told that, once.
+   */
   async function listenToDocument(folderId, id, page) {
     const folder = folders().get(folderId);
     if (!folder || !isDocumentId(id)) return false;
@@ -1199,6 +1202,12 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
       page.send({ revision: now.revision, author: now.author, at: now.at, first: true });
     } catch (e) {
       unwatch();
+      // A document that is not there (deleted while the page was away, say): the page is told so as it is when a document goes while it listens,
+      // and has nothing to listen to.
+      if (e instanceof DocError && e.status === 404 && !stopped) {
+        page.send({ deleted: true, first: true, at: new Date().toISOString() });
+        return () => {};
+      }
       if (!(e instanceof DocError)) portal.log(`A page could not listen to a document of ${folder.path}: ${e?.stack ?? e}`);
       return false;
     }

@@ -365,6 +365,15 @@ export interface ServerPortal {
      */
     folder(base: string, rel: string, options?: { direct?: boolean; likeParent?: boolean }): string;
     /**
+     * Which folder `rel` is, on this system: its device and inode as text, read from the folder as it is held, so that it is
+     * the folder the checks were made on and not what its path leads to by then. No two folders have the same pair at once, a
+     * folder that is moved keeps it and one that is deleted and made again does not: for a store a package keeps for a folder,
+     * which has to tell "the same folder, moved" from "another folder at the old path". A number can be given to the next folder made,
+     * so it says that a folder is the one it was while it exists, not for ever (compare something of its contents too).
+     * `direct` and `likeParent` as for `folder`.
+     */
+    identity(base: string, rel: string, options?: { direct?: boolean; likeParent?: boolean }): { dev: string; ino: string };
+    /**
      * A folder opened once and held, for a child process that reads all of it (an archive by `tar`): `folder` gives a
      * path, and a child started with it reads whatever a link put on the way leads to by then. The folder is opened
      * without following a link in any place on the way, from `base` down, and the child names it through the

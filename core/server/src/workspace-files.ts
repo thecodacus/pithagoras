@@ -1244,6 +1244,24 @@ export function holdForReading(base: string, rel: unknown, options: { direct?: b
 }
 
 /**
+ * Which folder `rel` is, on this system: its device and inode as text (an inode can be wider than a number), read from the folder
+ * as it is held (see holdFolder), so that it is the folder the checks were made on and not what its path leads to by the time it is
+ * looked at. No two folders have the same pair at once; a folder that is moved keeps it, and one that is deleted and made again does
+ * not (a number can be given to the next folder made, though, so it tells that a folder is the one it was while it exists, not for ever).
+ * `direct` and `likeParent` as for `folderPath`.
+ */
+export function folderIdentity(base: string, rel: unknown, options: { direct?: boolean; likeParent?: boolean } = {}): { dev: string; ino: string } {
+  const dir = folderPath(base, rel, options);
+  const held = holdFolder(base, dir, { likeParent: options.likeParent });
+  try {
+    const st = fstatSync(held.fd, { bigint: true });
+    return { dev: String(st.dev), ino: String(st.ino) };
+  } finally {
+    held.close();
+  }
+}
+
+/**
  * Whether `fd`, a folder opened by the name just made, is plainly the one that was made: empty, and on the parent's file
  * system. Not who it belongs to: some file systems (NFS with root_squash, CIFS or vfat mounted with a uid, FUSE) give a
  * new folder an owner that is not the one who made it, and a folder moved in from another parent needs the agent to

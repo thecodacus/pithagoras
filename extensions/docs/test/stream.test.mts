@@ -196,10 +196,10 @@ test('revisions made while a stream is being opened are heard, in order, and the
   }
 });
 
-test('a topic for what is not there is refused as any request is, and nothing is listened to', async () => {
+test('a topic for what is not there is refused as any request is, a document that is gone is said to be, and nothing is listened to', async () => {
   const { docs, f, id, events } = await withDocument('docs-stream-refused-');
   try {
-    for (const url of [`/folders/${f}/documents/0123456789abcdef/events`, `/folders/${f}/documents/..%2Fplan.md/events`, `/folders/0123456789abcdef/documents/${id}/events`, `/folders/${f}/documents/plan.md/events`]) {
+    for (const url of [`/folders/${f}/documents/..%2Fplan.md/events`, `/folders/0123456789abcdef/documents/${id}/events`, `/folders/${f}/documents/plan.md/events`]) {
       const refused = await docs.listen(url);
       assert.equal(refused.result, 'refused', url);
     }
@@ -207,6 +207,10 @@ test('a topic for what is not there is refused as any request is, and nothing is
     for (const topic of ['doc', 'doc/', `doc/${f}`, `doc/${f}/${id}/more`, 'folders/x', `doc/${f.toUpperCase()}/${id}`, '../folders', 'other']) {
       assert.equal(await docs.mock.page().listen(topic), 'refused', topic);
     }
+    // A document that is not there, in a folder that is: the page is told that it is gone, as one that went while it listened is, and listens to nothing.
+    const gone = await docs.listen(`/folders/${f}/documents/0123456789abcdef/events`);
+    assert.equal(gone.status, 200);
+    assert.deepEqual(await gone.frame().then((m) => [m!.event, m!.first]), ['deleted', true]);
     // And a folder with no store at all: nothing is made for it.
     const none = await docs.listen('/folders/0123456789abcdef/documents/0123456789abcdef/events');
     assert.equal(none.status, 404);
