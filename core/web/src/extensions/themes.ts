@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { choosePalette, chosenPalette, coloursOf, type Colours, type Palette } from "../theme";
+import { choosePalette, chosenPalette, coloursOf, themeIdNow, type Colours, type Palette } from "../theme";
 import { byRank, onRanked } from "./rank";
 
 /**
@@ -80,10 +80,11 @@ export function useThemes(): readonly Theme[] {
 }
 
 /** Choose a theme by its id ("<package>/<id>"), or the portal's own with null. Throws for one there is none of. */
-export function choose(id: string | null): void {
-  if (id === null) return choosePalette(null);
+export function choose(requested: string | null): void {
+  if (requested === null) return choosePalette(null);
+  const id = themeIdNow(requested);
   const theme = held.find((t) => t.id === id);
-  if (!theme) throw new Error(`There is no theme called "${id}"`);
+  if (!theme) throw new Error(`There is no theme called "${requested}"`);
   choosePalette({ id: theme.id, name: theme.name, light: theme.light, dark: theme.dark });
 }
 

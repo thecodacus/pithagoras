@@ -5,7 +5,7 @@ import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { bridgeExtensionUi, clientHalf, staticImports, packageKinds, packageThemes, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../core/server/src/extension-ui.ts';
 import { choose, registerTheme, themes, themesSettled } from '../core/web/src/extensions/themes.ts';
-import { chosenPalette, choosePalette, coloursOf, toTriplet, TOKENS } from '../core/web/src/theme.tsx';
+import { chosenPalette, choosePalette, coloursOf, storedPalette, themeIdNow, toTriplet, TOKENS } from '../core/web/src/theme.tsx';
 import { register, slotEntries } from '../core/web/src/extensions/slots.ts';
 import { rankExtensions } from '../core/web/src/extensions/rank.ts';
 import { hasCommand, registerCommand, runCommand } from '../core/web/src/extensions/commands.ts';
@@ -543,6 +543,43 @@ test('a theme is one an extension registered, chosen by its id and painted over 
   }
 });
 
+test('a theme chosen before Dusk and Warm moved into the themes package is still chosen, under its new id', () => {
+  const kept = new Map<string, string>();
+  const root = { dataset: { theme: 'dark' } as Record<string, string>, classList: { add() {}, remove() {} }, style: { setProperty() {}, removeProperty() {} } };
+  Object.assign(globalThis, {
+    document: { documentElement: root, querySelector: () => null },
+    window: { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), setTimeout: () => 0 },
+    getComputedStyle: () => ({ getPropertyValue: () => '10 10 12' }),
+    localStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) },
+  });
+  try {
+    assert.equal(themeIdNow('pithagoras-theme-dusk/dusk'), 'pithagoras-themes/dusk');
+    assert.equal(themeIdNow('pithagoras-theme-warm/warm'), 'pithagoras-themes/warm');
+    for (const same of ['pithagoras-themes/forest', 'my-pkg/dusk', 'constructor', '']) assert.equal(themeIdNow(same), same);
+
+    // What a browser kept before: the old id, with the colours it was chosen with.
+    const warm = { id: 'pithagoras-theme-warm/warm', name: 'Warm', light: { accent: '168 68 28' }, dark: { accent: '217 119 87' } };
+    kept.set('pithagoras.palette', JSON.stringify(warm));
+    assert.deepEqual(storedPalette(), { ...warm, id: 'pithagoras-themes/warm' });
+    assert.equal(JSON.parse(kept.get('pithagoras.palette')!).id, 'pithagoras-themes/warm', 'kept under the new id from then on');
+    kept.set('pithagoras.palette', JSON.stringify({ ...warm, id: 'my-pkg/warm' }));
+    assert.equal(storedPalette()?.id, 'my-pkg/warm', 'a theme of another package is left as it is');
+
+    // And an extension that still switches to it by the old id gets it.
+    const off = registerTheme('pithagoras-themes', { id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } });
+    try {
+      choose('pithagoras-theme-dusk/dusk');
+      assert.equal(chosenPalette()?.id, 'pithagoras-themes/dusk');
+      assert.throws(() => choose('pithagoras-theme-warm/warm'), /no theme called "pithagoras-theme-warm\/warm"/);
+    } finally {
+      choose(null);
+      off();
+    }
+  } finally {
+    for (const name of ['document', 'window', 'getComputedStyle', 'localStorage']) delete (globalThis as any)[name];
+  }
+});
+
 test('a package may name themes in its package.json and bring nothing else', () => {
   const dir = pkg({ themes: [{ id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' }, light: 'not colours' }, { id: 'nameless' }, 'not a theme'] }, []);
   assert.deepEqual(packageThemes(dir), { name: 'my-extension', version: '1.2.3', themes: [{ id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } }] });
@@ -551,9 +588,9 @@ test('a package may name themes in its package.json and bring nothing else', () 
   assert.equal(packageThemes(pkg({ themes: [] }, [])), undefined);
   assert.equal(packageThemes(pkg({ client: './web/client.js' }, ['web/client.js'])), undefined);
   // The one shipped as the example is one the page takes whole.
-  const dusk = packageThemes(path.resolve('extensions/theme-dusk'))!;
-  assert.equal(dusk.name, 'pithagoras-theme-dusk');
-  for (const theme of dusk.themes) {
+  const shipped = packageThemes(path.resolve('extensions/themes'))!;
+  assert.equal(shipped.name, 'pithagoras-themes');
+  for (const theme of shipped.themes) {
     assert.ok(coloursOf(theme.dark) && coloursOf(theme.light), theme.id);
     assert.deepEqual(Object.keys(theme.dark!).sort(), [...TOKENS].sort(), 'every colour of the portal\'s, in dark');
   }
@@ -561,7 +598,7 @@ test('a package may name themes in its package.json and bring nothing else', () 
 
 test('a package is told apart by what it brings: something for pi, something for the portal, colours', () => {
   assert.deepEqual(packageKinds(path.resolve('tests/fixtures/extensions/notes')), ['pi', 'pithagoras']);
-  assert.deepEqual(packageKinds(path.resolve('extensions/theme-dusk')), ['themes'], 'no code, so nothing for pi');
+  assert.deepEqual(packageKinds(path.resolve('extensions/themes')), ['themes'], 'no code, so nothing for pi');
   assert.deepEqual(packageKinds(path.resolve('extensions/subagent')), ['pi']);
   assert.deepEqual(packageKinds(pkg({ server: './server.js', themes: [{ id: 'a', name: 'A' }] }, ['server.js'])), ['pi', 'pithagoras', 'themes']);
   // A half it names and does not have is not one it brings.

@@ -38,6 +38,19 @@ export interface Palette {
 }
 
 const PALETTE_KEY = "pithagoras.palette";
+
+/**
+ * Themes that came with the portal as packages of their own and now are in another. A browser that chose one of them
+ * before has the old id kept: it is the same theme under the new one.
+ */
+const MOVED_THEMES = new Map([
+  ["pithagoras-theme-dusk/dusk", "pithagoras-themes/dusk"],
+  ["pithagoras-theme-warm/warm", "pithagoras-themes/warm"],
+]);
+
+/** A theme's id as it is now: the one given, or where the theme went if its package was folded into another. */
+export const themeIdNow = (id: string): string => MOVED_THEMES.get(id) ?? id;
+
 const TRIPLET = /^\d{1,3} \d{1,3} \d{1,3}$/;
 
 /** A colour as the portal's variables hold one, from that form or from "#rgb" / "#rrggbb". Null for anything else. */
@@ -65,12 +78,15 @@ export function coloursOf(given: unknown): Colours | null {
 }
 
 /** The theme chosen in this browser, with its colours: kept whole, so that it is painted before any extension is loaded. */
-function storedPalette(): Palette | null {
+export function storedPalette(): Palette | null {
   try {
     const kept = JSON.parse(local.get(PALETTE_KEY) ?? "null");
     const light = coloursOf(kept?.light), dark = coloursOf(kept?.dark);
     if (typeof kept?.id !== "string" || typeof kept.name !== "string" || !light || !dark) return null;
-    return { id: kept.id, name: kept.name, light, dark };
+    const now = { id: themeIdNow(kept.id), name: kept.name, light, dark };
+    // Kept under the new id from now on, or the old one would be mapped at every start.
+    if (now.id !== kept.id) local.set(PALETTE_KEY, JSON.stringify(now));
+    return now;
   } catch {
     return null;
   }

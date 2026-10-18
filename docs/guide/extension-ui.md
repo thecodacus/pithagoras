@@ -1213,8 +1213,9 @@ portal.slots.register("chat.header.action", { id: "theme", component: () => {
 } });
 ```
 
-`extensions/theme-dusk` and `extensions/theme-warm` in the repository are each
-a whole theme in one `package.json`.
+`extensions/themes` in the repository is the example of an extension that is
+only themes: seven of them (Forest, Ocean, Rose, Amber, Mono, Dusk and Warm),
+each a whole theme in the one `package.json`.
 
 ## What is loaded, and when
 
@@ -1353,8 +1354,8 @@ of them takes from the portal, and what gives the same to an extension:
 It is the portal's test extension and is not shipped: copy it to start your
 own, and install your copy by its path. What the portal ships is in
 `extensions/`, under **Settings → Extensions → Discover → Comes with
-Pithagoras**: `extensions/theme-dusk` and `extensions/theme-warm` are extensions
-that are only a theme, and `extensions/docs` is a large one: a page in the
+Pithagoras**: `extensions/themes` is an extension
+that is only themes, and `extensions/docs` is a large one: a page in the
 sidebar, fed by its server half's routes, a stream that tells the page of
 changes, an editor built into the page, and tools for the agent that share the
 server half's store ([Documents](/guide/documents), whose last section says how
