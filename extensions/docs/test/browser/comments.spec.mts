@@ -4,14 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { type Locator, type Page } from '@playwright/test';
 import { carry, locate, passage } from '../../web/anchor.js';
 import { merge3 } from '../../web/merge.js';
-import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { test, expect, mockPortal, reply, DONE, pushAsks, pushed } from '../../../../tests/browser/portal-mock';
 
 /**
  * The comments on the Documents page: the extension's browser half (extensions/docs/web) with the editor
  * `npm run build` builds, against a store that answers as the server half does (extensions/docs/server.js): threads on
  * passages of the text, which it keeps in their place as the document changes (extensions/docs/web/anchor.js, the
- * module the server half uses). The stream that tells the page of a change is the page's own EventSource, which the
- * test drives by hand.
+ * module the server half uses). What tells the page of a change is the topic it listens to (the portal's pushes stream, the
+ * page's own EventSource, which the test drives by hand).
  */
 const NAME = 'pithagoras-docs';
 const FOLDER = '0123456789abcdef';
@@ -320,12 +320,9 @@ const marked = (page: Page, id: string) => editorOf(page).locator(`[data-pd-thre
 /** The marks are put on after the comments are drawn, a moment later: this waits for them to be on these words. */
 const expectMarked = (page: Page, id: string, words: string) => expect.poll(() => marked(page, id)).toBe(words);
 
-/** What the stream of the open document says, as the server half would. */
+/** What the open document's topic says, as the server half would: a revision, or (`threads`) a change to its comments. */
 const told = (page: Page, event: string, data: unknown) =>
-  page.evaluate(([event, data]) => {
-    const stream = (window as any).streams.filter((s: any) => s.url.includes('/documents/') && s.url.endsWith('/events') && !s.closed).at(-1);
-    stream.emit(event, data);
-  }, [event, data] as const);
+  pushed(page, NAME, `doc/${FOLDER}/${ID}`, event === 'threads' ? { threads: true, ...(data as object) } : data);
 
 /** Selects `text` in the editor, which must be within one block, as a person would with the mouse. */
 async function select(page: Page, text: string) {
@@ -759,11 +756,14 @@ test('a comment the agent writes shows up when the stream says the comments chan
   const card = await openThread(page, green.id);
   await expect(card.locator('li[data-author="agent"]')).toContainText('Is it?');
   expect(asked).toBe(1);
-  // The stream drops; a comment is written while it is down; the new stream opening is how the page finds out.
-  await page.evaluate(() => (window as any).streams[0].emit('error', null));
+  // The stream drops; a comment is written while it is down; the document's first message on the new stream is how the page finds out.
+  await told(page, 'revision', { revision: 1, author: 'user', at: '2026-10-02T10:00:00.000Z', first: true });
+  await page.evaluate(() => (window as any).streams.find((s: any) => !s.closed && s.url === '/api/pushes').emit('error', null));
   seeded(store, 'Sign-off is on Monday.', 'Who signs off?', 'agent');
+  await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => s.url === '/api/pushes').length), { timeout: 8000 }).toBe(2);
+  await expect.poll(() => pushAsks(page).filter(([kind]) => kind === 'listen').length).toBe(2);
+  await told(page, 'revision', { revision: 1, author: 'user', at: '2026-10-02T10:00:00.000Z', first: true });
   await expect(items(page)).toHaveCount(2, { timeout: 8000 });
-  expect(await page.evaluate(() => (window as any).streams.length)).toBe(2);
 });
 
 test('a passage stays marked on its words while text is typed before it and in it, and goes where the server says it went when the document is changed from outside', async ({ page }) => {

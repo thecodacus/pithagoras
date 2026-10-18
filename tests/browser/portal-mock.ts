@@ -99,6 +99,8 @@ export function extensionOnDisk(dir: string) {
  * every chat (what runs in the background, what came before), with nothing set up.
  */
 const portalBase = ({ path, method, url }: Ask): Answer => {
+  // A page asking to listen to a topic of an extension, or leaving it: allowed, as for a topic the server half has no rule against.
+  if (method === 'POST' && /^\/api\/pushes\/[^/]+\/(listen|leave)$/.test(path)) return { ok: true };
   if (method !== 'GET') return undefined;
   if (path === '/api/auth/status') return { authed: true, authRequired: false };
   if (path === '/api/sessions') return { sessions: [], executor: 'host' };
@@ -137,6 +139,42 @@ const settingsBase = ({ path, method }: Ask): Answer => {
   return undefined;
 };
 
+/** What the page asked of its pushes stream (`/api/pushes`), by page. */
+const pushLog = new WeakMap<Page, { kind: 'listen' | 'leave'; extension: string; topic: string }[]>();
+
+/**
+ * What the page has asked to listen to on its pushes stream, and left, in order: `[kind, extension, topic]`. The stream is the page's one
+ * for every extension's topics (`portal.server.on(topic, …)`); the mock answers each ask as the server does for a topic it allows.
+ */
+export const pushAsks = (page: Page) => (pushLog.get(page) ?? []).map((ask) => [ask.kind, ask.extension, ask.topic] as const);
+
+/** The topics the page listens to now: asked for, and not left. */
+export const listeningTo = (page: Page) => {
+  const topics = new Set<string>();
+  for (const ask of pushLog.get(page) ?? []) {
+    const key = JSON.stringify([ask.extension, ask.topic]);
+    if (ask.kind === 'listen') topics.add(key);
+    else topics.delete(key);
+  }
+  return [...topics].map((key) => JSON.parse(key) as [string, string]);
+};
+
+/**
+ * What an extension's server half pushes to a topic, as the pushes stream carries it. The stream is the page's own EventSource (with
+ * `streams: 'open'`), which says which it is first (`ready`) when the test first speaks on it.
+ */
+export function pushed(page: Page, extension: string, topic: string, data: unknown) {
+  return page.evaluate(([extension, topic, data]) => {
+    const stream = (window as any).streams.filter((s: any) => !s.closed && s.url === '/api/pushes').at(-1);
+    if (!stream) throw new Error('The page has no pushes stream open');
+    if (!stream.ready) {
+      stream.ready = true;
+      stream.emit('ready', { stream: `s${(window as any).streams.filter((s: any) => s.url === '/api/pushes').length}` });
+    }
+    stream.emit('push', { extension, topic, data });
+  }, [extension, topic, data] as const);
+}
+
 export interface PortalOptions {
   /**
    * The page's event streams: `idle` ones that never say anything (the default), `open` ones that open and are kept
@@ -160,6 +198,11 @@ export async function mockPortal(page: Page, answer: (ask: Ask) => Answer | Prom
     const request = route.request();
     const url = new URL(request.url());
     const ask: Ask = { path: url.pathname, method: request.method(), url, route, json: () => request.postDataJSON() };
+    const pushAsk = /^\/api\/pushes\/[^/]+\/(listen|leave)$/.exec(url.pathname);
+    if (pushAsk && request.method() === 'POST') {
+      const { extension, topic } = request.postDataJSON();
+      pushLog.set(page, [...(pushLog.get(page) ?? []), { kind: pushAsk[1] as 'listen' | 'leave', extension, topic }]);
+    }
     let got = await answer(ask);
     if (got === undefined && settings) got = settingsBase(ask);
     if (got === undefined) got = portalBase(ask);
@@ -179,7 +222,19 @@ export async function mockPortal(page: Page, answer: (ask: Ask) => Answer | Prom
     (window as any).EventSource = class {
       url: string; closed = false; onmessage: any; onopen: any; onerror: any;
       listeners: Record<string, ((e: any) => void)[]> = {};
-      constructor(url: string) { this.url = url; open.push(this); if (streams === 'open') setTimeout(() => this.onopen?.(), 0); }
+      constructor(url: string) {
+        this.url = url;
+        open.push(this);
+        if (streams !== 'open') return;
+        setTimeout(() => {
+          this.onopen?.();
+          // The pushes stream says which it is as it opens, as the server's does.
+          if (url === '/api/pushes') {
+            (this as any).ready = true;
+            this.emit('ready', { stream: `s${open.filter((s) => s.url === '/api/pushes').length}` });
+          }
+        }, 0);
+      }
       addEventListener(name: string, fn: (e: any) => void) { (this.listeners[name] ??= []).push(fn); }
       close() { this.closed = true; }
       emit(name: string, data: unknown) {

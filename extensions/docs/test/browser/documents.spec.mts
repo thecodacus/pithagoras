@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { type Page } from '@playwright/test';
-import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { test, expect, mockPortal, reply, DONE, listeningTo, pushAsks, pushed } from '../../../../tests/browser/portal-mock';
 
 /**
  * The Documents extension's page: its own browser half (extensions/docs/web),
@@ -403,22 +403,19 @@ test('the agent\'s document cards are in German in a German portal', async ({ pa
 });
 
 /**
- * The list of documents keeps itself up to date: the page's own EventSource, which the test drives by hand, says the list's version
+ * The list of documents keeps itself up to date: the list's topic, which the test drives by hand through the portal's pushes stream, says the list's version
  * (extensions/docs/server.js) as its first message and whenever it changes, and the page asks for the list again when that is not the
  * version it holds.
  */
 const NOTES = { id: '4444444444444444', name: 'notes.md', title: 'Field notes', revision: 1, size: 20, modified: '2026-10-04T09:30:00.000Z' };
 const listOf = (page: Page) => page.getByRole('region', { name: 'site' }).getByRole('listitem');
 
-/** What the stream of the list says, as the server half would: the list is at `version` now. */
-const listStream = (page: Page, version: string) =>
-  page.evaluate((version) => {
-    const stream = (window as any).streams.filter((s: any) => !s.closed && s.url.endsWith('/folders/events')).at(-1);
-    stream.emit('documents', { version });
-  }, version);
-/** Every stream of the list the page opened, as its address and whether it was let go of. Development React runs each effect twice, so the first is already closed. */
-const streamsOf = (page: Page) => page.evaluate(() => (window as any).streams.filter((s: any) => s.url.endsWith('/folders/events')).map((s: any) => ({ url: s.url, closed: s.closed })));
-const openStreams = async (page: Page) => (await streamsOf(page)).filter((s) => !s.closed);
+/** What the list's topic says, as the server half would: the list is at `version` now. */
+const listStream = (page: Page, version: string) => pushed(page, NAME, 'folders', { version });
+/** Every time the page listened to the list's topic and left it, in order. */
+const listAsks = (page: Page) => pushAsks(page).filter(([, , topic]) => topic === 'folders').map(([kind]) => kind);
+/** Whether the page listens to the list's topic now: one topic for all folders. */
+const openStreams = async (page: Page) => listeningTo(page).filter(([, topic]) => topic === 'folders');
 
 async function opened(page: Page, listing?: Partial<Listing>) {
   const state: Listing = { folders: FOLDERS, problems: [], version: 'v1', asked: 0, failing: false, ...listing };
@@ -435,20 +432,21 @@ async function opened(page: Page, listing?: Partial<Listing>) {
 /** The first folder with `documents` in place of its own. */
 const withDocuments = (documents: unknown[]) => [{ ...(FOLDERS[0] as object), documents }, FOLDERS[1]];
 
-test('the list opens one stream for all folders, and lets go of it when a document is opened and again when the list is back', async ({ page }) => {
+test('the list listens to one topic for all folders, and lets go of it when a document is opened and listens again when the list is back', async ({ page }) => {
   const state = await opened(page);
-  expect(await openStreams(page)).toEqual([{ url: `/api/x/${NAME}/folders/events`, closed: false }]);
-  // The stream's first message says the version the page holds: nothing to ask for.
+  await expect.poll(() => openStreams(page)).toEqual([[NAME, 'folders']]);
+  // The first message says the version the page holds: nothing to ask for.
   await listStream(page, 'v1');
   await page.waitForTimeout(200);
   expect(state.asked).toBe(0);
 
   await listOf(page).first().getByRole('button').click();
   await expect(page.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
-  expect(await openStreams(page)).toEqual([]);
+  await expect.poll(() => openStreams(page)).toEqual([]);
   await page.getByRole('button', { name: /All documents/ }).click();
   await expect(page.getByRole('region', { name: 'site' })).toBeVisible();
   await expect.poll(() => openStreams(page)).toHaveLength(1);
+  expect(listAsks(page)).toBeTruthy();
 });
 
 test('a document made by the agent or in another window is in the list when the stream says the list changed, without a reload, and the list is not drawn again for the same version', async ({ page }) => {
@@ -551,12 +549,15 @@ test('a list that could not be asked for again is asked for again after a while,
 
 test('a stream that dropped is opened again after a while, and a change that was made while it was down is found by its first message', async ({ page }) => {
   const state = await opened(page);
-  const made = (await streamsOf(page)).length;
-  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed).at(-1).emit('error', null));
-  expect(await openStreams(page)).toEqual([]);
-  // After a wait, another is opened, and its first message is the list's version.
-  await expect.poll(async () => (await streamsOf(page)).length, { timeout: 6000 }).toBe(made + 1);
-  expect(await openStreams(page)).toHaveLength(1);
+  const pushStreams = () => page.evaluate(() => (window as any).streams.filter((s: any) => s.url === '/api/pushes').length);
+  const made = await pushStreams();
+  // (Development React runs each effect twice, so the list may have been asked for more than once already.)
+  const asked = () => listAsks(page).filter((kind) => kind === 'listen').length;
+  const before = asked();
+  await page.evaluate(() => (window as any).streams.filter((s: any) => !s.closed && s.url === '/api/pushes').at(-1).emit('error', null));
+  // After a wait, another is opened, and the list's topic is asked for on it: its first message is the list's version.
+  await expect.poll(pushStreams, { timeout: 6000 }).toBe(made + 1);
+  await expect.poll(asked).toBe(before + 1);
   const [site] = FOLDERS;
   state.folders = withDocuments([...site.documents, NOTES]);
   state.version = 'v2';

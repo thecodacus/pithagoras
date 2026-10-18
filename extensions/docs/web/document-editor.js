@@ -349,10 +349,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       let leaving = false;
       // What changed meanwhile, taken into the editor, and the stream that tells of it: once the editor is drawn.
       let live = null;
-      let stream = null;
-      let retry = null;
-      let failed = 0;
-      let connected = false;
+      let off = null;
+      let listening = false;
       // Which answer to a request for the threads is the newest: an older one that comes late is not taken.
       let latest = 0;
       refresh.current = async () => {
@@ -466,41 +464,25 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             void refresh.current();
           },
         });
-        // Told where the document stands as it opens, which is how a change between its load and now is found, and after each revision.
-        const listen = () => {
-          const source = new EventSource(`${url}/events`);
-          stream = source;
-          source.addEventListener("revision", (e) => {
-            failed = 0;
-            try {
-              void live.seen(JSON.parse(e.data));
-            } catch {
-              // A message that is not one of ours: nothing to take from it.
-            }
-          });
+        // Told where the document stands as it opens, which is how a change between its load and now is found, and after each revision. The
+        // portal asks again by itself when the connection drops, and the server half tells where the document stands again.
+        off = portal.server.on(`doc/${folder}/${id}`, (message) => {
           // The comments changed (the agent wrote one, or another window did): asked for again.
-          source.addEventListener("threads", () => void refresh.current());
-          // A stream that is back may have missed such a message.
-          source.onopen = () => {
-            if (connected) void refresh.current();
-            connected = true;
-          };
-          // One that dropped is asked for again after a while, longer each time, as the chat's own stream is: the first message of a new one
-          // says where the document stands, so nothing that happened meanwhile is missed. (The browser would not ask again for one a proxy refused.)
-          source.addEventListener("error", () => {
-            source.close();
-            if (!gone) retry = setTimeout(listen, Math.min(2000 * 2 ** failed++, 30_000));
-          });
-        };
-        if (typeof EventSource !== "undefined") listen();
+          if (message?.threads) return void refresh.current();
+          // Told where it stands again: this listening is back after one that dropped, which may have missed such a message.
+          if (message?.first) {
+            if (listening) void refresh.current();
+            listening = true;
+          }
+          void live.seen(message);
+        });
         void refresh.current();
         setReady(true);
       })();
 
       return () => {
         gone = true;
-        clearTimeout(retry);
-        stream?.close();
+        off?.();
         live?.close();
         window.removeEventListener("pagehide", hide);
         window.removeEventListener("pageshow", returned);

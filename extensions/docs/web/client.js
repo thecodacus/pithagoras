@@ -238,25 +238,23 @@ export default function (portal) {
   }
 
   /**
-   * A list of documents (`path`, a route of the server half's), kept up to date while it is on the page: the server half's stream says the
-   * list's version whenever it changes (and as its first message), and the list is asked for again when that is not the version the page
-   * holds (a list without a version, one chat's, is asked for again whenever the stream says anything). So what changed while there was no
-   * stream (the first request, a dropped connection) is found out at once, and a list that is current is not asked for again. What is shown
-   * stays while a request for it again fails, which is made again after a while; only a page that has no list yet says why.
+   * A list of documents (`path`, a route of the server half's), kept up to date while it is on the page: the server half pushes the
+   * list's version to the topic `folders` whenever it changes (and as the first thing a page listening hears), and the list is asked for
+   * again when that is not the version the page holds (a list without a version, one chat's, is asked for again whenever it says
+   * anything). So what changed while the page was not listening (the first request, a dropped connection) is found out at once, and a list
+   * that is current is not asked for again. What is shown stays while a request for it again fails, which is made again after a while;
+   * only a page that has no list yet says why.
    */
   function useListed(path) {
     const [state, setState] = useState({ body: null, error: null });
     const [asked, setAsked] = useState(0);
     useEffect(() => {
       let gone = false;
-      let stream = null;
-      let reconnect = null;
-      let failed = 0;
-      // The version of the list the page holds, the newest one the stream said, and whether the list is being asked for.
+      // The version of the list the page holds, the newest one the server half said, and whether the list is being asked for.
       let held = null;
       let told = null;
       let loading = false;
-      // A request that failed is made again after a wait, longer each time: the stream says nothing more until the list changes again.
+      // A request that failed is made again after a wait, longer each time: the server half says nothing more until the list changes again.
       let wait = null;
       let failures = 0;
       const load = async () => {
@@ -274,43 +272,28 @@ export default function (portal) {
         } catch (error) {
           if (gone) return;
           setState((now) => (now.body ? now : { body: null, error }));
-          // The list that is shown is not the one the stream said, and the stream says nothing again until the list changes once more.
+          // The list that is shown is not the one the server half said, and it says nothing again until the list changes once more.
           if (told !== null && told !== held) wait = setTimeout(() => void load(), Math.min(2000 * 2 ** failures++, 30_000));
           return;
         } finally {
           loading = false;
         }
-        // The stream said something newer while it was asked for.
+        // The server half said something newer while it was asked for.
         if (!gone && told !== before && told !== held) void load();
       };
       setState({ body: null, error: null });
       void load();
-      const listen = () => {
-        const source = new EventSource(portal.api.url("/folders/events"));
-        stream = source;
-        source.addEventListener("documents", (e) => {
-          failed = 0;
-          try {
-            told = JSON.parse(e.data).version;
-          } catch {
-            // A message that is not one of ours: nothing to take from it.
-            return;
-          }
-          if (told !== held) void load();
-        });
-        // One that dropped is asked for again after a while, longer each time, as the document's own stream is: the first message of a new
-        // one says where the list stands, so nothing that happened meanwhile is missed.
-        source.addEventListener("error", () => {
-          source.close();
-          if (!gone) reconnect = setTimeout(listen, Math.min(2000 * 2 ** failed++, 30_000));
-        });
-      };
-      if (typeof EventSource !== "undefined") listen();
+      // The version of the list whenever it changes, and where it stands as the first message: the portal asks again by itself when the
+      // connection drops, so what changed meanwhile is found out at once, and a list that is current is not asked for again.
+      const off = portal.server.on("folders", (message) => {
+        if (typeof message?.version !== "string") return;
+        told = message.version;
+        if (told !== held) void load();
+      });
       return () => {
         gone = true;
-        clearTimeout(reconnect);
         clearTimeout(wait);
-        stream?.close();
+        off();
       };
     }, [path, asked]);
     return { ...state, retry: () => setAsked((n) => n + 1) };

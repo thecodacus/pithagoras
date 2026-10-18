@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { type Page } from '@playwright/test';
 import { merge3 } from '../../web/merge.js';
-import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
+import { test, expect, mockPortal, reply, DONE, listeningTo, pushAsks, pushed } from '../../../../tests/browser/portal-mock';
 
 /**
  * A document changed while it is open on the Documents page: the extension's browser half (extensions/docs/web)
  * with the editor `npm run build` builds, against a store that answers as the server half does
  * (extensions/docs/server.js): a save that started from an earlier revision is put together with what was saved
- * since where the changes do not meet, and the stream that tells the page of each revision is the page's own
- * EventSource, which the test drives by hand.
+ * since where the changes do not meet, and what tells the page of each revision is the topic it listens to (the portal's
+ * pushes stream, the page's own EventSource, which the test drives by hand).
  */
 const NAME = 'pithagoras-docs';
 const FOLDER = '0123456789abcdef';
@@ -90,12 +90,12 @@ const editorOf = (page: Page) => page.locator('.pd-editor .ProseMirror');
 const state = (page: Page) => page.locator('.pd-state');
 const note = (page: Page) => page.locator('.pd-note');
 
-/** What the stream of the open document says, as the server half would: the revision, who made it. */
-const tell = (page: Page, revision: number, author = 'agent') =>
-  page.evaluate(([revision, author]) => {
-    const stream = (window as any).streams.find((s: any) => s.url.endsWith('/events'));
-    stream.emit('revision', { revision, author, at: '2026-10-02T10:00:00.000Z' });
-  }, [revision, author] as const);
+/** The topic the open document is listened to by. */
+const TOPIC = `doc/${FOLDER}/${ID}`;
+
+/** What the open document's topic says, as the server half would: the revision, who made it. */
+const tell = (page: Page, revision: number, author = 'agent', first = false) =>
+  pushed(page, NAME, TOPIC, { revision, author, at: '2026-10-02T10:00:00.000Z', ...(first ? { first: true } : {}) });
 
 /** Puts the caret at the end of the paragraph or heading that holds `text`, and types there. */
 async function typeAfter(page: Page, text: string, typed: string) {
@@ -108,12 +108,11 @@ async function typeAfter(page: Page, text: string, typed: string) {
 
 const agents = (plan = PLAN) => plan.replace('on Monday', 'on Tuesday');
 
-test('the page listens to the document it has open, at the address of its own stream', async ({ page }) => {
+test('the page listens to the document it has open, to the topic the server half names it by', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
-  const streams = await page.evaluate(() => (window as any).streams.map((s: any) => s.url));
-  expect(streams).toEqual([DOCUMENT + '/events']);
+  await expect.poll(() => listeningTo(page)).toEqual([[NAME, TOPIC]]);
 });
 
 test('what the agent changed is in a document that is open and untouched at once, the caret is where it was, and the change is marked for a moment', async ({ page }) => {
@@ -297,13 +296,16 @@ test('a stream that dropped is asked for again, and what the new one says is tak
   const store = new Store();
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
-  // The connection fails (a proxy answering while the portal restarts): the page lets go of it and asks again.
-  await page.evaluate(() => (window as any).streams[0].emit('error', null));
-  await expect.poll(() => page.evaluate(() => (window as any).streams.length), { timeout: 6000 }).toBe(2);
-  expect(await page.evaluate(() => (window as any).streams.map((s: any) => s.closed))).toEqual([true, false]);
-  // The document changed while it was down: the new stream's first message says so.
+  await expect.poll(() => listeningTo(page)).toEqual([[NAME, TOPIC]]);
+  // The connection fails (a proxy answering while the portal restarts): the portal's page lets go of it and asks again, for the topic too.
+  await pushed(page, NAME, TOPIC, { revision: 3, author: 'user', at: '2026-10-02T10:00:00.000Z', first: true });
+  await page.evaluate(() => (window as any).streams.find((s: any) => !s.closed && s.url === '/api/pushes').emit('error', null));
+  await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => s.url === '/api/pushes').length), { timeout: 6000 }).toBe(2);
+  expect(await page.evaluate(() => (window as any).streams.filter((s: any) => s.url === '/api/pushes').map((s: any) => s.closed))).toEqual([true, false]);
+  // The document changed while it was down: the new listening's first message says so.
   store.elsewhere(agents());
-  await page.evaluate(() => (window as any).streams[1].emit('revision', { revision: 4, author: 'agent', at: '2026-10-02T10:00:00.000Z' }));
+  await tell(page, 4, 'agent', true);
+  await expect.poll(() => pushAsks(page).filter(([kind]) => kind === 'listen').length).toBe(2);
   await expect(editorOf(page)).toContainText('Sign-off is on Tuesday.');
   await expect(state(page)).toHaveText('Saved · Revision 4');
 });
@@ -331,14 +333,15 @@ test('a change whose text could not be fetched is fetched again after a while, w
   expect(asked).toBe(2);
 });
 
-test('the stream is let go of when the document is left', async ({ page }) => {
+test('the document is let go of when it is left', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await expect.poll(() => listeningTo(page)).toContainEqual([NAME, TOPIC]);
   await page.getByRole('button', { name: /All documents/ }).click();
   await expect(page.getByText('The plan').first()).toBeVisible();
-  // The list that is back has a stream of its own (documents.spec.mts): it is the document's that is closed.
-  expect(await page.evaluate((url) => (window as any).streams.filter((s: any) => s.url === url).map((s: any) => s.closed), DOCUMENT + '/events')).toEqual([true]);
+  // The list that is back listens to a topic of its own (documents.spec.mts): it is the document's that is left.
+  await expect.poll(() => listeningTo(page).map(([, topic]) => topic)).not.toContain(TOPIC);
 });
 
 test('the notes about a change that came from outside are in German in a German portal', async ({ page }) => {

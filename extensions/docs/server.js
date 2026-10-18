@@ -9,14 +9,12 @@
  * the page, which has no chat of its own to ask:
  *
  *   GET  /api/x/pithagoras-docs/folders                                          every folder with documents, and its documents; `version` says which list it is
- *   GET  /api/x/pithagoras-docs/folders/events                                   a stream of the changes to that list as they are made (server-sent events)
  *   GET  /api/x/pithagoras-docs/chats/:chat/documents                            the documents of one chat's folder (other chats' own marked), and the folder: for the panel beside it
  *   POST /api/x/pithagoras-docs/folders/:folder/documents                        a new document { title, markdown?, scope?, chat? }
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/upload                 a Markdown file the person uploaded { name, markdown }, kept as it is
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/download           the document's file, as an attachment
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
  *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
- *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/events             a stream of its revisions as they are made (server-sent events)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/history            its revisions, newest first (?before=, ?limit=)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/revisions/:revision  the text of one of them
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/restore            { revision, base? }: that text as a new revision
@@ -35,35 +33,36 @@
  * works in, as the portal lists them now.
  *
  * A page with a document open is told of each revision of it as it is made, by
- * the agent, by the page itself, by Files or an editor: the stream's first
- * message is where the document stands, so that a page that was away (a
- * reconnect, or a change between its load and its stream) finds out at once,
- * whatever it missed. A message says which revision, who made it and when; the
- * text is asked for from the document's own route. A change to the document's
+ * the agent, by the page itself, by Files or an editor: the page listens to the
+ * portal's topic `doc/<folder>/<document>` (`portal.onListen` below, `portal.server.on`
+ * in the page), and the first thing it hears is where the document stands, so that a
+ * page that was away (a reconnect, or a change between its load and its listening)
+ * finds out at once, whatever it missed. A message says which revision, who made it and
+ * when; the text is asked for from the document's own route. A change to the document's
  * comments is told too (`threads`, with when), and the threads are asked for
- * from their own route. While a stream is open the
- * folder is looked at every couple of seconds for what changed outside the
- * store's own writes, which is how the changes of Files and editors get told.
+ * from their own route. While a page listens the folder is looked at every couple of
+ * seconds for what changed outside the store's own writes, which is how the changes of
+ * Files and editors get told.
  *
- * The page that lists the folders is told when the list changes, by one stream
- * for all of them, not one for each: a browser keeps few connections to a
- * server, and a folder that has no documents yet is not on the page to have a
- * stream of its own. A message is only the list's `version` (a hash of what the
- * page would show of every folder), and the list is asked for from its own
- * route when that is not the version the page holds. The first message says where
- * the list stands, as a document's does, so that a page that was away finds
- * out at once and one that is up to date asks for nothing. While a stream is
- * open, each folder chats work in is looked at every couple of seconds for what
- * its list would show now (a document made, renamed, deleted or made again, a
- * folder that cannot be read), and at once for what the store itself writes.
- * Like every route it is behind the portal's login, and the portal ends it when
- * the password changes: it says nothing of a folder that its list would not
- * show, and nothing of the folder or its documents but that something changed.
+ * The page that lists the folders listens to the topic `folders`: it is told when the
+ * list changes, by one topic for all of them, not one for each: a folder that has no
+ * documents yet is not on the page to have a topic of its own. A message is only the list's
+ * `version` (a hash of what the page would show of every folder), and the list is asked for
+ * from its own route when that is not the version the page holds. The first message says
+ * where the list stands, as a document's does, so that a page that was away finds out at
+ * once and one that is up to date asks for nothing. While a page listens, each folder chats
+ * work in is looked at every couple of seconds for what its list would show now (a document
+ * made, renamed, deleted or made again, a folder that cannot be read), and at once for what
+ * the store itself writes. What a page may listen to is decided here: a folder only if a chat
+ * works in it now, a document only if the folder's store has it. Like every route it is behind
+ * the portal's login, and the portal ends it when the password changes: it says nothing of a
+ * folder that its list would not show, and nothing of the folder or its documents but that
+ * something changed.
  *
- * A comment of the person's that has `@agent` in it asks the agent (ping.js): the
+ * A comment of the person's that has `@agent` in it asks the agent: the
  * thread is marked as waiting for it, and the agent of the chat the page names
  * (the one the person is in) is woken with the comment, through the portal's own
- * `chats.tell`, to answer it with its tools. The wake is in the background, a few
+ * `chats.followUp`, to answer it with its tools. The wake is in the background, a few
  * seconds after the comment was last saved: nothing here waits for a chat to start.
  * A comment that is changed asks as a new one would, only while it is the last of an open
  * thread; one that is taken away, or its thread, takes the wake with it.
@@ -74,11 +73,10 @@ import path from "node:path";
 import { ensureDependencies } from "./deps.js";
 import { explained } from "./errors.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
-import { hearPings, wakeMessage } from "./ping.js";
 import { SECRET, SECRET_WARNING } from "./secret.js";
 import { frontMatterEnd } from "./src/frame.js";
 import { DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
-import { documentTools } from "./tools.js";
+import { documentTools, wakeMessage } from "./tools.js";
 import { asksAgent } from "./web/mention.js";
 
 /** Where a document's title is looked for: its first heading, near its top. */
@@ -373,9 +371,7 @@ function headed(markdown, title) {
 }
 
 
-/** How often an open stream is sent a comment line, so that nothing between the portal and the page (a proxy) takes it for idle. */
-const PING_MS = 25_000;
-/** How often a folder with an open stream is looked at for changes outside the store's own writes. */
+/** How often a folder a page listens to is looked at for changes outside the store's own writes. */
 const POLL_MS = 2_000;
 /**
  * How long a comment that asks the agent has to be left alone before the agent is woken: a moment to take it back or change it,
@@ -388,7 +384,7 @@ const WAKE_MS = 3_000;
  */
 const WAKE_LIMIT_MS = 120_000;
 
-export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pingMs = PING_MS, pollMs = POLL_MS, wakeMs = WAKE_MS, wakeLimitMs = WAKE_LIMIT_MS } = {}) {
+export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pollMs = POLL_MS, wakeMs = WAKE_MS, wakeLimitMs = WAKE_LIMIT_MS } = {}) {
   // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
   // in the background: the portal does not wait for an install to start the rest. The store waits for it.
   const ready = dependencies((line) => portal.log(line));
@@ -419,7 +415,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
    */
   function documentsOf(folder) {
     try {
-      return portal.files.folder(folder, DOCUMENTS, { direct: true });
+      return portal.files.folder(folder, DOCUMENTS, { direct: true, likeParent: true });
     } catch {
       return null;
     }
@@ -445,27 +441,25 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   }
 
   /**
-   * The streams that are open, and who they are for: by folder (its path), the
-   * streams of each document, and a look at the folder that goes on for as long
-   * as one is open. A revision made in a folder is told to the streams of its
-   * document, in the order it was made.
+   * The pages that listen to a folder's documents, and a look at the folder that goes on for as long as one does. A
+   * revision made in a folder is pushed to the topic of its document (`doc/<folder>/<document>`), in the order it was made.
    */
   const watching = new Map();
+  const docTopic = (folder, id) => `doc/${idOf(folder)}/${id}`;
   const live = {
     publish(folder, change) {
-      for (const send of [...(watching.get(folder)?.documents.get(change.id) ?? [])]) send(change);
+      // A change to the comments is no revision: it has no revision number, which a page that reconnects would take for the last one it saw.
+      portal.push(docTopic(folder, change.id), change.threads ? { threads: true, at: change.at } : { revision: change.revision, author: change.author, at: change.at });
       // The list shows each document's revision, size, time and open comments: a page that lists the folders is told at once.
-      if (lists.sends.size) void look(idOf(folder));
+      if (lists.count) void look(idOf(folder));
     },
-    /** `send` is given each revision of document `id` in `folder`. Returns what stops it. */
-    watch(folder, id, send) {
+    /** The folder is looked at for as long as a page listens to one of its documents. Returns what stops it. */
+    watch(folder) {
       let entry = watching.get(folder);
       if (!entry) {
-        entry = { documents: new Map(), count: 0, timer: null, busy: false, failure: null };
+        entry = { count: 0, timer: null, busy: false, failure: null };
         watching.set(folder, entry);
       }
-      const sends = entry.documents.get(id) ?? entry.documents.set(id, new Set()).get(id);
-      sends.add(send);
       entry.count++;
       if (!entry.timer && pollMs > 0) {
         const watched = entry;
@@ -487,25 +481,24 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         }, pollMs);
         watched.timer.unref?.();
       }
+      let left = false;
       return () => {
-        if (!sends.delete(send)) return;
-        if (!sends.size) entry.documents.delete(id);
+        if (left) return;
+        left = true;
         if (--entry.count > 0) return;
         clearInterval(entry.timer);
         if (watching.get(folder) === entry) watching.delete(folder);
       };
     },
   };
-  /** The responses of the streams that are open, ended when the extension stops. */
-  const streams = new Set();
   let stopped = false;
 
   /**
-   * The streams of the list of folders, and what is known of the list. `seen`: what each folder's listing was when it was last looked at (a
-   * string for each folder that has anything to list), which is what a change is found against; it is made when the first stream opens and
-   * dropped with the last, so that nothing is looked at while no page listens. `sends`: told the list's version when it changed.
+   * The pages that listen to the list of folders, and what is known of the list. `seen`: what each folder's listing was when it was last looked at (a
+   * string for each folder that has anything to list), which is what a change is found against; it is made when the first page listens and
+   * dropped with the last, so that nothing is looked at while no page listens. `count`: how many listen, who are pushed the list's version when it changed.
    */
-  const lists = { sends: new Set(), seen: null, based: null, timer: null, running: null, all: false, due: new Set(), watchers: new Map() };
+  const lists = { count: 0, seen: null, based: null, timer: null, running: null, all: false, due: new Set(), watchers: new Map() };
 
   /** Each folder's store, opened once and kept while it is there: by the folder's path. */
   const stores = new Map();
@@ -539,19 +532,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     return opening;
   }
 
-  /**
-   * What the agents of chats are to be told because the person asked them in a comment, by chat, until the chat's pi has taken
-   * it (`hearPings`): the server half keeps it, so that only a comment the person wrote can be said to the agent.
-   */
-  const waking = new Map();
-  const takeWaking = (chat) => {
-    const entries = waking.get(chat) ?? [];
-    waking.delete(chat);
-    return entries;
-  };
-
-  // The agent's tools, in each chat's pi, where pi runs in the portal's process: they share the store the routes use. So does
-  // what hears the bell that wakes the chat (ping.js).
+  // The agent's tools, in each chat's pi, where pi runs in the portal's process: they share the store the routes use.
   if (portal.executor === "host") {
     portal.chats.extend((pi, chat) => {
       documentTools(pi, chat, {
@@ -564,7 +545,6 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         headBytes: HEAD_BYTES,
         log: (line) => portal.log(line),
       });
-      hearPings(pi, { extension: portal.extension, take: () => takeWaking(chat.id) });
     });
   }
 
@@ -631,10 +611,11 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   const toldThreads = (folder, id) => live.publish(folder.path, { id, threads: true, at: new Date().toISOString() });
 
   /**
-   * Wakes the agent of `chat` with the comment `comment`, which the ping `ping` of a thread was made for, as it stands now: through the bell of the
-   * chat's pi extension, which starts the chat's pi if it was let go. The wake is not waited for by anyone: the page is told by the
-   * thread, which says whether the chat took it. `mine` is the wake's own entry in `wakes`: it is only ever taken out by the wake
-   * it belongs to (or by `unwake`), and a comment that is changed while the wake is on its way is not woken for again.
+   * Wakes the agent of `chat` with the comment `comment`, which the ping `ping` of a thread was made for, as it stands now: through
+   * the portal's `chats.followUp`, which starts the chat's pi if it was let go and puts the message in the conversation after the turn
+   * that is going on. The wake is not waited for by anyone: the page is told by the thread, which says whether the chat took it. `mine`
+   * is the wake's own entry in `wakes`: it is only ever taken out by the wake it belongs to (or by `unwake`), and a comment that is
+   * changed while the wake is on its way is not woken for again.
    */
   async function wake(folder, store, id, thread, ping, comment, chat, mine) {
     const key = wakeKey(folder, comment);
@@ -647,24 +628,19 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       const last = now?.comments.at(-1);
       // Not asked any more, a chat has taken it already, or the agent has answered (or the thread was closed) while the comment was left alone.
       if (!now || now.status !== "open" || now.ping?.id !== ping || now.ping.comment !== comment || now.ping.sent || last?.id !== comment || last.author !== "user" || !asksAgent(last.body)) return done();
-      const entry = { text: wakeMessage({ title: titleOf(doc.bytes, doc.name), name: doc.name, id, thread, comment: last.body }), details: { folder: idOf(folder.path), id, thread }, state: "waiting" };
-      waking.set(chat, [...(waking.get(chat) ?? []), entry]);
+      const message = { text: wakeMessage({ title: titleOf(doc.bytes, doc.name), name: doc.name, id, thread, comment: last.body }), details: { folder: idOf(folder.path), id, thread }, type: "ping" };
       let why;
       let late;
       try {
-        // Starts the chat's pi if it was let go, and rings the bell its pi extension answers by taking what is queued for it.
-        const rang = await Promise.race([portal.chats.tell(chat, { type: "ping" }), new Promise((resolve) => (late = setTimeout(resolve, wakeLimitMs, "late")))]);
-        if (rang === "late") why = "This chat did not start in time";
-        else if (!rang) why = "This chat's agent does not run in the portal's own process";
+        // Starts the chat's pi if it was let go, and has it say the message.
+        const taken = await Promise.race([portal.chats.followUp(chat, message), new Promise((resolve) => (late = setTimeout(resolve, wakeLimitMs, "late")))]);
+        if (taken === "late") why = "This chat did not start in time";
+        else if (!taken) why = "This chat's agent does not run in the portal's own process";
       } catch (e) {
         why = e?.message ?? String(e);
       } finally {
         clearTimeout(late);
       }
-      // What the bell did not hand over is not left for whatever rings it next.
-      waking.set(chat, (waking.get(chat) ?? []).filter((queued) => queued !== entry));
-      if (!why && entry.state === "failed") why = entry.error;
-      else if (!why && entry.state !== "sent") why = "This chat's agent did not take it";
       if (why) throw new Error(why);
       // Only the ping of this comment is taken: one that has its number now (this comment was typed away and another written) is not.
       await store.reached(id, thread, ping, comment);
@@ -851,8 +827,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       changed = true;
     }
     if (!changed) return;
-    const version = versionOf(seen);
-    for (const send of [...lists.sends]) send(version);
+    portal.push("folders", { version: versionOf(seen) });
   }
 
   /**
@@ -924,9 +899,9 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     }
   }
 
-  /** `send` is given the list's version whenever it changes. Returns what stops it. */
-  function watchList(send) {
-    lists.sends.add(send);
+  /** A page listens to the list: it is looked at, and pushed to the topic `folders`, for as long as one does. Returns what stops it. */
+  function watchList() {
+    lists.count++;
     // The folders are looked at every so often: a document that is made, renamed or deleted outside the store tells it nothing.
     if (!lists.timer && pollMs > 0) {
       watchDirs();
@@ -936,8 +911,11 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       }, pollMs);
       lists.timer.unref?.();
     }
+    let left = false;
     return () => {
-      if (!lists.sends.delete(send) || lists.sends.size) return;
+      if (left) return;
+      left = true;
+      if (--lists.count > 0) return;
       clearInterval(lists.timer);
       for (const id of [...lists.watchers.keys()]) unwatchDir(id);
       Object.assign(lists, { timer: null, seen: null, based: null, all: false });
@@ -983,32 +961,6 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     const titles = new Map(portal.chats.list().map((c) => [c.id, c.title]));
     const documents = (found.listed?.documents ?? []).map((doc) => (doc.scope === "chat" && doc.chat !== chat ? { ...doc, otherChat: true, chatTitle: titles.get(doc.chat) ?? null } : doc));
     res.json({ folder: { id: folder.id, name: path.basename(where) || where, path: where }, documents });
-  }));
-
-  portal.router.get("/folders/events", route(async (req, res) => {
-    if (stopped) throw new DocError(503, "The documents extension is stopping");
-    let closed = false;
-    let send = () => {};
-    let ping;
-    // Listened to before it is asked where the list stands: a change made in between is told, and what came before is in the list the page asks for.
-    const unwatch = watchList((version) => send(version));
-    res.on("close", () => {
-      closed = true;
-      clearInterval(ping);
-      streams.delete(res);
-      unwatch();
-    });
-    await baseline();
-    if (stopped) throw new DocError(503, "The documents extension is stopping");
-    if (closed) return;
-    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-    res.write("retry: 2000\n\n");
-    send = (version) => res.write(`event: documents\ndata: ${JSON.stringify({ version })}\n\n`);
-    // Where the list stands, as the first message: a page that was away finds out whether it missed anything, whatever it was.
-    send(versionOf(lists.seen));
-    ping = setInterval(() => res.write(": ping\n\n"), pingMs);
-    ping.unref?.();
-    streams.add(res);
   }));
 
   portal.router.post("/folders/:folder/documents", json, route(async (req, res) => {
@@ -1068,48 +1020,6 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     // A text that started from an earlier revision is put together with what was saved since, where their changes do not meet.
     const doc = await (await storeFor(folder.path)).save(id, { markdown, base, merge: true });
     res.json({ ...doc, ...warn(markdown) });
-  }));
-
-  portal.router.get("/folders/:folder/documents/:id/events", route(async (req, res) => {
-    const folder = folderOf(req);
-    const id = documentOf(req);
-    // The page's end of it: told by the response, which closes when the connection does.
-    let closed = false;
-    res.on("close", () => (closed = true));
-    const store = await storeFor(folder.path);
-    // Listened to before it is asked where the document stands: a revision made in between is not missed.
-    const queued = [];
-    let send = (change) => queued.push(change);
-    const unwatch = live.watch(folder.path, id, (change) => send(change));
-    let now;
-    try {
-      now = await store.current(id);
-    } catch (e) {
-      unwatch();
-      throw e;
-    }
-    if (stopped) {
-      unwatch();
-      throw new DocError(503, "The documents extension is stopping");
-    }
-    if (closed) return unwatch();
-    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-    // A page that lost the stream asks again after this long, with its last id: the first message tells it where things stand, so it is not needed.
-    res.write("retry: 2000\n\n");
-    const write = ({ revision, author, at, threads }) =>
-      // A change to the comments is no revision: it has no id, which a reconnecting page would take for the last one it saw.
-      res.write(threads ? `event: threads\ndata: ${JSON.stringify({ at })}\n\n` : `id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`);
-    write(now);
-    for (const change of queued) if (change.threads || change.revision > now.revision) write(change);
-    send = write;
-    const ping = setInterval(() => res.write(": ping\n\n"), pingMs);
-    ping.unref?.();
-    streams.add(res);
-    res.on("close", () => {
-      clearInterval(ping);
-      streams.delete(res);
-      unwatch();
-    });
   }));
 
   portal.router.get("/folders/:folder/documents/:id/history", route(async (req, res) => {
@@ -1216,6 +1126,60 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.json(withChat(folder, await (await storeFor(folder.path)).settle(id, req.params.thread, { status: "open", author: "user" })));
   }));
 
+  /**
+   * Who may listen to what, and what a page hears first. The list of folders, to anyone who is signed in: it tells that
+   * something changed, and what it is a hash of. A document's revisions, only if a chat works in its folder now (a page
+   * cannot listen to a folder the portal does not list) and the folder's store has the document; the page hears where the
+   * document stands as it begins to, then each revision and each change to its comments. What a page is not allowed to
+   * hear is refused, and it hears nothing of it.
+   */
+  portal.onListen(async (topic, page) => {
+    if (stopped) return false;
+    if (topic === "folders") return listenToList(page);
+    const match = /^doc\/([0-9a-f]{16})\/([0-9a-f]{16})$/.exec(topic);
+    return match ? listenToDocument(match[1], match[2], page) : false;
+  });
+
+  /** A page listens to the list: it is told where the list stands, then its version whenever it changes. */
+  async function listenToList(page) {
+    // Counted before it is asked where the list stands: a change made in between is told, and what came before is in the list the page asks for.
+    const unwatch = watchList();
+    let left = false;
+    try {
+      await baseline();
+    } catch (e) {
+      unwatch();
+      throw e;
+    }
+    if (stopped || left) {
+      unwatch();
+      return false;
+    }
+    // Where the list stands, as the first message: a page that was away finds out whether it missed anything, whatever it was.
+    page.send({ version: versionOf(lists.seen), first: true });
+    return () => {
+      left = true;
+      unwatch();
+    };
+  }
+
+  /** A page listens to a document: it is told where the document stands, then each revision and each change to its comments. */
+  async function listenToDocument(folderId, id, page) {
+    const folder = folders().get(folderId);
+    if (!folder || !isDocumentId(id)) return false;
+    const unwatch = live.watch(folder.path);
+    try {
+      const now = await (await storeFor(folder.path)).current(id);
+      if (stopped) throw new DocError(503, "The documents extension is stopping");
+      page.send({ revision: now.revision, author: now.author, at: now.at, first: true });
+    } catch (e) {
+      unwatch();
+      if (!(e instanceof DocError)) portal.log(`A page could not listen to a document of ${folder.path}: ${e?.stack ?? e}`);
+      return false;
+    }
+    return unwatch;
+  }
+
   return async () => {
     stopped = true;
     for (const queued of wakes.values()) clearTimeout(queued.timer);
@@ -1223,7 +1187,6 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     for (const entry of watching.values()) clearInterval(entry.timer);
     clearInterval(lists.timer);
     for (const id of [...lists.watchers.keys()]) unwatchDir(id);
-    for (const res of [...streams]) res.end();
     const open = [...stores.values()];
     stores.clear();
     for (const pending of open) await pending.then((store) => store.close(), () => {});

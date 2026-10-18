@@ -23,8 +23,9 @@
  *     it changed
  *   - it changes and deletes its own comments and replies, and never the person's:
  *     it answers those, or resolves the thread
- *   - it is woken only by the person's `@agent` in a comment (ping.js), with the
- *     thread to answer: that gives it the same tools and no others
+ *   - it is woken only by the person's `@agent` in a comment (server.js, through the
+ *     portal's `chats.followUp`), with the thread to answer: that gives it the same
+ *     tools and no others
  *
  * A refusal is an error the agent reads, which starts with its code:
  * `not_found`, `exists`, `too_large`, `secret`, `revision_mismatch`,
@@ -146,6 +147,18 @@ function describeThreads(threads, text, which) {
   // A thread the person wrote @agent in asks the agent for an answer, in the thread.
   const asking = shown.some((t) => t.toAgent) ? " A thread marked \"asks you\" has @agent in the person's last comment: answer it in the thread." : "";
   return `\n\n${head}. Answer one with doc_reply, or with doc_edit given its thread; close it with doc_resolve.${asking}\n\n${blocks.join("\n\n")}${more}`;
+}
+
+/** How much of a comment the message to the agent holds: the rest is in the thread, which doc_read gives whole. */
+const COMMENT_CHARS = 1000;
+
+/** What the agent is told when it is asked in a comment: where the comment is and what it says, and how to answer it. */
+export function wakeMessage({ title, name, id, thread, comment }) {
+  return [
+    `The person asked you in a comment on the shared document "${title}" (id ${id}, documents/${name}), thread ${thread}:`,
+    ...clip(comment, COMMENT_CHARS).split("\n").map((line) => `> ${line}`),
+    "Read the thread with doc_read and answer it there: with doc_reply, or with doc_edit given this thread if the answer is a change to the passage it is on. Resolving the thread with doc_resolve, saying what you did, is an answer too: the person is told that you answered either way.",
+  ].join("\n");
 }
 
 /**
