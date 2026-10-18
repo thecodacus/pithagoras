@@ -16,6 +16,12 @@ import { orderedInput } from "./text";
  */
 export function Shell({ chatId }: { chatId: string }) {
   const host = useRef<HTMLDivElement>(null);
+  const screen = useRef<Terminal | null>(null);
+  // Light for dark, or another theme chosen: the terminal's colours follow. The portal has painted them by the time this is drawn again.
+  const { mode, theme } = portal.theme.use();
+  useEffect(() => {
+    if (screen.current) screen.current.options.theme = terminalColours();
+  }, [mode, theme]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -36,6 +42,7 @@ export function Shell({ chatId }: { chatId: string }) {
     term.loadAddon(fit);
     term.open(host.current);
     fit.fit();
+    screen.current = term;
 
     const route = (path = "") => portal.api.url(`/terminal${path}`);
     const post = (path: string, body: unknown) => portal.api.json(route(path), { method: "POST", body: JSON.stringify(body) });
@@ -90,14 +97,10 @@ export function Shell({ chatId }: { chatId: string }) {
     });
     observer.observe(host.current);
 
-    // Another theme chosen, or light for dark: its colours follow.
-    const themed = new MutationObserver(() => (term.options.theme = terminalColours()));
-    themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
-
     return () => {
       closed = true;
       observer.disconnect();
-      themed.disconnect();
+      screen.current = null;
       source?.close();
       if (id) void close(id);
       term.dispose();

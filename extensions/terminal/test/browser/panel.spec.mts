@@ -68,3 +68,21 @@ test('keystrokes that go nowhere are said once, and said again after the stream 
   await t.type('cd');
   await expect.poll(async () => ((await t.screen()).match(/Connection to the shell lost/g) ?? []).length).toBe(1);
 });
+
+test.describe('with a theme that gives the terminal another ground for light than for dark', () => {
+  test.use({ installed: ['extensions/terminal', 'extensions/themes'] });
+
+  test('the shell takes the portal\'s colours again when the portal goes from dark to light, and back', async ({ page }) => {
+    // The portal's own colours keep the terminal dark in both modes; Forest, chosen in this browser, has a ground for each.
+    await page.addInitScript(() => localStorage.setItem('pithagoras.palette', JSON.stringify({ id: 'pithagoras-themes/forest', name: 'Forest', dark: { terminal: '11 15 13' }, light: { terminal: '18 38 28' } })));
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await shell(page, () => ({ ok: true }));
+    // xterm paints its scrolling element with the terminal colours the theme gave it.
+    const background = () => page.locator('.xterm-scrollable-element').evaluate((el) => getComputedStyle(el).backgroundColor);
+    await expect.poll(background).toBe('rgb(11, 15, 13)');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect.poll(background).toBe('rgb(18, 38, 28)');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(background).toBe('rgb(11, 15, 13)');
+  });
+});
