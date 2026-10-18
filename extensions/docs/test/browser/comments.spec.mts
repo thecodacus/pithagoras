@@ -1758,7 +1758,7 @@ test('a change to a sent comment is kept when the card is closed, comes back whe
   await expect.poll(asks).toBe(false);
 });
 
-test('Ctrl+Alt+M is the comment shortcut and nothing else: AltGr+M (Ctrl+Alt on Windows) is left to the text, which types its character', async ({ page }) => {
+test('Ctrl+Alt+M is the comment shortcut and nothing else: AltGr+M (Ctrl+Alt on Windows) is left to the text, which types its character; on a Mac it is ⌘+Alt+M', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await editorOf(page).getByText('Ship it on').click();
@@ -1772,9 +1772,24 @@ test('Ctrl+Alt+M is the comment shortcut and nothing else: AltGr+M (Ctrl+Alt on 
   expect(await sent({ key: 'µ', ctrlKey: true, altKey: true })).toBe(false);
   expect(await sent({ key: 'µ', altKey: true, modifierAltGraph: true })).toBe(false);
   expect(await sent({ key: 'm', ctrlKey: true, altKey: true, modifierAltGraph: true })).toBe(false);
-  // The shortcut is: Ctrl+Alt+M, and ⌘+Alt+M (which types µ on a Mac).
+  // The shortcut is Ctrl+Alt+M here, and not ⌘+Alt+M.
   expect(await sent({ key: 'm', ctrlKey: true, altKey: true })).toBe(true);
+  expect(await sent({ key: 'µ', metaKey: true, altKey: true })).toBe(false);
+});
+
+test('on a Mac the comment shortcut is ⌘+Alt+M, which types µ there, and Ctrl+Alt+M is not it', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' }));
+  const store = new Store();
+  await open(page, store);
+  await editorOf(page).getByText('Ship it on').click();
+  const sent = (init: KeyboardEventInit) =>
+    page.evaluate((init) => {
+      const event = new KeyboardEvent('keydown', { code: 'KeyM', bubbles: true, cancelable: true, ...init });
+      document.querySelector('.pd-editor .ProseMirror')!.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, init);
   expect(await sent({ key: 'µ', metaKey: true, altKey: true })).toBe(true);
+  expect(await sent({ key: 'm', ctrlKey: true, altKey: true })).toBe(false);
 });
 
 test('Escape closes a card that a click opened, wherever the focus is in the text, and does nothing when no card is open', async ({ page }) => {

@@ -180,15 +180,23 @@ test('a shortcut for anywhere in the portal is not run for AltGr, nor while a di
     return (window as any).ran;
   })).toBe(1);
 
+  // A browser that does not name AltGr types a character instead, which a letter key does not: µ, @.
+  expect(await page.evaluate(() => {
+    for (const key of ['µ', '@', '€']) document.getElementById('b')!.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyM', key, ctrlKey: true, altKey: true, bubbles: true, cancelable: true }));
+    return (window as any).ran;
+  })).toBe(1);
+  // The letter of another layout (Dvorak types o where the key is S) is a letter: the physical key is the shortcut.
+  expect(await press('KeyM', { ctrlKey: true, altKey: true, key: 'o' })).toBe(2);
+
   // A dialog has the keys while it is open.
   await page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div aria-modal="true" id="dialog"></div>'));
-  expect(await press('KeyM', { ctrlKey: true, altKey: true })).toBe(1);
-  await page.evaluate(() => document.getElementById('dialog')!.remove());
   expect(await press('KeyM', { ctrlKey: true, altKey: true })).toBe(2);
+  await page.evaluate(() => document.getElementById('dialog')!.remove());
+  expect(await press('KeyM', { ctrlKey: true, altKey: true })).toBe(3);
 
   // A part of the page that handled the key has it.
   await page.evaluate(() => document.getElementById('b')!.addEventListener('keydown', (e) => e.preventDefault(), { once: true }));
-  expect(await press('KeyM', { ctrlKey: true, altKey: true })).toBe(2);
+  expect(await press('KeyM', { ctrlKey: true, altKey: true })).toBe(3);
 
   // Voice mode's own are for voice mode.
   await press('KeyT');
