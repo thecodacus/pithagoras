@@ -45,7 +45,7 @@ export function comments(portal, { when }) {
   function Writing({ value, onChange, onBlur, onDone, onCancel, label, placeholder, autoFocus }) {
     const box = useRef(null);
     useEffect(() => {
-      if (autoFocus) box.current?.focus();
+      if (autoFocus) box.current?.focus({ preventScroll: true });
     }, [autoFocus]);
     return h("textarea", {
       ref: box,
@@ -81,8 +81,18 @@ export function comments(portal, { when }) {
    * One comment of a thread, in the list. The person's own has **Edit** (the comment becomes a box with Save and Cancel; it is
    * kept as it is until Save) and **Delete** (after a question). A thread's only comment is taken away with the thread, by its own button.
    */
-  function Comment({ comment, only, onEdit, onDelete, run }) {
-    const [editing, setEditing] = useState(null);
+  function Comment({ comment, only, drafts, onEdit, onDelete, run }) {
+    // The words of a change that is not saved are kept in `drafts` as well, as a reply's are: the card is drawn from nothing each time it
+    // is opened, and a change begun is not lost with it (the page warns of it before it is left). Words that are the comment's own are none.
+    const draftKey = `edit-${comment.id}`;
+    const [editing, setEditingNow] = useState(() => drafts.get(draftKey) ?? null);
+    const setEditing = (words) => {
+      if (words === null || words.trim() === comment.body) drafts.delete(draftKey);
+      else drafts.set(draftKey, words);
+      setEditingNow(words);
+    };
+    // Only a change the person has just begun takes the focus: one that was kept does not, when the card is opened again.
+    const [begun, setBegun] = useState(false);
     const [busy, setBusy] = useState(false);
     const mine = comment.author === "user";
     const mounted = useRef(true);
@@ -121,7 +131,7 @@ export function comments(portal, { when }) {
           h(
             "span",
             { className: "pd-comment-actions" },
-            h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: () => setEditing(comment.body) }, t("Edit")),
+            h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: () => (setBegun(true), setEditing(comment.body)) }, t("Edit")),
             !only && h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: () => void remove() }, t("Delete")),
           ),
       ),
@@ -130,7 +140,7 @@ export function comments(portal, { when }) {
         : h(
             "div",
             { className: "pd-reply" },
-            h(Writing, { value: editing, onChange: setEditing, onDone: save, onCancel: () => setEditing(null), label: t("Edit the comment"), autoFocus: true }),
+            h(Writing, { value: editing, onChange: setEditing, onDone: save, onCancel: () => setEditing(null), label: t("Edit the comment"), autoFocus: begun }),
             h(
               "div",
               { className: "pd-actions" },
@@ -236,7 +246,7 @@ export function comments(portal, { when }) {
       h(
         "ol",
         { className: "pd-comments" },
-        thread.comments.map((comment) => h(Comment, { key: comment.id, comment, only: thread.comments.length === 1 && deletable, onEdit: (c, words) => onEdit(thread, c, words), onDelete: (c) => onDelete(thread, c), run })),
+        thread.comments.map((comment) => h(Comment, { key: comment.id, comment, drafts, only: thread.comments.length === 1 && deletable, onEdit: (c, words) => onEdit(thread, c, words), onDelete: (c) => onDelete(thread, c), run })),
       ),
       error && h(ui.ErrorBanner, { onClose: () => setError(null) }, t("Could not comment: {error}", { error })),
       open
@@ -249,7 +259,6 @@ export function comments(portal, { when }) {
                 onDone: send,
                 label: composing ? t("Write a comment") : t("Reply"),
                 placeholder: composing ? t("Write a comment…") : t("Reply…"),
-                autoFocus: composing,
               }),
               h(
                 "div",
@@ -335,12 +344,14 @@ export function comments(portal, { when }) {
       document.addEventListener("mousedown", away);
       return () => document.removeEventListener("mousedown", away);
     }, [onClose]);
-    // Opened with the keyboard (or from the list), the box to write in has the focus.
+    // Opened with the keyboard (or from the list), or to write a comment, the box to write in has the focus: once the card is where it goes,
+    // and without scrolling to it. Focused earlier it would sit at the top of the sheet, and the page would scroll there.
+    const placed = at !== null;
     useEffect(() => {
-      if (!takeFocus) return;
+      if (!takeFocus || !placed) return;
       const field = box.current?.querySelector("textarea") ?? box.current?.querySelector("button");
       field?.focus({ preventScroll: true });
-    }, [takeFocus]);
+    }, [takeFocus, placed]);
 
     const composing = Boolean(compose);
     return h(
@@ -413,6 +424,16 @@ export function comments(portal, { when }) {
     const openCount = threads.filter((thread) => thread.status === "open").length;
     // On a passage: open and found in the text (or not looked for yet).
     const onPassage = (thread) => thread.status === "open" && !thread.orphaned && (texts.has(thread.id) || !settled);
+    // The comment being written, whose card is closed (it has words, or its card is open now): a line like a thread's, which opens it.
+    const typed = compose && !compose.threadId ? (drafts.get(`compose-${compose.key}`) ?? "").replace(/\s+/g, " ").trim() : null;
+    const kept =
+      typed !== null &&
+      h(
+        "button",
+        { type: "button", className: "pd-item", "data-thread": PENDING, "aria-current": active === PENDING ? "true" : undefined, title: t("Show in the text"), onClick: () => onActivate(PENDING) },
+        h("span", { className: "pd-quote" }, short(compose.passage.text ?? compose.passage.quote)),
+        h("span", { className: "pd-said" }, h("strong", null, t("New comment")), typed && ": ", typed.length > SUMMARY_CHARS ? `${typed.slice(0, SUMMARY_CHARS)}…` : typed),
+      );
     const card = (thread) =>
       onPassage(thread)
         ? h(Summary, { key: thread.id, thread, text: texts.get(thread.id), active: active === thread.id, onActivate })
@@ -453,6 +474,7 @@ export function comments(portal, { when }) {
               "div",
               { className: "pd-thread-list", "aria-live": "polite" },
               !threads.length && !compose && h("p", { className: "pd-hint" }, t("No comments yet. Select some text, then press Comment.")),
+              kept,
               list.map(card),
               closed.length > 0 &&
                 h("button", { type: "button", className: `${ui.classes.ghost} pd-more`, "aria-expanded": resolved, onClick: () => setResolved((on) => !on) }, resolved ? t("Hide resolved") : t("Show resolved ({n})", { n: closed.length })),

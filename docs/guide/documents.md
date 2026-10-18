@@ -556,7 +556,7 @@ older revisions** the next ones.
 
 If the editor cannot be loaded (its file is missing from a checkout that was
 not built), the document is shown read-only, drawn as the portal draws
-Markdown, with the reason and **Try again**.
+Markdown, with the reason and **Reload the page** (a module that failed to load fails again when it is asked for again, so only a new page loads it).
 
 ## Comments
 
@@ -574,13 +574,18 @@ as the text and not beside it, and nothing of them is shown until you ask:
   thread** where that is yours to do, and a reminder that **@agent** asks the
   agent. Only one card is open at a time: a click on another passage opens that
   one instead. It follows its words as you scroll and as the text changes, and a
-  click in the text elsewhere, a click outside the card or **Escape** closes it
+  click in the text elsewhere, a click outside the card or **Escape** (also when
+  the card was opened by a click and the cursor is still in the text) closes it
   (the text has the focus again). What was typed in its box is kept when it is
-  closed ([below](#writing-a-comment)).
+  closed ([below](#writing-a-comment)). If its words are gone from the text while
+  it is open (the agent rewrote them), it stays where it was, says so, and keeps
+  what you were typing.
 - A new comment opens its card in the same way at the words you selected, with
-  the box ready to write in.
-- With the keyboard: **Ctrl+Alt+M** with the cursor in a commented passage opens
-  its card, with the focus in the box; **Tab** from the text goes into the card,
+  the box ready to write in. The page stays where it is, also far down a long
+  document.
+- With the keyboard: **Ctrl+Alt+M** with the cursor in a commented passage (or in
+  the passage of a comment you began and closed) opens its card, with the focus in
+  the box; **AltGr+M** is left to the text (it types a character on some layouts); **Tab** from the text goes into the card,
   and **Escape** back to the text.
 - **Comments** in the bar, with how many threads are open, shows the **list** of
   all the threads, and hides it again. It is beside the sheet where the page
@@ -608,8 +613,12 @@ browser asks before a reload or a closed tab would lose a comment you had not
 sent. What you typed is kept when you close the card (with **Escape** or by
 clicking outside) and when you show or hide the list, and is there when you open
 the card again; a comment on a passage that you close with words in it keeps the
-passage marked, and a click on the mark opens it again (with nothing typed, closing
-it drops it). An answer from the agent that comes while you type is added to the
+passage marked, and a click on the mark, its line in the list (**New comment**) or
+**Ctrl+Alt+M** in the passage opens it again (with nothing typed, closing it drops
+it). Starting another comment while one is kept asks first (**Discard the comment
+you started?**); **Cancel** opens the kept one. A change you began to a sent
+comment with **Edit** is kept the same way, and the browser asks before the page is
+left with one. An answer from the agent that comes while you type is added to the
 thread, and what you are typing stays in the box.
 
 Once it is sent the comment is in its thread. You change or delete it afterwards

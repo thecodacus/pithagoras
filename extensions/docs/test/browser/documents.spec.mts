@@ -706,3 +706,23 @@ test('the extension\'s module registers its page without the editor\'s half, whi
   await expect(page.locator('.pd-editor h1')).toHaveText('The plan');
   expect(modules).toEqual(expect.arrayContaining(['document-editor.js', 'editor.js']));
 });
+
+test('a failed load of the editor offers a reload, not a retry that cannot work, and the page loads the editor after it', async ({ page }) => {
+  await portal(page);
+  let asked = 0;
+  await page.route('**/document-editor.js*', (route) => (asked++ === 0 ? route.abort() : route.fallback()));
+  await page.goto(`/x/${NAME}/documents`);
+  await page.getByRole('region', { name: 'site' }).getByRole('button', { name: /The plan/ }).click();
+  // Said once, in the words of the failure, with the one thing that helps.
+  const alert = page.getByRole('alert');
+  await expect(alert).toContainText('The editor could not be loaded');
+  await expect(alert).not.toContainText('Could not load this');
+  await expect(alert.getByRole('button', { name: 'Reload the page' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+  // The browser keeps the failure: a second ask would not even go out.
+  expect(asked).toBe(1);
+  await alert.getByRole('button', { name: 'Reload the page' }).click();
+  await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
+  await page.getByRole('region', { name: 'site' }).getByRole('button', { name: /The plan/ }).click();
+  await expect(page.locator('.pd-editor h1')).toHaveText('The plan');
+});

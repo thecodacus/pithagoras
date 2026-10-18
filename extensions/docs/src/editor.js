@@ -63,14 +63,12 @@ const flashing = $prose(
 /**
  * The passages of comments, marked in the text: a decoration for each, which the editor moves with the text as it is
  * edited, so that a mark stays on its words while they are typed in. The page says where they are; a click is told
- * (`click`, with the id of the passage it was in, or null where it was in none), and so is a change of what is selected.
+ * (`click`, with the id of the passage it was in, or null where it was in none).
  */
 const threadKey = new PluginKey("pd-threads");
-/** The id the passage of a comment that is being written is marked by: no thread has it (the page's own constant, document-editor.js). */
-const PENDING = "pending";
 /** The narrowest of `ranges` that `pos` is in (its two ends count), or nothing. */
 const narrowest = (ranges, pos) => ranges.filter((r) => r.from <= pos && pos <= r.to).sort((a, b) => a.to - a.from - (b.to - b.from))[0];
-const threads = ({ click, select, texts }) =>
+const threads = ({ click, texts }) =>
   $prose(() => {
     /** A click on the text, told with the narrowest of the passages it is in; none where it is in no passage (what was open is closed). */
     const clicked = (view, pos) => {
@@ -106,7 +104,6 @@ const threads = ({ click, select, texts }) =>
         let timer = null;
         return {
           update(view, before) {
-            if (!before.selection.eq(view.state.selection)) select(!view.state.selection.empty);
             // What the passages read as is kept up with what is typed in them, after a moment.
             if (before.doc !== view.state.doc) {
               clearTimeout(timer);
@@ -371,11 +368,10 @@ function applyChanges(ctx, body, flash) {
  * An editor in `root`, holding `markdown`. `onChange` is told the Markdown
  * after each change the person makes. Resolves once it is drawn.
  *
- * The passages of comments: `onSelect(selected)` is told when something is
- * selected or not, `onThread(id)` when the text is clicked (the id of the marked passage it was in, or null), and
+ * The passages of comments: `onThread(id)` when the text is clicked (the id of the marked passage it was in, or null), and
  * `onPlaced(map)` which passages are marked, by thread, with what they read as.
  */
-export async function createEditor({ root, markdown = "", onChange, editable = true, onSelect, onThread, onPlaced, onFormat }) {
+export async function createEditor({ root, markdown = "", onChange, editable = true, onThread, onPlaced, onFormat }) {
   let kept = frame(markdown);
   // The threads last given (`mark`), to be put again where they are when the document is replaced.
   let marked = [];
@@ -394,7 +390,7 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
     .use(history)
     .use(listener)
     .use(flashing)
-    .use(threads({ click: (id) => onThread?.(id), select: (on) => onSelect?.(on), texts: () => report() }))
+    .use(threads({ click: (id) => onThread?.(id), texts: () => report() }))
     .use(formatting((format) => onFormat?.(format)))
     .create();
   editor.action((ctx) => ctx.get(editorViewCtx).setProps({ editable: () => editable }));
@@ -500,7 +496,7 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
       looked.textContent = id ? `.pd-editor .ProseMirror [data-pd-thread="${CSS.escape(id)}"] { background: rgb(var(--warn) / .4); }` : "";
     },
     /**
-     * The thread whose passage the caret is in (the narrowest), or null: the keyboard's way to a comment. Read from where the caret is
+     * The thread whose passage the caret is in (the narrowest; "pending" for the comment being written), or null: the keyboard's way to a comment. Read from where the caret is
      * drawn, in the marks of the text, which is what the person sees (the editor's own state follows the browser's a moment later).
      */
     threadAtCaret: () => {
@@ -510,7 +506,7 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
       if (node?.nodeType === 1) node = node.childNodes[selection.focusOffset] ?? node.lastChild ?? node;
       const hit = (node?.nodeType === 1 ? node : node?.parentElement)?.closest?.("[data-pd-thread]");
       const id = hit && root.contains(hit) ? hit.dataset.pdThread : null;
-      return id && id !== PENDING ? id : null;
+      return id || null;
     },
     /** Scrolls a passage into view, without moving the selection. */
     reveal: (id) =>

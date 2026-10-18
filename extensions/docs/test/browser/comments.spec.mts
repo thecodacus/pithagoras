@@ -1580,3 +1580,187 @@ test('with the comments on a document there is nothing under the sheet: the docu
   expect(await page.evaluate(() => { const row = document.querySelector('.pd-row')!; return [...document.querySelectorAll('.pd-desk > *')].filter((e) => e !== row).length; })).toBe(0);
 });
 
+
+test('a comment started far down a long document keeps the page where it is, and its card is on screen with the box focused', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const lines = Array.from({ length: 80 }, (_, i) => `P${String(i).padStart(3, '0')} is a line of the long text.`).join('\n\n');
+  const store = new Store();
+  store.texts.set(3, `# Long\n\n${lines}\n`);
+  await open(page, store, { ready: 'P079' });
+  const scrolled = () => page.evaluate(() => document.querySelector('.extension-page')!.scrollTop);
+  for (const line of ['P079 is a line of the long text.', 'P040 is a line of the long text.']) {
+    await select(page, line);
+    await expect(commentButton(page)).toBeEnabled();
+    const before = await scrolled();
+    expect(before).toBeGreaterThan(300);
+    await commentButton(page).click();
+    const box = popover(page).locator('.pd-compose').getByRole('textbox');
+    await expect(box).toBeFocused();
+    // The page stayed where it was, and the card is in view, not at the top of the sheet.
+    expect(Math.abs((await scrolled()) - before)).toBeLessThan(4);
+    const card = (await popover(page).boundingBox())!;
+    expect(card.y).toBeGreaterThanOrEqual(0);
+    expect(card.y + card.height).toBeLessThanOrEqual(900);
+    await box.press('Escape');
+    await expect(popover(page)).toHaveCount(0);
+  }
+  // The same through the shortcut, and for a comment opened again from the list.
+  await select(page, 'P040 is a line of the long text.');
+  await expect(commentButton(page)).toBeEnabled();
+  const before = await scrolled();
+  await page.keyboard.press('Control+Alt+m');
+  await expect(popover(page).locator('.pd-compose').getByRole('textbox')).toBeFocused();
+  expect(Math.abs((await scrolled()) - before)).toBeLessThan(4);
+});
+
+test('a comment kept with words in it is not thrown away by starting another one: the person is asked, Cancel opens the kept one, it is in the list and reached from the keyboard', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  const compose = popover(page).locator('.pd-compose');
+  await compose.getByRole('textbox').fill('Draft one, long and careful');
+  await compose.getByRole('textbox').press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+  // It is in the list, as a line that opens it.
+  await showList(page);
+  await expect(items(page)).toHaveCount(1);
+  await expect(items(page).first()).toContainText('New comment: Draft one, long and careful');
+  await expect(items(page).first()).toContainText('The build is green.');
+  await items(page).first().click();
+  await expect(compose.getByRole('textbox')).toHaveValue('Draft one, long and careful');
+  await expect(compose.getByRole('textbox')).toBeFocused();
+  await compose.getByRole('textbox').press('Escape');
+  await barButton(page).click();
+  // From the keyboard: the caret in its passage and the shortcut.
+  await editorOf(page).getByText('Ship it on').click();
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(() => page.evaluate(() => Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('[data-pd-thread]')))).toBe(true);
+  await page.keyboard.press('Control+Alt+m');
+  await expect(compose.getByRole('textbox')).toHaveValue('Draft one, long and careful');
+  await compose.getByRole('textbox').press('Escape');
+  // Another comment is started: asked first. Cancel leaves the kept one, which is open again; the new passage is not commented on.
+  await select(page, 'Sign-off is on Monday.');
+  await expect(commentButton(page)).toBeEnabled();
+  await commentButton(page).click();
+  await expect(dialog(page)).toContainText('Discard the comment you started?');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(compose.getByRole('textbox')).toHaveValue('Draft one, long and careful');
+  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('The build is green.');
+  // Again, and discarded: the new passage is the one being written.
+  await compose.getByRole('textbox').press('Escape');
+  await select(page, 'Sign-off is on Monday.');
+  await expect(commentButton(page)).toBeEnabled();
+  await commentButton(page).click();
+  await dialog(page).getByRole('button', { name: 'Discard' }).click();
+  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('Sign-off is on Monday.');
+  await expect(compose.getByRole('textbox')).toHaveValue('');
+  expect(store.made).toEqual([]);
+  // Nothing typed in the kept one: no question.
+  await compose.getByRole('textbox').press('Escape');
+  await select(page, 'The build is green.');
+  await expect(commentButton(page)).toBeEnabled();
+  await commentButton(page).click();
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('The build is green.');
+});
+
+test('a change to a sent comment is kept when the card is closed, comes back when it is opened, and the page asks before it is left', async ({ page }) => {
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Original words');
+  await open(page, store);
+  const asks = () => page.evaluate(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; });
+  let card = await openThread(page, green.id);
+  await card.getByRole('button', { name: 'Edit' }).click();
+  // Begun and not changed: nothing to keep or to warn of.
+  expect(await asks()).toBe(false);
+  await card.getByRole('textbox', { name: 'Edit the comment' }).fill('Carefully changed words');
+  expect(await asks()).toBe(true);
+  // Closed by a click in the text, opened again: the box is there with the words, not focused (nobody asked for it).
+  await closeCard(page);
+  expect(await asks()).toBe(true);
+  card = await openThread(page, green.id);
+  await expect(card.getByRole('textbox', { name: 'Edit the comment' })).toHaveValue('Carefully changed words');
+  await expect(card.getByRole('textbox', { name: 'Edit the comment' })).not.toBeFocused();
+  expect(store.requests).toEqual([]);
+  // Saved: it is the comment's, and nothing is kept.
+  await card.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(card.getByRole('textbox', { name: 'Edit the comment' })).toHaveCount(0);
+  await expect(card.locator('li').first()).toContainText('Carefully changed words');
+  expect(await asks()).toBe(false);
+  // A change given up (Cancel) is not kept either; one back to the comment's own words is none.
+  await card.getByRole('button', { name: 'Edit' }).click();
+  await card.getByRole('textbox', { name: 'Edit the comment' }).fill('Yet another');
+  await card.getByRole('button', { name: 'Cancel' }).click();
+  expect(await asks()).toBe(false);
+  await card.getByRole('button', { name: 'Edit' }).click();
+  await card.getByRole('textbox', { name: 'Edit the comment' }).fill('Typed');
+  await card.getByRole('textbox', { name: 'Edit the comment' }).fill('Carefully changed words');
+  expect(await asks()).toBe(false);
+  // A change to a comment that is gone is nothing to warn of.
+  await card.getByRole('textbox', { name: 'Edit the comment' }).fill('Will be lost');
+  expect(await asks()).toBe(true);
+  store.threads = [];
+  await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
+  await expect(popover(page)).toHaveCount(0);
+  await expect.poll(asks).toBe(false);
+});
+
+test('Ctrl+Alt+M is the comment shortcut and nothing else: AltGr+M (Ctrl+Alt on Windows) is left to the text, which types its character', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await editorOf(page).getByText('Ship it on').click();
+  const sent = (init: KeyboardEventInit) =>
+    page.evaluate((init) => {
+      const event = new KeyboardEvent('keydown', { code: 'KeyM', bubbles: true, cancelable: true, ...init });
+      document.querySelector('.pd-editor .ProseMirror')!.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, init);
+  // As Windows reports AltGr+M on a German layout, and with its state named: not taken.
+  expect(await sent({ key: 'µ', ctrlKey: true, altKey: true })).toBe(false);
+  expect(await sent({ key: 'µ', altKey: true, modifierAltGraph: true })).toBe(false);
+  expect(await sent({ key: 'm', ctrlKey: true, altKey: true, modifierAltGraph: true })).toBe(false);
+  // The shortcut is: Ctrl+Alt+M, and ⌘+Alt+M (which types µ on a Mac).
+  expect(await sent({ key: 'm', ctrlKey: true, altKey: true })).toBe(true);
+  expect(await sent({ key: 'µ', metaKey: true, altKey: true })).toBe(true);
+});
+
+test('Escape closes a card that a click opened, wherever the focus is in the text, and does nothing when no card is open', async ({ page }) => {
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  await openThread(page, green.id);
+  await expect(editorOf(page)).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+  await expect(editorOf(page)).toBeFocused();
+  // With none open, Escape is not taken: the page sees it unprevented.
+  const taken = () => page.evaluate(() => { const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }); document.querySelector('.pd-editor .ProseMirror')!.dispatchEvent(event); return event.defaultPrevented; });
+  expect(await taken()).toBe(false);
+});
+
+test('a card whose passage goes while a reply is typed in it stays open where it was, with the note, the words and the focus', async ({ page }) => {
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  const card = await openThread(page, green.id);
+  await card.getByRole('textbox', { name: 'Reply' }).fill('Half a reply');
+  const before = (await popover(page).boundingBox())!;
+  // The agent saves a revision without the sentence.
+  store.elsewhere(store.markdown.replace('The build is green.\n\n', ''));
+  await told(page, 'revision', { revision: store.revision, author: 'agent', at: '2026-10-02T10:00:00.000Z' });
+  await expect(editorOf(page)).not.toContainText('The build is green.');
+  await expect(editorOf(page).locator('.pd-thread')).toHaveCount(0);
+  await expect(card).toContainText('The passage this comment was on is no longer in the document.');
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  const after = (await popover(page).boundingBox())!;
+  expect(Math.abs(after.x - before.x)).toBeLessThan(2);
+  // It can still be sent, and closed with Escape; the thread is then in the list.
+  await card.getByRole('textbox', { name: 'Reply' }).press('Control+Enter');
+  await expect.poll(() => store.threads[0].comments.length).toBe(2);
+  await card.getByRole('textbox', { name: 'Reply' }).press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+  await showList(page);
+  await expect(cards(page)).toHaveCount(1);
+});

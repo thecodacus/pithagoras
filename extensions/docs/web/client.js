@@ -154,6 +154,10 @@ export default function (portal) {
     "Markdown (.md)": "Markdown (.md)",
     "PDF (print)": "PDF (Drucken)",
     "Full page": "Vollbild",
+    "Reload the page": "Seite neu laden",
+    "Discard the comment you started?": "Den begonnenen Kommentar verwerfen?",
+    "What you wrote in it is lost.": "Was du darin geschrieben hast, geht verloren.",
+    Discard: "Verwerfen",
     "Open on its own page": "Auf einer eigenen Seite öffnen",
     Formatting: "Formatierung",
     Undo: "Rückgängig",
@@ -369,36 +373,31 @@ export default function (portal) {
   // document is first opened, so that this module, which registers the page's entry in the sidebar, does not wait for it.
   let editorHalf = null;
   const loadEditorHalf = () =>
-    (editorHalf ??= import("./document-editor.js").then(
-      (module) => module.documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember }),
-      (e) => {
-        editorHalf = null;
-        throw e;
-      },
-    ));
+    (editorHalf ??= import("./document-editor.js").then((module) => module.documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember })));
 
   /** A document of a folder, for reading and writing: the editor's half is loaded first, with the page's loading state in its place. */
   function DocumentEditor(props) {
     const [Editor, setEditor] = useState(null);
     const [failed, setFailed] = useState(null);
-    const [attempt, setAttempt] = useState(0);
     useEffect(() => {
       let here = true;
-      setFailed(null);
       loadEditorHalf().then(
         // A component is held in the state by a function that returns it.
         (component) => here && setEditor(() => component),
         (e) => here && setFailed(e),
       );
       return () => void (here = false);
-    }, [attempt]);
+    }, []);
     if (Editor) return h(Editor, props);
     const back = h("button", { type: "button", className: "pd-back", onClick: props.onBack }, `← ${t("All documents")}`);
     return h(
       "article",
       { className: "pd-document" },
       back,
-      failed ? h(ui.LoadFailed, { error: t("The editor could not be loaded: {error}", { error: failed.message }), onRetry: () => setAttempt((n) => n + 1) }) : h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
+      // A module that failed to load fails again when it is asked for again (the browser keeps the failure): only a new page can load it.
+      failed
+        ? h(ui.ErrorBanner, null, h("span", null, t("The editor could not be loaded: {error}", { error: failed.message })), " ", h("button", { type: "button", className: ui.classes.ghost, onClick: () => window.location.reload() }, t("Reload the page")))
+        : h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
     );
   }
 

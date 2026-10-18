@@ -139,13 +139,9 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     );
   }
 
-  /** The editor's module, loaded once and when first wanted; one that failed to load is asked for again. */
+  /** The editor's module, loaded once and when first wanted. */
   let bundle = null;
-  const loadEditor = () =>
-    (bundle ??= import("./editor.js").catch((e) => {
-      bundle = null;
-      throw e;
-    }));
+  const loadEditor = () => (bundle ??= import("./editor.js"));
 
   const draftKey = (folder, id) => `${DRAFT}/${folder}/${id}`;
   function readDraft(folder, id) {
@@ -313,6 +309,12 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       window.addEventListener("beforeunload", warn);
       return () => window.removeEventListener("beforeunload", warn);
     }, []);
+    // A change begun to a comment that is no longer there is nothing to warn of.
+    useEffect(() => {
+      if (!threads.loaded) return;
+      const ids = new Set(threads.items.flatMap((x) => x.comments.map((c) => c.id)));
+      for (const key of [...drafts.current.keys()]) if (key.startsWith("edit-") && !ids.has(key.slice(5))) drafts.current.delete(key);
+    }, [threads]);
     const workspace = useRef(null);
     const sheet = useRef(null);
     // The whole of it, measured for whether the list of comments fits beside the sheet.
@@ -401,10 +403,15 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
           e.preventDefault();
           save();
-        } else if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === "KeyM") {
-          // As in a word processor: comment on what is selected, or open the comment at the cursor.
+        } else if (e.altKey && e.code === "KeyM" && (e.metaKey || (e.ctrlKey && /^m$/i.test(e.key))) && !e.getModifierState?.("AltGraph")) {
+          // As in a word processor: comment on what is selected, or open the comment at the cursor. Not AltGr+M (reported as Ctrl+Alt on
+          // Windows), which types a character on some layouts (µ on a German one): there it is a letter of the text, and is left to it.
           e.preventDefault();
           now.current.comment();
+        } else if (e.key === "Escape" && now.current.active !== null) {
+          // A card opened by a click has no focus in it: Escape in the text closes it too. With none open, Escape is left alone.
+          e.preventDefault();
+          now.current.close();
         }
       };
       window.addEventListener("pagehide", hide);
@@ -623,7 +630,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       const passage = editor.selection();
       if (!passage) return;
       if (passage.quote.length > MAX_QUOTE) return setCommentProblem(t("Select less text: a comment can be on at most {n} characters.", { n: MAX_QUOTE }));
-      // A comment that was being written on another passage is given up with this one.
+      // A comment that was being written on another passage, and kept (its card closed with words in it), is not thrown away unasked: it is
+      // given up with the person's say so, and else its card is opened again.
+      const kept = now.current.compose;
+      if (kept && !kept.threadId && drafts.current.get(`compose-${kept.key}`)?.trim()) {
+        const ok = await ui.confirm({ title: t("Discard the comment you started?"), message: t("What you wrote in it is lost."), confirmLabel: t("Discard"), danger: true });
+        if (!ok) {
+          setTakeFocus(PENDING);
+          setActive(PENDING);
+          return;
+        }
+      }
       for (const key of drafts.current.keys()) if (key.startsWith("compose-")) drafts.current.delete(key);
       setTakeFocus(null);
       setActive(PENDING);
@@ -744,6 +761,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const seen = async (thread) => taken(await post(`${thread.id}/seen`, {}));
     /** The thread chosen in the list: its passage is brought into view and its card opened there, with the focus in it. */
     const show = (thread) => {
+      // The comment being written is a card of its own, which is there only while there is one.
+      if (thread === PENDING && !now.current.compose) return;
       setTakeFocus(thread);
       setActive(thread);
       parts.current?.editor.reveal(thread);
@@ -784,7 +803,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         if (id) show(id);
       }
     };
-    now.current = { active, compose, clicked, comment };
+    now.current = { active, compose, clicked, comment, close: closeCard };
     // In the order of the text, those that have no place last.
     const ordered = [...threads.items].sort((a, b) => (a.start ?? Infinity) - (b.start ?? Infinity) || a.createdAt.localeCompare(b.createdAt));
 
@@ -801,7 +820,9 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // cannot be anchored: it is in the list). A thread just made has no mark until the editor has been asked for it.
     const written = compose && (active === PENDING || (compose.threadId !== null && active === compose.threadId));
     const madeOf = compose && threads.items.find((x) => x.id === compose.threadId);
-    const shown = !written && active ? threads.items.find((x) => x.id === active && x.status === "open" && !x.orphaned && (texts.has(x.id) || asked !== wanted)) : null;
+    // A thread whose passage is gone while its card is open (the agent rewrote the text) keeps the card, at the place it had, with the note that
+    // says so: what is typed in it is not taken from under the person's hands.
+    const shown = !written && active ? threads.items.find((x) => x.id === active) : null;
     const card =
       ready && !watching
         ? written
@@ -936,7 +957,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
                   const here = rectsOf(card.mark);
                   return here.length ? here : rectsOf(PENDING);
                 },
-                takeFocus: takeFocus !== null && takeFocus === active,
+                takeFocus: Boolean(card.compose) || (takeFocus !== null && takeFocus === active),
                 onClose: closeCard,
                 onActivate: show,
                 onWrite: write,
@@ -962,16 +983,14 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const { body, error, retry } = useAnswer(documentUrl(folder, id));
     const [edit, setEdit] = useState(null);
     const [failed, setFailed] = useState(null);
-    const [attempt, setAttempt] = useState(0);
     useEffect(() => {
       let here = true;
-      setFailed(null);
       loadEditor().then(
         (module) => here && setEdit(module),
         (e) => here && setFailed(e),
       );
       return () => void (here = false);
-    }, [attempt]);
+    }, []);
 
     const back = h("button", { type: "button", className: "pd-back", onClick: onBack }, `← ${t("All documents")}`);
     if (error) return h("article", { className: "pd-document" }, back, h(ui.LoadFailed, { error, onRetry: retry }));
@@ -981,7 +1000,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         "article",
         { className: "pd-document" },
         back,
-        h(ui.LoadFailed, { error: t("The editor could not be loaded: {error}", { error: failed.message }), onRetry: () => setAttempt((n) => n + 1) }),
+        // A module that failed to load fails again when it is asked for again (the browser keeps the failure): only a new page can load it.
+        h(ui.ErrorBanner, null, h("span", null, t("The editor could not be loaded: {error}", { error: failed.message })), " ", h("button", { type: "button", className: ui.classes.ghost, onClick: () => window.location.reload() }, t("Reload the page"))),
         h("p", { className: "pd-meta" }, `documents/${body.name} · ${t("Changed {date}", { date: when(body.modified) })} · `, h("a", { href: `${documentUrl(folder, id)}/download`, download: body.name }, t("Download"))),
         body.markdown.trim() ? h("div", { className: "pd-body" }, h(ui.Markdown, null, body.markdown)) : h(ui.Empty, null, t("This document is empty.")),
       );
