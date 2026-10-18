@@ -229,6 +229,8 @@ test('a name is never taken away from a thing that has no other: another file pu
   // Right before the old name is taken away the agent makes a folder of it, and puts a file of its own at the new name: the call that takes
   // the old name away fails, and the new name is not the file's any more, so it is not ours to take away.
   const own = () => {
+    // A name of the file is kept: its inode number is not given to the next file made (ext4 does), which would be the same file by its number.
+    linkSync(path.join(sub, 'doc.md'), path.join(sub, 'kept.md'));
     rmSync(path.join(sub, 'doc.md'));
     mkdirSync(path.join(sub, 'doc.md'));
     rmSync(path.join(sub, 'new.md'));
