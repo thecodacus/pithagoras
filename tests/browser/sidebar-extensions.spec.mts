@@ -225,6 +225,26 @@ test.describe('with extension pages', () => {
   });
 });
 
+test.describe('with a slow extension first in the list', () => {
+  // Viewer is listed first, and its module is not there for as long as the test says.
+  test.use({ installed: ['tests/fixtures/extensions/viewer', 'tests/fixtures/extensions/notes'] });
+
+  test('the pages of the others are in the group at once, and stay in the order of the list when the slow one comes', async ({ page }) => {
+    let arrive!: () => void;
+    const late = new Promise<void>((resolve) => { arrive = resolve; });
+    await page.route('**/api/extension-ui/test-viewer/client.js*', async (route) => { await late; await route.fallback(); });
+    await portal(page);
+    await page.goto('/sessions');
+    await expect(group(page).getByRole('button', { name: 'Notes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Viewer' })).toHaveCount(0);
+    arrive();
+    await expect.poll(() => page.evaluate(() => typeof (window as any).viewerListed)).toBe('function');
+    await listViewer(page);
+    // Viewer came into the page last, and is listed first all the same: that is the order the server lists them in.
+    await expect(group(page).getByRole('button')).toHaveText(['Viewer', 'Notes']);
+  });
+});
+
 test.describe('without extension pages', () => {
   test('there is no group in the sidebar and no button on the rail', async ({ page }) => {
     await portal(page);

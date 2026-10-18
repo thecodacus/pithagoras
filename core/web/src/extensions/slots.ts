@@ -36,14 +36,35 @@ function put(slot: SlotName, entries: readonly Registered<SlotName>[]) {
   for (const watcher of [...watchers]) watcher();
 }
 
+/**
+ * Where each extension stands among the installed ones, by the order the server lists them in. Entries
+ * that say no `order` are drawn in that order, not in the order their modules happened to arrive in: the
+ * modules are loaded at the same time, and a slow one must not move its entries behind a faster one's.
+ */
+let ranks = new Map<string, number>();
+const rankOf = (entry: Registered<SlotName>) => ranks.get(entry.extension) ?? Infinity;
+
 const ordered = (entries: Registered<SlotName>[]) =>
   entries
     .map((entry, at) => ({ entry, at }))
     .sort((a, b) => {
-      if (a.entry.order === undefined || b.entry.order === undefined) return a.entry.order === b.entry.order ? a.at - b.at : a.entry.order === undefined ? 1 : -1;
-      return a.entry.order - b.entry.order || a.at - b.at;
+      if (a.entry.order === undefined || b.entry.order === undefined) {
+        if (a.entry.order !== b.entry.order) return a.entry.order === undefined ? 1 : -1;
+      } else if (a.entry.order !== b.entry.order) {
+        return a.entry.order - b.entry.order;
+      }
+      return rankOf(a.entry) - rankOf(b.entry) || a.at - b.at;
     })
     .map(({ entry }) => entry);
+
+/** Tell the slots which extensions there are, first to last: what they hold is put in that order. */
+export function rankExtensions(names: readonly string[]): void {
+  ranks = new Map(names.map((name, at) => [name, at]));
+  for (const [slot, entries] of [...held]) {
+    const again = ordered([...entries]);
+    if (again.some((entry, at) => entry !== entries[at])) put(slot, again);
+  }
+}
 
 /**
  * An extension's part, drawn inside an element that says whose it is

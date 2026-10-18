@@ -10,11 +10,15 @@ import { installTooltips } from "./tooltips";
 import { watchKeyboard } from "./keyboard";
 import { installMotion } from "./motion";
 import { Intro } from "./components/Intro";
+import { askForExtensions } from "./extensions/loader";
 
 installTooltips();
 watchKeyboard();
 // Before the first draw: the intro and every other animation read what it says.
 installMotion();
+
+// The list of extensions goes out now, with the language file and the question of who is signed in, rather than after them.
+askForExtensions();
 
 // In the language chosen: for German that is a file to fetch first, which is soon there.
 void ready.then(() =>

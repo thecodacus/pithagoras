@@ -22,7 +22,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
   ];
   const model = { id: 'model-a', name: 'Model A', provider: 'llama-swap' };
   const state = {
-    installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false,
+    installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false, probeListed: true, openingHangs: false,
     /** What the Notes extension's server half would tell a page opening a chat now. */
     opening: [] as unknown[],
     /** Themes the Notes package names beside its module. */
@@ -43,7 +43,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
           // A second package with themes of its own, two of them, one under the id the first uses.
           ...(state.themed ? [{ name: 'more-themes', version: '1.0.0', themes: [{ id: 'dusk', name: 'Noon', light: { accent: '#0055aa' } }, { id: 'midnight', name: 'Midnight', dark: { canvas: '#05070d' } }] }] : []),
           ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}`, ...(state.notesThemes ? { themes: state.notesThemes } : {}) }] : []),
-          ...(probe ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
+          ...(probe && state.probeListed ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
           ...more.map((extension) => extension.listing),
         ],
       };
@@ -59,7 +59,7 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
     if (p === '/api/sessions') return { sessions, executor: 'host' };
     const told = /^\/api\/sessions\/(\w+)\/extension-ui$/.exec(p);
     // Asked by a browser half that came into the page after the chat's stream had opened.
-    if (told && method === 'GET') return { pushes: state.opening };
+    if (told && method === 'GET') return state.openingHangs ? HANG : { pushes: state.opening };
     if (told && method === 'POST') { said.push({ chat: told[1], ...json() }); return { ok: true }; }
     if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [model] }, named: { provider: null, model: null } };
@@ -263,6 +263,18 @@ test('an extension removed, or changed, is taken out of the page and loaded agai
   await expect(sidebar(page).getByRole('button', { name: 'Notes' })).toHaveCount(1);
 });
 
+test("extensions come into the page at the same time: a slow one, or one told where its server half stands, holds none of the others back", async ({ page }) => {
+  const { changed, state } = await portal(page, web('client.js'), PROBE);
+  state.installed = false;
+  state.probeListed = false;
+  await page.goto('/s/a');
+  await expect(sidebar(page).getByRole('button', { name: 'Sessions' })).toBeVisible();
+  // Notes is first in the list, and what it asks the server when it comes into the open chat is never answered.
+  await changed({ installed: true, probeListed: true, openingHangs: true });
+  await expect(header(page).getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
+  await expect(page.getByTestId('overlay')).toContainText('Over First chat');
+});
+
 test('an extension that fails to load, or to draw, fails alone', async ({ page }) => {
   const broken = `export default function (portal) {
     portal.slots.register("nav.page", { id: "fine", title: "Registered first", component: () => null });
@@ -428,6 +440,8 @@ test("an extension's own page in Settings, and why its server half is not runnin
   await row.getByRole('button', { name: /Configure/ }).click();
   await expect(dialog.getByTestId('probe-settings')).toHaveText("Probe's own settings");
   await page.goto('/settings/extensions');
+  // The page has asked for the list by now, so that what changes next is a change to what it has.
+  await expect(row).toBeVisible();
   await changed({ probeServerError: 'cannot start here' });
   await expect(dialog.getByRole('listitem').filter({ hasText: 'probe' }).getByRole('alert')).toHaveText('Its server half could not be started: cannot start here');
 });
