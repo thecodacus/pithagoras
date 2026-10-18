@@ -687,3 +687,22 @@ test('a document open in the panel fills it to its bottom: no strip of the panel
   const end = await at();
   expect(Math.abs(Math.round(end.panel - end.doc))).toBe(0);
 });
+
+test('the extension\'s module registers its page without the editor\'s half, which is loaded when a document is first opened', async ({ page }) => {
+  const modules: string[] = [];
+  page.on('request', (request) => {
+    const at = new URL(request.url()).pathname;
+    if (at.startsWith(address(''))) modules.push(at.slice(address('').length));
+  });
+  await portal(page);
+  await page.goto(`/x/${NAME}/documents`);
+  await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
+  await expect(sidebar(page).getByRole('button', { name: 'Documents' })).toHaveAttribute('aria-current', 'page');
+  // The page is there, with its list, and nothing of the editor was asked for: not its half of the page, not the comments, not the editor.
+  expect(modules).toContain('client.js');
+  expect(modules.filter((name) => /document-editor|comments|saver|anchor|live|editor\.js/.test(name))).toEqual([]);
+  // A document opened loads it, behind the page's loading state.
+  await page.getByRole('region', { name: 'site' }).getByRole('button', { name: /The plan/ }).click();
+  await expect(page.locator('.pd-editor h1')).toHaveText('The plan');
+  expect(modules).toEqual(expect.arrayContaining(['document-editor.js', 'editor.js']));
+});
