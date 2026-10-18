@@ -255,10 +255,32 @@ const namesDescriptors = () => process.platform === "linux" && HAS_FD_PATHS;
 
 const OPEN_FOLDER = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 
-/** A folder opened without following a link in its last place. */
-function openFolder(where: string): number {
+/** Node does not export it. A descriptor that only names a folder (no read, no sync), for which the right to search the folders above it is enough. */
+const O_PATH = 0o10000000;
+
+/**
+ * How a folder is opened to be walked through: with O_PATH where the kernel has it, so that a folder the portal may
+ * search but not read (mode 0311, say) can be walked through as it could before. What tells that the flag is the one it
+ * is taken for is that such a descriptor cannot be synced (EBADF).
+ */
+const WALK_FOLDER = (() => {
+  if (process.platform !== "linux") return OPEN_FOLDER;
+  let fd: number | undefined;
   try {
-    return openSync(where, OPEN_FOLDER);
+    fd = openSync("/", O_PATH | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    fsyncSync(fd);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EBADF") return O_PATH | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  return OPEN_FOLDER;
+})();
+
+/** A folder opened without following a link in its last place. */
+function openFolder(where: string, flags = OPEN_FOLDER): number {
+  try {
+    return openSync(where, flags);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") throw new FileError("missing", "There is no such file or folder");
@@ -276,6 +298,7 @@ function openFolder(where: string): number {
  * it is named through `at`, so that it happens in this folder.
  */
 interface Held {
+  /** The folder, for `fstat` and for naming it: it may be an O_PATH descriptor, which cannot be read, synced or given away. */
   readonly fd: number;
   /** The folder itself, as a path for the calls that take one. */
   readonly here: string;
@@ -327,13 +350,13 @@ function holdFolder(base: string, dir: string): Held {
     };
   }
   const named = (descriptor: number) => `/proc/self/fd/${descriptor}`;
-  let fd = openFolder(base);
+  let fd = openFolder(base, WALK_FOLDER);
   try {
     // The part of the path above `base` is not walked, so it is checked on what was opened: a folder up there swapped for a
     // link since `base` was made canonical leads this open somewhere else, and the descriptor says where.
     if (realpathSync.native(named(fd)) !== path.resolve(base)) throw new FileError("invalid", "That path leads outside the folder");
     for (const part of below.split(path.sep).filter(Boolean)) {
-      const next = openFolder(`${named(fd)}/${part}`);
+      const next = openFolder(`${named(fd)}/${part}`, WALK_FOLDER);
       closeSync(fd);
       fd = next;
     }
@@ -495,10 +518,17 @@ export function readBytes(
 
 /** The rename of a save is only lasting once the folder that holds it is synced. */
 function syncFolder(held: Held): void {
+  let fd: number | undefined;
   try {
-    fsyncSync(held.fd);
+    // The held descriptor may be an O_PATH one, which cannot be synced: the folder is opened for reading again through it
+    // (the folder it names, not a lookup of its name).
+    fd = openSync(held.here, constants.O_RDONLY | constants.O_DIRECTORY);
+    fsyncSync(fd);
   } catch {
-    // Some file systems cannot sync a folder; the rename stands all the same.
+    // Some file systems cannot sync a folder, and a folder the portal may search but not read cannot be opened to be
+    // synced; the rename stands all the same.
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -966,11 +996,35 @@ export function holdForReading(base: string, rel: unknown, options: { direct?: b
 }
 
 /**
+ * Whether `fd`, a folder opened by the name just made, is plainly the one that was made: empty, on the parent's file
+ * system, and the portal's own where the portal is not root.
+ *
+ * Node cannot make a folder and open it in one call, so the name is looked up twice, and in between an agent that writes in
+ * the parent can remove the new (empty) folder and move another one of the parent onto the name. What the portal does next
+ * (give it away, give it a mode) must not reach that one. It is told by the folder's own descriptor: the new folder is made
+ * closed to everyone but the portal, so nothing can have been put in it, while a folder moved there holds what it held
+ * and is turned away. An empty one that is moved there is relabelled, which gives the agent nothing: it could have removed
+ * it and made one of its own. A folder of another file system (a mount) is turned away too, for its root is not the agent's
+ * to remove.
+ */
+function isFresh(fd: number, where: string, parent: { dev: number }): boolean {
+  try {
+    const st = fstatSync(fd);
+    if (st.dev !== parent.dev) return false;
+    if (process.geteuid && st.uid !== process.geteuid()) return false;
+    return readdirSync(where).length === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Makes a folder inside `dir`. Like a new file, it never takes the place of
  * something already there. It has the mode, owner and group of the folder it
  * is made in, so that the agent can write in it as it can there (see madeIn).
  * It is made in the folder as it is held (see holdFolder), not in the place
- * its path leads to by the time of the call. Returns its path, from the chat's folder.
+ * its path leads to by the time of the call, and given away only once it is
+ * known to be the one just made (see isFresh). Returns its path, from the chat's folder.
  */
 export function makeFolder(base: string, dirRel: unknown, name: unknown): string {
   const clean = checkName(name);
@@ -984,7 +1038,8 @@ export function makeFolder(base: string, dirRel: unknown, name: unknown): string
       // The mode and owner are the held folder's own, from its descriptor.
       const folder = fstatSync(held.fd);
       const mode = folder.mode & 0o7777;
-      mkdirSync(target, { mode });
+      // Closed to everyone but the portal until it has its own mode, whatever that is.
+      mkdirSync(target, { mode: 0o700 });
       // Given its mode and owner through the folder that is opened, never by its path: a link put where it was, by an agent
       // that writes in the folder, would have what it leads to changed, and the portal may be root.
       let fd: number | undefined;
@@ -995,6 +1050,8 @@ export function makeFolder(base: string, dirRel: unknown, name: unknown): string
         throw e;
       }
       try {
+        // Not the folder just made: something else took the name since, and is left as it is.
+        if (!isFresh(fd, held.pinned ? `/proc/self/fd/${fd}` : target, folder)) throw taken();
         handOver(fd, { uid: folder.uid, gid: folder.gid }, mode, held);
       } finally {
         closeSync(fd);
