@@ -107,6 +107,20 @@ export interface GitHandle {
   gh(args: string[], options?: GitStepOptions): Promise<GitRan>;
 }
 
+/** One page that asked to listen to a topic of the package's, as `onListen` is handed it. */
+export interface PageListener {
+  /** To this page alone: where things stand, the first thing it hears. */
+  send(data: unknown): void;
+}
+
+/**
+ * Whether a page may listen to a topic, and what to do when it stops. Return `false` (or throw) to refuse; return a
+ * function to be called once when the page stops listening (it left, its tab closed, its login ended, or this half
+ * stopped), to undo what was started for it. May be async: a page waits for the answer, and one that takes over ten
+ * seconds is refused.
+ */
+export type ListenHandler = (topic: string, page: PageListener) => void | false | (() => void) | Promise<void | false | (() => void)>;
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -151,6 +165,24 @@ export interface ServerPortal {
      */
     endWithLogin(end: () => void): () => void;
   };
+  /**
+   * To the pages that listen to `topic` of the package's (`portal.server.on(topic, …)` in the browser half), on
+   * whichever page of the portal: one with no chat open, as well as one that has. A topic is a name of at most 200
+   * characters, the package's own: another package's page does not hear it, and it cannot send under another's name.
+   * `data` must be JSON. Nothing is stored: a page that was not listening misses it, so tell where things stand in
+   * `onListen` as a page begins to listen. Pages open on a chat are told with `chats.send`.
+   */
+  push(topic: string, data: unknown): void;
+  /**
+   * The rule for who may listen to a topic of the package's, and what a page that does is told first. Called for each
+   * page that asks, with the topic as it wrote it: check that it names something the package has (a folder a chat works in,
+   * a document that is there) and refuse otherwise, so that a page cannot listen to what it could not otherwise see; and
+   * tell `page` where things stand, which it hears before anything pushed after. Whatever is pushed while the handler is
+   * still working reaches the page after it has answered, and not at all if it refuses, so tell the state, not an event
+   * that may repeat it. The portal has one login, so every page that is signed in is the same person: with no handler,
+   * any page may listen to any topic of the package's.
+   */
+  onListen(handler: ListenHandler): void;
   chats: {
     get(id: string): Chat | undefined;
     list(): Chat[];

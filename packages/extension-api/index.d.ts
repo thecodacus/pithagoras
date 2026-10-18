@@ -540,6 +540,13 @@ export interface Portal {
   server: {
     /** What the package's server half says to the pages open on a chat, whichever chat. */
     on(handler: (chatId: string, data: unknown) => void): () => void;
+    /**
+     * What the package's server half pushes to `topic` (`portal.push(topic, data)`), on any page: one with no chat
+     * open as well. The server half decides who may listen (`onListen`) and tells the page where things stand as it
+     * begins to, so a handler hears that first, then each change. A page that loses its connection asks again by
+     * itself, and is told where things stand again; a topic the server refuses is not heard. Returns the unsubscribe.
+     */
+    on(topic: string, handler: (data: unknown) => void): () => void;
   };
   theme: {
     /** A theme of the package's, chosen in Settings like any other. */

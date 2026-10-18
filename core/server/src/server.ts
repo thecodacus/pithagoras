@@ -1,5 +1,6 @@
 import { bindHost, loginThrottle, portalSecurityHeaders, tlsFiles } from "./http-security.js";
 import { eventsRouter } from "./api/events.js";
+import { pushesRouter } from "./api/pushes.js";
 import { serveWeb } from "./web-static.js";
 import { clampLevel } from "./pi/model-runtime.js";
 import { ASK_QUESTION_TOOL } from "./pi/ask-question.js";
@@ -1789,6 +1790,7 @@ mountBrowserProxy(app);
 // --- event stream ---
 
 app.use("/api", eventsRouter());
+app.use("/api", pushesRouter());
 
 /**
  * Anything under /api that no route took. Answered in JSON, like every other

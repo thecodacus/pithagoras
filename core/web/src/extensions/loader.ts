@@ -10,6 +10,7 @@ import { hasCommand, registerCommand, runCommand } from "./commands";
 import { ui } from "./kit";
 import { panels } from "./panels";
 import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from "./server-feed";
+import { forgetPushes, listenTopic } from "./push";
 import { rankExtensions } from "./rank";
 import { register } from "./slots";
 import { addStrings, forgetStrings, translate, translateCount, translateInContext, translateWithParts } from "./strings";
@@ -166,7 +167,10 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       panels,
       chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)) },
       shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },
-      server: { on: (handler) => kept(onServerPush(ext.name, handler)) },
+      server: {
+        on: ((first: unknown, handler?: (data: unknown) => void) =>
+          kept(typeof first === "function" ? onServerPush(ext.name, first as Parameters<typeof onServerPush>[1]) : listenTopic(ext.name, String(first), handler!))) as Portal["server"]["on"],
+      },
       theme: {
         register: (theme) => kept(registerTheme(ext.name, theme)),
         list: () => themes().map((theme) => ({ id: theme.id, name: theme.name, extension: theme.extension })),
@@ -177,6 +181,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
     };
     kept(() => {
       extensionGone(ext.name);
+      forgetPushes(ext.name);
       forgetStrings(ext.name);
     });
     const left = await module.default(portal);

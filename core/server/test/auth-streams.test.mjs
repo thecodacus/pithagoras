@@ -34,7 +34,11 @@ test("changing the password ends every event and terminal stream that was open u
       copiedEvents: await openStream(p.base, mine, `/api/sessions/${chat}/events`),
       theirEvents: await openStream(p.base, other, `/api/sessions/${chat}/events`),
       theirTerminal: await openStream(p.base, other, `${TERMINAL}/${shell}/stream`),
+      // What the extensions' server halves tell the pages that listen to their topics, on a stream that is not a chat's.
+      pushes: await openStream(p.base, mine, "/api/pushes"),
     };
+    assert.equal((await fetch(`${p.base}/api/pushes`)).status, 401, "the pushes are behind the login");
+    assert.equal((await post(p.base, "/api/pushes/any/listen", { extension: "pithagoras-terminal", topic: "x" })).status, 401);
     const changed = await post(p.base, "/api/auth/password", { current: PASSWORD, password: "the brand new one" }, mine);
     assert.equal(changed.status, 200);
     for (const [name, stream] of Object.entries(streams)) await ends(stream, name);

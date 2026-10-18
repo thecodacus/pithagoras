@@ -18,6 +18,7 @@ import { baseDir } from "./workspace-files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
+import { addGate, dropExtension, pushToPages, validTopic } from "./extension-push.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -184,6 +185,14 @@ function portalFor(ext: Running): ServerPortal {
       },
     },
     router: ext.router,
+    push: (topic, data) => {
+      if (!validTopic(topic)) throw new TypeError("A topic is a name of at most 200 characters, with no control characters in it");
+      pushToPages(name, topic, data);
+    },
+    onListen: (handler) => {
+      if (typeof handler !== "function") throw new TypeError("onListen takes a function: (topic, page) => whether the page may listen");
+      addGate(name, handler);
+    },
     http: {
       json: express.json,
       raw: express.raw,
@@ -251,6 +260,8 @@ async function stop(ext: Running): Promise<void> {
   running.delete(ext.half.name);
   for (const fn of ext.stops.reverse()) await guarded(ext.half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
   ext.life.removeAllListeners();
+  // After its own stop: what it ended for the pages that listened to it is done by then, and they ask again.
+  dropExtension(ext.half.name);
 }
 
 async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<void> {
@@ -271,6 +282,7 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
     say(half.name, "server half started");
   } catch (e) {
     for (const fn of ext.stops.reverse()) await guarded(half.name, "stopping", () => within(STOP_MS, Promise.resolve().then(fn), "stopping"));
+    dropExtension(half.name);
     failures.set(half.name, (e as Error)?.message || String(e));
     console.error(`[extension ${half.name}] its server half could not be started:`, e);
   }
