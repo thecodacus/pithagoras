@@ -31,7 +31,6 @@ async function portal(folders: Record<string, string>, options: { onStep?: (step
   let armed: string | null = null;
   const mock = await mockPortal({ extension: 'pithagoras-docs', chats: folders, dataDir: options.data ?? DATA, sandbox: options.sandbox ?? false });
   await mock.start(docsServer, {
-    dependencies: async () => true,
     gitTimeoutMs: options.gitTimeoutMs,
     faults: {
       after(step: string) {
@@ -411,7 +410,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       const data = path.join(root, 'data');
       mkdirSync(data, { mode: 0o700 });
       const mock = await mockPortal({ extension: 'pithagoras-docs', chats: { a: folder }, dataDir: data, sandbox: true });
-      const stop = await mock.start(docsServer, { dependencies: async () => true });
+      const stop = await mock.start(docsServer, {  });
       const web = await mock.serve();
       const call = async (method, url, body) => (await web.call(method, url, body)).body;
       const [listed] = (await call('GET', '/folders')).folders;

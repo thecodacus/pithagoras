@@ -35,7 +35,7 @@ async function until(done: () => boolean, what: string, more: () => string = () 
 async function portal(folder: string | Record<string, string>, { pollMs = 40 }: { pollMs?: number } = {}) {
   const chats: Record<string, string> = typeof folder === 'string' ? { a: folder } : { ...folder };
   const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats, dataDir: DATA });
-  const stopHalf = await mock.start(docsServer, { dependencies: async () => true, pollMs });
+  const stopHalf = await mock.start(docsServer, { pollMs });
   const web = await mock.serve();
   const { call } = web;
   const pages: MockPage[] = [];

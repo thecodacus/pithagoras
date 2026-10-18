@@ -33,7 +33,7 @@ async function portal(chats: Record<string, string>, options: Options = {}) {
     dataDir: DATA,
     followUp: options.tell ? async (chat) => ((await options.tell!(chat)) ? undefined : false) : undefined,
   });
-  await mock.start(docsServer, { dependencies: async () => true, faults: options.faults, pollMs: 0, wakeMs: options.wakeMs ?? 25, wakeLimitMs: options.wakeLimitMs });
+  await mock.start(docsServer, { faults: options.faults, pollMs: 0, wakeMs: options.wakeMs ?? 25, wakeLimitMs: options.wakeLimitMs });
   const { call } = await mock.serve();
   /** A tool of a chat's agent, called as pi calls it: its text, or the error it threw. */
   const agent = (chat: string) => async (name: string, params: unknown) => {

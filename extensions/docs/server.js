@@ -70,7 +70,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import path from "node:path";
-import { ensureDependencies } from "./deps.js";
 import { explained } from "./errors.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
 import { SECRET, SECRET_WARNING } from "./secret.js";
@@ -384,10 +383,9 @@ const WAKE_MS = 3_000;
  */
 const WAKE_LIMIT_MS = 120_000;
 
-export default function (portal, { dependencies = ensureDependencies, faults, gitTimeoutMs, pollMs = POLL_MS, wakeMs = WAKE_MS, wakeLimitMs = WAKE_LIMIT_MS } = {}) {
-  // What it needs to run comes with the image. A folder without it (a checkout run as it is) has it installed now,
-  // in the background: the portal does not wait for an install to start the rest. The store waits for it.
-  const ready = dependencies((line) => portal.log(line));
+export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeMs = WAKE_MS, wakeLimitMs = WAKE_LIMIT_MS } = {}) {
+  // What it needs to run is in its folder before it is started: the image installs it when it is built, and the portal installs
+  // it from the lock file for a folder that came without (a checkout run as it is).
   let Database;
 
   /** The folders chats work in now, by id, with the chats that work in each. */
@@ -522,8 +520,12 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document");
     const opening = (async () => {
       if (!Database) {
-        if (!(await ready)) throw new DocError(503, "The documents store's packages are not installed yet");
-        Database = (await import("better-sqlite3")).default;
+        try {
+          Database = (await import("better-sqlite3")).default;
+        } catch (e) {
+          portal.log(`The documents store's database could not be loaded: ${e?.message ?? e}`);
+          throw new DocError(503, "The documents store's packages are not installed");
+        }
       }
       const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: portal.files, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
       return Store.open(folder, { dir, files: portal.files, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });

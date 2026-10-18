@@ -18,7 +18,7 @@ const DATA = scratch('docs-comments-data-');
 /** The server half for chats that work in these folders. */
 async function portal(folders: Record<string, string>, data = DATA) {
   const mock = await mockPortal({ extension: 'pithagoras-docs', chats: folders, dataDir: data });
-  await mock.start(docsServer, { dependencies: async () => true, pollMs: 40 });
+  await mock.start(docsServer, { pollMs: 40 });
   const { call } = await mock.serve();
   /** A page's listening, message by message. */
   const listen = (url: string) => follow(mock.page(), url);

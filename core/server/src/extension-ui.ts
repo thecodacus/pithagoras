@@ -72,6 +72,11 @@ export interface ServerHalf {
   requires?: Record<string, string>;
   /** Those it uses when they are there, and starts without (`pithagoras.optional`). */
   optional?: Record<string, string>;
+  /**
+   * The folder whose packages are installed from its lock file before the half is started, when they are not there: for a package
+   * pi installed by its folder, which pi leaves without them (see extension-install.ts).
+   */
+  install?: string;
 }
 
 /** What a package says it builds on: extensions by name, each with a version range. What is not that is not read. */

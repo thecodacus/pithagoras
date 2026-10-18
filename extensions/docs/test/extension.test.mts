@@ -2,10 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
-import { ensureDependencies, missingDependencies } from '../deps.js';
 import { SECRET_WARNING } from '../secret.js';
 import docsServer from '../server.js';
 import { portalFiles, scratch } from '@pithagoras/extension-api/testing';
@@ -38,9 +37,6 @@ function server(folders: Record<string, string>, logged: string[] = []) {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
     },
-  }, {
-    // What it needs to run is there: the test does not install anything.
-    dependencies: (log: (line: string) => void) => (log('dependencies checked'), Promise.resolve(true)),
   });
   const call = async (method: string, route: string, params: Record<string, string> = {}, body?: unknown) => {
     const answer: { status: number; body: any; headers: Record<string, string> } = { status: 200, body: undefined, headers: {} };
@@ -88,7 +84,7 @@ test('the Documents page is told every folder chats work in that has documents, 
   const empty = folderWith('docs-empty-', { 'notes.md': '# Not a document' });
   const logged: string[] = [];
   const docs = server({ a: site, b: site, c: empty }, logged);
-  assert.deepEqual(logged, ['dependencies checked'], 'it sees to its dependencies as it starts, in the portal\'s log');
+  assert.deepEqual(logged, [], 'it starts without a word: what it runs on is there before it is started');
   const [only, ...more] = await docs.folders();
   assert.deepEqual(more, [], 'a folder without documents is left out');
   assert.equal(only.path, realpathSync(site));
@@ -225,7 +221,7 @@ test('a pipe named like a document is no document, and asking for one does not h
       sandbox: { on: () => false },
       dataDir: () => process.env.DATA,
       chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
-    }, { dependencies: async () => true });
+    }, {  });
     const ask = async (route, params) => { const answer = {}; const res = { status: (code) => ((answer.status = code), res), json: (body) => (answer.body = body) }; await routes.get('GET ' + route)({ params, query: {} }, res); return answer; };
     const [folder] = (await ask('/folders', {})).body.folders;
     const other = folder.documents.find((d) => d.name === 'other.md');
@@ -444,105 +440,4 @@ test('every text the Documents page shows has a German one, and no German one is
   assert.equal(said.size, german!.size, 'every German text is written out');
   // The warning the server half sends with a save is said by the page in the person's language, and is the same words.
   assert.ok(shown.has(SECRET_WARNING), 'the page says the secret warning as the server half does');
-});
-
-/** `version` of `name` in the package folder `dir`, as npm leaves it there. */
-function installed(dir: string, where: string, version: string) {
-  mkdirSync(path.join(dir, where), { recursive: true });
-  writeFileSync(path.join(dir, where, 'package.json'), JSON.stringify({ version }));
-}
-
-/**
- * A package folder that depends on `a` (which brings `d`) and `b` to run and on `c` to be built, as its lock
- * file says, with an npm that does what it is told to.
- */
-function packageNeeding(npmSays: string) {
-  const dir = scratch('docs-deps-');
-  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'needs', dependencies: { a: '^1.0.0', b: '^1.0.0' }, devDependencies: { c: '1.0.0' } }));
-  writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify({
-    name: 'needs', lockfileVersion: 3, packages: {
-      '': { name: 'needs' },
-      'node_modules/a': { version: '1.2.0' },
-      'node_modules/a/node_modules/d': { version: '2.0.0' },
-      'node_modules/b': { version: '1.0.0' },
-      'node_modules/c': { version: '1.0.0', dev: true },
-      // Only where it fits: left out by npm elsewhere.
-      'node_modules/e': { version: '1.0.0', optional: true },
-    },
-  }));
-  const npm = path.join(dir, 'fake-npm');
-  writeFileSync(npm, `#!/bin/sh\necho "$@" >> "${dir}/asked"\n${npmSays}\n`);
-  chmodSync(npm, 0o755);
-  return { dir, npm, asked: () => readFileSync(path.join(dir, 'asked'), 'utf8').trim().split('\n') };
-}
-
-/** What a fake npm does for `npm ci --omit=dev`: what the lock names to run, at its versions. */
-const INSTALLS = [['node_modules/a', '1.2.0'], ['node_modules/a/node_modules/d', '2.0.0'], ['node_modules/b', '1.0.0']]
-  .map(([where, version]) => `mkdir -p ${where} && echo '{"version":"${version}"}' > ${where}/package.json`).join(' && ');
-
-/** The events of a process that has ended can come after the promise for it: what they log is in by then. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-
-test('the Documents extension installs what it needs to run when it is missing, once, and says so in the log', async () => {
-  const { dir, npm, asked } = packageNeeding(INSTALLS);
-  installed(dir, 'node_modules/a', '1.2.0');
-  installed(dir, 'node_modules/a/node_modules/d', '2.0.0');
-  assert.deepEqual(missingDependencies(dir), ['b'], 'what it needs to be built is not asked for');
-  assert.deepEqual(missingDependencies(dir, { dev: true }), ['b', 'c'], 'unless it is to be built');
-  const log: string[] = [];
-  // Asked twice while it installs: one install.
-  const [first, second] = await Promise.all([ensureDependencies((line: string) => log.push(line), { dir, npm }), ensureDependencies((line: string) => log.push(line), { dir, npm })]);
-  assert.equal(first, true);
-  assert.equal(second, true);
-  assert.deepEqual(asked(), ['ci --omit=dev --ignore-scripts --no-audit --no-fund']);
-  assert.deepEqual(missingDependencies(dir), []);
-  await settle();
-  assert.equal(log.length, 2);
-  assert.match(log[0], /^Installing its dependencies \(b\) with npm$/);
-  assert.match(log[1], /^Installed its dependencies in \d+ s$/);
-  // Everything there: npm is not asked again.
-  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), true);
-  assert.equal(asked().length, 1);
-  assert.equal(log.length, 2);
-});
-
-test('a dependency at another version than the lock names is installed again, one it brings along as well', async () => {
-  const { dir, npm, asked } = packageNeeding(INSTALLS);
-  // What an older lock installed: a later commit moved `a` on, and `a` brings another `d`.
-  installed(dir, 'node_modules/a', '1.0.0');
-  installed(dir, 'node_modules/a/node_modules/d', '1.0.0');
-  installed(dir, 'node_modules/b', '1.0.0');
-  assert.deepEqual(missingDependencies(dir), ['a', 'd']);
-  const log: string[] = [];
-  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), true);
-  assert.equal(asked().length, 1);
-  assert.match(log[0], /^Installing its dependencies \(a, d\) with npm$/);
-  assert.deepEqual(missingDependencies(dir), []);
-  // An optional package that is there is checked like the rest.
-  installed(dir, 'node_modules/e', '0.1.0');
-  assert.deepEqual(missingDependencies(dir), ['e']);
-});
-
-test('without a lock file, what the package names is what is checked', () => {
-  const { dir } = packageNeeding('');
-  rmSync(path.join(dir, 'package-lock.json'));
-  installed(dir, 'node_modules/a', '0.0.1');
-  assert.deepEqual(missingDependencies(dir), ['b']);
-  assert.deepEqual(missingDependencies(dir, { dev: true }), ['b', 'c']);
-});
-
-test('an install of the Documents extension\'s dependencies that fails is said in the log once, and tried again on the next start', async () => {
-  const { dir, npm, asked } = packageNeeding('echo "npm error network unreachable" >&2; exit 1');
-  const log: string[] = [];
-  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), false);
-  await settle();
-  assert.deepEqual(log.slice(1), ['Could not install its dependencies: npm exited with 1: npm error network unreachable']);
-  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm }), false);
-  assert.equal(asked().length, 2);
-  // An npm that cannot be started at all is said as well, once: not again as the end of a process that never ran.
-  log.length = 0;
-  assert.equal(await ensureDependencies((line: string) => log.push(line), { dir, npm: path.join(dir, 'no-such-npm') }), false);
-  await settle();
-  assert.equal(log.length, 2, log.join('\n'));
-  assert.match(log[1], /^Could not install its dependencies: spawn .*no-such-npm ENOENT$/);
 });

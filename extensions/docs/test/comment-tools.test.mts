@@ -18,7 +18,7 @@ type Result = { ok: true; text: string; details: any } | { ok: false; error: str
 
 async function portal(chats: Record<string, string>, faults?: { after(step: string): void }) {
   const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats, dataDir: DATA });
-  await mock.start(docsServer, { dependencies: async () => true, pollMs: 0, faults });
+  await mock.start(docsServer, { pollMs: 0, faults });
   const { call } = await mock.serve();
   const agent = (chat: string) => async (name: string, params: unknown): Promise<Result> => {
     const result = await mock.pi(chat).call(name, params);

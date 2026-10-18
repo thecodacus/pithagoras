@@ -10,7 +10,8 @@ import { sessions } from "../session-manager.js";
 import { clientHalf, packageKinds, staticImports, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
 import { sendCompressed } from "../compressed-file.js";
 import { bundledPath } from "../bundled.js";
-import { SUBAGENT_PACKAGE } from "../features.js";
+import { SUBAGENT_PACKAGE, isLocalSource } from "../features.js";
+import { hasLock } from "../extension-install.js";
 import { isServing, serverFailure, serversSettled, syncServerHalves } from "../extension-host.js";
 
 const run = promisify(execFile);
@@ -298,7 +299,8 @@ async function halves(): Promise<{ clients: ClientHalf[]; servers: ServerHalf[];
     if (!name || taken.has(name)) continue;
     taken.add(name);
     if (client) clients.push(client);
-    if (server) servers.push(server);
+    // A package pi installed by its folder has not the packages it runs on: they are installed from its lock file, if it has one.
+    if (server) servers.push(isLocalSource(pkg.spec) && hasLock(pkg.path) ? { ...server, install: pkg.path } : server);
     if (themes) themed.push(themes);
   }
   return { clients, servers, themed };

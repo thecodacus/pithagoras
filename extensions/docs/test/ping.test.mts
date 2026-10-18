@@ -36,7 +36,7 @@ async function portal(chats: Record<string, string>, options: Options = {}) {
     },
   });
   if (options.order) mock.order(options.order);
-  await mock.start(docsServer, { dependencies: async () => true, pollMs: 0, wakeMs: options.wakeMs ?? 25 });
+  await mock.start(docsServer, { pollMs: 0, wakeMs: options.wakeMs ?? 25 });
   const { call } = await mock.serve();
   /** A tool of a chat's agent, called as pi calls it. */
   const agent = (chat: string) => async (name: string, params: unknown) => {

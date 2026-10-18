@@ -19,6 +19,7 @@ import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
 import { addGate, dropExtension, pushToPages, validTopic } from "./extension-push.js";
+import { installPackages, missingPackages } from "./extension-install.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -299,6 +300,47 @@ async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<
 /** Whether `version` of an extension is one that `range` takes; a range that is none takes nothing. */
 const takes = (range: string, version: string | undefined) => Boolean(version && semver.validRange(range) && semver.satisfies(version, range, { includePrerelease: true }));
 
+/** The packages being installed for server halves, by folder, and why an install failed, by folder, until the next change of what is installed. */
+const installing = new Map<string, Promise<void>>();
+const installFailures = new Map<string, string>();
+/** What was last asked to run: an install that has finished starts what waited for it. */
+let current: ServerHalf[] = [];
+/** Installs run by another command than npm, for a test. */
+let npmCommand: string | undefined;
+export function setNpm(command: string | undefined): void {
+  npmCommand = command;
+}
+
+/** Starts the install of the packages a half runs on, when they are not there and are not being installed. */
+function prepare(half: ServerHalf): void {
+  const dir = half.install;
+  if (!dir) return;
+  if (!missingPackages(dir).length) return void installFailures.delete(dir);
+  if (installing.has(dir) || installFailures.has(dir)) return;
+  say(half.name, "Installing its packages with npm");
+  const started = Date.now();
+  const job = installPackages(dir, npmCommand ? { npm: npmCommand } : {}).then((why) => {
+    installing.delete(dir);
+    if (why) {
+      installFailures.set(dir, why);
+      say(half.name, `Could not install its packages: ${why}`);
+    } else {
+      say(half.name, `Installed its packages in ${Math.round((Date.now() - started) / 1000)} s`);
+    }
+    // Started now that they are there; or said not to be, so that Settings tells why it is not running.
+    return syncAgain();
+  });
+  installing.set(dir, job);
+}
+
+/** Why a half cannot start yet for want of its packages, or nothing. */
+function packagesPending(half: ServerHalf): string | undefined {
+  const dir = half.install;
+  if (!dir || !missingPackages(dir).length) return undefined;
+  const failed = installFailures.get(dir);
+  return failed ? `Its packages could not be installed: ${failed}` : "Its packages are being installed";
+}
+
 /**
  * How the halves that are wanted are to run, as they build on one another (`pithagoras.requires` and `optional`): the
  * order to start them in, an extension before those that build on it; those that cannot start, and why (what they
@@ -314,6 +356,12 @@ function plan(halves: ServerHalf[]): { order: ServerHalf[]; blocked: Map<string,
   const visit = (half: ServerHalf): boolean => {
     if (uses.has(half.name)) return true;
     if (blocked.has(half.name)) return false;
+    // Its packages are not there yet: it waits for them, and what builds on it with it.
+    const pending = packagesPending(half);
+    if (pending) {
+      blocked.set(half.name, pending);
+      return false;
+    }
     if (visiting.includes(half.name)) {
       const circle = [...visiting.slice(visiting.indexOf(half.name)), half.name];
       for (const name of circle) blocked.set(name, `It builds on itself, through ${circle.join(" → ")}`);
@@ -377,7 +425,20 @@ let queue: Promise<void> = Promise.resolve();
  * after it. One at a time: a second ask waits for the first.
  */
 export function syncServerHalves(halves: ServerHalf[]): Promise<void> {
+  // Something changed (a package was installed, removed or switched): an install that failed is tried again.
+  installFailures.clear();
+  return sync(halves);
+}
+
+/** The same, for an install that has ended: what failed is not tried again by it. */
+const syncAgain = (): Promise<void> => sync(current);
+
+function sync(halves: ServerHalf[]): Promise<void> {
+  current = halves;
   const run = async () => {
+    // What is asked for may have changed since this was queued (or been stopped): the latest is what runs.
+    halves = current;
+    for (const half of halves) prepare(half);
     const { order, blocked, uses } = plan(halves);
     const wanted = new Map(order.map((half) => [half.name, half]));
     // What is not wanted any more, or changed, goes, with what builds on it: the latest started first.

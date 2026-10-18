@@ -9,20 +9,15 @@
  * itself is this package's own (devDependencies), installed here first when
  * it is not there yet, or not at the version its lock file names.
  */
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { missingDependencies } from "./deps.js";
+import { installPackages } from "@pithagoras/extension-api/build";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(HERE, "web", "editor.js");
 
 // Missing, or not the versions the lock names (a later commit changed them): installed as the lock says.
-const missing = missingDependencies(HERE, { dev: true });
-if (missing.length) {
-  console.log(`pithagoras-docs: installing its packages (${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ", …" : ""})`);
-  execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"], { cwd: HERE, stdio: "inherit" });
-}
+installPackages({ dir: HERE, name: "pithagoras-docs" });
 
 const { build } = await import("esbuild");
 await build({

@@ -241,6 +241,26 @@ await buildExtension({ dir: import.meta.dirname, tailwind: true, server: "src/se
 `extensions/terminal` and `extensions/git` in the repository are extensions
 written this way; Git builds its server half and its utilities too.
 
+**Packages.** An extension of your own that has packages (an emulator, a database
+driver) names them in its `package.json` and keeps a `package-lock.json`. Two
+things see to them, so that no extension carries code for it:
+
+- The build. `buildExtension({ dir, install: true })` first installs what the lock names
+  (`npm ci`, without install scripts, from npm's cache where it can, so that a build with
+  no network works when everything is there) if it is not in the package's `node_modules`
+  or is at another version, and says so. `installPackages({ dir })` does only that, for a
+  build of your own (Documents' editor). The image builds every extension this way, then
+  installs what each needs to run and no more (`npm ci --omit=dev`).
+- The portal. A package pi installed by its folder is left by pi without its packages. When the
+  portal is about to start its server half and the packages it runs on (what its lock names,
+  without what only the build needs) are missing, it installs them in the background first
+  and starts the half when they are there, so a checkout that is run as it is just works. The
+  half has the fifteen seconds to start from then. Until then Settings → Extensions says "Its
+  packages are being installed", an install that fails says why ("Its packages could not be
+  installed: …"), and the next change of what is installed tries again. A package with no
+  lock file is not installed from. A server half imports its packages, and does not install
+  them.
+
 ### Looking like the portal
 
 The page's colours are variables holding the three numbers of a colour, so

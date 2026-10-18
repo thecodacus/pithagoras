@@ -1034,7 +1034,6 @@ extensions/docs/
 ├── tools.js         the agent's nine tools
 ├── errors.js        the refusals, and what a failed disk, git or database is to a reader
 ├── secret.js        what a secret looks like, for the warning and for the agent's tools
-├── deps.js          installs what the extension needs to run
 ├── web/             the browser half, plain JavaScript as it is served, and its stylesheet
 └── src/             the editor (Milkdown), built into web/editor.js: not kept in git
 ```
@@ -1096,16 +1095,16 @@ a failure of the disk, of git or of the database is made into one that says
 what is wrong (`errors.js`), and anything else is logged and answered with
 "The documents store could not do that".
 
-**Options.** The server half takes a second argument, for tests: `dependencies`
-(what installs the packages), `faults` (breaks a write after a step), `gitTimeoutMs`,
-`pollMs`, `wakeMs` and `wakeLimitMs` (the times in the table above).
+**Options.** The server half takes a second argument, for tests: `faults` (breaks a
+write after a step), `gitTimeoutMs`, `pollMs`, `wakeMs` and `wakeLimitMs` (the times in
+the table above). Its packages (the database driver) are installed by the portal before it starts.
 
 **Tests.** They are beside the code, in `extensions/docs/test/`. Each file runs
 alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:
 
 | File | What it holds |
 | --- | --- |
-| `store`, `extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, dependencies, German |
+| `store`, `extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, German |
 | `hardening` | The edges: a file deleted or renamed, no rights, a broken store, saves at once, the size limit, a chat that never starts |
 | `tools` | The agent's tools |
 | `stream`, `live`, `merge`, `saver` | Telling a page of changes (what it listens to), and taking them in |

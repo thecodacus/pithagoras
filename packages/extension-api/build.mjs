@@ -25,12 +25,62 @@
  * half is written in TypeScript too: that module is bundled into `server.js`
  * beside its package.json, its packages left to be imported where it runs.
  *
+ * With `install`, the packages the extension's own package.json names (what it is
+ * built with, and what it runs on) are installed first when they are not there, or are
+ * not at the versions its lock file names: `npm ci`, without install scripts, from the
+ * cache when it can. `installPackages` does only that, for a build of the extension's
+ * own (Documents' editor).
+ *
  * esbuild is the caller's, and tailwindcss and postcss with `tailwind`: they
  * are peers of this package.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import portal from "./tailwind.mjs";
+
+const readJson = (file) => {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * What the package in `dir` needs and does not have in its own node_modules as its lock file says: missing, or at
+ * another version (a later commit changed the lock, and nothing installed it since). Without a lock, what its package.json
+ * names, there at all. Only what it needs to run, unless `dev`: then also what it is built with. An optional package is one npm
+ * leaves out where it does not fit (another system): only one that is there is checked. Named as npm names them.
+ */
+export function missingPackages(dir, { dev = true } = {}) {
+  const lock = readJson(path.join(dir, "package-lock.json"));
+  if (lock?.packages) {
+    const wrong = new Set();
+    for (const [where, entry] of Object.entries(lock.packages)) {
+      if (!where.startsWith("node_modules/") || entry.link || ((entry.dev || entry.devOptional) && !dev)) continue;
+      const installed = readJson(path.join(dir, where, "package.json"));
+      if (!installed && entry.optional) continue;
+      if (installed?.version !== entry.version) wrong.add(where.slice(where.lastIndexOf("node_modules/") + "node_modules/".length));
+    }
+    return [...wrong];
+  }
+  const meta = readJson(path.join(dir, "package.json")) ?? {};
+  return Object.keys({ ...meta.dependencies, ...(dev ? meta.devDependencies : {}) }).filter((name) => !existsSync(path.join(dir, "node_modules", name, "package.json")));
+}
+
+/**
+ * Installs what `missingPackages` finds missing in the package in `dir`, as its lock file says: `npm ci`, without install
+ * scripts (a native package brings its binaries with it), from npm's cache when it can, so that a build with no network works
+ * when everything is there. Says so on the console. Nothing is done when nothing is missing.
+ */
+export function installPackages({ dir, dev = true, name = path.basename(dir) } = {}) {
+  if (!dir) throw new Error("installPackages needs the extension's folder: { dir }");
+  const missing = missingPackages(dir, { dev });
+  if (!missing.length) return;
+  console.log(`${name}: installing its packages (${missing.slice(0, 5).join(", ")}${missing.length > 5 ? ", …" : ""})`);
+  execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["ci", ...(dev ? [] : ["--omit=dev"]), "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"], { cwd: dir, stdio: "inherit" });
+}
 
 /** The portal's packages, by what the code imports, and the names each hands out. */
 const SHARED = {
@@ -75,10 +125,12 @@ const portalPackages = {
  * owns `client.js`, `client.css`, `chunks/` and `assets/` in it, and replaces
  * them each time; anything else there is left as it is. `tailwind`: make the
  * utilities its code uses into `client.css`. `server`: the server half's
- * module (`src/server.ts`), built into `server.js` in `dir`.
+ * module (`src/server.ts`), built into `server.js` in `dir`. `install`: its
+ * packages are installed first, if they are not (see installPackages).
  */
-export async function buildExtension({ dir, entry = "src/client.tsx", outdir = "web", minify = true, tailwind = false, server } = {}) {
+export async function buildExtension({ dir, entry = "src/client.tsx", outdir = "web", minify = true, tailwind = false, server, install = false } = {}) {
   if (!dir) throw new Error("buildExtension needs the extension's folder: { dir }");
+  if (install) installPackages({ dir, name: readJson(path.join(dir, "package.json"))?.name });
   const { build } = await import("esbuild");
   const out = path.resolve(dir, outdir);
   for (const owned of ["chunks", "assets"]) rmSync(path.join(out, owned), { recursive: true, force: true });

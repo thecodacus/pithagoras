@@ -20,7 +20,7 @@ type Result = { ok: true; text: string; details: any } | { ok: false; error: str
 /** The server half for chats that work in these folders (`chats`: the folder of each, by id), with pi run as `executor`. */
 async function portal(chats: Record<string, string>, executor = 'host') {
   const mock = await mockPortal({ extension: 'pithagoras-docs', executor, chats, dataDir: DATA });
-  await mock.start(docsServer, { dependencies: async () => true });
+  await mock.start(docsServer, {  });
   /** The person, through the routes. */
   const { call } = await mock.serve();
   /** A chat's pi as the portal starts it: the tools the server half put into it, by name. */
