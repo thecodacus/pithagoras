@@ -1091,6 +1091,16 @@ class SessionManager extends EventEmitter {
     return client.tellExtension?.(extension, data) ?? false;
   }
 
+  /**
+   * What an extension's server half says to a chat's agent, starting the chat's pi if it is not running: a message in the
+   * conversation, run after the turn that is going on or at once. False where the executor cannot reach pi's session.
+   */
+  async followUpExtension(sessionId: string, extension: string, message: { text: string; details?: unknown; type?: string }): Promise<boolean> {
+    if (EXECUTOR_KIND !== "host") return false;
+    const client = await this.ensureClient(sessionId);
+    return client.followUpExtension?.(extension, message) ?? false;
+  }
+
   /** How a running chat's model is offered a tool now (see PiClient.offers); nothing for a chat whose pi is not running. */
   toolOffered(sessionId: string, tool: string): "direct" | "lazy" | undefined {
     return this.live.get(sessionId)?.client.offers?.(tool);
@@ -3168,5 +3178,9 @@ class SessionManager extends EventEmitter {
 }
 
 export const sessions = new SessionManager();
-setChatBridge({ tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data), offers: (chatId, tool) => sessions.toolOffered(chatId, tool) });
+setChatBridge({
+  tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data),
+  followUp: (chatId, extension, message) => sessions.followUpExtension(chatId, extension, message),
+  offers: (chatId, tool) => sessions.toolOffered(chatId, tool),
+});
 export { SESSION_ROOT, IMAGE_ROOT };

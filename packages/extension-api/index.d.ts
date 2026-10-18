@@ -532,6 +532,13 @@ export interface Portal {
     use<T = ChatFeed>(chatId: string, pick?: (feed: ChatFeed) => T, same?: (a: T, b: T) => boolean): T;
     /** The same outside a component: told each time the chat changes. Returns the unsubscribe. */
     on(chatId: string, handler: (feed: ChatFeed) => void): () => void;
+    /**
+     * A new chat, as New chat makes one: in `workspace` (a folder, as the portal takes it for a chat: the workspace
+     * root or below it, or an agent's home) or, without one, in the home of the agent that new chats go to. With a
+     * `title` it keeps that name and is not named after its first message. It is not opened: `portal.navigate("/s/" +
+     * chat.id)` does that. Rejects with an `ApiError` where the portal refuses the folder.
+     */
+    create(options?: { title?: string; workspace?: string }): Promise<Chat>;
   };
   shortcuts: {
     /** A shortcut of the extension's: see `Shortcut`. Its label is translated as the extension's own texts are. */

@@ -378,6 +378,24 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     return true;
   }
 
+  /**
+   * What an extension's server half says to the agent, as a message of the extension's that the person sees as a notice.
+   * Run after the turn that is going on, if one is; a turn is started if the agent is idle. Handed over, not waited for:
+   * pi answers once the whole run is over, which is no reason to hold the extension that asked.
+   */
+  followUpExtension(extension: string, message: { text: string; details?: unknown; type?: string }): boolean {
+    void this.session
+      .sendCustomMessage(
+        { customType: message.type ? `${extension}:${message.type}` : extension, content: message.text, display: true, details: message.details },
+        { deliverAs: "followUp", triggerTurn: true },
+      )
+      .catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.emit("event", { type: "portal_failed", error: `A message from ${extension} could not be delivered: ${reason}` });
+      });
+    return true;
+  }
+
   subagentsRunning(): number {
     return this.unbridge?.running() ?? 0;
   }

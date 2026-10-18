@@ -230,6 +230,15 @@ export interface ServerPortal {
     /** To the package's own pi extension in a chat, starting its pi if need be. False where pi does not run in the portal. */
     tell(chatId: string, data: unknown): Promise<boolean>;
     /**
+     * Says something to a chat's agent as a message of the package's: it is put in the conversation, where the person
+     * reads it as a notice, after the turn that is going on, or at once (a turn starts) when the agent is idle. The
+     * chat's pi is started if it was let go. Resolves true once pi has taken it (the run it starts is not waited for),
+     * false where pi does not run in the portal's own process; rejects where the chat is gone or its pi could not
+     * start. `details` is kept with the message for the package's own tools and cards; `type` names the kind of
+     * message when the package has several (the message is the package's `<name>:<type>`).
+     */
+    followUp(chatId: string, message: { text: string; details?: unknown; type?: string }): Promise<boolean>;
+    /**
      * A pi extension of the package's, made here: registered in every chat's
      * pi as it starts, so its tools hold what this module holds. Only where pi
      * runs in the portal's own process. A tool registered with

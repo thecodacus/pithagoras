@@ -165,7 +165,14 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
       commands: { register: (name, run) => kept(registerCommand(name, run, ext.name)), run: runCommand, has: hasCommand },
       panels,
-      chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)) },
+      chats: {
+        use: useChatFeed,
+        on: (chatId, handler) => kept(onChatFeed(chatId, handler)),
+        create: async (options) => {
+          const made = await api.createSession(options?.workspace, options?.title);
+          return { id: made.id, title: made.title, workspace: made.workspace };
+        },
+      },
       shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },
       server: {
         on: ((first: unknown, handler?: (data: unknown) => void) =>

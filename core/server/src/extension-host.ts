@@ -126,9 +126,11 @@ function wire(name: string, data: unknown): string | undefined {
 
 /** How the host reaches what only the session manager can do, which it cannot import: the manager imports it. */
 let tellChat: (chatId: string, extension: string, data: unknown) => Promise<boolean> = async () => false;
+let followUpChat: (chatId: string, extension: string, message: { text: string; details?: unknown; type?: string }) => Promise<boolean> = async () => false;
 let toolOffered: (chatId: string, tool: string) => "direct" | "lazy" | undefined = () => undefined;
-export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof toolOffered }): void {
+export function setChatBridge(bridge: { tell: typeof tellChat; followUp: typeof followUpChat; offers: typeof toolOffered }): void {
   tellChat = bridge.tell;
+  followUpChat = bridge.followUp;
   toolOffered = bridge.offers;
 }
 
@@ -217,6 +219,11 @@ function portalFor(ext: Running): ServerPortal {
       on: (event, handler) => void ext.life.on(event, handler),
       onEvent: (handler) => void ext.events.push(handler),
       tell: (chatId, data) => tellChat(chatId, name, data),
+      followUp: (chatId, message) => {
+        if (typeof message?.text !== "string" || !message.text.trim()) return Promise.reject(new TypeError("A follow-up needs text"));
+        if (!getSession(chatId)) return Promise.reject(new Error("No such chat"));
+        return followUpChat(chatId, name, { text: message.text, details: message.details, type: message.type });
+      },
       offers: (chatId, tool) => toolOffered(chatId, tool),
       extend: (factory) => void ext.factories.push(factory),
       hold: (chatId) => {
