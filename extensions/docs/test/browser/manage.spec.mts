@@ -576,8 +576,13 @@ test('a 404 that is not the server half\'s own, as the portal answers while the 
   await expect(page.locator('.pd-state')).toContainText('Not saved');
   await expect(page.getByText(/Could not save/)).toBeVisible();
   await expect(page.getByText('This document was deleted')).toHaveCount(0);
-  // The stream dropped with the half: the page asks after the document again (its comments), and the answer is the portal's 404 again.
-  await page.evaluate(() => (window as any).streams.find((s: any) => s.url.endsWith('/events') && !s.closed).emit('error', {}));
+  // The connection dropped with the half: the portal's page asks again, and what the new listening says first makes the page ask after the
+  // document (its comments), and the answer is the portal's 404 again.
+  const where = (first: boolean) => pushed(page, NAME, topicOf(PLAN.id), { revision: 3, author: 'user', at: '2026-10-02T10:00:00.000Z', ...(first ? { first: true } : {}) });
+  await where(true);
+  await page.evaluate(() => (window as any).streams.find((s: any) => s.url === '/api/pushes' && !s.closed).emit('error', null));
+  await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => s.url === '/api/pushes').length), { timeout: 10_000 }).toBe(2);
+  await where(true);
   await expect.poll(() => shelf.awayCalls.filter((c) => c === 'GET /threads').length, { timeout: 10_000 }).toBeGreaterThan(0);
   await expect(page.getByText('This document was deleted')).toHaveCount(0);
   await expect(editorOf(page)).toContainText('The build is green. Typed while it was away.');
@@ -588,8 +593,9 @@ test('a 404 that is not the server half\'s own, as the portal answers while the 
   expect(shelf.requests.at(-1)).toContain('The build is green. Typed while it was away. And after.');
   expect(shelf.find(PLAN.id)!.markdown).toContain('Typed while it was away. And after.');
   await expect(actions(page)).toBeEnabled();
-  // The stream is open again: the page takes a change from elsewhere, as before.
-  await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => s.url.endsWith('/events') && !s.closed).length), { timeout: 10_000 }).toBe(1);
+  // The connection is open again, and the document is listened to on it: the page takes a change from elsewhere, as before.
+  await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => s.url === '/api/pushes' && !s.closed).length), { timeout: 10_000 }).toBe(1);
+  await expect.poll(() => listeningTo(page)).toContainEqual([NAME, topicOf(PLAN.id)]);
 });
 
 test('a 404 on a deletion that is not the server half\'s own is a failure, said on the page, which stays: the document is not taken for deleted', async ({ page }) => {
