@@ -209,6 +209,21 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       );
     };
 
+    /**
+     * Asks first: the text on the page is replaced. It is not lost (what was typed is saved as a revision before, and the replaced text
+     * is one), so the question is not drawn as a danger, but it is the portal's question before something is replaced or removed, which
+     * Settings → This browser can switch off. Cancel leaves the focus on the button that asked, and a restore ends in the text.
+     */
+    const restoreAsked = async (revision) => {
+      const ok = await ui.confirm({
+        title: t("Restore revision {n}?", { n: revision.revision }),
+        message: t("The current text is replaced by revision {n}. The current version stays in the history, so you can go back to it.", { n: revision.revision }),
+        confirmLabel: t("Restore"),
+        deletes: true,
+      });
+      if (ok && (await onRestore(revision))) onLook(null);
+    };
+
     return h(
       SidePanel,
       { kind: "history", title: t("History"), onClose },
@@ -248,7 +263,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             h("strong", null, t("Revision {n}", { n: shown.revision })),
             shown.revision === current
               ? h("span", { className: "pd-meta" }, t("This is the current revision."))
-              : h("button", { type: "button", className: ui.classes.primarySmall, disabled: busy || shown.markdown === undefined, onClick: async () => (await onRestore(shown)) && onLook(null) }, t("Restore this revision")),
+              : h("button", { type: "button", className: ui.classes.primarySmall, disabled: busy || shown.markdown === undefined, onClick: () => void restoreAsked(shown) }, t("Restore this revision")),
           ),
           shown.error && h(ui.ErrorBanner, null, shown.error),
         ),
@@ -331,6 +346,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const [side, setSide] = useState(null);
     // The earlier revision looked at in the History panel (`{ revision, markdown }`, or `error`), which is drawn in the text's place.
     const [looking, setLooking] = useState(null);
+    // Set by a restore that is done: the focus goes to the text (see the effect after `old`).
+    const toText = useRef(false);
     const looked = useRef(0);
     const commentsButton = useRef(null);
     const historyButton = useRef(null);
@@ -668,6 +685,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           editor.replace(markdown);
           saver.adopt(done.revision, editor.markdown());
           setNotice({ kind: "restored", from: revision, to: done.revision });
+          // The button that asked is disabled meanwhile and the preview with it goes: the person goes on in the text.
+          toText.current = true;
           return true;
         } catch (e) {
           if (e.status !== 409 || !Number.isInteger(e.body?.revision)) throw e;
@@ -677,6 +696,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           setNotice({ kind: "moved", revision: e.body.revision, from: revision });
           // The page is the document as it is now, not the old text beside a note that says it moved on.
           look(null);
+          toText.current = true;
           return false;
         }
       } catch (e) {
@@ -983,6 +1003,12 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     }, [side]);
     // An earlier revision is on the page in the text's place (the current one is the text itself); one that cannot be read is said in the panel.
     const old = history && looking && looking.revision !== base && !looking.error ? looking : null;
+    // A restore ends in the text, once the earlier revision is off the page (the editor is not there to take the focus before).
+    useEffect(() => {
+      if (!toText.current || old) return;
+      toText.current = false;
+      parts.current?.editor.focus();
+    });
     const print = () => {
       const editor = parts.current?.editor;
       // The editor draws the page that is printed: it has the text of the box first.

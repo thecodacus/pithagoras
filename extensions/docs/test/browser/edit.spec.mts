@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
 
 /**
@@ -127,6 +127,11 @@ async function open(page: Page, store: Store, { editor = true, panel = false }: 
 
 const editorOf = (page: Page) => page.locator('.pd-editor .ProseMirror');
 const state = (page: Page) => page.locator('.pd-state');
+/** Restore on the revision chosen in the panel, and the yes to the question that comes first. */
+const restoreThis = async (page: Page, history: Locator) => {
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Restore', exact: true }).click();
+};
 /** Types at the end of the document's last line. */
 async function typeAtEnd(page: Page, text: string) {
   await editorOf(page).click();
@@ -566,7 +571,7 @@ test('the history lists the revisions, shows one, and brings it back as a new re
   await expect(history).toBeVisible();
   await history.getByRole('button', { name: /^Revision 2/ }).click();
   await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
 
   await expect(editorOf(page)).toContainText('Ship it soon.');
   await expect(state(page)).toHaveText('Saved · Revision 4');
@@ -582,6 +587,84 @@ test('the history lists the revisions, shows one, and brings it back as a new re
   await expect(history.getByRole('button', { name: 'Restore this revision' })).toHaveCount(0);
 });
 
+test('restoring asks first; Cancel keeps the text and the focus on the button', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  // The earlier revision is on the page in the text's place: this is the restore from there.
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  const restore = history.getByRole('button', { name: 'Restore this revision' });
+  await restore.click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Restore revision 2?');
+  await expect(dialog).toContainText('The current text is replaced by revision 2. The current version stays in the history, so you can go back to it.');
+  await expect(dialog.getByRole('button', { name: 'Restore', exact: true })).toBeFocused();
+  expect(store.restores).toEqual([]);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(restore).toBeFocused();
+  // Nothing happened: the revision is still only looked at, and the text is the document's.
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  await expect(state(page)).toHaveText('Saved · Revision 3');
+  expect(store.restores).toEqual([]);
+  expect(store.markdown).toBe(PLAN);
+  // Escape answers no as well.
+  await restore.click();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect(store.restores).toEqual([]);
+});
+
+test('confirming the question restores the revision and puts the focus in the text', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Restore', exact: true }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.restores).toEqual([{ revision: 2, base: 3 }]);
+  expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
+  await expect(editorOf(page)).toContainText('Ship it soon.');
+  await expect(editorOf(page)).toBeFocused();
+});
+
+test('with the question switched off in Settings, restoring restores at once', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('confirmDeletes', 'off'));
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.restores).toEqual([{ revision: 2, base: 3 }]);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(editorOf(page)).toBeFocused();
+});
+
+test('the question before a restore is in German in a German portal', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await page.getByRole('button', { name: 'Verlauf' }).click();
+  const history = page.getByRole('complementary', { name: 'Verlauf' });
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await history.getByRole('button', { name: 'Diese Revision wiederherstellen' }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Revision 2 wiederherstellen?');
+  await expect(dialog).toContainText('Der aktuelle Text wird durch Revision 2 ersetzt. Die aktuelle Version bleibt im Verlauf, du kannst also zu ihr zurückkehren.');
+  await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+  expect(store.restores).toEqual([]);
+});
+
 test('restoring saves what was typed first, as a revision to go back to', async ({ page }) => {
   const store = new Store();
   await open(page, store);
@@ -590,7 +673,7 @@ test('restoring saves what was typed first, as a revision to go back to', async 
   await typeAtEnd(page, ' Unsaved words.');
   const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   await expect(state(page)).toHaveText('Saved · Revision 5');
   // The typed text went in as revision 4, and revision 1 came back on top of it.
   expect(store.puts).toEqual([{ markdown: '# The plan\n\nShip it on Friday. Unsaved words.\n', base: 3 }]);
@@ -609,7 +692,7 @@ test('restoring waits for the choice when the text cannot be saved', async ({ pa
   await expect(page.locator('.pd-conflict')).toBeVisible();
   const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   // Nothing was restored, and the text is still there.
   await expect(page.locator('.pd-conflict')).toBeVisible();
   await expect(editorOf(page)).toContainText('Mine.');
@@ -624,7 +707,7 @@ test('restoring a revision when the document has moved on shows the document as 
   const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
   store.elsewhere('# The plan\n\nTheirs.\n');
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   await expect(page.locator('.pd-note')).toContainText('The document changed in the meantime and is now at revision 4. Restore revision 1 again if you still want it.');
   await expect(editorOf(page)).toContainText('Theirs.');
   await expect(page.locator('.pd-old')).toHaveCount(0);
@@ -976,7 +1059,7 @@ test('a revision is restored from the side panel in a narrow page too, and the p
   await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
   // The note with the way back is above the panel, which covers the right of the page.
   await expect(page.getByRole('button', { name: 'Back to the current text' })).toBeVisible();
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   await expect(state(page)).toHaveText('Saved · Revision 4');
   expect(store.restores).toEqual([{ revision: 2, base: 3 }]);
   expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
@@ -1173,7 +1256,7 @@ test('restoring a revision shows it in the source too', async ({ page }) => {
   await page.getByRole('button', { name: 'History' }).click();
   const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 2/ }).click();
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   await expect(state(page)).toHaveText('Saved · Revision 4');
   await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it soon.\n');
   expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');

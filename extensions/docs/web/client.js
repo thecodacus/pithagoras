@@ -73,6 +73,10 @@ export default function (portal) {
     Current: "Aktuell",
     "This is the current revision.": "Das ist die aktuelle Revision.",
     "Restore this revision": "Diese Revision wiederherstellen",
+    "Restore revision {n}?": "Revision {n} wiederherstellen?",
+    "The current text is replaced by revision {n}. The current version stays in the history, so you can go back to it.":
+      "Der aktuelle Text wird durch Revision {n} ersetzt. Die aktuelle Version bleibt im Verlauf, du kannst also zu ihr zurückkehren.",
+    Restore: "Wiederherstellen",
     "Show older revisions": "Ältere Revisionen anzeigen",
     You: "Du",
     "The agent": "Der Agent",

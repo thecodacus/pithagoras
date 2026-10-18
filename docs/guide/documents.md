@@ -608,8 +608,15 @@ document itself has not changed. **Back to the current text** in the note (or a
 click on the revision again, or closing the panel) is the way back. The current
 revision is the text itself, so nothing is changed for it.
 
-**Restore this revision** (in the panel) saves its text as a new revision, so the history only
-grows. Text you have not saved yet is saved first, as a revision of its own, so
+**Restore this revision** (in the panel, also while the revision is shown on the
+page) first asks "Restore revision _n_?": the current text is replaced, and the
+current version stays in the history. **Cancel** (or Escape) changes nothing and
+the focus goes back to the button; **Restore** goes ahead and the cursor is in
+the text afterwards. The question is the portal's one before something is
+removed or replaced, so **Settings → This browser → Confirmations → Ask before
+deleting** ([Interface](/guide/interface#confirmations)) turns it off, and then
+the restore is made at once. It saves the revision's text as a new revision, so
+the history only grows. Text you have not saved yet is saved first, as a revision of its own, so
 the restore does not take it away. If it cannot be saved (a change meanwhile
 that you have not chosen about, or an error), nothing is restored until it is
 dealt with. If the document changed since the page last saved or loaded it, the
