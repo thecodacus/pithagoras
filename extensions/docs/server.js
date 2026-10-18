@@ -916,9 +916,12 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       try {
         const watched = { dir, identity: identity(dir), watcher: null, timer: null };
         // A burst of events (a write through a temporary file, a copy of many) is one look.
-        watched.watcher = watch(dir, { persistent: false }, () => {
-          // The folder itself was removed or made again: this watch is dead, and the folder is watched anew without waiting for the next look.
-          if (identity(dir) !== watched.identity) {
+        watched.watcher = watch(dir, { persistent: false }, (type, name) => {
+          // The folder itself was removed or made again: this watch is dead (it follows the folder that is gone), and the folder is
+          // watched anew without waiting for the next look. The event that names the folder is the sure sign: a folder made again may
+          // get the number of the one removed (ext4 does), so its identity says nothing then, and tells only of a move.
+          if ((type === "rename" && name === path.basename(dir)) || identity(dir) !== watched.identity) {
+            if (lists.watchers.get(id) !== watched) return;
             unwatchDir(id);
             watchDirs();
             void look(id);

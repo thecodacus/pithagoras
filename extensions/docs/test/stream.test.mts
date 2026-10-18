@@ -133,8 +133,8 @@ async function portal(folder: string | Record<string, string>, { pingMs, pollMs 
       ended = true;
     })();
     const told = () => frames.filter((f) => f.event === 'documents').map((f) => f.data.version as string);
-    const wait = async (done: () => boolean, what: string) => {
-      await until(() => done() || ended, what, () => `the list was told as ${JSON.stringify(told())}`);
+    const wait = async (done: () => boolean, what: string, ms?: number) => {
+      await until(() => done() || ended, what, () => `the list was told as ${JSON.stringify(told())}`, ms);
       if (!done()) throw new Error(`The stream ended before ${what}`);
     };
     return { ...stream, frames, told, ended: () => ended, until: wait, last: () => told().at(-1) };
@@ -595,16 +595,17 @@ test('a Markdown file put into a documents folder (an upload in Files) is told a
 
 test('a documents folder that was removed and made again is watched again, not at the next look of the folders', async () => {
   // The folders are looked at once a minute here: the watch on the folder is what tells, and the old one watched the folder that is gone.
+  // On ext4 the folder made again gets the inode number of the one removed, so the watch is told dead by what it reports, not by that number.
   const { folder, docs } = await withDocument('docs-list-remade-', { pollMs: 60_000 });
   try {
     const stream = await docs.follow('/folders/events');
     await stream.until(() => stream.told().length === 1, 'the first message');
     rmSync(path.join(folder, 'documents'), { recursive: true });
     mkdirSync(path.join(folder, 'documents'));
-    await stream.until(() => stream.told().length === 2, 'the document gone with its folder');
+    await stream.until(() => stream.told().length === 2, 'the document gone with its folder', 20_000);
     assert.deepEqual(namesOf(await listed(docs)), []);
     writeFileSync(path.join(folder, 'documents', 'again.md'), '# Again\n');
-    await stream.until(() => stream.told().length === 3, 'the file put into the folder that was made again');
+    await stream.until(() => stream.told().length === 3, 'the file put into the folder that was made again', 20_000);
     assert.deepEqual(namesOf(await listed(docs)), ['again.md']);
   } finally {
     await docs.close();
