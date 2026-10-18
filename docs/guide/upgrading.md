@@ -115,6 +115,12 @@ Its routes moved with it: what was `/api/sessions/:id/files`, `file`, `folder`,
 used the old addresses needs the new ones. Uploads (`/upload`), pictures and
 clips stay where they were.
 
+## Dusk and Warm are in the theme pack
+
+Dusk and Warm were extensions of their own (`pithagoras-theme-dusk` and `pithagoras-theme-warm`). They are themes of the `pithagoras-themes` pack now, with the same colours, so Settings → Extensions lists one package for all seven. The first start after the upgrade takes the two old packages out of pi's list, where their folders no longer exist, and makes sure `pithagoras-themes` is installed and switched on if one of them was switched on. A browser that had Dusk or Warm chosen keeps it: the choice is moved to the pack's theme the first time the page loads. A package of your own that you installed from a folder called `theme-dusk` or `theme-warm`, and that is still there, is left alone. If installing the pack fails, the old entries stay and the next start tries again.
+
+Reload the portal's open tabs after the upgrade. A tab that was open before it still runs the old page, which does not know the pack's themes and gives up the Dusk or Warm choice the first time it asks the server for the extensions.
+
 ## Upgrading from the first release
 
 What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:

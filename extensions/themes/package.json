@@ -1,7 +1,7 @@
 {
   "name": "pithagoras-themes",
   "version": "0.1.0",
-  "description": "More colours for the Pithagoras portal: Forest, Ocean, Rose, Amber and Mono, each in light and dark. Only themes: no code",
+  "description": "More colours for the Pithagoras portal: Forest, Ocean, Rose, Amber, Mono, Dusk and Warm, each in light and dark. Only themes: no code, the reference for an extension that is only themes",
   "keywords": ["pi-package"],
   "pi": {},
   "pithagoras": {
@@ -194,6 +194,78 @@
           "danger": "#ba1b0f",
           "terminal": "#1a1a1a",
           "terminal-fg": "#d7d7d7"
+        }
+      },
+      {
+        "id": "dusk",
+        "name": "Dusk",
+        "dark": {
+          "canvas": "#1b1626",
+          "surface": "#241e33",
+          "raised": "#302843",
+          "line": "#42385a",
+          "fg": "#f4f0fa",
+          "fg-muted": "#c4bcd6",
+          "fg-subtle": "#b0a7c4",
+          "fg-faint": "#a49bb9",
+          "accent": "#ff79c6",
+          "accent-fg": "#1b1626",
+          "ok": "#50fa7b",
+          "warn": "#f1fa8c",
+          "danger": "#ff6e6e",
+          "terminal": "#15111e",
+          "terminal-fg": "#e2dcf0"
+        },
+        "light": {
+          "canvas": "#faf7ff",
+          "surface": "#ffffff",
+          "raised": "#f3eefc",
+          "line": "#e2daf0",
+          "fg": "#221a30",
+          "fg-muted": "#54486a",
+          "fg-subtle": "#64587a",
+          "fg-faint": "#6c6182",
+          "accent": "#a83282",
+          "accent-fg": "#ffffff",
+          "ok": "#047c57",
+          "warn": "#966209",
+          "danger": "#cd283c"
+        }
+      },
+      {
+        "id": "warm",
+        "name": "Warm",
+        "dark": {
+          "canvas": "#161412",
+          "surface": "#1e1b19",
+          "raised": "#292623",
+          "line": "#3a3632",
+          "fg": "#f3efe9",
+          "fg-muted": "#c4b9aa",
+          "fg-subtle": "#aea394",
+          "fg-faint": "#a5998d",
+          "accent": "#d97757",
+          "accent-fg": "#161412",
+          "ok": "#86c48f",
+          "warn": "#e5b567",
+          "danger": "#f58b7e",
+          "terminal": "#100e0d",
+          "terminal-fg": "#e6e0d6"
+        },
+        "light": {
+          "canvas": "#faf9f5",
+          "surface": "#ffffff",
+          "raised": "#f0eee6",
+          "line": "#e0dcd0",
+          "fg": "#29261f",
+          "fg-muted": "#52493e",
+          "fg-subtle": "#5f564a",
+          "fg-faint": "#6a6155",
+          "accent": "#a8441c",
+          "accent-fg": "#ffffff",
+          "ok": "#1f7340",
+          "warn": "#8c5806",
+          "danger": "#b3301f"
         }
       }
     ]

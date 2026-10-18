@@ -466,8 +466,13 @@ portal.slots.register("voice.window", { id: "viewer", title: "Viewer", place: "m
 
 ### A page
 
-A `nav.page` is at `/x/<package>/<id>`, with an entry in the sidebar after
-the portal's own. `useShown()` is a hook, called as the sidebar is drawn:
+A `nav.page` is at `/x/<package>/<id>`, with an entry in the sidebar. The
+entries of every extension are together in one group, **Extensions**, after
+the portal's own pages and before **Audit**, which stays last. The group folds
+like a folder, is remembered per browser, and is held open while one of its
+pages is showing. On the folded sidebar it is one puzzle button, before the
+one for Audit, that opens a menu of the pages. With no page, there is neither.
+`useShown()` is a hook, called as the sidebar is drawn:
 whether the entry is listed now. Use it for a page whose service is not set
 up, as the browser's page is not listed before there is a browser. Until it
 returns `true` the entry is not listed; the page is at its address either way.
@@ -1205,8 +1210,9 @@ portal.slots.register("chat.header.action", { id: "theme", component: () => {
 } });
 ```
 
-`extensions/theme-dusk` and `extensions/theme-warm` in the repository are each
-a whole theme in one `package.json`.
+`extensions/themes` in the repository is the example of an extension that is
+only themes: seven of them (Forest, Ocean, Rose, Amber, Mono, Dusk and Warm),
+each a whole theme in the one `package.json`.
 
 ## What is loaded, and when
 
@@ -1338,8 +1344,8 @@ of them takes from the portal, and what gives the same to an extension:
 It is the portal's test extension and is not shipped: copy it to start your
 own, and install your copy by its path. What the portal ships is in
 `extensions/`, under **Settings → Extensions → Discover → Comes with
-Pithagoras**: `extensions/theme-dusk` and `extensions/theme-warm` are extensions
-that are only a theme, and `extensions/docs` is a large one: a page in the
+Pithagoras**: `extensions/themes` is an extension
+that is only themes, and `extensions/docs` is a large one: a page in the
 sidebar, fed by its server half's routes, a stream that tells the page of
 changes, an editor built into the page, and tools for the agent that share the
 server half's store ([Documents](/guide/documents), whose last section says how
