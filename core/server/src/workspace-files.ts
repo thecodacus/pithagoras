@@ -198,9 +198,14 @@ function listHeld(base: string, target: string, held: Held): { path: string; ent
         // A link that leads out, or nowhere, is listed and left alone.
         type = "link";
         const real = realpathSync(full);
+        // Looked at by the path that was checked, and the path checked again after: a folder on the way swapped for a link to somewhere
+        // outside in between would otherwise tell the size and time of something that is not in the folder.
         if (isWithinText(base, real)) {
-          st = statSync(real);
-          type = st.isDirectory() ? "dir" : "file";
+          const followed = statSync(real);
+          if (realpathSync(real) === real) {
+            st = followed;
+            type = st.isDirectory() ? "dir" : "file";
+          }
         }
       }
       entries.push({ name: dirent.name, type, ...(link ? { link } : {}), size: st.size, mtime: st.mtimeMs });
