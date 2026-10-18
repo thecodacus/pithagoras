@@ -660,7 +660,7 @@ test('a document open in the panel opens on a page of its own, the whole of it, 
   await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toHaveCount(0);
 });
 
-test('a document open in the panel fills it to its bottom: no strip of the panel under the desk, whatever the panel\'s height', async ({ page }) => {
+test('a document open in the panel is a page that fills it to its bottom, with no frame, and its list opens from the right edge', async ({ page }) => {
   // Taller than a short document, which is what shows a strip under it.
   await page.setViewportSize({ width: 1300, height: 1300 });
   await portal(page);
@@ -672,20 +672,32 @@ test('a document open in the panel fills it to its bottom: no strip of the panel
   const at = () =>
     page.evaluate(() => {
       const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
-      const scroller = document.querySelector('.pd-panel') as HTMLElement;
-      return { panel: rect('.pd-panel').bottom, doc: rect('.pd-doc').bottom, desk: rect('.pd-desk').bottom, scrolls: scroller.scrollHeight > scroller.clientHeight + 1 };
+      const panel = document.querySelector('.pd-panel') as HTMLElement;
+      const sheet = getComputedStyle(document.querySelector('.pd-sheet')!);
+      return { panel: rect('.pd-panel').bottom, scroll: rect('.pd-scroll').bottom, sheet: rect('.pd-sheet').bottom, toolbar: rect('.pd-toolbar').bottom, top: rect('.pd-scroll').top, scrolls: panel.scrollHeight > panel.clientHeight + 1, frame: [sheet.borderTopWidth, sheet.boxShadow, sheet.backgroundColor] };
     });
-  // The document goes down to the panel's end, and the panel has nothing to scroll for the empty room under it.
-  await expect.poll(async () => Math.round((await at()).panel - (await at()).doc)).toBe(0);
-  expect((await at()).desk).toBeGreaterThanOrEqual((await at()).panel - 1);
-  expect((await at()).scrolls).toBe(false);
-  // The same in a shorter panel, where the document is longer than it: it scrolls, and ends with the desk.
+  // The page goes down to the panel's end (it is the text's ground the whole way), and the panel has nothing to scroll for the room under it.
+  await expect.poll(async () => Math.round((await at()).panel - (await at()).scroll)).toBe(0);
+  const now = await at();
+  expect(Math.round(now.sheet)).toBe(Math.round(now.panel));
+  expect(Math.round(now.top)).toBe(Math.round(now.toolbar));
+  expect(now.scrolls).toBe(false);
+  expect(now.frame).toEqual(['0px', 'none', 'rgba(0, 0, 0, 0)']);
+  // Its list comes in from the right edge, over the page, the whole height of it (the panel is narrow).
+  await panels.getByRole('button', { name: /^Comments/ }).click();
+  const list = (await panels.getByRole('complementary', { name: 'Comments' }).boundingBox())!;
+  const desk = (await page.locator('.pd-desk').boundingBox())!;
+  expect(Math.round(list.x + list.width)).toBe(Math.round(desk.x + desk.width));
+  expect(Math.round(list.y)).toBe(Math.round(desk.y));
+  expect(Math.round(list.y + list.height)).toBe(Math.round(desk.y + desk.height));
+  expect(list.width).toBeLessThanOrEqual(320);
+  await panels.getByRole('complementary', { name: 'Comments' }).getByRole('button', { name: 'Close' }).click();
+  // In a shorter panel, where the text is longer than it: the page scrolls in itself, and the panel does not.
   await page.setViewportSize({ width: 1300, height: 500 });
-  await expect.poll(async () => (await at()).scrolls).toBe(true);
-  const scroller = page.locator('.pd-panel');
-  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
-  const end = await at();
-  expect(Math.abs(Math.round(end.panel - end.doc))).toBe(0);
+  await expect.poll(() => page.evaluate(() => { const s = document.querySelector('.pd-scroll')!; return s.scrollHeight > s.clientHeight; })).toBe(true);
+  const short = await at();
+  expect(short.scrolls).toBe(false);
+  expect(Math.abs(Math.round(short.panel - short.scroll))).toBe(0);
 });
 
 test('the extension\'s module registers its page without the editor\'s half, which is loaded when a document is first opened', async ({ page }) => {

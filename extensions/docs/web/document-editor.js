@@ -26,8 +26,11 @@ import { drafted, shownOf } from "./writing.js";
 const DRAFT = "pithagoras-docs/draft";
 /** What a request that goes on after the page is gone may carry: the browsers allow 64 KiB, and it is kept well under. */
 const KEEPALIVE_BYTES = 60 * 1024;
-/** How wide the document has to be for the list of comments to stand beside the sheet; narrower, it is a sheet of its own over the bottom of the page. */
+/** How wide the document has to be for the list of comments to stand beside the page; narrower, it comes in over the page from the right. */
 const LIST_BESIDE = 900;
+/** The markers of comments in the right margin: how high one is, and how wide the page has to be for it to have a margin to stand in (as a card beside a passage). */
+const MARKER_HEIGHT = 22;
+const MARGIN_MIN = 720;
 
 /** How a printed copy of a document looks: plain, black on white, as a page. */
 const PRINT_CSS = `
@@ -548,6 +551,27 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       watch.observe(sheet);
       return () => watch.disconnect();
     }, []);
+    // The markers of the comments in the right margin, level with their passages: one for each thread that is marked in the text and whose
+    // card is not open, stacked where passages share a line. Measured after each drawing; drawn again only when one moved.
+    const [markers, setMarkers] = useState([]);
+    React.useLayoutEffect(() => {
+      const frame = sheet.current?.getBoundingClientRect();
+      let found = [];
+      if (ready && !watching && frame && frame.width >= MARGIN_MIN) {
+        for (const thread of threads.items) {
+          if (thread.status !== "open" || thread.orphaned || thread.id === active || !texts.has(thread.id)) continue;
+          const line = rectsOf(thread.id)[0];
+          if (line) found.push({ id: thread.id, count: thread.comments.length, text: texts.get(thread.id), top: line.top - frame.top - sheet.current.clientTop + (line.height - MARKER_HEIGHT) / 2 });
+        }
+        found.sort((a, b) => a.top - b.top);
+        let low = -Infinity;
+        for (const marker of found) {
+          marker.top = Math.round(Math.max(marker.top, low));
+          low = marker.top + MARKER_HEIGHT + 2;
+        }
+      }
+      setMarkers((now) => (now.length === found.length && now.every((m, i) => m.id === found[i].id && m.top === found[i].top && m.count === found[i].count && m.text === found[i].text) ? now : found));
+    });
     /** Where on the screen the passage of thread `thread` is, a rectangle for each line of it (none where it is not marked). */
     const rectsOf = (thread) => [...(host.current?.querySelectorAll(`[data-pd-thread="${CSS.escape(thread)}"]`) ?? [])].flatMap((el) => [...el.getClientRects()]).filter((r) => r.width > 0 || r.height > 0);
 
@@ -937,13 +961,20 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         { ref: workspace, className: "pd-desk pd-workspace" },
         h(
           "div",
-          { className: "pd-row" },
+          { className: "pd-scroll" },
           h(
             "div",
-            { className: "pd-sheet", ref: sheet },
+            {
+              className: "pd-sheet",
+              ref: sheet,
+              // A click on the page under the text, or beside it, is a click in the text: the caret goes to its end, as on a word processor's page.
+              onClick: (e) => {
+                if (!e.target.closest(".ProseMirror, .pd-popover, .pd-draft, button, a, input, textarea") && parts.current && !watching) parts.current.editor.focusEnd();
+              },
+            },
             !ready && !broken && h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
             watching && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shownOf(edited))),
-            h("div", { ref: host, className: "pd-editor", hidden: !ready || watching, onClick: (e) => e.target === host.current && parts.current?.editor.focus() }),
+            h("div", { ref: host, className: "pd-editor", hidden: !ready || watching }),
             card &&
               h(Popover, {
                 key: card.key,
@@ -970,10 +1001,31 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
                 onDelete: removeComment,
                 onDeleteThread: removeThread,
               }),
+            // After the card in the order of the page, so that Tab goes from the text to the card first.
+            markers.length > 0 &&
+              h(
+                "div",
+                { className: "pd-markers" },
+                markers.map((marker) =>
+                  h(
+                    "button",
+                    {
+                      key: marker.id,
+                      type: "button",
+                      className: "pd-marker",
+                      style: { top: `${marker.top}px` },
+                      "aria-label": t("Comments on “{passage}”: {n}", { passage: marker.text.length > 30 ? `${marker.text.slice(0, 30)}…` : marker.text, n: marker.count }),
+                      // A click opens the card as a click on the words does; with the keyboard (no pointer: detail 0) the box has the focus too.
+                      onClick: (e) => (e.detail === 0 ? show(marker.id) : now.current.clicked(marker.id)),
+                    },
+                    h(Icon, { name: "comments" }),
+                    h("span", null, marker.count),
+                  ),
+                ),
+              ),
           ),
-          wide && list,
         ),
-        !wide && list && h("div", { className: "pd-listdock" }, list),
+        list,
       ),
     );
   }

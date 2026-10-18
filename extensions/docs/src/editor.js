@@ -475,6 +475,14 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
     html: () => editor.action((ctx) => ctx.get(editorViewCtx).dom.innerHTML),
     /** Gives the text the focus. */
     focus: () => editor.action((ctx) => ctx.get(editorViewCtx).focus()),
+    /** Puts the caret at the end of the document and gives the text the focus: a click on the page below the text. */
+    focusEnd: () =>
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        if (view.isDestroyed) return;
+        view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView());
+        view.focus();
+      }),
     /** The passage the selection is (see anchors.js), or nothing. */
     selection: () => editor.action((ctx) => selected(ctx, kept)),
     /** Marks these threads' passages (see `mark`): the ones that are to be shown. */

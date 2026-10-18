@@ -821,7 +821,7 @@ test('a document is downloaded as its Markdown file, or printed on its own to be
   await expect(page.getByRole('menu')).toHaveCount(0);
 });
 
-test('a document opened on the page is the whole page: its bar, the toolbar and the sheet, with no list above it', async ({ page }) => {
+test('a document opened on the page is the whole page: its bar, the toolbar and the text on the rest of it, with no list above it', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
@@ -829,8 +829,10 @@ test('a document opened on the page is the whole page: its bar, the toolbar and 
   await expect(page.locator('.pd-titlebar')).toContainText('The plan');
   await expect(page.locator('.pd-titlebar')).toContainText('documents/plan.md');
   await expect(page.getByRole('toolbar', { name: 'Formatting' })).toBeVisible();
-  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
-  expect(sheet.width).toBeLessThanOrEqual(816);
+  // The text is on the whole of the area under the toolbar, in a column of a readable width in the middle of it.
+  const [area, text] = await Promise.all([page.locator('.pd-scroll').boundingBox(), editorOf(page).boundingBox()]);
+  expect(text!.width).toBeLessThanOrEqual(46 * 16 + 1);
+  expect(Math.abs(text!.x - area!.x - (area!.x + area!.width - text!.x - text!.width))).toBeLessThan(2);
   // A page's own document has no button to open it on a page of its own.
   await expect(page.getByRole('button', { name: /Full page|Open on its own page/ })).toHaveCount(0);
   // Back to the list, which has its heading again.

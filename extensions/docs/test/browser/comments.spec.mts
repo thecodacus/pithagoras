@@ -312,7 +312,7 @@ const cards = (page: Page) => panel(page).locator('.pd-thread-card');
 /** The card of a comment that floats over the sheet, and the thread (or the comment being written) in it. */
 const popover = (page: Page) => page.locator('.pd-popover');
 const shown = (page: Page) => popover(page).locator('.pd-thread-card');
-const barButton = (page: Page) => page.getByRole('button', { name: /^(Comments|Kommentare)/ });
+const barButton = (page: Page) => page.getByRole('button', { name: /^(Comments|Kommentare)( \d+)?$/ });
 const state = (page: Page) => page.locator('.pd-state');
 /** What the marked passages of a thread read as. */
 const mark = (page: Page, id: string) => editorOf(page).locator(`[data-pd-thread="${id}"]`).first();
@@ -419,15 +419,19 @@ test('by default only the document is shown, its commented passages marked; a cl
   await expect(card.locator('li[data-author="user"]')).toContainText('It was at noon.');
   await expect(card.getByRole('textbox', { name: 'Reply' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible();
-  await expect(card).toContainText('Write @agent in a comment to ask the agent to answer it.');
+  // The hint to ask the agent is the box's own placeholder, not a line of the card.
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveAttribute('placeholder', 'Reply… (@agent asks the agent)');
+  await expect(card).not.toContainText('Write @agent in a comment');
   await expect(page.locator(`.pd-editor [data-active-thread="${green.id}"]`)).toHaveCount(1);
-  // On top of the sheet, just under its passage, which stays readable.
+  // On a wide page: beside its passage, level with it, at the right edge of the page, and the words stay readable at its left.
   const sheet = (await page.locator('.pd-sheet').boundingBox())!;
   const box = (await popover(page).boundingBox())!;
-  expect(box.x).toBeGreaterThanOrEqual(sheet.x);
+  await expect(popover(page)).toHaveAttribute('data-side', 'true');
+  expect(Math.round(box.x + box.width)).toBeGreaterThan(Math.round(sheet.x + sheet.width) - 16);
   expect(box.x + box.width).toBeLessThanOrEqual(sheet.x + sheet.width);
   const rects = await rectsOf(page, green.id);
-  expect(box.y).toBeGreaterThanOrEqual(Math.max(...rects.map((r) => r.bottom)));
+  expect(box.x).toBeGreaterThanOrEqual(Math.max(...rects.map((r) => r.right)));
+  expect(Math.abs(box.y - rects[0].top)).toBeLessThan(8);
   expect(await clearOf(page, green.id)).toBe(true);
   // Another passage: that one is the only one open.
   await mark(page, friday.id).click();
@@ -524,8 +528,8 @@ test('text that is selected is commented on: its card opens at the selection whi
   expect(await editorOf(page).locator('.pd-thread-pending').evaluateAll((spans) => spans.map((s) => s.textContent).join(''))).toBe('Friday, see the guide');
   // The card is at the selection, under it, and the box has the focus.
   const box0 = (await popover(page).boundingBox())!;
-  const pending = await page.evaluate(() => [...document.querySelectorAll('.pd-thread-pending')].flatMap((el) => [...el.getClientRects()].map((r) => r.bottom)));
-  expect(box0.y).toBeGreaterThanOrEqual(Math.max(...pending));
+  const pending = await page.evaluate(() => [...document.querySelectorAll('.pd-thread-pending')].flatMap((el) => [...el.getClientRects()].map((r) => ({ top: r.top, bottom: r.bottom, right: r.right }))));
+  expect(pending.every((r) => box0.x >= r.right || box0.y >= r.bottom || box0.y + box0.height <= r.top)).toBe(true);
   await expect(compose.getByRole('textbox')).toBeFocused();
   const send = compose.getByRole('button', { name: 'Send' });
   await expect(send).toBeDisabled();
@@ -839,7 +843,7 @@ test('a passage is found in the text the editor writes when the file is written 
   await openThread(page, thread.id);
 });
 
-test('at a phone\'s width the card of a comment fills the sheet under its passage with no sideways scrolling, the list is a sheet over the bottom, and the comment button is within reach', async ({ page }) => {
+test('at a phone\'s width the card of a comment fills the page under its passage with no sideways scrolling, the list is a panel over the page from the right edge, and the comment button is within reach', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   const store = new Store();
   const green = seeded(store, 'The build is green.', 'Is it? '.repeat(30), 'agent');
@@ -855,12 +859,16 @@ test('at a phone\'s width the card of a comment fills the sheet under its passag
   expect(await clearOf(page, green.id)).toBe(true);
   expect(await noSideways()).toBe(true);
   expect(await page.evaluate(() => [...document.querySelectorAll('.pd-popover *')].every((e) => e.getBoundingClientRect().right <= window.innerWidth + 1))).toBe(true);
-  // The list is a sheet over the bottom of the screen; choosing a thread in it closes it, so that the card is not covered.
+  // The list is a panel at the right edge, over the page, the page's whole height under the bars, and no wider than 320 px;
+  // choosing a thread in it closes it, so that the card is not covered.
   await showList(page);
   const list = (await panel(page).boundingBox())!;
-  expect(list.x).toBeGreaterThanOrEqual(0);
-  expect(list.x + list.width).toBeLessThanOrEqual(390);
-  expect(list.y + list.height).toBeGreaterThan(780);
+  const area = (await page.locator('.pd-desk').boundingBox())!;
+  expect(Math.round(list.x + list.width)).toBe(Math.round(area.x + area.width));
+  expect(list.width).toBeLessThanOrEqual(320);
+  expect(list.width).toBeGreaterThan(200);
+  expect(Math.round(list.y)).toBe(Math.round(area.y));
+  expect(Math.round(list.y + list.height)).toBe(Math.round(area.y + area.height));
   expect(await noSideways()).toBe(true);
   await items(page).first().click();
   await expect(panel(page)).toHaveCount(0);
@@ -886,7 +894,7 @@ test('what the comments say is in German in a German portal', async ({ page }) =
   const card = await openThread(page, green.id);
   await expect(card.getByRole('textbox', { name: 'Antworten' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Erledigen', exact: true })).toBeVisible();
-  await expect(card).toContainText('Schreibe @agent in einen Kommentar, damit der Agent ihn beantwortet.');
+  await expect(card.getByRole('textbox', { name: 'Antworten' })).toHaveAttribute('placeholder', 'Antworten… (@agent fragt den Agenten)');
   await expect(page.getByRole('button', { name: 'Kommentieren', exact: true })).toBeDisabled();
   await select(page, 'Ship it on');
   await page.getByRole('button', { name: 'Kommentieren', exact: true }).click();
@@ -1378,8 +1386,8 @@ test('Ctrl+Enter in the Edit box with the words unchanged just closes it: nothin
   expect(store.requests).toEqual([]);
 });
 
-test('the card of a comment is under its passage, above it where there is no room under it, inside the sheet, and follows the passage as the text moves and the page scrolls', async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 800 });
+test('where there is no room beside a passage the card is under it, above it where there is no room under it, inside the page, and follows the passage as the text moves and the page scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 800 });
   const filler = Array.from({ length: 14 }, (_, i) => `Paragraph ${i + 1} of what is between.`).join('\n\n');
   const edge = `${'word '.repeat(15)}right edge words`;
   const store = new Store();
@@ -1418,12 +1426,14 @@ test('the card of a comment is under its passage, above it where there is no roo
   await expect.poll(async () => (await popover(page).boundingBox())!.y + (await popover(page).boundingBox())!.height <= (await rectsOf(page, last.id))[0].top + 1).toBe(true);
   expect(await clearOf(page, last.id)).toBe(true);
   await expect(popover(page)).toHaveAttribute('data-above', 'true');
-  // Scrolled again to where there is room under it: it goes under it again. It follows the passage the whole way.
-  await page.evaluate((id) => document.querySelector(`.pd-editor [data-pd-thread="${id}"]`)!.scrollIntoView({ block: 'start' }), last.id);
-  await expect.poll(async () => (await popover(page).boundingBox())!.y >= Math.max(...(await rectsOf(page, last.id)).map((r) => r.bottom))).toBe(true);
-  await expect(popover(page)).not.toHaveAttribute('data-above', 'true');
+  // It follows the passage as the page is scrolled: moved with it, at the same distance.
+  const apart = async () => (await rectsOf(page, last.id))[0].top - ((await popover(page).boundingBox())!.y + (await popover(page).boundingBox())!.height);
+  const was = await apart();
+  const scrolledBy = await page.evaluate(() => { const s = document.querySelector('.pd-scroll')!; const before = s.scrollTop; s.scrollTop = before - 30; return before - s.scrollTop; });
+  expect(scrolledBy).toBeGreaterThan(0);
+  await expect.poll(async () => Math.abs((await apart()) - was)).toBeLessThan(2);
   // Back at the first: it moved down with the text typed above it.
-  await page.evaluate(() => document.querySelector('.extension-page')!.scrollTo(0, 0));
+  await page.evaluate(() => document.querySelector('.pd-scroll')!.scrollTo(0, 0));
   await openThread(page, first.id);
   expect((await popover(page).boundingBox())!.y).toBeGreaterThan(before - 5);
   expect(spread).toBeGreaterThan(0);
@@ -1521,7 +1531,7 @@ test('every thread is reached with the keyboard: Ctrl+Alt+M at a commented passa
   await mark(page, line.id).click();
   await expect(shown(page)).toHaveAttribute('data-thread', line.id);
   await page.keyboard.press('Tab');
-  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  await expect(shown(page).locator(':focus')).toHaveCount(1);
   // The thread whose passage is gone has no mark to reach: it is a card of the list, with its box and buttons, in the tab order.
   await expect(editorOf(page).locator(`[data-pd-thread="${gone.id}"]`)).toHaveCount(0);
   await barButton(page).focus();
@@ -1561,25 +1571,67 @@ test('the card of an open thread is updated when the agent comments, and keeps w
   expect(box.x + box.width).toBeLessThanOrEqual(sheet.x + sheet.width);
 });
 
-test('with the comments on a document there is nothing under the sheet: the document fills the page to its bottom, with no bar of its own below the text', async ({ page }) => {
+test('the page is the whole area under the toolbar: no box, no frame, no band under it, and a click anywhere under the text puts the caret at its end', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 1200 });
   const store = new Store();
   seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
-  // Not a list under the text, and no margin: the desk is the sheet and the room around it.
+  // Not a list under the text, and no margin.
   await expect(page.locator('.pd-threads, .pd-margin, .pd-thread-card')).toHaveCount(0);
   const m = await page.evaluate(() => {
     const at = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
-    return { doc: at('.pd-doc'), sheet: at('.pd-sheet'), desk: at('.pd-desk'), scroller: at('.extension-page') };
+    const sheet = getComputedStyle(document.querySelector('.pd-sheet')!);
+    const editor = getComputedStyle(document.querySelector('.pd-editor')!);
+    return {
+      doc: at('.pd-doc'), scroll: at('.pd-scroll'), sheet: at('.pd-sheet'), scroller: at('.extension-page'), toolbar: at('.pd-toolbar'),
+      frame: [sheet.borderTopWidth, sheet.borderLeftWidth, sheet.boxShadow, sheet.backgroundColor, editor.borderTopWidth],
+      overflows: (() => { const s = document.querySelector('.extension-page')!; return s.scrollHeight > s.clientHeight + 1; })(),
+    };
   });
-  // The document ends where the page does, and the sheet is followed by the desk's own padding and nothing else.
-  expect(m.doc.bottom).toBeGreaterThanOrEqual(m.scroller.bottom - 1);
-  expect(m.desk.bottom).toBeGreaterThanOrEqual(m.scroller.bottom - 1);
-  expect(await page.evaluate(() => { const s = document.querySelector('.extension-page')!; return s.scrollHeight <= s.clientHeight + 1; })).toBe(true);
-  // What is on the desk under the sheet is the desk's padding alone.
-  expect(await page.evaluate(() => { const row = document.querySelector('.pd-row')!; return [...document.querySelectorAll('.pd-desk > *')].filter((e) => e !== row).length; })).toBe(0);
+  // The page goes from the toolbar to the end of the area, and is the text's ground the whole way, with no frame of its own.
+  expect(Math.round(m.scroll.top)).toBe(Math.round(m.toolbar.bottom));
+  expect(Math.round(m.scroll.bottom)).toBe(Math.round(m.scroller.bottom));
+  expect(Math.round(m.sheet.bottom)).toBe(Math.round(m.scroll.bottom));
+  expect(m.overflows).toBe(false);
+  expect(m.frame).toEqual(['0px', '0px', 'none', 'rgba(0, 0, 0, 0)', '0px']);
+  // A click far under the text, and beside it, goes to the end of the document: what is typed there is its last words.
+  await editorOf(page).getByText('Sign-off is on Monday.').click();
+  await page.keyboard.press('Home');
+  await page.mouse.click(m.scroll.left + 40, m.scroll.bottom - 60);
+  await page.keyboard.type(' End.');
+  await expect(editorOf(page).locator('p').last()).toHaveText('Sign-off is on Monday. End.');
+  await editorOf(page).getByText('Ship it on').click();
+  await page.mouse.click(m.scroll.right - 15, m.scroll.top + 300);
+  await page.keyboard.type(' Again.');
+  await expect(editorOf(page).locator('p').last()).toHaveText('Sign-off is on Monday. End. Again.');
+  // The caret is where it was put: a click in the text itself is not taken for it.
+  await editorOf(page).getByText('Ship it on').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('!');
+  await expect(editorOf(page).locator('p').nth(0)).toContainText('now.!');
+  await expect(editorOf(page).locator('p').last()).toHaveText('Sign-off is on Monday. End. Again.');
 });
 
+test('the list opens at the side, at the right edge, in a wide page (beside the text) and in a narrow one (over it), with Close', async ({ page }) => {
+  const store = new Store();
+  seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  for (const [width, layout] of [[1400, 'wide'], [700, 'narrow']] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', layout);
+    await showList(page);
+    const [list, area, scroll] = await Promise.all([panel(page).boundingBox(), page.locator('.pd-desk').boundingBox(), page.locator('.pd-scroll').boundingBox()]);
+    expect(Math.round(list!.x + list!.width)).toBe(Math.round(area!.x + area!.width));
+    expect(Math.round(list!.y)).toBe(Math.round(area!.y));
+    expect(Math.round(list!.y + list!.height)).toBe(Math.round(area!.y + area!.height));
+    expect(list!.width).toBeLessThanOrEqual(320);
+    // Beside the text it pushes the page narrower; over it, the page keeps all its width.
+    if (layout === 'wide') expect(Math.round(scroll!.x + scroll!.width)).toBe(Math.round(list!.x));
+    else expect(Math.round(scroll!.x + scroll!.width)).toBe(Math.round(area!.x + area!.width));
+    await panel(page).getByRole('button', { name: 'Close' }).click();
+    await expect(panel(page)).toHaveCount(0);
+  }
+});
 
 test('a comment started far down a long document keeps the page where it is, and its card is on screen with the box focused', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -1587,7 +1639,7 @@ test('a comment started far down a long document keeps the page where it is, and
   const store = new Store();
   store.texts.set(3, `# Long\n\n${lines}\n`);
   await open(page, store, { ready: 'P079' });
-  const scrolled = () => page.evaluate(() => document.querySelector('.extension-page')!.scrollTop);
+  const scrolled = () => page.evaluate(() => document.querySelector('.pd-scroll')!.scrollTop);
   for (const line of ['P079 is a line of the long text.', 'P040 is a line of the long text.']) {
     await select(page, line);
     await expect(commentButton(page)).toBeEnabled();
@@ -1763,4 +1815,115 @@ test('a card whose passage goes while a reply is typed in it stays open where it
   await expect(popover(page)).toHaveCount(0);
   await showList(page);
   await expect(cards(page)).toHaveCount(1);
+});
+
+test('on a wide page a card is beside its passage, level with it at the right edge, never over the passage, and falls back to under it where the passage runs into its place; in a narrow page it is under it', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const edge = `${'word '.repeat(30)}the end of a long line`;
+  const store = new Store();
+  store.texts.set(3, `# The plan\n\nThe first point.\n\n${edge}\n\nThe last point.\n`);
+  const first = seeded(store, 'The first point.', 'One.');
+  const long = seeded(store, edge, 'Long.');
+  await open(page, store, { ready: 'The last point.' });
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  await openThread(page, first.id);
+  await expect(popover(page)).toHaveAttribute('data-side', 'true');
+  let box = (await popover(page).boundingBox())!;
+  expect(Math.round(sheet.x + sheet.width - (box.x + box.width))).toBeLessThanOrEqual(16);
+  expect(Math.abs(box.y - (await rectsOf(page, first.id))[0].top)).toBeLessThan(8);
+  expect(await clearOf(page, first.id)).toBe(true);
+  // A passage that runs on under the card's place: the card goes under it instead, and the words are still not covered.
+  await openThread(page, long.id);
+  await expect(popover(page)).not.toHaveAttribute('data-side', 'true');
+  box = (await popover(page).boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(Math.max(...(await rectsOf(page, long.id)).map((r) => r.bottom)));
+  expect(await clearOf(page, long.id)).toBe(true);
+  // In a narrow page there is no room beside it.
+  await page.setViewportSize({ width: 800, height: 900 });
+  await openThread(page, first.id);
+  await expect(popover(page)).not.toHaveAttribute('data-side', 'true');
+  box = (await popover(page).boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(Math.max(...(await rectsOf(page, first.id)).map((r) => r.bottom)));
+});
+
+test('a marker in the right margin, level with the line of each commented passage, shows how many comments the thread has and opens its card; it is a button, stacks with others on the same line, follows the text, and hides while its card is open', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const store = new Store();
+  const friday = seeded(store, '**Friday**', 'Why Friday?');
+  store.comment(friday.id, 'It is the release day.', 'agent');
+  store.comment(friday.id, 'Ok.');
+  const green = seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  await expectMarked(page, green.id, 'The build is green.');
+  const markers = page.locator('.pd-marker');
+  await expect(markers).toHaveCount(2);
+  // A real button with a name that says what it is on and how many comments there are.
+  const fridayMarker = page.getByRole('button', { name: 'Comments on “Friday”: 3' });
+  const greenMarker = page.getByRole('button', { name: 'Comments on “The build is green.”: 1' });
+  await expect(fridayMarker).toContainText('3');
+  // In the margin to the right of the text column, level with the line of the passage (a thread is on a line of it).
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const text = (await editorOf(page).boundingBox())!;
+  const at = (await greenMarker.boundingBox())!;
+  expect(at.x).toBeGreaterThanOrEqual(text.x + text.width);
+  expect(at.x + at.width).toBeLessThanOrEqual(sheet.x + sheet.width);
+  // (Measured again until it is steady: the line may still be moving into its place.)
+  await expect.poll(async () => {
+    const [m, rects] = [(await greenMarker.boundingBox())!, await rectsOf(page, green.id)];
+    return Math.abs(m.y + m.height / 2 - (rects[0].top + rects[0].bottom) / 2);
+  }).toBeLessThan(3);
+  // A click opens its card beside the passage (as a click on the words does), and the marker is gone while it is open.
+  await greenMarker.click();
+  await expect(shown(page)).toHaveAttribute('data-thread', green.id);
+  await expect(popover(page)).toHaveAttribute('data-side', 'true');
+  await expect(greenMarker).toHaveCount(0);
+  await expect(markers).toHaveCount(1);
+  await closeCard(page);
+  await expect(greenMarker).toBeVisible();
+  // With the keyboard: Enter on it opens the card with the focus in its box.
+  await greenMarker.focus();
+  await page.keyboard.press('Enter');
+  await expect(shown(page)).toHaveAttribute('data-thread', green.id);
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  await closeCard(page);
+  // The marker goes down with its passage when text is typed above it.
+  const before = (await greenMarker.boundingBox())!.y;
+  await editorOf(page).getByRole('heading').click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('A new paragraph that is above.');
+  await expect.poll(async () => (await greenMarker.boundingBox())!.y - before).toBeGreaterThan(20);
+  await expect.poll(async () => {
+    const [m, rects] = [(await greenMarker.boundingBox())!, await rectsOf(page, green.id)];
+    return Math.abs(m.y + m.height / 2 - (rects[0].top + rects[0].bottom) / 2);
+  }).toBeLessThan(3);
+  // A resolved thread has none.
+  await openThread(page, friday.id);
+  await shown(page).getByRole('button', { name: 'Resolve', exact: true }).click();
+  await expect(markers).toHaveCount(1);
+});
+
+test('threads on one line have a marker each, one under the other, not over each other', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const store = new Store();
+  seeded(store, 'Ship it on', 'Ship what?');
+  seeded(store, '**Friday**', 'Why Friday?');
+  seeded(store, 'now.', 'Now?');
+  await open(page, store);
+  const markers = page.locator('.pd-marker');
+  await expect(markers).toHaveCount(3);
+  const boxes = (await markers.evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left }; }))).sort((a, b) => a.top - b.top);
+  for (let i = 1; i < boxes.length; i++) expect(boxes[i].top).toBeGreaterThanOrEqual(boxes[i - 1].bottom);
+  // All in the same column of the margin.
+  expect(new Set(boxes.map((b) => Math.round(b.left))).size).toBe(1);
+});
+
+test('in a narrow page, where there is no margin, there are no markers: the highlighted words open the card', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 900 });
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  await expectMarked(page, green.id, 'The build is green.');
+  await expect(page.locator('.pd-marker')).toHaveCount(0);
+  await openThread(page, green.id);
 });
