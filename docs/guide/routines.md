@@ -145,14 +145,19 @@ browser was last set for the routine. Every page a run opens is recorded in [Aud
 
 ## Letting the agent manage them
 
-Sessions reached through a channel get `routines_list`, `routine_create`,
-`routine_update` and `routine_run`, so "remind me every morning to check the
-backups" writes the routine instead of telling you where the button is. They are
-for you: a routine runs as you, so a colleague or a guest cannot make, change or
-run one through the agent, whatever is [allowed](/people/rules) for them.
+Your conversations with an agent get `routines_list`, `routine_create`,
+`routine_update` and `routine_run`: a chat started with **+** or **New** in an
+agent's home, a chat on the Agents page, and a conversation that came through a
+channel. So "remind me every morning to check the backups" writes the routine
+instead of telling you where the button is. They are for you: a routine runs as
+you, so a colleague or a guest cannot make, change or run one through the agent,
+whatever is [allowed](/people/rules) for them. A routine made from a chat in the
+portal reports to the portal-wide default (see [Reporting back](#reporting-back)),
+as such a chat has no channel to answer on.
 
-Task sessions do not get them — a session working inside your repository has no
-business rescheduling anything. Neither does a routine run: a routine that can
+A chat working in a project or any other folder that is not an agent's home does
+not get them — a session working inside your repository has no business
+rescheduling anything. Neither does a routine run: a routine that can
 create routines can build a chain with nobody watching it.
 
 There is no delete tool. Disabling stops a routine firing and leaves it visible,

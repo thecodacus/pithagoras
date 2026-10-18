@@ -22,9 +22,10 @@ import { insertRoutine, readTiming, timingSets } from "../routines/store.js";
  * chat — the agent writes the routine itself instead of telling you where the
  * button is.
  *
- * Only registered for sessions reached through a channel. A task session
- * working in some repository has no business touching the schedule, and a
- * routine run does not get them either: a routine able to create routines can
+ * Only registered for conversations with the agent: through a channel, on the
+ * Agent page, or a chat in an agent's home. A task session working in some
+ * repository has no business touching the schedule, and a routine run does not
+ * get them either: a routine able to create routines can
  * form a chain with nobody watching it.
  *
  * There is no delete. Disabling stops a routine firing and leaves it visible,

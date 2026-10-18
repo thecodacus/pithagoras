@@ -20,7 +20,7 @@ export interface LaunchOptions {
   thinkingLevel?: string;
   /** A previous run's pi session file, reopened so the conversation continues. */
   sessionFile?: string;
-  /** Give this session the routine tools. Channel sessions only. */
+  /** Give this session the routine tools: conversations with the agent, not a routine run or a task in a repository. */
   routineTools?: boolean;
   /** Give this session the ask_question tool. Chats a person talks to in the portal's pages only. */
   questions?: boolean;
