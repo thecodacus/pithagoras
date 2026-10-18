@@ -929,6 +929,11 @@ function entryAt(base: string, rel: unknown, verb: "removed" | "renamed", option
   return target;
 }
 
+/** The folder an entry is in, held for what is done to the entry (see holdFolder), with the options all four calls on an entry take. */
+function holdEntryFolder(base: string, dir: string, options: OpenOptions): Held {
+  return holdFolder(base, dir, { likeParent: options.likeParent });
+}
+
 /**
  * `name` in the held folder, looked at without following a link in its last place: what it is, or undefined when it is not
  * there. Read from the descriptor of the folder, so that it is a name in that folder and no other, and by `lstat`, which opens
@@ -997,7 +1002,7 @@ export async function removeEntry(base: string, rel: unknown, discard = false, o
     const unsaved = await unsavedIn(base, target);
     if (unsaved && holdsWork(unsaved)) throw new FileError("unsaved", unsavedRefusal(unsaved).error, unsaved);
   }
-  const held = holdFolder(base, path.dirname(target), { likeParent: options.likeParent });
+  const held = holdEntryFolder(base, path.dirname(target), options);
   const name = path.basename(target);
   try {
     if (!held.pinned) {
@@ -1049,7 +1054,7 @@ export async function removeEntry(base: string, rel: unknown, discard = false, o
  */
 export function removeFile(base: string, rel: unknown, options: OpenOptions = {}): void {
   const target = entryAt(base, rel, "removed", options);
-  const held = holdFolder(base, path.dirname(target), { likeParent: options.likeParent });
+  const held = holdEntryFolder(base, path.dirname(target), options);
   try {
     const name = path.basename(target);
     plainIn(held, name, options.alone);
@@ -1142,7 +1147,7 @@ function renameNamed(base: string, rel: unknown, newName: unknown, options: Open
   const name = checkName(newName);
   const from = entryAt(base, rel, "renamed", options);
   const parent = path.dirname(from);
-  const held = holdFolder(base, parent, { likeParent: options.likeParent });
+  const held = holdEntryFolder(base, parent, options);
   try {
     const old = path.basename(from);
     let seen: BigIntStats | undefined;
