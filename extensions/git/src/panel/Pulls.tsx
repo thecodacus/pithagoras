@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { LuCircleCheck, LuCircleDot, LuCircleX, LuExternalLink, LuGitCompareArrows, LuGitMerge, LuGitPullRequest, LuLoader } from "react-icons/lu";
-import { Markdown } from "../portal";
-import { Select } from "../portal";
+import { Markdown, Select, confirmDialog, TextButton, when, labelOf, msg, t, tc, tp, tx } from "../portal";
 import { webLink } from "../helpers";
 import { gitApi, type Check, type Comparison, type PullDetail, type PullSummary } from "../git-api";
 import { parseDiff, type DiffFile } from "../git-diff";
-import { confirmDialog } from "../portal";
-import { Counts, ErrorNote, Quiet, SectionHead, TextButton } from "./bits";
+import { Counts, ErrorNote, Quiet, SectionHead } from "./bits";
 import { ChangeList } from "./History";
 import { useGit } from "./context";
 import { useGitDraft } from "./draft";
-import { when } from "../portal";
-import { labelOf, msg, t, tc, tp, tx } from "../portal";
 
 
 /** Where a pull request is: open, draft, merged or closed. */

@@ -67,3 +67,13 @@ export const when = (iso: string): string => portal.format.since(iso);
 export const below = (dir: string, where: string) => portal.chats.files.below(dir, where);
 /** Enter that means "done", not Enter that picks a word with an input method. */
 export const isEnter: Ui["isEnter"] = (e) => portal.ui.isEnter(e);
+
+// The portal's small buttons, drawn as components of the extension's.
+export function IconButton(props: ComponentProps<Ui["IconButton"]>) {
+  const Own = portal.ui.IconButton;
+  return <Own {...props} />;
+}
+export function TextButton(props: ComponentProps<Ui["TextButton"]>) {
+  const Own = portal.ui.TextButton;
+  return <Own {...props} />;
+}

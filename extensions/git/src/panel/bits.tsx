@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { LuCircleAlert } from "react-icons/lu";
-import { msg, t } from "../portal";
-import { sinceThen } from "../portal";
+import { msg, t, sinceThen } from "../portal";
 
 /** "5m ago", from seconds since the epoch. */
 export const ago = (seconds: number): string => sinceThen(seconds * 1000, { dateAfterDays: 60 });
@@ -53,77 +52,6 @@ export function Counts({ added, removed, binary }: { added: number; removed: num
       {added > 0 && removed > 0 && " "}
       {removed > 0 && <span className="text-danger">−{removed}</span>}
     </span>
-  );
-}
-
-/** A small button with an icon, named for what it does. */
-export function IconButton({
-  label,
-  onClick,
-  children,
-  disabled,
-  danger,
-  className = "",
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-  disabled?: boolean;
-  danger?: boolean;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      className={`shrink-0 rounded p-1 text-fg-faint transition disabled:opacity-40 ${
-        danger ? "hover:bg-danger/10 hover:text-danger" : "hover:bg-fg/10 hover:text-fg"
-      } ${className}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** A labelled text button for the bars. */
-export function TextButton({
-  onClick,
-  children,
-  disabled,
-  title,
-  primary,
-  danger,
-  type = "button",
-}: {
-  onClick?: () => void;
-  children: ReactNode;
-  disabled?: boolean;
-  title?: string;
-  primary?: boolean;
-  danger?: boolean;
-  type?: "button" | "submit";
-}) {
-  const look = primary
-    ? "bg-accent/12 text-accent ring-1 ring-inset ring-accent/25 hover:bg-accent/20"
-    : danger
-      ? "text-danger ring-1 ring-inset ring-danger/25 hover:bg-danger/10"
-      : "text-fg-subtle ring-1 ring-inset ring-line hover:bg-fg/5 hover:text-fg";
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition disabled:opacity-40 ${look}`}
-    >
-      {children}
-    </button>
   );
 }
 

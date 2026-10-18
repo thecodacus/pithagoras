@@ -4,14 +4,11 @@ import { gitApi, type GhState, type GitState, type RepoChoice } from "../git-api
 import { Branches } from "./Branches";
 import { Changes } from "./Changes";
 import { Ctx, useGit, type Busy, type GitCtx, type View } from "./context";
-import { ErrorNote, Quiet, TextButton } from "./bits";
+import { ErrorNote, Quiet } from "./bits";
+import { TextButton, Select, local, labelOf, msg, t, tp, useLanguage, below } from "../portal";
 import { History } from "./History";
 import { Pulls } from "./Pulls";
 import { ViewHost } from "./views";
-import { Select } from "../portal";
-import { local } from "../portal";
-import { labelOf, msg, t, tp, useLanguage } from "../portal";
-import { below } from "../portal";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
 export const GIT_TABS: { id: GitTab; label: string }[] = [

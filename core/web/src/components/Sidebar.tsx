@@ -1,9 +1,9 @@
-import { memo, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { SessionActions, sessionError } from "./SessionActions";
 import { TitleInput } from "./TitleInput";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { StatusDot, workingText } from "./StatusDot";
+import { Menu } from "./Menu";
 import { ChatsHeading, FolderTree } from "./FolderTree";
 import {
   LuBot,
@@ -26,8 +26,7 @@ import type { Session } from "../api";
 import { local } from "../safe-storage";
 import { filterSessions } from "../session-filter";
 import { isEscape } from "../shortcuts";
-import { pick, useFlip, useLeaveRef } from "../motion";
-import { useDismiss } from "../use-dismiss";
+import { pick, useFlip } from "../motion";
 import { HOME, folderKeys, hasMoreThanHome, folderName, folderNameOf, groupByFolder, sortFolders, type Places } from "../session-folders";
 import { useFolderPrefs, useOpenFolders } from "../use-session-folders";
 import { t, useLanguage } from "../i18n";
@@ -504,12 +503,7 @@ function ExtensionsGroup({ pages, view, onNavigate }: { pages: { to: Destination
   );
 }
 
-/**
- * A button on the rail that opens a menu beside it, for what does not fit on
- * the rail as one button each: arrows move through it, Enter picks, Escape
- * shuts it and gives the focus back to the button. Drawn at the body, as the
- * Select's list is, because the sidebar clips what leaves it.
- */
+/** A button on the rail that opens a menu beside it, for what does not fit on the rail as one button each (see Menu). */
 function RailMenu({
   icon,
   label,
@@ -524,122 +518,15 @@ function RailMenu({
   current: string | null;
   onPick: (to: Destination) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [place, setPlace] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  const menuRef = useLeaveRef<HTMLDivElement>("menu", menu);
-  const menuId = useId();
-  useDismiss(open, [menu, button], () => setOpen(false), button);
-
-  const show = () => {
-    const b = button.current?.getBoundingClientRect();
-    if (!b) return;
-    // Beside the button, level with it, and hung from its bottom edge instead where the window ends too soon below.
-    const below = window.innerHeight - b.top - 8;
-    const flip = below < 220 && b.bottom > below;
-    setPlace({ left: b.right + 8, ...(flip ? { bottom: window.innerHeight - b.bottom } : { top: b.top }), maxHeight: Math.max(120, flip ? b.bottom - 8 : below) });
-    setOpen(true);
-  };
-  /** Which entry had the focus last: where it goes if that entry is unlisted. */
-  const lastAt = useRef(0);
-  const entries = () => Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
-  // The page showing is where the arrows start, if it is one of these.
-  useEffect(() => {
-    if (!open) return;
-    const at = Math.max(0, items.findIndex((d) => d.to === current));
-    entries()[at]?.focus();
-  }, [open]);
-  // An entry unlisted under the focus takes it along to body, where the arrows are not heard: it goes to the one
-  // now in its place, or to the button if none is left.
-  const listed = items.map((d) => d.to).join("\n");
-  useEffect(() => {
-    if (!open || menu.current?.contains(document.activeElement)) return;
-    if (document.activeElement && document.activeElement !== document.body) return;
-    const all = entries();
-    if (all.length) all[Math.min(lastAt.current, all.length - 1)].focus();
-    else {
-      setOpen(false);
-      button.current?.focus();
-    }
-  }, [listed]);
-
-  const onMenuKey = (e: KeyboardEvent) => {
-    const all = entries();
-    const at = all.indexOf(document.activeElement as HTMLElement);
-    const go = (to: number) => {
-      e.preventDefault();
-      all[(to + all.length) % all.length]?.focus();
-    };
-    if (e.key === "ArrowDown") go(at + 1);
-    else if (e.key === "ArrowUp") go(at < 0 ? -1 : at - 1);
-    else if (e.key === "Home") go(0);
-    else if (e.key === "End") go(-1);
-    // Away from the menu with the keys is away from it, and on from where the button is, not from the end of the page
-    // the menu is drawn at: the focus goes to the button before the Tab is carried out.
-    else if (e.key === "Tab") {
-      button.current?.focus();
-      setOpen(false);
-    }
-  };
-
   return (
-    <>
-      <button
-        ref={button}
-        type="button"
-        title={label}
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        aria-current={current ? "page" : undefined}
-        onClick={() => (open ? setOpen(false) : show())}
-        onKeyDown={(e) => {
-          if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-            e.preventDefault();
-            show();
-          }
-        }}
-        className="sidebar-rail-button"
-      >
-        {icon}
-      </button>
-      {open &&
-        place &&
-        createPortal(
-          <div
-            ref={menuRef}
-            id={menuId}
-            role="menu"
-            aria-label={label}
-            onKeyDown={onMenuKey}
-            onFocus={(e) => (lastAt.current = Math.max(0, entries().indexOf(e.target as HTMLElement)))}
-            className={`ui-select-list ${place.bottom !== undefined ? "is-above" : ""}`}
-            style={{ left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxHeight, minWidth: 180 }}
-          >
-            {items.map((d) => (
-              <button
-                key={d.to}
-                type="button"
-                role="menuitem"
-                tabIndex={-1}
-                aria-current={d.to === current ? "page" : undefined}
-                onClick={() => {
-                  setOpen(false);
-                  button.current?.focus();
-                  onPick(d.to);
-                }}
-                className="ui-select-option w-full text-left hover:bg-fg/5 hover:text-fg focus:bg-fg/[0.07] focus:text-fg"
-              >
-                <span className={`shrink-0 ${d.to === current ? "text-accent" : "text-fg-faint"}`}>{d.icon}</span>
-                <span className="min-w-0 flex-1 truncate">{d.label}</span>
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )}
-    </>
+    <Menu
+      label={label}
+      placement="beside"
+      className="sidebar-rail-button"
+      items={items.map((d) => ({ key: d.to, icon: d.icon, label: d.label, current: d.to === current, onSelect: () => onPick(d.to) }))}
+    >
+      {icon}
+    </Menu>
   );
 }
 

@@ -308,6 +308,21 @@ export interface ConfirmOptions {
   deletes?: boolean;
 }
 
+/** One choice of a `ui.Menu`. */
+export interface MenuItem {
+  /** Tells the choices apart. */
+  key: string;
+  label: string;
+  icon?: ReactNode;
+  /** What a button does when it is chosen. */
+  onSelect?: () => void;
+  /** Makes the choice a link; with `download`, it saves what it leads to (under that name, "" for the name it has). */
+  href?: string;
+  download?: string;
+  /** For a menu that goes between pages: the one showing is marked, and the arrows start there. */
+  current?: boolean;
+}
+
 export interface SelectOption<T> {
   value: T;
   label: ReactNode;
@@ -386,6 +401,23 @@ export interface Ui {
     size?: "sm" | "cell" | "md";
     className?: string;
   }): ReactNode;
+  /**
+   * A button that opens a list of choices, drawn over the page: arrows move through it, Enter picks, Escape shuts it and gives the
+   * focus back. `children` is what the button holds and `className` styles it; the list opens under it (`below`, above where there is
+   * no room) or beside it (`beside`). A choice is a button (`onSelect`) or a link (`href`, with `download` to save the target).
+   */
+  Menu: ComponentType<{
+    label: string;
+    children: ReactNode;
+    items: MenuItem[];
+    className?: string;
+    disabled?: boolean;
+    placement?: "below" | "beside";
+  }>;
+  /** A small button with an icon in it, named by `label` (its hover text and its name for a screen reader). `onClick` does not reach the row it is in. */
+  IconButton: ComponentType<{ label: string; onClick: () => void; children: ReactNode; disabled?: boolean; danger?: boolean; className?: string }>;
+  /** A labelled button for a bar of small controls: plain, `primary` for the one that does the job, `danger` for one that destroys. */
+  TextButton: ComponentType<{ onClick?: () => void; children: ReactNode; disabled?: boolean; title?: string; primary?: boolean; danger?: boolean; type?: "button" | "submit" }>;
   RowsSkeleton: ComponentType<{ rows?: number; label?: string }>;
   SkeletonGroup: ComponentType<{ label: string; className?: string; children: ReactNode }>;
   /** Draws `fallback` in place of what it holds when that fails to draw, until `resetKey` changes. */

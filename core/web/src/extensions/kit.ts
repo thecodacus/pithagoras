@@ -9,6 +9,8 @@ import {
   CollapsibleSection, Empty, ErrorBanner, Field, LoadFailed, Section, Segments, Switch, SwitchRow, WarnBanner,
   btnCls, codeAreaCls, ghostCls, inputCls, inputSmCls, primaryCls, primarySmCls,
 } from "../components/SettingsUi";
+import { IconButton, TextButton } from "../components/Buttons";
+import { Menu } from "../components/Menu";
 import { RowsSkeleton, SkeletonGroup } from "../components/Skeleton";
 import { StatusDot } from "../components/StatusDot";
 import { lazyComponent } from "../lazy";
@@ -46,6 +48,9 @@ export const ui: Ui = {
   Switch,
   SwitchRow,
   Segments,
+  Menu,
+  IconButton,
+  TextButton,
   RowsSkeleton,
   SkeletonGroup,
   ErrorBoundary,

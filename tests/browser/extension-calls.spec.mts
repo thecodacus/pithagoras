@@ -242,6 +242,7 @@ test('what the portal has for a path, a time, a size and a key is offered, in pl
       bytes: [format.bytes(10), format.bytes(1536), format.bytes(5 * 1024 ** 2)],
       since: [format.since(Date.now() - 5 * 60_000), format.since(new Date(Date.now() - 3 * 3_600_000)), format.since('2000-01-01 00:00:00', { dateAfterDays: 7 }).includes('ago')],
       keys: [ui.isEnter({ key: 'Enter' }), ui.isEnter({ key: 'Enter', isComposing: true }), ui.isEnter({ key: 'Enter', keyCode: 229 }), ui.isEscape({ key: 'Escape' }), ui.isEscape({ key: 'Escape', nativeEvent: { isComposing: true } })],
+      parts: ['Menu', 'IconButton', 'TextButton'].map((name) => typeof ui[name]),
     };
   });
   expect(got).toEqual({
@@ -254,5 +255,6 @@ test('what the portal has for a path, a time, a size and a key is offered, in pl
     bytes: ['10 B', '1.5 KB', '5.0 MB'],
     since: ['5m ago', '3h ago', false],
     keys: [true, false, false, true, false],
+    parts: ['function', 'function', 'function'],
   });
 });

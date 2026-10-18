@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { LuArchive, LuArchiveRestore, LuExternalLink, LuMinus, LuPlus, LuTrash2, LuUndo2 } from "react-icons/lu";
 import { gitApi, type ChangedFile, type Stash } from "../git-api";
-import { isEnter } from "../portal";
-import { confirmDialog } from "../portal";
-import { ago, Counts, ErrorNote, IconButton, Letter, LETTER_NAME, Quiet, SectionHead, splitPath, TextButton } from "./bits";
+import { isEnter, confirmDialog, IconButton, TextButton, msg, t, tp } from "../portal";
+import { ago, Counts, ErrorNote, Letter, LETTER_NAME, Quiet, SectionHead, splitPath } from "./bits";
 import { useGit } from "./context";
 import { useGitDraft } from "./draft";
-import { msg, t, tp } from "../portal";
 
 type Side = "staged" | "unstaged" | "conflict";
 
