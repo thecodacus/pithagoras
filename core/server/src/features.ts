@@ -38,10 +38,22 @@ function packageName(dir: string): string | undefined {
   }
 }
 
+/** Whether pi takes a package source for a folder: the ones it knows by a prefix are not (its isLocalPath). */
+export const isLocalSource = (source: string): boolean => !/^(npm|git|github|https?|ssh|builtin):/.test(source.trim());
+
 /** A package pi lists by its folder, as a full path: relative to pi's own folder, `~` for home. */
 export function localPackagePath(source: string, agentDir = piAgentDir()): string {
   return path.resolve(agentDir, source.replace(/^~(?=\/)/, process.env.HOME ?? "~"));
 }
+
+/**
+ * A package source as `pi remove` takes it back. pi writes a folder into its
+ * settings relative to its own folder, but reads the one it is given relative
+ * to where it runs (1.1.0, DefaultPackageManager), so the entry as it stands
+ * there matches only from a folder just as deep. A full path matches always.
+ */
+export const piPackageArg = (source: string, agentDir = piAgentDir()): string =>
+  isLocalSource(source) ? localPackagePath(source, agentDir) : source;
 
 /**
  * Where pi's packages list has the subagent tool: the bundled folder, or any
@@ -57,7 +69,7 @@ export function findSubagent(
 ): { source: string; enabled: boolean } | undefined {
   for (const entry of packages) {
     const source = sourceOf(entry);
-    if (!source || /^(npm|git|https?):/.test(source)) continue;
+    if (!source || !isLocalSource(source)) continue;
     const dir = localPackagePath(source, agentDir);
     if ((bundled && real(dir) === real(bundled)) || nameOf(dir) === SUBAGENT_PACKAGE) {
       return { source, enabled: !isSwitchedOff(entry) };

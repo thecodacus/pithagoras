@@ -6,7 +6,7 @@ import {
   UNDERSTORY_TOKEN_ENV,
   bundledSubagentDir,
   isModelChoice,
-  localPackagePath,
+  piPackageArg,
   subagentModelOf,
   subagentState,
   understoryDefaultUrl,
@@ -233,10 +233,7 @@ export function featuresRouter(): Router {
         }
       }
       if (enabled === false && state.source) {
-        // A folder as pi's settings name it is relative to its folder; handed
-        // to `pi remove` as it is, pi reads it from where the portal runs.
-        const local = !/^(npm|git|https?):/.test(state.source);
-        await pi(["remove", local ? localPackagePath(state.source) : state.source]);
+        await pi(["remove", piPackageArg(state.source)]);
         await packageRemoved(state.source);
       }
       // A package installed, removed or switched: its server half follows, where it has one.
