@@ -71,6 +71,81 @@ function forked() {
   return dir;
 }
 
+test("what changed: staged and not, new files, renames and names with spaces, with their line counts", async () => {
+  const dir = repo();
+  writeFileSync(path.join(dir, "a.txt"), "one\n2\nthree\nfour\n");
+  sh(dir, "mv", "b c.txt", "d e.txt");
+  writeFileSync(path.join(dir, "new file.md"), "hello\n");
+  writeFileSync(path.join(dir, "staged.txt"), "x\n");
+  sh(dir, "add", "staged.txt");
+
+  const s = await g.status(await open(dir));
+  assert.equal(s.branch, "main");
+  assert.equal(s.operation, null);
+  const by = Object.fromEntries(s.files.map((f) => [f.path, f]));
+  assert.deepEqual({ x: by["a.txt"].x, y: by["a.txt"].y, unstaged: by["a.txt"].unstaged }, { x: ".", y: "M", unstaged: { added: 2, removed: 1, binary: false } });
+  assert.equal(by["d e.txt"].kind, "renamed");
+  assert.equal(by["d e.txt"].from, "b c.txt");
+  assert.equal(by["new file.md"].kind, "untracked");
+  assert.deepEqual(by["staged.txt"].staged, { added: 1, removed: 0, binary: false });
+});
+
+test("a status too long to read whole is cut, says so, keeps what is changed, and lists no half of a file", async () => {
+  const dir = repo();
+  writeFileSync(path.join(dir, "a.txt"), "one\nTWO\nthree\n");
+  // Paths of 750 characters: fewer files than are ever listed, and more than a refresh should read.
+  const deep = path.join(dir, "d".repeat(250), "e".repeat(250));
+  mkdirSync(deep, { recursive: true });
+  const made = new Set();
+  for (let i = 0; i < 1500; i++) {
+    const name = `${"f".repeat(240)}${String(i).padStart(10, "0")}`;
+    writeFileSync(path.join(deep, name), "");
+    made.add(path.relative(dir, path.join(deep, name)));
+  }
+  const s = await g.status(await open(dir));
+  assert.equal(s.truncated, true);
+  assert.ok(s.files.length < 1500, `read ${s.files.length}`);
+  // What is changed comes first and is still there, with its counts; every untracked file is a whole one.
+  assert.deepEqual(s.files[0].unstaged, { added: 1, removed: 1, binary: false });
+  assert.equal(s.files.filter((f) => f.kind === "untracked").every((f) => made.has(f.path)), true);
+  // A repository that fits is not said to be cut.
+  const small = repo();
+  writeFileSync(path.join(small, "new.txt"), "x\n");
+  assert.equal((await g.status(await open(small))).truncated, false);
+});
+
+test("a remote is shown without the login its URL may carry", () => {
+  assert.deepEqual(g.describeRemote("https://me:ghp_secret@github.com/me/demo.git"), { address: "github.com/me/demo", web: "https://github.com/me/demo" });
+  assert.deepEqual(g.describeRemote("git@github.com:me/demo.git"), { address: "github.com:me/demo", web: "https://github.com/me/demo" });
+  assert.deepEqual(g.describeRemote("ssh://git@gitlab.example.com:2222/a/b.git"), { address: "gitlab.example.com:2222/a/b", web: "https://gitlab.example.com/a/b" });
+  assert.equal(g.describeRemote("/srv/git/demo.git").web, undefined);
+});
+
+test("a refresh reads what to turn off once, not before every command", async () => {
+  const dir = repo();
+  // A git that writes down how it was called, first on the PATH.
+  const logged = path.join(home, `calls${n}`);
+  const wrap = path.join(home, `wrap${n}`);
+  mkdirSync(wrap);
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(path.join(wrap, "git"), `#!/bin/sh\necho "$*" >> ${logged}\nexec ${real} "$@"\n`);
+  chmodSync(path.join(wrap, "git"), 0o755);
+  const saved = process.env.PATH;
+  process.env.PATH = `${wrap}:${saved}`;
+  try {
+    const r = await open(dir);
+    const looked = () => readFileSync(logged, "utf8").split("\n").filter((c) => c.includes("--get-regexp ^filter")).length;
+    await g.status(r);
+    // One look for the handle that found the repository and one for the repository's own, not one before each of the commands of a refresh.
+    const first = looked();
+    assert.equal(first, 2, readFileSync(logged, "utf8"));
+    await g.status(r);
+    assert.equal(looked(), first, "a second refresh of the same repository asks again for nothing");
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
 test("diffs of one file: in the tree, in the index, and a new one — and nothing outside what changed", async () => {
   const dir = repo();
   const r = await open(dir);

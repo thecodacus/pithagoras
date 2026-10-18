@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { lstat, readdir, readFile, stat } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
+import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 import { insideReal, isUnderText, realPath } from "./within.js";
 
@@ -26,9 +26,6 @@ export class GitError extends Error {
     super(message);
   }
 }
-
-/** More changed files than this are cut off, and the page says so. */
-export const MAX_FILES = 2000;
 
 /** Reading: seconds. Talking to a remote, or a commit's hooks: minutes. */
 const QUICK_MS = 20_000;
@@ -270,12 +267,6 @@ export async function findRepo(folder: string): Promise<Repo | null> {
 /** A repository the panel can show: where it is, as a path from the chat's folder ("" for the one around it). */
 // --- what changed -------------------------------------------------------------
 
-export interface Counts {
-  added: number;
-  removed: number;
-  binary: boolean;
-}
-
 export interface ChangedFile {
   path: string;
   /** Where a renamed or copied file came from. */
@@ -284,11 +275,10 @@ export interface ChangedFile {
   x: string;
   y: string;
   kind: "changed" | "renamed" | "conflict" | "untracked";
-  staged?: Counts;
-  unstaged?: Counts;
 }
 
-export interface Status {
+/** What `git status --porcelain=v2 --branch` says (see parseStatus). */
+export interface ParsedStatus {
   branch: string | null;
   /** The commit checked out, null before the first. */
   head: string | null;
@@ -296,17 +286,13 @@ export interface Status {
   ahead: number;
   behind: number;
   stashes: number;
-  /** A merge, rebase, cherry-pick or revert that is under way and waiting. */
-  operation: "merge" | "rebase" | "am" | "cherry-pick" | "revert" | null;
   files: ChangedFile[];
-  truncated: boolean;
-  remotes: Remote[];
 }
 
 /** `git status --porcelain=v2 -z --branch`, read. */
-export function parseStatus(raw: string): Omit<Status, "operation" | "remotes" | "truncated"> & { truncated?: boolean } {
+export function parseStatus(raw: string): ParsedStatus {
   const parts = raw.split("\0");
-  const status: Omit<Status, "operation" | "remotes" | "truncated"> = {
+  const status: ParsedStatus = {
     branch: null,
     head: null,
     upstream: null,
@@ -351,72 +337,6 @@ export function parseStatus(raw: string): Omit<Status, "operation" | "remotes" |
     }
   }
   return status;
-}
-
-/** `git diff --numstat -z`, by the path each file ends up at. */
-export function parseNumstat(raw: string): Map<string, Counts> {
-  const counts = new Map<string, Counts>();
-  const parts = raw.split("\0");
-  for (let i = 0; i < parts.length; i++) {
-    const entry = parts[i];
-    if (!entry) continue;
-    const m = /^(-|\d+)\t(-|\d+)\t(.*)$/s.exec(entry);
-    if (!m) continue;
-    let file = m[3];
-    // A rename: the counts, then the old and the new name as fields of their own.
-    if (!file) {
-      i++;
-      file = parts[++i];
-    }
-    counts.set(file, { added: m[1] === "-" ? 0 : Number(m[1]), removed: m[2] === "-" ? 0 : Number(m[2]), binary: m[1] === "-" });
-  }
-  return counts;
-}
-
-function operationIn(gitDir: string): Status["operation"] {
-  if (existsSync(path.join(gitDir, "rebase-merge"))) return "rebase";
-  // `git am` keeps its patches where `git rebase --apply` does, and says so with "applying".
-  if (existsSync(path.join(gitDir, "rebase-apply"))) return existsSync(path.join(gitDir, "rebase-apply", "applying")) ? "am" : "rebase";
-  if (existsSync(path.join(gitDir, "MERGE_HEAD"))) return "merge";
-  if (existsSync(path.join(gitDir, "CHERRY_PICK_HEAD"))) return "cherry-pick";
-  if (existsSync(path.join(gitDir, "REVERT_HEAD"))) return "revert";
-  // Several commits picked or reverted, stopped between two of them: only the sequencer is left.
-  if (existsSync(path.join(gitDir, "sequencer"))) {
-    try {
-      const next = readFileSync(path.join(gitDir, "sequencer", "todo"), "utf8").split("\n").find((line) => line.trim() && !line.startsWith("#")) ?? "";
-      return /^(revert|r)\s/.test(next) ? "revert" : "cherry-pick";
-    } catch {
-      return "cherry-pick";
-    }
-  }
-  return null;
-}
-
-/**
- * How much of `git status` is read. What is listed stops at MAX_FILES, and the
- * untracked files come last, so a folder with tens of thousands of them (an
- * unignored node_modules) would otherwise be read whole, and parsed, on every
- * refresh just to be cut down to a list. What is changed is first, and is kept.
- */
-const STATUS_MAX = 1024 * 1024;
-
-export async function status(repo: Repo): Promise<Status> {
-  const [raw, unstaged, staged, remotes] = await Promise.all([
-    git(repo, ["status", "--porcelain=v2", "-z", "--branch", "--show-stash", "--untracked-files=all", "--ignore-submodules=dirty"], { max: STATUS_MAX }),
-    git(repo, ["diff", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
-    git(repo, ["diff", "--cached", "--numstat", "-z", "-M", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty"]),
-    listRemotes(repo),
-  ]);
-  // Cut off, its last entry may be half of one: that is not a file.
-  const parsed = parseStatus(raw.cut ? raw.stdout.slice(0, raw.stdout.lastIndexOf("\0") + 1) : raw.stdout);
-  const inIndex = parseNumstat(staged.stdout);
-  const inTree = parseNumstat(unstaged.stdout);
-  const files = parsed.files.slice(0, MAX_FILES).map((file) => ({
-    ...file,
-    ...(file.x !== "." && file.x !== "?" && inIndex.has(file.path) ? { staged: inIndex.get(file.path) } : {}),
-    ...(file.y !== "." && file.y !== "?" && inTree.has(file.path) ? { unstaged: inTree.get(file.path) } : {}),
-  }));
-  return { ...parsed, files, truncated: raw.cut || parsed.files.length > MAX_FILES, operation: operationIn(repo.gitDir), remotes };
 }
 
 /** What deleting a folder would lose for good: nothing else holds a copy of these. */
@@ -704,36 +624,6 @@ async function repoWork(dir: string, folder: string, counted: Set<string>, tops:
   return { changed, unpushed: heldByHeads + onBranches, stashes: now.stashes };
 }
 
-// --- remotes ------------------------------------------------------------------
-
-export interface Remote {
-  name: string;
-  /** Where it is, with any login taken out: a URL can carry a token. */
-  address: string;
-  /** Its page on the web, where it is on a host that has one. */
-  web?: string;
-}
-
-/**
- * Where a remote is, fit to show: the host and the path, never the user and
- * password an https URL may carry.
- */
-export function describeRemote(url: string): { address: string; web?: string } {
-  const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/)(.+?)(?:\.git)?\/?$/.exec(url);
-  if (scp && !/^[a-z]+:\/\//i.test(url)) return { address: `${scp[1]}:${scp[2]}`, web: `https://${scp[1]}/${scp[2]}` };
-  try {
-    const u = new URL(url);
-    if (u.protocol === "file:") return { address: u.pathname };
-    const where = u.pathname.replace(/\.git\/?$/, "").replace(/\/$/, "");
-    const address = `${u.hostname}${u.port ? `:${u.port}` : ""}${where}`;
-    const web = /^(https?|ssh|git):$/.test(u.protocol) && where.split("/").filter(Boolean).length >= 2 ? `https://${u.hostname}${where}` : undefined;
-    return { address, web };
-  } catch {
-    // A local path.
-    return { address: url };
-  }
-}
-
 /** The remotes of a repository, each by its name and the URL as it is written in the config. */
 async function remoteUrls(repo: Repo): Promise<{ name: string; url: string }[]> {
   const { stdout } = await git(repo, ["config", "--get-regexp", "^remote\\..*\\.url$"], { ok: [1] });
@@ -744,8 +634,4 @@ async function remoteUrls(repo: Repo): Promise<{ name: string; url: string }[]> 
       const [key, ...rest] = line.split(" ");
       return { name: key.replace(/^remote\./, "").replace(/\.url$/, ""), url: rest.join(" ") };
     });
-}
-
-async function listRemotes(repo: Repo): Promise<Remote[]> {
-  return (await remoteUrls(repo)).map(({ name, url }) => ({ name, ...describeRemote(url) }));
 }
