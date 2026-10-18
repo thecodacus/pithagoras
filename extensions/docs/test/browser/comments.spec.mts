@@ -303,10 +303,19 @@ async function open(page: Page, store: Store, { language, ready = 'Ship it on Fr
 }
 
 const editorOf = (page: Page) => page.locator('.pd-editor .ProseMirror');
+/** The list of all the comments, which is only there when the bar's Comments button has opened it. */
 const panel = (page: Page) => page.getByRole('complementary', { name: /Comments|Kommentare/ });
-const cards = (page: Page) => panel(page).locator('.pd-thread-card:not(.pd-compose)');
+/** The threads of the list that are on a passage in the text: a line each, which opens the thread's card on the sheet. */
+const items = (page: Page) => panel(page).locator('.pd-item');
+/** The threads of the list that are a card of their own there: the ones whose passage is gone or cannot be marked, and the resolved ones. */
+const cards = (page: Page) => panel(page).locator('.pd-thread-card');
+/** The card of a comment that floats over the sheet, and the thread (or the comment being written) in it. */
+const popover = (page: Page) => page.locator('.pd-popover');
+const shown = (page: Page) => popover(page).locator('.pd-thread-card');
+const barButton = (page: Page) => page.getByRole('button', { name: /^(Comments|Kommentare)/ });
 const state = (page: Page) => page.locator('.pd-state');
 /** What the marked passages of a thread read as. */
+const mark = (page: Page, id: string) => editorOf(page).locator(`[data-pd-thread="${id}"]`).first();
 const marked = (page: Page, id: string) => editorOf(page).locator(`[data-pd-thread="${id}"]`).evaluateAll((spans) => spans.map((s) => s.textContent).join(''));
 /** The marks are put on after the comments are drawn, a moment later: this waits for them to be on these words. */
 const expectMarked = (page: Page, id: string, words: string) => expect.poll(() => marked(page, id)).toBe(words);
@@ -320,6 +329,7 @@ const told = (page: Page, event: string, data: unknown) =>
 
 /** Selects `text` in the editor, which must be within one block, as a person would with the mouse. */
 async function select(page: Page, text: string) {
+  await closeCard(page);
   await editorOf(page).getByText(text.slice(0, 6)).first().click();
   await page.evaluate((text) => {
     const root = document.querySelector('.pd-editor .ProseMirror')!;
@@ -346,14 +356,33 @@ async function select(page: Page, text: string) {
 }
 
 const commentButton = (page: Page) => page.getByRole('button', { name: 'Comment', exact: true });
-/**
- * A card in the margin is made the one looked at, as a click on it does: only that card has the box to answer in and its
- * buttons. Clicked at its corner, where none of its buttons is.
- */
-const pick = async (card: Locator) => {
-  await card.click({ position: { x: 4, y: 4 } });
-  await expect(card).toHaveAttribute('aria-current', 'true');
-};
+/** The list is asked for with the bar's button. */
+async function showList(page: Page) {
+  await barButton(page).click();
+  await expect(panel(page)).toBeVisible();
+}
+/** The card that is open is closed with a click on the heading, which no card covers: the text under a card is out of reach while it is open. */
+async function closeCard(page: Page) {
+  if (await popover(page).count()) {
+    await editorOf(page).locator('h1').first().click();
+    await expect(popover(page)).toHaveCount(0);
+  }
+}
+/** The comment of thread `id` is opened as a click on its passage does: its card floats over the sheet. */
+async function openThread(page: Page, id: string) {
+  await closeCard(page);
+  await mark(page, id).click();
+  await expect(shown(page)).toHaveAttribute('data-thread', id);
+  return shown(page);
+}
+/** Where the passage of thread `id` is on the screen, a rectangle for each line of it. */
+const rectsOf = (page: Page, id: string) =>
+  page.evaluate((id) => [...document.querySelectorAll(`.pd-editor [data-pd-thread="${id}"]`)].flatMap((el) => [...el.getClientRects()].map((r) => ({ top: r.top, bottom: r.bottom, left: r.left, right: r.right }))), id);
+/** Whether the card is clear of every line of the passage (it does not cover a word of it). */
+async function clearOf(page: Page, id: string) {
+  const box = (await popover(page).boundingBox())!;
+  return (await rectsOf(page, id)).every((r) => box.y >= r.bottom - 0.5 || box.y + box.height <= r.top + 0.5 || box.x >= r.right || box.x + box.width <= r.left);
+}
 
 /** A thread made on `quote`, in the store, as if it had been there when the page opened. */
 function seeded(store: Store, quote: string, body: string, author: 'user' | 'agent' = 'user') {
@@ -362,7 +391,7 @@ function seeded(store: Store, quote: string, body: string, author: 'user' | 'age
   return made.body as Thread;
 }
 
-test('the comments of a document are beside it, by whom they are, and their passages are marked in the text; a click on either leads to the other', async ({ page }) => {
+test('by default only the document is shown, its commented passages marked; a click on one opens its comment as a card under it, on the sheet, and only that one', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const store = new Store();
   // Made in the other order than they are in the text.
@@ -370,44 +399,134 @@ test('the comments of a document are beside it, by whom they are, and their pass
   const friday = seeded(store, '**Friday**', 'Why Friday?');
   store.comment(green.id, 'It was at noon.');
   await open(page, store);
-  await expect(cards(page)).toHaveCount(2);
-  // In the order of the text, with who said what.
-  await expect(cards(page).nth(0)).toContainText('Friday');
-  await expect(cards(page).nth(0)).toContainText('You');
-  await expect(cards(page).nth(0)).toContainText('Why Friday?');
-  await expect(cards(page).nth(1)).toContainText('The build is green.');
-  await expect(cards(page).nth(1).locator('li[data-author="agent"]')).toContainText('The agent');
-  await expect(cards(page).nth(1).locator('li[data-author="agent"]')).toContainText('Is it?');
-  await expect(cards(page).nth(1).locator('li[data-author="user"]')).toContainText('It was at noon.');
-  await expect(panel(page).getByRole('heading', { name: 'Comments' })).toContainText('2');
   // The words are marked in the text where they are, with the marks inside them left in (a bold word is one passage).
   await expectMarked(page, friday.id, 'Friday');
   await expectMarked(page, green.id, 'The build is green.');
   await expect(editorOf(page).locator('.pd-thread')).toHaveCount(2);
-  // Beside the text on a wide page.
-  const [editorBox, panelBox] = await Promise.all([page.locator('.pd-editor').boundingBox(), panel(page).boundingBox()]);
-  expect(panelBox!.x).toBeGreaterThan(editorBox!.x + editorBox!.width - 2);
-  // A click on the card marks the thread as the one looked at; a click on the words does the same.
-  await cards(page).nth(1).locator('.pd-quote').click();
-  await expect(cards(page).nth(1)).toHaveAttribute('aria-current', 'true');
+  // Nothing else of the comments: no margin, no list under the text, no card.
+  await expect(panel(page)).toHaveCount(0);
+  await expect(page.locator('.pd-threads, .pd-thread-card, .pd-popover')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Comments' })).toHaveCount(0);
+  // The bar has the way to the list, with how many are open.
+  await expect(barButton(page)).toHaveAccessibleName('Comments 2');
+  await expect(barButton(page)).toHaveAttribute('aria-expanded', 'false');
+
+  // A click on a passage opens its thread, with who said what, floating on the sheet.
+  const card = await openThread(page, green.id);
+  await expect(page.locator('.pd-popover')).toHaveCount(1);
+  await expect(card).toContainText('Is it?');
+  await expect(card.locator('li[data-author="agent"]')).toContainText('The agent');
+  await expect(card.locator('li[data-author="user"]')).toContainText('It was at noon.');
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible();
+  await expect(card).toContainText('Write @agent in a comment to ask the agent to answer it.');
   await expect(page.locator(`.pd-editor [data-active-thread="${green.id}"]`)).toHaveCount(1);
-  await editorOf(page).locator(`[data-pd-thread="${friday.id}"]`).first().click();
-  await expect(cards(page).nth(0)).toHaveAttribute('aria-current', 'true');
-  await expect(cards(page).nth(1)).not.toHaveAttribute('aria-current', 'true');
-  await expect(page.locator(`.pd-editor [data-active-thread="${friday.id}"]`)).toHaveCount(1);
+  // On top of the sheet, just under its passage, which stays readable.
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const box = (await popover(page).boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(sheet.x);
+  expect(box.x + box.width).toBeLessThanOrEqual(sheet.x + sheet.width);
+  const rects = await rectsOf(page, green.id);
+  expect(box.y).toBeGreaterThanOrEqual(Math.max(...rects.map((r) => r.bottom)));
+  expect(await clearOf(page, green.id)).toBe(true);
+  // Another passage: that one is the only one open.
+  await mark(page, friday.id).click();
+  const other = shown(page);
+  await expect(other).toHaveAttribute('data-thread', friday.id);
+  await expect(page.locator('.pd-popover')).toHaveCount(1);
+  await expect(other).toContainText('Why Friday?');
+  await expect(other).not.toContainText('Is it?');
+  expect(await clearOf(page, friday.id)).toBe(true);
+  // Text that is no passage closes it.
+  await editorOf(page).getByRole('heading', { name: 'The plan' }).click();
+  await expect(popover(page)).toHaveCount(0);
+  await expect(page.locator('.pd-editor [data-active-thread=""]')).toHaveCount(1);
 });
 
-test('text that is selected is commented on: the passage is marked while the comment is written, nothing is sent while it is typed, and Send makes the thread on it', async ({ page }) => {
+test('the bar\'s Comments button shows the list of all the threads beside the sheet and hides it again; a thread chosen in it opens its card at its passage', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Is it?', 'agent');
+  const friday = seeded(store, '**Friday**', 'Why Friday?');
+  store.comment(green.id, 'It was at noon.');
+  await open(page, store);
+  await showList(page);
+  await expect(barButton(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(panel(page).getByRole('heading', { name: 'Comments' })).toContainText('2');
+  // In the order of the text, with the passage and the last that was said; beside the sheet on a wide page.
+  await expect(items(page)).toHaveCount(2);
+  await expect(items(page).nth(0)).toContainText('Friday');
+  await expect(items(page).nth(0)).toContainText('You: Why Friday?');
+  await expect(items(page).nth(1)).toContainText('The build is green.');
+  await expect(items(page).nth(1)).toContainText('You: It was at noon.');
+  await expect(panel(page)).toContainText('Write @agent in a comment to ask the agent to answer it.');
+  const [sheet, list] = await Promise.all([page.locator('.pd-sheet').boundingBox(), panel(page).boundingBox()]);
+  expect(list!.x).toBeGreaterThan(sheet!.x + sheet!.width - 2);
+  // A thread with a passage in the text has no card in the list: it opens in the text.
+  await expect(cards(page)).toHaveCount(0);
+  await expect(popover(page)).toHaveCount(0);
+  await items(page).nth(1).click();
+  await expect(shown(page)).toHaveAttribute('data-thread', green.id);
+  await expect(items(page).nth(1)).toHaveAttribute('aria-current', 'true');
+  expect(await clearOf(page, green.id)).toBe(true);
+  // A click on a passage marks its line in the list as well.
+  await mark(page, friday.id).click();
+  await expect(items(page).nth(0)).toHaveAttribute('aria-current', 'true');
+  await expect(items(page).nth(1)).not.toHaveAttribute('aria-current', 'true');
+  // The list is on request: the button hides it again, and so does Close; the card on the sheet stays as it was.
+  await barButton(page).click();
+  await expect(panel(page)).toHaveCount(0);
+  await showList(page);
+  await panel(page).getByRole('button', { name: 'Close' }).click();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(barButton(page)).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('threads that cannot be opened in the text are in the list: a resolved one is shown on request and opened again there, and no thread is out of reach', async ({ page }) => {
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Is it?');
+  const done = seeded(store, 'Sign-off is on Monday.', 'Who?');
+  store.settle(done.id, 'resolved');
+  await open(page, store);
+  // Resolved: not marked in the text, not counted as open, and put away until asked for.
+  await expect(editorOf(page).locator('.pd-thread')).toHaveCount(1);
+  await expect(barButton(page)).toHaveAccessibleName('Comments 1');
+  await showList(page);
+  await expect(items(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(0);
+  await panel(page).getByRole('button', { name: 'Show resolved (1)' }).click();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page).first()).toContainText('Who?');
+  await expect(cards(page).first()).toContainText('Resolved');
+  await cards(page).first().getByRole('button', { name: 'Reopen' }).click();
+  // Open again: marked in the text, a line in the list that opens it there.
+  await expectMarked(page, done.id, 'Sign-off is on Monday.');
+  await expect(cards(page)).toHaveCount(0);
+  await expect(items(page)).toHaveCount(2);
+  await expect(barButton(page)).toHaveAccessibleName('Comments 2');
+  await items(page).filter({ hasText: 'Who?' }).click();
+  await expect(shown(page)).toHaveAttribute('data-thread', done.id);
+  expect(green.id).toBeTruthy();
+});
+
+test('text that is selected is commented on: its card opens at the selection while the comment is written, nothing is sent while it is typed, and Send makes the thread on it', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await expect(commentButton(page)).toBeDisabled();
+  await showList(page);
   await expect(panel(page)).toContainText('No comments yet. Select some text, then press Comment.');
+  await barButton(page).click();
   await select(page, 'Friday, see the guide');
   await expect(commentButton(page)).toBeEnabled();
   await commentButton(page).click();
-  const compose = panel(page).locator('.pd-compose');
-  await expect(compose).toContainText('Friday, see the guide');
+  const compose = popover(page).locator('.pd-compose');
+  await expect(compose).toContainText('New comment');
   expect(await editorOf(page).locator('.pd-thread-pending').evaluateAll((spans) => spans.map((s) => s.textContent).join(''))).toBe('Friday, see the guide');
+  // The card is at the selection, under it, and the box has the focus.
+  const box0 = (await popover(page).boundingBox())!;
+  const pending = await page.evaluate(() => [...document.querySelectorAll('.pd-thread-pending')].flatMap((el) => [...el.getClientRects()].map((r) => r.bottom)));
+  expect(box0.y).toBeGreaterThanOrEqual(Math.max(...pending));
+  await expect(compose.getByRole('textbox')).toBeFocused();
   const send = compose.getByRole('button', { name: 'Send' });
   await expect(send).toBeDisabled();
   await compose.getByRole('textbox').fill('Is the guide up to date?');
@@ -420,48 +539,75 @@ test('text that is selected is commented on: the passage is marked while the com
   // What the page sent: the revision it saw, the passage as Markdown (with its marks in it) and what is around it. No chat: it asks nobody.
   expect(store.made[0]).toEqual({ base: 3, quote: '**Friday**, [see the guide](https://example.com/guide)', prefix: '# The plan\n\nShip it on ', suffix: ' now.\n\nThe build is green.\n\nSign', start: PLAN.indexOf('**Friday**'), body: 'Is the guide up to date? Really?' });
   expect(store.threads[0].quote).toBe('**Friday**, [see the guide](https://example.com/guide)');
-  // It is a thread of the list, with the comment in it, marked in the text as its own; the document was not changed by any of it.
+  // The card is the thread's from then on, with the comment in it, and the passage is marked as its own; the document was not changed by any of it.
   await expect(compose).toHaveCount(0);
-  await expect(cards(page)).toHaveCount(1);
-  await expect(cards(page).first()).toContainText('Is the guide up to date? Really?');
-  await expect(cards(page).first()).toContainText('You');
-  await expect(cards(page).first()).toHaveAttribute('aria-current', 'true');
+  await expect(shown(page)).toHaveAttribute('data-thread', store.threads[0].id);
+  await expect(shown(page)).toContainText('Is the guide up to date? Really?');
+  await expect(shown(page)).toContainText('You');
   await expect(editorOf(page).locator('.pd-thread-pending')).toHaveCount(0);
   await expectMarked(page, store.threads[0].id, 'Friday, see the guide');
   expect(store.requests).toEqual([]);
   expect(store.puts).toEqual([]);
-  // Ctrl+Enter sends it as well; with nothing typed it sends nothing.
+  // Ctrl+Enter sends it as well (and so does the shortcut that starts it, Ctrl+Alt+M); with nothing typed it sends nothing.
   await select(page, 'The build is green.');
-  await commentButton(page).click();
-  const box = panel(page).locator('.pd-compose').getByRole('textbox');
+  await expect(commentButton(page)).toBeEnabled();
+  await page.keyboard.press('Control+Alt+m');
+  const box = popover(page).locator('.pd-compose').getByRole('textbox');
+  await expect(box).toBeFocused();
   await box.press('Control+Enter');
   await box.fill('Green?');
   await box.press('Control+Enter');
   await expect.poll(() => store.made.length).toBe(2);
   expect(store.made[1]).toMatchObject({ body: 'Green?' });
-  await expect(cards(page)).toHaveCount(2);
+  await showList(page);
+  await expect(items(page)).toHaveCount(2);
 });
 
-test('a comment that is dropped leaves nothing marked and sends nothing, and one on text that was typed and not saved yet is made on the revision that save made', async ({ page }) => {
+test('a comment being written is closed with Escape or a click outside: given up when nothing was typed, kept (its passage marked) when there are words, and a click on the passage opens it again', async ({ page }) => {
   const store = new Store();
   await open(page, store);
+  const compose = popover(page).locator('.pd-compose');
+  const pending = editorOf(page).locator('.pd-thread-pending');
+  // Nothing typed: Escape gives it up, and the text has the focus again.
   await select(page, 'The build is green.');
   await commentButton(page).click();
-  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('The build is green.');
-  await panel(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(editorOf(page).locator('.pd-thread-pending')).toHaveCount(0);
-  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
-  // Typed, and dropped: nothing was sent, so nothing is taken away either.
+  await expect(pending).toHaveText('The build is green.');
+  await compose.getByRole('textbox').press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+  await expect(pending).toHaveCount(0);
+  await expect(editorOf(page)).toBeFocused();
+  // Nothing typed, and a click outside (on the bar): the same.
   await select(page, 'The build is green.');
   await commentButton(page).click();
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Hm.');
-  await page.waitForTimeout(1000);
-  await panel(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
-  await expect(editorOf(page).locator('.pd-thread, .pd-thread-pending')).toHaveCount(0);
+  await expect(compose).toBeVisible();
+  await page.locator('.pd-titlebar').click({ position: { x: 300, y: 4 } });
+  await expect(popover(page)).toHaveCount(0);
+  await expect(pending).toHaveCount(0);
+  // Words typed: closing keeps them, and the passage stays marked as the comment's.
+  await select(page, 'The build is green.');
+  await commentButton(page).click();
+  await compose.getByRole('textbox').fill('Half a comment');
+  await compose.getByRole('textbox').press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+  await expect(pending).toHaveText('The build is green.');
+  expect(store.made).toEqual([]);
+  // A click on the marked passage opens the card again, with the words in it.
+  await pending.click();
+  await expect(compose.getByRole('textbox')).toHaveValue('Half a comment');
+  // A click in the text elsewhere closes it again, and Cancel drops the comment for good.
+  await editorOf(page).locator('h1').click();
+  await expect(popover(page)).toHaveCount(0);
+  await pending.click();
+  await compose.getByRole('button', { name: 'Cancel' }).click();
+  await expect(popover(page)).toHaveCount(0);
+  await expect(pending).toHaveCount(0);
   expect(store.made).toEqual([]);
   expect(store.requests).toEqual([]);
+});
 
+test('a comment on text that was typed and not saved yet is made on the revision that save made', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
   // Typed, and the second's wait for the save not yet over: the save is made before the comment is started.
   await editorOf(page).getByText('Sign-off is on Monday.').click();
   await page.keyboard.press('End');
@@ -470,10 +616,10 @@ test('a comment that is dropped leaves nothing marked and sends nothing, and one
   await expect(state(page)).toHaveText('Unsaved changes · Revision 3');
   await select(page, 'Maybe.');
   await commentButton(page).click();
-  await expect(panel(page).locator('.pd-compose')).toBeVisible();
+  await expect(popover(page).locator('.pd-compose')).toBeVisible();
   expect(store.puts).toEqual([{ markdown: PLAN.replace('Monday.', 'Monday. Maybe.'), base: 3 }]);
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Maybe?');
-  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
+  await popover(page).locator('.pd-compose').getByRole('textbox').fill('Maybe?');
+  await popover(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.made.length).toBe(1);
   expect(store.made[0]).toMatchObject({ base: 4, quote: 'Maybe.' });
   expect(store.threads[0].quote).toBe('Maybe.');
@@ -489,18 +635,15 @@ test('the passage is refused when it is too long for a comment, and a reason is 
   await expect(commentButton(page)).toBeEnabled();
   await commentButton(page).click();
   await expect(page.getByRole('alert')).toContainText('Select less text: a comment can be on at most 5000 characters.');
-  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
+  await expect(popover(page)).toHaveCount(0);
   expect(store.made).toEqual([]);
 });
 
-test('a thread is answered with Send, resolved and opened again; a resolved one is out of the way until asked for, and what was typed goes with it when it is resolved', async ({ page }) => {
+test('a thread is answered with Send, resolved and opened again; resolving closes its card, and what was typed goes with it', async ({ page }) => {
   const store = new Store();
   const green = seeded(store, 'The build is green.', 'Is it?', 'agent');
   await open(page, store);
-  const card = cards(page).first();
-  // Answered in the card that is looked at: the others have no box.
-  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveCount(0);
-  await pick(card);
+  const card = await openThread(page, green.id);
   const box = card.getByRole('textbox', { name: 'Reply' });
   const send = card.getByRole('button', { name: 'Send' });
   // Nothing typed is nothing to send.
@@ -516,27 +659,32 @@ test('a thread is answered with Send, resolved and opened again; a resolved one 
   await expect(card.locator('li')).toHaveCount(2);
   await expect(card.locator('li').nth(1)).toContainText('Yes, it is.');
   await expect(box).toHaveValue('');
-  // Typed, and the thread resolved: what was typed is sent first, as the last word.
+  // Typed, and the thread resolved: what was typed is sent first, as the last word; the card closes, the text has the focus.
   await box.fill('And another.');
   await card.getByRole('button', { name: 'Resolve', exact: true }).click();
-  await expect(cards(page)).toHaveCount(0);
+  await expect(popover(page)).toHaveCount(0);
+  await expect(editorOf(page)).toBeFocused();
   expect(store.threads[0].status).toBe('resolved');
   expect(store.threads[0].comments.map((c) => c.body)).toEqual(['Is it?', 'Yes, it is.', 'And another.']);
   expect(store.requests).toEqual([]);
-  // No longer marked in the text; counted, and shown on request.
+  // No longer marked in the text, and not counted; in the list, put away until asked for.
   await expect(editorOf(page).locator('.pd-thread')).toHaveCount(0);
+  await expect(barButton(page)).toHaveAccessibleName('Comments');
+  await showList(page);
   await expect(panel(page).getByRole('button', { name: 'Show resolved (1)' })).toBeVisible();
   await panel(page).getByRole('button', { name: 'Show resolved (1)' }).click();
   await expect(cards(page)).toHaveCount(1);
   await expect(cards(page).first()).toContainText('Resolved');
   await expect(cards(page).first().getByRole('textbox')).toHaveCount(0);
   await cards(page).first().getByRole('button', { name: 'Reopen' }).click();
-  await expect(cards(page).first().getByRole('textbox', { name: 'Reply' })).toBeVisible();
   await expectMarked(page, green.id, 'The build is green.');
   await expect(panel(page).getByRole('button', { name: /resolved/i })).toHaveCount(0);
   // Resolved with nothing typed: just closed.
-  await cards(page).first().getByRole('button', { name: 'Resolve', exact: true }).click();
-  await expect(cards(page)).toHaveCount(0);
+  await barButton(page).click();
+  const again = await openThread(page, green.id);
+  await expect(again.getByRole('textbox', { name: 'Reply' })).toHaveValue('');
+  await again.getByRole('button', { name: 'Resolve', exact: true }).click();
+  await expect(popover(page)).toHaveCount(0);
   expect(store.threads[0].comments).toHaveLength(3);
 });
 
@@ -546,7 +694,7 @@ test('a comment is sent once: Send again while it is on its way sends nothing mo
   await open(page, store);
   await select(page, 'The build is green.');
   await commentButton(page).click();
-  const compose = panel(page).locator('.pd-compose');
+  const compose = popover(page).locator('.pd-compose');
   await compose.getByRole('textbox').fill('Hello');
   await compose.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.started).toBe(1);
@@ -562,11 +710,10 @@ test('a comment is sent once: Send again while it is on its way sends nothing mo
 
 test('a comment that could not be sent keeps what was typed and says why, and Send tries again', async ({ page }) => {
   const store = new Store();
-  seeded(store, 'The build is green.', 'Is it?');
+  const green = seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
-  const card = cards(page).first();
+  const card = await openThread(page, green.id);
   store.refuse = { status: 500, error: 'The documents store could not do that' };
-  await pick(card);
   await card.getByRole('textbox', { name: 'Reply' }).fill('A long answer I would not want to lose.');
   await card.getByRole('button', { name: 'Send' }).click();
   await expect(card.getByRole('alert')).toContainText('Could not comment: The documents store could not do that');
@@ -581,32 +728,37 @@ test('a comment that could not be sent keeps what was typed and says why, and Se
   await select(page, 'Sign-off is on Monday.');
   await commentButton(page).click();
   store.refuse = { status: 422, error: 'That passage is not in the document at revision 3' };
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Who signs?');
-  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
-  await expect(panel(page).locator('.pd-compose')).toContainText('That passage is not in the document at revision 3');
-  await expect(panel(page).locator('.pd-compose').getByRole('textbox')).toHaveValue('Who signs?');
+  const compose = popover(page).locator('.pd-compose');
+  await compose.getByRole('textbox').fill('Who signs?');
+  await compose.getByRole('button', { name: 'Send' }).click();
+  await expect(compose).toContainText('That passage is not in the document at revision 3');
+  await expect(compose.getByRole('textbox')).toHaveValue('Who signs?');
   await expect(editorOf(page).locator('.pd-thread-pending')).toHaveText('Sign-off is on Monday.');
   // Nothing was made, so Cancel has nothing to take away.
-  await panel(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
+  await compose.getByRole('button', { name: 'Cancel' }).click();
+  await expect(popover(page)).toHaveCount(0);
 });
 
 test('a comment the agent writes shows up when the stream says the comments changed, and the page asks again after a stream that dropped', async ({ page }) => {
   const store = new Store();
   await open(page, store);
-  await expect(cards(page)).toHaveCount(0);
+  await showList(page);
+  await expect(items(page)).toHaveCount(0);
+  await expect(barButton(page)).toHaveAccessibleName('Comments');
   let asked = 0;
   await page.route(`**${DOCUMENT}/threads`, (route) => (route.request().method() === 'GET' ? (asked++, route.fallback()) : route.fallback()));
   const green = seeded(store, 'The build is green.', 'Is it?', 'agent');
   await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
-  await expect(cards(page)).toHaveCount(1);
-  await expect(cards(page).first().locator('li[data-author="agent"]')).toContainText('Is it?');
+  await expect(items(page)).toHaveCount(1);
+  await expect(barButton(page)).toHaveAccessibleName('Comments 1');
   await expectMarked(page, green.id, 'The build is green.');
+  const card = await openThread(page, green.id);
+  await expect(card.locator('li[data-author="agent"]')).toContainText('Is it?');
   expect(asked).toBe(1);
   // The stream drops; a comment is written while it is down; the new stream opening is how the page finds out.
   await page.evaluate(() => (window as any).streams[0].emit('error', null));
   seeded(store, 'Sign-off is on Monday.', 'Who signs off?', 'agent');
-  await expect(cards(page)).toHaveCount(2, { timeout: 8000 });
+  await expect(items(page)).toHaveCount(2, { timeout: 8000 });
   expect(await page.evaluate(() => (window as any).streams.length)).toBe(2);
 });
 
@@ -614,6 +766,7 @@ test('a passage stays marked on its words while text is typed before it and in i
   const store = new Store();
   const green = seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
+  await showList(page);
   await expectMarked(page, green.id, 'The build is green.');
   // Typed before it, in the paragraph above, and after the passage's end (not in it).
   await editorOf(page).getByText('Ship it on').first().click();
@@ -637,7 +790,7 @@ test('a passage stays marked on its words while text is typed before it and in i
   store.elsewhere(store.markdown.replace('Sign-off is on Monday.', 'Sign-off is on Tuesday.').replace('# The plan\n', '# The plan\n\nA new first paragraph.\n'));
   await told(page, 'revision', { revision: store.revision, author: 'agent', at: '2026-10-02T10:00:00.000Z' });
   await expect(editorOf(page)).toContainText('A new first paragraph.');
-  await expect(cards(page).first()).toContainText('The build is really green.');
+  await expect(items(page).first()).toContainText('The build is really green.');
   await expectMarked(page, green.id, 'The build is really green.');
   // It answers the comment by rewriting the passage (the server puts the passage on what stands there now).
   store.elsewhere(store.markdown.replace('The build is really green.', 'Everything passes now.'));
@@ -645,10 +798,10 @@ test('a passage stays marked on its words while text is typed before it and in i
   await told(page, 'revision', { revision: store.revision, author: 'agent', at: '2026-10-02T10:01:00.000Z' });
   await expect(editorOf(page)).toContainText('Everything passes now. More.');
   await expect.poll(() => marked(page, green.id)).toBe('Everything passes now.');
-  await expect(cards(page).first().locator('.pd-quote')).toHaveText('Everything passes now.');
+  await expect(items(page).first().locator('.pd-quote')).toHaveText('Everything passes now.');
 });
 
-test('a comment whose passage is no longer in the document says so, can still be answered, and one that cannot be marked in the text says that', async ({ page }) => {
+test('a comment whose passage is no longer in the document is in the list, says so, and can still be answered there; one that cannot be marked in the text says that', async ({ page }) => {
   const text = '# Notes\n\n* a\n* b\n\nSign-off is on Monday.\n';
   const store = new Store();
   store.texts.set(3, text);
@@ -657,11 +810,14 @@ test('a comment whose passage is no longer in the document says so, can still be
   const odd = seeded(store, '* a', 'Why this one?');
   store.elsewhere(text.replace('Sign-off is on Monday.\n', ''));
   await open(page, store, { ready: 'Notes' });
+  // Marked nowhere: the list is the way to them, and it says how many are open.
+  await expect(editorOf(page).locator('.pd-thread')).toHaveCount(0);
+  await expect(barButton(page)).toHaveAccessibleName('Comments 2');
+  await showList(page);
   await expect(cards(page)).toHaveCount(2);
   const first = cards(page).filter({ hasText: 'Who signs off?' });
   await expect(first).toContainText('The passage this comment was on is no longer in the document.');
   await expect(first.locator('.pd-quote')).toHaveText('Sign-off is on Monday.');
-  await pick(first);
   await first.getByRole('textbox', { name: 'Reply' }).fill('Nobody now.');
   await first.getByRole('textbox', { name: 'Reply' }).press('Control+Enter');
   await expect(first.locator('li')).toHaveCount(2);
@@ -678,21 +834,37 @@ test('a passage is found in the text the editor writes when the file is written 
   const thread = seeded(store, 'first item\n* second item', 'These two?');
   await open(page, store, { ready: 'first item' });
   // The editor writes `-`: the passage, kept as the file has it, is found by its words.
-  await expect(cards(page)).toHaveCount(1);
   await expectMarked(page, thread.id, 'first itemsecond item');
   await expect(editorOf(page).locator('li')).toHaveCount(2);
+  await openThread(page, thread.id);
 });
 
-test('the comments are under the text at a phone\'s width, with no sideways scrolling, and the comment button is within reach', async ({ page }) => {
+test('at a phone\'s width the card of a comment fills the sheet under its passage with no sideways scrolling, the list is a sheet over the bottom, and the comment button is within reach', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   const store = new Store();
-  seeded(store, 'The build is green.', 'Is it? '.repeat(30), 'agent');
+  const green = seeded(store, 'The build is green.', 'Is it? '.repeat(30), 'agent');
   await open(page, store);
-  await expect(cards(page)).toHaveCount(1);
-  const [editorBox, panelBox] = await Promise.all([page.locator('.pd-editor').boundingBox(), panel(page).boundingBox()]);
-  expect(panelBox!.y).toBeGreaterThan(editorBox!.y + editorBox!.height - 2);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  expect(await page.evaluate(() => [...document.querySelectorAll('.pd-threads *')].every((e) => e.getBoundingClientRect().right <= window.innerWidth + 1))).toBe(true);
+  const noSideways = () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+  expect(await noSideways()).toBe(true);
+  await openThread(page, green.id);
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const box = (await popover(page).boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(sheet.x);
+  expect(box.x + box.width).toBeLessThanOrEqual(sheet.x + sheet.width);
+  expect(box.width).toBeGreaterThan(sheet.width - 40);
+  expect(await clearOf(page, green.id)).toBe(true);
+  expect(await noSideways()).toBe(true);
+  expect(await page.evaluate(() => [...document.querySelectorAll('.pd-popover *')].every((e) => e.getBoundingClientRect().right <= window.innerWidth + 1))).toBe(true);
+  // The list is a sheet over the bottom of the screen; choosing a thread in it closes it, so that the card is not covered.
+  await showList(page);
+  const list = (await panel(page).boundingBox())!;
+  expect(list.x).toBeGreaterThanOrEqual(0);
+  expect(list.x + list.width).toBeLessThanOrEqual(390);
+  expect(list.y + list.height).toBeGreaterThan(780);
+  expect(await noSideways()).toBe(true);
+  await items(page).first().click();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(shown(page)).toHaveAttribute('data-thread', green.id);
   await select(page, 'Sign-off is on Monday.');
   await expect(commentButton(page)).toBeEnabled();
   expect((await commentButton(page).boundingBox())!.x + (await commentButton(page).boundingBox())!.width).toBeLessThanOrEqual(390);
@@ -700,24 +872,29 @@ test('the comments are under the text at a phone\'s width, with no sideways scro
 
 test('what the comments say is in German in a German portal', async ({ page }) => {
   const store = new Store();
-  seeded(store, 'The build is green.', 'Is it?', 'agent');
+  const green = seeded(store, 'The build is green.', 'Is it?', 'agent');
   const done = seeded(store, 'Sign-off is on Monday.', 'Who?');
   store.settle(done.id, 'resolved');
   await open(page, store, { language: 'de' });
+  await expect(barButton(page)).toHaveAccessibleName('Kommentare 1');
+  await showList(page);
   await expect(panel(page).getByRole('heading', { name: 'Kommentare' })).toBeVisible();
-  await expect(cards(page).first()).toContainText('Der Agent');
-  await pick(cards(page).first());
-  await expect(cards(page).first().getByRole('textbox', { name: 'Antworten' })).toBeVisible();
-  await expect(cards(page).first().getByRole('button', { name: 'Erledigen', exact: true })).toBeVisible();
+  await expect(items(page).first()).toContainText('Der Agent');
   await expect(panel(page).getByRole('button', { name: 'Erledigte anzeigen (1)' })).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Schließen' })).toBeVisible();
+  await barButton(page).click();
+  const card = await openThread(page, green.id);
+  await expect(card.getByRole('textbox', { name: 'Antworten' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Erledigen', exact: true })).toBeVisible();
+  await expect(card).toContainText('Schreibe @agent in einen Kommentar, damit der Agent ihn beantwortet.');
   await expect(page.getByRole('button', { name: 'Kommentieren', exact: true })).toBeDisabled();
   await select(page, 'Ship it on');
   await page.getByRole('button', { name: 'Kommentieren', exact: true }).click();
-  await expect(panel(page).locator('.pd-compose')).toContainText('Neuer Kommentar');
-  await expect(panel(page).locator('.pd-compose').getByRole('textbox', { name: 'Kommentar schreiben' })).toBeVisible();
-  await expect(panel(page).locator('.pd-compose').getByRole('button', { name: 'Abbrechen' })).toBeVisible();
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Gut?');
-  await expect(panel(page).locator('.pd-compose').getByRole('button', { name: 'Senden' })).toBeEnabled();
+  await expect(popover(page).locator('.pd-compose')).toContainText('Neuer Kommentar');
+  await expect(popover(page).locator('.pd-compose').getByRole('textbox', { name: 'Kommentar schreiben' })).toBeVisible();
+  await expect(popover(page).locator('.pd-compose').getByRole('button', { name: 'Abbrechen' })).toBeVisible();
+  await popover(page).locator('.pd-compose').getByRole('textbox').fill('Gut?');
+  await expect(popover(page).locator('.pd-compose').getByRole('button', { name: 'Senden' })).toBeEnabled();
 });
 
 test('the list of documents says how many comments are open on each', async ({ page }) => {
@@ -736,21 +913,22 @@ test('the list of documents says how many comments are open on each', async ({ p
 /** The chat the page last remembered the person in, in this tab. */
 const remembered = (page: Page) => page.evaluate(() => sessionStorage.getItem('pithagoras-docs/chat'));
 
-/** A comment typed on `quote` and sent: the card of its thread in the list. */
+/** A comment typed on `quote` and sent: the card of its thread, open on the sheet. */
 async function compose(page: Page, quote: string, text: string) {
   await select(page, quote);
   await commentButton(page).click();
-  const card = panel(page).locator('.pd-compose');
+  const card = popover(page).locator('.pd-compose');
   await card.getByRole('textbox').fill(text);
   await card.getByRole('button', { name: 'Send' }).click();
   await expect(card).toHaveCount(0);
-  return cards(page).filter({ hasText: text });
+  const made = shown(page).filter({ hasText: text });
+  await expect(made).toBeVisible();
+  return made;
 }
 
 test('a comment with @agent asks the agent of the chat the person is in once it is sent: the thread says so, and says when the agent answered, until the person has seen it or reacts', async ({ page }) => {
   const store = new Store();
   await open(page, store, { chat: 'a' });
-  await expect(panel(page)).toContainText('Write @agent in a comment to ask the agent to answer it.');
   // One that does not ask names no chat.
   const quiet = await compose(page, 'Sign-off is on Monday.', 'Who signs?');
   expect(store.made[0]).not.toHaveProperty('chat');
@@ -758,16 +936,16 @@ test('a comment with @agent asks the agent of the chat the person is in once it 
   // Typed with @agent and not finished: nobody is asked, however long it waits.
   await select(page, 'The build is green.');
   await commentButton(page).click();
-  const box = panel(page).locator('.pd-compose').getByRole('textbox');
+  const box = popover(page).locator('.pd-compose').getByRole('textbox');
   await box.fill('Is it? @agent, please');
   await page.waitForTimeout(1500);
   expect(store.made).toHaveLength(1);
   // Sent: as it was written, with the chat the page knows the person is in.
   await box.fill('Is it? @agent, please check.');
-  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
+  await popover(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.made.length).toBe(2);
   expect(store.made[1]).toMatchObject({ body: 'Is it? @agent, please check.', chat: 'a' });
-  const card = cards(page).filter({ hasText: 'Is it?' });
+  const card = shown(page).filter({ hasText: 'Is it?' });
   await expect(card.locator('.pd-asked')).toHaveText('Asked the agent · First chat');
   await expect(card.locator('.pd-asked')).toHaveAttribute('data-asked', 'waiting');
   // The server has the chat take it, and the agent answers; the page is told the comments changed.
@@ -801,22 +979,22 @@ test('a comment that asks the agent when the person is in no chat of the folder 
   // While it is typed, no chat is opened for it.
   await select(page, 'The build is green.');
   await commentButton(page).click();
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Is it? @agent');
+  await popover(page).locator('.pd-compose').getByRole('textbox').fill('Is it? @agent');
   await page.waitForTimeout(1500);
   expect(store.opened).toEqual([]);
-  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
+  await popover(page).locator('.pd-compose').getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.made.length).toBe(1);
   expect(store.opened).toEqual([{ title: 'Comments on The plan', workspace: '/w/site' }]);
   expect(store.made[0]).toMatchObject({ chat: 'n1' });
   expect(await remembered(page)).toBe('n1');
-  const first = cards(page).filter({ hasText: 'Is it?' });
-  await expect(first.locator('.pd-asked')).toHaveText('Asked the agent · Comments on The plan');
+  await expect(shown(page).filter({ hasText: 'Is it?' }).locator('.pd-asked')).toHaveText('Asked the agent · Comments on The plan');
   // The same chat for the next one, and for a reply: no second chat is opened.
+  const first = store.threads[0].id;
   await compose(page, 'Sign-off is on Monday.', 'Who signs? @agent');
   expect(store.made[1]).toMatchObject({ chat: 'n1' });
-  await pick(first);
-  await first.getByRole('textbox', { name: 'Reply' }).fill('And you? @agent');
-  await first.getByRole('button', { name: 'Send' }).click();
+  const card = await openThread(page, first);
+  await card.getByRole('textbox', { name: 'Reply' }).fill('And you? @agent');
+  await card.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.threads[0].comments.length).toBe(2);
   expect(store.opened).toHaveLength(1);
 });
@@ -866,8 +1044,10 @@ test('a comment whose chat is gone from the thread says it was not delivered; on
   const quiet = seeded(store, 'Ship it on', 'Fine.');
   Object.assign(quiet, { status: 'resolved' });
   await open(page, store);
-  await expect(cards(page).filter({ hasText: 'Is it?' }).locator('.pd-asked')).toHaveText('Not delivered to the agent · No chat that can read this document works in its folder any more');
+  const card = await openThread(page, lost.id);
+  await expect(card.locator('.pd-asked')).toHaveText('Not delivered to the agent · No chat that can read this document works in its folder any more');
   // The agent resolved it: it is in the list, resolved and answered, and the one that is only resolved is put away.
+  await showList(page);
   const news = cards(page).filter({ hasText: 'Who signs?' });
   await expect(news).toBeVisible();
   await expect(news).toContainText('Resolved');
@@ -884,17 +1064,17 @@ test('a comment whose chat is gone from the thread says it was not delivered; on
 
 test('a reply being typed when the agent answers stays in the box, and is sent after the answer', async ({ page }) => {
   const store = new Store();
-  seeded(store, 'The build is green.', 'Is it?');
+  const green = seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
-  const card = cards(page).first();
-  await pick(card);
+  const card = await openThread(page, green.id);
   const box = card.getByRole('textbox', { name: 'Reply' });
   await box.fill('Please check.');
-  // The agent answers and the page is told: the answer is in the list, and what is being typed is still the person's.
+  // The agent answers and the page is told: the answer is in the open card, and what is being typed is still the person's.
   store.comment(store.threads[0].id, 'Checked.', 'agent');
   await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
   await expect(card.locator('li')).toHaveCount(2);
   await expect(box).toHaveValue('Please check.');
+  await expect(box).toBeFocused();
   await card.getByRole('button', { name: 'Send' }).click();
   await expect.poll(() => store.threads[0].comments.length).toBe(3);
   expect(store.threads[0].comments.map((c) => [c.author, c.body])).toEqual([['user', 'Is it?'], ['agent', 'Checked.'], ['user', 'Please check.']]);
@@ -911,15 +1091,18 @@ test('what asking the agent says is in German in a German portal, and the chat o
   const monday = seeded(store, 'Sign-off is on Monday.', 'Who? @agent');
   Object.assign(monday, { toAgent: true, ping: { id: 2, chat: 'a', comment: monday.comments[0].id, sent: false, title: 'First chat', state: 'failed' } });
   await open(page, store, { language: 'de' });
+  await showList(page);
   await expect(panel(page)).toContainText('Schreibe @agent in einen Kommentar, damit der Agent ihn beantwortet.');
-  await expect(cards(page).filter({ hasText: 'Is it?' }).locator('.pd-asked')).toHaveText('Den Agenten gefragt · First chat');
-  await expect(cards(page).filter({ hasText: 'Why Friday?' }).locator('.pd-asked')).toHaveText(/^Der Agent hat geantwortet/);
-  await expect(cards(page).filter({ hasText: 'Why Friday?' }).getByRole('button', { name: 'Verstanden' })).toBeVisible();
-  await expect(cards(page).filter({ hasText: 'Who?' }).locator('.pd-asked')).toHaveText('Nicht beim Agenten angekommen');
+  await barButton(page).click();
+  await expect((await openThread(page, green.id)).locator('.pd-asked')).toHaveText('Den Agenten gefragt · First chat');
+  const answered = await openThread(page, friday.id);
+  await expect(answered.locator('.pd-asked')).toHaveText(/^Der Agent hat geantwortet/);
+  await expect(answered.getByRole('button', { name: 'Verstanden' })).toBeVisible();
+  await expect((await openThread(page, monday.id)).locator('.pd-asked')).toHaveText('Nicht beim Agenten angekommen');
   await select(page, 'Ship it on');
   await page.getByRole('button', { name: 'Kommentieren', exact: true }).click();
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('@agent?');
-  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Senden' }).click();
+  await popover(page).locator('.pd-compose').getByRole('textbox').fill('@agent?');
+  await popover(page).locator('.pd-compose').getByRole('button', { name: 'Senden' }).click();
   await expect.poll(() => store.opened.length).toBe(1);
   expect(store.opened[0].title).toBe('Kommentare zu The plan');
 });
@@ -939,13 +1122,13 @@ test('the list of documents says how many comments the agent answered, and none 
 
 const dialog = (page: Page) => page.getByRole('alertdialog');
 
-test('a comment of the person in the list is changed with Edit: the box is kept as it is until Save, Cancel and Escape leave it, and the comment says it was edited', async ({ page }) => {
+test('a comment of the person is changed with Edit: the box is kept as it is until Save, Cancel and Escape leave it, and the comment says it was edited', async ({ page }) => {
   const store = new Store();
   const thread = seeded(store, 'The build is green.', 'Is it?');
   store.comment(thread.id, 'Yes.', 'agent');
   store.comment(thread.id, 'Sure?');
   await open(page, store);
-  const card = cards(page).first();
+  const card = await openThread(page, thread.id);
   const items = card.locator('li');
   await expect(items).toHaveCount(3);
   // Only the person's own comments are theirs to change: not the agent's.
@@ -994,9 +1177,9 @@ test('a comment of the person in the list is changed with Edit: the box is kept 
 
 test('a change that cannot be saved says why and stays in the box, to be saved again', async ({ page }) => {
   const store = new Store();
-  seeded(store, 'The build is green.', 'Is it?');
+  const thread = seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
-  const card = cards(page).first();
+  const card = await openThread(page, thread.id);
   await card.getByRole('button', { name: 'Edit' }).click();
   const box = card.getByRole('textbox', { name: 'Edit the comment' });
   await box.fill('Is it right?');
@@ -1016,7 +1199,7 @@ test('a comment is deleted after a question, and the thread stays; the only comm
   const first = thread.comments[0].id;
   store.comment(thread.id, 'Sure?');
   await open(page, store);
-  const card = cards(page).first();
+  const card = await openThread(page, thread.id);
   const items = card.locator('li');
   await expectMarked(page, thread.id, 'The build is green.');
   await expect(items).toHaveCount(2);
@@ -1038,14 +1221,15 @@ test('a comment is deleted after a question, and the thread stays; the only comm
   await card.getByRole('button', { name: 'Delete thread' }).click();
   await expect(dialog(page)).toContainText('Delete this thread?');
   await dialog(page).getByRole('button', { name: 'Cancel' }).click();
-  await expect(cards(page)).toHaveCount(1);
+  await expect(popover(page)).toHaveCount(1);
   await card.getByRole('button', { name: 'Delete thread' }).click();
   await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
-  await expect(cards(page)).toHaveCount(0);
+  await expect(popover(page)).toHaveCount(0);
   expect(store.threads).toEqual([]);
   expect(store.requests.at(-1)).toEqual({ method: 'DELETE-THREAD', comment: thread.id });
   // Its mark in the text goes with it.
   await expect(editorOf(page).locator('.pd-thread')).toHaveCount(0);
+  await showList(page);
   await expect(panel(page)).toContainText('No comments yet.');
 });
 
@@ -1059,53 +1243,53 @@ test('a thread is deleted as a whole only while it is the person\'s and the agen
   const closed = seeded(store, 'The plan', 'Old.');
   store.settle(closed.id, 'resolved');
   await open(page, store);
-  const card = (words: string) => cards(page).filter({ hasText: words });
-  await pick(card('Is it?'));
-  await expect(card('Is it?').getByRole('button', { name: 'Delete thread' })).toBeVisible();
-  await pick(card('Who signs off?'));
-  await expect(card('Who signs off?').getByRole('button', { name: 'Resolve' })).toBeVisible();
-  await expect(card('Who signs off?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
-  await pick(card('Why Friday?'));
-  await expect(card('Why Friday?').getByRole('button', { name: 'Resolve' })).toBeVisible();
-  await expect(card('Why Friday?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
+  const card = await openThread(page, mine.id);
+  await expect(card.getByRole('button', { name: 'Delete thread' })).toBeVisible();
+  const answeredCard = await openThread(page, answered.id);
+  await expect(answeredCard.getByRole('button', { name: 'Resolve' })).toBeVisible();
+  await expect(answeredCard.getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
   // The person's comment in a thread of the answered kind can still go by itself.
-  await expect(card('Who signs off?').locator('li').first().getByRole('button', { name: 'Delete' })).toBeVisible();
-  // A resolved thread of the person's is theirs to delete too, beside Reopen.
+  await expect(answeredCard.locator('li').first().getByRole('button', { name: 'Delete' })).toBeVisible();
+  const theirCard = await openThread(page, theirs.id);
+  await expect(theirCard.getByRole('button', { name: 'Resolve' })).toBeVisible();
+  await expect(theirCard.getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
+  // A resolved thread of the person's is theirs to delete too, beside Reopen: it is a card of the list.
+  await showList(page);
   await panel(page).getByRole('button', { name: 'Show resolved (1)' }).click();
-  await pick(card('Old.'));
-  await expect(card('Old.').getByRole('button', { name: 'Reopen' })).toBeVisible();
-  await expect(card('Old.').getByRole('button', { name: 'Delete thread' })).toBeVisible();
+  const old = cards(page).filter({ hasText: 'Old.' });
+  await expect(old.getByRole('button', { name: 'Reopen' })).toBeVisible();
+  await expect(old.getByRole('button', { name: 'Delete thread' })).toBeVisible();
   // The agent comments in the person's thread: the button goes, when the page is told.
+  await openThread(page, mine.id);
+  await expect(shown(page).locator('li')).toHaveCount(2);
   store.comment(mine.id, 'Yes.', 'agent');
   await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
-  await expect(card('Is it?').locator('li')).toHaveCount(3);
-  await pick(card('Is it?'));
-  await expect(card('Is it?').getByRole('button', { name: 'Resolve' })).toBeVisible();
-  await expect(card('Is it?').getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
-  // A thread that is deleted elsewhere is gone from here when the page is told, with its mark in the text.
-  await expectMarked(page, answered.id, 'Sign-off is on Monday.');
+  await expect(shown(page).locator('li')).toHaveCount(3);
+  await expect(shown(page).getByRole('button', { name: 'Resolve' })).toBeVisible();
+  await expect(shown(page).getByRole('button', { name: 'Delete thread' })).toHaveCount(0);
+  // A thread that is deleted elsewhere is gone from here when the page is told, with its mark in the text and its card.
+  await openThread(page, answered.id);
   store.threads = store.threads.filter((t) => t.id !== answered.id);
   await told(page, 'threads', { at: '2026-10-02T10:01:00.000Z' });
-  await expect(card('Who signs off?')).toHaveCount(0);
+  await expect(popover(page)).toHaveCount(0);
   await expect(editorOf(page).locator(`[data-pd-thread="${answered.id}"]`)).toHaveCount(0);
+  await expect(items(page).filter({ hasText: 'Who signs off?' })).toHaveCount(0);
   // The resolved one is deleted from here.
-  await pick(card('Old.'));
-  await card('Old.').getByRole('button', { name: 'Delete thread' }).click();
+  await old.getByRole('button', { name: 'Delete thread' }).click();
   await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
-  await expect(card('Old.')).toHaveCount(0);
+  await expect(old).toHaveCount(0);
   expect(store.threads.map((t) => t.id)).toEqual([mine.id, theirs.id]);
 });
 
 test('a thread deleted while a comment was being typed in it takes the box with it, sends nothing of it, and says nothing is wrong', async ({ page }) => {
   const store = new Store();
-  seeded(store, 'The build is green.', 'Is it?');
+  const thread = seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
-  const card = cards(page).first();
-  await pick(card);
+  const card = await openThread(page, thread.id);
   await card.getByRole('textbox', { name: 'Reply' }).fill('Typed on.');
   await card.getByRole('button', { name: 'Delete thread' }).click();
   await dialog(page).getByRole('button', { name: 'Delete thread' }).click();
-  await expect(cards(page)).toHaveCount(0);
+  await expect(popover(page)).toHaveCount(0);
   expect(store.threads).toEqual([]);
   expect(store.requests.map((r) => r.method)).toEqual(['DELETE-THREAD']);
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -1117,19 +1301,19 @@ test('changing the last comment of an open thread asks the agent as a new one wo
   const older = seeded(store, 'Sign-off is on Monday.', 'Who signs off?');
   store.comment(older.id, 'The release manager.', 'agent');
   await open(page, store, { chat: 'a' });
-  const edit = async (words: string, text: string) => {
-    const card = cards(page).filter({ hasText: words });
+  const edit = async (id: string, text: string) => {
+    const card = await openThread(page, id);
     await card.locator('li').first().getByRole('button', { name: 'Edit' }).click();
     await card.getByRole('textbox', { name: 'Edit the comment' }).fill(text);
     await card.getByRole('button', { name: 'Save', exact: true }).click();
     return card;
   };
-  const card = await edit('Is it?', 'Is it? @agent, please check.');
+  const card = await edit(last.id, 'Is it? @agent, please check.');
   await expect(card.locator('.pd-asked')).toHaveText('Asked the agent · First chat');
   expect(store.requests.at(-1)).toMatchObject({ method: 'PUT', comment: last.comments[0].id, body: { body: 'Is it? @agent, please check.', chat: 'a' } });
   expect(store.threads[0].ping?.chat).toBe('a');
   // The agent has answered the other: the mention changes nothing there.
-  const answered = await edit('Who signs off?', 'Who signs off? @agent');
+  const answered = await edit(older.id, 'Who signs off? @agent');
   await expect(answered.locator('li').first()).toContainText('@agent');
   expect(store.requests.at(-1)!.body).not.toHaveProperty('chat');
   expect(store.threads[1].toAgent).toBeFalsy();
@@ -1143,11 +1327,10 @@ test('what changing and deleting comments says is in German in a German portal',
   store.comment(thread.id, 'Sure?');
   store.threads[0].comments[0].edited = '2026-10-02T09:30:00.000Z';
   await open(page, store, { language: 'de' });
-  const card = cards(page).first();
+  const card = await openThread(page, thread.id);
   const first = card.locator('li').first();
   await expect(first.getByText('bearbeitet', { exact: true })).toBeVisible();
   await expect(first.getByText('bearbeitet', { exact: true })).toHaveAttribute('title', /^Bearbeitet /);
-  await pick(card);
   await expect(card.getByRole('button', { name: 'Kommentarthread löschen' })).toBeVisible();
   await first.getByRole('button', { name: 'Bearbeiten' }).click();
   await expect(card.getByRole('textbox', { name: 'Kommentar bearbeiten' })).toBeVisible();
@@ -1168,7 +1351,7 @@ test('changing the last comment whose ask a chat has taken looks for no chat and
   // The agent of a chat was woken with it, and has not answered.
   thread.ping = { ...thread.ping!, sent: true, state: 'sent' };
   await open(page, store, { chat: 'elsewhere' });
-  const card = cards(page).first();
+  const card = await openThread(page, thread.id);
   await card.getByRole('button', { name: 'Edit' }).click();
   await card.getByRole('textbox', { name: 'Edit the comment' }).fill('Is it? @agent, typo fixed');
   await card.getByRole('button', { name: 'Save', exact: true }).click();
@@ -1179,9 +1362,9 @@ test('changing the last comment whose ask a chat has taken looks for no chat and
 
 test('Ctrl+Enter in the Edit box with the words unchanged just closes it: nothing is sent', async ({ page }) => {
   const store = new Store();
-  seeded(store, 'The build is green.', 'Is it? @agent', 'user');
+  const thread = seeded(store, 'The build is green.', 'Is it? @agent', 'user');
   await open(page, store, { chat: 'a' });
-  const card = cards(page).first();
+  const card = await openThread(page, thread.id);
   await card.getByRole('button', { name: 'Edit' }).click();
   const box = card.getByRole('textbox', { name: 'Edit the comment' });
   await box.press('Control+Enter');
@@ -1195,117 +1378,205 @@ test('Ctrl+Enter in the Edit box with the words unchanged just closes it: nothin
   expect(store.requests).toEqual([]);
 });
 
-test('on a wide page each card is in the margin level with its passage, and the one looked at goes to its passage with the others moved out of its way', async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 1000 });
-  const filler = Array.from({ length: 8 }, (_, i) => `Paragraph ${i + 1} of what is between.`).join('\n\n');
+test('the card of a comment is under its passage, above it where there is no room under it, inside the sheet, and follows the passage as the text moves and the page scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const filler = Array.from({ length: 14 }, (_, i) => `Paragraph ${i + 1} of what is between.`).join('\n\n');
+  const edge = `${'word '.repeat(15)}right edge words`;
   const store = new Store();
-  store.texts.set(3, `# The plan\n\nThe first point.\n\nThe second point.\n\n${filler}\n\nThe last point.\n`);
+  store.texts.set(3, `# The plan\n\nThe first point.\n\n${edge}\n\n${filler}\n\nThe last point.\n`);
   const first = seeded(store, 'The first point.', 'One.');
-  const second = seeded(store, 'The second point.', 'Two.');
+  const right = seeded(store, 'right edge words', 'Edge.');
   const last = seeded(store, 'The last point.', 'Three.');
   await open(page, store, { ready: 'The last point.' });
-  await expect(cards(page)).toHaveCount(3);
   await expectMarked(page, last.id, 'The last point.');
-  const top = async (selector: string) => (await page.locator(selector).first().boundingBox())!.y;
-  const card = (id: string) => `.pd-thread-card[data-thread="${id}"]`;
-  const mark = (id: string) => `.pd-editor [data-pd-thread="${id}"]`;
-  // Beside the sheet, each where its words are: the first two are close, so the second is under the first.
+  const gap = async (id: string) => (await popover(page).boundingBox())!.y - Math.max(...(await rectsOf(page, id)).map((r) => r.bottom));
   const sheet = (await page.locator('.pd-sheet').boundingBox())!;
-  expect((await page.locator(card(first.id)).boundingBox())!.x).toBeGreaterThan(sheet.x + sheet.width - 12);
-  await expect.poll(async () => Math.abs((await top(card(first.id))) - (await top(mark(first.id))))).toBeLessThan(4);
-  await expect.poll(async () => Math.abs((await top(card(last.id))) - (await top(mark(last.id))))).toBeLessThan(4);
-  const firstBox = (await page.locator(card(first.id)).boundingBox())!;
-  expect(await top(card(second.id))).toBeGreaterThanOrEqual(firstBox.y + firstBox.height);
-  // The second looked at: it is at its words, and the first is moved up above it.
-  await page.locator(mark(second.id)).first().click();
-  await expect(page.locator(card(second.id))).toHaveAttribute('aria-current', 'true');
-  await expect.poll(async () => Math.abs((await top(card(second.id))) - (await top(mark(second.id))))).toBeLessThan(4);
-  const moved = (await page.locator(card(first.id)).boundingBox())!;
-  expect(moved.y + moved.height).toBeLessThanOrEqual((await top(card(second.id))) + 1);
-  // Text typed above the passages moves their cards down with them.
-  const before = await top(card(last.id));
+  // Under its passage, where there is room.
+  await openThread(page, first.id);
+  expect(await gap(first.id)).toBeGreaterThan(0);
+  expect(await gap(first.id)).toBeLessThan(20);
+  // A passage at the right of the sheet: the card is kept inside it.
+  await openThread(page, right.id);
+  const box = (await popover(page).boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(sheet.x);
+  expect(box.x + box.width).toBeLessThanOrEqual(sheet.x + sheet.width);
+  expect(await clearOf(page, right.id)).toBe(true);
+  // Text typed above moves the passage, and the card goes with it.
+  await openThread(page, first.id);
+  const before = (await popover(page).boundingBox())!.y;
+  const spread = await gap(first.id);
+  await closeCard(page);
   await editorOf(page).getByText('Paragraph 1 of').click();
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
   await page.keyboard.type('A new paragraph.');
   await page.keyboard.press('Enter');
   await page.keyboard.type('And another.');
-  await expect.poll(async () => (await top(card(last.id))) - before).toBeGreaterThan(30);
-  await expect.poll(async () => Math.abs((await top(card(last.id))) - (await top(mark(last.id))))).toBeLessThan(4);
-  // Hidden with the bar's button, and shown again.
-  await page.getByRole('button', { name: /Comments/ }).first().click();
-  await expect(panel(page)).toHaveCount(0);
-  await page.getByRole('button', { name: /Comments/ }).first().click();
-  await expect(cards(page)).toHaveCount(3);
+  await openThread(page, last.id);
+  // (The passage far down is at the bottom of the page: where the page is scrolled to, the card is above it if there is no room under it.)
+  await page.evaluate((id) => document.querySelector(`.pd-editor [data-pd-thread="${id}"]`)!.scrollIntoView({ block: 'end' }), last.id);
+  await expect.poll(async () => (await popover(page).boundingBox())!.y + (await popover(page).boundingBox())!.height <= (await rectsOf(page, last.id))[0].top + 1).toBe(true);
+  expect(await clearOf(page, last.id)).toBe(true);
+  await expect(popover(page)).toHaveAttribute('data-above', 'true');
+  // Scrolled again to where there is room under it: it goes under it again. It follows the passage the whole way.
+  await page.evaluate((id) => document.querySelector(`.pd-editor [data-pd-thread="${id}"]`)!.scrollIntoView({ block: 'start' }), last.id);
+  await expect.poll(async () => (await popover(page).boundingBox())!.y >= Math.max(...(await rectsOf(page, last.id)).map((r) => r.bottom))).toBe(true);
+  await expect(popover(page)).not.toHaveAttribute('data-above', 'true');
+  // Back at the first: it moved down with the text typed above it.
+  await page.evaluate(() => document.querySelector('.extension-page')!.scrollTo(0, 0));
+  await openThread(page, first.id);
+  expect((await popover(page).boundingBox())!.y).toBeGreaterThan(before - 5);
+  expect(spread).toBeGreaterThan(0);
+  expect(await gap(first.id)).toBeLessThan(20);
 });
 
-test('a comment typed and not sent survives the page crossing the width of the margin and the margin being hidden, and the page still asks before it is left', async ({ page }) => {
+test('a comment typed and not sent survives the card being closed and opened, the list being shown and hidden, and the width of the page changing, and the page still asks before it is left', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
   const store = new Store();
-  const thread = seeded(store, 'The build is green.', 'Is it?');
+  const green = seeded(store, 'The build is green.', 'Is it?');
   await open(page, store);
   const asks = () => page.evaluate(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; });
   expect(await asks()).toBe(false);
-  // A reply in the margin goes on being there when the page is narrowed to a list, and when it is widened again.
-  const card = cards(page).filter({ hasText: 'Is it?' });
-  await pick(card);
+  // A reply typed in the card is kept when the card is closed with Escape (the text has the focus) and opened again.
+  const card = await openThread(page, green.id);
   await card.getByRole('textbox', { name: 'Reply' }).fill('Half a reply');
+  expect(await asks()).toBe(true);
+  await card.getByRole('textbox', { name: 'Reply' }).press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+  await expect(editorOf(page)).toBeFocused();
+  expect(await asks()).toBe(true);
+  await expect((await openThread(page, green.id)).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  // Closed with a click outside, and opened from the list, which is shown and hidden meanwhile.
+  await page.locator('.pd-titlebar').click({ position: { x: 300, y: 4 } });
+  await expect(popover(page)).toHaveCount(0);
+  await showList(page);
+  await barButton(page).click();
+  await showList(page);
+  await items(page).first().click();
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  // (The bar's button is outside the card: it closes it. The card is opened again for what follows.)
+  await barButton(page).click();
+  await expect(panel(page)).toHaveCount(0);
+  await expect((await openThread(page, green.id)).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  // The page narrowed to a phone's width and widened again: the card is drawn as it needs to be, with the words in it.
   await page.setViewportSize({ width: 700, height: 1000 });
-  await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', 'list');
-  await expect(cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', 'narrow');
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
   await page.setViewportSize({ width: 1400, height: 1000 });
-  await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', 'float');
-  await expect(cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
-  // A comment being written on a passage is kept when the margin is hidden with the bar's button and shown again.
+  await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', 'wide');
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  // A comment being written on a passage is kept when its card is closed, and the page asks for it as well.
   await select(page, 'Sign-off is on Monday.');
   await commentButton(page).click();
-  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Unsent words');
-  await page.getByRole('button', { name: /Comments/ }).first().click();
-  await expect(panel(page)).toHaveCount(0);
-  // Hidden, what was typed is still the page's to warn of.
+  await popover(page).locator('.pd-compose').getByRole('textbox').fill('Unsent words');
+  await popover(page).locator('.pd-compose').getByRole('textbox').press('Escape');
+  await expect(popover(page)).toHaveCount(0);
   expect(await asks()).toBe(true);
-  await page.getByRole('button', { name: /Comments/ }).first().click();
-  await expect(panel(page).locator('.pd-compose').getByRole('textbox')).toHaveValue('Unsent words');
-  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
-  // Sent, it is gone from the drafts: the reply makes no more asking, and the box is empty for the next one.
-  await card.getByRole('textbox', { name: 'Reply' }).press('Control+Enter');
-  await expect(card.locator('li')).toHaveCount(2);
-  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Cancel' }).click();
-  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
+  await closeCard(page);
+  await editorOf(page).locator('.pd-thread-pending').click();
+  await expect(popover(page).locator('.pd-compose').getByRole('textbox')).toHaveValue('Unsent words');
+  // Sent, the reply is gone from the drafts: the box is empty for the next one.
+  await mark(page, green.id).click();
+  await shown(page).getByRole('textbox', { name: 'Reply' }).press('Control+Enter');
+  await expect(shown(page).locator('li')).toHaveCount(2);
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toHaveValue('');
+  // The comment on the passage is given up: nothing is left to warn of.
+  await closeCard(page);
+  await editorOf(page).locator('.pd-thread-pending').click();
+  await popover(page).locator('.pd-compose').getByRole('button', { name: 'Cancel' }).click();
+  await expect(popover(page)).toHaveCount(0);
   expect(await asks()).toBe(false);
-  await page.setViewportSize({ width: 700, height: 1000 });
-  await expect(cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' })).toHaveValue('');
-  expect(thread.id).toBeTruthy();
 });
 
-test('in the margin every card is reached with the keyboard, an orphaned thread too: Enter on it gives the box to answer in and the buttons', async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 1000 });
-  const text = '# Notes\n\nA line.\n\nSign-off is on Monday.\n';
+test('every thread is reached with the keyboard: Ctrl+Alt+M at a commented passage opens its card with the focus in its box, a line of the list does the same, Tab goes from the text to the card, and the threads without a passage are in the list', async ({ page }) => {
+  const text = '# Notes\n\nA line.\n\nAn other line.\n\nSign-off is on Monday.\n';
   const store = new Store();
   store.texts.set(3, text);
-  seeded(store, 'Sign-off is on Monday.', 'Who signs off?');
-  seeded(store, 'A line.', 'Which line?');
+  const gone = seeded(store, 'Sign-off is on Monday.', 'Who signs off?');
+  const line = seeded(store, 'An other line.', 'Which line?', 'agent');
   store.elsewhere(text.replace('Sign-off is on Monday.\n', ''));
   await open(page, store, { ready: 'Notes' });
-  const gone = cards(page).filter({ hasText: 'Who signs off?' });
-  await expect(gone).toContainText('The passage this comment was on is no longer in the document.');
-  await expect(gone.getByRole('textbox')).toHaveCount(0);
-  await expect(gone.getByRole('button', { name: 'Resolve' })).toHaveCount(0);
-  // Focused (it is in the tab order) and opened with Enter.
-  await expect(gone).toHaveAttribute('tabindex', '0');
-  await gone.focus();
-  await expect(gone).toBeFocused();
-  await gone.press('Enter');
-  await expect(gone).toHaveAttribute('aria-current', 'true');
-  await expect(gone.getByRole('textbox', { name: 'Reply' })).toBeVisible();
-  await gone.getByRole('textbox', { name: 'Reply' }).focus();
-  await expect(gone.getByRole('textbox', { name: 'Reply' })).toBeFocused();
-  await expect(gone.getByRole('button', { name: 'Resolve' })).toBeVisible();
-  // Space does the same on another card, and a key typed in a card's own box is not taken for it.
-  const other = cards(page).filter({ hasText: 'Which line?' });
-  await other.focus();
-  await other.press('Space');
-  await expect(other).toHaveAttribute('aria-current', 'true');
-  await other.getByRole('textbox', { name: 'Reply' }).pressSequentially('two words');
-  await expect(other.getByRole('textbox', { name: 'Reply' })).toHaveValue('two words');
+  await expectMarked(page, line.id, 'An other line.');
+  // The caret in the passage, and Ctrl+Alt+M: the card is open and the box has the focus. Typing there is the box's.
+  await editorOf(page).getByText('A line.').click();
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(() => page.evaluate(() => Boolean(window.getSelection()?.anchorNode?.parentElement?.closest('[data-pd-thread]')))).toBe(true);
+  await page.keyboard.press('Control+Alt+m');
+  await expect(shown(page)).toHaveAttribute('data-thread', line.id);
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  await page.keyboard.type('two words');
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toHaveValue('two words');
+  // Escape: closed, the text has the focus; the words are kept, and are there when the card is opened again.
+  await page.keyboard.press('Escape');
+  await expect(popover(page)).toHaveCount(0);
+  await expect(editorOf(page)).toBeFocused();
+  await mark(page, line.id).click();
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toHaveValue('two words');
+  // With the caret in no commented passage the shortcut does nothing.
+  await page.keyboard.press('Escape');
+  await editorOf(page).getByText('A line.').click();
+  await page.keyboard.press('Control+Alt+m');
+  await expect(popover(page)).toHaveCount(0);
+  // Tab from the text goes to the card, which is next in the order of the page.
+  await mark(page, line.id).click();
+  await expect(shown(page)).toHaveAttribute('data-thread', line.id);
+  await page.keyboard.press('Tab');
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  // The thread whose passage is gone has no mark to reach: it is a card of the list, with its box and buttons, in the tab order.
+  await expect(editorOf(page).locator(`[data-pd-thread="${gone.id}"]`)).toHaveCount(0);
+  await barButton(page).focus();
+  await page.keyboard.press('Enter');
+  await expect(panel(page)).toBeVisible();
+  const orphan = cards(page).filter({ hasText: 'Who signs off?' });
+  await expect(orphan).toContainText('The passage this comment was on is no longer in the document.');
+  await orphan.getByRole('textbox', { name: 'Reply' }).focus();
+  await expect(orphan.getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  await orphan.getByRole('textbox', { name: 'Reply' }).pressSequentially('Nobody now.');
+  await page.keyboard.press('Control+Enter');
+  await expect(orphan.locator('li')).toHaveCount(2);
+  await expect(orphan.getByRole('button', { name: 'Resolve' })).toBeVisible();
+  // A line of the list for a thread with a passage: Enter opens its card, with the focus in the box.
+  await expect(items(page)).toHaveCount(1);
+  await items(page).first().focus();
+  await page.keyboard.press('Enter');
+  await expect(shown(page)).toHaveAttribute('data-thread', line.id);
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  await expect(shown(page).getByRole('textbox', { name: 'Reply' })).toHaveValue('two words');
 });
+
+test('the card of an open thread is updated when the agent comments, and keeps what was typed; the text of a thread shown in it is not cut', async ({ page }) => {
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  const card = await openThread(page, green.id);
+  await card.getByRole('textbox', { name: 'Reply' }).fill('typing…');
+  store.comment(green.id, 'A long answer. '.repeat(40), 'agent');
+  await told(page, 'threads', { at: '2026-10-02T10:00:00.000Z' });
+  await expect(card.locator('li')).toHaveCount(2);
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('typing…');
+  // Still beside its passage: the card grew, and is placed again.
+  expect(await clearOf(page, green.id)).toBe(true);
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const box = (await popover(page).boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(sheet.x + sheet.width);
+});
+
+test('with the comments on a document there is nothing under the sheet: the document fills the page to its bottom, with no bar of its own below the text', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 1200 });
+  const store = new Store();
+  seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  // Not a list under the text, and no margin: the desk is the sheet and the room around it.
+  await expect(page.locator('.pd-threads, .pd-margin, .pd-thread-card')).toHaveCount(0);
+  const m = await page.evaluate(() => {
+    const at = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+    return { doc: at('.pd-doc'), sheet: at('.pd-sheet'), desk: at('.pd-desk'), scroller: at('.extension-page') };
+  });
+  // The document ends where the page does, and the sheet is followed by the desk's own padding and nothing else.
+  expect(m.doc.bottom).toBeGreaterThanOrEqual(m.scroller.bottom - 1);
+  expect(m.desk.bottom).toBeGreaterThanOrEqual(m.scroller.bottom - 1);
+  expect(await page.evaluate(() => { const s = document.querySelector('.extension-page')!; return s.scrollHeight <= s.clientHeight + 1; })).toBe(true);
+  // What is on the desk under the sheet is the desk's padding alone.
+  expect(await page.evaluate(() => { const row = document.querySelector('.pd-row')!; return [...document.querySelectorAll('.pd-desk > *')].filter((e) => e !== row).length; })).toBe(0);
+});
+

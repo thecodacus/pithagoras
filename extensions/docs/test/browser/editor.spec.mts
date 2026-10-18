@@ -253,6 +253,13 @@ test('a mark moves with the text as it is typed, a click on it is told with the 
   expect(await page.evaluate(() => (window as any).clicked)).toContain('green');
   expect((await caret())[0]).toBe('The build is green.');
   expect(await page.locator('#root').evaluate((root) => (root as HTMLElement).dataset.activeThread)).toBe('green');
+  // The caret in it is how the keyboard finds the thread; a click in no passage is told too, with no id (what is open is to be closed).
+  expect(await page.evaluate(() => (window as any).ed.threadAtCaret())).toBe('green');
+  await page.locator('#root p').first().click();
+  expect(await page.evaluate(() => (window as any).clicked.at(-1))).toBe(null);
+  expect(await page.evaluate(() => (window as any).ed.threadAtCaret())).toBe(null);
+  await mark('green').click({ position: { x: 20, y: 5 } });
+  expect(await page.evaluate(() => (window as any).clicked.at(-1))).toBe('green');
   // Typed at its start, it is not in it.
   await page.keyboard.press('Home');
   await page.keyboard.type('Now ');

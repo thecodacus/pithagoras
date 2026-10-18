@@ -330,8 +330,9 @@ or floating like the other panels, with every document of the chat's folder,
 as on the page. A folder such as the agent's home is shared by many chats: a
 document another chat made as its own says **From the chat …** (its agent sees
 it; the agent of this chat does not). A document opens there in the same editor
-as on the page, with its toolbar, its comments and its history; the comments
-are under the text where the panel is narrow. **Full page** opens it on the
+as on the page, with its toolbar, its comments and its history; a comment's card
+fits the panel, and the list of comments is a sheet over the bottom of the panel
+where it is narrow. **Full page** opens it on the
 Documents page, the whole of it. A title and **New document** make
 one in the chat's folder and open it (the title is its heading, as below), and
 **Open in Documents** on the card of one of the agent's document tools opens
@@ -394,9 +395,10 @@ password changes. It names no folder, document or path; it says only that someth
 
 Click a document to open it in the editor. It is laid out as a word processor
 is: a bar with the document's name, where it stands, **Comments**, **History**
-and **Download**; a toolbar; and the text on a sheet the width of a page, with
-the comments in the margin beside it. On the Documents page an open document
-takes the whole page.
+and **Download**; a toolbar; and the text on a sheet the width of a page, on a
+desk. Nothing else is shown with the text: the comments are on the sheet when
+you open one, and in a list when you ask for it ([below](#comments)). On the
+Documents page an open document takes the whole page.
 
 You edit the text as it will look: headings, lists, task lists, tables, quotes,
 links and code. What you write is saved as Markdown, in the document's file.
@@ -559,15 +561,40 @@ Markdown, with the reason and **Try again**.
 ## Comments
 
 A comment is on a passage of a document: you select some words, press
-**Comment** in the toolbar and write what you want to say. The words
-are marked in the text, and the comment is a **thread** in the margin beside
-the text, level with its words (under the text on a narrow screen or in a
-narrow panel). Cards whose words are close are put one under the other; the
-one you click goes to its words, with the others moved out of its way, and only
-that one has the box to answer in and its buttons. **Comments** in the bar hides
-the margin and shows it again. The agent starts threads too, with
-its tools ([below](#the-agents-tools)), and your page shows them as soon as they
-are made, without a reload.
+**Comment** in the toolbar (or **Ctrl+Alt+M**, **⌘+Alt+M** on a Mac) and write
+what you want to say. The words are marked in the text, and the comment is a
+**thread** on them. As in a word processor, the comments are on the same canvas
+as the text and not beside it, and nothing of them is shown until you ask:
+
+- A **commented passage** is marked in the text. **Click it** and its thread
+  opens as a card on the sheet, just under the words (above them where there is
+  no room under them), so that the words stay readable; the card is on top of the
+  text, not in a margin, and stays inside the sheet. It has the comments of the
+  thread, the box to **Reply** in, **Resolve** (or **Reopen**) and **Delete
+  thread** where that is yours to do, and a reminder that **@agent** asks the
+  agent. Only one card is open at a time: a click on another passage opens that
+  one instead. It follows its words as you scroll and as the text changes, and a
+  click in the text elsewhere, a click outside the card or **Escape** closes it
+  (the text has the focus again). What was typed in its box is kept when it is
+  closed ([below](#writing-a-comment)).
+- A new comment opens its card in the same way at the words you selected, with
+  the box ready to write in.
+- With the keyboard: **Ctrl+Alt+M** with the cursor in a commented passage opens
+  its card, with the focus in the box; **Tab** from the text goes into the card,
+  and **Escape** back to the text.
+- **Comments** in the bar, with how many threads are open, shows the **list** of
+  all the threads, and hides it again. It is beside the sheet where the page
+  is wide and a sheet over the bottom of the page or the panel where it is
+  narrow. A thread on a passage is a line in it (the words, and the last thing
+  said): **choose** it and the text scrolls to the passage and its card opens
+  there. A thread that has no passage to click, because its words are gone
+  from the text (or could not be marked) or because it is resolved, is a card
+  of its own in the list, with its box and buttons: this is where they are
+  reached, **Show resolved** among them.
+
+The agent starts threads too, with its tools ([below](#the-agents-tools)), and
+your page shows them as soon as they are made, without a reload; a card that is
+open takes in what the agent says, and what you were typing stays in the box.
 
 ### Writing a comment
 
@@ -578,10 +605,14 @@ type, so a comment half written is nobody's but yours. **Cancel** on a new
 comment drops it; nothing was sent, so nothing is taken away. A comment that
 could not be sent stays in the box with the reason, to be sent again. The
 browser asks before a reload or a closed tab would lose a comment you had not
-sent. An answer from the agent that comes while you type is added to the
+sent. What you typed is kept when you close the card (with **Escape** or by
+clicking outside) and when you show or hide the list, and is there when you open
+the card again; a comment on a passage that you close with words in it keeps the
+passage marked, and a click on the mark opens it again (with nothing typed, closing
+it drops it). An answer from the agent that comes while you type is added to the
 thread, and what you are typing stays in the box.
 
-Once it is sent the comment is in the list. You change or delete it afterwards
+Once it is sent the comment is in its thread. You change or delete it afterwards
 with the buttons beside it ([below](#changing-and-deleting-comments)).
 
 A comment on text you have just typed is made on that text: what you typed is
@@ -590,8 +621,10 @@ history has.
 
 What is in a thread:
 
-- The passage it is on, which you can click to bring it into view in the text
-  (clicking the marked words does the same the other way round).
+- The passage it is on: the marked words in the text, which open the card when
+  you click them, and, in the list, the line that brings them into view and opens
+  the card (a card of the list, for a thread that has no passage in the text, shows
+  the words it had).
 - The comments in it, in the order they were made, each with who made it (you or
   the agent) and when. A comment is Markdown, drawn as the conversation draws
   it.
@@ -604,10 +637,10 @@ You and the agent can both start a thread, answer it and resolve it.
 
 ### Changing and deleting comments
 
-A comment that is in the list can be changed or deleted by whoever wrote it: you
+A comment that has been sent can be changed or deleted by whoever wrote it: you
 change your own, and the agent its own ([below](#the-agents-tools)). Neither
 changes or deletes the other's. Each of your comments has **Edit** and **Delete**
-beside its time, in an open thread or a resolved one.
+beside its time, in an open thread (its card on the sheet) or a resolved one (its card in the list).
 
 - **Edit** turns the comment into a box with **Save** and **Cancel**. It is kept
   as it was until you press **Save** (or **Ctrl+Enter**); **Cancel** and

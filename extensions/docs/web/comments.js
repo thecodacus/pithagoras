@@ -1,56 +1,34 @@
 /**
- * The comments of a document on the Documents page: the list of threads beside
- * the editor, a thread with its comments and the box a comment is written in.
- * What is typed in the box stays in the page until it is sent, with Send or
- * Ctrl+Enter: only then is it saved, seen by anyone else, and, with
- * @agent in it, asked of the agent. A comment half written is nobody's but the
- * person's. Plain JavaScript like the rest of the browser half, made with the
- * portal's React and building blocks (`portal.ui`).
+ * The comments of a document on the Documents page, as a word processor shows them: a passage that is commented on is marked in
+ * the text, and a click on it opens its thread as a card (`Popover`) that floats on the sheet, just under the passage (above it where
+ * there is no room below), so that the words stay readable. A thread is a card of its comments, the box a comment is
+ * written in and the buttons to resolve it. What is typed in the box stays in the page until it is sent, with Send or
+ * Ctrl+Enter: only then is it saved, seen by anyone else, and, with @agent in it, asked of the agent. A comment half written is
+ * nobody's but the person's, and it is kept when the card is closed and opened again. Plain JavaScript like the rest of
+ * the browser half, made with the portal's React and building blocks (`portal.ui`).
  *
- * A comment of the person's, once it is in the list, can be changed or deleted with
- * the buttons beside it, and a thread they started, while the agent has not commented
- * in it, can be deleted as a whole. The agent's comments are only read.
+ * Nothing else of the comments is drawn unless it is asked for: the bar's **Comments** shows the list (`Comments`) of all the
+ * threads, a way to a thread that is out of reach in the text (its passage is gone, or it is resolved) and to the others, which
+ * are chosen there and open in their card.
  *
- * Where the page is wide enough the threads float in the margin beside the
- * text, as a word processor draws them: each card level with its passage, the
- * one looked at where its passage is and the others moved up or down out of
- * its way, and the box to answer in only on the one looked at. Where it is not,
- * they are a list under the text.
+ * A comment of the person's, once it is sent, can be changed or deleted with the buttons beside it, and a thread they
+ * started, while the agent has not commented in it, can be deleted as a whole. The agent's comments are only read.
  *
- * It holds no data of its own: the page (document-editor.js) fetches the
- * threads, tells the editor where their passages are, and hands both over, with
- * what to do when a comment is saved, changed, taken away, resolved or opened again.
+ * It holds no data of its own: the page (document-editor.js) fetches the threads, tells the editor where their passages are, and
+ * hands both over, with what to do when a comment is saved, changed, taken away, resolved or opened again.
  */
 /** The most characters of the text of a passage a card shows. */
 const SHOWN_CHARS = 240;
+/** The most characters of a comment the list shows of it. */
+const SUMMARY_CHARS = 100;
 
-/** The room between two cards in the margin, in pixels. */
-const GAP = 8;
+/** The id the passage of a comment that is being written is marked by in the editor: no thread has it. */
+export const PENDING = "pending";
 
-/**
- * Where the cards of the margin go (`top` for each, in their order): each at its passage (`want`, null for one that has none, which
- * comes after the one before it), none over another, and the one looked at (`active`, an index) at its passage where the ones before it
- * can move up to make room.
- */
-export function floatCards(cards, active = -1) {
-  const tops = [];
-  let bottom = 0;
-  for (const [i, card] of cards.entries()) {
-    tops[i] = Math.max(card.want ?? bottom, bottom);
-    bottom = tops[i] + card.height + GAP;
-  }
-  const wanted = cards[active]?.want;
-  if (wanted == null || tops[active] <= wanted) return tops;
-  tops[active] = Math.max(0, wanted);
-  for (let i = active - 1; i >= 0; i--) tops[i] = Math.min(tops[i], tops[i + 1] - cards[i].height - GAP);
-  // Moved up as far as the top: what does not fit above it goes down again, the one looked at with it.
-  bottom = 0;
-  for (const [i, card] of cards.entries()) {
-    tops[i] = Math.max(tops[i], bottom);
-    bottom = tops[i] + card.height + GAP;
-  }
-  return tops;
-}
+/** How wide a card is at most, in pixels, and how far from the passage and from the sheet's edge it is kept. */
+const CARD_WIDTH = 352;
+const GAP = 6;
+const EDGE = 8;
 
 /** `text` cut to what a card shows. */
 const short = (text) => (text.length > SHOWN_CHARS ? `${text.slice(0, SHOWN_CHARS)}…` : text);
@@ -61,6 +39,7 @@ export function comments(portal, { when }) {
   const h = React.createElement;
 
   const WHO = () => ({ user: t("You"), agent: t("The agent") });
+  const HINT = () => t("Write @agent in a comment to ask the agent to answer it.");
 
   /** The box a comment is typed in: Ctrl+Enter (or Cmd+Enter) sends it, or saves an edit. Escape gives up, where that means something. */
   function Writing({ value, onChange, onBlur, onDone, onCancel, label, placeholder, autoFocus }) {
@@ -163,13 +142,14 @@ export function comments(portal, { when }) {
   }
 
   /**
-   * One thread: its passage, its comments in the order they were made, and the box to write the next in. `composing` is the
-   * card of a comment that is being written on a passage: with no thread yet (`thread.id` is null) until it is sent, which
-   * makes the thread, and the card is the thread's in the list from then on.
+   * One thread: its comments in the order they were made, and the box to write the next in. In its card on the sheet (`floating`)
+   * it is the passage's own and shows no quote; in the list it says which passage it is on. `composing` is the card of a comment that
+   * is being written on a passage: with no thread yet (`thread.id` is null) until it is sent, which makes the thread, and the card is
+   * the thread's from then on.
    */
-  function Thread({ thread, text, marked, settled, active, composing, float, drafts, draftKey, onPick, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
-    // What is typed is kept in `drafts` as well: the card is drawn again from nothing when the margin and the list change places or
-    // the margin is hidden, and the words are not lost with it. The page warns of them before it is left (document-editor.js).
+  function Thread({ thread, text, marked, settled, floating, composing, drafts, draftKey, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
+    // What is typed is kept in `drafts` as well: the card is drawn again from nothing each time it is opened, and the words are not
+    // lost with it. The page warns of them before it is left (document-editor.js).
     const [value, setValueNow] = useState(() => drafts.get(draftKey) ?? "");
     const setValue = (words) => {
       if (words) drafts.set(draftKey, words);
@@ -187,7 +167,6 @@ export function comments(portal, { when }) {
       mounted.current = true;
       return () => void (mounted.current = false);
     }, []);
-    const unsent = Boolean(value.trim());
 
     /** Does `work`, and says why if it did not go through. */
     const run = async (work) => {
@@ -233,31 +212,17 @@ export function comments(portal, { when }) {
           : [t("Asked the agent"), thread.ping?.title].filter(Boolean).join(" · ")
         : null;
 
-    // In the margin only the card looked at (or one being written, or one with something typed in it) has the box to answer in.
-    const answering = !float || active || composing || unsent;
-    const pickable = float && !active && Boolean(thread.id);
     return h(
       "article",
       {
         className: `pd-thread-card${composing ? " pd-compose" : ""}`,
         "data-thread": thread.id ?? undefined,
         "data-status": thread.status,
-        "aria-current": active ? "true" : undefined,
         "aria-label": composing ? t("New comment") : t("Comment thread"),
-        onClick: pickable ? () => onPick?.(thread.id) : undefined,
-        // A card is looked at with the keyboard as well (Enter or Space on the card itself): it has the box and the buttons then,
-        // and a thread whose passage is gone has no other way to them.
-        tabIndex: pickable ? 0 : undefined,
-        onKeyDown: pickable
-          ? (e) => {
-              if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
-              e.preventDefault();
-              onPick?.(thread.id);
-            }
-          : undefined,
+        role: floating ? "dialog" : undefined,
       },
       composing && !thread.id && h("strong", null, t("New comment")),
-      h(Passage, { text: text ?? thread.quote, onClick: marked ? () => onActivate(thread.id) : undefined }),
+      !floating && h(Passage, { text: text ?? thread.quote, onClick: marked ? () => onActivate(thread.id) : undefined }),
       thread.orphaned && h("p", { className: "pd-meta pd-gone" }, t("The passage this comment was on is no longer in the document.")),
       !thread.orphaned && !marked && settled && open && thread.id && !composing && h("p", { className: "pd-meta pd-gone" }, t("The passage could not be marked in the text.")),
       asked &&
@@ -274,9 +239,8 @@ export function comments(portal, { when }) {
         thread.comments.map((comment) => h(Comment, { key: comment.id, comment, only: thread.comments.length === 1 && deletable, onEdit: (c, words) => onEdit(thread, c, words), onDelete: (c) => onDelete(thread, c), run })),
       ),
       error && h(ui.ErrorBanner, { onClose: () => setError(null) }, t("Could not comment: {error}", { error })),
-      answering &&
-        (open
-          ? h(
+      open
+        ? h(
               "div",
               { className: "pd-reply" },
               h(Writing, {
@@ -296,29 +260,146 @@ export function comments(portal, { when }) {
                   : h("button", { type: "button", className: ui.classes.button, disabled: sending, onClick: () => void resolve() }, t("Resolve")),
                 deletable && h("button", { type: "button", className: ui.classes.ghost, disabled: sending, onClick: () => void removeThread() }, t("Delete thread")),
               ),
+              floating && h("p", { className: "pd-hint" }, HINT()),
             )
           : h(
               "div",
               { className: "pd-actions" },
               h("button", { type: "button", className: ui.classes.button, onClick: () => run(() => onReopen(thread)) }, t("Reopen")),
               deletable && h("button", { type: "button", className: ui.classes.ghost, onClick: () => void removeThread() }, t("Delete thread")),
-            )),
+            ),
     );
   }
 
   /**
-   * The panel: `threads` as the server has them (document order, open ones first), `texts` what the marked passages read as
-   * by thread id (`settled`: the editor has been asked to mark these threads, so one that is not marked cannot be), `error` why they could
-   * not be fetched. `compose` is the comment being written on a passage, if one is: its `threadId` is the thread sending it made,
-   * which is its card and not one of the list's until the card is let go.
+   * A thread's card on the sheet, floating next to its passage. `thread` is the one to show, or the comment being written (`compose`, with
+   * the thread its first save made once it has): `anchor()` gives the rectangles of the passage on the screen (one for each line of it),
+   * `sheet` is the element the card is placed in. It is just under the passage, above it where it does not fit under, and kept inside
+   * the sheet sideways. Escape or a click outside closes it (`onClose`, told whether the text is to have the focus back), and so does
+   * nothing else: the card follows its passage as the document scrolls and is placed again when the text, the card or the window change size.
    */
-  return function Comments({ threads, loaded, error, texts, settled, active, compose, drafts = new Map(), float = false, anchor, relayout, onPick, onRetry, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
+  function Popover({ thread, settled, compose, drafts, sheet, editor, anchor, takeFocus, onClose, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
+    const box = useRef(null);
+    const [at, setAt] = useState(null);
+    const place = () => {
+      const card = box.current;
+      const rects = anchor();
+      if (!card || !sheet || !rects?.length) return;
+      const frame = sheet.getBoundingClientRect();
+      const first = rects[0];
+      const last = rects.at(-1);
+      const width = Math.min(CARD_WIDTH, frame.width - 2 * EDGE);
+      const height = card.offsetHeight;
+      // What of the screen is the person's to look at: the panel or the window, under the toolbar that stays at the top.
+      const scroller = sheet.closest(".pd-panel");
+      const view = scroller ? scroller.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const top = Math.max(view.top, sheet.closest(".pd-doc")?.querySelector(".pd-toolbar")?.getBoundingClientRect().bottom ?? 0);
+      const under = last.bottom + GAP;
+      const over = first.top - GAP - height;
+      const above = under + height > Math.min(view.bottom, window.innerHeight) && over >= top;
+      const left = Math.min(Math.max((above ? first.left : last.left) - frame.left, EDGE), Math.max(EDGE, frame.width - width - EDGE));
+      const next = { top: Math.round((above ? over : under) - frame.top - sheet.clientTop), left: Math.round(left - sheet.clientLeft), width: Math.round(width), above };
+      setAt((now) => (now && now.top === next.top && now.left === next.left && now.width === next.width && now.above === next.above ? now : next));
+    };
+    // After every drawing (the card's contents change its height, and the page draws it again when the text moved), and by the
+    // listeners below, which are set up once and so ask for the latest `place`.
+    const placing = useRef(place);
+    placing.current = place;
+    React.useLayoutEffect(place);
+    useEffect(() => {
+      let timer = null;
+      // Scrolled: placed again once it stops, where it is above or under the passage depending on what is in view then.
+      const later = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => placing.current(), 120);
+      };
+      const resized = () => placing.current();
+      window.addEventListener("resize", resized);
+      document.addEventListener("scroll", later, { capture: true, passive: true });
+      const watch = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resized);
+      if (box.current) watch?.observe(box.current);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener("resize", resized);
+        document.removeEventListener("scroll", later, { capture: true });
+        watch?.disconnect();
+      };
+    }, []);
+    // A click outside closes it; one in the text is the text's to tell (a click on another passage opens that one), and one in a
+    // question the card asked is not outside.
+    useEffect(() => {
+      const away = (e) => {
+        if (box.current?.contains(e.target) || editor?.contains(e.target) || e.target.closest?.('[role="alertdialog"]')) return;
+        onClose({ focus: false });
+      };
+      document.addEventListener("mousedown", away);
+      return () => document.removeEventListener("mousedown", away);
+    }, [onClose]);
+    // Opened with the keyboard (or from the list), the box to write in has the focus.
+    useEffect(() => {
+      if (!takeFocus) return;
+      const field = box.current?.querySelector("textarea") ?? box.current?.querySelector("button");
+      field?.focus({ preventScroll: true });
+    }, [takeFocus]);
+
+    const composing = Boolean(compose);
+    return h(
+      "div",
+      {
+        ref: box,
+        className: "pd-popover",
+        "data-above": at?.above ? "true" : undefined,
+        style: at ? { top: `${at.top}px`, left: `${at.left}px`, width: `${at.width}px` } : { top: 0, left: 0, width: `${CARD_WIDTH}px`, opacity: 0, pointerEvents: "none" },
+        onKeyDown: (e) => {
+          if (e.key !== "Escape" || e.defaultPrevented) return;
+          e.preventDefault();
+          onClose({ focus: true });
+        },
+      },
+      h(Thread, {
+        key: composing ? `compose-${compose.key}` : thread.id,
+        thread,
+        marked: true,
+        settled,
+        floating: true,
+        composing,
+        drafts,
+        draftKey: composing ? `compose-${compose.key}` : thread.id,
+        onActivate,
+        onWrite: composing ? (th, words, id) => onWrite(th, words, id, compose) : onWrite,
+        onFinish,
+        onCancel: () => onCancel(compose),
+        onResolve,
+        onReopen,
+        onSeen,
+        onEdit,
+        onDelete,
+        onDeleteThread,
+      }),
+    );
+  }
+
+  /** A thread in the list that is on a passage in the text: what it is on and what was said last; a click opens its card there. */
+  function Summary({ thread, text, active, onActivate }) {
+    const last = thread.comments.at(-1);
+    const words = last ? last.body.replace(/\s+/g, " ").trim() : "";
+    return h(
+      "button",
+      { type: "button", className: "pd-item", "data-thread": thread.id, "aria-current": active ? "true" : undefined, title: t("Show in the text"), onClick: () => onActivate(thread.id) },
+      h("span", { className: "pd-quote" }, short(text ?? thread.quote)),
+      last && h("span", { className: "pd-said" }, h("strong", null, WHO()[last.author] ?? last.author), ": ", words.length > SUMMARY_CHARS ? `${words.slice(0, SUMMARY_CHARS)}…` : words),
+    );
+  }
+
+  /**
+   * The list of all the threads, shown when it is asked for: `threads` as the server has them (document order, open ones first),
+   * `texts` what the marked passages read as by thread id (`settled`: the editor has been asked to mark these threads, so one that is
+   * not marked cannot be), `error` why they could not be fetched, `active` the thread whose card is open. A thread on a passage in the
+   * text is a line that opens its card; one that is not (its passage is gone, or it is resolved) is a card of its own here, with its box
+   * and its buttons. `compose` is the comment being written, which is a card on the sheet and not in the list.
+   */
+  function Comments({ threads, loaded, error, texts, settled, active, compose, drafts = new Map(), onClose, onRetry, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
     const [resolved, setResolved] = useState(false);
-    // In the margin: the tops of the cards, by their keys, once they have been measured, and the elements they are measured by.
-    const [tops, setTops] = useState(() => new Map());
-    const slots = useRef(new Map());
-    const margin = useRef(null);
-    const listBox = useRef(null);
     const listed = threads.filter((thread) => thread.id !== compose?.threadId);
     const open = listed.filter((thread) => thread.status === "open");
     // A thread the agent resolved is news until the person has seen it: it is not put away with the others.
@@ -329,138 +410,41 @@ export function comments(portal, { when }) {
       if (!closed.length) setResolved(false);
     }, [closed.length]);
     const list = resolved ? listed : [...open, ...news];
-    const card = (thread) =>
-      h(Thread, {
-        key: thread.id,
-        float,
-        onPick,
-        thread,
-        drafts,
-        draftKey: thread.id,
-        text: texts.get(thread.id),
-        marked: texts.has(thread.id),
-        settled,
-        active: active === thread.id,
-        onActivate,
-        onWrite,
-        onFinish,
-        onCancel,
-        onResolve,
-        onReopen,
-        onSeen,
-        onEdit,
-        onDelete,
-        onDeleteThread,
-      });
-    // The thread its first save made, or one that is not made yet.
-    const made = compose && threads.find((thread) => thread.id === compose.threadId);
-    const composed = compose && (made ?? { id: null, status: "open", orphaned: false, quote: compose.passage.quote, toAgent: false, answered: false, ping: null, comments: [] });
     const openCount = threads.filter((thread) => thread.status === "open").length;
-    const hint = t("Write @agent in a comment to ask the agent to answer it.");
-    const composeCard =
-      composed &&
-      h(Thread, {
-        key: `compose-${compose.key}`,
-        thread: composed,
-        drafts,
-        draftKey: `compose-${compose.key}`,
-        text: made ? texts.get(made.id) : compose.passage.text,
-        marked: Boolean(made) && texts.has(made.id),
-        settled,
-        active: made ? active === made.id : false,
-        composing: true,
-        float,
-        onPick,
-        onActivate,
-        onWrite: (thread, words, id) => onWrite(thread, words, id, compose),
-        onFinish,
-        onCancel: () => onCancel(compose),
-        onResolve,
-        onReopen,
-        onSeen,
-        onEdit,
-        onDelete,
-        onDeleteThread,
-      });
-
-    // The cards of the margin, in the order of the text: the one being written is at the passage it is on (marked as pending until it is a thread).
-    const floating = float && loaded ? [...(composeCard ? [{ key: `compose-${compose.key}`, anchor: made?.id ?? "pending", node: composeCard, id: made?.id ?? null }] : []), ...list.map((thread) => ({ key: thread.id, anchor: thread.id, node: card(thread), id: thread.id }))] : [];
-    const order = floating.map((c) => c.key).join("\n");
-    // Measured after each drawing: where each passage is and how tall each card is, and the cards put where they go. Drawn again only
-    // when that moved them, which it does not the second time.
-    React.useLayoutEffect(() => {
-      if (!float) return;
-      // Where the passages are is told from the top of the page; the cards are put from the top of their list.
-      const top = listBox.current?.getBoundingClientRect().top ?? 0;
-      const measured = floating.map((c) => {
-        const at = anchor?.(c.anchor);
-        const want = at == null ? null : at - top;
-        return { key: c.key, want: want == null ? null : Math.round(want), height: Math.round(slots.current.get(c.key)?.offsetHeight ?? 0), id: c.id };
-      });
-      // Those that have a passage in the order of the text; those that have none after them, as they are listed.
-      const placed = measured.filter((c) => c.want !== null).sort((a, b) => a.want - b.want);
-      const cards = [...placed, ...measured.filter((c) => c.want === null)];
-      const at = floatCards(cards, cards.findIndex((c) => c.id !== null && c.id === active));
-      const next = new Map(cards.map((c, i) => [c.key, at[i]]));
-      setTops((now) => (now.size === next.size && [...next].every(([key, top]) => now.get(key) === top) ? now : next));
-    });
-    // Moved again when the text moves under them (`relayout`) or the margin changes its width.
-    useEffect(() => {
-      if (!float || typeof ResizeObserver === "undefined" || !margin.current) return;
-      const watch = new ResizeObserver(() => setTops((now) => new Map(now)));
-      watch.observe(margin.current);
-      return () => watch.disconnect();
-    }, [float]);
-    useEffect(() => {
-      if (float) setTops((now) => new Map(now));
-    }, [relayout]);
-
-    if (float) {
-      const bottom = Math.max(0, ...floating.map((c) => (tops.get(c.key) ?? 0) + (slots.current.get(c.key)?.offsetHeight ?? 0)));
-      return h(
-        "aside",
-        { className: "pd-threads pd-margin", "aria-label": t("Comments"), ref: margin },
-        h(
-          "div",
-          { className: "pd-margin-head" },
-          h("h2", null, t("Comments"), openCount > 0 && h("span", { className: "pd-count" }, openCount)),
-          closed.length > 0 && h("button", { type: "button", className: `${ui.classes.ghost} pd-more`, "aria-expanded": resolved, onClick: () => setResolved((on) => !on) }, resolved ? t("Hide resolved") : t("Show resolved ({n})", { n: closed.length })),
-        ),
-        h("p", { className: "pd-hint" }, hint),
-        error && !loaded
-          ? h(ui.LoadFailed, { error: t("Comments could not be loaded: {error}", { error: error.message }), onRetry })
-          : !loaded
-            ? h(ui.RowsSkeleton, { rows: 2, label: t("Loading…") })
-            : h(
-                React.Fragment,
-                null,
-                !threads.length && !compose && h("p", { className: "pd-hint" }, t("No comments yet. Select some text, then press Comment.")),
-                h(
-                  "div",
-                  { className: "pd-thread-list", ref: listBox, "aria-live": "polite", "data-order": order, style: { minHeight: `${bottom + 48}px` } },
-                  floating.map((c) =>
-                    h(
-                      "div",
-                      {
-                        key: c.key,
-                        className: "pd-slot",
-                        "data-placed": tops.has(c.key) ? "true" : undefined,
-                        style: { top: `${tops.get(c.key) ?? 0}px` },
-                        ref: (el) => (el ? slots.current.set(c.key, el) : slots.current.delete(c.key)),
-                      },
-                      c.node,
-                    ),
-                  ),
-                ),
-              ),
-      );
-    }
+    // On a passage: open and found in the text (or not looked for yet).
+    const onPassage = (thread) => thread.status === "open" && !thread.orphaned && (texts.has(thread.id) || !settled);
+    const card = (thread) =>
+      onPassage(thread)
+        ? h(Summary, { key: thread.id, thread, text: texts.get(thread.id), active: active === thread.id, onActivate })
+        : h(Thread, {
+            key: thread.id,
+            thread,
+            drafts,
+            draftKey: thread.id,
+            text: texts.get(thread.id),
+            marked: texts.has(thread.id),
+            settled,
+            onActivate,
+            onWrite,
+            onFinish,
+            onCancel,
+            onResolve,
+            onReopen,
+            onSeen,
+            onEdit,
+            onDelete,
+            onDeleteThread,
+          });
     return h(
       "aside",
       { className: "pd-threads", "aria-label": t("Comments") },
-      h("h2", null, t("Comments"), openCount > 0 && h("span", { className: "pd-count" }, openCount)),
-      h("p", { className: "pd-hint" }, hint),
-      composeCard,
+      h(
+        "div",
+        { className: "pd-list-head" },
+        h("h2", null, t("Comments"), openCount > 0 && h("span", { className: "pd-count" }, openCount)),
+        h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: onClose }, t("Close")),
+      ),
+      h("p", { className: "pd-hint" }, HINT()),
       error && !loaded
         ? h(ui.LoadFailed, { error: t("Comments could not be loaded: {error}", { error: error.message }), onRetry })
         : !loaded
@@ -474,5 +458,7 @@ export function comments(portal, { when }) {
                 h("button", { type: "button", className: `${ui.classes.ghost} pd-more`, "aria-expanded": resolved, onClick: () => setResolved((on) => !on) }, resolved ? t("Hide resolved") : t("Show resolved ({n})", { n: closed.length })),
             ),
     );
-  };
+  }
+
+  return { Comments, Popover };
 }

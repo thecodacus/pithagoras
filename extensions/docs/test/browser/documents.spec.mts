@@ -234,10 +234,8 @@ test('a chat has a Documents panel beside it: its folder\'s documents, opened in
   await expect(panels.getByText('Setting up')).toHaveCount(0);
   await panels.getByRole('button', { name: /The plan/ }).click();
   await expect(panels.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
-  // At a panel's width the comments are under the text, not squeezed beside it.
-  const editor = await panels.locator('.pd-editor').boundingBox();
-  const comments = await panels.locator('.pd-threads').boundingBox();
-  expect(comments!.y).toBeGreaterThan(editor!.y + editor!.height - 1);
+  // The comments are not drawn until they are asked for: nothing under the text, no margin.
+  await expect(panels.locator('.pd-threads, .pd-thread-card')).toHaveCount(0);
   await panels.getByRole('button', { name: /All documents/ }).click();
   // A new one, by its title: made in the chat's folder, and open at once.
   const create = panels.getByRole('button', { name: 'New document' });
@@ -660,4 +658,32 @@ test('a document open in the panel opens on a page of its own, the whole of it, 
   await expect(page).toHaveURL(new RegExp(`/x/${NAME}/documents\\?folder=0123456789abcdef&doc=1111111111111111$`));
   await expect(page.locator('.pd-full .ProseMirror h1')).toHaveText('The plan');
   await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toHaveCount(0);
+});
+
+test('a document open in the panel fills it to its bottom: no strip of the panel under the desk, whatever the panel\'s height', async ({ page }) => {
+  // Taller than a short document, which is what shows a strip under it.
+  await page.setViewportSize({ width: 1300, height: 1300 });
+  await portal(page);
+  await page.goto('/s/a');
+  await page.locator('.panel-toggle[aria-label="Documents"]').click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  await panels.getByRole('button', { name: /The plan/ }).click();
+  await expect(panels.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
+  const at = () =>
+    page.evaluate(() => {
+      const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+      const scroller = document.querySelector('.pd-panel') as HTMLElement;
+      return { panel: rect('.pd-panel').bottom, doc: rect('.pd-doc').bottom, desk: rect('.pd-desk').bottom, scrolls: scroller.scrollHeight > scroller.clientHeight + 1 };
+    });
+  // The document goes down to the panel's end, and the panel has nothing to scroll for the empty room under it.
+  await expect.poll(async () => Math.round((await at()).panel - (await at()).doc)).toBe(0);
+  expect((await at()).desk).toBeGreaterThanOrEqual((await at()).panel - 1);
+  expect((await at()).scrolls).toBe(false);
+  // The same in a shorter panel, where the document is longer than it: it scrolls, and ends with the desk.
+  await page.setViewportSize({ width: 1300, height: 500 });
+  await expect.poll(async () => (await at()).scrolls).toBe(true);
+  const scroller = page.locator('.pd-panel');
+  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  const end = await at();
+  expect(Math.abs(Math.round(end.panel - end.doc))).toBe(0);
 });

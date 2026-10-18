@@ -150,7 +150,7 @@ export function toolbar(portal) {
       h(Tool, { icon: "table", label: t("Insert table"), disabled: off || f.table, onClick: run("table") }),
       h(Tool, { icon: "hr", label: t("Horizontal line"), disabled: off, onClick: run("hr") }),
       h(Divider),
-      h(Tool, { icon: "comment", label: t("Comment"), disabled: off || !f.selected, onClick: onComment }, h("span", null, t("Comment"))),
+      h(Tool, { icon: "comment", label: t("Comment"), keys: `${mod}+Alt+M`, disabled: off || !f.selected, onClick: onComment }, h("span", null, t("Comment"))),
       linking &&
         h(LinkBox, {
           onDone: (href) => {

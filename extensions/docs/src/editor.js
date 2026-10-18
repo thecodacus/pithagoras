@@ -62,57 +62,62 @@ const flashing = $prose(
 
 /**
  * The passages of comments, marked in the text: a decoration for each, which the editor moves with the text as it is
- * edited, so that a mark stays on its words while they are typed in. The page says where they are; a click on one is
- * told (`click`), and so is a change of what is selected.
+ * edited, so that a mark stays on its words while they are typed in. The page says where they are; a click is told
+ * (`click`, with the id of the passage it was in, or null where it was in none), and so is a change of what is selected.
  */
 const threadKey = new PluginKey("pd-threads");
+/** The id the passage of a comment that is being written is marked by: no thread has it (the page's own constant, document-editor.js). */
+const PENDING = "pending";
+/** The narrowest of `ranges` that `pos` is in (its two ends count), or nothing. */
+const narrowest = (ranges, pos) => ranges.filter((r) => r.from <= pos && pos <= r.to).sort((a, b) => a.to - a.from - (b.to - b.from))[0];
 const threads = ({ click, select, texts }) =>
-  $prose(
-    () =>
-      new Plugin({
-        key: threadKey,
-        state: {
-          init: () => ({ ranges: [] }),
-          apply(tr, value) {
-            const told = tr.getMeta(threadKey);
-            if (told) return told;
-            if (!tr.docChanged) return value;
-            // A start moves right of what is put in at it, and an end left of it: text typed at an edge is not in the passage.
-            return { ...value, ranges: value.ranges.map((r) => ({ ...r, from: tr.mapping.map(r.from, 1), to: tr.mapping.map(r.to, -1) })).filter((r) => r.to > r.from) };
-          },
+  $prose(() => {
+    /** A click on the text, told with the narrowest of the passages it is in; none where it is in no passage (what was open is closed). */
+    const clicked = (view, pos) => {
+      click(narrowest(threadKey.getState(view.state).ranges, pos)?.id ?? null);
+      return false;
+    };
+    return new Plugin({
+      key: threadKey,
+      state: {
+        init: () => ({ ranges: [] }),
+        apply(tr, value) {
+          const told = tr.getMeta(threadKey);
+          if (told) return told;
+          if (!tr.docChanged) return value;
+          // A start moves right of what is put in at it, and an end left of it: text typed at an edge is not in the passage.
+          return { ...value, ranges: value.ranges.map((r) => ({ ...r, from: tr.mapping.map(r.from, 1), to: tr.mapping.map(r.to, -1) })).filter((r) => r.to > r.from) };
         },
-        props: {
-          decorations(state) {
-            const { ranges } = threadKey.getState(state);
-            return DecorationSet.create(
-              state.doc,
-              ranges.map((r) => Decoration.inline(r.from, r.to, { class: `pd-thread${r.pending ? " pd-thread-pending" : ""}`, "data-pd-thread": r.id })),
-            );
-          },
-          handleClick(view, pos) {
-            const { ranges } = threadKey.getState(view.state);
-            // The narrowest of the passages the click is in.
-            const hit = ranges.filter((r) => !r.pending && r.from <= pos && pos <= r.to).sort((a, b) => a.to - a.from - (b.to - b.from))[0];
-            if (hit) click(hit.id);
-            return false;
-          },
+      },
+      props: {
+        decorations(state) {
+          const { ranges } = threadKey.getState(state);
+          return DecorationSet.create(
+            state.doc,
+            ranges.map((r) => Decoration.inline(r.from, r.to, { class: `pd-thread${r.pending ? " pd-thread-pending" : ""}`, "data-pd-thread": r.id })),
+          );
         },
-        view: () => {
-          let timer = null;
-          return {
-            update(view, before) {
-              if (!before.selection.eq(view.state.selection)) select(!view.state.selection.empty);
-              // What the passages read as is kept up with what is typed in them, after a moment.
-              if (before.doc !== view.state.doc) {
-                clearTimeout(timer);
-                timer = setTimeout(() => !view.isDestroyed && texts(), 250);
-              }
-            },
-            destroy: () => clearTimeout(timer),
-          };
-        },
-      }),
-  );
+        // A second or third click in a moment is another kind of click for the editor, and is as much a click on the passage.
+        handleClick: clicked,
+        handleDoubleClick: clicked,
+        handleTripleClick: clicked,
+      },
+      view: () => {
+        let timer = null;
+        return {
+          update(view, before) {
+            if (!before.selection.eq(view.state.selection)) select(!view.state.selection.empty);
+            // What the passages read as is kept up with what is typed in them, after a moment.
+            if (before.doc !== view.state.doc) {
+              clearTimeout(timer);
+              timer = setTimeout(() => !view.isDestroyed && texts(), 250);
+            }
+          },
+          destroy: () => clearTimeout(timer),
+        };
+      },
+    });
+  });
 
 /** The marks the toolbar shows, by their names in the editor's schema. */
 const MARKS = ["strong", "emphasis", "strike_through", "inlineCode", "link"];
@@ -367,7 +372,7 @@ function applyChanges(ctx, body, flash) {
  * after each change the person makes. Resolves once it is drawn.
  *
  * The passages of comments: `onSelect(selected)` is told when something is
- * selected or not, `onThread(id)` when a marked passage is clicked, and
+ * selected or not, `onThread(id)` when the text is clicked (the id of the marked passage it was in, or null), and
  * `onPlaced(map)` which passages are marked, by thread, with what they read as.
  */
 export async function createEditor({ root, markdown = "", onChange, editable = true, onSelect, onThread, onPlaced, onFormat }) {
@@ -493,6 +498,19 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
         document.head.append(looked);
       }
       looked.textContent = id ? `.pd-editor .ProseMirror [data-pd-thread="${CSS.escape(id)}"] { background: rgb(var(--warn) / .4); }` : "";
+    },
+    /**
+     * The thread whose passage the caret is in (the narrowest), or null: the keyboard's way to a comment. Read from where the caret is
+     * drawn, in the marks of the text, which is what the person sees (the editor's own state follows the browser's a moment later).
+     */
+    threadAtCaret: () => {
+      const selection = root.ownerDocument.getSelection();
+      let node = selection?.focusNode;
+      // The caret may be between a paragraph's children, not in a text: the child it is before (or the last one) is where it is.
+      if (node?.nodeType === 1) node = node.childNodes[selection.focusOffset] ?? node.lastChild ?? node;
+      const hit = (node?.nodeType === 1 ? node : node?.parentElement)?.closest?.("[data-pd-thread]");
+      const id = hit && root.contains(hit) ? hit.dataset.pdThread : null;
+      return id && id !== PENDING ? id : null;
     },
     /** Scrolls a passage into view, without moving the selection. */
     reveal: (id) =>

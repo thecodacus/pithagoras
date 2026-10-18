@@ -156,8 +156,6 @@ export default function (portal) {
     "PDF (print)": "PDF (Drucken)",
     "Full page": "Vollbild",
     "Open on its own page": "Auf einer eigenen Seite öffnen",
-    "Show comments": "Kommentare einblenden",
-    "Hide comments": "Kommentare ausblenden",
     Formatting: "Formatierung",
     Undo: "Rückgängig",
     Redo: "Wiederholen",
