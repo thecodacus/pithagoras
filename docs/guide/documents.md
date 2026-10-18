@@ -399,12 +399,14 @@ password changes. It names no folder, document or path; it says only that someth
 
 Click a document to open it in the editor. It is laid out as a word processor
 is: a bar with the document's name, where it stands, **Comments**, **History**
-and **Download**; a toolbar; and the page itself: the text is written on the whole
+and **Download** (the first two open a panel at the side, [below](#history)); a toolbar; and the page itself: the text is written on the whole
 of the area under the toolbar, one continuous surface with no box or frame around
 it (in the chat's panel as well as on the Documents page), in a column of a
 readable width with room at its sides. It scrolls by itself, so that the bar and
-the toolbar stay. A click anywhere on it under the text, or beside it, puts the
-cursor at the end of the document, as on a word processor's page. Nothing else is
+the toolbar stay. A click on it beside a line of the text puts the cursor on that
+line, and one under the last of the text puts it at the end of the document, as
+on a word processor's page. Selecting text with the mouse and letting go beside
+it, in the margin, keeps the selection. Nothing else is
 shown with the text: the comments are on the page when you open one, and in a list
 when you ask for it ([below](#comments)). On the Documents page an open document
 takes the whole page.
@@ -419,6 +421,59 @@ numbered and check lists, a quote, a table, a horizontal line, and
 box is ticked with a click. The usual Markdown shortcuts work as you type (`#`
 and a space for a heading, `-` for a list, `>` for a quote, three backticks for
 code), and so do Ctrl+B, Ctrl+I and Ctrl+E.
+
+### Visual or Markdown
+
+The bar has a switch, **Visual** and **Markdown**, for people who would rather
+write the Markdown itself. **Visual** is the editor above and is what a document
+opens in. **Markdown** shows the document's text as plain Markdown, in the place
+of the editor: in the same column, in a monospace face, with soft wrapping and no
+box. It is a plain text box, so the browser's own undo and redo, spelling and
+selection work in it, and so does **Tab**, which leaves the box rather than
+writing a tab. The browser remembers the choice (per browser, not per document),
+and a document opens the way you left it last.
+Where the bar is narrow (a window with the portal's sidebar open) the switch is
+two icons, with the names as tooltips, so that the document's name keeps its room.
+
+Everything else works as it does in the editor:
+
+- The text is saved in the same way: after a second without typing, at once with
+  Ctrl+S, and when the cursor leaves the box. What is saved is what is typed,
+  character for character, so a list written with `*` stays that way. The status
+  in the bar and the revision numbers are the same.
+- When the agent or another window changes the document meanwhile, the change
+  comes into the box as it does into the editor: at once if you have typed
+  nothing unsaved, merged into your text where the changes do not meet, and a
+  conflict that you choose in ([below](#when-the-document-changed-meanwhile)) where
+  they do. The box is the text for all of it: what the agent changed is merged
+  into what is in the box, in the style it is written in (a document that uses `*`
+  for list items keeps them), and a line the agent changed is no conflict because
+  of the style of another. Your cursor stays at the words it was at, and the
+  browser's own undo keeps what you typed: the change from outside is a step of
+  its own in it (the first Ctrl+Z takes it back, as an edit of yours that you can
+  redo; a browser that does not allow this starts its undo over).
+- A page that is closed with text not saved is kept, restored, and warned of in
+  the same way. What was typed in the box comes back in it as it was typed. In
+  **Visual** the same text is written by the editor, in its style. **History**
+  works the same, and a revision restored shows in the box.
+- Going from one to the other loses nothing, also text that is not saved yet,
+  which stays unsaved. Going to **Visual** saves the text first where it can. If
+  you only looked at a document, or went from one to the other without changing
+  it, nothing is saved, even for a document written in another style than the
+  editor's (`*` for list items, say). The page stays at the same place in the
+  text, as far as the scroll goes.
+- The toolbar (formatting and **Comment**) is not shown in the Markdown, where
+  there is nothing to select a passage in and the formatting is written out; the
+  shortcut Ctrl+Alt+M does nothing there either.
+- The comments are not drawn on the text: no marked passages, no cards, no
+  markers in the margin. **Comments** in the bar still has the list of all the
+  threads and how many are open. A thread **chosen** in the list takes you back to
+  **Visual** and opens its card at its passage. A passage is a stretch of the
+  file's Markdown that is followed from one revision to the next, so what you
+  write in the Markdown moves the comments as a change in the editor does
+  ([below](#where-the-passage-is)).
+- **Download** and **PDF (print)** are the same, and the print is the text as the
+  editor draws it.
 
 **Download** saves the document's file as it is (**Markdown (.md)**), or prints
 the text on its own (**PDF (print)**), where the browser's print dialog saves it
@@ -548,14 +603,33 @@ while there is such text.
 
 ## History
 
-**History** shows the document's revisions, newest first, with who made each
-(you; the agent, through its document tools; or an outside change: Files, an
-editor, the agent's own file tools, or a save the portal could not finish) and
-when. A revision that restored an earlier one says which.
-Click a revision to read its text.
+**History** in the bar opens the document's revisions as a panel at the right
+edge of the page, newest first, with who made each (you; the agent, through its
+document tools; or an outside change: Files, an editor, the agent's own file
+tools, or a save the portal could not finish) and when. A revision that restored
+an earlier one says which. It is the same panel as the list of comments
+([below](#comments)): at the same edge and in the same size, beside the text
+where the page is wide and over it, from the right, where it is narrow, with
+**Close**. Only one of the two is open at a time: opening one closes the other,
+and the bar's buttons show which one is open. **Escape** closes the panel while
+the cursor is in it, and the button it was opened from has the focus again.
 
-**Restore this revision** saves its text as a new revision, so the history only
-grows. Text you have not saved yet is saved first, as a revision of its own, so
+Click a revision to read its text. It is shown on the page, in the text's place,
+while the panel stays open: the text cannot be edited then, and a note under the
+bar says that you are reading revision _n_, an earlier text, and that the
+document itself has not changed. **Back to the current text** in the note (or a
+click on the revision again, or closing the panel) is the way back. The current
+revision is the text itself, so nothing is changed for it.
+
+**Restore this revision** (in the panel, also while the revision is shown on the
+page) first asks "Restore revision _n_?": the current text is replaced, and the
+current version stays in the history. **Cancel** (or Escape) changes nothing and
+the focus goes back to the button; **Restore** goes ahead and the cursor is in
+the text afterwards. The question is the portal's one before something is
+removed or replaced, so **Settings → This browser → Confirmations → Ask before
+deleting** ([Interface](/guide/interface#confirmations)) turns it off, and then
+the restore is made at once. It saves the revision's text as a new revision, so
+the history only grows. Text you have not saved yet is saved first, as a revision of its own, so
 the restore does not take it away. If it cannot be saved (a change meanwhile
 that you have not chosen about, or an error), nothing is restored until it is
 dealt with. If the document changed since the page last saved or loaded it, the
@@ -579,16 +653,17 @@ as the text, and nothing of them is shown until you ask:
   opens as a card on the page. On a wide page the card is **beside the passage**,
   level with it at the right edge of the page, so that the highlighted words stay
   visible at its left (the text it overlaps on the right goes behind it); where
-  the passage runs into the card's place, or the page is narrow (a narrow panel,
-  a phone), the card is just under the words (above them where there is no room
-  under them). It stays inside the page. It has the comments of the thread, each
+  the passage runs into the card's place, or the page has no room beside the text
+  for it (a narrow panel, a phone, or a panel open at the side: the room right of
+  the text column is measured, not the window), the card is just under the words
+  (above them where there is no room under them). It stays inside the page. It has the comments of the thread, each
   with who wrote it and when, a check to **Resolve** the thread (**Reopen** on a
   resolved one) and **Delete thread** where that is yours to do. A thread with
   many comments shows its first and its last, and **Show _n_ replies** for the
   rest. The box to **Reply** in is one line, and says in its own words that
   **@agent** asks the agent. Only one card is open at a time: a click on another
-  passage opens that one instead. It follows its words as you scroll and as the
-  text changes, and a click in the text elsewhere, a click outside the card or
+  passage opens that one instead. It follows its words as you scroll (it scrolls off with them when they do)
+  and as the text changes, and a click in the text elsewhere, a click outside the card or
   **Escape** (also when the card was opened by a click and the cursor is still in
   the text) closes it (the text has the focus again). What was typed in its box
   is kept when it is closed ([below](#writing-a-comment)). If its words are gone
@@ -600,8 +675,10 @@ as the text, and nothing of them is shown until you ask:
   the thread's card as a click on the words does, and **Enter** on it opens the
   card with the focus in its box. Threads on one line have a marker each, one
   under the other. A marker follows its passage and is not there while its card
-  is open. Where there is no margin (a narrow panel, a phone) there are no
-  markers: the highlighted words are the way in.
+  is open. Markers are drawn only where the margin right of the text is wide
+  enough to hold them without touching a word (measured, so a panel open at the
+  side counts): where there is not (a narrow window or panel, a phone) there are
+  no markers, and the highlighted words are the way in.
 - A new comment opens its card in the same way at the words you selected, with
   the box ready to write in. The page stays where it is, also far down a long
   document.
@@ -610,10 +687,12 @@ as the text, and nothing of them is shown until you ask:
   the box; **AltGr+M** is left to the text (it types a character on some layouts); **Tab** from the text goes into the card,
   and **Escape** back to the text.
 - **Comments** in the bar, with how many threads are open, shows the **list** of
-  all the threads, and hides it again (**Close** in it does too). It is a panel
-  at the right edge of the page, the whole height of it: beside the text where
-  the page is wide (the text gets narrower), over it, from the right, where it is
-  narrow (a narrow panel, a phone). A thread on a passage is a line in it (the
+  all the threads, and hides it again (**Close** in it does too, and so does
+  **Escape** while the cursor is in it). It is a panel at the right edge of the
+  page, the whole height of it: beside the text where the page is wide (the text
+  gets narrower), over it, from the right, where it is narrow (a narrow panel, a
+  phone). The history is the same panel ([above](#history)), and the two replace
+  each other. A thread on a passage is a line in it (the
   words, and the last thing said): **choose** it and the text scrolls to the
   passage and its card opens there. A thread that has no passage to click, because
   its words are gone from the text (or could not be marked) or because it is

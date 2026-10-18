@@ -369,3 +369,15 @@ test('rebasing says the document is at a later revision, as the editor writes it
   assert.equal(saver.state().status, 'saved');
   assert.equal(timers.size, 0);
 });
+
+test('restyling the baseline says the text of the revision is written another way now, without a change of state or a save', async () => {
+  const { saver, editor, sent } = setup({ revision: 3, markdown: '* one\n' });
+  // The text in the box was the file's; the editor writes the same words with a dash.
+  editor.text = '- one\n';
+  assert.equal(saver.unsaved(), true);
+  saver.restyle('- one\n');
+  assert.equal(saver.baseline(), '- one\n');
+  assert.equal(saver.unsaved(), false);
+  assert.equal(saver.state().status, 'saved');
+  assert.deepEqual(sent, []);
+});

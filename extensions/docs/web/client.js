@@ -38,7 +38,13 @@ export default function (portal) {
     "Unsaved changes": "Nicht gespeicherte Änderungen",
     "Not saved": "Nicht gespeichert",
     History: "Verlauf",
-    "Hide history": "Verlauf ausblenden",
+    "You are reading revision {n}, an earlier text. It cannot be edited here; the document itself has not changed.":
+      "Du liest Revision {n}, einen früheren Text. Er lässt sich hier nicht bearbeiten; das Dokument selbst ist unverändert.",
+    "Back to the current text": "Zurück zum aktuellen Text",
+    "Editing mode": "Bearbeitungsmodus",
+    Visual: "Visuell",
+    Markdown: "Markdown",
+    "Markdown source": "Markdown-Quelltext",
     "This document changed while you were editing it, and is now at revision {n}. Your text is kept here and has not been saved.":
       "Dieses Dokument wurde geändert, während du es bearbeitet hast, und steht jetzt bei Revision {n}. Dein Text bleibt hier erhalten und ist nicht gespeichert.",
     "Keep mine as a new revision": "Meinen Text als neue Revision behalten",
@@ -67,6 +73,10 @@ export default function (portal) {
     Current: "Aktuell",
     "This is the current revision.": "Das ist die aktuelle Revision.",
     "Restore this revision": "Diese Revision wiederherstellen",
+    "Restore revision {n}?": "Revision {n} wiederherstellen?",
+    "The current text is replaced by revision {n}. The current version stays in the history, so you can go back to it.":
+      "Der aktuelle Text wird durch Revision {n} ersetzt. Die aktuelle Version bleibt im Verlauf, du kannst also zu ihr zurückkehren.",
+    Restore: "Wiederherstellen",
     "Show older revisions": "Ältere Revisionen anzeigen",
     You: "Du",
     "The agent": "Der Agent",
