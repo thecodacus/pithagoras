@@ -1,10 +1,10 @@
-import { closeSync, createReadStream, createWriteStream, fstatSync } from "node:fs";
+import { closeSync, createReadStream, fstatSync } from "node:fs";
 import express, { type Request, type Response, type Router } from "express";
 import { getSession } from "../db.js";
 import { unsavedRefusal } from "../git.js";
 import { parseRange } from "../http-range.js";
 import { openVideo } from "../video-files.js";
-import { FileError, baseDir, uploadTarget, openDownload, openPicture } from "../workspace-files.js";
+import { FileError, MAX_UPLOAD_BYTES, UPLOAD_INTERRUPTED, baseDir, uploadStream, openDownload, openPicture } from "../workspace-files.js";
 
 /**
  * What the portal itself serves of a chat's folder: a picture or a clip to be
@@ -19,9 +19,6 @@ import { FileError, baseDir, uploadTarget, openDownload, openPicture } from "../
  * decides what may be reached is in workspace-files.ts; this only turns a chat
  * into its folder and a refusal into a status.
  */
-
-/** An upload larger than this is cut off: the portal's disk is everyone's. */
-export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 
 const STATUS = { invalid: 400, missing: 404, conflict: 409, exists: 409, too_large: 413, failed: 500, unsaved: 409 } as const;
 
@@ -113,7 +110,7 @@ export function sendFile(req: Request, res: Response, opened: { fd: number; size
   stream.pipe(res);
 }
 
-export function filesRouter(): Router {
+export function filesRouter(limits: { upload?: number } = {}): Router {
   const router = express.Router();
 
   /** The chat's folder, or the answer that it has none. */
@@ -188,9 +185,10 @@ export function filesRouter(): Router {
   /**
    * A file from the browser, as the request body, into the folder at `path`
    * under `name` — or "name (2)" if that is taken. Streamed to disk, so a big
-   * file is never held in memory, and only put in place once all of it came.
+   * file is never held in memory, and only put in place once all of it came
+   * (see uploadStream).
    */
-  router.post("/sessions/:id/upload", (req, res) => {
+  router.post("/sessions/:id/upload", async (req, res) => {
     // Any answer given before the whole file came in closes the connection, the
     // early refusals below included: kept open, Node would read the rest of the
     // body — however big it said it was — just to throw it away.
@@ -201,50 +199,23 @@ export function filesRouter(): Router {
     const base = folderOf(req.params.id, res);
     if (!base) return;
     const announced = Number(req.headers["content-length"]);
-    if (announced > MAX_UPLOAD_BYTES) {
-      return res.status(413).json({ error: `Files over ${MAX_UPLOAD_BYTES / 1024 / 1024 / 1024} GB are not uploaded here` });
+    const most = limits.upload ?? MAX_UPLOAD_BYTES;
+    if (announced > most) {
+      return res.status(413).json({ error: `Files over ${most / 1024 / 1024 / 1024} GB are not uploaded here` });
     }
-    let target: ReturnType<typeof uploadTarget>;
     try {
-      target = uploadTarget(base, req.query.path, req.query.name);
+      const stored = await uploadStream(base, req.query.path, req.query.name, req, { maxBytes: most });
+      res.removeHeader("Connection");
+      res.json({ ok: true, ...stored });
     } catch (e) {
-      return fail(res, e);
-    }
-    const out = createWriteStream("", { fd: target.fd });
-    let received = 0;
-    let done = false;
-    const giveUp = (status: number, error: string) => {
-      if (done) return;
-      done = true;
-      req.unpipe(out);
-      out.destroy();
-      target.abandon();
       // Nothing more of the body is read: the connection is closed once the
       // answer is out, rather than taking in the rest of a file nobody keeps.
-      if (res.headersSent) return void req.destroy();
-      res.status(status).json({ error });
-    };
-    req.on("data", (chunk: Buffer) => {
-      received += chunk.length;
-      if (received > MAX_UPLOAD_BYTES) giveUp(413, `Files over ${MAX_UPLOAD_BYTES / 1024 / 1024 / 1024} GB are not uploaded here`);
-    });
-    // The browser went away, or the connection dropped: half a file is not a file.
-    req.on("aborted", () => giveUp(400, "The upload was interrupted"));
-    out.on("error", (e) => {
-      console.error("[portal] files: upload failed:", e.message);
-      giveUp(500, "The file could not be written");
-    });
-    out.on("finish", () => {
-      if (done) return;
-      done = true;
-      try {
-        res.removeHeader("Connection");
-        res.json({ ok: true, path: target.finish(), size: received });
-      } catch (e) {
-        fail(res, e);
-      }
-    });
-    req.pipe(out);
+      if (res.headersSent || res.destroyed) return void req.destroy();
+      // The sender went away: it is answered all the same, with what it is (400, as it always was).
+      if (e instanceof FileError && e.code === "failed" && e.message === UPLOAD_INTERRUPTED) return void res.status(400).json({ error: UPLOAD_INTERRUPTED });
+      if (e instanceof FileError && e.code === "failed") console.error("[portal] files: upload failed:", e.message);
+      fail(res, e);
+    }
   });
 
   return router;

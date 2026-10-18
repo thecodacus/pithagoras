@@ -74,6 +74,19 @@ export interface HeldFolder {
   close(): void;
 }
 
+/** What `files.watch` tells: something in the folder may have changed, or (`gone`) the folder itself was removed, renamed or replaced, and the watch has ended. */
+export interface FolderChange {
+  gone?: true;
+}
+
+/** A watch on a folder, from `files.watch`. */
+export interface FolderWatch {
+  /** Whether the folder at its place is still the one that is watched: a folder deleted and made again at the same path is another. */
+  current(): boolean;
+  /** Stops the watch. Safe to call again. */
+  close(): void;
+}
+
 /** What opens a file for `files.open` and `files.readBytes`, beyond the checks every path gets. */
 export interface FileOpenOptions {
   /**
@@ -310,6 +323,25 @@ export interface ServerPortal {
      * descriptor it is given. The caller closes it. Refuses what `folder` refuses, and a folder the portal may not read.
      */
     hold(base: string, rel: string, options?: { direct?: boolean }): HeldFolder;
+    /**
+     * A file that arrives as a stream, put in the folder `rel` under `name`: written to disk as it comes (a big file is
+     * never held in memory) and put in place only once all of it has, never over something there: a taken name gets a
+     * number (`report (2).pdf`). `body` is a request, or anything iterable in chunks. Resolves with the path from `base`
+     * and the size. More than `maxBytes` (by default 2 GB) is refused (`too_large`) as soon as it is crossed; a
+     * sender that went away is `failed`; nothing is left behind by a file that did not arrive whole. Nothing is done
+     * to `body` here, so an answer can still be sent on the request after a refusal.
+     */
+    upload(base: string, rel: string, name: string, body: AsyncIterable<Uint8Array>, options?: { maxBytes?: number }): Promise<{ path: string; size: number }>;
+    /**
+     * Tells `onChange` when something in the folder `rel` may have changed (a file made, written, renamed or removed in
+     * it), once the burst of changes is over (`debounceMs`, by default 100); it says no more than that, so look at what
+     * changed through `files.list` or `readBytes`. The watch is on the folder as it is held when this is called, not on
+     * what its path leads to later: a link put in its place does not lead it elsewhere. When the folder itself is
+     * removed, renamed or replaced the watch ends by itself, after `onChange({ gone: true })`: watch the folder that is
+     * there now. A system that cannot watch (too many watches, a file system that has none) is `failed`, with its code
+     * in `errno`: look at the folder every so often instead. `direct` as for `folder`.
+     */
+    watch(base: string, rel: string, onChange: (change: FolderChange) => void, options?: { direct?: boolean; debounceMs?: number }): FolderWatch;
     /**
      * Removes the temporary files that saves in the folder `rel` left behind when they were cut off, and returns
      * their names. Only those older than `olderThanMs` (by default a minute): a save of the portal's own or of

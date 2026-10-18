@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "../../../core/server/test/server-harness.mjs";
 
@@ -142,6 +142,28 @@ test("a file and a folder are renamed in place, a file downloaded as it is, and 
     assert.match(archive.headers.get("content-disposition") ?? "", /box\.tar\.gz/);
     assert.ok((await archive.arrayBuffer()).byteLength > 0);
     assert.equal((await fetch(`${base}/archive?path=box/new.txt`).then(answer)).status, 400, "a file is not a folder");
+  });
+});
+
+test("a file is uploaded as it comes, a taken name gets a number instead of replacing, and nothing is put outside the folder", async () => {
+  mkdirSync(path.join(work, "inbox"), { recursive: true });
+  await withApi(async (base) => {
+    const put = (dir: string, name: string, body: string) =>
+      fetch(`${base}/upload?path=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body }).then(answer);
+    const first = await put("inbox", "report.pdf", "one");
+    assert.deepEqual([first.status, first.path, first.size], [200, "inbox/report.pdf", 3]);
+    const second = await put("inbox", "report.pdf", "two");
+    assert.equal(second.path, "inbox/report (2).pdf");
+    assert.equal(readFileSync(path.join(work, "inbox", "report.pdf"), "utf8"), "one");
+    assert.equal(readFileSync(path.join(work, "inbox", "report (2).pdf"), "utf8"), "two");
+    // A .json file is a file, not a request to read.
+    const json = await fetch(`${base}/upload?path=inbox&name=data.json`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"a":1}' }).then(answer);
+    assert.equal(readFileSync(path.join(work, json.path as string), "utf8"), '{"a":1}');
+    assert.equal((await put("..", "x.txt", "x")).status, 400);
+    assert.equal((await put("inbox", "../x.txt", "x")).status, 400);
+    assert.equal((await put("nope", "x.txt", "x")).status, 404);
+    assert.equal((await put("inbox", "", "x")).status, 400, "a file needs a name");
+    assert.deepEqual(readdirSync(path.join(work, "inbox")).filter((n) => n.endsWith(".upload")), [], "nothing half-written is left");
   });
 });
 

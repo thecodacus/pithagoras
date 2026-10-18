@@ -69,7 +69,7 @@
  * thread; one that is taken away, or its thread, takes the wake with it.
  */
 import { createHash } from "node:crypto";
-import { lstatSync, watch } from "node:fs";
+import { lstatSync } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
 import { explained } from "./errors.js";
@@ -879,22 +879,11 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     })());
   }
 
-  /** Which folder `dir` is (the file system's own numbers for it), or null where it is not there: a folder made again is another one. */
-  function identity(dir) {
-    try {
-      const { dev, ino } = lstatSync(dir);
-      return `${dev}:${ino}`;
-    } catch {
-      return null;
-    }
-  }
-
   /** Stops watching the documents folder of folder `id`. */
   function unwatchDir(id) {
     const watched = lists.watchers.get(id);
     if (!watched) return;
-    clearTimeout(watched.timer);
-    watched.watcher.close();
+    watched.watch.close();
     lists.watchers.delete(id);
   }
 
@@ -906,30 +895,28 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   function watchDirs() {
     const found = folders();
     // A watch follows the folder it was set on, not its name: one removed and made again is watched no more and is watched anew.
-    for (const [id, watched] of lists.watchers) if (!found.has(id) || documentsOf(found.get(id).path) !== watched.dir || identity(watched.dir) !== watched.identity) unwatchDir(id);
+    for (const [id, watched] of lists.watchers) if (!found.has(id) || documentsOf(found.get(id).path) !== watched.dir || !watched.watch.current()) unwatchDir(id);
     for (const [id, folder] of found) {
       if (lists.watchers.has(id)) continue;
       const dir = documentsOf(folder.path);
       if (!dir) continue;
       try {
-        const watched = { dir, identity: identity(dir), watcher: null, timer: null };
-        // A burst of events (a write through a temporary file, a copy of many) is one look.
-        watched.watcher = watch(dir, { persistent: false }, (type, name) => {
-          // The folder itself was removed or made again: this watch is dead (it follows the folder that is gone), and the folder is
-          // watched anew without waiting for the next look. The event that names the folder is the sure sign: a folder made again may
-          // get the number of the one removed (ext4 does), so its identity says nothing then, and tells only of a move.
-          if ((type === "rename" && name === path.basename(dir)) || identity(dir) !== watched.identity) {
+        const watched = { dir, watch: null };
+        // The portal's own watch, on the folder as it was opened: a burst of events (a write through a temporary file, a copy of many) is one look.
+        watched.watch = portal.files.watch(
+          folder.path,
+          DOCUMENTS,
+          ({ gone }) => {
             if (lists.watchers.get(id) !== watched) return;
-            unwatchDir(id);
-            watchDirs();
+            // The folder itself was removed or made again: this watch is over, and the folder is watched anew without waiting for the next look.
+            if (gone) {
+              unwatchDir(id);
+              watchDirs();
+            }
             void look(id);
-            return;
-          }
-          clearTimeout(watched.timer);
-          watched.timer = setTimeout(() => void look(id), 100);
-          watched.timer.unref?.();
-        });
-        watched.watcher.on("error", () => unwatchDir(id));
+          },
+          { direct: true, debounceMs: 100 },
+        );
         lists.watchers.set(id, watched);
       } catch {
         // Not to be watched here (too many watches, a file system that has none): the looks find what changes.

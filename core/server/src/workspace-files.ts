@@ -19,6 +19,8 @@ import {
   rmSync,
   statSync,
   unlinkSync,
+  watch as watchPath,
+  write as writeAsync,
   writeSync,
 } from "node:fs";
 import { lstat, open as openHandle, readdir, rm, rmdir, unlink } from "node:fs/promises";
@@ -1182,4 +1184,148 @@ export function saveNewFile(base: string, dirRel: unknown, name: string, data: B
   }
   closeSync(target.fd);
   return target.finish();
+}
+
+/** An upload larger than this is cut off: the portal's disk is everyone's. */
+export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+/** What a failed upload says when the sender went away or its connection broke: the file is not kept. */
+export const UPLOAD_INTERRUPTED = "The upload was interrupted";
+
+/** All of `data` written to `fd`, without holding the thread that serves every chat. */
+function writeAll(fd: number, data: Uint8Array): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let at = 0;
+    const next = () => {
+      if (at >= data.length) return resolve();
+      writeAsync(fd, data, at, data.length - at, null, (error, written) => {
+        if (error) return reject(error);
+        at += written;
+        next();
+      });
+    };
+    next();
+  });
+}
+
+/**
+ * A file that arrives as a stream, put in the folder `dirRel` under `name`: written to disk as it comes, so a big
+ * file is never held in memory, and put in place only once all of it has, the way an upload is (see uploadTarget):
+ * a taken name gets a number and nothing is replaced. Resolves with its path from the chat's folder and its size.
+ *
+ * Over `maxBytes` (by default 2 GB) is refused (`too_large`) when it is crossed; a sender that goes away, or a
+ * connection that breaks, is `failed` (UPLOAD_INTERRUPTED). Nothing is left behind by a file that did not arrive whole.
+ * The stream is not destroyed here: whoever has it decides what is done to it, so that an answer can still be sent.
+ */
+export async function uploadStream(
+  base: string,
+  dirRel: unknown,
+  name: unknown,
+  body: AsyncIterable<Uint8Array>,
+  options: { maxBytes?: number } = {},
+): Promise<{ path: string; size: number }> {
+  const max = options.maxBytes ?? MAX_UPLOAD_BYTES;
+  const target = uploadTarget(base, dirRel, name);
+  let size = 0;
+  let closed = false;
+  const close = () => {
+    if (!closed) closeSync(target.fd);
+    closed = true;
+  };
+  try {
+    // Not `for await`: leaving that loop early closes the stream it reads, and a request closed is a connection without
+    // an answer. The caller says what is done to it.
+    const chunks = body[Symbol.asyncIterator]();
+    for (;;) {
+      const next = await chunks.next();
+      if (next.done) break;
+      size += next.value.length;
+      if (size > max) throw new FileError("too_large", `Files over ${max / 1024 / 1024 / 1024} GB are not uploaded here`);
+      await writeAll(target.fd, next.value);
+    }
+    fsyncSync(target.fd);
+    close();
+  } catch (e) {
+    close();
+    target.abandon();
+    if (e instanceof FileError) throw e;
+    // A full disk and the like are the system's; anything else came from the sender's side.
+    const mapped = ioFailure(e, "The file could not be written", "Nothing was changed.");
+    if (mapped instanceof FileError) throw mapped;
+    throw new FileError("failed", UPLOAD_INTERRUPTED, undefined, e);
+  }
+  return { path: target.finish(), size };
+}
+
+/** What `watchFolder` tells: something in the folder may have changed, or the folder itself is gone (removed, renamed or replaced). */
+export interface FolderChange {
+  gone?: true;
+}
+
+/** A watch on a folder, ended by `close`. */
+export interface FolderWatch {
+  /** Whether the folder at its place is still the one that is watched. */
+  current(): boolean;
+  close(): void;
+}
+
+/**
+ * Tells `onChange` when something in the folder `rel` may have changed (a file made, written, renamed or removed, in
+ * it), after the burst of changes is over (`debounceMs`, by default 100), and says no more than that: what changed is
+ * to be looked at through `portal.files`, which has the checks. A watch reads nothing and changes nothing, but it
+ * should watch the folder that was meant: the folder is held and the watch is set on it, so that a link put in
+ * its place does not lead the watch elsewhere, and what is watched is the folder as it was, not what its place leads to
+ * later. When that folder is removed, renamed or replaced the watch ends by itself, after `onChange({ gone: true })`: ask
+ * again for the folder that is there now. A system that cannot watch (too many watches, a file system that has
+ * none) is `failed`, with its code; look at the folder every so often instead.
+ */
+export function watchFolder(
+  base: string,
+  rel: unknown,
+  onChange: (change: FolderChange) => void,
+  options: { direct?: boolean; debounceMs?: number } = {},
+): FolderWatch {
+  const dir = folderPath(base, rel, options);
+  const held = holdFolder(base, dir);
+  const identityOf = (stat: BigIntStats | undefined) => (stat ? `${stat.dev}:${stat.ino}` : undefined);
+  let identity: string | undefined;
+  let watcher: ReturnType<typeof watchPath>;
+  try {
+    identity = identityOf(fstatSync(held.fd, { bigint: true }));
+    // On the descriptor where there is one: the watch is on the folder that is held, whatever the path leads to by now.
+    watcher = watchPath(held.here, { persistent: false });
+  } catch (e) {
+    throw ioFailure(e, "The folder could not be watched", "Nothing is watched.");
+  } finally {
+    held.close();
+  }
+  let ended = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const current = () => !ended && identityOf(lstatSync(dir, { bigint: true, throwIfNoEntry: false })) === identity;
+  const tell = (change: FolderChange) => {
+    try {
+      onChange(change);
+    } catch (e) {
+      console.error("[portal] a folder watch's handler failed:", e);
+    }
+  };
+  const close = () => {
+    ended = true;
+    clearTimeout(timer);
+    watcher.close();
+  };
+  const gone = () => {
+    if (ended) return;
+    close();
+    tell({ gone: true });
+  };
+  watcher.on("change", () => {
+    if (ended) return;
+    // The folder itself was removed, renamed or put back as another: this watch follows the one that is gone.
+    if (!current()) return gone();
+    clearTimeout(timer);
+    timer = setTimeout(() => !ended && tell({}), options.debounceMs ?? 100);
+    timer.unref?.();
+  });
+  watcher.on("error", gone);
+  return { current, close };
 }

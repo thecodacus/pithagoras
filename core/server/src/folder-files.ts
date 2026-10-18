@@ -12,6 +12,8 @@ import {
   resolveInside,
   sweepTemp,
   unsavedAt,
+  uploadStream,
+  watchFolder,
   writeText,
 } from "./workspace-files.js";
 
@@ -39,4 +41,6 @@ export const folderFiles: ServerPortal["files"] = {
   hold: (base, rel, options = {}) => holdForReading(base, rel, options),
   sweepTemp: (base, rel, options = {}) => sweepTemp(base, rel, options.olderThanMs),
   open: (base, rel, options = {}) => openFile(base, rel, options),
+  upload: (base, rel, name, body, options = {}) => uploadStream(base, rel, name, body, options),
+  watch: (base, rel, onChange, options = {}) => watchFolder(base, rel, onChange, options),
 };

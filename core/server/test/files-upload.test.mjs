@@ -17,11 +17,11 @@ mkdirSync(work);
 mkdirSync(outside);
 createSession({ id: "up", title: "up", workspace: work, executor: "host" });
 
-async function withApi(fn) {
+async function withApi(fn, limits) {
   const app = express();
   // As the portal does: an upload is not parsed, whatever type it says it is.
   app.use((req, res, next) => (req.path.endsWith("/upload") ? next() : express.json()(req, res, next)));
-  app.use("/api", filesRouter());
+  app.use("/api", filesRouter(limits));
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}/api/sessions/up`;
   try {
@@ -79,6 +79,26 @@ test("an upload cannot be sent out of the folder, by path or by name", async () 
     assert.equal((await upload(base, "missing", "x.txt", "x")).status, 404);
   });
   assert.deepEqual(readdirSync(outside), []);
+});
+
+test("an upload that grows past the limit while it is coming is answered 413, the answer reaches the sender, and nothing is kept", async () => {
+  await withApi(async (base) => {
+    // No length announced: the size is only found out as it arrives.
+    const body = new ReadableStream({
+      async pull(controller) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        controller.enqueue(new Uint8Array(1000));
+      },
+    });
+    const res = await fetch(`${base}/upload?path=&name=too-big.bin`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body, duplex: "half" });
+    assert.equal(res.status, 413);
+    assert.match((await res.json()).error, /are not uploaded here/);
+    assert.ok(!existsSync(path.join(work, "too-big.bin")));
+    assert.deepEqual(readdirSync(work).filter((n) => n.endsWith(".upload")), [], "nothing half-written is left");
+    // One that announces it is refused before a byte is read.
+    const announced = await upload(base, "", "announced.bin", "x".repeat(5000));
+    assert.equal(announced.status, 413);
+  }, { upload: 4096 });
 });
 
 test("numbers go before the extension, and on the end without one", () => {

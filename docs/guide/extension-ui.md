@@ -676,7 +676,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `hold`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `hold`, `upload`, `watch`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -691,22 +691,17 @@ portal.router.get("/chats/:id/files", (req, res) => {
 });
 // A body is read only where a route asks for it.
 portal.router.post("/chats/:id/notes", portal.http.json(), (req, res) => { /* req.body */ });
-// A route that takes a file reads the body itself, and saves it with portal.files (not req.pipe into a path built from the
-// folder and a name: that follows a link the agent left there).
+// A route that takes a file reads the body itself, and streams it to disk with portal.files (not req.pipe into a path built
+// from the folder and a name: that follows a link the agent left there).
 portal.router.post("/chats/:id/upload", async (req, res) => {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    if ((size += chunk.length) > 1024 * 1024) return res.status(413).json({ error: "At most 1 MB" });
-    chunks.push(chunk);
-  }
   const folder = portal.chats.folder(req.params.id);
-  res.json(portal.files.write(folder, String(req.query.name), Buffer.concat(chunks), { create: true }));
+  res.json(await portal.files.upload(folder, String(req.query.path ?? ""), String(req.query.name), req));
 });
 ```
-A file that may be bigger than 1 MB, and has to be streamed to disk, has no call
-in `portal.files` yet; do not build its path yourself, see
-[A chat's folder](#a-chat-s-folder).
+A file that arrives in a request is `files.upload`'s: it is written to disk as it
+comes, so a big file is never held in memory, and put in place when all of it has,
+never over something there (`report.pdf` is followed by `report (2).pdf`). Do not
+build its path yourself, see [A chat's folder](#a-chat-s-folder).
 
 Routes are written from the package's own root. From the browser half,
 `portal.api.url("/chats/a/files")` is their address and `portal.api.json` asks
@@ -898,12 +893,24 @@ itself, for a server half that words a full disk differently from a missing righ
 told changed by `change`; its folder is found with `folder`, made with
 `makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`.
 
-**Watching a chat's folder** is not in `portal.files`. A watch reads nothing and
-changes nothing, so it has none of the dangers above: it only tells that
-something happened, and a half that then looks does so through `portal.files`.
-What a watch needs is the extension's own (when a folder made again counts as
-another, what to fall back on when the system cannot watch), so use `fs.watch`
-on the folder `portal.files.folder` gave you, and look when it says so.
+**Watching a chat's folder** is `files.watch(base, rel, onChange)`. A watch reads
+nothing and changes nothing, but it should watch the folder that was meant: the
+folder is held and the watch is set on it, so a link put in its place does not
+lead the watch somewhere else. It only tells that something in the folder may have
+changed, once the burst of changes is over (`debounceMs`, 100 by default), and a half
+that then looks does so through `portal.files`. When the folder is removed,
+renamed or replaced the watch ends by itself after `onChange({ gone: true })`:
+watch the folder that is there now (`watch.current()` says whether the folder at
+its place is still the one watched). A system that cannot watch (too many
+watches, a file system that has none) is `failed`, with its code in `errno`, and
+what to fall back on, looking at the folder every so often, is the extension's own.
+
+```js
+const watch = portal.files.watch(folder, "documents", ({ gone }) => {
+  if (gone) return startAgain();
+  portal.push("documents-changed", portal.files.list(folder, "documents").entries.length);
+}, { direct: true });
+```
 
 ### Telling the pages open on a chat
 

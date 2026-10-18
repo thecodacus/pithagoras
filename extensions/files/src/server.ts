@@ -8,14 +8,13 @@ import type { ServerPortal } from "@pithagoras/extension-api/server";
 /**
  * Files' server half: its routes at /api/x/pithagoras-files/chats/<chat>/…,
  * for listing, reading, downloading, saving, renaming and deleting what is in
- * the chat's folder, a new folder in it, and the whole of it as a .tar.gz.
+ * the chat's folder, uploading a file into it, a new folder in it, and the whole of it as a .tar.gz.
  *
  * What may be reached and how it is read and written is the portal's
  * (`portal.files`): the agent writes in that folder, links included, and these
  * routes run in the portal's own process. This only turns a chat into its
- * folder, a request into a call, and a refusal into a status. Uploads and
- * pictures are the portal's own routes, which its message box and its
- * conversation use as well.
+ * folder, a request into a call, and a refusal into a status. Pictures are
+ * the portal's own routes, which its message box and its conversation use as well.
  */
 
 type Files = ServerPortal["files"];
@@ -135,6 +134,29 @@ export function routes(router: Router, json: RequestHandler, files: Files, folde
     try {
       res.json({ ok: true, path: files.makeFolder(at, pathOf(req), req.body?.name) });
     } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /**
+   * A file from this computer, as the request body, into the folder at `path` under `name`: a taken name gets a number
+   * rather than being replaced. The portal streams it to disk and puts it in place when all of it came (`files.upload`).
+   */
+  router.post("/chats/:id/upload", async (req, res) => {
+    // Any answer given before the whole file came in closes the connection, an early refusal included: kept open, Node
+    // would read the rest of the body, however big, just to throw it away.
+    res.setHeader("Connection", "close");
+    res.on("finish", () => {
+      if (!req.complete) req.destroy();
+    });
+    const at = base(req, res);
+    if (!at) return;
+    try {
+      const stored = await files.upload(at, pathOf(req), String(req.query.name ?? ""), req);
+      res.removeHeader("Connection");
+      res.json({ ok: true, ...stored });
+    } catch (e) {
+      if (res.headersSent || res.destroyed) return void req.destroy();
       fail(res, e);
     }
   });

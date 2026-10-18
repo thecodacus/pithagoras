@@ -3,8 +3,8 @@ import { isApiError, portal, t } from "./portal";
 /**
  * What Files asks of a chat's folder: its own server half's routes for
  * listing, reading, saving, renaming, deleting and downloading (src/server.ts,
- * on the portal's `portal.files`), and the portal's own for uploading and for
- * pictures, which its message box and its conversation use as well.
+ * on the portal's `portal.files`), and the portal's own for pictures, which its
+ * message box and its conversation use as well.
  */
 
 /** One thing in a chat's folder. "link" leads out of it, or nowhere, and is left alone. */
@@ -58,7 +58,7 @@ export const api = {
    */
   uploadFile: async (sessionId: string, dir: string, file: File): Promise<{ path: string; size: number }> => {
     try {
-      return await portal.api.json(at(sessionId, "upload", dir, `&name=${encodeURIComponent(file.name)}`), {
+      return await portal.api.json(own(sessionId, "upload", dir, `&name=${encodeURIComponent(file.name)}`), {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: file,
