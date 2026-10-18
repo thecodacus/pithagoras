@@ -104,7 +104,7 @@ export interface SlotMap {
    * portal's own panels go by "browser" and "agents", and while
    * one of those is the portal's, it is the one.
    * Of two extensions that name a panel alike, the one first in the slot's
-   * order has it (a lower `order`, then the one loaded first).
+   * order has it (a lower `order`, then the one whose extension is first in the list of installed extensions).
    */
   "chat.panel": {
     entry: {
@@ -186,7 +186,7 @@ export type SlotName = keyof SlotMap;
 export type Entry<S extends SlotName> = SlotMap[S]["entry"] & {
   /** Its name among the extension's entries in the slot. */
   id: string;
-  /** Lower first; entries without one come after, in the order they were registered. */
+  /** Lower first; entries without one come after, in the order of the list of installed extensions, then as they were registered. */
   order?: number;
   component: ComponentType<SlotMap[S]["props"]>;
 };

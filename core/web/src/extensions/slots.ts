@@ -15,6 +15,7 @@ import { createElement, memo, useSyncExternalStore, type ComponentType } from "r
 // What a slot's entry says of itself and what its component is given are the public contract,
 // @pithagoras/extension-api: the portal draws exactly that.
 import type { Entry, SlotName } from "@pithagoras/extension-api";
+import { byRank, onRanked } from "./rank";
 import { translate } from "./strings";
 export type { Channel, Chat, ChatProps, Entry, PanelHandle, PanelProps, Panels, SlotMap, SlotName, ToolCallView, VoiceWindowOpened } from "@pithagoras/extension-api";
 
@@ -36,14 +37,6 @@ function put(slot: SlotName, entries: readonly Registered<SlotName>[]) {
   for (const watcher of [...watchers]) watcher();
 }
 
-/**
- * Where each extension stands among the installed ones, by the order the server lists them in. Entries
- * that say no `order` are drawn in that order, not in the order their modules happened to arrive in: the
- * modules are loaded at the same time, and a slow one must not move its entries behind a faster one's.
- */
-let ranks = new Map<string, number>();
-const rankOf = (entry: Registered<SlotName>) => ranks.get(entry.extension) ?? Infinity;
-
 const ordered = (entries: Registered<SlotName>[]) =>
   entries
     .map((entry, at) => ({ entry, at }))
@@ -53,18 +46,18 @@ const ordered = (entries: Registered<SlotName>[]) =>
       } else if (a.entry.order !== b.entry.order) {
         return a.entry.order - b.entry.order;
       }
-      return rankOf(a.entry) - rankOf(b.entry) || a.at - b.at;
+      // Not the order the modules came into the page in: see rank.ts.
+      return byRank(a.entry.extension, b.entry.extension) || a.at - b.at;
     })
     .map(({ entry }) => entry);
 
-/** Tell the slots which extensions there are, first to last: what they hold is put in that order. */
-export function rankExtensions(names: readonly string[]): void {
-  ranks = new Map(names.map((name, at) => [name, at]));
+// What is held is put in order again when the list of extensions changes.
+onRanked(() => {
   for (const [slot, entries] of [...held]) {
     const again = ordered([...entries]);
     if (again.some((entry, at) => entry !== entries[at])) put(slot, again);
   }
-}
+});
 
 /**
  * An extension's part, drawn inside an element that says whose it is

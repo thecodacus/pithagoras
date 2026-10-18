@@ -10,7 +10,8 @@ import { hasCommand, registerCommand, runCommand } from "./commands";
 import { ui } from "./kit";
 import { panels } from "./panels";
 import { chatOnScreen, extensionGone, extensionHere, onlyWaitFor, onServerPush, serverPush } from "./server-feed";
-import { rankExtensions, register } from "./slots";
+import { rankExtensions } from "./rank";
+import { register } from "./slots";
 import { addStrings, forgetStrings, translate, translateCount, translateInContext, translateWithParts } from "./strings";
 import { registerShortcut } from "./shortcuts";
 import { choose, registerTheme, themes, themesSettled } from "./themes";
@@ -133,6 +134,11 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       document.head.append(link);
       kept(() => link.remove());
     }
+    // What the module imports is asked for now, not once the module has been read and has said so level by level.
+    for (const href of [entry, ...(ext.preload ?? [])]) {
+      hint(href, ext.name);
+      kept(() => hinted(href).forEach((link) => link.remove()));
+    }
     const module = await import(/* @vite-ignore */ entry);
     if (typeof module.default !== "function") throw new Error("Its module has no default export to call");
     const portal: Portal = {
@@ -156,7 +162,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       tx: (text, vars) => translateWithParts(ext.name, text, vars),
       format: { number: formatNumber, date: formatDate, dateTime: formatDateTime, time: formatTime },
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
-      commands: { register: (name, run) => kept(registerCommand(name, run)), run: runCommand, has: hasCommand },
+      commands: { register: (name, run) => kept(registerCommand(name, run, ext.name)), run: runCommand, has: hasCommand },
       panels,
       chats: { use: useChatFeed, on: (chatId, handler) => kept(onChatFeed(chatId, handler)) },
       shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },
@@ -205,7 +211,8 @@ async function catchUp(name: string): Promise<void> {
   const chatId = chatOnScreen();
   if (!settled || !chatId) return;
   try {
-    const { pushes } = await api.extensionOpening(chatId, name);
+    // A server that does not answer is no reason to hold every later change of what is installed.
+    const { pushes } = await within(LOAD_MS, api.extensionOpening(chatId, name), "being asked where its server half stands");
     for (const data of pushes) serverPush(chatId, name, data);
   } catch (e) {
     console.error(`[extensions] ${name} could not be told where its server half stands:`, e);
@@ -220,6 +227,23 @@ async function catchUp(name: string): Promise<void> {
 let early: Promise<{ extensions: ExtensionUi[] } | undefined> | undefined;
 export function askForExtensions(): void {
   early ??= api.extensionUi().catch(() => undefined);
+  // The modules are fetched, not yet called, while the question of who is signed in is still out: they are there to call when it is
+  // answered. For somebody who is not signed in the fetch is refused, and nothing was called.
+  void early.then((answer) => {
+    for (const ext of answer?.extensions ?? []) for (const href of [ext.entry, ...(ext.preload ?? [])]) if (href) hint(href, ext.name);
+  });
+}
+
+const hinted = (href: string) => [...document.head.querySelectorAll("link[rel=modulepreload]")].filter((l) => l.getAttribute("href") === href);
+
+/** Ask the browser to fetch a module, to have it when it is imported. */
+function hint(href: string, extension: string): void {
+  if (hinted(href).length) return;
+  const link = document.createElement("link");
+  link.rel = "modulepreload";
+  link.href = href;
+  link.dataset.extensionModule = extension;
+  document.head.append(link);
 }
 
 async function list(): Promise<{ extensions: ExtensionUi[] }> {

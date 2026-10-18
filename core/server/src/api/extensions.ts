@@ -7,7 +7,8 @@ import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
-import { clientHalf, packageKinds, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
+import { clientHalf, packageKinds, staticImports, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
+import { sendCompressed } from "../compressed-file.js";
 import { bundledPath } from "../bundled.js";
 import { SUBAGENT_PACKAGE } from "../features.js";
 import { isServing, serverFailure, serversSettled, syncServerHalves } from "../extension-host.js";
@@ -324,8 +325,8 @@ export const followPackages = (): Promise<void> =>
   syncExtensionServers().catch((e) => console.error("[extensions] could not bring the server halves in line with what is installed:", e));
 
 /** Where a page fetches a file of a package's web folder from. */
-const clientUrl = (half: ClientHalf, file: string) =>
-  `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}?v=${half.rev}`;
+const clientUrl = (half: ClientHalf, file: string, revised = true) =>
+  `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}${revised ? `?v=${half.rev}` : ""}`;
 
 export function extensionsRouter(): Router {
   const router = express.Router();
@@ -348,6 +349,8 @@ export function extensionsRouter(): Router {
             ...(themes ? { themes: themes.themes } : {}),
             ...(client ? { entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
+            // What its module imports along with itself, for the page to ask for all at once.
+            ...(client && staticImports(client).length ? { preload: staticImports(client).map((file) => clientUrl(client, file, false)) } : {}),
             // Where its server half's own routes are, when it has one that is running.
             ...(server && isServing(name) ? { server: `/api/x/${name.split("/").map(encodeURIComponent).join("/")}` } : {}),
             ...(failure ? { serverError: failure } : {}),
@@ -368,6 +371,8 @@ export function extensionsRouter(): Router {
       const file = half ? asked.slice(half.name.length + 1) : "";
       if (!half || !file) return res.status(404).json({ error: "Not found" });
       // Asked for by the module's revision, so what a page holds is never stale; checked each time all the same.
+      // A text file goes compressed to a browser that takes it; the rest, and what is refused, as it is.
+      if (await sendCompressed(req, res, half.dir, file)) return;
       res.sendFile(file, { root: half.dir, dotfiles: "deny", cacheControl: false, headers: { "Cache-Control": "no-cache" } }, (error) => {
         if (error && !res.headersSent) res.status(404).json({ error: "Not found" });
       });

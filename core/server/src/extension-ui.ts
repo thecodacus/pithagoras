@@ -137,6 +137,66 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
   };
 }
 
+/** What a module names after `from`, or by an `import` of its own, to load with it: not `import()`, which waits until it is called. */
+const STATIC_IMPORTS = [
+  /\b(?:import|export)\b\s*(?:type\s+)?[^'"`;]*?\bfrom\s*(['"])([^'"]+)\1/g,
+  /(?:^|[;}\n])\s*import\s*(['"])([^'"]+)\1/g,
+];
+/** What a module imported, by where it was and how it stood: read again only when the file is not as it was. */
+const importsOf = new Map<string, { stamp: string; files: string[] }>();
+/** More than this is a folder that is not one module's, and preloading it would be a cost, not a help. */
+const PRELOAD_LIMIT = 64;
+
+/**
+ * The files of the browser half's folder that its module loads along with itself, by what each says it
+ * imports, as far down as they go: the paths from the folder, the module's own left out.
+ *
+ * The page asks for them all at once. A browser that is left to find them reads a module, sees what it
+ * imports, asks for that, reads it, and so on down: a round trip for every level of a bundle that has
+ * levels, which is most of the time a page of an extension takes to be there. A relative address is
+ * what the module's own import resolves to, without the revision the module itself is asked for under,
+ * so what is fetched ahead is the very file the import then finds there.
+ */
+export function staticImports(half: ClientHalf): string[] {
+  const found = new Set<string>();
+  const entry = half.entry;
+  const queue = [entry];
+  while (queue.length && found.size < PRELOAD_LIMIT) {
+    const from = queue.shift()!;
+    const file = fileIn(half.dir, path.join(half.dir, from));
+    if (!file) continue;
+    let files: string[];
+    try {
+      const stat = statSync(path.join(half.dir, file));
+      const stamp = `${stat.size}-${stat.mtimeMs}`;
+      const had = importsOf.get(path.join(half.dir, file));
+      if (had?.stamp === stamp) {
+        files = had.files;
+      } else {
+        const text = readFileSync(path.join(half.dir, file), "utf8");
+        files = [];
+        for (const pattern of STATIC_IMPORTS) {
+          for (const match of text.matchAll(pattern)) {
+            const spec = match[2]!;
+            if (!/^\.{1,2}\//.test(spec) || !/\.m?js$/.test(spec)) continue;
+            const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
+            if (!target.startsWith("../") && !path.posix.isAbsolute(target) && !files.includes(target)) files.push(target);
+          }
+        }
+        importsOf.set(path.join(half.dir, file), { stamp, files });
+      }
+    } catch {
+      continue;
+    }
+    for (const target of files) {
+      if (target === entry || found.has(target) || !fileIn(half.dir, path.join(half.dir, target))) continue;
+      found.add(target);
+      queue.push(target);
+    }
+  }
+  return [...found];
+}
+
 /** A theme a package names: who it is, and its colours as written, for the page to check. */
 export interface NamedTheme {
   id: string;

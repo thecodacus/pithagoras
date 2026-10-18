@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { request } from "node:http";
 import test from "node:test";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { inProcessHome } from "./server-harness.mjs";
 
 /**
@@ -28,10 +30,14 @@ function pkg(folder, name, declared, files) {
 const WEB = { client: "./web/client.js", style: "./web/client.css" };
 const files = (marker) => ({
   "index.ts": "export const secret = 'the half pi loads';",
-  "web/client.js": `export default function () { /* ${marker} */ }`,
+  "web/client.js": `import { dep } from "./dep.js";\nexport default function () { /* ${marker} */ dep; }`,
+  "web/dep.js": `import "./deeper/two.js";\nexport const dep = 1;\nexport const lazy = () => import("./lazy.js");`,
+  "web/deeper/two.js": "export const two = 2;",
+  "web/lazy.js": "export const lazy = 3;",
   "web/client.css": ".x { color: red; }",
   "web/img/logo.svg": "<svg xmlns='http://www.w3.org/2000/svg'/>",
   "web/.env": "KEY=value",
+  "web/big.js": `export const lines = [\n${Array.from({ length: 400 }, (_, i) => `  "line ${i} of a module that is long enough to be worth compressing",`).join("\n")}\n];\n`,
 });
 const SERVER = "export default function (portal) { portal.router.get('/hello', (_req, res) => res.json({ from: portal.extension })); }";
 const scoped = pkg("scoped", "@codacus/notes", { ...WEB, server: "./server.js" }, { ...files("scoped"), "server.js": SERVER });
@@ -109,6 +115,15 @@ test("the browser halves listed are those of the portal's own packages that are 
   assert.match(notes.style, /^\/api\/extension-ui\/%40codacus\/notes\/client\.css\?v=/);
 });
 
+test("what a module imports along with itself is listed, for the page to ask for at once, and what it only imports when it is called is not", async () => {
+  const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
+  const notes = extensions.find((e) => e.name === "@codacus/notes");
+  // Without the revision the module is asked for under: its import resolves to the file as it is addressed, and the page's fetch ahead must be that one.
+  assert.deepEqual(notes.preload, ["/api/extension-ui/%40codacus/notes/dep.js", "/api/extension-ui/%40codacus/notes/deeper/two.js"]);
+  assert.equal((await fetch(at(notes.preload[1]))).status, 200);
+  assert.equal(extensions.find((e) => e.name === "only-themes").preload, undefined);
+});
+
 test("each installed package is listed with what it brings, for the page to tell them apart by", async () => {
   const { extensions } = await (await fetch(at("/api/extensions"))).json();
   const kinds = Object.fromEntries(extensions.map((e) => [e.spec, e.kinds]));
@@ -141,6 +156,52 @@ test("a package's web folder is served as the addresses listed say, and as what 
   const picture = await fetch(at("/api/extension-ui/@codacus/notes/img/logo.svg"));
   assert.equal(picture.status, 200);
   assert.match(picture.headers.get("content-type"), /svg/);
+});
+
+/** A GET with the headers as given, and the body as it came, not unpacked. */
+const raw = (address, headers = {}) =>
+  new Promise((resolve, reject) => {
+    request(at(address), { headers }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+    }).on("error", reject).end();
+  });
+
+test("a text file of a package's web folder is sent compressed to a browser that takes it, and not sent again to one that has it", async () => {
+  const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
+  const address = extensions[0].entry.replace(/client\.js.*/, "big.js");
+  const plain = await raw(address, { "accept-encoding": "identity" });
+  assert.equal(plain.status, 200);
+  assert.equal(plain.headers["content-encoding"], undefined);
+  assert.match(plain.headers["content-type"], /javascript/);
+
+  const packed = await raw(address, { "accept-encoding": "gzip, br" });
+  assert.equal(packed.status, 200);
+  assert.equal(packed.headers["content-encoding"], "br");
+  assert.match(packed.headers.vary, /Accept-Encoding/i);
+  assert.equal(packed.headers["cache-control"], "no-cache");
+  assert.match(packed.headers["content-type"], /javascript/);
+  assert.ok(packed.body.length < plain.body.length / 4, `${packed.body.length} of ${plain.body.length}`);
+  assert.equal(brotliDecompressSync(packed.body).toString(), plain.body.toString());
+
+  const zipped = await raw(address, { "accept-encoding": "gzip" });
+  assert.equal(zipped.headers["content-encoding"], "gzip");
+  assert.equal(gunzipSync(zipped.body).toString(), plain.body.toString());
+  // Quality 0 refuses an encoding.
+  assert.equal((await raw(address, { "accept-encoding": "br;q=0, gzip;q=0" })).headers["content-encoding"], undefined);
+
+  // What the browser holds is revalidated, and not sent again; and one encoding's copy is not the other's.
+  const etag = packed.headers.etag;
+  assert.ok(etag);
+  const again = await raw(address, { "accept-encoding": "br", "if-none-match": etag });
+  assert.equal(again.status, 304);
+  assert.equal(again.body.length, 0);
+  assert.equal((await raw(address, { "accept-encoding": "gzip", "if-none-match": etag })).status, 200);
+  // A small file, a picture and a hidden file are not compressed here: the first two as they are, the last refused.
+  const small = await raw(address.replace("big.js", "client.js"), { "accept-encoding": "br" });
+  assert.equal(small.headers["content-encoding"], undefined);
+  assert.equal((await raw(address.replace("big.js", ".env"), { "accept-encoding": "br" })).status, 404);
 });
 
 test("nothing else of a package is served, and nothing of a package that has no browser half here", async () => {
