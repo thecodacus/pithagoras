@@ -769,10 +769,17 @@ easy to get wrong in a way that is a hole, not a bug:
   as a user of its own. A file the agent cannot read, the portal can, and so
   can a server half that is led to it.
 - **A check and an open are two steps.** Between them the agent can put a link
-  where the file was. A file is opened without following a link in its last
-  place (`O_NOFOLLOW`), and what is sent is read from what was opened, never by
-  opening the path again. A pipe left there does not hold the server, and a
-  device is not read.
+  where the file was, or where a folder on the way to it was, and the portal,
+  which may be root, would then read, make or remove a file where the link leads.
+  A file is opened without following a link in its last place (`O_NOFOLLOW`), and
+  what is sent is read from what was opened, never by opening the path again. The
+  folder it is in is held open too, walked down from the chat's folder one part at
+  a time and never through a link, and the file is read, made and put in place in
+  that folder, whatever happens to the path meanwhile. That holds on Linux, where a
+  held folder can be named as `/proc/self/fd/<n>`; where there is no `/proc`
+  (macOS) a folder on the way can still be swapped between the check and the
+  call, and so the portal gives nothing it makes away there (below). A pipe left
+  there does not hold the server, and a device is not read.
 - **A save is put in place whole.** It is written beside the file and renamed
   over it, so a full disk leaves the file as it was, not empty. It keeps the
   file's mode and its owner, so a file the portal saved as root is still the
@@ -845,9 +852,15 @@ is a link. `alone` refuses a file with a second name. A refusal is `invalid`.
 uploaded have the mode, the owner and the group of the folder they are made in
 (a file 0644, and group-writable where the folder is), and a folder is given
 that through itself, never by its path, so that a link put in its place by the
-agent meanwhile gets nothing. With the sandbox on, the portal is root and the
-agent another user: what the portal made as root would not be the agent's to
-change otherwise. Where the portal may not give a file away, it stays its own.
+agent meanwhile gets nothing. The owner and the mode are the held folder's own,
+read from its descriptor, and a file or a folder is given away only once it is
+known to be in the chat's folder (Linux), so that a folder the agent swapped for
+a link cannot make the portal, as root, hand the agent a file anywhere else. With
+the sandbox on, the portal is root and the agent another user: what the portal made as
+root would not be the agent's to change otherwise. Where the portal may not give
+a file away (it is not root and the folder is someone else's), it stays its own,
+in the group it can: it is group-writable only if that group is the folder's. A
+portal on a system without `/proc` gives nothing away.
 
 **Temporary files.** A save writes `.<name>.<12 hex>.tmp` beside the file until
 it is renamed. One that was cut off stays. `sweepTemp(base, rel)` removes those

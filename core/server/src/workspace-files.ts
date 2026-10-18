@@ -3,6 +3,7 @@ import {
   type BigIntStats,
   closeSync,
   constants,
+  existsSync,
   fchmodSync,
   fchownSync,
   fstatSync,
@@ -225,6 +226,132 @@ function openPlain(file: string, flags: number): number {
   return fd;
 }
 
+/** Whether a descriptor can be named as a path (`/proc/self/fd/<n>`), which is what stands in for `openat` here: Linux. */
+const HAS_FD_PATHS = existsSync("/proc/self/fd");
+const namesDescriptors = () => process.platform === "linux" && HAS_FD_PATHS;
+
+const OPEN_FOLDER = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+
+/** A folder opened without following a link in its last place. */
+function openFolder(where: string): number {
+  try {
+    return openSync(where, OPEN_FOLDER);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw new FileError("missing", "There is no such file or folder");
+    // A link is ENOTDIR here too: O_DIRECTORY is looked at before O_NOFOLLOW.
+    if (code === "ELOOP" || code === "ENOTDIR") {
+      if (lstatSync(where, { throwIfNoEntry: false })?.isSymbolicLink()) throw new FileError("invalid", "That path leads outside the folder");
+      throw new FileError("invalid", "That is not a folder");
+    }
+    throw ioFailure(e, "The folder could not be opened", "Nothing was changed.");
+  }
+}
+
+/**
+ * A folder inside the chat's folder, held open: what is made, read or removed in
+ * it is named through `at`, so that it happens in this folder.
+ */
+interface Held {
+  readonly fd: number;
+  /** The folder itself, as a path for the calls that take one. */
+  readonly here: string;
+  /**
+   * Whether `at` goes through the descriptor, so that no change of a folder on the way to it can send
+   * a call elsewhere: Linux. Where it is not, the names are the checked path's, as they were before.
+   */
+  readonly pinned: boolean;
+  /** `name` in the folder: one name, no place. */
+  at(name: string): string;
+  close(): void;
+}
+
+/**
+ * Holds the folder `dir`, a checked path (`resolveInside`'s) inside `base`.
+ *
+ * A check of a path and a call on it are two steps, and between them the agent
+ * can put a link where a folder on the way was: the call then goes where the link
+ * leads, and the portal, which may be root, makes a file or a folder there. So the
+ * folder is walked down from `base` one part at a time, each opened relative to
+ * the one before it (`/proc/self/fd/<n>/<part>`) and never through a link, and
+ * what is done in the folder is done through the descriptor of the last one.
+ * What this guarantees on Linux: the descriptor is a folder inside `base`,
+ * whatever is done to the path from now on. A checked path has no link on it, so a
+ * link found on the way is one put there after the check, and is refused. The
+ * walk starts at `base` itself, whose real path is checked on the descriptor, so a
+ * folder above it that was swapped is found as well.
+ *
+ * Where descriptors cannot be named (macOS has no /proc) the folder is opened
+ * by its path and calls go by the path, which leaves the gap this closes; there the portal
+ * does not give anything it makes away (see handOver), so the worst that is left is a
+ * file the portal owns in the wrong place, as it was before.
+ */
+function holdFolder(base: string, dir: string): Held {
+  const below = pathBelow(base, dir);
+  if (below === undefined) throw new FileError("invalid", "That path leads outside the folder");
+  if (!namesDescriptors()) {
+    const fd = openFolder(dir);
+    let open = true;
+    return {
+      fd,
+      here: dir,
+      pinned: false,
+      at: (name) => path.join(dir, name),
+      close: () => {
+        if (open) closeSync(fd);
+        open = false;
+      },
+    };
+  }
+  const named = (descriptor: number) => `/proc/self/fd/${descriptor}`;
+  let fd = openFolder(base);
+  try {
+    // The part of the path above `base` is not walked, so it is checked on what was opened: a folder up there swapped for a
+    // link since `base` was made canonical leads this open somewhere else, and the descriptor says where.
+    if (realpathSync.native(named(fd)) !== path.resolve(base)) throw new FileError("invalid", "That path leads outside the folder");
+    for (const part of below.split(path.sep).filter(Boolean)) {
+      const next = openFolder(`${named(fd)}/${part}`);
+      closeSync(fd);
+      fd = next;
+    }
+  } catch (e) {
+    closeSync(fd);
+    throw e;
+  }
+  const held = fd;
+  let open = true;
+  return {
+    fd: held,
+    here: named(held),
+    pinned: true,
+    at: (name) => `${named(held)}/${name}`,
+    close: () => {
+      if (open) closeSync(held);
+      open = false;
+    },
+  };
+}
+
+/**
+ * A plain file opened in the folder it is in, held and not followed (see holdFolder). `file` is a checked path.
+ * What is returned is the file's descriptor, which is what every later step goes through.
+ */
+function openIn(base: string, file: string, flags: number): number {
+  if (file === base) throw new FileError("invalid", "That is not a plain file");
+  let held: Held;
+  try {
+    held = holdFolder(base, path.dirname(file));
+  } catch (e) {
+    if (e instanceof FileError && e.code === "missing") throw new FileError("missing", "There is no such file");
+    throw e;
+  }
+  try {
+    return openPlain(held.at(path.basename(file)), flags);
+  } finally {
+    held.close();
+  }
+}
+
 /** Null bytes early in a file are the cheap, reliable sign that it is not text. */
 const looksBinary = (head: Buffer) => head.includes(0);
 
@@ -232,7 +359,7 @@ export type FileContent = { binary: true; size: number; mtime: number } | { bina
 
 /** A file's text, or the fact that it is not text or too large to show. */
 export function readText(base: string, rel: unknown): FileContent {
-  const fd = openPlain(resolveInside(base, rel), constants.O_RDONLY);
+  const fd = openIn(base, resolveInside(base, rel), constants.O_RDONLY);
   try {
     const st = fstatSync(fd);
     if (st.size > MAX_EDIT_BYTES) return { binary: true, size: st.size, mtime: st.mtimeMs };
@@ -297,7 +424,7 @@ export function openFile(
   options: OpenOptions = {},
 ): { fd: number; size: number; name: string; mtime: number; change: string } {
   const file = placeOf(base, rel, options.direct);
-  const fd = openPlain(file, constants.O_RDONLY);
+  const fd = openIn(base, file, constants.O_RDONLY);
   try {
     const st = fstatSync(fd, { bigint: true });
     if (options.alone && st.nlink !== 1n) throw new FileError("invalid", "That file has another name elsewhere (a hard link)");
@@ -344,15 +471,11 @@ export function readBytes(
 }
 
 /** The rename of a save is only lasting once the folder that holds it is synced. */
-function syncFolder(dir: string): void {
-  let fd: number | undefined;
+function syncFolder(held: Held): void {
   try {
-    fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY);
-    fsyncSync(fd);
+    fsyncSync(held.fd);
   } catch {
     // Some file systems cannot sync a folder; the rename stands all the same.
-  } finally {
-    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -433,17 +556,55 @@ export interface WriteOptions {
   direct?: boolean;
 }
 
+/** Who a file or folder belongs to. */
+interface Owner {
+  uid: number;
+  gid: number;
+}
+
 /**
- * What a file or folder that is made in `dir` is given: the mode of the folder
+ * What a file that is made in the held folder is given: the mode of the folder
  * (a file: 0644, and writable for the folder's group where the folder is) and
- * its owner and group. With the sandbox on the portal writes as root in a
- * folder the agent's user works in, and what the portal makes has to be
- * something the agent goes on editing; where the portal is not allowed to
- * give a file away it stays the portal's, as it always was.
+ * its owner and group, read from the folder's descriptor. With the sandbox on
+ * the portal writes as root in a folder the agent's user works in, and what the
+ * portal makes has to be something the agent goes on editing; where the portal
+ * is not allowed to give a file away it stays the portal's, as it always was.
  */
-function madeIn(dir: string): { mode: number; owner: { uid: number; gid: number } } {
-  const folder = statSync(dir);
+function madeIn(held: Held): { mode: number; owner: Owner } {
+  const folder = fstatSync(held.fd);
   return { mode: 0o644 | (folder.mode & 0o020), owner: { uid: folder.uid, gid: folder.gid } };
+}
+
+/**
+ * Gives the file or folder behind `fd`, which was just made in the held folder,
+ * to `owner`, and then its mode.
+ *
+ * Only through the held folder on Linux (`pinned`): it is known to be inside the
+ * chat's folder, so that what is given away is the agent's own place. Where it is
+ * not known, nothing is given: a swapped folder would otherwise have the portal, as
+ * root, make a file for the agent anywhere.
+ *
+ * Group-write is the folder's group's. A file that stays in another group (the
+ * portal may not give it away, as it is not root, and is not in the folder's
+ * group) does not get it: the portal's own group is not the one the folder
+ * lets write.
+ */
+function handOver(fd: number, owner: Owner, mode: number, held: Held): void {
+  if (held.pinned) {
+    try {
+      fchownSync(fd, owner.uid, owner.gid);
+    } catch {
+      // Not allowed to give it away. The group may still be the folder's, if the portal belongs to it.
+      try {
+        fchownSync(fd, -1, owner.gid);
+      } catch {
+        // It stays in the portal's group.
+      }
+    }
+  }
+  // After the owner: giving a file away takes setuid and setgid off it, and they are not carried over in any case.
+  if (fstatSync(fd).gid !== owner.gid) mode &= ~0o2020;
+  fchmodSync(fd, mode);
 }
 
 /**
@@ -480,79 +641,87 @@ export function writeText(
   }
   const target = placeOf(base, rel, options.direct);
   if (target === base) throw new FileError("invalid", "That is the folder, not a file");
-  // Looked at before anything is written, and without O_CREAT: a file that is
-  // there is checked as it is, so an emptied one is compared like any other. One
-  // that is not there was either never made (no `expected`, so make it) or has
-  // been taken away since it was opened, and putting it back with old text is
-  // not what a save means.
-  let mode = 0o644;
-  let owner: { uid: number; gid: number } | undefined;
-  let existed = true;
+  const name = path.basename(target);
+  // The folder is held for all of it: the file is looked at, written and put in place in this folder and no other,
+  // whatever happens to the path meanwhile (see holdFolder).
+  let held: Held;
   try {
-    // Only to look at: what is written goes to a file beside it, so the file itself
-    // need not be writable (a read-only one is replaced, and keeps its mode).
-    const fd = openPlain(target, constants.O_RDONLY);
-    try {
-      const st = fstatSync(fd);
-      if (createOnly) throw new FileError("exists", `There is already something called "${path.basename(target)}" here`);
-      if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
-      if (expected !== undefined && Math.abs(st.mtimeMs - expected) > 1) throw new FileError("conflict", CHANGED);
-      mode = st.mode & 0o7777;
-      owner = { uid: st.uid, gid: st.gid };
-    } finally {
-      closeSync(fd);
-    }
+    held = holdFolder(base, path.dirname(target));
   } catch (e) {
-    if (!(e instanceof FileError) || e.code !== "missing") throw writeFailure(e);
-    if (expected !== undefined) throw new FileError("conflict", CHANGED);
-    existed = false;
+    // A folder that is gone is a file that is gone: what the person was shown is out of date.
+    if (e instanceof FileError && e.code === "missing" && expected !== undefined) throw new FileError("conflict", CHANGED);
+    throw e;
+  }
+  try {
+    // Looked at before anything is written, and without O_CREAT: a file that is
+    // there is checked as it is, so an emptied one is compared like any other. One
+    // that is not there was either never made (no `expected`, so make it) or has
+    // been taken away since it was opened, and putting it back with old text is
+    // not what a save means.
+    let mode = 0o644;
+    let owner: Owner;
+    let existed = true;
     try {
-      ({ mode, owner } = madeIn(path.dirname(target)));
+      // Only to look at: what is written goes to a file beside it, so the file itself
+      // need not be writable (a read-only one is replaced, and keeps its mode).
+      const fd = openPlain(held.at(name), constants.O_RDONLY);
+      try {
+        const st = fstatSync(fd);
+        if (createOnly) throw new FileError("exists", `There is already something called "${name}" here`);
+        if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
+        if (expected !== undefined && Math.abs(st.mtimeMs - expected) > 1) throw new FileError("conflict", CHANGED);
+        // Not setuid or setgid: a file the portal writes does not carry them over (see handOver).
+        mode = st.mode & 0o1777;
+        owner = { uid: st.uid, gid: st.gid };
+      } finally {
+        closeSync(fd);
+      }
     } catch (e) {
+      if (!(e instanceof FileError) || e.code !== "missing") throw writeFailure(e);
+      if (expected !== undefined) throw new FileError("conflict", CHANGED);
+      existed = false;
+      try {
+        ({ mode, owner } = madeIn(held));
+      } catch (e) {
+        throw writeFailure(e);
+      }
+    }
+
+    const tempName = `.${tempStem(name)}.${randomBytes(6).toString("hex")}.tmp`;
+    let fd: number | undefined;
+    try {
+      fd = openSync(held.at(tempName), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+      // What the file had: the mode is cut by the umask on creation, and the owner is not ours if the portal runs as another user.
+      handOver(fd, owner, mode, held);
+      let written = 0;
+      while (written < data.length) written += writeSync(fd, data, written, data.length - written, written);
+      fsyncSync(fd);
+      if (existed) {
+        renameSync(held.at(tempName), held.at(name));
+      } else {
+        // A file that is made is not put over one that has appeared since: a link
+        // fails where a rename would replace. Where links are not possible, rename.
+        try {
+          linkSync(held.at(tempName), held.at(name));
+          unlinkSync(held.at(tempName));
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FileError("conflict", CHANGED);
+          renameSync(held.at(tempName), held.at(name));
+        }
+      }
+      // After the rename or link, which both change the file's times.
+      const after = fstatSync(fd, { bigint: true });
+      closeSync(fd);
+      fd = undefined;
+      syncFolder(held);
+      return { size: Number(after.size), mtime: mtimeOf(after), change: changeOf(after) };
+    } catch (e) {
+      if (fd !== undefined) closeSync(fd);
+      rmSync(held.at(tempName), { force: true });
       throw writeFailure(e);
     }
-  }
-
-  const folderOf = path.dirname(target);
-  const temp = path.join(folderOf, `.${tempStem(path.basename(target))}.${randomBytes(6).toString("hex")}.tmp`);
-  let fd: number | undefined;
-  try {
-    fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
-    // What the file had: the mode is cut by the umask on creation, and the owner is not ours if the portal runs as another user.
-    fchmodSync(fd, mode);
-    if (owner) {
-      try {
-        fchownSync(fd, owner.uid, owner.gid);
-      } catch {
-        // Not allowed to give it away; it stays ours.
-      }
-    }
-    let written = 0;
-    while (written < data.length) written += writeSync(fd, data, written, data.length - written, written);
-    fsyncSync(fd);
-    if (existed) {
-      renameSync(temp, target);
-    } else {
-      // A file that is made is not put over one that has appeared since: a link
-      // fails where a rename would replace. Where links are not possible, rename.
-      try {
-        linkSync(temp, target);
-        unlinkSync(temp);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FileError("conflict", CHANGED);
-        renameSync(temp, target);
-      }
-    }
-    // After the rename or link, which both change the file's times.
-    const after = fstatSync(fd, { bigint: true });
-    closeSync(fd);
-    fd = undefined;
-    syncFolder(folderOf);
-    return { size: Number(after.size), mtime: mtimeOf(after), change: changeOf(after) };
-  } catch (e) {
-    if (fd !== undefined) closeSync(fd);
-    rmSync(temp, { force: true });
-    throw writeFailure(e);
+  } finally {
+    held.close();
   }
 }
 
@@ -650,43 +819,45 @@ export function folderPath(base: string, rel: unknown, options: { direct?: boole
  * Makes a folder inside `dir`. Like a new file, it never takes the place of
  * something already there. It has the mode, owner and group of the folder it
  * is made in, so that the agent can write in it as it can there (see madeIn).
- * Returns its path, from the chat's folder.
+ * It is made in the folder as it is held (see holdFolder), not in the place
+ * its path leads to by the time of the call. Returns its path, from the chat's folder.
  */
 export function makeFolder(base: string, dirRel: unknown, name: unknown): string {
   const clean = checkName(name);
   const parent = folderPath(base, dirRel);
-  const target = path.join(parent, clean);
+  const held = holdFolder(base, parent);
   const taken = () => new FileError("exists", `There is already something called "${clean}" here`);
-  if (lexists(target)) throw taken();
   try {
-    const inParent = statSync(parent);
-    const mode = inParent.mode & 0o7777;
-    mkdirSync(target, { mode });
-    // Given its mode and owner through the folder that is opened, never by its path: a link put where it was, by an agent
-    // that writes in the folder, would have what it leads to changed, and the portal may be root.
-    let fd: number | undefined;
+    const target = held.at(clean);
+    if (lexists(target)) throw taken();
     try {
-      fd = openSync(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ELOOP" || (e as NodeJS.ErrnoException).code === "ENOTDIR") throw taken();
-      throw e;
-    }
-    try {
-      fchmodSync(fd, mode);
+      // The mode and owner are the held folder's own, from its descriptor.
+      const folder = fstatSync(held.fd);
+      const mode = folder.mode & 0o7777;
+      mkdirSync(target, { mode });
+      // Given its mode and owner through the folder that is opened, never by its path: a link put where it was, by an agent
+      // that writes in the folder, would have what it leads to changed, and the portal may be root.
+      let fd: number | undefined;
       try {
-        fchownSync(fd, inParent.uid, inParent.gid);
-      } catch {
-        // Not allowed to give it away: it stays ours.
+        fd = openSync(target, OPEN_FOLDER);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ELOOP" || (e as NodeJS.ErrnoException).code === "ENOTDIR") throw taken();
+        throw e;
       }
-    } finally {
-      closeSync(fd);
+      try {
+        handOver(fd, { uid: folder.uid, gid: folder.gid }, mode, held);
+      } finally {
+        closeSync(fd);
+      }
+    } catch (e) {
+      if (e instanceof FileError) throw e;
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw taken();
+      throw ioFailure(e, "The folder could not be made", "Nothing was changed.");
     }
-  } catch (e) {
-    if (e instanceof FileError) throw e;
-    if ((e as NodeJS.ErrnoException).code === "EEXIST") throw taken();
-    throw ioFailure(e, "The folder could not be made", "Nothing was changed.");
+  } finally {
+    held.close();
   }
-  return path.relative(base, target);
+  return path.relative(base, path.join(parent, clean));
 }
 
 /** The start of a name that fits in `max` bytes, cut between letters, not inside one. */
@@ -723,28 +894,40 @@ export const TEMP_GRACE_MS = 60_000;
  */
 export function sweepTemp(base: string, rel: unknown, olderThanMs = TEMP_GRACE_MS): string[] {
   const dir = resolveInside(base, rel);
-  let names: string[];
+  let held: Held;
   try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
+    held = holdFolder(base, dir);
+  } catch (e) {
+    // Not there, not a folder, or no longer what the check saw: nothing is swept.
+    if (e instanceof FileError) return [];
+    throw e;
   }
-  const removed: string[] = [];
-  const now = Date.now();
-  for (const name of names) {
-    if (!SAVE_TEMP.test(name)) continue;
-    const file = path.join(dir, name);
+  try {
+    let names: string[];
     try {
-      const st = lstatSync(file);
-      if (!st.isFile() && !st.isSymbolicLink()) continue;
-      if (now - st.mtimeMs < olderThanMs) continue;
-      unlinkSync(file);
-      removed.push(name);
+      names = readdirSync(held.here);
     } catch {
-      // Gone since it was listed, or not ours to remove: left.
+      return [];
     }
+    const removed: string[] = [];
+    const now = Date.now();
+    for (const name of names) {
+      if (!SAVE_TEMP.test(name)) continue;
+      const file = held.at(name);
+      try {
+        const st = lstatSync(file);
+        if (!st.isFile() && !st.isSymbolicLink()) continue;
+        if (now - st.mtimeMs < olderThanMs) continue;
+        unlinkSync(file);
+        removed.push(name);
+      } catch {
+        // Gone since it was listed, or not ours to remove: left.
+      }
+    }
+    return removed;
+  } finally {
+    held.close();
   }
-  return removed;
 }
 
 /**
@@ -780,46 +963,58 @@ export function uploadTarget(
 ): { fd: number; finish: () => string; abandon: () => void } {
   const clean = checkName(name);
   const parent = folderPath(base, dirRel);
-  const temp = path.join(parent, `.${tempStem(clean)}.${randomBytes(6).toString("hex")}.upload`);
-  let fd: number;
+  // Held until the upload is finished or given up: the temporary file and the place it is put in are this folder, whatever
+  // happens to the path while the file comes in.
+  const held = holdFolder(base, parent);
+  const tempName = `.${tempStem(clean)}.${randomBytes(6).toString("hex")}.upload`;
+  const temp = held.at(tempName);
+  let fd: number | undefined;
   try {
-    const { mode, owner } = madeIn(parent);
+    const { mode, owner } = madeIn(held);
     fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
     // The mode is cut by the umask on creation; this is the one it is to have.
-    fchmodSync(fd, mode);
-    try {
-      fchownSync(fd, owner.uid, owner.gid);
-    } catch {
-      // Not allowed to give it away: it stays ours.
-    }
+    handOver(fd, owner, mode, held);
   } catch (e) {
+    if (fd !== undefined) {
+      closeSync(fd);
+      rmSync(temp, { force: true });
+    }
+    held.close();
     throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
   }
-  const abandon = () => rmSync(temp, { force: true });
+  const abandon = () => {
+    rmSync(temp, { force: true });
+    held.close();
+  };
   const finish = () => {
-    for (let n = 1; n < 1000; n++) {
-      const target = path.join(parent, numbered(clean, n));
-      try {
-        linkSync(temp, target);
-        unlinkSync(temp);
-        syncFolder(parent);
-        return path.relative(base, target);
-      } catch (e) {
-        const code = (e as NodeJS.ErrnoException).code;
-        if (code === "EEXIST") continue;
-        // Where links are not possible: a rename, after looking, is the best there is.
-        if (code === "EPERM" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
-          if (lexists(target)) continue;
-          renameSync(temp, target);
-          syncFolder(parent);
-          return path.relative(base, target);
+    try {
+      for (let n = 1; n < 1000; n++) {
+        const numberedName = numbered(clean, n);
+        const target = held.at(numberedName);
+        try {
+          linkSync(temp, target);
+          unlinkSync(temp);
+          syncFolder(held);
+          return path.relative(base, path.join(parent, numberedName));
+        } catch (e) {
+          const code = (e as NodeJS.ErrnoException).code;
+          if (code === "EEXIST") continue;
+          // Where links are not possible: a rename, after looking, is the best there is.
+          if (code === "EPERM" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+            if (lexists(target)) continue;
+            renameSync(temp, target);
+            syncFolder(held);
+            return path.relative(base, path.join(parent, numberedName));
+          }
+          rmSync(temp, { force: true });
+          throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
         }
-        abandon();
-        throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
       }
+      rmSync(temp, { force: true });
+      throw new FileError("exists", `Too many files called "${clean}" here`);
+    } finally {
+      held.close();
     }
-    abandon();
-    throw new FileError("exists", `Too many files called "${clean}" here`);
   };
   return { fd, finish, abandon };
 }
