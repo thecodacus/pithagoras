@@ -358,3 +358,59 @@ test('the notes about a change that came from outside are in German in a German 
   await tell(page, 6);
   await expect(note(page)).toContainText('Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision 6. Die Änderungen wurden in deinen Text eingearbeitet.');
 });
+
+/* The document written as Markdown (the bar's Markdown): what the agent changes meanwhile comes in there too. */
+const sourceOf = (page: Page) => page.getByRole('textbox', { name: 'Markdown source' });
+const inMarkdown = (page: Page) => page.addInitScript(() => localStorage.setItem('pithagoras-docs/mode', 'markdown'));
+
+test('what the agent changed is in the Markdown of a document that is open and untouched at once, and the caret is where it was', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect(sourceOf(page)).toHaveValue(agents());
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  await expect(note(page)).toContainText('The agent changed this document. It is now at revision 4.');
+  // The caret stayed at the start of the third line: what is typed goes there.
+  await page.keyboard.type('>> ');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.puts).toEqual([{ markdown: agents().replace('Ship it on', '>> Ship it on'), base: 4 }]);
+});
+
+test('a change by the agent is merged into the Markdown being typed, which is then saved on the new revision', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Or Monday.');
+  await expect(state(page)).toHaveText('Unsaved changes · Revision 3');
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect(sourceOf(page)).toHaveValue(agents().replace('Friday.', 'Friday. Or Monday.'));
+  await expect(note(page)).toContainText('Its changes were merged into your text');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.markdown).toBe(agents().replace('Friday.', 'Friday. Or Monday.'));
+});
+
+test('a change that meets what is typed in the Markdown is a conflict, with the typed text kept', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).fill(PLAN.replace('on Monday', 'on Wednesday'));
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect(page.locator('.pd-conflict')).toBeVisible();
+  await expect(sourceOf(page)).toHaveValue(PLAN.replace('on Monday', 'on Wednesday'));
+});

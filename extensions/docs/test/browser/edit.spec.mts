@@ -1004,3 +1004,177 @@ for (const name of ['History', 'Comments'] as const) {
     await expect(sideBar(page, name)).toBeFocused();
   });
 }
+
+/* The document as plain Markdown, for those who prefer to write it: the same document, saved the same way. */
+const modeSwitch = (page: Page) => page.getByRole('group', { name: 'Editing mode' });
+const modeButton = (page: Page, name: 'Visual' | 'Markdown') => modeSwitch(page).getByRole('button', { name, exact: true });
+const sourceOf = (page: Page) => page.getByRole('textbox', { name: 'Markdown source' });
+const inMarkdown = (page: Page) => page.addInitScript(() => localStorage.getItem('pithagoras-docs/mode') === null && localStorage.setItem('pithagoras-docs/mode', 'markdown'));
+
+test('the document is written in the visual editor, or as Markdown with the switch in the bar, and the browser remembers which', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  // Visual to begin with: the editor and its toolbar; no source.
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'true');
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('aria-pressed', 'false');
+  await expect(sourceOf(page)).toBeHidden();
+  await expect(page.getByRole('toolbar', { name: 'Formatting' })).toBeVisible();
+
+  await modeButton(page, 'Markdown').click();
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('aria-pressed', 'true');
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'false');
+  // The file as it is, in the same column, in a monospace face and without a box; the formatting toolbar is not there (it has nothing to do in the source).
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await expect(editorOf(page)).toBeHidden();
+  await expect(page.getByRole('toolbar', { name: 'Formatting' })).toHaveCount(0);
+  const look = await sourceOf(page).evaluate((el) => {
+    const style = getComputedStyle(el);
+    const sheet = document.querySelector('.pd-sheet')!.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    return { family: style.fontFamily, border: style.borderTopWidth, background: style.backgroundColor, centred: Math.abs(box.left - sheet.left - (sheet.right - box.right)) < 2, narrower: box.width < sheet.width };
+  });
+  expect(look.family).toMatch(/mono|Menlo|Consolas/i);
+  expect(look.border).toBe('0px');
+  expect(look.background).toBe('rgba(0, 0, 0, 0)');
+  expect(look.centred).toBe(true);
+  expect(look.narrower).toBe(true);
+
+  // Kept by the browser: a new page opens as it was left.
+  await page.reload();
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('aria-pressed', 'true');
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toBeVisible();
+  await expect(sourceOf(page)).toBeHidden();
+  await page.reload();
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'true');
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  expect(store.puts).toEqual([]);
+});
+
+test('a browser that keeps nothing still lets the mode be chosen for the page', async ({ page }) => {
+  await page.addInitScript(() => {
+    const get = Storage.prototype.getItem;
+    const set = Storage.prototype.setItem;
+    Storage.prototype.getItem = function (key: string) { if (key === 'pithagoras-docs/mode') throw new Error('denied'); return get.call(this, key); };
+    Storage.prototype.setItem = function (key: string, value: string) { if (key === 'pithagoras-docs/mode') throw new Error('denied'); return set.call(this, key, value); };
+  });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'true');
+  await modeButton(page, 'Markdown').click();
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+});
+
+test('typing in the source saves like the editor does: after a second, at once with Ctrl+S, and when the focus leaves; as it was typed', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('* Not a dash.');
+  await expect(state(page)).toHaveText('Unsaved changes · Revision 3');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  // The text as typed, not as the editor would write it (it would have a dash for the star).
+  expect(store.puts).toEqual([{ markdown: `${PLAN}* Not a dash.`, base: 3 }]);
+
+  await page.keyboard.type('\n* Again.');
+  await page.keyboard.press('Control+s');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.puts.map((put) => put.base)).toEqual([3, 4]);
+  expect(store.markdown).toBe(`${PLAN}* Not a dash.\n* Again.`);
+
+  // The focus leaving the text saves what is typed.
+  await page.keyboard.type(' More.');
+  await page.getByRole('button', { name: 'History' }).focus();
+  await expect(state(page)).toHaveText('Saved · Revision 6');
+  expect(store.markdown).toBe(`${PLAN}* Not a dash.\n* Again. More.`);
+
+  // The browser's own undo takes the words back.
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' Oops.');
+  await page.keyboard.press('Control+z');
+  await expect(sourceOf(page)).toHaveValue(`${PLAN}* Not a dash.\n* Again. More.`);
+});
+
+test('a document written in another style is the same document in both: looking at it, or going from one to the other, saves nothing', async ({ page }) => {
+  const raw = '* One\n* Two\n\nText  \nmore\n';
+  const store = new Store(raw);
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('One');
+  await modeButton(page, 'Markdown').click();
+  // The file as it is, in its own style.
+  await expect(sourceOf(page)).toHaveValue(raw);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.waitForTimeout(1300);
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('One');
+  await page.waitForTimeout(1300);
+  expect(store.puts).toEqual([]);
+  await expect(state(page)).toHaveText('Saved · Revision 3');
+  // A change in the source keeps the style it was written in; going back to the editor then writes nothing more.
+  await modeButton(page, 'Markdown').click();
+  await sourceOf(page).fill('* One\n* Two\n* Three\n\nText  \nmore\n');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.puts).toEqual([{ markdown: '* One\n* Two\n* Three\n\nText  \nmore\n', base: 3 }]);
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('Three');
+  await page.waitForTimeout(1300);
+  expect(store.puts).toHaveLength(1);
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+});
+
+test('text that is not saved yet goes with the switch, in both directions', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await typeAtEnd(page, ' Typed in the editor.');
+  // Switched before the autosave: the words are in the source.
+  await modeButton(page, 'Markdown').click();
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it on Friday. Typed in the editor.\n');
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('Typed in the source.');
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('Typed in the editor.');
+  await expect(editorOf(page)).toContainText('Typed in the source.');
+  await expect.poll(() => store.markdown).toContain('Typed in the source.');
+  expect(store.markdown).toContain('Typed in the editor.');
+  await expect(state(page)).toHaveText(/^Saved · Revision \d+$/);
+});
+
+test('a conflict keeps the text typed in the source, and the choice is made there as in the editor', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  store.elsewhere('# The plan\n\nShip it on Monday.\n');
+  await sourceOf(page).fill('# The plan\n\nShip it on Tuesday.\n');
+  await expect(page.locator('.pd-conflict')).toBeVisible();
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it on Tuesday.\n');
+  await page.getByRole('button', { name: 'Keep mine as a new revision' }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.markdown).toBe('# The plan\n\nShip it on Tuesday.\n');
+  // Going to the editor shows the same text.
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('Ship it on Tuesday.');
+});
+
+test('restoring a revision shows it in the source too', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await page.getByRole('button', { name: 'History' }).click();
+  const history = page.getByRole('complementary', { name: 'History' });
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it soon.\n');
+  expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
+});

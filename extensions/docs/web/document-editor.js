@@ -3,7 +3,10 @@
  * a document is first opened), saved as it is edited (saver.js), kept up to
  * date with what the agent and others change meanwhile (live.js), the
  * document's history with a way back to an earlier revision, and the comments
- * on its passages (comments.js).
+ * on its passages (comments.js). The same text can be written as Markdown in
+ * a plain box instead of in the editor (source.js): the editor stays what the
+ * saving, the changes from outside and the comments are done on, and the box
+ * takes its place for as long as it is chosen.
  *
  * It is laid out as a word processor is: a bar with the document's name, where
  * it stands and what can be done with it (the list of its comments, its history,
@@ -19,6 +22,7 @@ import { comments, PENDING } from "./comments.js";
 import { createLive } from "./live.js";
 import { asksAgent } from "./mention.js";
 import { createSaver } from "./saver.js";
+import { fit, keepMode, readMode, replaceText } from "./source.js";
 import { ICONS, toolbar } from "./toolbar.js";
 import { drafted, shownOf } from "./writing.js";
 
@@ -263,6 +267,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const parts = useRef(null);
     const [view, setView] = useState({ status: "saved", base: doc.revision, error: null, conflict: null, warning: null });
     const [ready, setReady] = useState(false);
+    // How the text is written: in the editor, or as Markdown in a box. The ref is what the editor's callbacks see; the state draws.
+    const modeNow = useRef(readMode());
+    const [mode, setMode] = useState(modeNow.current);
+    const plain = mode === "markdown";
+    // The box, the text it held last (for when the page is gone), the text the file had when it was last known (what the box starts with, if it is the editor's text in the file's own style), and where the page was scrolled to when the mode changed.
+    const sourceBox = useRef(null);
+    const typed = useRef("");
+    const filed = useRef(doc.markdown);
+    const scrolled = useRef(null);
+    // The thread chosen in the list while the text was Markdown: its card opens once the editor is shown.
+    const [toOpen, setToOpen] = useState(null);
     const [broken, setBroken] = useState(null);
     const [notice, setNotice] = useState(null);
     const [problem, setProblem] = useState(null);
@@ -361,7 +376,9 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           if (!gone && mine === latest) setThreads((now) => ({ ...now, error }));
         }
       };
-      const read = () => frozen ?? editor.markdown();
+      // The editor, or what takes its place for the saver and for what changes from outside: the box, while the text is written as Markdown.
+      let proxy = null;
+      const read = () => frozen ?? proxy.markdown();
       const saver = createSaver({
         read,
         send: (markdown, base) =>
@@ -369,6 +386,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             // The server puts the passages of the comments in step with each revision when it is asked for them: after each save, so that each
             // step is a small one and a passage is not lost in a big one.
             if (commented.current) void refresh.current();
+            filed.current = markdown;
             // The file was gone (deleted, or renamed) and the save made it again: the person is told, since the document is not where it was.
             if (answer.recreated) setNotice({ kind: "recreated", revision: answer.revision });
             return answer;
@@ -447,12 +465,59 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           else saver.conflicted({ revision: doc.revision, markdown: doc.markdown }, kept.base);
           setNotice({ kind: "draft" });
         }
-        parts.current = { editor, saver, url };
+        /** Puts a text in the box, keeping the caret where it is. */
+        const put = (next) => {
+          if (sourceBox.current) replaceText(sourceBox.current, next);
+          typed.current = sourceBox.current ? sourceBox.current.value : next;
+        };
+        // What the box says the text is: the text as it was saved where it is only written in another style (the editor writes Markdown in its own, and
+        // the same words are not a change), else as it is typed.
+        let seenText = { raw: null, base: null, out: null };
+        const boxText = () => {
+          const raw = sourceBox.current ? sourceBox.current.value : typed.current;
+          const base = saver.baseline();
+          if (seenText.raw !== raw || seenText.base !== base) seenText = { raw, base, out: raw === base ? raw : editor.normalize(raw) === base ? base : raw };
+          return seenText.out;
+        };
+        const inSource = () => modeNow.current === "markdown";
+        proxy = {
+          ...editor,
+          markdown: () => (inSource() ? boxText() : editor.markdown()),
+          apply: (next) => (inSource() ? put(next) : editor.apply(next)),
+          replace: (next) => (inSource() ? put(next) : editor.replace(next)),
+          focus: () => (inSource() ? sourceBox.current?.focus({ preventScroll: true }) : editor.focus()),
+          focusEnd: () => {
+            if (!inSource()) return editor.focusEnd();
+            sourceBox.current?.focus({ preventScroll: true });
+            sourceBox.current?.setSelectionRange(sourceBox.current.value.length, sourceBox.current.value.length);
+          },
+        };
+        parts.current = {
+          editor: proxy,
+          visual: editor,
+          saver,
+          url,
+          // The box is given the text: the file's, where that is the editor's text in the file's own style, else the editor's.
+          seed: () => {
+            const text = editor.markdown();
+            put(editor.normalize(filed.current) === text ? filed.current : text);
+          },
+          // The editor is given the text of the box, where it differs from its own.
+          toVisual: () => {
+            const text = sourceBox.current ? sourceBox.current.value : typed.current;
+            if (editor.normalize(text) !== editor.markdown()) editor.replace(text);
+          },
+        };
+        if (inSource()) parts.current.seed();
         live = createLive({
-          editor,
+          editor: proxy,
           saver,
           revision: doc.revision,
-          load: () => portal.api.json(url),
+          load: () =>
+            portal.api.json(url).then((body) => {
+              filed.current = body.markdown;
+              return body;
+            }),
           notify: ({ kind, revision, author }) => {
             if (kind === "conflict") return;
             setNotice({ kind, revision, author });
@@ -501,7 +566,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         window.removeEventListener("beforeunload", ask);
         document.removeEventListener("visibilitychange", hidden);
         if (editor) {
-          frozen = editor.markdown();
+          frozen = proxy.markdown();
           // Leaving the page is not a reason to lose text: it is saved now, and kept until it is. Kept here too, not only when
           // the saver's state changes: text typed after a conflict changed no state, and has no other way to be kept.
           if (saver.unsaved()) keepDraft(folder, id, { base: saver.state().base, markdown: frozen });
@@ -515,7 +580,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
 
     // Decided once, as the agent's call begins, and before it is drawn: whether the person is working in the text then.
     React.useLayoutEffect(() => {
-      if (draft?.call && (host.current?.contains(document.activeElement) || parts.current?.saver.unsaved())) setUnwatched(draft.call);
+      if (draft?.call && (host.current?.contains(document.activeElement) || sourceBox.current === document.activeElement || parts.current?.saver.unsaved())) setUnwatched(draft.call);
     }, [draft?.call]);
     useEffect(() => {
       if (!draft?.call) return;
@@ -551,7 +616,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     React.useLayoutEffect(() => {
       const frame = sheet.current?.getBoundingClientRect();
       let found = [];
-      if (ready && !watching && !old && frame && frame.width >= MARGIN_MIN) {
+      if (ready && !watching && !old && !plain && frame && frame.width >= MARGIN_MIN) {
         for (const thread of threads.items) {
           if (thread.status !== "open" || thread.orphaned || thread.id === active || !texts.has(thread.id)) continue;
           const line = rectsOf(thread.id)[0];
@@ -599,6 +664,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         if (!(await saver.flush())) return false;
         try {
           const done = await portal.api.json(`${url}/restore`, { method: "POST", body: JSON.stringify({ revision, base: saver.state().base }) });
+          filed.current = markdown;
           editor.replace(markdown);
           saver.adopt(done.revision, editor.markdown());
           setNotice({ kind: "restored", from: revision, to: done.revision });
@@ -644,6 +710,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
 
     /** The passage selected is commented on: the text is saved first, so that the passage is in a revision the server has. */
     const startComment = async () => {
+      // There is nothing to select a passage in, in the Markdown: the comment is on the text as it is drawn.
+      if (modeNow.current === "markdown") return;
       const { editor, saver } = parts.current;
       setCommentProblem(null);
       if (!(await saver.flush())) return;
@@ -783,6 +851,12 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const show = (thread) => {
       // The comment being written is a card of its own, which is there only while there is one.
       if (thread === PENDING && !now.current.compose) return;
+      // The card is on the text as it is drawn: from the Markdown, the editor comes first, and the card opens once it is there.
+      if (modeNow.current === "markdown") {
+        setToOpen(thread);
+        void switchTo("visual");
+        return;
+      }
       setTakeFocus(thread);
       setActive(thread);
       parts.current?.editor.reveal(thread);
@@ -832,6 +906,57 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const watching = edited !== null && status === "saved" && unwatched !== draft.call;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
     const openCount = threads.items.filter((x) => x.status === "open").length;
+    /**
+     * The text is written in the other way: in the editor, or as Markdown in a box. What is in the one goes to the other (nothing is lost, and
+     * what is not saved yet stays unsaved); going to the editor saves first where it can, so that the text it takes is a revision's.
+     */
+    const switchTo = async (next) => {
+      const p = parts.current;
+      if (!p || modeNow.current === next) return;
+      const area = workspace.current?.querySelector(".pd-scroll");
+      scrolled.current = area && area.scrollHeight > area.clientHeight ? area.scrollTop / (area.scrollHeight - area.clientHeight) : 0;
+      if (next === "markdown") {
+        p.seed();
+        modeNow.current = next;
+      } else {
+        await p.saver.flush();
+        // Another switch came while it was saved.
+        if (modeNow.current !== "markdown") return;
+        p.toVisual();
+        // What the box held was saved as it was typed, which the editor writes in its own style: that is not a change to save.
+        const clean = p.saver.state().status === "saved" && !p.saver.unsaved();
+        modeNow.current = next;
+        if (clean) p.saver.adopt(p.saver.state().base, p.visual.markdown());
+        else p.saver.changed();
+        // The editor was not told of what changed in the box: the passages of the comments are asked for again.
+        void refresh.current();
+      }
+      keepMode(next);
+      setMode(next);
+    };
+    // The box is as high as its text, also when the page is as wide as it was not when it was drawn; the page is where it was in the text.
+    React.useLayoutEffect(() => {
+      const box = sourceBox.current;
+      if (plain && box) fit(box);
+      const area = workspace.current?.querySelector(".pd-scroll");
+      if (area && scrolled.current !== null) area.scrollTop = scrolled.current * Math.max(0, area.scrollHeight - area.clientHeight);
+      scrolled.current = null;
+    }, [plain, ready]);
+    useEffect(() => {
+      const box = sourceBox.current;
+      if (!box || typeof ResizeObserver === "undefined") return;
+      const watch = new ResizeObserver(() => fit(box));
+      watch.observe(box);
+      return () => watch.disconnect();
+    }, []);
+    // The thread chosen in the list from the Markdown: its card opens now that the editor is shown.
+    useEffect(() => {
+      if (toOpen && !plain && ready) {
+        const thread = toOpen;
+        setToOpen(null);
+        show(thread);
+      }
+    }, [toOpen, plain, ready]);
     // The side panel: one at a time, the other's place taken. Closed from within (Close, Escape), the button it was opened from has the focus again.
     const openers = { comments: commentsButton, history: historyButton };
     const closeSide = ({ focus = false } = {}) => {
@@ -860,6 +985,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const old = history && looking && looking.revision !== base && !looking.error ? looking : null;
     const print = () => {
       const editor = parts.current?.editor;
+      // The editor draws the page that is printed: it has the text of the box first.
+      if (modeNow.current === "markdown") parts.current?.toVisual();
       if (editor) printDocument(doc.title, editor.html());
     };
     // The card that is open, on the sheet: the comment being written, or the thread whose passage is marked in the text (one that is not
@@ -870,7 +997,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // says so: what is typed in it is not taken from under the person's hands.
     const shown = !written && active ? threads.items.find((x) => x.id === active) : null;
     const card =
-      ready && !watching && !old
+      ready && !watching && !old && !plain
         ? written
           ? { key: `compose-${compose.key}`, compose, mark: compose.threadId ?? PENDING, thread: madeOf ?? { id: null, status: "open", orphaned: false, quote: compose.passage.quote, toAgent: false, answered: false, ping: null, comments: [] } }
           : shown && { key: shown.id, thread: shown, mark: shown.id }
@@ -920,6 +1047,12 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         h(
           "div",
           { className: "pd-bar-end" },
+          // How the text is written: the editor, or Markdown. The browser keeps the choice.
+          h(
+            "div",
+            { className: "pd-modes", role: "group", "aria-label": t("Editing mode") },
+            ["visual", "markdown"].map((way) => h("button", { key: way, type: "button", "aria-pressed": mode === way, disabled: !ready, onClick: () => void switchTo(way) }, way === "visual" ? t("Visual") : t("Markdown"))),
+          ),
           h(BarButton, { icon: "comments", label: t("Comments"), expanded: listed, badge: openCount || null, buttonRef: commentsButton, onClick: () => toggleSide("comments") }),
           h(BarButton, { icon: "history", label: t("History"), expanded: history, disabled: !ready, buttonRef: historyButton, onClick: () => toggleSide("history") }),
           h(Menu, {
@@ -934,7 +1067,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           onExpand && h(BarButton, { icon: "expand", label: t("Open on its own page"), onClick: async () => (!parts.current || (await parts.current.saver.flush())) && onExpand() }, t("Full page")),
         ),
       ),
-      h(Toolbar, { format, disabled: !ready || watching || Boolean(old), onCommand: (name, arg) => parts.current?.editor.command(name, arg), onComment: () => void startComment(), onFocusText: () => parts.current?.editor.focus() }),
+      // Nothing of the formatting is of use in the Markdown, where it is written out: the toolbar is not there.
+      !plain && h(Toolbar, { format, disabled: !ready || watching || Boolean(old), onCommand: (name, arg) => parts.current?.editor.command(name, arg), onComment: () => void startComment(), onFocusText: () => parts.current?.editor.focus() }),
       conflict &&
         h(
           "div",
@@ -1010,7 +1144,28 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
                 { className: "pd-editor pd-draft pd-old" },
                 old.markdown === undefined ? h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }) : old.markdown.trim() ? h(ui.Markdown, null, old.markdown) : h(ui.Empty, null, t("This document is empty.")),
               ),
-            h("div", { ref: host, className: "pd-editor", hidden: !ready || watching || Boolean(old) }),
+            h("div", { ref: host, className: "pd-editor", hidden: !ready || watching || plain || Boolean(old) }),
+            h("textarea", {
+              ref: sourceBox,
+              className: "pd-source",
+              hidden: !ready || watching || !plain || Boolean(old),
+              spellCheck: false,
+              wrap: "soft",
+              "aria-label": t("Markdown source"),
+              onInput: (e) => {
+                typed.current = e.target.value;
+                fit(e.target);
+                parts.current?.saver.changed();
+              },
+              // As in the editor: the focus leaving the text saves it, and so does Ctrl+S.
+              onBlur: () => void parts.current?.saver.flush(),
+              onKeyDown: (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+                  e.preventDefault();
+                  void parts.current?.saver.flush();
+                }
+              },
+            }),
             card &&
               h(Popover, {
                 key: card.key,

@@ -417,6 +417,51 @@ box is ticked with a click. The usual Markdown shortcuts work as you type (`#`
 and a space for a heading, `-` for a list, `>` for a quote, three backticks for
 code), and so do Ctrl+B, Ctrl+I and Ctrl+E.
 
+### Visual or Markdown
+
+The bar has a switch, **Visual** and **Markdown**, for people who would rather
+write the Markdown itself. **Visual** is the editor above and is what a document
+opens in. **Markdown** shows the document's text as plain Markdown, in the place
+of the editor: in the same column, in a monospace face, with soft wrapping and no
+box. It is a plain text box, so the browser's own undo and redo, spelling and
+selection work in it, and so does **Tab**, which leaves the box rather than
+writing a tab. The browser remembers the choice (per browser, not per document),
+and a document opens the way you left it last.
+
+Everything else works as it does in the editor:
+
+- The text is saved in the same way: after a second without typing, at once with
+  Ctrl+S, and when the cursor leaves the box. What is saved is what is typed,
+  character for character, so a list written with `*` stays that way. The status
+  in the bar and the revision numbers are the same.
+- When the agent or another window changes the document meanwhile, the change
+  comes into the box as it does into the editor: at once if you have typed
+  nothing unsaved, merged into your text where the changes do not meet, and a
+  conflict that you choose in ([below](#when-the-document-changed-meanwhile)) where
+  they do. Your cursor stays at the words it was at. (A change from outside is
+  not something the browser's undo takes back.)
+- A page that is closed with text not saved is kept, restored, and warned of in
+  the same way. **History** works the same, and a revision restored shows in the
+  box.
+- Going from one to the other loses nothing, also text that is not saved yet,
+  which stays unsaved. Going to **Visual** saves the text first where it can. If
+  you only looked at a document, or went from one to the other without changing
+  it, nothing is saved, even for a document written in another style than the
+  editor's (`*` for list items, say). The page stays at the same place in the
+  text, as far as the scroll goes.
+- The toolbar (formatting and **Comment**) is not shown in the Markdown, where
+  there is nothing to select a passage in and the formatting is written out; the
+  shortcut Ctrl+Alt+M does nothing there either.
+- The comments are not drawn on the text: no marked passages, no cards, no
+  markers in the margin. **Comments** in the bar still has the list of all the
+  threads and how many are open. A thread **chosen** in the list takes you back to
+  **Visual** and opens its card at its passage. A passage is a stretch of the
+  file's Markdown that is followed from one revision to the next, so what you
+  write in the Markdown moves the comments as a change in the editor does
+  ([below](#where-the-passage-is)).
+- **Download** and **PDF (print)** are the same, and the print is the text as the
+  editor draws it.
+
 **Download** saves the document's file as it is (**Markdown (.md)**), or prints
 the text on its own (**PDF (print)**), where the browser's print dialog saves it
 as a PDF.

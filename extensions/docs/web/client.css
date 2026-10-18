@@ -90,7 +90,10 @@
 .pd-preview-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* An earlier revision on the page in the text's place: the note under the bar says so, and the sheet is drawn as a copy, not as the text to type in. */
 .pd-old-note { border-color: rgb(var(--warn) / .6); background: rgb(var(--warn) / .1); }
-.pd-old { opacity: .92; }
+.pd-old { opacity: .92; font-size: 16px; line-height: 1.7; }
+.pd-old h1 { font-size: 2.3em; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; }
+.pd-old h2 { font-size: 1.6em; font-weight: 600; line-height: 1.25; }
+.pd-old h3 { font-size: 1.25em; font-weight: 600; line-height: 1.3; }
 
 /* The toolbar: stays at the top while the text scrolls under it (the page below it scrolls, not this). */
 .pd-toolbar { z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 4px 12px; }
@@ -207,6 +210,16 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
 .pd-iconbtn:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-iconbtn:disabled { opacity: .5; cursor: default; }
 .pd-fold { align-self: flex-start; padding: 0 8px; font-size: 12px; font-weight: 400; color: rgb(var(--fg-muted)); }
+/* The way the text is written, in the bar: the editor, or Markdown. */
+.pd-modes { display: inline-flex; gap: 2px; margin-right: 6px; border: 1px solid rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .5); padding: 2px; }
+.pd-modes button { border: 0; border-radius: 6px; background: none; padding: 3px 10px; color: rgb(var(--fg-muted)); font: inherit; font-size: 13px; cursor: pointer; }
+.pd-modes button:hover:not(:disabled) { color: rgb(var(--fg)); }
+.pd-modes button[aria-pressed="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 2px rgb(0 0 0 / .18); }
+.pd-modes button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-modes button:disabled { opacity: .5; cursor: default; }
+/* The text as Markdown, in the editor's place: the same column, plain, in a monospace face; the page scrolls, not the box (source.js keeps it as high as its text). */
+.pd-source { display: block; width: 100%; min-height: 16rem; margin: 0; border: 0; border-radius: 0; background: none; padding: 0; resize: none; overflow: hidden; outline: none; color: inherit; font: 14.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; cursor: text; }
+.pd-source[hidden] { display: none; }
 /* The markers in the right margin, level with the lines that are commented on: a bubble and how many comments there are. */
 .pd-markers { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .pd-marker { position: absolute; right: clamp(8px, calc((100% - 46rem) / 4), 72px); display: inline-flex; height: 22px; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: none; padding: 0 6px; color: rgb(var(--fg-subtle)); font: inherit; font-size: 12px; cursor: pointer; pointer-events: auto; }

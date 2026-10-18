@@ -1927,3 +1927,38 @@ test('in a narrow page, where there is no margin, there are no markers: the high
   await expect(page.locator('.pd-marker')).toHaveCount(0);
   await openThread(page, green.id);
 });
+
+/* The document written as Markdown (the bar's Markdown): the comments are not drawn in the source, and the list still has them. */
+test('in the Markdown nothing of the comments is drawn on the text, the list has them all, and choosing one goes to the editor and opens its card', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const store = new Store();
+  const green = seeded(store, 'The build is green.', 'Is it?', 'agent');
+  const friday = seeded(store, '**Friday**', 'Why Friday?');
+  await open(page, store);
+  await expectMarked(page, friday.id, 'Friday');
+  await expect(page.locator('.pd-marker')).toHaveCount(2);
+  const modes = page.getByRole('group', { name: 'Editing mode' });
+  await modes.getByRole('button', { name: 'Markdown', exact: true }).click();
+  const source = page.getByRole('textbox', { name: 'Markdown source' });
+  await expect(source).toBeVisible();
+  // No marks, no markers, no card, no way to start a comment (the shortcut included); the source is the file's own text.
+  await expect(editorOf(page)).toBeHidden();
+  await expect(page.locator('.pd-marker, .pd-popover')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Comment', exact: true })).toHaveCount(0);
+  await source.click();
+  await page.keyboard.press('Control+Alt+m');
+  await expect(popover(page)).toHaveCount(0);
+  await expect(source).toHaveValue(store.markdown);
+  // The comments are all in the list, and the bar says how many are open.
+  await expect(barButton(page)).toHaveAccessibleName('Comments 2');
+  await showList(page);
+  await expect(items(page)).toHaveCount(2);
+  await expect(items(page).nth(0)).toContainText('Why Friday?');
+  // One chosen there goes back to the editor, with its card open at the passage.
+  await items(page).nth(0).click();
+  await expect(modes.getByRole('button', { name: 'Visual', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(editorOf(page)).toBeVisible();
+  await expect(shown(page)).toHaveAttribute('data-thread', friday.id);
+  await expect(shown(page)).toContainText('Why Friday?');
+  expect(green.id).not.toBe(friday.id);
+});
