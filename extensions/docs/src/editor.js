@@ -483,6 +483,20 @@ export async function createEditor({ root, markdown = "", onChange, editable = t
         view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView());
         view.focus();
       }),
+    /**
+     * Puts the caret at the place nearest to a point of the screen and gives the text the focus: a click on the page beside the text.
+     * The point is taken into the column sideways, so that a click beside a line is a click on that line, as on a word processor's page.
+     * The page does not scroll: the person clicked where they were looking.
+     */
+    focusAt: (x, y) =>
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        if (view.isDestroyed) return;
+        const column = view.dom.getBoundingClientRect();
+        const hit = view.posAtCoords({ left: Math.min(Math.max(x, column.left + 1), column.right - 1), top: Math.min(Math.max(y, column.top + 1), column.bottom - 1) });
+        if (hit) view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(hit.pos))));
+        view.focus();
+      }),
     /** The passage the selection is (see anchors.js), or nothing. */
     selection: () => editor.action((ctx) => selected(ctx, kept)),
     /** Marks these threads' passages (see `mark`): the ones that are to be shown. */

@@ -707,7 +707,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `hold`, `upload`, `watch`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `hold`, `upload`, `watch`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -834,6 +834,24 @@ easy to get wrong in a way that is a hole, not a bug:
   that is swapped under the walk stops it (`failed`) and leaves the rest; one
   nested more than 512 deep is not taken away here. A rename and a listing are
   done in the folder as it is held, too.
+- **A rename never puts a file over another.** `rename` makes the new name a
+  second name of the file or the link (a hard link) and then takes the old one
+  away: the system refuses the link in the call itself if something has the new
+  name (`exists`, whatever the agent made there since the look), where a plain
+  `rename` puts the file over it; a name swapped for something else between the
+  look and the call is `conflict`, and nothing is renamed. A crash between the
+  two halves leaves one file with two names, never none. A folder cannot be
+  linked: it is renamed after a look at the new name, which leaves a short gap
+  for an empty folder made there in between, as does a file system without hard
+  links (or `protected_hardlinks` for a file that is not the portal's own).
+- **A file of your own that you delete or rename can go by `removeFile` and
+  `renameFile`.** They are `remove` and `rename` for one plain file and nothing
+  else: a link or a folder is `invalid`, where `remove` takes the link or all of
+  the folder, and `alone` also refuses a file with a second name. Both are done
+  by the same code, in the folder as it is held, not by its path. `direct` is an
+  option of all four, as of `open`; `likeParent` too, for a server half that
+  works in a folder an agent can rename things into: the folder `base` must be
+  one the agent could use itself, and one the sandbox closed to it is refused.
 - **A save lasts.** After the rename the folder is synced too, so a crash
   right after leaves the new file, not the old one. An upload and a file the
   portal makes are synced the same way.
@@ -937,7 +955,9 @@ itself, for a server half that words a full disk differently from a missing righ
 [Documents](/guide/documents) is built on these: its files are read with
 `readBytes`, written with `write` (`create` for a new document, `direct`) and
 told changed by `change`; its folder is found with `folder`, made with
-`makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`.
+`makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`; a
+document is deleted with `removeFile` and renamed with `renameFile`
+(`direct`, `alone`).
 
 **Watching a chat's folder** is `files.watch(base, rel, onChange)`. A watch reads
 nothing and changes nothing, but it should watch the folder that was meant: the

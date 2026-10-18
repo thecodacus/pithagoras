@@ -15,6 +15,8 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/download           the document's file, as an attachment
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
  *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/rename              gives its file another name { name }, which is a revision of its own (409 for a name that is taken)
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id                  deletes the document: its file, its comments and its history on the page
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/history            its revisions, newest first (?before=, ?limit=)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/revisions/:revision  the text of one of them
  *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/restore            { revision, base? }: that text as a new revision
@@ -38,7 +40,9 @@
  * in the page), and the first thing it hears is where the document stands, so that a
  * page that was away (a reconnect, or a change between its load and its listening)
  * finds out at once, whatever it missed. A message says which revision, who made it and
- * when; the text is asked for from the document's own route. A change to the document's
+ * when; the text (and the name, which a rename is a revision for) is asked for from the
+ * document's own route. A document that is deleted is told as `deleted`, once, and
+ * the page keeps its text: nothing more is said of it, and a request for it is a 404. A change to the document's
  * comments is told too (`threads`, with when), and the threads are asked for
  * from their own route. While a page listens the folder is looked at every couple of
  * seconds for what changed outside the store's own writes, which is how the changes of
@@ -447,7 +451,11 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
   const live = {
     publish(folder, change) {
       // A change to the comments is no revision: it has no revision number, which a page that reconnects would take for the last one it saw.
-      portal.push(docTopic(folder, change.id), change.threads ? { threads: true, at: change.at } : { revision: change.revision, author: change.author, at: change.at });
+      // A deleted document has no revision to tell either: the pages that have it open are told that it is gone, once.
+      portal.push(
+        docTopic(folder, change.id),
+        change.deleted ? { deleted: true, at: change.at } : change.threads ? { threads: true, at: change.at } : { revision: change.revision, author: change.author, at: change.at },
+      );
       // The list shows each document's revision, size, time and open comments: a page that lists the folders is told at once.
       if (lists.count) void look(idOf(folder));
     },
@@ -1022,6 +1030,21 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
     // A text that started from an earlier revision is put together with what was saved since, where their changes do not meet.
     const doc = await (await storeFor(folder.path)).save(id, { markdown, base, merge: true });
     res.json({ ...doc, ...warn(markdown) });
+  }));
+
+  portal.router.post("/folders/:folder/documents/:id/rename", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.json(await (await storeFor(folder.path)).rename(id, { name: req.body?.name }));
+  }));
+
+  portal.router.delete("/folders/:folder/documents/:id", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const { comments } = await (await storeFor(folder.path)).delete(id);
+    // A comment that was waiting to ask the agent has nothing to ask about any more.
+    for (const comment of comments) unwake(folder, comment);
+    res.json({ deleted: true });
   }));
 
   portal.router.get("/folders/:folder/documents/:id/history", route(async (req, res) => {

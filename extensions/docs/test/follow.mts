@@ -6,7 +6,7 @@ import type { MockPage } from '@pithagoras/extension-api/testing';
  */
 
 /** One message of a topic: what kind it is, and what it says (without the mark of the first). */
-export interface Message { event: 'revision' | 'threads' | 'documents'; data: any; first: boolean }
+export interface Message { event: 'revision' | 'threads' | 'documents' | 'deleted'; data: any; first: boolean }
 
 /** The topic a document's or the list's old stream address stands for. */
 export function topicOf(address: string): string {
@@ -15,7 +15,7 @@ export function topicOf(address: string): string {
   return match ? `doc/${match[1]}/${match[2]}` : address;
 }
 
-const kindOf = (message: any): Message['event'] => (message.threads ? 'threads' : message.version !== undefined ? 'documents' : 'revision');
+const kindOf = (message: any): Message['event'] => (message.deleted ? 'deleted' : message.threads ? 'threads' : message.version !== undefined ? 'documents' : 'revision');
 
 /** Listens to `topic` (or to the address of a stream that was, see topicOf) on `page`. `status` is 200 where the page may listen, 404 where it is refused. */
 export async function follow(page: MockPage, address: string) {

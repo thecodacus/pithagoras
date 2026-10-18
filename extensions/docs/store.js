@@ -55,7 +55,7 @@ import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
 import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
-import { isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, writeDocument } from "./files.js";
+import { isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, removeDocument, renameDocument, writeDocument } from "./files.js";
 import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
 
@@ -114,12 +114,25 @@ export function fileNameOf(name) {
   ).trim();
 }
 
+/**
+ * The file name a person asks a document to have, or a 400 that says what is wrong with it: as a document's name is anywhere (`.md`, no way
+ * in it, no dot to start), and one the store could take in by itself, on one line (it is written into a commit's trailers).
+ */
+function nameGiven(input) {
+  if (typeof input !== "string") throw new DocError(400, "A document's name must be text", { code: "invalid" });
+  const name = input.normalize("NFC").trim();
+  if (Buffer.byteLength(name, "utf8") > 255) throw new DocError(400, "A file name can be at most 255 bytes", { code: "invalid" });
+  if (!isAdoptable(name)) throw new DocError(400, "A document's file name ends in .md, does not start with a dot, and has no / or \\ or control character in it", { code: "invalid" });
+  return name;
+}
+
 /** The slug, or the slug with a number, cut so that the whole stays within 80 characters. */
 const numbered = (slug, n) => (n === 1 ? slug : `${cut(slug, 80 - String(n).length - 1).replace(/-+$/, "")}-${n}`);
 
 /** What kind of revision a commit's trailers describe. */
-function kindOf({ revision, author, restoredFrom }) {
+function kindOf({ revision, author, restoredFrom, renamedFrom }) {
   if (restoredFrom) return "restore";
+  if (renamedFrom) return "rename";
   if (author === "external") return revision === 1 ? "adopted" : "recovered";
   return revision === 1 ? "create" : "save";
 }
@@ -146,6 +159,7 @@ CREATE TABLE IF NOT EXISTS revisions (
   kind TEXT NOT NULL,
   restored_from INTEGER,
   at TEXT NOT NULL,
+  renamed_from TEXT,
   PRIMARY KEY (doc_id, revision)
 );
 CREATE TABLE IF NOT EXISTS threads (
@@ -265,6 +279,8 @@ export class Store {
     this.db.exec(SCHEMA_SQL);
     // A database made before comments could be changed has no mark for it: added, and the older comments have none.
     if (!this.db.prepare("PRAGMA table_info(comments)").all().some((column) => column.name === "edited_at")) this.db.exec("ALTER TABLE comments ADD COLUMN edited_at TEXT");
+    // So has a database made before a document could be renamed: the revisions that were are not renames.
+    if (!this.db.prepare("PRAGMA table_info(revisions)").all().some((column) => column.name === "renamed_from")) this.db.exec("ALTER TABLE revisions ADD COLUMN renamed_from TEXT");
     const version = this.meta("schema");
     if (version && Number(version) > SCHEMA) throw new DocError(500, `The documents database is of a later version (${version})`);
     this.setMeta("schema", String(SCHEMA));
@@ -328,6 +344,16 @@ export class Store {
     }
   }
 
+  /** What stands where the documents folder is, when it is not one: a refusal (a link, or something that is not a folder), or nothing where there is no such place at all. */
+  blockedDocuments() {
+    try {
+      const stat = lstatSync(path.join(this.folder, DOCUMENTS));
+      return new DocError(409, stat.isSymbolicLink() ? "documents in this folder is a link" : "documents in this folder is not a folder");
+    } catch {
+      return null;
+    }
+  }
+
   /** The documents folder, made if it is not there: with the folder's owner and mode, so the agent can write in it as before. */
   makeDocumentsDir() {
     const found = this.documentsDir();
@@ -368,7 +394,11 @@ export class Store {
   async recover() {
     rmSync(this.repo.gitPath("index.lock"), { force: true });
     await this.replay();
+    // A rename that was cut off before its commit is finished first: the file under its new name would be taken in as a document of its own.
+    await this.resume("rename");
     await this.takeIn();
+    // A deletion after what was written outside is taken in, so that an edit that came before it is in the history.
+    await this.resume("delete");
   }
 
   /** Commits the database does not know yet, told to it from their trailers, in order. */
@@ -386,7 +416,8 @@ export class Store {
       const { time, message } = await this.repo.commit(sha);
       const groups = parseTrailers(message);
       const blobs = await this.repo.blobsIn(sha, [...new Set(groups.map((g) => g.name))]);
-      read.push({ sha, at: new Date(time * 1000).toISOString(), groups: groups.filter((g) => blobs.has(g.name)).map((g) => ({ ...g, blob: blobs.get(g.name) })) });
+      // A document that was deleted is not in the commit's tree: it has no blob, and is told by the commit all the same.
+      read.push({ sha, at: new Date(time * 1000).toISOString(), groups: groups.filter((g) => g.deleted || blobs.has(g.name)).map((g) => (g.deleted ? g : { ...g, blob: blobs.get(g.name) })) });
     }
     this.db.transaction(() => {
       if (rebuild) {
@@ -406,14 +437,21 @@ export class Store {
   record(sha, groups, at, keys = new Map()) {
     const now = new Date().toISOString();
     for (const group of groups) {
+      // The document is gone, with its comments (they go with the row); what was said of its text stays in the history.
+      if (group.deleted) {
+        this.db.prepare("DELETE FROM documents WHERE id = ?").run(group.id);
+        continue;
+      }
       if (!this.row(group.id)) {
         // Its name may be another's by now: that one keeps it, and this one's history stays in git.
         if (this.db.prepare("SELECT 1 FROM documents WHERE name = ?").get(group.name)) continue;
         this.db.prepare("INSERT INTO documents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(group.id, group.name, at, at);
       }
+      // Another name for the same document, unless that name is another document's (a rebuild that meets one it cannot place keeps what it has).
+      if (group.renamedFrom) this.db.prepare("UPDATE documents SET name = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM documents WHERE name = ? AND id != ?)").run(group.name, group.id, group.name, group.id);
       this.db
-        .prepare("INSERT OR REPLACE INTO revisions (doc_id, revision, sha, blob, author, kind, restored_from, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(group.id, group.revision, sha, group.blob, group.author, kindOf(group), group.restoredFrom ?? null, at);
+        .prepare("INSERT OR REPLACE INTO revisions (doc_id, revision, sha, blob, author, kind, restored_from, at, renamed_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(group.id, group.revision, sha, group.blob, group.author, kindOf(group), group.restoredFrom ?? null, at, group.renamedFrom ?? null);
       this.db
         .prepare("UPDATE documents SET revision = ?, blob = ?, stat = ?, updated_at = ? WHERE id = ? AND revision < ?")
         .run(group.revision, group.blob, keys.get(group.id) ?? null, now, group.id, group.revision);
@@ -422,19 +460,23 @@ export class Store {
   }
 
   /**
-   * Commits `groups` (`{ id, name, blob, revision, author, restoredFrom }`),
+   * Commits `groups` (`{ id, name, blob, revision, author, restoredFrom, renamedFrom, deleted }`),
    * one commit for all, and tells the database. `keys`: the files' change keys
-   * as written, by document id. Returns the commit. Every write goes through
+   * as written, by document id. `remove`: names that are taken out of the
+   * history's tree (what a document was called before it was renamed); so is
+   * the name of a group that is `deleted`. Returns the commit. Every write goes through
    * here, under the lock, so `onRevision` hears the revisions in the order they
    * were made.
    */
-  async commit(subject, groups, keys) {
+  async commit(subject, groups, keys, { remove = [] } = {}) {
     const parent = this.meta("head");
-    const sha = await this.repo.commitEntries(parent, groups, messageFor(subject, groups));
+    const entries = [...remove.map((name) => ({ name, blob: null })), ...groups.map((g) => (g.deleted ? { name: g.name, blob: null } : g))];
+    const sha = await this.repo.commitEntries(parent, entries, messageFor(subject, groups));
     this.fault("commit");
     const at = new Date().toISOString();
     this.db.transaction(() => this.record(sha, groups, at, keys))();
-    for (const group of groups) this.told({ id: group.id, revision: group.revision, author: group.author, at });
+    // A deleted document has no revision to tell: the pages that have it open are told that it is gone.
+    for (const group of groups) this.told(group.deleted ? { id: group.id, deleted: true, at } : { id: group.id, revision: group.revision, author: group.author, at });
     if (++this.commits % GC_EVERY === 0) await this.repo.gc();
     return sha;
   }
@@ -716,11 +758,11 @@ export class Store {
    */
   async #merged(row, file, base, markdown, bytes, author) {
     if (!Number.isInteger(base) || base < 1 || base >= row.revision) return null;
-    const found = this.db.prepare("SELECT sha FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, base);
+    const found = this.db.prepare("SELECT blob FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, base);
     if (!found) return null;
     let was;
     try {
-      was = await this.repo.show(found.sha, row.name);
+      was = await this.repo.blobText(found.blob);
     } catch (e) {
       if (e instanceof GitError) return null;
       throw e;
@@ -762,9 +804,9 @@ export class Store {
       await this.recover();
       const row = this.existing(id);
       const list = this.db
-        .prepare("SELECT revision, author, kind, restored_from AS restoredFrom, at FROM revisions WHERE doc_id = ? AND revision < ? ORDER BY revision DESC LIMIT ?")
+        .prepare("SELECT revision, author, kind, restored_from AS restoredFrom, renamed_from AS renamedFrom, at FROM revisions WHERE doc_id = ? AND revision < ? ORDER BY revision DESC LIMIT ?")
         .all(row.id, before ?? Number.MAX_SAFE_INTEGER, limit + 1);
-      return { revision: row.revision, revisions: list.slice(0, limit).map((r) => ({ ...r, restoredFrom: r.restoredFrom ?? undefined })), more: list.length > limit };
+      return { revision: row.revision, revisions: list.slice(0, limit).map((r) => ({ ...r, restoredFrom: r.restoredFrom ?? undefined, renamedFrom: r.renamedFrom ?? undefined })), more: list.length > limit };
     });
   }
 
@@ -775,7 +817,7 @@ export class Store {
       const row = this.existing(id);
       const found = this.db.prepare("SELECT * FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
       if (!found) throw new DocError(404, "There is no such revision");
-      return { revision: found.revision, author: found.author, kind: found.kind, at: found.at, bytes: await this.repo.show(found.sha, row.name) };
+      return { revision: found.revision, author: found.author, kind: found.kind, at: found.at, bytes: await this.repo.blobText(found.blob) };
     });
   }
 
@@ -794,7 +836,7 @@ export class Store {
       }
       const found = this.db.prepare("SELECT * FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
       if (!found) throw new DocError(404, "There is no such revision");
-      const bytes = await this.repo.show(found.sha, row.name);
+      const bytes = await this.repo.blobText(found.blob);
       const file = this.fileOf(row);
       if (file?.bytes.equals(bytes)) return { ...this.describe(row, file), changed: false };
       // A file that is only too big to be read (an outside change) is written over, as a save would; only no file at all is made again.
@@ -802,6 +844,162 @@ export class Store {
       const replace = !file && dir !== null && isPlainFile(dir, row.name);
       return this.#write(row, bytes, { author, subject: `Restore ${row.name} to revision ${revision}`, restoredFrom: revision, create: !file && !replace });
     });
+  }
+
+  /**
+   * Gives the document another file name: `name`, as the person wrote it, which is a name of the same kind as a document's
+   * (ends in `.md`, no way in it, no dot to start). The document stays what it is: its id, its comments and its history go
+   * with it, and the rename is a revision of its own (same text, kind `rename`, with the name it had), so that the pages
+   * that have it open are told as of any revision, and the history says when. A name that is another document's, or a
+   * file's, is refused (409, as `create` says it). The same name changes nothing.
+   *
+   * The file is renamed first (files.js), then committed and told to the database, like a write. What was decided is kept in
+   * the database (`pending`) before the file is touched, so that a rename that was cut off in between is finished by the next
+   * look at the store (`resume`), not left as a file under a name that no document has, which would be taken in as a new one.
+   */
+  rename(id, { name, author = "user" }) {
+    const to = nameGiven(name);
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const file = this.fileOf(row);
+      if (!file) throw this.unreadable(row);
+      if (row.name === to) return { ...this.describe(row, file), changed: false };
+      const taken = this.db.prepare("SELECT id FROM documents WHERE name = ?").get(to);
+      if (taken) throw new DocError(409, `A document called ${to} exists already`, { exists: taken.id });
+      this.setMeta("pending", JSON.stringify({ op: "rename", id: row.id, from: row.name, to, author }));
+      await this.#carryRename({ id: row.id, from: row.name, to, author });
+      const dir = this.documentsDir();
+      const now = this.row(row.id);
+      const looked = dir && lookAtDocument(this.files, dir, to);
+      return { ...this.describe(now, looked || file), changed: true };
+    });
+  }
+
+  /**
+   * Deletes the document: its file (one that is gone is nothing to remove), its comments and its history from the page. It is a
+   * commit of its own (`Deleted`), so that rebuilding the index from the history does not bring it back, and the name is free
+   * again; the commits it had stay in the store's repository, which nothing here reads them from. The pages that have it open are
+   * told that it is gone (`onRevision` with `deleted`). Returns the ids of the comments it had, for what waits on them.
+   * Refused (409) where the name is something that is not the document's file now (a link, a folder, a file with a second name).
+   * Cut off after the file is gone it is finished by the next look at the store, as a rename is (`resume`).
+   */
+  delete(id, { author = "user" } = {}) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const comments = this.db.prepare("SELECT c.id FROM comments c JOIN threads t ON t.id = c.thread_id WHERE t.doc_id = ? ORDER BY c.rowid").all(row.id).map((c) => c.id);
+      this.setMeta("pending", JSON.stringify({ op: "delete", id: row.id, name: row.name, author }));
+      await this.#carryDelete({ id: row.id, author });
+      return { comments };
+    });
+  }
+
+  /** What was decided and is not finished is forgotten: it is done, or it cannot be. */
+  clearPending() {
+    this.db.prepare("DELETE FROM meta WHERE key = 'pending'").run();
+  }
+
+  /**
+   * Finishes a rename or a deletion (`op`) that a stop cut off, as the database says it was decided. Under the lock, in recovery. What
+   * cannot be finished on the disk (a name that is not there, or taken now) is dropped; what git or the database refuses is not: it is
+   * tried again with the next look, and says why while it fails.
+   */
+  async resume(op) {
+    const raw = this.meta("pending");
+    if (!raw) return;
+    let pending;
+    try {
+      pending = JSON.parse(raw);
+    } catch {
+      return this.clearPending();
+    }
+    if (pending?.op !== op) return;
+    try {
+      await (op === "rename" ? this.#carryRename(pending, true) : this.#carryDelete(pending, true));
+    } catch (e) {
+      if (this.meta("pending") !== null) throw e;
+    }
+  }
+
+  /**
+   * The rename that `pending` says (`{ id, from, to, author }`) carried out from wherever it is: the file has one of its two names,
+   * or both (cut off between the two halves of a rename: it is one file with two names then), and the commit is made. Under the lock.
+   * A refusal on the disk (the new name is taken, the file is not a plain file) leaves things as they were, and is thrown as one. Any
+   * other failure of the disk step leaves what was decided for the next look at the disk, which is `recovering` when it is that one: a
+   * second failure drops it, so that a disk that cannot be written does not keep the store from being used.
+   */
+  async #carryRename({ id, from, to, author }, recovering = false) {
+    const row = this.row(id);
+    // Done already (its commit was made, and the database is told: replayed, or by the transaction), or the document is gone.
+    if (!row || row.revision === 0 || row.name === to) return this.clearPending();
+    const dir = this.documentsDir();
+    if (!dir) {
+      this.clearPending();
+      throw new DocError(404, "There is no such document");
+    }
+    const at = (name) => {
+      try {
+        return lstatSync(path.join(dir, name));
+      } catch {
+        return null;
+      }
+    };
+    const [old, now] = [at(from), at(to)];
+    // The step the disk is still waiting for, if there is one.
+    let step = null;
+    if (old?.isFile() && !now) step = () => renameDocument(this.files, dir, from, to);
+    // Cut off between the two halves: the old name is taken away.
+    else if (old?.isFile() && now?.isFile() && old.ino === now.ino && old.dev === now.dev) step = () => removeDocument(this.files, dir, from, { shared: true });
+    // Else the file has the new name already, or there is nothing to rename: neither name is a file, or the new one is another file's.
+    else if (!(now?.isFile() && !old)) step = () => {
+      throw new Refused(old ? "taken" : "gone", { taken: Boolean(old), gone: !old });
+    };
+    try {
+      step?.();
+    } catch (e) {
+      // Only what says that the disk is as it was ends the rename: any other failure leaves what was decided, and the next look at the disk finishes it.
+      if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
+      if (!(e instanceof Refused)) throw e;
+      if (e.taken) throw new DocError(409, `A file called ${to} is in the way`, { exists: null });
+      throw e.gone ? new DocError(404, "There is no such document") : new DocError(409, `${from} is not the document's file now (a link, a folder or a file with another name, or it changed meanwhile): it was not renamed`);
+    }
+    this.fault("rename");
+    // The text is the revision's own: what was written to the file since is taken in after this, as a revision of its own.
+    const key = lookAtDocument(this.files, dir, to)?.key ?? null;
+    await this.commit(`Rename ${from} to ${to}`, [{ id, name: to, blob: row.blob, revision: row.revision + 1, author, renamedFrom: from }], new Map([[id, key]]), { remove: [from] });
+    this.clearPending();
+  }
+
+  /**
+   * The deletion that `pending` says (`{ id, author }`) carried out from wherever it is: the file removed, if it still is there, and the
+   * commit. Under the lock. `recovering` as for a rename.
+   */
+  async #carryDelete({ id, author }, recovering = false) {
+    const row = this.row(id);
+    if (!row) return this.clearPending();
+    const dir = this.documentsDir();
+    if (!dir) {
+      // No folder to take the file from is nothing to remove; a link or a file called `documents` is something that is in the way, and the document stays.
+      const blocked = this.blockedDocuments();
+      if (blocked) {
+        this.clearPending();
+        throw blocked;
+      }
+    } else {
+      try {
+        removeDocument(this.files, dir, row.name);
+      } catch (e) {
+        if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
+        if (e instanceof Refused) throw new DocError(409, `${row.name} is not the document's file now (a link, a folder or a file with another name): it was not deleted`);
+        throw e;
+      }
+    }
+    this.fault("delete");
+    // Never committed (its first revision was lost): there is no history to say it is gone.
+    if (row.revision === 0) this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
+    else await this.commit(`Delete ${row.name}`, [{ id, name: row.name, revision: row.revision + 1, author, deleted: true }], new Map());
+    this.clearPending();
   }
 
   /** A document's text as text, or nothing when its bytes are not UTF-8 (they would be written back as other bytes). */
@@ -812,10 +1010,10 @@ export class Store {
 
   /** The text of one revision of a document, from the history: nothing when there is no such revision or it is not text. */
   async textAt(row, revision) {
-    const found = this.db.prepare("SELECT sha FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
+    const found = this.db.prepare("SELECT blob FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
     if (!found) return null;
     try {
-      return this.text(await this.repo.show(found.sha, row.name));
+      return this.text(await this.repo.blobText(found.blob));
     } catch (e) {
       if (e instanceof GitError) return null;
       throw e;

@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import { scratch } from './server-harness.mjs';
-const { FileError, baseDir, listDir, removeEntry, renameEntry, folderPath, holdForReading, readBytes, readText, writeText, openFile, sweepTemp } = await import('../dist/workspace-files.js');
+const { FileError, baseDir, listDir, removeEntry, renameEntry, folderPath, holdForReading, readBytes, readText, writeText, openFile, sweepTemp, removeFile, renameFile } = await import('../dist/workspace-files.js');
 
 /**
  * What is removed, renamed, listed or read whole in a chat's folder, with a folder on the way to it swapped for a link
@@ -78,6 +78,8 @@ async function swappedAt(point, swap, fn) {
 /** Before the folder is walked (the first thing opened), and the first thing the work itself does once it is held. */
 const FIRST = { names: ['openSync', 'mkdirSync', 'readdirSync', 'renameSync'], when: () => true };
 const WORK = { promises: true, names: ['lstat', 'rm', 'open', 'readdir', 'unlink', 'rmdir'], when: () => true };
+/** The first look the work takes at a name of the folder it holds (a path through its descriptor), and the call that takes a name away or gives it another. */
+const HELD = (names) => ({ names, when: (_name, [where]) => String(where).startsWith('/proc/self/fd/') });
 
 test('a folder swapped for a link before a removal walks to it is refused, and nothing outside is removed', async () => {
   const { base, outside, aside, swap, done } = swappable();
@@ -93,7 +95,7 @@ test('a folder swapped for a link before a removal walks to it is refused, and n
 test('a file is removed in the folder that was checked, however the path is changed after: the link gets nothing', async () => {
   const { base, outside, aside, swap, done } = swappable();
   let got;
-  assert.ok(await swappedAt(WORK, swap, async () => { got = await codeOf(() => removeEntry(base, 'sub/doc.md', true)); }));
+  assert.ok(await swappedAt(HELD(['lstatSync']), swap, async () => { got = await codeOf(() => removeEntry(base, 'sub/doc.md', true)); }));
   assert.equal(got, 'none');
   assert.deepEqual(names(outside), ['doc.md', 'secret'], 'nothing was removed outside');
   assert.equal(readFileSync(path.join(outside, 'doc.md'), 'utf8'), 'theirs');
@@ -163,7 +165,7 @@ test('the last name of what is removed swapped for a link as the removal reaches
   for (const [name, point, outcome] of [
     ['tree', { promises: true, names: ['lstat'], when: (_name, [where]) => String(where).endsWith('/tree') }, 'none'],
     ['tree', { promises: true, names: ['lstat'], after: true, when: (_name, [where]) => String(where).endsWith('/tree') }, 'failed'],
-    ['doc.md', { promises: true, names: ['unlink'], when: (_name, [where]) => String(where).endsWith('/doc.md') }, 'none'],
+    ['doc.md', { names: ['unlinkSync'], when: (_name, [where]) => String(where).endsWith('/doc.md') }, 'none'],
   ]) {
     const { base, sub, outside, done } = swappable();
     mkdirSync(path.join(sub, 'tree', 'deeper'), { recursive: true });
@@ -183,20 +185,54 @@ test('the last name of what is removed swapped for a link as the removal reaches
   }
 });
 
-test('the last name of what is renamed swapped for a link as the rename is made: the link is renamed, and what it leads to keeps its name', async () => {
-  for (const name of ['doc.md', 'tree']) {
+test('the last name of what is renamed swapped for a link as the rename is made: nothing outside is renamed, and a file is not taken for the link that stands there now', async () => {
+  for (const [name, call] of [['doc.md', 'linkSync'], ['tree', 'renameSync']]) {
     const { base, sub, outside, done } = swappable();
     mkdirSync(path.join(sub, 'tree'));
     mkdirSync(path.join(outside, 'tree'));
     const before = names(outside);
     let got;
-    assert.ok(await swappedAt({ names: ['renameSync'], when: () => true }, swapEntry(path.join(sub, name), path.join(outside, name)), async () => { got = await codeOf(() => renameEntry(base, `sub/${name}`, 'renamed')); }), name);
-    assert.equal(got, 'none');
+    assert.ok(await swappedAt({ names: [call], when: () => true }, swapEntry(path.join(sub, name), path.join(outside, name)), async () => { got = await codeOf(() => renameEntry(base, `sub/${name}`, 'renamed')); }), name);
     assert.deepEqual(names(outside), before, `${name}: nothing outside was renamed`);
-    assert.ok(lstatSync(path.join(sub, 'renamed')).isSymbolicLink(), `${name}: the link carries the new name`);
-    assert.ok(existsSync(path.join(sub, `${name}.aside`)));
+    assert.ok(existsSync(path.join(sub, `${name}.aside`)), `${name}: what was there goes on, aside, whole`);
+    if (name === 'doc.md') {
+      // A file that was looked at is not the link that took its name: the rename stops, and the new name is not kept.
+      assert.equal(got, 'conflict');
+      assert.ok(!existsSync(path.join(sub, 'renamed')) && lstatSync(path.join(sub, name)).isSymbolicLink());
+    } else {
+      // A folder is renamed by the name: the link that took its place is what is renamed.
+      assert.equal(got, 'none');
+      assert.ok(lstatSync(path.join(sub, 'renamed')).isSymbolicLink(), `${name}: the link carries the new name`);
+    }
     done();
   }
+});
+
+test('a rename never puts a file over one that took the new name since it was looked at', async () => {
+  const { base, sub, aside, done } = swappable();
+  let got;
+  // The agent makes a file of the new name right before the call that gives it.
+  const made = () => writeFileSync(path.join(sub, 'taken.md'), 'the agent\'s own');
+  assert.ok(await swappedAt({ names: ['linkSync', 'renameSync'], when: () => true }, made, async () => { got = await codeOf(() => renameEntry(base, 'sub/doc.md', 'taken.md')); }));
+  assert.equal(got, 'exists');
+  assert.equal(readFileSync(path.join(sub, 'taken.md'), 'utf8'), 'the agent\'s own', 'what took the name is whole');
+  assert.equal(readFileSync(path.join(sub, 'doc.md'), 'utf8'), 'ours', 'and the file keeps its name');
+  assert.ok(!existsSync(aside));
+  done();
+});
+
+test('a file is renamed under the name it is given with its owner, mode and content, and a link as the link', async () => {
+  const { base, sub, outside, done } = swappable();
+  const before = lstatSync(path.join(sub, 'doc.md'));
+  assert.equal(renameEntry(base, 'sub/doc.md', 'new.md'), path.join('sub', 'new.md'));
+  const after = lstatSync(path.join(sub, 'new.md'));
+  assert.deepEqual([after.ino, after.uid, after.gid, after.mode, readFileSync(path.join(sub, 'new.md'), 'utf8')], [before.ino, before.uid, before.gid, before.mode, 'ours']);
+  assert.deepEqual(names(sub), ['new.md']);
+  symlinkSync(outside, path.join(sub, 'out'));
+  renameEntry(base, 'sub/out', 'away');
+  assert.ok(lstatSync(path.join(sub, 'away')).isSymbolicLink());
+  assert.deepEqual(names(outside), ['doc.md', 'secret']);
+  done();
 });
 
 test('a tree of many files and folders is removed whole, a link in it as the link, and a folder that is too deep is not, with the reason', async () => {
@@ -223,7 +259,7 @@ test('a tree of many files and folders is removed whole, a link in it as the lin
 });
 
 test('a rename is made in the folder that was checked: a link put in its place before gets it refused, one put there after gets nothing', async () => {
-  for (const [point, outcome] of [[FIRST, 'invalid'], [{ names: ['renameSync'], when: () => true }, 'none']]) {
+  for (const [point, outcome] of [[FIRST, 'invalid'], [{ names: ['linkSync'], when: () => true }, 'none']]) {
     const { base, outside, aside, swap, done } = swappable();
     let got;
     assert.ok(await swappedAt(point, swap, async () => { got = await codeOf(() => renameEntry(base, 'sub/doc.md', 'renamed.md')); }));
@@ -355,6 +391,14 @@ test('a folder the sandbox closed to the agent is not used under another name: i
   assert.equal(await codeOf(() => writeText(documents, 'new.md', 'x', undefined, true, { direct: true, likeParent: true })), 'invalid');
   assert.deepEqual(sweepTemp(documents, '', 0, { likeParent: true }), [], 'and nothing is swept in it');
   assert.ok(!existsSync(path.join(documents, 'new.md')));
+  // Nor is anything taken away in it or given another name: what the sandbox kept from the agent stays as it was.
+  for (const [what, call] of [
+    ['removeFile', async () => removeFile(documents, 'secret.md', asDocuments)],
+    ['renameFile', async () => renameFile(documents, 'secret.md', 'other.md', asDocuments)],
+    ['removeEntry', () => removeEntry(documents, 'secret.md', true, { direct: true, likeParent: true })],
+    ['renameEntry', async () => renameEntry(documents, 'secret.md', 'other.md', { direct: true, likeParent: true })],
+  ]) assert.equal(await codeOf(call), 'invalid', what);
+  assert.deepEqual(names(documents), ['secret.md']);
   // Without the option nothing is asked of its owner: the portal\'s other uses of a folder are as ever.
   assert.equal(readBytes(documents, 'secret.md', { direct: true }).bytes.toString(), '# the sandbox kept this from the agent');
   assert.equal(statSync(dir).uid, AGENT);

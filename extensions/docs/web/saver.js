@@ -136,6 +136,11 @@ export function createSaver({ read, send, onState, onMerged, delay = 1000, setTi
       later();
     },
 
+    /** The text at the baseline's revision is written another way now (the page went from the Markdown to the editor): the same words, in the editor's style. */
+    restyle(text) {
+      baseline = text;
+    },
+
     /** The editor holds `text`, the document as it stands at `revision`: loaded, or taken from the server. */
     adopt(revision, text) {
       cancel();

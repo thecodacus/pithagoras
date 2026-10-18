@@ -361,3 +361,116 @@ test('the notes about a change that came from outside are in German in a German 
   await tell(page, 6);
   await expect(note(page)).toContainText('Das Dokument hat sich in der Zwischenzeit geändert und steht jetzt bei Revision 6. Die Änderungen wurden in deinen Text eingearbeitet.');
 });
+
+/* The document written as Markdown (the bar's Markdown): what the agent changes meanwhile comes in there too. */
+const sourceOf = (page: Page) => page.getByRole('textbox', { name: 'Markdown source' });
+const inMarkdown = (page: Page) => page.addInitScript(() => localStorage.setItem('pithagoras-docs/mode', 'markdown'));
+
+test('what the agent changed is in the Markdown of a document that is open and untouched at once, and the caret is where it was', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect(sourceOf(page)).toHaveValue(agents());
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  await expect(note(page)).toContainText('The agent changed this document. It is now at revision 4.');
+  // The caret stayed at the start of the third line: what is typed goes there.
+  await page.keyboard.type('>> ');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.puts).toEqual([{ markdown: agents().replace('Ship it on', '>> Ship it on'), base: 4 }]);
+});
+
+test('a change by the agent is merged into the Markdown being typed, which is then saved on the new revision', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Or Monday.');
+  await expect(state(page)).toHaveText('Unsaved changes · Revision 3');
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect(sourceOf(page)).toHaveValue(agents().replace('Friday.', 'Friday. Or Monday.'));
+  await expect(note(page)).toContainText('Its changes were merged into your text');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.markdown).toBe(agents().replace('Friday.', 'Friday. Or Monday.'));
+});
+
+test('a change that meets what is typed in the Markdown is a conflict, with the typed text kept', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).fill(PLAN.replace('on Monday', 'on Wednesday'));
+  store.elsewhere(agents());
+  await tell(page, 4);
+  await expect(page.locator('.pd-conflict')).toBeVisible();
+  await expect(sourceOf(page)).toHaveValue(PLAN.replace('on Monday', 'on Wednesday'));
+});
+
+test('a change by the agent is merged into a Markdown that is written in another style than the editor writes, which keeps its style and raises no conflict', async ({ page }) => {
+  await inMarkdown(page);
+  const raw = '# The plan\n\n* One\n* Two\n\nSecond para.\n';
+  const store = new Store();
+  store.texts.set(3, raw);
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(raw);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.type(' typed');
+  await expect(state(page)).toHaveText('Unsaved changes · Revision 3');
+  // The agent changes a line the person did not touch.
+  store.elsewhere(raw.replace('* Two', '* Two and more'));
+  await tell(page, 4);
+  const together = '# The plan\n\n* One\n* Two and more\n\nSecond para. typed\n';
+  await expect(sourceOf(page)).toHaveValue(together);
+  await expect(page.locator('.pd-conflict')).toHaveCount(0);
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.markdown).toBe(together);
+  // The same once something was saved from the box.
+  await page.keyboard.type(' more');
+  await page.keyboard.press('Control+s');
+  await expect(state(page)).toHaveText('Saved · Revision 6');
+  await page.keyboard.type(' again');
+  store.elsewhere(store.markdown.replace('# The plan', '# The big plan'));
+  await tell(page, 7);
+  await expect(page.locator('.pd-conflict')).toHaveCount(0);
+  await expect(sourceOf(page)).toHaveValue('# The big plan\n\n* One\n* Two and more\n\nSecond para. typed more again\n');
+  await expect(state(page)).toHaveText('Saved · Revision 8');
+});
+
+test('what the person typed in the Markdown can still be undone after a change from the agent was merged (the change itself is one step of the browser\'s undo)', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Or Monday.');
+  store.elsewhere(agents());
+  await tell(page, 4);
+  const merged = agents().replace('Friday.', 'Friday. Or Monday.');
+  await expect(sourceOf(page)).toHaveValue(merged);
+  // The caret is where it was: after the words typed.
+  expect(await sourceOf(page).evaluate((box: HTMLTextAreaElement) => box.selectionStart)).toBe(merged.indexOf(' Or Monday.') + ' Or Monday.'.length);
+  // The browser's undo goes back through the change from outside (a step of its own, and the last one), and then through what was typed:
+  // the history was not thrown away by the change.
+  await page.keyboard.press('Control+z');
+  await expect(sourceOf(page)).toHaveValue(PLAN.replace('Friday.', 'Friday. Or Monday.'));
+  await page.keyboard.press('Control+z');
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+});

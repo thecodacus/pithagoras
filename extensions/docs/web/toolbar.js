@@ -31,6 +31,10 @@ export const ICONS = {
   printer: "M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z",
   file: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5ZM14 3v5h5",
   chevron: "m6 9 6 6 6-6",
+  pencil: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5zM15 5l4 4",
+  trash: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6",
+  more: "M12 12h.01M19 12h.01M5 12h.01",
+  visual: "M4 7V4h16v3M9 20h6M12 4v16",
 };
 
 export function toolbar(portal) {
@@ -123,18 +127,19 @@ export function toolbar(portal) {
       h(Tool, { icon: "undo", label: t("Undo"), keys: `${mod}+Z`, disabled: off || !f.undo, onClick: run("undo") }),
       h(Tool, { icon: "redo", label: t("Redo"), keys: `${mod}+Shift+Z`, disabled: off || !f.redo, onClick: run("redo") }),
       h(Divider),
-      h(
-        "select",
-        {
-          className: `${ui.classes.inputSmall} pd-style`,
-          "aria-label": t("Text style"),
-          title: t("Text style"),
-          disabled: off,
-          value: styles.some(([value]) => value === f.block) ? f.block : "paragraph",
-          onChange: (e) => onCommand("block", e.target.value),
+      h(ui.Select, {
+        className: "pd-style",
+        size: "sm",
+        "aria-label": t("Text style"),
+        disabled: off,
+        value: styles.some(([value]) => value === f.block) ? f.block : "paragraph",
+        options: styles.map(([value, label]) => ({ value, label })),
+        // The list gives the focus back to its button as it closes, after this: the text has it once that is done.
+        onChange: (value) => {
+          onCommand("block", value);
+          queueMicrotask(() => onFocusText?.());
         },
-        styles.map(([value, label]) => h("option", { key: value, value }, label)),
-      ),
+      }),
       h(Divider),
       h(Tool, { icon: "strong", label: t("Bold"), keys: `${mod}+B`, pressed: f.marks.strong, disabled: off, onClick: run("strong") }),
       h(Tool, { icon: "emphasis", label: t("Italic"), keys: `${mod}+I`, pressed: f.marks.emphasis, disabled: off, onClick: run("emphasis") }),

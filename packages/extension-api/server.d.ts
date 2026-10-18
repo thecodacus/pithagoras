@@ -326,12 +326,36 @@ export interface ServerPortal {
       content: string | Uint8Array,
       options?: { expected?: number; create?: boolean; direct?: boolean; likeParent?: boolean },
     ): { size: number; mtime: number; change: string };
-    /** Another name in the same folder, never over something there; a link is renamed as the link. The new path, from `base`. */
-    rename(base: string, rel: string, name: string): string;
+    /**
+     * Another name in the same folder, never over something there (a file or a link is made a second name by a hard link, which the
+     * system refuses for a name that is taken even if the agent made it a moment ago, and only then loses its old name); a link
+     * is renamed as the link. The new path, from `base`. `direct` and `likeParent` (the folder `base`) as for `removeFile`.
+     */
+    rename(base: string, rel: string, name: string, options?: { direct?: boolean; likeParent?: boolean }): string;
     /** What removing `rel` would lose that nothing else has, or null for nothing. */
     unsaved(base: string, rel: string): Promise<Unsaved | null>;
     /** Removes a file, or a folder and all in it, a link as the link. A folder holding git work only it has is refused (`unsaved`) unless `discard`. */
-    remove(base: string, rel: string, options?: { discard?: boolean }): Promise<void>;
+    remove(base: string, rel: string, options?: { discard?: boolean; direct?: boolean; likeParent?: boolean }): Promise<void>;
+    /**
+     * Takes away one plain file, and nothing else: a link or a folder is refused (`invalid`), where `remove` takes the link
+     * or all of the folder. For a server half that deletes a file of its own that the agent can change as it runs: the
+     * folder it is in is held open and the name is taken from it, so the file goes from the folder that was checked
+     * whatever its path leads to by then, and what is swapped onto the name meanwhile is never followed (a link goes as the
+     * link) or taken as a folder (it stays, with all in it). `direct` and `alone` as for `open`; with `likeParent` the folder
+     * `base` must be one the agent could use (a folder the sandbox closed to it is refused, `invalid`). `missing` for a file
+     * that is not there.
+     */
+    removeFile(base: string, rel: string, options?: FileOpenOptions): void;
+    /**
+     * Another name for one plain file in the folder it is in, never over something there, and a link or a folder is
+     * refused (`invalid`). The folder is held as for `removeFile`, and the new name is made as a second name of the file
+     * (a hard link, which the system refuses in the call itself for a name that is taken: `exists`, whatever an agent
+     * made there since the look) before the old one is removed, so a crash between leaves the file with both names, never
+     * with none; its owner, mode and content stay, and its `change` does not. A name the agent swapped for another thing
+     * meanwhile is `conflict`, and nothing is renamed. Where hard links are not possible it is a rename after a look.
+     * `direct` and `alone` as for `open`; the new path, from `base`.
+     */
+    renameFile(base: string, rel: string, name: string, options?: FileOpenOptions): string;
     /** A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. */
     makeFolder(base: string, rel: string, name: string): string;
     /**

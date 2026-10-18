@@ -440,7 +440,7 @@ test('the list listens to one topic for all folders, and lets go of it when a do
   await page.waitForTimeout(200);
   expect(state.asked).toBe(0);
 
-  await listOf(page).first().getByRole('button').click();
+  await listOf(page).first().getByRole('button', { name: /The plan/ }).click();
   await expect(page.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
   await expect.poll(() => openStreams(page)).toEqual([]);
   await page.getByRole('button', { name: /All documents/ }).click();

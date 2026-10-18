@@ -7,7 +7,7 @@
  * nobody's but the person's, and it is kept when the card is closed and opened again. Plain JavaScript like the rest of
  * the browser half, made with the portal's React and building blocks (`portal.ui`).
  *
- * Nothing else of the comments is drawn unless it is asked for: the bar's **Comments** shows the list (`Comments`) of all the
+ * Nothing else of the comments is drawn unless it is asked for: the bar's **Comments** shows the list (`Comments`, in the side panel of side.js) of all the
  * threads, a way to a thread that is out of reach in the text (its passage is gone, or it is resolved) and to the others, which
  * are chosen there and open in their card.
  *
@@ -17,6 +17,8 @@
  * It holds no data of its own: the page (document-editor.js) fetches the threads, tells the editor where their passages are, and
  * hands both over, with what to do when a comment is saved, changed, taken away, resolved or opened again.
  */
+import { sidePanel } from "./side.js";
+
 /** The most characters of the text of a passage a card shows. */
 const SHOWN_CHARS = 240;
 /** The most characters of a comment the list shows of it. */
@@ -29,10 +31,16 @@ export const PENDING = "pending";
 const CARD_WIDTH = 352;
 const GAP = 6;
 const EDGE = 8;
-/** Beside the passage, at the right edge of the page: how wide the card is, how much room the page has to be for that, and how far it keeps from the words. */
+/** Beside the passage, at the right edge of the page: how wide the card is, how wide the page has to be for that, and how far it keeps from the words. */
 const SIDE_WIDTH = 320;
 const SIDE_MIN = 720;
 const SIDE_GAP = 16;
+/**
+ * How much room the margin right of the text column has to have (measured, not guessed from the window's width: the side panel takes
+ * from it) for the markers of the comments to stand in it without touching a word, and for a card to be beside its passage. Where it
+ * has less, the words are the way to a comment, and its card is under them.
+ */
+export const MARGIN_ROOM = 76;
 
 /** `text` cut to what a card shows. */
 const short = (text) => (text.length > SHOWN_CHARS ? `${text.slice(0, SHOWN_CHARS)}…` : text);
@@ -41,6 +49,7 @@ export function comments(portal, { when }) {
   const { React, ui, t } = portal;
   const { useEffect, useRef, useState } = React;
   const h = React.createElement;
+  const SidePanel = sidePanel(portal);
 
   const WHO = () => ({ user: t("You"), agent: t("The agent") });
   const HINT = () => t("Write @agent in a comment to ask the agent to answer it.");
@@ -316,6 +325,7 @@ export function comments(portal, { when }) {
       const rects = anchor();
       if (!card || !sheet || !rects?.length) return;
       const frame = sheet.getBoundingClientRect();
+      const margin = editor ? frame.right - sheet.clientLeft - editor.getBoundingClientRect().right : 0;
       const first = rects[0];
       const last = rects.at(-1);
       const width = Math.min(CARD_WIDTH, frame.width - 2 * EDGE);
@@ -326,10 +336,16 @@ export function comments(portal, { when }) {
       const top = view.top;
       // Where the page is wide enough: level with the passage, at the right edge, clear of every word of it (the text under the card goes
       // behind it). Where it is not, or the card would be over the passage: under it, above where there is no room under.
-      if (frame.width >= SIDE_MIN) {
+      if (frame.width >= SIDE_MIN && margin >= MARGIN_ROOM) {
         const x = frame.width - SIDE_WIDTH - EDGE;
-        // As high as the passage, and no lower than the page's end: moved up (still clear of the passage) where it would run past.
-        const y = Math.max(top + EDGE, Math.min(first.top, Math.min(view.bottom, window.innerHeight) - height - EDGE));
+        // As high as the passage, so that it goes with it when the page scrolls. Where the passage is in view the card is kept in view too
+        // (moved up, still clear of the passage, where it would run past the end); one whose passage is out of it goes off with it. Never
+        // past the sheet's own ends.
+        const bottom = Math.min(view.bottom, window.innerHeight);
+        const seen = first.bottom > top && first.top < bottom;
+        let y = first.top;
+        if (seen) y = Math.max(top + EDGE, Math.min(y, bottom - height - EDGE));
+        y = Math.max(frame.top + EDGE, Math.min(y, frame.bottom - height - EDGE));
         const clear = rects.every((r) => r.right + SIDE_GAP <= frame.left + x || r.bottom <= y || r.top >= y + height);
         if (clear) {
           const side = { top: Math.round(y - frame.top - sheet.clientTop), left: Math.round(x - sheet.clientLeft), width: SIDE_WIDTH, above: false, side: true };
@@ -491,14 +507,8 @@ export function comments(portal, { when }) {
             onDeleteThread,
           });
     return h(
-      "aside",
-      { className: "pd-threads", "aria-label": t("Comments") },
-      h(
-        "div",
-        { className: "pd-list-head" },
-        h("h2", null, t("Comments"), openCount > 0 && h("span", { className: "pd-count" }, openCount)),
-        h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: onClose }, t("Close")),
-      ),
+      SidePanel,
+      { kind: "comments", title: t("Comments"), count: openCount, onClose },
       h("p", { className: "pd-hint" }, HINT()),
       error && !loaded
         ? h(ui.LoadFailed, { error: t("Comments could not be loaded: {error}", { error: error.message }), onRetry })
@@ -516,5 +526,5 @@ export function comments(portal, { when }) {
     );
   }
 
-  return { Comments, Popover };
+  return { Comments, Popover, SidePanel };
 }

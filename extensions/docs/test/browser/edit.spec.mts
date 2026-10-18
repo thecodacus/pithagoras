@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { type Page } from '@playwright/test';
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from '../../../../tests/browser/portal-mock';
 
 /**
@@ -94,7 +94,8 @@ class Store {
   }
 }
 
-async function open(page: Page, store: Store, { editor = true }: { editor?: boolean } = {}) {
+/** `panel`: the document is opened in the panel beside a chat, not on the Documents page. */
+async function open(page: Page, store: Store, { editor = true, panel = false }: { editor?: boolean; panel?: boolean } = {}) {
   const sessions = [{ id: 'a', title: 'First chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString(), provider: null, model: null, thinking_level: null }];
   const folders = [{ id: FOLDER, name: 'site', path: '/w/site', chats: [{ id: 'a', title: 'First chat' }], documents: [{ id: ID, name: 'plan.md', title: 'The plan', revision: store.revision, size: 40, modified: '2026-10-01T11:00:00.000Z' }] }];
   await mockPortal(page, async ({ path: p, method, url, route, json }) => {
@@ -112,14 +113,25 @@ async function open(page: Page, store: Store, { editor = true }: { editor?: bool
     if (p === `${DOCUMENT}/restore`) { const { revision, base } = json(); return store.restore(revision, base); }
     const revision = /\/revisions\/(\d+)$/.exec(p);
     if (revision && p.startsWith(`${DOCUMENT}/`)) { const found = store.revisions.find((r) => r.revision === Number(revision[1])); return found ? { ...found, markdown: found.markdown } : reply(404, { error: 'There is no such revision' }); }
+    if (p === `${API}/chats/a/documents`) return { folder: { id: FOLDER, name: 'site', path: '/w/site' }, documents: folders[0].documents };
     if (p === '/api/sessions') return { sessions, executor: 'host' };
     if (p === '/api/models') return { models: [], providers: {} };
+    if (/^\/api\/sessions\/\w+$/.test(p)) return sessions[0];
+    if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model: null, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
   });
-  await page.goto(`/x/${NAME}/documents?folder=${FOLDER}&doc=${ID}`);
+  if (!panel) return void (await page.goto(`/x/${NAME}/documents?folder=${FOLDER}&doc=${ID}`));
+  await page.goto('/s/a');
+  await page.locator('.panel-toggle[aria-label="Documents"]').click();
+  await page.getByRole('complementary', { name: 'Panels' }).getByRole('button', { name: /The plan/ }).click();
 }
 
 const editorOf = (page: Page) => page.locator('.pd-editor .ProseMirror');
 const state = (page: Page) => page.locator('.pd-state');
+/** Restore on the revision chosen in the panel, and the yes to the question that comes first. */
+const restoreThis = async (page: Page, history: Locator) => {
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Restore', exact: true }).click();
+};
 /** Types at the end of the document's last line. */
 async function typeAtEnd(page: Page, text: string) {
   await editorOf(page).click();
@@ -541,15 +553,25 @@ test('the history lists the revisions, shows one, and brings it back as a new re
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   const rows = history.getByRole('listitem');
   await expect(rows).toHaveText([/^Revision 3Current\s*You · /, /^Revision 2\s*The agent · /, /^Revision 1\s*You · Created · /]);
 
   await history.getByRole('button', { name: /^Revision 2/ }).click();
-  await expect(history.locator('.pd-preview')).toContainText('Ship it soon.');
-  // What is shown is a look; the document is where it was.
+  // The old text is on the page, in the text's place, marked as an earlier revision that cannot be edited; the document is where it was.
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  await expect(page.locator('.pd-old-note')).toContainText('You are reading revision 2');
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await expect(editorOf(page)).toBeHidden();
+  await expect(page.getByRole('combobox', { name: 'Text style' })).toBeDisabled();
+  // The way back is on the page, and the panel stays open.
+  await page.getByRole('button', { name: 'Back to the current text' }).click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(editorOf(page)).toBeVisible();
+  await expect(history).toBeVisible();
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  await restoreThis(page, history);
 
   await expect(editorOf(page)).toContainText('Ship it soon.');
   await expect(state(page)).toHaveText('Saved · Revision 4');
@@ -565,15 +587,93 @@ test('the history lists the revisions, shows one, and brings it back as a new re
   await expect(history.getByRole('button', { name: 'Restore this revision' })).toHaveCount(0);
 });
 
+test('restoring asks first; Cancel keeps the text and the focus on the button', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  // The earlier revision is on the page in the text's place: this is the restore from there.
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  const restore = history.getByRole('button', { name: 'Restore this revision' });
+  await restore.click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Restore revision 2?');
+  await expect(dialog).toContainText('The current text is replaced by revision 2. The current version stays in the history, so you can go back to it.');
+  await expect(dialog.getByRole('button', { name: 'Restore', exact: true })).toBeFocused();
+  expect(store.restores).toEqual([]);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(restore).toBeFocused();
+  // Nothing happened: the revision is still only looked at, and the text is the document's.
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  await expect(state(page)).toHaveText('Saved · Revision 3');
+  expect(store.restores).toEqual([]);
+  expect(store.markdown).toBe(PLAN);
+  // Escape answers no as well.
+  await restore.click();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect(store.restores).toEqual([]);
+});
+
+test('confirming the question restores the revision and puts the focus in the text', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Restore', exact: true }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.restores).toEqual([{ revision: 2, base: 3 }]);
+  expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
+  await expect(editorOf(page)).toContainText('Ship it soon.');
+  await expect(editorOf(page)).toBeFocused();
+});
+
+test('with the question switched off in Settings, restoring restores at once', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('confirmDeletes', 'off'));
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.restores).toEqual([{ revision: 2, base: 3 }]);
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(editorOf(page)).toBeFocused();
+});
+
+test('the question before a restore is in German in a German portal', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pithagoras.language', 'de'));
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await page.getByRole('button', { name: 'Verlauf' }).click();
+  const history = page.getByRole('complementary', { name: 'Verlauf' });
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await history.getByRole('button', { name: 'Diese Revision wiederherstellen' }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('Revision 2 wiederherstellen?');
+  await expect(dialog).toContainText('Der aktuelle Text wird durch Revision 2 ersetzt. Die aktuelle Version bleibt im Verlauf, du kannst also zu ihr zurückkehren.');
+  await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+  expect(store.restores).toEqual([]);
+});
+
 test('restoring saves what was typed first, as a revision to go back to', async ({ page }) => {
   const store = new Store();
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
   await page.getByRole('button', { name: 'History' }).click();
   await typeAtEnd(page, ' Unsaved words.');
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   await expect(state(page)).toHaveText('Saved · Revision 5');
   // The typed text went in as revision 4, and revision 1 came back on top of it.
   expect(store.puts).toEqual([{ markdown: '# The plan\n\nShip it on Friday. Unsaved words.\n', base: 3 }]);
@@ -590,9 +690,9 @@ test('restoring waits for the choice when the text cannot be saved', async ({ pa
   store.elsewhere('# The plan\n\nTheirs.\n');
   await typeAtEnd(page, ' Mine.');
   await expect(page.locator('.pd-conflict')).toBeVisible();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   // Nothing was restored, and the text is still there.
   await expect(page.locator('.pd-conflict')).toBeVisible();
   await expect(editorOf(page)).toContainText('Mine.');
@@ -604,12 +704,13 @@ test('restoring a revision when the document has moved on shows the document as 
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
   store.elsewhere('# The plan\n\nTheirs.\n');
-  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await restoreThis(page, history);
   await expect(page.locator('.pd-note')).toContainText('The document changed in the meantime and is now at revision 4. Restore revision 1 again if you still want it.');
   await expect(editorOf(page)).toContainText('Theirs.');
+  await expect(page.locator('.pd-old')).toHaveCount(0);
   await expect(state(page)).toHaveText('Saved · Revision 4');
   expect(store.markdown).toBe('# The plan\n\nTheirs.\n');
 });
@@ -619,7 +720,7 @@ test('an older page of the history is asked for when wanted', async ({ page }) =
   for (let n = 4; n <= 60; n++) store.elsewhere(`# The plan\n\nVersion ${n}.\n`);
   await open(page, store);
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await expect(history.getByRole('listitem')).toHaveCount(50);
   await expect(history.getByRole('listitem').first()).toContainText('Revision 60');
   await history.getByRole('button', { name: 'Show older revisions' }).click();
@@ -635,7 +736,7 @@ test('a revision that cannot be read says so, and the history that cannot be lis
   let broken = true;
   await page.route(`**${DOCUMENT}/history*`, (route) => (broken ? route.fulfill({ status: 500, json: { error: 'The documents store could not do that' } }) : route.fallback()));
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await expect(history.getByRole('alert')).toContainText('The documents store could not do that');
   broken = false;
   await history.getByRole('button', { name: 'Try again' }).click();
@@ -664,8 +765,8 @@ test('the editor page speaks German in a German portal', async ({ page }) => {
   await expect(state(page)).toHaveText('Nicht gespeicherte Änderungen · Revision 3');
   await expect(state(page)).toHaveText('Gespeichert · Revision 4');
   await page.getByRole('button', { name: 'Verlauf' }).click();
-  await expect(page.getByRole('region', { name: 'Verlauf' }).getByRole('listitem').first()).toContainText('Revision 4Aktuell');
-  await expect(page.getByRole('region', { name: 'Verlauf' }).getByRole('listitem').last()).toContainText('Du · Erstellt · ');
+  await expect(page.getByRole('complementary', { name: 'Verlauf' }).getByRole('listitem').first()).toContainText('Revision 4Aktuell');
+  await expect(page.getByRole('complementary', { name: 'Verlauf' }).getByRole('listitem').last()).toContainText('Du · Erstellt · ');
   store.elsewhere('# Der Plan\n');
   await typeAtEnd(page, ' Noch mehr.');
   await expect(page.locator('.pd-conflict')).toContainText('Dieses Dokument wurde geändert, während du es bearbeitet hast, und steht jetzt bei Revision 5.');
@@ -737,12 +838,16 @@ test('the toolbar makes the selected words bold or a link, a paragraph a heading
 
   // The kind of paragraph, from the list of styles; it says the kind where the caret is.
   const style = page.getByRole('combobox', { name: 'Text style' });
-  await expect(style).toHaveValue('paragraph');
-  await style.selectOption('h2');
-  await expect(style).toHaveValue('h2');
-  expect(await saved(page, store)).toBe('# The plan\n\n## Ship it on ***Friday***.\n\nThe build is green.\n');
+  await expect(style).toHaveText('Normal text');
+  await style.click();
+  await page.getByRole('option', { name: 'Heading 2' }).click();
+  await expect(style).toHaveText('Heading 2');
+  // Choosing gives the text the focus back (not the list's button), so that typing goes on in it.
+  await expect(editorOf(page)).toBeFocused();
+  // (The list taking the focus out of the text and the text taking it back saves it, so there is nothing more for Ctrl+S to write.)
+  await expect.poll(() => store.markdown).toBe('# The plan\n\n## Ship it on ***Friday***.\n\nThe build is green.\n');
   await editorOf(page).getByText('The plan').click();
-  await expect(style).toHaveValue('h1');
+  await expect(style).toHaveText('Heading 1');
 
   // Lists, one kind for another, and off again.
   await editorOf(page).getByText('The build is green.').click();
@@ -838,4 +943,441 @@ test('a document opened on the page is the whole page: its bar, the toolbar and 
   // Back to the list, which has its heading again.
   await page.getByRole('button', { name: /All documents/ }).click();
   await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
+});
+
+/* The history is a panel at the side like the comments: the same place, size and way of closing, and one of the two at a time. */
+const sideBar = (page: Page, name: 'History' | 'Comments') => page.getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
+const sidePanel = (page: Page, name: 'History' | 'Comments') => page.getByRole('complementary', { name });
+
+/** Where the panel stands against the page's area below the bars, and the text's scroll box beside it. */
+async function sideGeometry(page: Page, name: 'History' | 'Comments') {
+  const [side, area, scroll] = await Promise.all([sidePanel(page, name).boundingBox(), page.locator('.pd-desk').boundingBox(), page.locator('.pd-scroll').boundingBox()]);
+  return { side: side!, area: area!, scroll: scroll! };
+}
+
+for (const where of ['the Documents page', 'the panel beside a chat'] as const) {
+  test(`the history opens at the side, as the comments do, in a wide and in a narrow page, on ${where}`, async ({ page }) => {
+    const panel = where !== 'the Documents page';
+    const store = new Store();
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await open(page, store, { panel });
+    await expect(editorOf(page)).toContainText('Ship it on Friday.');
+    // The panel beside a chat is narrow in itself; the Documents page is wide at 1400 and narrow at 700.
+    const sizes = panel ? ([[1400, 'narrow'], [700, 'narrow']] as const) : ([[1400, 'wide'], [700, 'narrow']] as const);
+    for (const [width, layout] of sizes) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', layout);
+      // The comments are where the history is to be, whatever the page.
+      await sideBar(page, 'Comments').click();
+      const comments = await sideGeometry(page, 'Comments');
+      await sideBar(page, 'Comments').click();
+      await expect(sidePanel(page, 'Comments')).toHaveCount(0);
+
+      await sideBar(page, 'History').click();
+      const { side, area, scroll } = await sideGeometry(page, 'History');
+      await expect(sidePanel(page, 'History').getByRole('listitem')).toHaveCount(3);
+      expect(side).toEqual(comments.side);
+      expect(Math.round(side.x + side.width)).toBe(Math.round(area.x + area.width));
+      expect(Math.round(side.y)).toBe(Math.round(area.y));
+      expect(Math.round(side.y + side.height)).toBe(Math.round(area.y + area.height));
+      expect(side.width).toBeLessThanOrEqual(320);
+      // Beside the text it pushes the page narrower; over it, the page keeps all its width.
+      if (layout === 'wide') expect(Math.round(scroll.x + scroll.width)).toBe(Math.round(side.x));
+      else expect(Math.round(scroll.x + scroll.width)).toBe(Math.round(area.x + area.width));
+      await sidePanel(page, 'History').getByRole('button', { name: 'Close' }).click();
+      await expect(sidePanel(page, 'History')).toHaveCount(0);
+      // The button it was opened from has the focus again.
+      await expect(sideBar(page, 'History')).toBeFocused();
+    }
+  });
+}
+
+test('the comments and the history replace each other, and the bar says which one is open', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  const [comments, history] = [sideBar(page, 'Comments'), sideBar(page, 'History')];
+  await expect(comments).toHaveAttribute('aria-expanded', 'false');
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+  await history.click();
+  await expect(sidePanel(page, 'History')).toBeVisible();
+  await expect(history).toHaveAttribute('aria-expanded', 'true');
+  // The comments in its place: the history is gone, not under it.
+  await comments.click();
+  await expect(sidePanel(page, 'Comments')).toBeVisible();
+  await expect(sidePanel(page, 'History')).toHaveCount(0);
+  await expect(comments).toHaveAttribute('aria-expanded', 'true');
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+  await history.click();
+  await expect(sidePanel(page, 'History')).toBeVisible();
+  await expect(sidePanel(page, 'Comments')).toHaveCount(0);
+  await expect(page.locator('.pd-side')).toHaveCount(1);
+  await expect(comments).toHaveAttribute('aria-expanded', 'false');
+  // The button that is open closes it.
+  await history.click();
+  await expect(page.locator('.pd-side')).toHaveCount(0);
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('an earlier revision looked at is on the page, read-only and marked, with the panel open; closing the panel goes back to the text', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  await expect(page.locator('.pd-old-note')).toContainText('You are reading revision 2, an earlier text');
+  await expect(history).toBeVisible();
+  // The chosen one is chosen again to be let go of.
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(page.locator('.pd-old-note')).toHaveCount(0);
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toBeVisible();
+  // Closing the panel (or taking the comments in its place) leaves the old text, not the page showing something nobody can reach.
+  await history.getByRole('button', { name: 'Close' }).click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(page.locator('.pd-old-note')).toHaveCount(0);
+  await expect(editorOf(page)).toBeVisible();
+  await sideBar(page, 'History').click();
+  await history.getByRole('button', { name: /^Revision 1/ }).click();
+  await expect(page.locator('.pd-old')).toBeVisible();
+  await sideBar(page, 'Comments').click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+});
+
+test('a revision is restored from the side panel in a narrow page too, and the page is the text again', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  // The note with the way back is above the panel, which covers the right of the page.
+  await expect(page.getByRole('button', { name: 'Back to the current text' })).toBeVisible();
+  await restoreThis(page, history);
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.restores).toEqual([{ revision: 2, base: 3 }]);
+  expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(editorOf(page)).toContainText('Ship it soon.');
+  await expect(history).toBeVisible();
+});
+
+for (const name of ['History', 'Comments'] as const) {
+  test(`Escape in the ${name.toLowerCase()} panel closes it and the focus goes back to its button`, async ({ page }) => {
+    const store = new Store();
+    await open(page, store);
+    await expect(editorOf(page)).toContainText('Ship it on Friday.');
+    await sideBar(page, name).click();
+    const panel = sidePanel(page, name);
+    await expect(panel).toBeVisible();
+    // With the focus in the text, Escape is the text's: the panel stays.
+    await editorOf(page).click();
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeVisible();
+    // With it inside the panel, it closes the panel.
+    await panel.getByRole('button', { name: 'Close' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(sideBar(page, name)).toBeFocused();
+  });
+}
+
+/* The document as plain Markdown, for those who prefer to write it: the same document, saved the same way. */
+const modeSwitch = (page: Page) => page.getByRole('group', { name: 'Editing mode' });
+const modeButton = (page: Page, name: 'Visual' | 'Markdown') => modeSwitch(page).getByRole('button', { name, exact: true });
+const sourceOf = (page: Page) => page.getByRole('textbox', { name: 'Markdown source' });
+const inMarkdown = (page: Page) => page.addInitScript(() => localStorage.getItem('pithagoras-docs/mode') === null && localStorage.setItem('pithagoras-docs/mode', 'markdown'));
+
+test('the document is written in the visual editor, or as Markdown with the switch in the bar, and the browser remembers which', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  // Visual to begin with: the editor and its toolbar; no source.
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'true');
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('aria-pressed', 'false');
+  await expect(sourceOf(page)).toBeHidden();
+  await expect(page.getByRole('toolbar', { name: 'Formatting' })).toBeVisible();
+
+  await modeButton(page, 'Markdown').click();
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('aria-pressed', 'true');
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'false');
+  // The file as it is, in the same column, in a monospace face and without a box; the formatting toolbar is not there (it has nothing to do in the source).
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await expect(editorOf(page)).toBeHidden();
+  await expect(page.getByRole('toolbar', { name: 'Formatting' })).toHaveCount(0);
+  const look = await sourceOf(page).evaluate((el) => {
+    const style = getComputedStyle(el);
+    const sheet = document.querySelector('.pd-sheet')!.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    return { family: style.fontFamily, border: style.borderTopWidth, background: style.backgroundColor, centred: Math.abs(box.left - sheet.left - (sheet.right - box.right)) < 2, narrower: box.width < sheet.width };
+  });
+  expect(look.family).toMatch(/mono|Menlo|Consolas/i);
+  expect(look.border).toBe('0px');
+  expect(look.background).toBe('rgba(0, 0, 0, 0)');
+  expect(look.centred).toBe(true);
+  expect(look.narrower).toBe(true);
+
+  // Kept by the browser: a new page opens as it was left.
+  await page.reload();
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('aria-pressed', 'true');
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toBeVisible();
+  await expect(sourceOf(page)).toBeHidden();
+  await page.reload();
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'true');
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  expect(store.puts).toEqual([]);
+});
+
+test('a browser that keeps nothing still lets the mode be chosen for the page', async ({ page }) => {
+  await page.addInitScript(() => {
+    const get = Storage.prototype.getItem;
+    const set = Storage.prototype.setItem;
+    Storage.prototype.getItem = function (key: string) { if (key === 'pithagoras-docs/mode') throw new Error('denied'); return get.call(this, key); };
+    Storage.prototype.setItem = function (key: string, value: string) { if (key === 'pithagoras-docs/mode') throw new Error('denied'); return set.call(this, key, value); };
+  });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await expect(modeButton(page, 'Visual')).toHaveAttribute('aria-pressed', 'true');
+  await modeButton(page, 'Markdown').click();
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+});
+
+test('typing in the source saves like the editor does: after a second, at once with Ctrl+S, and when the focus leaves; as it was typed', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('* Not a dash.');
+  await expect(state(page)).toHaveText('Unsaved changes · Revision 3');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  // The text as typed, not as the editor would write it (it would have a dash for the star).
+  expect(store.puts).toEqual([{ markdown: `${PLAN}* Not a dash.`, base: 3 }]);
+
+  await page.keyboard.type('\n* Again.');
+  await page.keyboard.press('Control+s');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.puts.map((put) => put.base)).toEqual([3, 4]);
+  expect(store.markdown).toBe(`${PLAN}* Not a dash.\n* Again.`);
+
+  // The focus leaving the text saves what is typed.
+  await page.keyboard.type(' More.');
+  await page.getByRole('button', { name: 'History' }).focus();
+  await expect(state(page)).toHaveText('Saved · Revision 6');
+  expect(store.markdown).toBe(`${PLAN}* Not a dash.\n* Again. More.`);
+
+  // The browser's own undo takes the words back.
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' Oops.');
+  await page.keyboard.press('Control+z');
+  await expect(sourceOf(page)).toHaveValue(`${PLAN}* Not a dash.\n* Again. More.`);
+});
+
+test('a document written in another style is the same document in both: looking at it, or going from one to the other, saves nothing', async ({ page }) => {
+  const raw = '* One\n* Two\n\nText  \nmore\n';
+  const store = new Store(raw);
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('One');
+  await modeButton(page, 'Markdown').click();
+  // The file as it is, in its own style.
+  await expect(sourceOf(page)).toHaveValue(raw);
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.waitForTimeout(1300);
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('One');
+  await page.waitForTimeout(1300);
+  expect(store.puts).toEqual([]);
+  await expect(state(page)).toHaveText('Saved · Revision 3');
+  // A change in the source keeps the style it was written in; going back to the editor then writes nothing more.
+  await modeButton(page, 'Markdown').click();
+  await sourceOf(page).fill('* One\n* Two\n* Three\n\nText  \nmore\n');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.puts).toEqual([{ markdown: '* One\n* Two\n* Three\n\nText  \nmore\n', base: 3 }]);
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('Three');
+  await page.waitForTimeout(1300);
+  expect(store.puts).toHaveLength(1);
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+});
+
+test('text that is not saved yet goes with the switch, in both directions', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await typeAtEnd(page, ' Typed in the editor.');
+  // Switched before the autosave: the words are in the source.
+  await modeButton(page, 'Markdown').click();
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it on Friday. Typed in the editor.\n');
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('Typed in the source.');
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('Typed in the editor.');
+  await expect(editorOf(page)).toContainText('Typed in the source.');
+  await expect.poll(() => store.markdown).toContain('Typed in the source.');
+  expect(store.markdown).toContain('Typed in the editor.');
+  await expect(state(page)).toHaveText(/^Saved · Revision \d+$/);
+});
+
+test('a conflict keeps the text typed in the source, and the choice is made there as in the editor', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  store.elsewhere('# The plan\n\nShip it on Monday.\n');
+  await sourceOf(page).fill('# The plan\n\nShip it on Tuesday.\n');
+  await expect(page.locator('.pd-conflict')).toBeVisible();
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it on Tuesday.\n');
+  await page.getByRole('button', { name: 'Keep mine as a new revision' }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.markdown).toBe('# The plan\n\nShip it on Tuesday.\n');
+  // Going to the editor shows the same text.
+  await modeButton(page, 'Visual').click();
+  await expect(editorOf(page)).toContainText('Ship it on Tuesday.');
+});
+
+test('restoring a revision shows it in the source too', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store();
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(PLAN);
+  await page.getByRole('button', { name: 'History' }).click();
+  const history = page.getByRole('complementary', { name: 'History' });
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await restoreThis(page, history);
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\nShip it soon.\n');
+  expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
+});
+
+/* The page under and beside the text is the text's, as on a word processor's page: but a selection is the person's. */
+const paragraphs = (n: number) => `# The plan\n\n${Array.from({ length: n }, (_, i) => `Paragraph ${i + 1} of the text.`).join('\n\n')}\n`;
+const scrollTopOf = (page: Page) => page.evaluate(() => document.querySelector('.pd-scroll')!.scrollTop);
+
+test('a selection made by dragging and let go of beside its line stays selected, the page stays where it is, and it can be commented on', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const store = new Store(paragraphs(60));
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Paragraph 60 of the text.');
+  const line = editorOf(page).getByText('Paragraph 30 of the text.', { exact: true });
+  await line.scrollIntoViewIfNeeded();
+  const before = await scrollTopOf(page);
+  const box = (await line.boundingBox())!;
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 1, y);
+  await page.mouse.down();
+  await page.mouse.move(sheet.x + sheet.width - 60, y, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => getSelection()!.toString().trim())).toBe('Paragraph 30 of the text.');
+  expect(Math.abs((await scrollTopOf(page)) - before)).toBeLessThan(4);
+  await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeEnabled();
+});
+
+test('a click beside a line puts the caret on that line, and the page stays where it is', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const store = new Store(paragraphs(60));
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Paragraph 60 of the text.');
+  const line = editorOf(page).getByText('Paragraph 30 of the text.', { exact: true });
+  await line.scrollIntoViewIfNeeded();
+  const before = await scrollTopOf(page);
+  const box = (await line.boundingBox())!;
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  await page.mouse.click(sheet.x + sheet.width - 40, box.y + box.height / 2);
+  await page.keyboard.type('X');
+  await expect(editorOf(page).getByText('Paragraph 30 of the text.X', { exact: true })).toBeVisible();
+  expect(Math.abs((await scrollTopOf(page)) - before)).toBeLessThan(40);
+  // The left margin too: the start of the line.
+  await page.mouse.click(sheet.x + 10, box.y + box.height / 2);
+  await page.keyboard.type('Y');
+  await expect(editorOf(page).getByText('YParagraph 30 of the text.X', { exact: true })).toBeVisible();
+});
+
+test('a click on the page below the text puts the caret at its end', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  const sheet = (await page.locator('.pd-sheet').boundingBox())!;
+  const area = (await page.locator('.pd-scroll').boundingBox())!;
+  await page.mouse.click(sheet.x + sheet.width / 2, area.y + area.height - 30);
+  await page.keyboard.type(' The end.');
+  await expect(editorOf(page)).toContainText('Ship it on Friday. The end.');
+  await page.mouse.click(sheet.x + 10, area.y + area.height - 30);
+  await page.keyboard.type(' More.');
+  await expect(editorOf(page)).toContainText('Ship it on Friday. The end. More.');
+});
+
+test('Markdown that is only written another way is saved as it was typed, and the bar says Saved only when it is', async ({ page }) => {
+  await inMarkdown(page);
+  const store = new Store('# The plan\n\n- One\n- Two\n\nText.\n');
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue('# The plan\n\n- One\n- Two\n\nText.\n');
+  // The bullets written with a star: the editor writes them the same, and it is still a change to the file.
+  await sourceOf(page).fill('# The plan\n\n* One\n* Two\n\nText.\n');
+  await page.keyboard.press('Control+s');
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.puts).toEqual([{ markdown: '# The plan\n\n* One\n* Two\n\nText.\n', base: 3 }]);
+  // The heading in the other style, and more blank lines.
+  await sourceOf(page).fill('The plan\n========\n\n\n* One\n* Two\n\nText.\n');
+  await expect(state(page)).toHaveText('Unsaved changes · Revision 4');
+  await page.keyboard.press('Control+s');
+  await expect(state(page)).toHaveText('Saved · Revision 5');
+  expect(store.markdown).toBe('The plan\n========\n\n\n* One\n* Two\n\nText.\n');
+  await page.reload();
+  await expect(sourceOf(page)).toHaveValue('The plan\n========\n\n\n* One\n* Two\n\nText.\n');
+});
+
+test('text typed in the Markdown that could not be saved comes back as it was typed, and is saved so', async ({ page }) => {
+  await inMarkdown(page);
+  const raw = '# The plan\n\n* One\n* Two\n\nText.\n';
+  const store = new Store(raw);
+  await open(page, store);
+  await expect(sourceOf(page)).toHaveValue(raw);
+  let fail = true;
+  await page.route(`**${DOCUMENT}`, (route) => (fail && route.request().method() === 'PUT' ? route.fulfill({ status: 500, json: { error: 'The documents store could not do that' } }) : route.fallback()));
+  await sourceOf(page).click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('* Three\n');
+  await expect(state(page)).toHaveText('Not saved · Revision 3');
+  await page.reload();
+  // Not the editor's way of writing it (a dash, a blank line before the item).
+  await expect(sourceOf(page)).toHaveValue(`${raw}* Three\n`);
+  await expect(page.locator('.pd-note')).toContainText('Text you had not saved was brought back.');
+  fail = false;
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.markdown).toBe(`${raw}* Three\n`);
+});
+
+test('the bar keeps the room for the name of the document at a window of 1060 pixels with the sidebar open: the switch is two icons there', async ({ page }) => {
+  await page.setViewportSize({ width: 1060, height: 800 });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  const name = page.locator('.pd-doctitle');
+  await expect(name).toHaveText('The plan');
+  const fits = await name.evaluate((el) => ({ cut: el.scrollWidth > el.clientWidth, width: el.getBoundingClientRect().width }));
+  expect(fits.cut).toBe(false);
+  expect(fits.width).toBeGreaterThan(50);
+  // The switch is still there and named, with icons for words.
+  await expect(modeButton(page, 'Visual')).toBeVisible();
+  await expect(modeButton(page, 'Markdown')).toBeVisible();
+  await expect(modeSwitch(page).locator('.pd-modelabel').first()).toBeHidden();
+  await expect(modeButton(page, 'Markdown')).toHaveAttribute('title', 'Markdown');
+  // A wide window has the words.
+  await page.setViewportSize({ width: 1700, height: 800 });
+  await expect(modeSwitch(page).locator('.pd-modelabel').first()).toBeVisible();
 });

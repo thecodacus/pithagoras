@@ -918,31 +918,108 @@ async function unlinkQuietly(place: string): Promise<void> {
 }
 
 /**
+ * The place `rel` names for taking away or renaming (`entryPlace`), and with `direct` only a name in `base` itself
+ * (see OpenOptions.direct), as it was spelled.
+ */
+function entryAt(base: string, rel: unknown, verb: "removed" | "renamed", options: OpenOptions): string {
+  const target = entryPlace(base, rel, verb);
+  if (options.direct && (path.dirname(target) !== base || path.basename(target) !== String(rel))) {
+    throw new FileError("invalid", "That is not a file directly in the folder");
+  }
+  return target;
+}
+
+/**
+ * `name` in the held folder, looked at without following a link in its last place: what it is, or undefined when it is not
+ * there. Read from the descriptor of the folder, so that it is a name in that folder and no other, and by `lstat`, which opens
+ * nothing: a pipe is not waited at, and a file the portal may not read can still be taken away.
+ */
+function lookAt(held: Held, name: string): BigIntStats | undefined {
+  try {
+    return lstatSync(held.at(name), { bigint: true });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw ioFailure(e, "The file could not be looked at", "Nothing was changed.");
+  }
+}
+
+/**
+ * `name` in the held folder if it is a plain file, else a refusal (`invalid`: a link, a folder, a pipe, or with `alone` a
+ * file with a second name; `missing`).
+ */
+function plainIn(held: Held, name: string, alone: boolean | undefined): BigIntStats {
+  const st = lookAt(held, name);
+  if (!st) throw new FileError("missing", "There is no such file");
+  if (!st.isFile()) throw new FileError("invalid", "That is a link, a folder or not a plain file");
+  if (alone && st.nlink !== 1n) throw new FileError("invalid", "That file has another name elsewhere (a hard link)");
+  return st;
+}
+
+/**
+ * `name` of the held folder taken away by `unlink`, which removes the name and never what it leads to: a file, a link (the
+ * link goes, what it leads to stays) or a pipe. A folder is left as it is, with all in it (`unlink` says `EISDIR`): the name
+ * an agent swapped a folder onto since it was looked at is not taken for something to empty. `missing` for a name that is not
+ * there, `invalid` for a folder. The folder is synced after it, so that the removal lasts through a crash.
+ */
+function unlinkIn(held: Held, name: string): void {
+  try {
+    unlinkSync(held.at(name));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw new FileError("missing", "There is no such file");
+    // (POSIX says EPERM for a folder where Linux says EISDIR.)
+    if (code === "EISDIR" || (code === "EPERM" && lstatSync(held.at(name), { throwIfNoEntry: false })?.isDirectory())) {
+      throw new FileError("invalid", "That is a link, a folder or not a plain file");
+    }
+    throw ioFailure(e, "It could not be deleted", "Nothing was changed.");
+  }
+  syncFolder(held);
+}
+
+/**
  * Removes a file, or a folder and all that is in it. A link is removed as the
  * link it is, and what it points at stays. The folder itself is not removable
  * from here: that is the chat's place, not something in it.
  *
- * The folder the entry is in is held (see holdFolder) and everything below it
- * is walked through descriptors, never by a path that could be sent elsewhere
- * (see removeBelow). Where descriptors cannot be named (no /proc) it is `rm`
- * by the checked path, as it was.
+ * The folder the entry is in is held (see holdFolder) and the name is taken from it: a file, link or pipe by `unlink`
+ * (see unlinkIn), a folder by walking everything below it through descriptors, never by a path that could be sent elsewhere
+ * (see removeBelow). Where descriptors cannot be named (no /proc) it is `rm` by the checked path, as it was.
  *
  * A folder that holds git work nothing else has — a clone with commits no
  * remote has, changes not committed, stashes — or a repository's .git is
  * refused, with what it holds, unless `discard` says that is meant.
+ *
+ * `direct` and `likeParent` as for `OpenOptions`.
  */
-export async function removeEntry(base: string, rel: unknown, discard = false): Promise<void> {
-  const target = entryPlace(base, rel, "removed");
+export async function removeEntry(base: string, rel: unknown, discard = false, options: OpenOptions = {}): Promise<void> {
+  const target = entryAt(base, rel, "removed", options);
   if (!discard) {
     const unsaved = await unsavedIn(base, target);
     if (unsaved && holdsWork(unsaved)) throw new FileError("unsaved", unsavedRefusal(unsaved).error, unsaved);
   }
-  const held = holdFolder(base, path.dirname(target));
+  const held = holdFolder(base, path.dirname(target), { likeParent: options.likeParent });
+  const name = path.basename(target);
   try {
+    if (!held.pinned) {
+      await rm(held.at(name), { recursive: true, force: true });
+      return;
+    }
+    // A name that has gone since it was looked for is what was asked for.
+    const seen = lookAt(held, name);
+    if (!seen) return;
+    if (!seen.isDirectory()) {
+      try {
+        unlinkIn(held, name);
+      } catch (e) {
+        if (e instanceof FileError && e.code === "missing") return;
+        // A folder took the name since the look: it is not emptied on that account.
+        if (e instanceof FileError && e.code === "invalid") throw new FileError("failed", "It could not be deleted (something in it was replaced while it was being deleted). Nothing more was changed.", undefined, e);
+        throw e;
+      }
+      return;
+    }
     // Not rmSync: a folder with many files is seconds on the thread that serves every chat.
-    // A file that has gone since it was looked for is what was asked for.
-    if (held.pinned) await removeBelow(held.here, path.basename(target));
-    else await rm(held.at(path.basename(target)), { recursive: true, force: true });
+    await removeBelow(held.here, name);
   } catch (e) {
     if (e instanceof FileError) throw e;
     const code = (e as NodeJS.ErrnoException)?.code;
@@ -951,6 +1028,32 @@ export async function removeEntry(base: string, rel: unknown, discard = false): 
       throw new FileError("failed", "It could not be deleted (something in it was replaced while it was being deleted). Nothing more was changed.", undefined, e);
     }
     throw ioFailure(e, "It could not be deleted", "Nothing more was changed.");
+  } finally {
+    held.close();
+  }
+}
+
+/**
+ * Takes away one plain file: not a folder, and not a link, which is refused, not removed as a link (`removeEntry` does
+ * both). For a server half that deletes a file of its own that the agent can change as it runs.
+ *
+ * It is the single-name part of removeEntry: the folder is held (see holdFolder) and the name is taken from it by `unlink`,
+ * so the file goes from the folder that was checked, whatever its path leads to by then. A look at the name comes first, for the
+ * refusal that says what is wrong; what is swapped in after it is still safe, because `unlink` never follows a link (a link
+ * put there is what goes, and what it leads to stays) and never removes a folder (see unlinkIn). The name an agent swaps
+ * another file of the folder onto between the look and the `unlink` is the one that goes: all of them are the folder's own,
+ * which the agent can remove as well.
+ *
+ * `direct`: `rel` is a name in `base` itself; `alone`: a file with a second name is refused; `likeParent`: see OpenOptions.
+ * Refusals: `missing`, `invalid`, and `failed` for the system's own reasons.
+ */
+export function removeFile(base: string, rel: unknown, options: OpenOptions = {}): void {
+  const target = entryAt(base, rel, "removed", options);
+  const held = holdFolder(base, path.dirname(target), { likeParent: options.likeParent });
+  try {
+    const name = path.basename(target);
+    plainIn(held, name, options.alone);
+    unlinkIn(held, name);
   } finally {
     held.close();
   }
@@ -965,32 +1068,118 @@ function checkName(name: unknown): string {
   return clean;
 }
 
+/** A name this call made in the held folder, taken away again: by `unlink`, which removes the name and never what it leads to. */
+function dropName(place: string): void {
+  try {
+    unlinkSync(place);
+  } catch {
+    // Gone already, or not ours to remove: what is left is a second name of a file, and nothing is lost.
+  }
+}
+
+/** What a looked-at name is, for telling that it is still that: a file, a folder, a link, or something else. */
+const kindOf = (st: BigIntStats) => (st.isFile() ? "file" : st.isDirectory() ? "dir" : st.isSymbolicLink() ? "link" : "other");
+
+/**
+ * `from` in the held folder given the name `to`, never over something that is there. `seen` is what `from` was when it was
+ * looked at. A file or a link is made a second name by a hard link, which the system refuses in the call itself
+ * (`EEXIST`) for a name that is taken, whatever an agent made there since the look: a rename would put the file over it. The
+ * new name is then looked at, and is taken away again if it is not what was looked at (the old name was swapped in between);
+ * only then is the old name removed, so a crash between the two leaves the file with two names, never none. A folder cannot
+ * be linked: it is renamed after a look at the new name, which leaves the gap of an empty folder made there in between, and
+ * so does a file system without hard links (or `protected_hardlinks` for a file that is not the portal's own), as uploadTarget does.
+ */
+function renameIn(held: Held, from: string, to: string, seen: BigIntStats): void {
+  const source = held.at(from);
+  const target = held.at(to);
+  const taken = () => new FileError("exists", `There is already something called "${to}" here`);
+  // The same thing by its number, and still of the kind it was: a file system gives the number of a file that was just removed to
+  // the next one that is made (ext4 does), so a folder swapped onto the name can have it.
+  const same = (st: BigIntStats | undefined) => st !== undefined && kindOf(st) === kindOf(seen) && st.dev === seen.dev && st.ino === seen.ino;
+  const renameAfterLook = () => {
+    if (lexists(target)) throw taken();
+    try {
+      renameSync(source, target);
+    } catch (e) {
+      throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+    }
+  };
+  if (seen.isDirectory()) return renameAfterLook();
+  try {
+    linkSync(source, target);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") throw taken();
+    if (code === "ENOENT") throw new FileError("missing", "There is no such file");
+    if (code !== "EPERM" && code !== "ENOTSUP" && code !== "EOPNOTSUPP") throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+    // A folder is `EPERM` too: the name was not a folder when it was looked at, and is another thing now.
+    if (!same(lstatSync(source, { bigint: true, throwIfNoEntry: false }))) throw new FileError("conflict", "The file changed while it was renamed");
+    // No hard links here: the best that is left is to look and rename.
+    return renameAfterLook();
+  }
+  // The new name is what was looked at, or it is taken away again: it is the name this call has just made.
+  const made = lstatSync(target, { bigint: true, throwIfNoEntry: false });
+  if (!same(made)) {
+    if (made && !made.isDirectory()) dropName(target);
+    throw new FileError("conflict", "The file changed while it was renamed");
+  }
+  try {
+    unlinkSync(source);
+  } catch (e) {
+    // Gone meanwhile (the agent removed it): the new name is the file, which is what was asked.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    // The old name cannot be taken away: the file has both names now, and the new one is not kept.
+    dropName(target);
+    throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+  }
+}
+
+/** The name of `rel` changed, in the folder it is in (see renameEntry and renameFile). `plain`: only a plain file is renamed. */
+function renameNamed(base: string, rel: unknown, newName: unknown, options: OpenOptions, plain: boolean): string {
+  const name = checkName(newName);
+  const from = entryAt(base, rel, "renamed", options);
+  const parent = path.dirname(from);
+  const held = holdFolder(base, parent, { likeParent: options.likeParent });
+  try {
+    const old = path.basename(from);
+    let seen: BigIntStats | undefined;
+    if (plain) seen = plainIn(held, old, options.alone);
+    else {
+      seen = lookAt(held, old);
+      if (!seen) throw new FileError("missing", "There is no such file or folder");
+    }
+    if (name !== old) {
+      renameIn(held, old, name, seen);
+      syncFolder(held);
+    }
+  } finally {
+    held.close();
+  }
+  return path.relative(base, path.join(parent, name));
+}
+
 /**
  * Gives a file or a folder another name, in the folder it is in. It is a new
  * name, not a new place, and it never replaces something that is already there.
  * A link is renamed as the link it is. Returns the new path, from the folder.
  *
  * Both names are in the folder as it is held (see holdFolder): as root, a rename
- * by path in a folder that was swapped for a link would move a file there.
+ * by path in a folder that was swapped for a link would move a file there. A name
+ * that is taken is never put over, even by one made in the instant between the look
+ * and the call (see renameIn).
  */
-export function renameEntry(base: string, rel: unknown, newName: unknown): string {
-  const name = checkName(newName);
-  const from = entryPlace(base, rel, "renamed");
-  const parent = path.dirname(from);
-  const to = path.join(parent, name);
-  if (to === from) return path.relative(base, to);
-  const held = holdFolder(base, parent);
-  try {
-    if (lexists(held.at(name))) throw new FileError("exists", `There is already something called "${name}" here`);
-    try {
-      renameSync(held.at(path.basename(from)), held.at(name));
-    } catch (e) {
-      throw ioFailure(e, "It could not be renamed", "It keeps its name.");
-    }
-  } finally {
-    held.close();
-  }
-  return path.relative(base, to);
+export function renameEntry(base: string, rel: unknown, newName: unknown, options: OpenOptions = {}): string {
+  return renameNamed(base, rel, newName, options, false);
+}
+
+/**
+ * Gives one plain file another name in the folder it is in, never over something that is there, and refuses a link and a
+ * folder (as removeFile does; renameEntry renames both). Returns the new path, from `base`. The options are as for removeFile.
+ * The file itself is not touched: its owner, mode and content stay, and its change key does not (its inode is the same, its
+ * times are not).
+ */
+export function renameFile(base: string, rel: unknown, newName: unknown, options: OpenOptions = {}): string {
+  return renameNamed(base, rel, newName, options, true);
 }
 
 /**

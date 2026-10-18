@@ -13,6 +13,8 @@ work in, which you and the agent edit together.
   earlier one can be brought back.
 - You and the agent comment on passages of a document, and write `@agent` in a
   comment to have the agent answer it.
+- You can rename a document (its file) and delete it, from the list or from the
+  open document ([below](#renaming-and-deleting-a-document)).
 
 Documents is not [Canvases](/guide/canvases). A canvas belongs to one
 conversation, and is kept by the portal (in memory, or in its database once
@@ -108,7 +110,10 @@ folder (folders first, then by name), as Files lists it.
 
 A document is a file, so [Files](/guide/files), the agent's own tools or an
 editor can delete it or give it another name while you have it open. What
-happens then:
+happens then is below. (Renaming or deleting a document from the Documents page
+is not this: the portal does it itself, and the document stays the same one, or
+is gone, with what went with it, as
+[described below](#renaming-and-deleting-a-document).)
 
 - The document is no longer listed, and asking for it is answered with "There
   is no such document". The list of documents on the page drops it within a
@@ -166,8 +171,8 @@ folder, not in your project: in `extension-data/pithagoras-docs/<id>`, where
 the page lists a folder's documents. It holds:
 
 - `git/`, a git repository of the extension's own, with one commit per
-  revision. It is not your project's repository and does not change it; it
-  holds only the documents.
+  revision (a rename and a deletion are revisions too). It is not your project's
+  repository and does not change it; it holds only the documents.
 - `docs.sqlite`, the comments and an index of the revisions.
 - `folder.json`, which folder it is for: its path, and which folder that is on
   this system (its device and inode).
@@ -333,6 +338,96 @@ A Markdown file put into a `documents` folder any other way (an upload in
 panel lists the documents, the portal watches each `documents` folder, and such
 a file is in the list a moment later.
 
+### Renaming and deleting a document
+
+Each row of the list (on the page and in the panel beside a chat) has two
+buttons at its right end, **Rename _name_** and **Delete _name_**, which show
+when the row is pointed at or has the keyboard focus, and always on a touch
+screen. An open document has the same two in the **Document actions** menu
+(**…**) of its bar, next to **Download**. The menu opens with **Rename** focused;
+the arrow keys, **Home** and **End** move in it, **Escape** closes it and the
+focus goes back to its button. In a row, Tab goes from the document's button to
+**Rename** and **Delete**.
+
+**Rename** changes the document's file name, `documents/<name>.md`. What you see
+of a document is two things, and this changes only the second: its **title** is
+its first heading (the list and the bar show it, [above](#the-page)) and is
+changed in the text; its **file name** is what you rename. The field takes the
+name without `.md`, which is added (an `.md` you write yourself is not doubled),
+has the name selected, and says this under it. **Enter** renames, **Escape** or
+**Cancel** gives it up, and the focus goes back to the button that opened the
+field. A name that is refused is said under the field, which stays open with what
+you wrote:
+
+- a name that another document has, or anything else in the folder has (a file,
+  a folder, a link)
+- a name that is not a document's: it must end in `.md`, may not start with a
+  dot, may not have `/`, `\` or a control character in it, and is at most 255
+  bytes
+
+A rename keeps the document: its id, its comments and their passages, its
+history and its text. It is a revision of its own (the same text, made by you,
+marked **Renamed from _old name_** in the [history](#history)), so every earlier
+revision can still be read and brought back, and a page that has the document
+open takes it as it takes any revision: it shows the new name, and what is typed
+there and not yet saved is kept and saved on top of it (a window that did not
+ask for the rename says "This document was renamed to …"). What was typed in the
+open document is saved before it is renamed. The agent finds the document by its id,
+so a rename costs it nothing except a new revision to read before its next edit.
+Only the page and the routes below rename: the agent has no tool for it.
+
+**Delete** asks first, as the portal does before it deletes anything ("Delete
+‘Title’? This deletes the file _name_, the comments on it and its history. It
+cannot be undone."). **Settings → This browser → Confirmations → Ask before
+deleting** ([Interface](/guide/interface#confirmations)) turns the question off,
+and the document is deleted at once. What is deleted:
+
+- the file, from the `documents` folder
+- the document's comments and their threads, and what waits on them (an `@agent`
+  that was not answered yet is not asked any more)
+- the document, from the lists and from its history on the page: asking for it is
+  answered with "There is no such document"
+
+Its file name is free again, and a document made under it is a new one, with
+nothing of the old one. The deletion is a commit of its own in the store's git
+repository ([below](#where-the-history-is-kept)), which is how the history says
+that the document is gone, so that the index made again from it does not bring it
+back. **The commits the document had stay in that repository** (git keeps what a
+commit once held), and nothing on the page reads them: for someone who runs the
+portal and wants a deleted document's text back, `git --git-dir=<the store's git>
+log --all` and `show <commit>:<file name>` find it. Its comments are not in
+git and cannot be brought back. Only a plain file is deleted: where the name is
+something else (a link, a folder, a file with a second name) the delete is
+refused ("… is not the document's file now") and the thing is left as it is. A
+document whose file is already gone (an outside deletion, [above](#a-file-that-is-deleted-or-renamed))
+is forgotten by the delete, with its comments.
+
+**An open document that is deleted from elsewhere** (another window, or the
+person who runs the portal) says so: "This document was deleted. Your text is
+kept here and is not saved." The text stays in the editor, nothing more is sent,
+and the bar's menu is off. **Save as a new document** makes a document of the text
+that is on the page (with the old title, and the same project or chat scope) and
+opens it; **Close** goes back to the list. A page that was not told (its
+connection was down) finds out with its next save, or when it asks for the
+comments again. Deleting from the page you have open leaves it at once, and the
+text typed since the last save goes with the document.
+
+**Where this is safe.** The portal may run as root (with the sandbox on) while the
+agent writes in the same folder, so a delete and a rename are not done by path:
+the `documents` folder is held open, and the file is taken away or given its new
+name through that folder, by `portal.files.removeFile` and `renameFile` ([A chat's
+folder](/guide/extension-ui#a-chat-s-folder)). A folder or a link that the agent
+puts where the file was between the look and the call is never followed or
+removed, and a rename never replaces what is at the new name.
+
+**Cut off in the middle.** The portal writes down what it is about to do before
+it touches the file. If it stops after the file was renamed or removed and
+before the history says so, the next time the store is used it finishes: the
+rename is committed (the document is the same one, not a new one made of the file
+under its new name), or the deletion is. A rename that was cut off between the
+two halves of the file's rename (the file has both names for a moment) loses the
+old name.
+
 ### Beside a chat
 
 **Documents** in a chat's header opens a panel beside the conversation, docked
@@ -407,12 +502,14 @@ password changes. It names no folder, document or path; it says only that someth
 
 Click a document to open it in the editor. It is laid out as a word processor
 is: a bar with the document's name, where it stands, **Comments**, **History**
-and **Download**; a toolbar; and the page itself: the text is written on the whole
+and **Download** (the first two open a panel at the side, [below](#history)); a toolbar; and the page itself: the text is written on the whole
 of the area under the toolbar, one continuous surface with no box or frame around
 it (in the chat's panel as well as on the Documents page), in a column of a
 readable width with room at its sides. It scrolls by itself, so that the bar and
-the toolbar stay. A click anywhere on it under the text, or beside it, puts the
-cursor at the end of the document, as on a word processor's page. Nothing else is
+the toolbar stay. A click on it beside a line of the text puts the cursor on that
+line, and one under the last of the text puts it at the end of the document, as
+on a word processor's page. Selecting text with the mouse and letting go beside
+it, in the margin, keeps the selection. Nothing else is
 shown with the text: the comments are on the page when you open one, and in a list
 when you ask for it ([below](#comments)). On the Documents page an open document
 takes the whole page.
@@ -427,6 +524,59 @@ numbered and check lists, a quote, a table, a horizontal line, and
 box is ticked with a click. The usual Markdown shortcuts work as you type (`#`
 and a space for a heading, `-` for a list, `>` for a quote, three backticks for
 code), and so do Ctrl+B, Ctrl+I and Ctrl+E.
+
+### Visual or Markdown
+
+The bar has a switch, **Visual** and **Markdown**, for people who would rather
+write the Markdown itself. **Visual** is the editor above and is what a document
+opens in. **Markdown** shows the document's text as plain Markdown, in the place
+of the editor: in the same column, in a monospace face, with soft wrapping and no
+box. It is a plain text box, so the browser's own undo and redo, spelling and
+selection work in it, and so does **Tab**, which leaves the box rather than
+writing a tab. The browser remembers the choice (per browser, not per document),
+and a document opens the way you left it last.
+Where the bar is narrow (a window with the portal's sidebar open) the switch is
+two icons, with the names as tooltips, so that the document's name keeps its room.
+
+Everything else works as it does in the editor:
+
+- The text is saved in the same way: after a second without typing, at once with
+  Ctrl+S, and when the cursor leaves the box. What is saved is what is typed,
+  character for character, so a list written with `*` stays that way. The status
+  in the bar and the revision numbers are the same.
+- When the agent or another window changes the document meanwhile, the change
+  comes into the box as it does into the editor: at once if you have typed
+  nothing unsaved, merged into your text where the changes do not meet, and a
+  conflict that you choose in ([below](#when-the-document-changed-meanwhile)) where
+  they do. The box is the text for all of it: what the agent changed is merged
+  into what is in the box, in the style it is written in (a document that uses `*`
+  for list items keeps them), and a line the agent changed is no conflict because
+  of the style of another. Your cursor stays at the words it was at, and the
+  browser's own undo keeps what you typed: the change from outside is a step of
+  its own in it (the first Ctrl+Z takes it back, as an edit of yours that you can
+  redo; a browser that does not allow this starts its undo over).
+- A page that is closed with text not saved is kept, restored, and warned of in
+  the same way. What was typed in the box comes back in it as it was typed. In
+  **Visual** the same text is written by the editor, in its style. **History**
+  works the same, and a revision restored shows in the box.
+- Going from one to the other loses nothing, also text that is not saved yet,
+  which stays unsaved. Going to **Visual** saves the text first where it can. If
+  you only looked at a document, or went from one to the other without changing
+  it, nothing is saved, even for a document written in another style than the
+  editor's (`*` for list items, say). The page stays at the same place in the
+  text, as far as the scroll goes.
+- The toolbar (formatting and **Comment**) is not shown in the Markdown, where
+  there is nothing to select a passage in and the formatting is written out; the
+  shortcut Ctrl+Alt+M does nothing there either.
+- The comments are not drawn on the text: no marked passages, no cards, no
+  markers in the margin. **Comments** in the bar still has the list of all the
+  threads and how many are open. A thread **chosen** in the list takes you back to
+  **Visual** and opens its card at its passage. A passage is a stretch of the
+  file's Markdown that is followed from one revision to the next, so what you
+  write in the Markdown moves the comments as a change in the editor does
+  ([below](#where-the-passage-is)).
+- **Download** and **PDF (print)** are the same, and the print is the text as the
+  editor draws it.
 
 **Download** saves the document's file as it is (**Markdown (.md)**), or prints
 the text on its own (**PDF (print)**), where the browser's print dialog saves it
@@ -557,14 +707,34 @@ while there is such text.
 
 ## History
 
-**History** shows the document's revisions, newest first, with who made each
-(you; the agent, through its document tools; or an outside change: Files, an
-editor, the agent's own file tools, or a save the portal could not finish) and
-when. A revision that restored an earlier one says which.
-Click a revision to read its text.
+**History** in the bar opens the document's revisions as a panel at the right
+edge of the page, newest first, with who made each (you; the agent, through its
+document tools; or an outside change: Files, an editor, the agent's own file
+tools, or a save the portal could not finish) and when. A revision that restored
+an earlier one says which, and one that renamed the document says what it was
+called ([above](#renaming-and-deleting-a-document)). It is the same panel as the list of comments
+([below](#comments)): at the same edge and in the same size, beside the text
+where the page is wide and over it, from the right, where it is narrow, with
+**Close**. Only one of the two is open at a time: opening one closes the other,
+and the bar's buttons show which one is open. **Escape** closes the panel while
+the cursor is in it, and the button it was opened from has the focus again.
 
-**Restore this revision** saves its text as a new revision, so the history only
-grows. Text you have not saved yet is saved first, as a revision of its own, so
+Click a revision to read its text. It is shown on the page, in the text's place,
+while the panel stays open: the text cannot be edited then, and a note under the
+bar says that you are reading revision _n_, an earlier text, and that the
+document itself has not changed. **Back to the current text** in the note (or a
+click on the revision again, or closing the panel) is the way back. The current
+revision is the text itself, so nothing is changed for it.
+
+**Restore this revision** (in the panel, also while the revision is shown on the
+page) first asks "Restore revision _n_?": the current text is replaced, and the
+current version stays in the history. **Cancel** (or Escape) changes nothing and
+the focus goes back to the button; **Restore** goes ahead and the cursor is in
+the text afterwards. The question is the portal's one before something is
+removed or replaced, so **Settings → This browser → Confirmations → Ask before
+deleting** ([Interface](/guide/interface#confirmations)) turns it off, and then
+the restore is made at once. It saves the revision's text as a new revision, so
+the history only grows. Text you have not saved yet is saved first, as a revision of its own, so
 the restore does not take it away. If it cannot be saved (a change meanwhile
 that you have not chosen about, or an error), nothing is restored until it is
 dealt with. If the document changed since the page last saved or loaded it, the
@@ -588,16 +758,17 @@ as the text, and nothing of them is shown until you ask:
   opens as a card on the page. On a wide page the card is **beside the passage**,
   level with it at the right edge of the page, so that the highlighted words stay
   visible at its left (the text it overlaps on the right goes behind it); where
-  the passage runs into the card's place, or the page is narrow (a narrow panel,
-  a phone), the card is just under the words (above them where there is no room
-  under them). It stays inside the page. It has the comments of the thread, each
+  the passage runs into the card's place, or the page has no room beside the text
+  for it (a narrow panel, a phone, or a panel open at the side: the room right of
+  the text column is measured, not the window), the card is just under the words
+  (above them where there is no room under them). It stays inside the page. It has the comments of the thread, each
   with who wrote it and when, a check to **Resolve** the thread (**Reopen** on a
   resolved one) and **Delete thread** where that is yours to do. A thread with
   many comments shows its first and its last, and **Show _n_ replies** for the
   rest. The box to **Reply** in is one line, and says in its own words that
   **@agent** asks the agent. Only one card is open at a time: a click on another
-  passage opens that one instead. It follows its words as you scroll and as the
-  text changes, and a click in the text elsewhere, a click outside the card or
+  passage opens that one instead. It follows its words as you scroll (it scrolls off with them when they do)
+  and as the text changes, and a click in the text elsewhere, a click outside the card or
   **Escape** (also when the card was opened by a click and the cursor is still in
   the text) closes it (the text has the focus again). What was typed in its box
   is kept when it is closed ([below](#writing-a-comment)). If its words are gone
@@ -609,8 +780,10 @@ as the text, and nothing of them is shown until you ask:
   the thread's card as a click on the words does, and **Enter** on it opens the
   card with the focus in its box. Threads on one line have a marker each, one
   under the other. A marker follows its passage and is not there while its card
-  is open. Where there is no margin (a narrow panel, a phone) there are no
-  markers: the highlighted words are the way in.
+  is open. Markers are drawn only where the margin right of the text is wide
+  enough to hold them without touching a word (measured, so a panel open at the
+  side counts): where there is not (a narrow window or panel, a phone) there are
+  no markers, and the highlighted words are the way in.
 - A new comment opens its card in the same way at the words you selected, with
   the box ready to write in. The page stays where it is, also far down a long
   document.
@@ -619,10 +792,12 @@ as the text, and nothing of them is shown until you ask:
   the box; **AltGr+M** is left to the text (it types a character on some layouts); **Tab** from the text goes into the card,
   and **Escape** back to the text.
 - **Comments** in the bar, with how many threads are open, shows the **list** of
-  all the threads, and hides it again (**Close** in it does too). It is a panel
-  at the right edge of the page, the whole height of it: beside the text where
-  the page is wide (the text gets narrower), over it, from the right, where it is
-  narrow (a narrow panel, a phone). A thread on a passage is a line in it (the
+  all the threads, and hides it again (**Close** in it does too, and so does
+  **Escape** while the cursor is in it). It is a panel at the right edge of the
+  page, the whole height of it: beside the text where the page is wide (the text
+  gets narrower), over it, from the right, where it is narrow (a narrow panel, a
+  phone). The history is the same panel ([above](#history)), and the two replace
+  each other. A thread on a passage is a line in it (the
   words, and the last thing said): **choose** it and the text scrolls to the
   passage and its card opens there. A thread that has no passage to click, because
   its words are gone from the text (or could not be marked) or because it is
@@ -863,6 +1038,11 @@ the runner image does not get extensions.
 | `doc_delete_comment` | Deletes one of the agent's own comments or replies. A thread goes with its only comment. |
 | `doc_resolve` | Resolves a thread, with a last comment if the agent gives one. |
 
+None of them renames or deletes a document: that is for the person, on the page
+([above](#renaming-and-deleting-a-document)). The agent can still move or remove
+the file with its own file tools, which is what
+[A file that is deleted or renamed](#a-file-that-is-deleted-or-renamed) is about.
+
 The agent names a document by its id, never by a path. A document is the
 **project's** (every chat that works in the folder sees it) unless the agent
 makes it with `scope: chat`: that one is listed and read only in its chat. The
@@ -1028,7 +1208,7 @@ extensions/docs/
 ├── build.mjs        builds the editor into web/editor.js
 ├── server.js        the server half: routes, what the pages listen to, the wake of the agent
 ├── store.js         one folder's documents (class Store): files, history, comments
-├── files.js         what a document's file is (its name, what refuses a write), on `portal.files`
+├── files.js         what a document's file is (its name, what refuses a write, rename or removal), on `portal.files`
 ├── git.js, guard.js the history in git, and the store's folder held open
 ├── place.js         where a folder's store is, and which folder it is for
 ├── tools.js         the agent's nine tools
@@ -1062,6 +1242,8 @@ its path and a document by an id the store gave it, never by a path:
 | `POST /folders/:folder/documents/upload` | A Markdown file the person uploaded `{ name, markdown }`, kept as it is under its own name |
 | `GET …/:id/download` | The document's file, as an attachment |
 | `GET`, `PUT /folders/:folder/documents/:id` | A document's Markdown and revision; a save `{ markdown, base }`, answered 409 with the current text when its changes meet later ones |
+| `POST …/:id/rename` | Another file name `{ name }` (`x.md`), as a revision of its own: 400 for a name that is not a document's, 409 for one that is taken (`exists`: the other document's id, or `null` for another file) |
+| `DELETE /folders/:folder/documents/:id` | Deletes the document: its file, its comments and its place in the lists (409 where its name is a link, a folder or a file with a second name) |
 | `GET …/:id/history`, `…/revisions/:n`, `POST …/restore` | The history, one revision's text, and bringing one back |
 | `GET`, `POST …/:id/threads`, `…/threads/:thread/{comments,resolve,reopen,seen}` | The comment threads, and a reply |
 | `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away one of the person's comments `{ body }`. With `draft` (`?draft=1` for the delete) it is a comment saved as it is typed, by a client that does that (the page sends one only when it is sent): only the last comment of an open thread, not marked as edited. Otherwise any of theirs, open thread or resolved; a change is marked as edited |
@@ -1089,7 +1271,17 @@ extension.
 
 **A write** is made under the folder's lock in three steps (the file, the git
 commit, the database) and any failure between them is put right the next time
-the store is used (`store.js`, top). Every refusal is a `DocError` with an HTTP
+the store is used (`store.js`, top). A rename or a delete begins with a fourth,
+first step: what is decided is written to the database (`pending`), then the
+file is renamed or removed (`portal.files.renameFile`, `removeFile`: the folder
+is held, nothing is followed), then the commit (a rename is a commit that takes the
+old name out of the tree and puts the new one in, with `Renamed-From`; a deletion
+takes the name out, with `Deleted: yes`) and the database. Recovery finishes what
+`pending` says from wherever the disk is (the file has the new name, or both, or
+only the old), and a rebuild of the index from the history takes the name from the
+last revision and drops what was deleted. A revision's text is read by its blob,
+not by the file name it had in that commit, which is what keeps the history of a
+renamed document readable. Every refusal is a `DocError` with an HTTP
 status, which a route answers and a tool turns into the error the agent reads;
 a failure of the disk, of git or of the database is made into one that says
 what is wrong (`errors.js`), and anything else is logged and answered with
@@ -1106,6 +1298,8 @@ alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:
 | --- | --- |
 | `store`, `extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, German |
 | `hardening` | The edges: a file deleted or renamed, no rights, a broken store, saves at once, the size limit, a chat that never starts |
+| `rename` | A document renamed and deleted: what goes with a rename, the refusals, the pages told, a stop in the middle of either, the index made again from the history |
+| `files` | What a document's file is, and the calls on `portal.files` it is read, written, renamed and removed with |
 | `tools` | The agent's tools |
 | `stream`, `live`, `merge`, `saver` | Telling a page of changes (what it listens to), and taking them in |
 | `frame` | What the editor keeps apart from the Markdown: front matter and line endings |
