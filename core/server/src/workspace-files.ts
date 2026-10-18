@@ -996,8 +996,10 @@ export function holdForReading(base: string, rel: unknown, options: { direct?: b
 }
 
 /**
- * Whether `fd`, a folder opened by the name just made, is plainly the one that was made: empty, on the parent's file
- * system, and the portal's own where the portal is not root.
+ * Whether `fd`, a folder opened by the name just made, is plainly the one that was made: empty, and on the parent's file
+ * system. Not who it belongs to: some file systems (NFS with root_squash, CIFS or vfat mounted with a uid, FUSE) give a
+ * new folder an owner that is not the one who made it, and a folder moved in from another parent needs the agent to
+ * be allowed to write in it, so the owner says nothing the emptiness does not.
  *
  * Node cannot make a folder and open it in one call, so the name is looked up twice, and in between an agent that writes in
  * the parent can remove the new (empty) folder and move another one of the parent onto the name. What the portal does next
@@ -1011,7 +1013,6 @@ function isFresh(fd: number, where: string, parent: { dev: number }): boolean {
   try {
     const st = fstatSync(fd);
     if (st.dev !== parent.dev) return false;
-    if (process.geteuid && st.uid !== process.geteuid()) return false;
     return readdirSync(where).length === 0;
   } catch {
     return false;
