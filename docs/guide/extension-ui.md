@@ -143,6 +143,7 @@ with it either way.
 | `chats.on(chatId, handler)` | The same outside a component |
 | `chats.create({ title?, workspace? })` | A new chat, as New chat makes one, in a folder and under a name if you say them. Not opened: `navigate("/s/" + chat.id)` does that |
 | `chats.files.pictureUrl`, `videoUrl`, `fileUrl`, `upload` | [The portal's routes for a chat's folder](#the-portal-s-routes-for-a-chat), as calls and not as addresses to build |
+| `chats.files.inside`, `below`, `latestActivity`, `ofCall`, `pictures` | [What the portal knows about paths in a chat's folder](#the-portal-s-routes-for-a-chat): where a path the agent wrote is, which file it last read or changed, and a Markdown's pictures |
 | `chats.background.stop`, `clear`, `output` | The jobs the agent left running: stop one, forget the finished, follow one's output |
 | `panels` | [Any panel of the chat on screen](#panels-and-commands), by name |
 | `commands` | [What can be asked of an extension by name](#panels-and-commands) |
@@ -289,6 +290,7 @@ prefix of your own: the stylesheet is the page's.
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
 | `inOverlay(target)` | Whether a press is inside something the portal draws over the page: the list of a `Select`, the question `confirm` asks. A popover of yours that closes on a press outside it counts these as inside |
+| `isEnter(event)`, `isEscape(event)` | Enter that means "done" and Escape that means "never mind", not the ones that pick or dismiss a word of an input method (Japanese, Chinese, Korean). Use them in a key handler instead of `event.key === "Enter"` |
 
 The portal's own utility classes (Tailwind) exist only for what the portal
 itself uses, so do not rely on one being there. Style your markup in your own
@@ -1058,6 +1060,19 @@ sends a file into the folder (a taken name gets a number), and `portal.chats.bac
 `clear(chatId)` and `output(chatId, key, from?)` stop a job the agent left running, forget the finished and follow one's output.
 Browsing and changing the folder is your own server half's, through `portal.files`.
 
+What the portal knows about paths in the folder is offered too, so that a page does not copy it:
+
+- `portal.chats.files.inside(folder, given)` turns a path as the agent wrote it (relative to its folder, or absolute) into one
+  relative to `folder`, and says `undefined` for one somewhere else or the folder itself. `below(dir, where)` is the same for two
+  paths you have. Both go by the text of the paths (`..` is followed, links are not), so they decide what to show, never what is allowed:
+  the server half checks that.
+- `latestActivity(events, folder)` is the file the agent most recently read or changed in the chat's folder, from `ChatFeed.events`:
+  `{ seq, path, tool }`, or `null`. A read counts when it starts, a write or an edit when it ends (one that failed does not). `seq`
+  is the event, so a newer one means "look again" even at the same file. `ofCall(call, folder)` is the file one call reads or changes.
+- `pictures(markdown, folder, url, base?)` turns the pictures an agent wrote as paths in the folder (`![chart](plots/chart.png)`)
+  into the addresses `url(path)` gives, which is what makes them draw: the Markdown renderer blocks a relative image. A web
+  picture, a `data:` URL and a path outside the folder are left as they are. `base` is the folder the Markdown lies in.
+
 ### Tools that share the server half's state
 
 A tool the agent calls is registered in the chat's pi. Made in the server
@@ -1403,7 +1418,10 @@ portal.tx("Press {key} to send", { key: h("kbd", null, "Enter") });
 ```
 
 `portal.format.number(n)`, `.date(d)`, `.dateTime(d)` and `.time(d)` write
-numbers and times as the page's language does.
+numbers and times as the page's language does. `.bytes(n)` writes a size
+("1.5 MB"), and `.since(then, { dateAfterDays?, dateFormat? })` how long ago ("5m ago"):
+of a date, a time in ms, or a timestamp the server wrote as text (UTC, with or without a zone marker), and the date
+itself once it is more than `dateAfterDays` days ago.
 
 ## Themes
 

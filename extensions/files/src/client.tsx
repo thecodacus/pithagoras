@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LuFolderOpen } from "react-icons/lu";
-import type { PanelProps, Portal, SlotMap } from "@pithagoras/extension-api";
+import type { FileActivity, PanelProps, Portal, SlotMap } from "@pithagoras/extension-api";
 import { FilesPanel } from "./FilesPanel";
-import { fileOfCall, keepFileActivity, latestFileActivity, type FileActivity } from "./activity";
+import { keepFileActivity } from "./activity";
 import { flushOnLeave, forgetFileDraft } from "./drafts";
 import { confirmDialog, msg, portal, setPortal, t } from "./portal";
 import { de } from "./de";
@@ -20,7 +20,7 @@ function useAgentFile(chat: { id: string; workspace: string }): { activity: File
   const last = useRef<FileActivity | null>(null);
   return portal.chats.use(
     chat.id,
-    (feed) => ({ activity: (last.current = keepFileActivity(last.current, latestFileActivity(feed.events, chat.workspace))), loading: feed.loading }),
+    (feed) => ({ activity: (last.current = keepFileActivity(last.current, portal.chats.files.latestActivity(feed.events, chat.workspace))), loading: feed.loading }),
     (a, b) => a.activity === b.activity && a.loading === b.loading,
   );
 }
@@ -72,7 +72,7 @@ function VoiceFiles({ chat, opened }: SlotMap["voice.window"]["props"]) {
   last.current = lastEvent;
   useEffect(() => {
     if (opened.by !== "call") return;
-    const path = fileOfCall(opened.call, chat.workspace);
+    const path = portal.chats.files.ofCall(opened.call, chat.workspace);
     if (!path) return;
     // Between the last event and the next: a second tap with nothing new between goes halfway to the next again.
     setTapped((was) => ({ seq: was && was.seq > last.current ? (was.seq + Math.floor(was.seq) + 1) / 2 : last.current + 0.5, path, tool: "read" }));
@@ -101,8 +101,8 @@ export default function files(given: Portal) {
     icon: LuFolderOpen,
     keepLoaded: true,
     // Each file the agent reads or changes in the folder brings it up.
-    useAutoOpen: ({ chat }) => portal.chats.use(chat.id, (feed) => latestFileActivity(feed.events, chat.workspace)?.seq ?? 0),
-    opensFor: (call, chat) => fileOfCall(call, chat.workspace) !== undefined,
+    useAutoOpen: ({ chat }) => portal.chats.use(chat.id, (feed) => portal.chats.files.latestActivity(feed.events, chat.workspace)?.seq ?? 0),
+    opensFor: (call, chat) => portal.chats.files.ofCall(call, chat.workspace) !== undefined,
     component: VoiceFiles,
   });
   portal.shortcuts.register({

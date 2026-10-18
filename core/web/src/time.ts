@@ -27,3 +27,12 @@ export function sinceThen(
 
 /** "5m ago", from a timestamp the server wrote; what cannot be read is shown as it is. */
 export const when = (iso: string): string => sinceThen(serverTime(iso)) || iso;
+
+/**
+ * "5m ago" for an extension: of a Date or a time in ms, or of a timestamp the server wrote as text (UTC, with or without a zone
+ * marker). What cannot be read is shown as it is, if it is text, and nothing otherwise.
+ */
+export function since(then: Date | number | string, options?: Parameters<typeof sinceThen>[1]): string {
+  if (typeof then !== "string") return sinceThen(then, options);
+  return sinceThen(serverTime(then), options) || then;
+}

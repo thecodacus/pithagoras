@@ -59,6 +59,15 @@ export interface PanelHandle {
 
 export type PanelProps = ChatProps & { close(): void; panel: PanelHandle };
 
+/** A file the agent has just read or changed in a chat's folder: see `chats.files.latestActivity`. */
+export interface FileActivity {
+  /** The event it was noticed at; a newer one means "look again", even at the same file. */
+  seq: number;
+  /** Relative to the chat's folder. */
+  path: string;
+  tool: "read" | "write" | "edit";
+}
+
 /** A call of a tool, as its row in the conversation has it. */
 export interface ToolCallView {
   /** The tool's name. */
@@ -415,6 +424,10 @@ export interface Ui {
    * ui.inOverlay(e.target)) return;`.
    */
   inOverlay(target: EventTarget | null): boolean;
+  /** Enter that means "done", not Enter that picks a word with an input method (Japanese, Chinese, Korean): for a key handler's `if`. */
+  isEnter(event: { key: string; keyCode?: number; nativeEvent?: { isComposing?: boolean }; isComposing?: boolean }): boolean;
+  /** Escape that means "never mind", not Escape that dismisses an input method's candidates. */
+  isEscape(event: { key: string; keyCode?: number; nativeEvent?: { isComposing?: boolean }; isComposing?: boolean }): boolean;
 }
 
 // --- shortcuts ---
@@ -532,6 +545,13 @@ export interface Portal {
     date(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
     dateTime(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
     time(d: Date | number | string, options?: Intl.DateTimeFormatOptions): string;
+    /** A size in bytes, "1.5 MB". */
+    bytes(n: number): string;
+    /**
+     * How long ago, "5m ago", in the language shown: of a Date, a time in ms, or a timestamp the server wrote as text (UTC, with or
+     * without a zone marker; what cannot be read is shown as it is). Past `dateAfterDays` days it is the date instead (`dateFormat`).
+     */
+    since(then: Date | number | string, options?: { dateAfterDays?: number; dateFormat?: Intl.DateTimeFormatOptions }): string;
   };
   locale: {
     /** The package's texts in a language ("de"), each by what the code says in English: a text, or a count's forms (see `tp`). */
@@ -579,6 +599,28 @@ export interface Portal {
       fileUrl(chatId: string, path: string, version?: string | number): string;
       /** A file from this computer into the folder `dir` of the chat's, as it is; a taken name gets a number. The answer says what it is called. */
       upload(chatId: string, dir: string, file: File, name?: string): Promise<{ path: string; size: number }>;
+      /**
+       * `given`, as the agent wrote it (relative to where it works in `folder`, or absolute), as a path relative to `folder`;
+       * undefined when it is somewhere else, or is the folder itself. By the text of the paths: `..` is followed, links are not.
+       */
+      inside(folder: string, given: string): string | undefined;
+      /** `where` as a path under the folder `dir`, "" for `dir` itself, or undefined when it is somewhere else: by the text of the paths. */
+      below(dir: string, where: string): string | undefined;
+      /**
+       * The file the agent most recently read or changed in the chat's folder (`chat.workspace`), if any, from `ChatFeed.events`.
+       * A read is noticed when it starts, since the file is there to be shown; a write or an edit when it ends, with the path of the
+       * call that began it, and one that failed is not. Somewhere else is somebody else's file.
+       */
+      latestActivity(events: readonly PortalEvent[], folder: string): FileActivity | null;
+      /** The file in the chat's folder a call of the agent's reads or changes (`read`, `write`, `edit`), by its path there; undefined for any other call. */
+      ofCall(call: ToolCallView, folder: string): string | undefined;
+      /**
+       * Markdown with the pictures the agent wrote as paths in the chat's folder (`![chart](plots/chart.png)`) turned into the
+       * addresses `url(path)` gives, which is what makes them draw: the Markdown renderer blocks a relative image. An address
+       * that already is one (a web picture, a data: URL, the portal's own) is left alone, and so is a path outside `folder`.
+       * `base` is the folder the Markdown itself lies in, relative to the chat's folder: a relative path is read from there.
+       */
+      pictures(markdown: string, folder: string, url: (path: string) => string, base?: string): string;
     };
     /** The jobs the agent left running in a chat (`ChatFeed.background` lists them). */
     background: {

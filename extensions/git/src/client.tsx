@@ -2,7 +2,6 @@ import { useCallback, type KeyboardEvent } from "react";
 import { LuGitBranch } from "react-icons/lu";
 import type { PanelHandle, PanelProps, Portal } from "@pithagoras/extension-api";
 import { GIT_TABS, GitPanel, type GitTab } from "./panel/GitPanel";
-import { latestFileActivity } from "./file-activity";
 import { portal, setPortal, t } from "./portal";
 import { de } from "./de";
 import "./client.css";
@@ -27,7 +26,7 @@ const show = (panel: PanelHandle, next: Partial<Shown>) => {
 function Body({ chat, panel }: PanelProps) {
   const { tab } = shownOf(panel);
   // A file the agent read or wrote, and the end of its turn: the panel looks again.
-  const { activity, running } = portal.chats.use(chat.id, (feed) => ({ activity: latestFileActivity(feed.events, chat.workspace), running: feed.running }));
+  const { activity, running } = portal.chats.use(chat.id, (feed) => ({ activity: portal.chats.files.latestActivity(feed.events, chat.workspace)?.seq, running: feed.running }));
   const onTab = useCallback((next: GitTab) => show(panel, { tab: next }), [panel]);
   const onCount = useCallback((n: number) => show(panel, { count: n }), [panel]);
   // In Files beside it: Git, just clicked in, is not the panel closed to make room. Offered only where there is a

@@ -11,7 +11,7 @@ import { ViewHost } from "./views";
 import { Select } from "../portal";
 import { local } from "../portal";
 import { labelOf, msg, t, tp, useLanguage } from "../portal";
-import { below } from "../helpers";
+import { below } from "../portal";
 
 export type GitTab = "changes" | "history" | "branches" | "pulls";
 export const GIT_TABS: { id: GitTab; label: string }[] = [

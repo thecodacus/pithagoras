@@ -1,7 +1,7 @@
-import { insideFolder } from "./helpers";
+import { insideFolder } from "./file-activity";
 
 /**
- * Pictures from the chat's folder, in Markdown Files draws as a page.
+ * Pictures from a chat's folder, in Markdown an extension draws as a page (a canvas, a file shown as one).
  *
  * The agent writes `![chart](plots/chart.png)`: a path in the folder it works
  * in. As a URL that means nothing to the page, and the Markdown renderer

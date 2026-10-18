@@ -4,6 +4,11 @@ import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
 import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi } from "../api";
 import { formatDate, formatDateTime, formatNumber, formatTime, useLanguage } from "../i18n";
+import { fileOfCall, insideFolder, latestFileActivity } from "../file-activity";
+import { folderPictures } from "../folder-pictures";
+import { below } from "../paths";
+import { bytesLabel } from "../projects";
+import { since } from "../time";
 import type { Portal } from "@pithagoras/extension-api";
 import { onChatFeed, useChatFeed } from "./chat-feed";
 import { hasCommand, registerCommand, runCommand } from "./commands";
@@ -161,7 +166,7 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       tp: (n, one, other, vars) => translateCount(ext.name, n, one, other, vars),
       tc: (text, context, vars) => translateInContext(ext.name, text, context, vars),
       tx: (text, vars) => translateWithParts(ext.name, text, vars),
-      format: { number: formatNumber, date: formatDate, dateTime: formatDateTime, time: formatTime },
+      format: { number: formatNumber, date: formatDate, dateTime: formatDateTime, time: formatTime, bytes: bytesLabel, since },
       locale: { add: (code, strings) => addStrings(ext.name, code, strings), use: useLanguage },
       commands: { register: (name, run) => kept(registerCommand(name, run, ext.name)), run: runCommand, has: hasCommand },
       panels,
@@ -172,7 +177,17 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
           const made = await api.createSession(options?.workspace, options?.title);
           return { id: made.id, title: made.title, workspace: made.workspace };
         },
-        files: { pictureUrl: api.pictureUrl, videoUrl: api.videoUrl, fileUrl: api.fileUrl, upload: api.uploadFile },
+        files: {
+          pictureUrl: api.pictureUrl,
+          videoUrl: api.videoUrl,
+          fileUrl: api.fileUrl,
+          upload: api.uploadFile,
+          inside: insideFolder,
+          below,
+          latestActivity: latestFileActivity,
+          ofCall: fileOfCall,
+          pictures: folderPictures,
+        },
         background: { stop: async (chatId, key) => void (await api.stopBackgroundJob(chatId, key)), clear: async (chatId) => void (await api.clearBackgroundJobs(chatId)), output: api.backgroundOutput },
       },
       shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },

@@ -13,6 +13,7 @@ import { RowsSkeleton, SkeletonGroup } from "../components/Skeleton";
 import { StatusDot } from "../components/StatusDot";
 import { lazyComponent } from "../lazy";
 import { inOverlay } from "../overlay";
+import { isEnter, isEscape } from "../shortcuts";
 import { local, session } from "../safe-storage";
 import { tabKeys } from "../tab-keys";
 import { useFollowBottom } from "../use-follow-bottom";
@@ -71,6 +72,10 @@ export const ui: Ui = {
   tabKeys,
   /** Whether a press is inside something the portal draws over the page: a select's list, a question. */
   inOverlay,
+  /** Enter that means "done", not Enter that picks a word in an input method. */
+  isEnter,
+  /** Escape that means "never mind", not Escape that dismisses an input method's candidates. */
+  isEscape,
 };
 
 

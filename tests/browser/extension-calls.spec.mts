@@ -221,3 +221,38 @@ test('a press in the list of a select, or in the question confirm asks, is in an
   });
   expect(answers).toEqual({ list: true, question: true, dialog: false, elsewhere: false, none: false, window: false });
 });
+
+test('what the portal has for a path, a time, a size and a key is offered, in place of a copy in each extension', async ({ page }) => {
+  await open(page);
+  const got = await page.evaluate(() => {
+    const { chats, format, ui } = (window as any).probe;
+    const folder = '/workspaces/proj';
+    const events = [
+      { seq: 1, type: 'tool_execution_start', payload: { toolName: 'read', args: { path: 'a.md' }, toolCallId: 'r' } },
+      { seq: 2, type: 'tool_execution_start', payload: { toolName: 'write', args: { file_path: '/workspaces/proj/src/b.ts' }, toolCallId: 'w' } },
+      { seq: 3, type: 'tool_execution_end', payload: { toolName: 'write', toolCallId: 'w' } },
+    ];
+    return {
+      inside: [chats.files.inside(folder, 'src/../a.md'), chats.files.inside(folder, '/etc/passwd'), chats.files.inside(folder, '/workspaces/proj/x/y.png')],
+      below: [chats.files.below('/a/b/', '/a/b/c'), chats.files.below('/a/b', '/a/bc'), chats.files.below('/a/b', '/a/b')],
+      latest: chats.files.latestActivity(events, folder),
+      none: chats.files.latestActivity([], folder),
+      ofCall: [chats.files.ofCall({ name: 'edit', input: { path: 'src/c.ts' } }, folder), chats.files.ofCall({ name: 'bash', input: { command: 'ls' } }, folder)],
+      pictures: chats.files.pictures('![chart](plots/chart.png) ![web](https://example.com/a.png)', folder, (path: string) => `/p?${path}`),
+      bytes: [format.bytes(10), format.bytes(1536), format.bytes(5 * 1024 ** 2)],
+      since: [format.since(Date.now() - 5 * 60_000), format.since(new Date(Date.now() - 3 * 3_600_000)), format.since('2000-01-01 00:00:00', { dateAfterDays: 7 }).includes('ago')],
+      keys: [ui.isEnter({ key: 'Enter' }), ui.isEnter({ key: 'Enter', isComposing: true }), ui.isEnter({ key: 'Enter', keyCode: 229 }), ui.isEscape({ key: 'Escape' }), ui.isEscape({ key: 'Escape', nativeEvent: { isComposing: true } })],
+    };
+  });
+  expect(got).toEqual({
+    inside: ['a.md', undefined, 'x/y.png'],
+    below: ['c', undefined, ''],
+    latest: { seq: 3, path: 'src/b.ts', tool: 'write' },
+    none: null,
+    ofCall: ['src/c.ts', undefined],
+    pictures: '![chart](</p?plots/chart.png>) ![web](https://example.com/a.png)',
+    bytes: ['10 B', '1.5 KB', '5.0 MB'],
+    since: ['5m ago', '3h ago', false],
+    keys: [true, false, false, true, false],
+  });
+});

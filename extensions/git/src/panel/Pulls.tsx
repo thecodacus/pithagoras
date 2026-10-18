@@ -10,7 +10,7 @@ import { Counts, ErrorNote, Quiet, SectionHead, TextButton } from "./bits";
 import { ChangeList } from "./History";
 import { useGit } from "./context";
 import { useGitDraft } from "./draft";
-import { when } from "../helpers";
+import { when } from "../portal";
 import { labelOf, msg, t, tc, tp, tx } from "../portal";
 
 

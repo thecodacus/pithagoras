@@ -57,3 +57,13 @@ export function Markdown(props: ComponentProps<Ui["Markdown"]>) {
   const Own = portal.ui.Markdown;
   return <Own {...props} />;
 }
+
+// What the portal has for it, by the names the extension's parts use.
+/** "5m ago", of a Date, a time in ms, or a timestamp the server wrote as text; past `dateAfterDays` it is the date. */
+export const sinceThen = (then: Date | number, options?: { dateAfterDays?: number; dateFormat?: Intl.DateTimeFormatOptions }) => portal.format.since(then, options);
+/** "5m ago", from a timestamp the server wrote; what cannot be read is shown as it is. */
+export const when = (iso: string): string => portal.format.since(iso);
+/** Where `where` is below the folder `dir`, as a path from it: "" for the folder itself, undefined for outside it. */
+export const below = (dir: string, where: string) => portal.chats.files.below(dir, where);
+/** Enter that means "done", not Enter that picks a word with an input method. */
+export const isEnter: Ui["isEnter"] = (e) => portal.ui.isEnter(e);

@@ -113,7 +113,6 @@ export const de: Record<string, string | Plural> = {
   "It is new and not in any commit, so nothing brings it back.": "Sie ist neu und in keinem Commit, also bringt nichts sie zurück.",
   "Its branch on the remote was deleted": "Sein Branch auf dem Remote wurde gelöscht",
   "Its commits are on no other branch. Deleting it loses them unless you have their hashes.": "Seine Commits sind auf keinem anderen Branch. Beim Löschen gehen sie verloren, sofern du ihre Hashes nicht hast.",
-  "just now": "gerade eben",
   "Kind of change": "Art der Änderung",
   "Line after": "Zeile nachher",
   "Line before": "Zeile vorher",
@@ -245,8 +244,5 @@ export const de: Record<string, string | Plural> = {
   "{n} files": {"one": "{n} Datei", "other": "{n} Dateien"},
   "{n} files are in conflict. Resolve and stage them, then continue.": {"one": "{n} Datei steht in Konflikt. Löse ihn, stage sie und mach dann weiter.", "other": "{n} Dateien stehen in Konflikt. Löse sie, stage sie und mach dann weiter."},
   "{n} stashes": {"one": "{n} Stash", "other": "{n} Stashes"},
-  "{n}d ago": "vor {n} T.",
-  "{n}h ago": "vor {n} Std.",
-  "{n}m ago": "vor {n} Min.",
   "{shown} of {total} lines shown": "{shown} von {total} Zeilen gezeigt",
 };

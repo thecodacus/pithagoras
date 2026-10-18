@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { toolArgsOf, toolNameOf } from '../core/web/src/tool-payload.js';
 import { describeCall } from '../core/web/src/tool-activity.js';
-import { latestFileActivity } from '../extensions/files/src/activity.ts';
+import { latestFileActivity } from '../core/web/src/file-activity.ts';
 import { latestBrowserActivity } from '../core/web/src/voice-browser.js';
 import { latestCommand } from '../extensions/terminal/src/runs.ts';
 

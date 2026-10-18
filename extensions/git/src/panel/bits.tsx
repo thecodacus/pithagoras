@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { LuCircleAlert } from "react-icons/lu";
 import { msg, t } from "../portal";
-import { sinceThen } from "../helpers";
+import { sinceThen } from "../portal";
 
 /** "5m ago", from seconds since the epoch. */
 export const ago = (seconds: number): string => sinceThen(seconds * 1000, { dateAfterDays: 60 });

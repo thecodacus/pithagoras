@@ -22,12 +22,10 @@ import {
   LuUpload,
 } from "react-icons/lu";
 import { api, type FileEntry, type Unsaved } from "./files-api";
-import type { FileActivity } from "./activity";
+import type { FileActivity } from "@pithagoras/extension-api";
 import { flushFileDraft, keepFileDraft, readFileDraft } from "./drafts";
-import { bytesLabel, isEnter, isEscape, within } from "./helpers";
-import { folderPictures } from "./pictures";
 import { deleteAsking, unsavedNotes } from "./unsaved";
-import { confirmDialog, isApiError, local, Markdown, t, tp, useLanguage } from "./portal";
+import { bytesLabel, confirmDialog, folderPictures, isApiError, isEnter, isEscape, local, Markdown, t, tp, useLanguage, within } from "./portal";
 
 interface Open {
   path: string;

@@ -37,3 +37,14 @@ export function Markdown(props: ComponentProps<Ui["Markdown"]>) {
   const Own = portal.ui.Markdown;
   return <Own {...props} />;
 }
+
+// What the portal has for it, by the names the extension's parts use.
+/** A size in bytes, "1.5 MB". */
+export const bytesLabel = (n: number) => portal.format.bytes(n);
+/** Enter that means "done", not Enter that picks a word with an input method. */
+export const isEnter: Ui["isEnter"] = (e) => portal.ui.isEnter(e);
+export const isEscape: Ui["isEscape"] = (e) => portal.ui.isEscape(e);
+/** `where` is the folder `dir` or inside it, by the text of the path. */
+export const within = (dir: string, where: string): boolean => portal.chats.files.below(dir, where) !== undefined;
+/** Markdown with the chat's folder's pictures turned into the portal's addresses. */
+export const folderPictures = (markdown: string, folder: string, url: (path: string) => string, base = "") => portal.chats.files.pictures(markdown, folder, url, base);
