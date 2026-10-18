@@ -3,6 +3,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Chat } from '../src/components/Chat';
+import { ConfirmHost } from '../src/components/ConfirmDialog';
 import { ExtensionDialog } from '../src/components/ExtensionDialog';
 import { KeyboardShortcuts } from '../src/components/KeyboardShortcuts';
 import type { PortalEvent, Session } from '../src/api';
@@ -150,4 +151,4 @@ function Fixture() {
 // Inside a router, as in the app: the chat's links go through it.
 // What an installed extension's server half tells this chat's page, as the app's stream passes it on: see extensions/server-feed.ts.
 (window as any).extensionSays = (extension: string, data: unknown) => serverPush('test', extension, data);
-createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /></BrowserRouter>);
+createRoot(document.getElementById('root')!).render(<BrowserRouter><Fixture /><ConfirmHost /></BrowserRouter>);

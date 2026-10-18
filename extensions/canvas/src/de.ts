@@ -22,7 +22,6 @@ export const de: Record<string, string> = {
   "Edit canvas content": "Canvas-Inhalt bearbeiten",
   "Edit inline": "Hier bearbeiten",
   "Edited by you": "Von dir bearbeitet",
-  "Keep": "Behalten",
   "Looking at the documents": "Sieht sich die Dokumente an",
   "New canvas": "Neues Canvas",
   "Not stored — lost on server restart": "Nicht gespeichert — geht beim Neustart des Servers verloren",

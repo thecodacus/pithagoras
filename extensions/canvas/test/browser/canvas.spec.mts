@@ -158,16 +158,54 @@ test('in voice mode the canvases are a window of their own, brought up as the ag
   await expect(window).toHaveClass(/is-open/);
 });
 
-test('what goes wrong and the delete question are in the theme\'s colour for danger, not one of their own', async ({ page }) => {
+test('what goes wrong is in the theme\'s colour for danger, not one of its own', async ({ page }) => {
   await chat(page);
   await page.goto('/tests/voice.html');
   // The extension's stylesheet is in the page once it is loaded.
   await expect(page.getByRole('button', { name: 'Session canvases', exact: true })).toBeVisible();
   const read = await page.evaluate(() => {
-    document.body.insertAdjacentHTML('beforeend', '<p class="canvas-error">e</p><p class="canvas-delete-confirm">d</p><i id="danger" style="color: rgb(var(--danger))"></i>');
+    document.body.insertAdjacentHTML('beforeend', '<p class="canvas-error">e</p><i id="danger" style="color: rgb(var(--danger))"></i>');
     const colour = (selector: string) => getComputedStyle(document.querySelector(selector)!).color;
-    return { error: colour('.canvas-error'), confirm: colour('.canvas-delete-confirm'), danger: colour('#danger') };
+    return { error: colour('.canvas-error'), danger: colour('#danger') };
   });
   expect(read.error).toBe(read.danger);
-  expect(read.confirm).toBe(read.danger);
+});
+
+/** A stored canvas to delete, and the number of times the server half was asked to. */
+async function deletable(page: Page) {
+  await chat(page, [{ id: 'saved', title: 'Saved document', content: 'Persisted words', revision: 1, status: 'saved', active_call: null, updated_at: '', persisted: true }]);
+  const asked = { deletes: 0 };
+  await page.route(`${ROUTES}/saved`, (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    asked.deletes++;
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.setViewportSize({ width: 1300, height: 860 });
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Session canvases', exact: true }).click();
+  await expect(page.locator('.canvas-document')).toContainText('Persisted words');
+  return asked;
+}
+
+test('deleting a canvas asks the portal\'s own question, and a no keeps it', async ({ page }) => {
+  const asked = await deletable(page);
+  await page.getByLabel('Delete canvas').click();
+  const question = page.getByRole('alertdialog', { name: 'Delete this document?' });
+  await question.getByRole('button', { name: 'Cancel' }).click();
+  await expect(question).toHaveCount(0);
+  await expect(page.locator('.canvas-document')).toContainText('Persisted words');
+  expect(asked.deletes).toBe(0);
+  await page.getByLabel('Delete canvas').click();
+  await question.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(page.getByText('A place for your documents')).toBeVisible();
+  expect(asked.deletes).toBe(1);
+});
+
+test('a canvas is deleted without a question when Settings says not to ask before deleting', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('confirmDeletes', 'off'));
+  const asked = await deletable(page);
+  await page.getByLabel('Delete canvas').click();
+  await expect(page.getByText('A place for your documents')).toBeVisible();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  expect(asked.deletes).toBe(1);
 });

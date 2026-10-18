@@ -16,7 +16,6 @@ export function Canvases({ chat, folder }: { chat: string; folder: string }) {
   const [selected, setSelected] = useState("");
   const [editing, setEditing] = useState(false), [draft, setDraft] = useState(""), [title, setTitle] = useState(""), [base, setBase] = useState(0);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   /** The draft of a document that was deleted while it was being edited, kept to be copied. */
   const [lost, setLost] = useState<string | null>(null), [copied, setCopied] = useState(false);
   const viewport = useRef<HTMLDivElement>(null), follow = useRef(true);
@@ -96,10 +95,11 @@ export function Canvases({ chat, folder }: { chat: string; folder: string }) {
     });
   const remove = () =>
     act(async () => {
+      // The portal's own question, which Settings can switch off for deletes.
+      if (!(await portal.ui.confirm({ title: t("Delete this document?"), confirmLabel: t("Delete"), danger: true, deletes: true }))) return;
       await request(`/${canvas!.id}`, "DELETE", { revision: canvas!.revision });
       hear(chat, { type: "delete", id: canvas!.id });
       setSelected("");
-      setConfirmDelete(false);
     });
   const store = () => act(async () => took(await request<Canvas>(`/${canvas!.id}/persist`, "POST")));
   const restore = () => act(async () => took(await request<Canvas>(`/${canvas!.id}/restore`, "POST", { revision: canvas!.revision })));
@@ -127,7 +127,6 @@ export function Canvases({ chat, folder }: { chat: string; folder: string }) {
           placeholder={t("Choose a document")}
           onChange={(v) => {
             setSelected(v);
-            setConfirmDelete(false);
             setError("");
             follow.current = true;
           }}
@@ -204,7 +203,7 @@ export function Canvases({ chat, folder }: { chat: string; folder: string }) {
                   <LuPencil />
                   {t("Edit inline")}
                 </button>
-                <button type="button" disabled={!!canvas.active_call || busy} aria-label={t("Delete canvas")} onClick={() => (portal.ui.asksBeforeDeleting() ? setConfirmDelete(true) : void remove())}>
+                <button type="button" disabled={!!canvas.active_call || busy} aria-label={t("Delete canvas")} onClick={() => void remove()}>
                   <LuTrash2 />
                 </button>
                 {canvas.restorable && !canvas.active_call && (
@@ -214,15 +213,6 @@ export function Canvases({ chat, folder }: { chat: string; folder: string }) {
                   </button>
                 )}
               </>
-            )}
-            {confirmDelete && !editing && (
-              <span className="canvas-delete-confirm">
-                {t("Delete this document?")}{" "}
-                <button type="button" disabled={busy} onClick={() => void remove()}>
-                  {t("Delete")}
-                </button>
-                <button type="button" onClick={() => setConfirmDelete(false)}>{t("Keep")}</button>
-              </span>
             )}
           </footer>
         </>
