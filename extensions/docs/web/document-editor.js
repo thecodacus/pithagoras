@@ -24,7 +24,7 @@ import { MAX_QUOTE } from "./anchor.js";
 import { comments, MARGIN_ROOM, PENDING } from "./comments.js";
 import { createLive } from "./live.js";
 import { asksAgent } from "./mention.js";
-import { renaming } from "./rename.js";
+import { renaming, wasDeleted } from "./rename.js";
 import { createSaver } from "./saver.js";
 import { fit, keepMode, readMode, replaceText } from "./source.js";
 import { ICONS, toolbar } from "./toolbar.js";
@@ -383,8 +383,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           // The same threads as before are left as they are, so that a save every second does not draw them again.
           if (!gone && mine === latest) setThreads((now) => (now.loaded && !now.error && JSON.stringify(now.items) === JSON.stringify(body.threads) ? now : { items: body.threads, loaded: true, error: null }));
         } catch (error) {
-          // The document is not there any more: the page keeps its text, and says so.
-          if (error?.status === 404) markVanished();
+          // The document is not there any more: the page keeps its text, and says so. Only when the server says so (see wasDeleted).
+          if (wasDeleted(error)) markVanished();
           // The threads that were shown stay; only a page that has none yet says why.
           if (!gone && mine === latest) setThreads((now) => ({ ...now, error }));
         }
@@ -408,7 +408,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           (vanishedNow.current ? Promise.reject(Object.assign(new Error(t("This document was deleted. Your text is kept here and is not saved.")), { status: 404 })) : portal.api.json(url, { method: "PUT", body: JSON.stringify({ markdown, base }), keepalive: leaving }))
             .catch((e) => {
               // The document is gone: a save is how a page that was not told (its stream was down) finds out.
-              if (e?.status === 404) markVanished();
+              if (wasDeleted(e)) markVanished();
               throw e;
             })
             .then((answer) => {
@@ -569,7 +569,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
                 return body;
               },
               (e) => {
-                if (e?.status === 404) markVanished();
+                if (wasDeleted(e)) markVanished();
                 throw e;
               },
             ),
@@ -717,7 +717,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         await portal.api.json(url, { method: "DELETE" });
       } catch (e) {
         // Gone already (another window did it): that is what was asked.
-        if (e.status !== 404) {
+        if (!wasDeleted(e)) {
           setBusy(false);
           return setActionProblem(t("The document could not be deleted: {error}", { error: e.message }));
         }

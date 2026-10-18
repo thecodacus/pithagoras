@@ -18,12 +18,16 @@ export const isDocumentName = (name) => typeof name === "string" && name.toLower
 /** What the store takes in by itself, found on disk: a name it can also write into a commit's trailers, on one line. */
 export const isAdoptable = (name) => isDocumentName(name) && name.length <= 255 && !/[\x00-\x1f\x7f]/.test(name);
 
-/** Something in the way of a write. `taken`: the name is another file's (a link, a folder, a second name), not a document's. `gone`: there is no such file. */
+/**
+ * Something in the way of a write. `taken`: the name is another file's (a link, a folder, a second name), not a document's. `gone`: there is no such file.
+ * `moved`: the folder is not the one that was asked for (see `expect` of removeDocument).
+ */
 export class Refused extends Error {
-  constructor(message, { taken = false, gone = false } = {}) {
+  constructor(message, { taken = false, gone = false, moved = false } = {}) {
     super(message);
     this.taken = taken;
     this.gone = gone;
+    this.moved = moved;
   }
 }
 
@@ -111,15 +115,19 @@ export function writeDocument(files, dir, name, bytes, { create = false } = {}) 
  * leaves), and nothing else. Done by the portal's `files.removeFile`, in the documents folder as it is held, so that what an agent does to the
  * folder or the name meanwhile is not followed, and no folder is taken for a file. True when it was removed, false when it was gone already
  * (that is what was asked for). Refused (`taken`: the name is something else now) for a link, a folder or a file with a second name.
+ *
+ * `expect` (`{ dev, ino }`): the folder it is to act in, which the portal checks on the folder it holds, so that a folder moved onto
+ * the documents folder's place since is not acted in (`moved`).
  */
-export function removeDocument(files, dir, name, { shared = false } = {}) {
+export function removeDocument(files, dir, name, { shared = false, expect } = {}) {
   if (!isDocumentName(name)) throw new Refused(`${name} is not a document's name in this folder`, { taken: true });
   try {
-    files.removeFile(dir, name, { direct: true, alone: !shared, likeParent: true });
+    files.removeFile(dir, name, { direct: true, alone: !shared, likeParent: true, ...(expect ? { expect } : {}) });
     return true;
   } catch (e) {
     if (e?.code === "missing") return false;
     if (e?.code === "invalid") throw new Refused(e.message, { taken: true });
+    if (e?.code === "conflict") throw new Refused(e.message, { moved: true });
     throw e;
   }
 }
@@ -127,12 +135,12 @@ export function removeDocument(files, dir, name, { shared = false } = {}) {
 /**
  * Gives the document file `from` the name `to`, in the folder it is in, never over something that is there (`files.renameFile`: a second name is
  * made first, which the system refuses for a taken name, then the old one is removed). Refused: `taken` for a name that something has (a file, a
- * folder, a link, a file made there meanwhile); not `taken` for a `from` that is no plain document file now, or gone.
+ * folder, a link, a file made there meanwhile); not `taken` for a `from` that is no plain document file now, or gone. `expect` as for removeDocument.
  */
-export function renameDocument(files, dir, from, to) {
+export function renameDocument(files, dir, from, to, { expect } = {}) {
   if (!isDocumentName(from) || !isAdoptable(to)) throw new Refused(`${isAdoptable(to) ? from : to} is not a document's name in this folder`);
   try {
-    files.renameFile(dir, from, to, { direct: true, alone: true, likeParent: true });
+    files.renameFile(dir, from, to, { direct: true, alone: true, likeParent: true, ...(expect ? { expect } : {}) });
   } catch (e) {
     switch (e?.code) {
       case "exists":

@@ -140,7 +140,7 @@ test('a document is read by its folder\'s id and its own, and nothing else is', 
   for (const name of ['plan.md', '../secret.md', 'link.md', 'alias.md', 'hard.md', 'big.md', '.', '', 'documents/plan.md', 'plan.md\0', '0123456789abcdef']) {
     const refused = await docs.read(folder.id, name);
     assert.equal(refused.status, 404, name);
-    assert.deepEqual(refused.body, { error: 'There is no such document' }, name);
+    assert.deepEqual(refused.body, name === '0123456789abcdef' ? { error: 'There is no such document', code: 'deleted' } : { error: 'There is no such document' }, name);
   }
   // A folder is only one a chat works in: an id the portal does not list, or a path, is no folder.
   const id = idOf(folder, 'plan.md');

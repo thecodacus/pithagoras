@@ -195,7 +195,8 @@ export function documentTools(pi, chat, deps) {
         return new Refusal("refused", "the documents store of this folder cannot be used just now. Tell the person: the Documents page says what is wrong and how to mend it. Do not try to repair it yourself");
       }
       // The comments' refusals say what they are: a thread that is not there, a quote that is not in the text, a comment too long.
-      if (e.extra?.code && e.extra.code !== "revision_mismatch") return new Refusal(e.extra.code, e.message);
+      // (A document that is not there says `deleted` to the page, which tells it from the portal's own 404; to the agent it is `not_found` as it was.)
+      if (e.extra?.code && e.extra.code !== "revision_mismatch" && e.extra.code !== "deleted") return new Refusal(e.extra.code, e.message);
       if (e.status === 404) return new Refusal("not_found", e.message);
       if (e.status === 413) return new Refusal("too_large", "a document can be at most 1 MB");
       if (e.extra?.exists !== undefined) return new Refusal("exists", e.message);

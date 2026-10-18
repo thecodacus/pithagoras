@@ -868,7 +868,12 @@ easy to get wrong in a way that is a hole, not a bug:
   name (`exists`, whatever the agent made there since the look), where a plain
   `rename` puts the file over it; a name swapped for something else between the
   look and the call is `conflict`, and nothing is renamed. A crash between the
-  two halves leaves one file with two names, never none. A folder cannot be
+  two halves leaves one file with two names, never none. If the old name cannot
+  be taken away, the new one is given up again, but never when it is the thing's
+  only name (a folder took the old name just before): nothing is deleted for
+  that, and the rename stands. A new name that the file system does not tell from
+  the old one (only capitals, or the form of a letter, differ: macOS, Windows, a
+  casefold folder) is the old name itself, so it is `exists`. A folder cannot be
   linked: it is renamed after a look at the new name, which leaves a short gap
   for an empty folder made there in between, as does a file system without hard
   links (or `protected_hardlinks` for a file that is not the portal's own).
@@ -880,6 +885,14 @@ easy to get wrong in a way that is a hole, not a bug:
   option of all four, as of `open`; `likeParent` too, for a server half that
   works in a folder an agent can rename things into: the folder `base` must be
   one the agent could use itself, and one the sandbox closed to it is refused.
+  `expect: { dev, ino }` is an option of all four as well: the folder the entry is
+  in must be that one, by its device and inode (what `stat` says of the folder, or
+  `files.identity`, as numbers, text or bigint), or the call is `conflict` and
+  touches nothing. A half that deletes or renames in a folder it decided on earlier
+  keeps the identity of that folder and passes it: the check is made on the
+  descriptor of the folder the call works in, so another folder swapped onto the
+  path meanwhile (one the agent may not write in, which the portal, as root, could)
+  is never changed.
 - **A save lasts.** After the rename the folder is synced too, so a crash
   right after leaves the new file, not the old one. An upload and a file the
   portal makes are synced the same way.
@@ -994,7 +1007,7 @@ itself, for a server half that words a full disk differently from a missing righ
 told changed by `change`; its folder is found with `folder`, made with
 `makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`; a
 document is deleted with `removeFile` and renamed with `renameFile`
-(`direct`, `alone`).
+(`direct`, `alone`, and `expect` for the documents folder it keeps the identity of).
 
 **Watching a chat's folder** is `files.watch(base, rel, onChange)`. A watch reads
 nothing and changes nothing, but it should watch the folder that was meant: the

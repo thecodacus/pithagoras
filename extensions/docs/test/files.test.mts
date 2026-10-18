@@ -5,6 +5,8 @@ import path from 'node:path';
 import { portalFiles } from '@pithagoras/extension-api/testing';
 import { lookAtDocument, readDocument, Refused, removeDocument, renameDocument, writeDocument } from '../files.js';
 import { scratch } from '../../../tests/helpers.mts';
+// @ts-ignore: a module of the portal's own tests, plain JavaScript
+import { race, root } from '../../../core/server/test/race-harness.mjs';
 
 const folderFiles = await portalFiles();
 
@@ -127,3 +129,20 @@ test('a document is renamed to a name that is free, and never to one that is tak
   assert.equal(gone.gone, true);
   assert.deepEqual(readdirSync(dir).sort(), ['a.md', 'c.md', 'folder.md', 'taken.md']);
 });
+
+// As root against an agent that is not (core/server/test/race-harness.mjs): a folder the agent has no access to is moved onto the documents folder's
+// place and back, while the document is deleted or renamed in the documents folder. Told which folder it is for, Documents never acts in the other.
+for (const [what, act] of [
+  ['removeDocument', (folder: string, options: { expect?: { dev: bigint; ino: bigint } }) => removeDocument(folderFiles, folder, 'doc.md', { expect: options.expect })],
+  ['renameDocument', (folder: string, options: { expect?: { dev: bigint; ino: bigint } }) => renameDocument(folderFiles, folder, 'doc.md', 'new.md', { expect: options.expect })],
+] as const) {
+  test(`${what} as root never acts in a closed folder that the agent moved onto the documents folder's place, when it is told which folder it is for`, { skip: !root && 'only as root', timeout: 60_000 }, async (t) => {
+    const told = await race(act, { expect: true });
+    if (!told) return t.skip('the agent\'s user cannot run node here');
+    assert.ok(told.rounds > 100, `the agent moved the folders (${told.rounds} rounds)`);
+    assert.equal(told.breaches, 0, `${what}: the closed folder was acted in ${told.breaches} times in ${told.calls} calls`);
+    const free = await race(act, { expect: false });
+    if (!free) return t.skip('the agent\'s user cannot run node here');
+    assert.ok(free.breaches > 0, `${what}: without expect the closed folder was never acted in (${free.calls} calls, ${free.rounds} rounds): the race did not happen, so the test says nothing`);
+  });
+}

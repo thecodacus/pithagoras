@@ -38,7 +38,7 @@ export const folderFiles: ServerPortal["files"] = {
     writeText(base, rel, content, options.expected, options.create === true, { direct: options.direct, likeParent: options.likeParent }),
   rename: (base, rel, name, options = {}) => renameEntry(base, rel, name, options),
   unsaved: (base, rel) => unsavedAt(base, rel),
-  remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true, { direct: options.direct, likeParent: options.likeParent }),
+  remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true, { direct: options.direct, likeParent: options.likeParent, expect: options.expect }),
   removeFile: (base, rel, options = {}) => removeFile(base, rel, options),
   renameFile: (base, rel, name, options = {}) => renameFile(base, rel, name, options),
   makeFolder: (base, rel, name) => makeFolder(base, rel, name),

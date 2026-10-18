@@ -1381,3 +1381,28 @@ test('the bar keeps the room for the name of the document at a window of 1060 pi
   await page.setViewportSize({ width: 1700, height: 800 });
   await expect(modeSwitch(page).locator('.pd-modelabel').first()).toBeVisible();
 });
+
+test('the bar keeps its height whatever it says of the text, at a window of 1280 pixels with the sidebar open and a face that is wider than the usual: a bar that wraps moves its buttons between the press and the release of a click', async ({ page }) => {
+  // A wide face (DejaVu Sans, where nothing else is installed) is stood for by letter spacing, which makes the text of any face wider.
+  await page.addInitScript(() => document.addEventListener('DOMContentLoaded', () => {
+    const style = document.createElement('style');
+    style.textContent = '*, *::before, *::after { letter-spacing: 0.6px !important; }';
+    document.head.append(style);
+  }));
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  // What the bar says of the text changes while it is typed in, and with it the room it needs: the longest of them is told here, as the page would.
+  const heights = await page.locator('.pd-titlebar').evaluate((bar) => {
+    const say = bar.querySelector('.pd-state') as HTMLElement;
+    const own = say.textContent;
+    const found: Record<string, number> = {};
+    for (const text of ['Saved · Revision 3', 'Saving… · Revision 3', 'Unsaved changes · Revision 12', 'Not saved · Revision 12']) {
+      say.textContent = text;
+      found[text] = Math.round(bar.getBoundingClientRect().height);
+    }
+    say.textContent = own;
+    return found;
+  });
+  expect(new Set(Object.values(heights)).size, JSON.stringify(heights)).toBe(1);
+});

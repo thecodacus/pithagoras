@@ -54,7 +54,7 @@ import path from "node:path";
 import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
-import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
+import { bindingFor, identityOf, readBinding, sameBinding, writeBinding } from "./place.js";
 import { isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, removeDocument, renameDocument, writeDocument } from "./files.js";
 import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
@@ -72,6 +72,15 @@ const SCHEMA = 1;
 const GC_EVERY = 100;
 
 export const isDocumentId = (id) => typeof id === "string" && /^[0-9a-f]{16}$/.test(id);
+
+/** Which file or folder a stat is, on this system: its device and inode as text (an inode can be wider than a number), as place.js tells a folder. */
+const idOf = (stat) => ({ dev: String(stat.dev), ino: String(stat.ino) });
+const isId = (id) => /^\d+$/.test(id?.dev) && /^\d+$/.test(id?.ino);
+/** Whether `stat` (from a `bigint` look) is the file or folder `id` names. */
+const sameId = (stat, id) => Boolean(stat) && isId(id) && String(stat.dev) === id.dev && String(stat.ino) === id.ino;
+
+/** What is said of a documents folder that is not the one the documents were kept in. */
+const REPLACED = "The documents folder here is not the folder these documents were kept in (it was replaced, or another folder was moved onto its name), so nothing was deleted or renamed. Making a new document here takes the folder as it is.";
 
 export { DocError };
 
@@ -354,10 +363,17 @@ export class Store {
     }
   }
 
-  /** The documents folder, made if it is not there: with the folder's owner and mode, so the agent can write in it as before. */
-  makeDocumentsDir() {
+  /**
+   * The documents folder, made if it is not there: with the folder's owner and mode, so the agent can write in it as before. A folder made
+   * here is the one the store holds to (`pin`), and so is one it finds when it holds to none. `trust`: a person made a document, so the
+   * folder as it is now is the one, also when it is another than the store held to (it was replaced on purpose).
+   */
+  makeDocumentsDir({ trust = false } = {}) {
     const found = this.documentsDir();
-    if (found) return found;
+    if (found) {
+      if (trust || !this.pinned()) this.pin(found);
+      return found;
+    }
     try {
       this.files.makeFolder(this.folder, "", DOCUMENTS);
     } catch (e) {
@@ -365,7 +381,10 @@ export class Store {
       if (e?.code !== "exists") throw e;
     }
     const made = this.documentsDir();
-    if (made) return made;
+    if (made) {
+      this.pin(made);
+      return made;
+    }
     let what = "not a folder";
     try {
       const found = lstatSync(path.join(this.folder, DOCUMENTS));
@@ -375,6 +394,54 @@ export class Store {
       // Gone again: it is none of these.
     }
     throw new DocError(409, `documents in this folder is ${what}`);
+  }
+
+  /**
+   * The documents folder the store holds to, `{ dev, ino }`, or nothing before it has had one. A deletion and a rename act in this folder and
+   * no other: the folder at `documents` can be replaced by another folder of the chat's (one the agent may not write in, moved onto the
+   * name), and what the portal does there it does with its own rights.
+   */
+  pinned() {
+    try {
+      const found = JSON.parse(this.meta("documents") ?? "null");
+      return isId(found) ? { dev: found.dev, ino: found.ino } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Holds to the documents folder `dir`: the one made here, or the first the store sees. */
+  pin(dir) {
+    try {
+      this.setMeta("documents", JSON.stringify(identityOf(dir)));
+    } catch {
+      // Gone again: nothing to hold to.
+    }
+  }
+
+  /**
+   * Whether `dir` is the folder a deletion or a rename may act in, which is `expected` (the folder it was decided in) or else the one held to: it
+   * is returned as `{ dev, ino }`, for the call that acts to check on the folder it holds (`expect` of files.js); else a 409. This look is for the
+   * clear refusal; what stops a folder moved there after it is the call's own check, on the descriptor.
+   */
+  holds(dir, expected = this.pinned()) {
+    let here = null;
+    try {
+      here = identityOf(dir);
+    } catch {
+      // Gone since it was found: it is not that folder.
+    }
+    if (!here || (expected && (here.dev !== expected.dev || here.ino !== expected.ino))) throw new DocError(409, REPLACED, { code: "folder_replaced" });
+    return expected ?? here;
+  }
+
+  /** What `name` in the documents folder `dir` is on the disk, not followed (numbers as bigints), or nothing. */
+  statOf(dir, name) {
+    try {
+      return lstatSync(path.join(dir, name), { bigint: true });
+    } catch {
+      return null;
+    }
   }
 
   row(id) {
@@ -393,6 +460,9 @@ export class Store {
   /** Puts right what a write cut off, or someone else changed, left: see the top of this file. Under the lock. */
   async recover() {
     rmSync(this.repo.gitPath("index.lock"), { force: true });
+    // The documents folder the store sees first is the one it holds to (see `pinned`); a folder made here was held to when it was made.
+    const documents = this.documentsDir();
+    if (documents && !this.pinned()) this.pin(documents);
     await this.replay();
     // A rename that was cut off before its commit is finished first: the file under its new name would be taken in as a document of its own.
     await this.resume("rename");
@@ -558,10 +628,14 @@ export class Store {
     await this.commit(subject, groups, new Map(groups.map((g) => [g.id, g.key])));
   }
 
-  /** A document's row, or a 404. */
+  /**
+   * A document's row, or a 404 that says `deleted`: this server half has no such document. That is how a page that has the document open tells
+   * its deletion from any other 404 (the portal's own, while this half is not running yet, or a chat's folder that is not listed): only this one
+   * means the document is gone.
+   */
   existing(id) {
     const row = isDocumentId(id) ? this.row(id) : null;
-    if (!row || row.revision === 0) throw new DocError(404, "There is no such document");
+    if (!row || row.revision === 0) throw new DocError(404, "There is no such document", { code: "deleted" });
     return row;
   }
 
@@ -666,7 +740,7 @@ export class Store {
     return this.locked(async () => {
       await this.recover();
       if (this.rows().length >= MAX_DOCUMENTS) throw new DocError(409, `A folder holds at most ${MAX_DOCUMENTS} documents`);
-      const dir = this.makeDocumentsDir();
+      const dir = this.makeDocumentsDir({ trust: author === "user" });
       const slug = given === undefined ? slugOf(title) : fileNameOf(given) || slugOf(title);
       const id = randomBytes(8).toString("hex");
       const now = new Date().toISOString();
@@ -867,9 +941,20 @@ export class Store {
       if (row.name === to) return { ...this.describe(row, file), changed: false };
       const taken = this.db.prepare("SELECT id FROM documents WHERE name = ?").get(to);
       if (taken) throw new DocError(409, `A document called ${to} exists already`, { exists: taken.id });
-      this.setMeta("pending", JSON.stringify({ op: "rename", id: row.id, from: row.name, to, author }));
-      await this.#carryRename({ id: row.id, from: row.name, to, author });
       const dir = this.documentsDir();
+      if (!dir) throw this.unreadable(row);
+      // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for.
+      const folder = this.holds(dir);
+      const was = this.statOf(dir, row.name);
+      const there = this.statOf(dir, to);
+      // A name the file system does not tell from the file's own (it differs in capitals, or in the form of a letter) is the file's own name there:
+      // no second name can be made for it, and a rename of a name onto itself does nothing on some of them. Only another name in between does it.
+      if (was && there && was.dev === there.dev && was.ino === there.ino && was.nlink === 1n) {
+        throw new DocError(409, `This file system does not tell ${to} from ${row.name} (they differ only in capitals or in the form of a letter), so the file cannot be renamed to it directly: rename it to another name first, then to ${to}`, { code: "same_name" });
+      }
+      const pending = { op: "rename", id: row.id, from: row.name, to, author, folder, file: was?.isFile() ? idOf(was) : null };
+      this.setMeta("pending", JSON.stringify(pending));
+      await this.#carryRename(pending);
       const now = this.row(row.id);
       const looked = dir && lookAtDocument(this.files, dir, to);
       return { ...this.describe(now, looked || file), changed: true };
@@ -881,16 +966,22 @@ export class Store {
    * commit of its own (`Deleted`), so that rebuilding the index from the history does not bring it back, and the name is free
    * again; the commits it had stay in the store's repository, which nothing here reads them from. The pages that have it open are
    * told that it is gone (`onRevision` with `deleted`). Returns the ids of the comments it had, for what waits on them.
-   * Refused (409) where the name is something that is not the document's file now (a link, a folder, a file with a second name).
-   * Cut off after the file is gone it is finished by the next look at the store, as a rename is (`resume`).
+   * Refused (409) where the name is something that is not the document's file now (a link, a folder, a file with a second name), and
+   * where the documents folder is not the one the store holds to (`pinned`). Cut off after the file is gone it is finished by the next
+   * look at the store, as a rename is (`resume`): the file is taken away once, which `pending` says (`done`).
    */
   delete(id, { author = "user" } = {}) {
     return this.locked(async () => {
       await this.recover();
       const row = this.existing(id);
       const comments = this.db.prepare("SELECT c.id FROM comments c JOIN threads t ON t.id = c.thread_id WHERE t.doc_id = ? ORDER BY c.rowid").all(row.id).map((c) => c.id);
-      this.setMeta("pending", JSON.stringify({ op: "delete", id: row.id, name: row.name, author }));
-      await this.#carryDelete({ id: row.id, author });
+      // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for. No folder is no file to take away.
+      const dir = this.documentsDir();
+      const folder = dir ? this.holds(dir) : null;
+      const there = dir ? this.statOf(dir, row.name) : null;
+      const pending = { op: "delete", id: row.id, name: row.name, author, folder, file: there?.isFile() ? idOf(there) : null, done: false };
+      this.setMeta("pending", JSON.stringify(pending));
+      await this.#carryDelete(pending);
       return { comments };
     });
   }
@@ -915,6 +1006,9 @@ export class Store {
       return this.clearPending();
     }
     if (pending?.op !== op) return;
+    // A decision with no folder in it (a rename needs one; a deletion without a folder had none to take the file from) was not made by this code, and
+    // cannot be finished safely: what is not known to be the folder it was meant for is not acted in.
+    if (op === "rename" ? !isId(pending.folder) : pending.folder !== null && !isId(pending.folder)) return this.clearPending();
     try {
       await (op === "rename" ? this.#carryRename(pending, true) : this.#carryDelete(pending, true));
     } catch (e) {
@@ -923,13 +1017,15 @@ export class Store {
   }
 
   /**
-   * The rename that `pending` says (`{ id, from, to, author }`) carried out from wherever it is: the file has one of its two names,
-   * or both (cut off between the two halves of a rename: it is one file with two names then), and the commit is made. Under the lock.
+   * The rename that `pending` says (`{ id, from, to, author, folder, file }`) carried out from wherever it is: the file has one of its two
+   * names, or both (cut off between the two halves of a rename: it is one file with two names then), and the commit is made. Under the lock.
+   * `folder` is the documents folder the rename was decided in and `file` the file (`{ dev, ino }`): it is carried out in that folder only, and
+   * the old name of a file that has both is taken away only for that file, only while recovering, and only when it really has two names.
    * A refusal on the disk (the new name is taken, the file is not a plain file) leaves things as they were, and is thrown as one. Any
    * other failure of the disk step leaves what was decided for the next look at the disk, which is `recovering` when it is that one: a
    * second failure drops it, so that a disk that cannot be written does not keep the store from being used.
    */
-  async #carryRename({ id, from, to, author }, recovering = false) {
+  async #carryRename({ id, from, to, author, folder, file }, recovering = false) {
     const row = this.row(id);
     // Done already (its commit was made, and the database is told: replayed, or by the transaction), or the document is gone.
     if (!row || row.revision === 0 || row.name === to) return this.clearPending();
@@ -938,19 +1034,21 @@ export class Store {
       this.clearPending();
       throw new DocError(404, "There is no such document");
     }
-    const at = (name) => {
-      try {
-        return lstatSync(path.join(dir, name));
-      } catch {
-        return null;
-      }
-    };
-    const [old, now] = [at(from), at(to)];
+    try {
+      this.holds(dir, folder);
+    } catch (e) {
+      this.clearPending();
+      throw e;
+    }
+    const [old, now] = [this.statOf(dir, from), this.statOf(dir, to)];
     // The step the disk is still waiting for, if there is one.
     let step = null;
-    if (old?.isFile() && !now) step = () => renameDocument(this.files, dir, from, to);
-    // Cut off between the two halves: the old name is taken away.
-    else if (old?.isFile() && now?.isFile() && old.ino === now.ino && old.dev === now.dev) step = () => removeDocument(this.files, dir, from, { shared: true });
+    if (old?.isFile() && !now) step = () => renameDocument(this.files, dir, from, to, { expect: folder });
+    // Cut off between the two halves: the old name is taken away. Not when it is the same file under two spellings of one name (a file system that does
+    // not tell them apart: there is one name, and it is the only one), and not on a first try, where a second name is something that is in the way.
+    else if (recovering && old?.isFile() && now?.isFile() && old.dev === now.dev && old.ino === now.ino && old.nlink > 1n && sameId(old, file)) {
+      step = () => removeDocument(this.files, dir, from, { shared: true, expect: folder });
+    }
     // Else the file has the new name already, or there is nothing to rename: neither name is a file, or the new one is another file's.
     else if (!(now?.isFile() && !old)) step = () => {
       throw new Refused(old ? "taken" : "gone", { taken: Boolean(old), gone: !old });
@@ -961,38 +1059,71 @@ export class Store {
       // Only what says that the disk is as it was ends the rename: any other failure leaves what was decided, and the next look at the disk finishes it.
       if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
       if (!(e instanceof Refused)) throw e;
+      if (e.moved) throw new DocError(409, REPLACED, { code: "folder_replaced" });
       if (e.taken) throw new DocError(409, `A file called ${to} is in the way`, { exists: null });
+      // The portal says `conflict` for a file that changed and for a folder that is not the one asked for alike: which it was is a look away.
+      if (!e.gone) this.holds(dir, folder);
       throw e.gone ? new DocError(404, "There is no such document") : new DocError(409, `${from} is not the document's file now (a link, a folder or a file with another name, or it changed meanwhile): it was not renamed`);
     }
     this.fault("rename");
-    // The text is the revision's own: what was written to the file since is taken in after this, as a revision of its own.
-    const key = lookAtDocument(this.files, dir, to)?.key ?? null;
+    // The text is the revision's own. The file's key goes with it only while the file still is that text: what was written to it since (the agent's
+    // edit, in the time since the last look) is not in the revision, and a key taken now would hide it from the next look, which takes it in as a
+    // revision of its own when the key is none.
+    const after = readDocument(this.files, dir, to);
+    const key = after && blobId(after.bytes) === row.blob ? after.key : null;
     await this.commit(`Rename ${from} to ${to}`, [{ id, name: to, blob: row.blob, revision: row.revision + 1, author, renamedFrom: from }], new Map([[id, key]]), { remove: [from] });
     this.clearPending();
   }
 
   /**
-   * The deletion that `pending` says (`{ id, author }`) carried out from wherever it is: the file removed, if it still is there, and the
-   * commit. Under the lock. `recovering` as for a rename.
+   * The deletion that `pending` says (`{ id, author, folder, file, done }`) carried out from wherever it is: the file removed, if it still is there,
+   * and the commit. Under the lock. `recovering` as for a rename. The file is taken away in the folder the deletion was decided in only, and once:
+   * `done` says it was (it is kept as soon as it is), and then only the commit is left, in whatever state the folder is in by then. A file at the name
+   * that is not the one it was decided for (made since the other was taken away, when recovering) is left where it is.
    */
-  async #carryDelete({ id, author }, recovering = false) {
+  async #carryDelete(pending, recovering = false) {
+    const { id, author, folder, file } = pending;
     const row = this.row(id);
     if (!row) return this.clearPending();
-    const dir = this.documentsDir();
-    if (!dir) {
-      // No folder to take the file from is nothing to remove; a link or a file called `documents` is something that is in the way, and the document stays.
-      const blocked = this.blockedDocuments();
-      if (blocked) {
-        this.clearPending();
-        throw blocked;
-      }
-    } else {
-      try {
-        removeDocument(this.files, dir, row.name);
-      } catch (e) {
-        if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
-        if (e instanceof Refused) throw new DocError(409, `${row.name} is not the document's file now (a link, a folder or a file with another name): it was not deleted`);
-        throw e;
+    if (!pending.done) {
+      const dir = this.documentsDir();
+      if (!dir) {
+        // No folder to take the file from is nothing to remove; a link or a file called `documents` is something that is in the way, and the document stays.
+        const blocked = this.blockedDocuments();
+        if (blocked) {
+          this.clearPending();
+          throw blocked;
+        }
+      } else if (folder) {
+        try {
+          this.holds(dir, folder);
+        } catch (e) {
+          this.clearPending();
+          throw e;
+        }
+        const there = this.statOf(dir, row.name);
+        if (there?.isFile() && !sameId(there, file)) {
+          // Not the file that was decided on: another one is at the name. Recovery leaves it (the other was taken away before the stop); a first try
+          // that finds it was beaten to the name by someone, and says so.
+          if (!recovering) {
+            this.clearPending();
+            throw new DocError(409, `${row.name} is not the document's file now (it was replaced meanwhile): it was not deleted`);
+          }
+        } else {
+          try {
+            removeDocument(this.files, dir, row.name, { expect: folder });
+          } catch (e) {
+            if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
+            if (e instanceof Refused) {
+              if (e.moved) throw new DocError(409, REPLACED, { code: "folder_replaced" });
+              throw new DocError(409, `${row.name} is not the document's file now (a link, a folder or a file with another name): it was not deleted`);
+            }
+            throw e;
+          }
+        }
+        // The file is gone, which is told before anything else can fail: it is not taken away a second time, whatever is at the name by then.
+        pending.done = true;
+        this.setMeta("pending", JSON.stringify(pending));
       }
     }
     this.fault("delete");

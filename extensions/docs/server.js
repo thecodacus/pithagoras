@@ -521,7 +521,7 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
       }
     }
     const id = idOf(folder);
-    if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document");
+    if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document", { code: "deleted" });
     const opening = (async () => {
       const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: portal.files, Database: portal.sqlite, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
       return Store.open(folder, { dir, files: portal.files, Database: portal.sqlite, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });

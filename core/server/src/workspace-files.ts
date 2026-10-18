@@ -486,6 +486,16 @@ export interface OpenOptions {
   likeParent?: boolean;
 }
 
+/** What the calls that take away or rename an entry take beyond OpenOptions. */
+export interface ChangeOptions extends OpenOptions {
+  /**
+   * The folder the entry is in must be this one, by its device and inode as `stat` gives them: another folder at that path (one swapped in
+   * since the caller looked) is refused (`conflict`) before anything is touched. Told from the descriptor of the held folder, which is the
+   * folder the call then works in, so it cannot be one folder checked and another changed.
+   */
+  expect?: { dev: string | number | bigint; ino: string | number | bigint };
+}
+
 /**
  * What tells that a file's content changed without reading it: its identity
  * (inode), size and times. A write in place changes the times, a file put in
@@ -929,9 +939,24 @@ function entryAt(base: string, rel: unknown, verb: "removed" | "renamed", option
   return target;
 }
 
-/** The folder an entry is in, held for what is done to the entry (see holdFolder), with the options all four calls on an entry take. */
-function holdEntryFolder(base: string, dir: string, options: OpenOptions): Held {
-  return holdFolder(base, dir, { likeParent: options.likeParent });
+/**
+ * The folder an entry is in, held for what is done to the entry (see holdFolder), with the options all four calls on an entry take:
+ * `likeParent`, and with `expect` refused (`conflict`) unless the held folder is that one, told by its descriptor, before anything is changed.
+ */
+function holdEntryFolder(base: string, dir: string, options: ChangeOptions): Held {
+  const held = holdFolder(base, dir, { likeParent: options.likeParent });
+  const expect = options.expect;
+  if (!expect) return held;
+  try {
+    const st = fstatSync(held.fd, { bigint: true });
+    if (String(st.dev) !== String(expect.dev) || String(st.ino) !== String(expect.ino)) {
+      throw new FileError("conflict", "That folder is not the one it was expected to be");
+    }
+  } catch (e) {
+    held.close();
+    throw e;
+  }
+  return held;
 }
 
 /**
@@ -994,9 +1019,10 @@ function unlinkIn(held: Held, name: string): void {
  * remote has, changes not committed, stashes — or a repository's .git is
  * refused, with what it holds, unless `discard` says that is meant.
  *
- * `direct` and `likeParent` as for `OpenOptions`.
+ * `direct`, `likeParent` and `expect` as for `ChangeOptions`: with `expect` another folder than the one named is refused (`conflict`)
+ * before anything is touched.
  */
-export async function removeEntry(base: string, rel: unknown, discard = false, options: OpenOptions = {}): Promise<void> {
+export async function removeEntry(base: string, rel: unknown, discard = false, options: ChangeOptions = {}): Promise<void> {
   const target = entryAt(base, rel, "removed", options);
   if (!discard) {
     const unsaved = await unsavedIn(base, target);
@@ -1049,10 +1075,11 @@ export async function removeEntry(base: string, rel: unknown, discard = false, o
  * another file of the folder onto between the look and the `unlink` is the one that goes: all of them are the folder's own,
  * which the agent can remove as well.
  *
- * `direct`: `rel` is a name in `base` itself; `alone`: a file with a second name is refused; `likeParent`: see OpenOptions.
- * Refusals: `missing`, `invalid`, and `failed` for the system's own reasons.
+ * `direct`: `rel` is a name in `base` itself; `alone`: a file with a second name is refused; `likeParent`: see OpenOptions; `expect`: the
+ * folder must be that one (see ChangeOptions), for a caller that decided on a folder earlier and must not act in another.
+ * Refusals: `missing`, `invalid`, `conflict` (another folder than `expect`), and `failed` for the system's own reasons.
  */
-export function removeFile(base: string, rel: unknown, options: OpenOptions = {}): void {
+export function removeFile(base: string, rel: unknown, options: ChangeOptions = {}): void {
   const target = entryAt(base, rel, "removed", options);
   const held = holdEntryFolder(base, path.dirname(target), options);
   try {
@@ -1090,14 +1117,23 @@ const kindOf = (st: BigIntStats) => (st.isFile() ? "file" : st.isDirectory() ? "
  * looked at. A file or a link is made a second name by a hard link, which the system refuses in the call itself
  * (`EEXIST`) for a name that is taken, whatever an agent made there since the look: a rename would put the file over it. The
  * new name is then looked at, and is taken away again if it is not what was looked at (the old name was swapped in between);
- * only then is the old name removed, so a crash between the two leaves the file with two names, never none. A folder cannot
- * be linked: it is renamed after a look at the new name, which leaves the gap of an empty folder made there in between, and
- * so does a file system without hard links (or `protected_hardlinks` for a file that is not the portal's own), as uploadTarget does.
+ * only then is the old name removed, so a crash between the two leaves the file with two names, never none. A name is only ever
+ * taken away while the thing it names has another (nlink 2 or more), so no file is lost to it: when the old name cannot be
+ * removed because a folder took it just before (`EISDIR`), the new name is the file's only one, and the rename stands. A folder
+ * cannot be linked: it is renamed after a look at the new name, which leaves the gap of an empty folder made there in between,
+ * and so does a file system without hard links (or `protected_hardlinks` for a file that is not the portal's own), as uploadTarget
+ * does. A new name that the file system does not tell from the old one (capitals, or the form of a letter, on macOS, Windows or a
+ * casefold folder) is the old name, which `link` and the look both say is taken: `exists`.
  */
 function renameIn(held: Held, from: string, to: string, seen: BigIntStats): void {
   const source = held.at(from);
   const target = held.at(to);
   const taken = () => new FileError("exists", `There is already something called "${to}" here`);
+  // What the system says of a name it cannot make or take away. Too many links to the file is the system's refusal like a full disk is, not a failure of this code.
+  const refused = (e: unknown) =>
+    (e as NodeJS.ErrnoException).code === "EMLINK"
+      ? new FileError("failed", "It could not be renamed (EMLINK). It keeps its name.", undefined, e)
+      : ioFailure(e, "It could not be renamed", "It keeps its name.");
   // The same thing by its number, and still of the kind it was: a file system gives the number of a file that was just removed to
   // the next one that is made (ext4 does), so a folder swapped onto the name can have it.
   const same = (st: BigIntStats | undefined) => st !== undefined && kindOf(st) === kindOf(seen) && st.dev === seen.dev && st.ino === seen.ino;
@@ -1106,7 +1142,7 @@ function renameIn(held: Held, from: string, to: string, seen: BigIntStats): void
     try {
       renameSync(source, target);
     } catch (e) {
-      throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+      throw refused(e);
     }
   };
   if (seen.isDirectory()) return renameAfterLook();
@@ -1116,16 +1152,18 @@ function renameIn(held: Held, from: string, to: string, seen: BigIntStats): void
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "EEXIST") throw taken();
     if (code === "ENOENT") throw new FileError("missing", "There is no such file");
-    if (code !== "EPERM" && code !== "ENOTSUP" && code !== "EOPNOTSUPP") throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+    if (code !== "EPERM" && code !== "ENOTSUP" && code !== "EOPNOTSUPP") throw refused(e);
     // A folder is `EPERM` too: the name was not a folder when it was looked at, and is another thing now.
     if (!same(lstatSync(source, { bigint: true, throwIfNoEntry: false }))) throw new FileError("conflict", "The file changed while it was renamed");
     // No hard links here: the best that is left is to look and rename.
     return renameAfterLook();
   }
-  // The new name is what was looked at, or it is taken away again: it is the name this call has just made.
+  // The new name is what was looked at, or it is taken away again: it is the name this call has just made. It is taken away only if it
+  // is another name of what the old name is now (the thing swapped onto it), which then has the old name still: nothing is deleted.
   const made = lstatSync(target, { bigint: true, throwIfNoEntry: false });
   if (!same(made)) {
-    if (made && !made.isDirectory()) dropName(target);
+    const now = lstatSync(source, { bigint: true, throwIfNoEntry: false });
+    if (made && now && made.dev === now.dev && made.ino === now.ino && made.nlink >= 2n) dropName(target);
     throw new FileError("conflict", "The file changed while it was renamed");
   }
   try {
@@ -1134,16 +1172,19 @@ function renameIn(held: Held, from: string, to: string, seen: BigIntStats): void
     const code = (e as NodeJS.ErrnoException).code;
     // Gone meanwhile (the agent removed it): the new name is the file, which is what was asked.
     if (code === "ENOENT") return;
-    // The old name cannot be taken away: the file has both names now, and the new one is not kept.
+    // The old name cannot be taken away, and the new one is made to be given up again, but only while the file has another name besides it:
+    // it is the only one when a folder took the old name just before (`EISDIR`), and taking it away then would delete the file. Then the old
+    // name is not the file's any more, which is a rename; and a new name that is not the file any more is not ours to take away.
+    const left = lstatSync(target, { bigint: true, throwIfNoEntry: false });
+    if (!same(left)) throw new FileError("conflict", "The file changed while it was renamed");
+    if (left!.nlink < 2n) return;
     dropName(target);
-    // A folder took the old name since the new one was looked at (`unlink` says so, and leaves it alone).
-    if (code === "EISDIR" || code === "EPERM") throw new FileError("conflict", "The file changed while it was renamed");
-    throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+    throw code === "EISDIR" ? new FileError("conflict", "The file changed while it was renamed") : refused(e);
   }
 }
 
 /** The name of `rel` changed, in the folder it is in (see renameEntry and renameFile). `plain`: only a plain file is renamed. */
-function renameNamed(base: string, rel: unknown, newName: unknown, options: OpenOptions, plain: boolean): string {
+function renameNamed(base: string, rel: unknown, newName: unknown, options: ChangeOptions, plain: boolean): string {
   const name = checkName(newName);
   const from = entryAt(base, rel, "renamed", options);
   const parent = path.dirname(from);
@@ -1176,7 +1217,7 @@ function renameNamed(base: string, rel: unknown, newName: unknown, options: Open
  * that is taken is never put over, even by one made in the instant between the look
  * and the call (see renameIn).
  */
-export function renameEntry(base: string, rel: unknown, newName: unknown, options: OpenOptions = {}): string {
+export function renameEntry(base: string, rel: unknown, newName: unknown, options: ChangeOptions = {}): string {
   return renameNamed(base, rel, newName, options, false);
 }
 
@@ -1186,7 +1227,7 @@ export function renameEntry(base: string, rel: unknown, newName: unknown, option
  * The file itself is not touched: its owner, mode and content stay, and its change key does not (its inode is the same, its
  * times are not).
  */
-export function renameFile(base: string, rel: unknown, newName: unknown, options: OpenOptions = {}): string {
+export function renameFile(base: string, rel: unknown, newName: unknown, options: ChangeOptions = {}): string {
   return renameNamed(base, rel, newName, options, true);
 }
 

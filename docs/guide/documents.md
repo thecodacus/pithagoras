@@ -353,17 +353,27 @@ focus goes back to its button. In a row, Tab goes from the document's button to
 of a document is two things, and this changes only the second: its **title** is
 its first heading (the list and the bar show it, [above](#the-page)) and is
 changed in the text; its **file name** is what you rename. The field takes the
-name without `.md`, which is added (an `.md` you write yourself is not doubled),
-has the name selected, and says this under it. **Enter** renames, **Escape** or
-**Cancel** gives it up, and the focus goes back to the button that opened the
-field. A name that is refused is said under the field, which stays open with what
-you wrote:
+name without `.md`, which is added (an `.md` you write yourself is not doubled; a
+file that has its extension in capitals, as an uploaded `README.MD` does, keeps
+them), has the name selected, and says this under it. **Enter** renames, **Escape**
+or **Cancel** gives it up, and the focus goes back to the button that opened the
+field. **Enter** in a field that was not changed asks for nothing. A name that is
+refused is said under the field, which stays open with what you wrote:
 
 - a name that another document has, or anything else in the folder has (a file,
   a folder, a link)
 - a name that is not a document's: it must end in `.md`, may not start with a
   dot, may not have `/`, `\` or a control character in it, and is at most 255
   bytes
+- a name that **differs from the file's own only in capitals, or in the form of a
+  letter, on a file system that does not tell such names apart** (macOS, Windows,
+  and Linux folders made case-insensitive): there it is the same name, so there
+  is no second name to give the file, and a rename of a name onto itself would
+  change nothing or, worse, take the only name away. It is refused ("This file
+  system does not tell … from …"), and the file is as it was. Rename it to
+  another name first, and then to the one you want. On a file system that tells
+  the two apart (Linux as it usually is), a name that only changes the capitals
+  is an ordinary rename.
 
 A rename keeps the document: its id, its comments and their passages, its
 history and its text. It is a revision of its own (the same text, made by you,
@@ -412,6 +422,14 @@ connection was down) finds out with its next save, or when it asks for the
 comments again. Deleting from the page you have open leaves it at once, and the
 text typed since the last save goes with the document.
 
+The page takes a document for deleted only when the server half says so: the 404 for
+a document it has no more carries `code: "deleted"`, and its stream sends a `deleted`
+event. Any other 404 is not that. While the portal starts, or the extension is being
+updated, the routes of the server half answer with the portal's own 404 ("No such API
+route"), and the page then does what it does for any failed save: it says "Could not
+save", keeps the text (and a draft, if you leave), asks for the comments again with the
+connection, and saves the text with the next change once the server half is back.
+
 **Where this is safe.** The portal may run as root (with the sandbox on) while the
 agent writes in the same folder, so a delete and a rename are not done by path:
 the `documents` folder is held open, and the file is taken away or given its new
@@ -420,13 +438,35 @@ folder](/guide/extension-ui#a-chat-s-folder)). A folder or a link that the agent
 puts where the file was between the look and the call is never followed or
 removed, and a rename never replaces what is at the new name.
 
+The `documents` folder itself is the one the store **holds to**: the folder it made,
+or the first it saw there (its device and inode, kept in the store's database). The
+agent can move a folder it has no access to (the sandbox's closed folders belong to
+root) onto the name `documents`, with a file of the same name in it, and what the
+portal does in a folder it does with its own rights. So a delete and a rename are
+done only in the folder held to: it is checked on the folder the call holds, in the
+call itself (`expect`), not by a look at the path before. Another folder at the
+place is refused ("The documents folder here is not the folder these documents were
+kept in …", 409), with nothing changed. A folder that was replaced on purpose (a
+`git checkout` that removed it, a restore) is taken as the one when **you make a new
+document** in it: the page's **New document**, an upload or **Save as a new
+document**, not the agent's tool. The agent can read and write in the folder as before
+(its files are taken in as they are anywhere in `documents`); what it cannot do is
+get the portal to delete or rename in a folder that was not the documents folder.
+
 **Cut off in the middle.** The portal writes down what it is about to do before
 it touches the file. If it stops after the file was renamed or removed and
 before the history says so, the next time the store is used it finishes: the
 rename is committed (the document is the same one, not a new one made of the file
 under its new name), or the deletion is. A rename that was cut off between the
 two halves of the file's rename (the file has both names for a moment) loses the
-old name.
+old name, but only for the file it was decided for, only when the file really has
+two names, and only while finishing such a rename: a second name made by someone
+else is in the way of a rename, never a half of one. What is written down holds
+the folder and the file (device and inode) it was decided for, and a deletion
+notes that the file was taken away as soon as it was: finishing it later removes
+nothing again, so a file made at that name since, or a folder moved onto the
+place, is left as it is. If the folder is not the one it was decided in, the
+decision is dropped and nothing is changed.
 
 ### Beside a chat
 
