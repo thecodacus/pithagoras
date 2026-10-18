@@ -26,8 +26,11 @@ export class Refused extends Error {
   }
 }
 
-/** A file that is a document's: directly in the folder, through no link, with the one name. */
-const AS_DOCUMENT = { direct: true, alone: true };
+/**
+ * A file that is a document's: directly in the folder, through no link, with the one name, in a folder that is the agent's to have (the portal
+ * reads and writes it as root: a folder the sandbox closed to the agent, renamed to `documents`, is none), and a file the agent could read.
+ */
+const AS_DOCUMENT = { direct: true, alone: true, likeParent: true };
 
 /**
  * A document's file as `files.readBytes` reads it, or nothing when it is not a
@@ -84,7 +87,7 @@ export function isPlainFile(dir, name) {
 export function writeDocument(files, dir, name, bytes, { create = false } = {}) {
   if (!isDocumentName(name)) throw new Refused(`${name} is not a document's name in this folder`, { taken: true });
   try {
-    const written = files.write(dir, name, bytes, { create, direct: true });
+    const written = files.write(dir, name, bytes, { create, direct: true, likeParent: true });
     return { key: written.change, modified: new Date(written.mtime) };
   } catch (e) {
     switch (e?.code) {

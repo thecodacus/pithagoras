@@ -322,7 +322,7 @@ export class Store {
   /** The documents folder, or nothing when there is none (or it is a link, which is none). */
   documentsDir() {
     try {
-      return this.files.folder(this.folder, DOCUMENTS, { direct: true });
+      return this.files.folder(this.folder, DOCUMENTS, { direct: true, likeParent: true });
     } catch {
       return null;
     }
@@ -340,13 +340,15 @@ export class Store {
     }
     const made = this.documentsDir();
     if (made) return made;
-    let link = false;
+    let what = "not a folder";
     try {
-      link = lstatSync(path.join(this.folder, DOCUMENTS)).isSymbolicLink();
+      const found = lstatSync(path.join(this.folder, DOCUMENTS));
+      // A folder that is there and is neither: the portal turned it away (the sandbox closed it to the agent, and it was renamed to this name).
+      what = found.isSymbolicLink() ? "a link" : found.isDirectory() ? "closed to the agent, so it is not used" : what;
     } catch {
-      // Gone again: it is neither.
+      // Gone again: it is none of these.
     }
-    throw new DocError(409, link ? "documents in this folder is a link" : "documents in this folder is not a folder");
+    throw new DocError(409, `documents in this folder is ${what}`);
   }
 
   row(id) {
@@ -461,12 +463,12 @@ export class Store {
     }
     let listing;
     try {
-      listing = this.files.list(dir, "");
+      listing = this.files.list(dir, "", { likeParent: true });
     } catch {
       return;
     }
     // What a save of another half left when it was cut off; one under way is not touched.
-    this.files.sweepTemp(dir, "");
+    this.files.sweepTemp(dir, "", { likeParent: true });
     const names = new Set();
     // A link is not a document, whatever it leads to.
     for (const entry of listing.entries) if (entry.type === "file" && !entry.link && isDocumentName(entry.name)) names.add(entry.name);

@@ -28,18 +28,18 @@ import {
  */
 export const folderFiles: ServerPortal["files"] = {
   inside: (base, rel) => resolveInside(base, rel),
-  list: (base, rel) => listDir(base, rel),
-  read: (base, rel) => readText(base, rel),
+  list: (base, rel, options = {}) => listDir(base, rel, options),
+  read: (base, rel, options = {}) => readText(base, rel, options),
   readBytes: (base, rel, options = {}) => readBytes(base, rel, options),
   write: (base, rel, content, options = {}) =>
-    writeText(base, rel, content, options.expected, options.create === true, { direct: options.direct }),
+    writeText(base, rel, content, options.expected, options.create === true, { direct: options.direct, likeParent: options.likeParent }),
   rename: (base, rel, name) => renameEntry(base, rel, name),
   unsaved: (base, rel) => unsavedAt(base, rel),
   remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true),
   makeFolder: (base, rel, name) => makeFolder(base, rel, name),
   folder: (base, rel, options = {}) => folderPath(base, rel, options),
   hold: (base, rel, options = {}) => holdForReading(base, rel, options),
-  sweepTemp: (base, rel, options = {}) => sweepTemp(base, rel, options.olderThanMs),
+  sweepTemp: (base, rel, options = {}) => sweepTemp(base, rel, options.olderThanMs, { likeParent: options.likeParent }),
   open: (base, rel, options = {}) => openFile(base, rel, options),
   upload: (base, rel, name, body, options = {}) => uploadStream(base, rel, name, body, options),
   watch: (base, rel, onChange, options = {}) => watchFolder(base, rel, onChange, options),

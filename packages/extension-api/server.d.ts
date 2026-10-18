@@ -96,6 +96,21 @@ export interface FileOpenOptions {
   direct?: boolean;
   /** A file with a second name (a hard link, which may be outside the folder) is refused (`invalid`). */
   alone?: boolean;
+  /** As for `FolderUse.likeParent`, and the file as well: one the agent could not read itself is refused. */
+  likeParent?: boolean;
+}
+
+/**
+ * For what the portal reads or writes as root in a folder that an agent can write next to and so rename things into.
+ * The sandbox closes a folder the agent may not enter to root alone (mode 0700, or 0750 for its tools' group), and the
+ * agent can rename it to the name of a folder the portal reads on its behalf (`documents`): then the portal hands the
+ * agent what it could not read itself. With `likeParent`, the folder (`base`; for `folder` the folder it names) is
+ * refused (`invalid`) unless the agent that works in the folder it is in could use it: it is owned by the same user,
+ * or its group is that folder's and may read it, or everyone may. Where the sandbox is off nothing is closed, and
+ * nothing is refused that the portal's own user could not read.
+ */
+export interface FolderUse {
+  likeParent?: boolean;
 }
 
 /**
@@ -287,9 +302,9 @@ export interface ServerPortal {
     /** `rel` inside `base`, checked: throws for `..`, an absolute path, or a link that leads out. */
     inside(base: string, rel: string): string;
     /** What is directly in a folder, folders first; `.git` is left out. At most 2,000 entries, and `truncated` says when there were more. */
-    list(base: string, rel: string): { path: string; entries: FileEntry[]; truncated: boolean };
+    list(base: string, rel: string, options?: FolderUse): { path: string; entries: FileEntry[]; truncated: boolean };
     /** A file's text, or that it has none to show. */
-    read(base: string, rel: string): FileContent;
+    read(base: string, rel: string, options?: FolderUse): FileContent;
     /**
      * A file's bytes as they are, at most 1 MB (`too_large`), with its `change`. With `head`, only that many bytes
      * from the start are read (0: none, to ask for `change` alone).
@@ -309,7 +324,7 @@ export interface ServerPortal {
       base: string,
       rel: string,
       content: string | Uint8Array,
-      options?: { expected?: number; create?: boolean; direct?: boolean },
+      options?: { expected?: number; create?: boolean; direct?: boolean; likeParent?: boolean },
     ): { size: number; mtime: number; change: string };
     /** Another name in the same folder, never over something there; a link is renamed as the link. The new path, from `base`. */
     rename(base: string, rel: string, name: string): string;
@@ -324,7 +339,7 @@ export interface ServerPortal {
      * that is a name in `base` itself and no link (`invalid` otherwise), for a half that keeps something in a
      * folder of that name.
      */
-    folder(base: string, rel: string, options?: { direct?: boolean }): string;
+    folder(base: string, rel: string, options?: { direct?: boolean; likeParent?: boolean }): string;
     /**
      * A folder opened once and held, for a child process that reads all of it (an archive by `tar`): `folder` gives a
      * path, and a child started with it reads whatever a link put on the way leads to by then. The folder is opened
@@ -356,7 +371,7 @@ export interface ServerPortal {
      * their names. Only those older than `olderThanMs` (by default a minute): a save of the portal's own or of
      * another half that is under way has such a file for a moment, and it is not removed under it.
      */
-    sweepTemp(base: string, rel: string, options?: { olderThanMs?: number }): string[];
+    sweepTemp(base: string, rel: string, options?: { olderThanMs?: number; likeParent?: boolean }): string[];
     /**
      * A plain file opened once, to read or send: read from `fd`, not from the path again, and with its `mtime` and
      * `change` as they were when it was opened. A file kept open this way is the file the name had then, whatever
