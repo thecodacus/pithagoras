@@ -10,7 +10,7 @@
  * outside a chat has no chat's pi to ask. A document is asked for by the id
  * the listing gives it, never by its file's name.
  */
-import { renaming } from "./rename.js";
+import { renaming, wasDeleted } from "./rename.js";
 import { ICONS } from "./toolbar.js";
 import { uploads } from "./upload.js";
 import { WRITING_TOOLS, isDocumentId, sameCall, sameCalls, shownNew } from "./writing.js";
@@ -404,7 +404,7 @@ export default function (portal) {
         changed();
       } catch (e) {
         // Deleted already (another window): it is gone from the list too.
-        if (e.status === 404) changed();
+        if (wasDeleted(e)) changed();
         else setProblem(e.message);
       } finally {
         setBusy(false);

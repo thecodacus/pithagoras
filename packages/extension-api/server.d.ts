@@ -71,6 +71,16 @@ export interface FileOpenOptions {
   alone?: boolean;
 }
 
+/** What `removeFile` and `renameFile` take beyond `FileOpenOptions`. */
+export interface FileChangeOptions extends FileOpenOptions {
+  /**
+   * The folder the file is in must be this one, by its device and inode as `stat` gives them (numbers, text or bigint): another
+   * folder at that path, one swapped in since the caller looked, is refused (`conflict`) before anything is touched. It is told
+   * from the descriptor of the folder the call then works in, so the folder that was checked is the folder that is changed.
+   */
+  expect?: { dev: string | number | bigint; ino: string | number | bigint };
+}
+
 /**
  * A file read, with what tells it changed. `change` is an opaque text that differs whenever the file was written
  * (in place: its times; or put in place by a rename: its inode), so a caller that keeps it can tell a changed
@@ -255,19 +265,22 @@ export interface ServerPortal {
      * folder it is in is held open and the name is taken from it, so the file goes from the folder that was checked
      * whatever its path leads to by then, and what is swapped onto the name meanwhile is never followed (a link goes as the
      * link) or taken as a folder (it stays, with all in it). `direct` and `alone` as for `open`. `missing` for a file that
-     * is not there.
+     * is not there. `expect`: the folder must be that one (`conflict` otherwise).
      */
-    removeFile(base: string, rel: string, options?: FileOpenOptions): void;
+    removeFile(base: string, rel: string, options?: FileChangeOptions): void;
     /**
      * Another name for one plain file in the folder it is in, never over something there, and a link or a folder is
      * refused (`invalid`). The folder is held as for `removeFile`, and the new name is made as a second name of the file
      * (a hard link, which the system refuses in the call itself for a name that is taken: `exists`, whatever an agent
      * made there since the look) before the old one is removed, so a crash between leaves the file with both names, never
      * with none; its owner, mode and content stay, and its `change` does not. A name the agent swapped for another thing
-     * meanwhile is `conflict`, and nothing is renamed. Where hard links are not possible it is a rename after a look.
-     * `direct` and `alone` as for `open`; the new path, from `base`.
+     * meanwhile is `conflict`, and nothing is renamed. If the old name cannot be removed the new one is given up again, but
+     * never when it is the file's only name (a folder took the old name), where the rename stands. A name the file system does
+     * not tell from the old one (capitals, or the form of a letter, on macOS, Windows or a casefold folder) is the old name
+     * itself: `exists`. Where hard links are not possible it is a rename after a look. `direct` and `alone` as for `open`,
+     * `expect` as for `removeFile`; the new path, from `base`.
      */
-    renameFile(base: string, rel: string, name: string, options?: FileOpenOptions): string;
+    renameFile(base: string, rel: string, name: string, options?: FileChangeOptions): string;
     /** A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. */
     makeFolder(base: string, rel: string, name: string): string;
     /**

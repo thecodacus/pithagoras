@@ -240,8 +240,10 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
 .pd-modes button[aria-pressed="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 2px rgb(0 0 0 / .18); }
 .pd-modes button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-modes button:disabled { opacity: .5; cursor: default; }
-/* A bar that is not wide (a window with the portal's sidebar open) keeps the room for the document's name: the switch is two icons. */
-@container (max-width: 1000px) { .pd-modelabel { display: none; } .pd-modes button { padding: 4px 7px; } }
+/* A bar that is not wide (a window with the portal's sidebar open) keeps the room for the document's name: the switch is two icons. The room is for the
+   longest thing the bar says as well ("Unsaved changes · Revision 12"): where it only fits while the text is saved, the bar wraps when it is typed in,
+   and the buttons move between the press and the release of a click on one of them (a wide face, as on a system with DejaVu Sans). */
+@container (max-width: 1150px) { .pd-modelabel { display: none; } .pd-modes button { padding: 4px 7px; } }
 /* The text as Markdown, in the editor's place: the same column, plain, in a monospace face; the page scrolls, not the box (source.js keeps it as high as its text). */
 .pd-source { display: block; width: 100%; min-height: 16rem; margin: 0; border: 0; border-radius: 0; background: none; padding: 0; resize: none; overflow: hidden; outline: none; color: inherit; font: 14.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; cursor: text; }
 .pd-source[hidden] { display: none; }

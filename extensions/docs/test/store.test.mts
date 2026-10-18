@@ -196,7 +196,8 @@ test('a document is named by its id: a path, a name or ../ in its place is refus
       for (const [method, suffix, body] of [['GET', '', undefined], ['PUT', '', { markdown: 'overwritten', base: 1 }], ['GET', '/history', undefined], ['GET', '/revisions/1', undefined], ['POST', '/restore', { revision: 1 }]] as const) {
         const answer = await docs.call(method, `/folders/${f}/documents/${id}${suffix}`, body);
         assert.equal(answer.status, 404, `${method} ${id}${suffix}`);
-        assert.deepEqual(answer.body, { error: 'There is no such document' });
+        // An id the store knows the form of, and has no document for, says so with `deleted` (what the page takes for a deletion); any other is only not found.
+        assert.deepEqual(answer.body, id === '0123456789abcdef' ? { error: 'There is no such document', code: 'deleted' } : { error: 'There is no such document' });
       }
     }
     assert.equal(readFileSync(path.join(folder, 'secret.md'), 'utf8'), '# Secret');

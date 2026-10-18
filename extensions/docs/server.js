@@ -530,7 +530,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       }
     }
     const id = idOf(folder);
-    if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document");
+    if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document", { code: "deleted" });
     const opening = (async () => {
       if (!Database) {
         if (!(await ready)) throw new DocError(503, "The documents store's packages are not installed yet");

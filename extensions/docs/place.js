@@ -42,7 +42,7 @@ const MAX_DEPTH = 16;
 const COMPARED = 200;
 
 /** Which folder it is, on this system: no two folders have the same device and inode at once. As text, since inodes can be wider than a number. */
-function identityOf(folder) {
+export function identityOf(folder) {
   const stat = statSync(folder, { bigint: true });
   return { dev: String(stat.dev), ino: String(stat.ino) };
 }

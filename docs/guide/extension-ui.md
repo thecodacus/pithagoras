@@ -807,10 +807,22 @@ easy to get wrong in a way that is a hole, not a bug:
   there since the look), where `rename` puts the file over it; a name swapped for
   something else between the look and the call is `conflict`, and nothing is
   renamed. A crash between the two halves leaves one file with two names, never
-  none. Where hard links cannot be made (a file system without them, or
-  `protected_hardlinks` for a file that is not the portal's own) it is a rename
-  after a look, with a short gap for a file that is made at the new name in
-  between. `direct` and `alone` are options of both, as of `open`.
+  none. If the old name cannot be taken away, the new one is given up again,
+  but never when it is the file's only name (a folder took the old name just
+  before): the file is not deleted for that, and the rename stands. A new name
+  that the file system does not tell from the old one (only capitals, or the
+  form of a letter, differ: macOS, Windows, a casefold folder) is the old name
+  itself, so it is `exists`. Where hard links cannot be made (a file system
+  without them, or `protected_hardlinks` for a file that is not the portal's own)
+  it is a rename after a look, with a short gap for a file that is made at the
+  new name in between. `direct` and `alone` are options of both, as of `open`.
+  `expect: { dev, ino }` is one of both as well: the folder the file is in must
+  be that one, by its device and inode (what `stat` says of the folder, as numbers,
+  text or bigint), or the call is `conflict` and touches nothing. A half that
+  deletes or renames in a folder it decided on earlier keeps the identity of that
+  folder and passes it: the check is made on the descriptor of the folder the
+  call works in, so another folder swapped onto the path meanwhile (one the agent
+  may not write in, which the portal, as root, could) is never changed.
 - **A save lasts.** After the rename the folder is synced too, so a crash
   right after leaves the new file, not the old one. An upload and a file the
   portal makes are synced the same way.
@@ -902,7 +914,7 @@ itself, for a server half that words a full disk differently from a missing righ
 told changed by `change`; its folder is found with `folder`, made with
 `makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`; a
 document is deleted with `removeFile` and renamed with `renameFile`
-(`direct`, `alone`).
+(`direct`, `alone`, and `expect` for the documents folder it keeps the identity of).
 
 **Watching a chat's folder** is not in `portal.files`. A watch reads nothing and
 changes nothing, so it has none of the dangers above: it only tells that

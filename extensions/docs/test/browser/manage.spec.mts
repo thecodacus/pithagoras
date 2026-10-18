@@ -36,6 +36,10 @@ class Shelf {
   /** The version of the list: another each time something is changed. */
   version = 1;
   loads = 0;
+  /** The server half is not running (the portal started, or the extension is being updated): its routes are the portal's own 404, which says nothing of any document. */
+  away = false;
+  /** What was asked of the document's routes while the half was away. */
+  awayCalls: string[] = [];
 
   constructor(docs: Doc[] = [PLAN, NOTES, SETUP]) {
     this.docs = docs.map((d) => ({ ...d }));
@@ -74,8 +78,13 @@ class Shelf {
 
   /** The answer to a request about a document. */
   document(method: string, id: string, tail: string, body: () => any) {
+    if (this.away) {
+      this.awayCalls.push(`${method} ${tail || '/'}`);
+      return reply(404, { error: `No such API route: ${method} ${API}/folders/${FOLDER}/documents/${id}${tail}` });
+    }
     const d = this.find(id);
-    if (!d) return reply(404, { error: 'There is no such document' });
+    // The half's own answer to a document it has no more: it says so (`code`), as a 404 of the portal's does not.
+    if (!d) return reply(404, { error: 'There is no such document', code: 'deleted' });
     if (tail === '' && method === 'GET') return { ...this.describe(d), title: this.titleOf(d), markdown: d.markdown };
     if (tail === '/threads') return { revision: d.revision, threads: [] };
     if (tail === '/history') return { revision: d.revision, revisions: [], more: false };
@@ -218,6 +227,27 @@ test('a name written with its .md, or with spaces around it, is the same name; E
   await field.fill('  Q3 plan.md  ');
   await field.press('Enter');
   expect(shelf.requests).toEqual(['POST 1111111111111111/rename {"name":"Q3 plan.md"}']);
+});
+
+test('a rename form that was not changed asks for nothing, also for a file whose extension is in capitals, and a name that is changed keeps that extension', async ({ page }) => {
+  const shelf = new Shelf([{ id: '6666666666666666', name: 'README.MD', title: 'Readme', revision: 1, markdown: '# Readme\n' }]);
+  await portal(page, shelf);
+  await page.goto(`/x/${NAME}/documents`);
+  const row = site(page).getByRole('listitem').first();
+  await row.getByRole('button', { name: 'Rename README.MD' }).click();
+  const field = page.getByRole('textbox', { name: 'New file name for README.MD' });
+  await expect(field).toHaveValue('README');
+  // The extension is the file's own, said after the field.
+  await expect(row.locator('.pd-rename-field .pd-meta').nth(1)).toHaveText('.MD');
+  // Enter with nothing changed: the form closes, and nothing is sent (`README.md` would be another name than `README.MD`, and on a file system that does not tell them apart, the same file).
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('textbox', { name: /New file name/ })).toHaveCount(0);
+  expect(shelf.requests).toEqual([]);
+  await row.getByRole('button', { name: 'Rename README.MD' }).click();
+  await field.fill('Guide');
+  await page.keyboard.press('Enter');
+  await expect(site(page).getByRole('listitem').first()).toContainText('Guide.MD');
+  expect(shelf.requests).toEqual(['POST 6666666666666666/rename {"name":"Guide.MD"}']);
 });
 
 test('a name that is refused is said under the field, which stays with what was typed, and is tried again', async ({ page }) => {
@@ -528,6 +558,55 @@ test('a stream that dropped on a document that was deleted meanwhile finds that 
   await expect(page.getByRole('alert')).toContainText('This document was deleted.', { timeout: 10_000 });
   const streams = () => page.evaluate(() => (window as any).streams.filter((s: any) => s.url.includes('/documents/') && !s.closed).length);
   expect(await streams()).toBe(0);
+});
+
+test('a 404 that is not the server half\'s own, as the portal answers while the half starts, does not make the page say the document was deleted: the text is kept, and saved once the half is back', async ({ page }) => {
+  const shelf = new Shelf();
+  await openDocument(page, shelf);
+  shelf.away = true;
+  await editorOf(page).getByText('The build is green.').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Typed while it was away.');
+  // The save fails as any failed save does: said, the text kept, tried again at the next change. Not the words for a deleted document.
+  await expect(page.locator('.pd-state')).toContainText('Not saved');
+  await expect(page.getByText(/Could not save/)).toBeVisible();
+  await expect(page.getByText('This document was deleted')).toHaveCount(0);
+  // The stream dropped with the half: the page asks after the document again (its comments), and the answer is the portal's 404 again.
+  await page.evaluate(() => (window as any).streams.find((s: any) => s.url.endsWith('/events') && !s.closed).emit('error', {}));
+  await expect.poll(() => shelf.awayCalls.filter((c) => c === 'GET /threads').length, { timeout: 10_000 }).toBeGreaterThan(0);
+  await expect(page.getByText('This document was deleted')).toHaveCount(0);
+  await expect(editorOf(page)).toContainText('The build is green. Typed while it was away.');
+  // The half is back: the page goes on, and the text typed while it was away is saved with what comes after it.
+  shelf.away = false;
+  await page.keyboard.type(' And after.');
+  await expect(page.locator('.pd-state')).toContainText('Saved');
+  expect(shelf.requests.at(-1)).toContain('The build is green. Typed while it was away. And after.');
+  expect(shelf.find(PLAN.id)!.markdown).toContain('Typed while it was away. And after.');
+  await expect(actions(page)).toBeEnabled();
+  // The stream is open again: the page takes a change from elsewhere, as before.
+  await expect.poll(() => page.evaluate(() => (window as any).streams.filter((s: any) => s.url.endsWith('/events') && !s.closed).length), { timeout: 10_000 }).toBe(1);
+});
+
+test('a 404 on a deletion that is not the server half\'s own is a failure, said on the page, which stays: the document is not taken for deleted', async ({ page }) => {
+  await asksNot(page);
+  const shelf = new Shelf();
+  await openDocument(page, shelf);
+  await editorOf(page).getByText('The build is green.').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' Typed.');
+  shelf.away = true;
+  await actions(page).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await expect(page.getByText(/The document could not be deleted/)).toBeVisible();
+  await expect(bar(page)).toBeVisible();
+  await expect(editorOf(page)).toContainText('The build is green. Typed.');
+  expect(shelf.find(PLAN.id)).toBeDefined();
+  // Where the half answers that there is no such document, it is gone, and the page goes back to the list.
+  shelf.away = false;
+  shelf.deleteElsewhere(PLAN.id);
+  await actions(page).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await expect(site(page)).toBeVisible();
 });
 
 test('a document with no heading is called by its file name, which a rename changes in the bar, and the question before it is deleted says the new one', async ({ page }) => {

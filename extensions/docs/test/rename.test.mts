@@ -2,14 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import docsServer from '../server.js';
 import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
+import { CASEFOLD, inCasefold } from '../../../tests/casefold.mts';
 
 /**
  * A document renamed and deleted by the person (extensions/docs/store.js, server.js): the same document under another file name, with its
@@ -711,3 +713,277 @@ test('the agent has no tool to rename or delete a document', async () => {
   assert.ok(names.length > 0);
   assert.deepEqual(names.filter((n) => /rename|delete_doc|remove|move/.test(n)), []);
 });
+
+// What a rename and a deletion do not do, whatever the folder or the file has become: the file of another folder, the second name of another file, the only name of a file.
+
+test('a second name that someone made for the file is in the way of a rename, not a half of it: the old name is not taken away', async () => {
+  let hook: (() => void) | null = null;
+  // Made in the time between the store's look at the file and its look at the names, as the agent could.
+  const racing = { ...folderFiles, readBytes: (...args: Parameters<typeof folderFiles.readBytes>) => { const read = folderFiles.readBytes(...args); const fire = args[2]?.head === undefined ? hook : null; if (fire) { hook = null; fire(); } return read; } } as typeof folderFiles;
+  const { folder, docs, id, url, dir } = await withDocument('docs-rename-twin-', { files: racing });
+  try {
+    hook = () => linkSync(path.join(dir, 'plan.md'), path.join(dir, 'twin.md'));
+    const refused = await docs.call('POST', `${url}/rename`, { name: 'twin.md' });
+    assert.equal(hook, null, 'the second name was made');
+    assert.deepEqual([refused.status, refused.body.exists], [409, null], JSON.stringify(refused.body));
+    assert.match(refused.body.error, /in the way/);
+    assert.deepEqual(readdirSync(dir).filter((n) => !n.startsWith('.')).sort(), ['plan.md', 'twin.md'], 'both names are there: the one that was the file\'s own is not taken away');
+    assert.equal(statSync(path.join(dir, 'plan.md')).ino, statSync(path.join(dir, 'twin.md')).ino);
+    assert.equal(commits(folder), 2, 'and nothing was committed');
+    assert.equal(id.length, 16);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a rename that was cut off between its halves is finished only for the file it was decided for: a file with the two names that is another one is left as it is', async () => {
+  let cutting = true;
+  const stopping = { ...folderFiles, renameFile: (base: string, rel: string, name: string, options?: any) => {
+    if (!cutting) return folderFiles.renameFile(base, rel, name, options);
+    linkSync(path.join(base, rel), path.join(base, name));
+    throw new Error('stopped between the link and the unlink');
+  } } as typeof folderFiles;
+  const { folder, docs, url, dir } = await withDocument('docs-rename-other-file-', { files: stopping });
+  assert.equal((await docs.call('POST', `${url}/rename`, { name: 'after.md' })).status, 500);
+  await docs.close();
+  cutting = false;
+  // The agent has made another file of it by the time of the next look: it has the two names as well.
+  unlinkSync(path.join(dir, 'plan.md'));
+  unlinkSync(path.join(dir, 'after.md'));
+  writeFileSync(path.join(dir, 'plan.md'), 'The agent\'s own file.\n');
+  linkSync(path.join(dir, 'plan.md'), path.join(dir, 'after.md'));
+  const again = await portal({ a: folder });
+  try {
+    await again.call('GET', '/folders');
+    assert.deepEqual(readdirSync(dir).filter((n) => !n.startsWith('.')).sort(), ['after.md', 'plan.md'], 'neither name of the other file was taken away');
+    assert.equal(statSync(path.join(dir, 'plan.md')).nlink, 2);
+    assert.equal(commits(folder) >= 2, true);
+    // What was decided is dropped: it is not tried again at every look.
+    const store = await import('better-sqlite3').then(({ default: Database }) => new Database(path.join(storeOf(folder), 'docs.sqlite'), { readonly: true }));
+    try {
+      assert.equal(store.prepare("SELECT COUNT(*) AS n FROM meta WHERE key = 'pending'").get().n, 0);
+    } finally {
+      store.close();
+    }
+  } finally {
+    await again.close();
+  }
+});
+
+test('what someone wrote to the file in the time of a rename is taken in as a revision of its own, and a restore cannot lose it', async () => {
+  let edit = false;
+  const { docs, id, url, dir } = await withDocument('docs-rename-window-', {
+    onStep: (step) => { if (step === 'rename' && edit) { edit = false; writeFileSync(path.join(dir, 'after.md'), `${TEXT_2}The agent\'s line.\n`); } },
+  });
+  try {
+    edit = true;
+    const answer = await docs.call('POST', `${url}/rename`, { name: 'after.md' });
+    assert.equal(answer.status, 200, JSON.stringify(answer.body));
+    assert.equal(edit, false, 'the edit was made in the window');
+    // The edit is in the history as what it is, after the rename: the next look takes it in (it is not hidden by the file's key).
+    const history = await docs.call('GET', `${url}/history`);
+    assert.deepEqual(history.body.revisions.map((r: any) => [r.revision, r.kind, r.author]), [[4, 'recovered', 'external'], [3, 'rename', 'user'], [2, 'save', 'user'], [1, 'create', 'user']]);
+    assert.equal((await docs.call('GET', `${url}/revisions/4`)).body.markdown, `${TEXT_2}The agent's line.\n`);
+    assert.equal((await docs.call('GET', `${url}/revisions/3`)).body.markdown, TEXT_2);
+    assert.equal((await docs.call('GET', url)).body.markdown, `${TEXT_2}The agent's line.\n`);
+    // A restore of an earlier revision can be undone, since the text it replaces is a revision.
+    const restored = await docs.call('POST', `${url}/restore`, { revision: 1, base: 4 });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+    assert.equal((await docs.call('GET', `${url}/revisions/4`)).body.markdown, `${TEXT_2}The agent's line.\n`);
+    assert.equal(id.length, 16);
+  } finally {
+    await docs.close();
+  }
+});
+
+/** The folder of a chat with a document, and another folder (`private`) with a file of the same name in it that the document's rights do not reach: stands for a folder the agent may not write in. */
+async function withPrivate(prefix: string, options: Options = {}) {
+  const made = await withDocument(prefix, options);
+  const privateDir = path.join(made.folder, 'private');
+  mkdirSync(privateDir);
+  writeFileSync(path.join(privateDir, 'plan.md'), 'not the agent\'s\n');
+  writeFileSync(path.join(privateDir, 'new.md'), 'also not the agent\'s\n');
+  /** What the agent does: the documents folder goes aside, the other folder takes its name. */
+  const swap = () => {
+    renameSync(made.dir, `${made.dir}.aside`);
+    renameSync(privateDir, made.dir);
+  };
+  const intact = (where: string) => {
+    assert.equal(readFileSync(path.join(where, 'plan.md'), 'utf8'), 'not the agent\'s\n');
+    assert.equal(readFileSync(path.join(where, 'new.md'), 'utf8'), 'also not the agent\'s\n');
+    assert.deepEqual(readdirSync(where).filter((n) => !n.startsWith('.')).sort(), ['new.md', 'plan.md']);
+  };
+  return { ...made, privateDir, swap, intact, aside: `${made.dir}.aside` };
+}
+
+test('a folder moved onto the documents folder\'s place in the time of a deletion or a rename is not acted in: what is in it stays, and the document stays', async () => {
+  for (const act of ['delete', 'rename'] as const) {
+    let swap: (() => void) | null = null;
+    // The agent\'s move, made between the store\'s look at the folder and the call that works in it.
+    const racing = {
+      ...folderFiles,
+      removeFile: (...args: Parameters<typeof folderFiles.removeFile>) => { swap?.(); swap = null; return folderFiles.removeFile(...args); },
+      renameFile: (...args: Parameters<typeof folderFiles.renameFile>) => { swap?.(); swap = null; return folderFiles.renameFile(...args); },
+    } as typeof folderFiles;
+    const made = await withPrivate(`docs-${act}-folder-race-`, { files: racing });
+    try {
+      swap = made.swap;
+      const answer = act === 'delete' ? await made.docs.call('DELETE', made.url) : await made.docs.call('POST', `${made.url}/rename`, { name: 'new.md' });
+      assert.equal(swap, null, `${act}: the swap was made`);
+      assert.equal(answer.status, 409, `${act}: ${JSON.stringify(answer.body)}`);
+      assert.equal(answer.body.code, 'folder_replaced');
+      made.intact(made.dir);
+      assert.equal(readFileSync(path.join(made.aside, 'plan.md'), 'utf8'), TEXT_2, `${act}: the folder that went aside is as it was`);
+      assert.equal(commits(made.folder), 2, `${act}: nothing was decided`);
+    } finally {
+      await made.docs.close();
+    }
+  }
+});
+
+test('a documents folder that is another folder than the one the documents were kept in is not acted in: a deletion and a rename are refused with the reason, until a person makes a document', async () => {
+  const made = await withPrivate('docs-folder-replaced-');
+  try {
+    made.swap();
+    for (const answer of [await made.docs.call('DELETE', made.url), await made.docs.call('POST', `${made.url}/rename`, { name: 'brand-new.md' })]) {
+      assert.equal(answer.status, 409, JSON.stringify(answer.body));
+      assert.equal(answer.body.code, 'folder_replaced');
+      assert.match(answer.body.error, /not the folder these documents were kept in/);
+    }
+    made.intact(made.dir);
+    // A person making a document takes the folder as it is now (the agent's tool does not), and then the folder is the one.
+    const made2 = await made.docs.call('POST', `/folders/${made.f}/documents`, { title: 'Fresh', markdown: '# Fresh\n' });
+    assert.equal(made2.status, 201, JSON.stringify(made2.body));
+    const deleted = await made.docs.call('DELETE', `/folders/${made.f}/documents/${made2.body.id}`);
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+    assert.equal(existsSync(path.join(made.dir, 'fresh.md')), false);
+    made.intact(made.dir);
+  } finally {
+    await made.docs.close();
+  }
+});
+
+test('a deletion whose file was removed and whose commit was cut off is finished without removing anything again: a folder moved onto the place, or a file made at the name, stays', async () => {
+  for (const scene of ['a folder', 'a file'] as const) {
+    const made = await withPrivate(`docs-delete-once-${scene === 'a folder' ? 'folder' : 'file'}-`);
+    made.docs.fault('delete');
+    assert.equal((await made.docs.call('DELETE', made.url)).status, 500);
+    await made.docs.close();
+    assert.equal(existsSync(path.join(made.dir, 'plan.md')), false, 'the file was removed');
+    if (scene === 'a folder') made.swap();
+    else writeFileSync(path.join(made.dir, 'plan.md'), 'made after.\n');
+    const again = await portal({ a: made.folder });
+    try {
+      await again.call('GET', '/folders');
+      assert.equal((await again.call('GET', made.url)).status, 404, `${scene}: the document is gone`);
+      assert.match(git(made.folder, 'log', '--format=%(trailers:only,unfold)'), /Deleted: yes/);
+      if (scene === 'a folder') made.intact(made.dir);
+      else assert.equal(readFileSync(path.join(made.dir, 'plan.md'), 'utf8'), 'made after.\n', 'the file made at the name is not removed in its turn');
+    } finally {
+      await again.close();
+    }
+  }
+});
+
+test('a deletion that is not known to have removed the file does not remove another file that is at the name, whatever it is called by then', async () => {
+  const made = await withDocument('docs-delete-unknown-');
+  made.docs.fault('delete');
+  assert.equal((await made.docs.call('DELETE', made.url)).status, 500);
+  await made.docs.close();
+  // The stop came between the removal and the note that it was made: the decision says the file is still to be removed.
+  const { default: Database } = await import('better-sqlite3');
+  const db = new Database(path.join(storeOf(made.folder), 'docs.sqlite'));
+  try {
+    assert.equal(db.prepare("UPDATE meta SET value = json_set(value, '$.done', json('false')) WHERE key = 'pending'").run().changes, 1);
+  } finally {
+    db.close();
+  }
+  // And another file has the name by then (not the one that was decided on).
+  writeFileSync(path.join(made.dir, 'plan.md'), 'made after.\n');
+  const again = await portal({ a: made.folder });
+  try {
+    await again.call('GET', '/folders');
+    assert.equal(readFileSync(path.join(made.dir, 'plan.md'), 'utf8'), 'made after.\n');
+    assert.equal((await again.call('GET', made.url)).status, 404);
+  } finally {
+    await again.close();
+  }
+});
+
+// A file system that does not tell two names apart: names that differ in capitals, or in the form of a letter. A tmpfs with `casefold` in a mount
+// namespace stands for it (tests/casefold.mts); the tests marked [casefold] are run there, once more, by the one below.
+
+if (CASEFOLD) {
+  const casefolded = (prefix: string, files: Record<string, string> = {}) => {
+    const folder = realpathSync(mkdtempSync(path.join(CASEFOLD, prefix)));
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(folder, name)), { recursive: true });
+      writeFileSync(path.join(folder, name), text);
+    }
+    return folder;
+  };
+  const listing = (dir: string) => readdirSync(dir).filter((n) => !n.startsWith('.')).sort();
+
+  test('[casefold] a rename that only changes the capitals of the name is refused, with the reason, and the document and its file stay', async () => {
+    const folder = casefolded('docs-case-', { 'documents/.keep': '' });
+    const docs = await portal({ a: folder });
+    const dir = path.join(folder, 'documents');
+    try {
+      // The file system is what this stands on: the two names are one file.
+      writeFileSync(path.join(dir, 'probe.md'), 'x');
+      assert.equal(statSync(path.join(dir, 'PROBE.MD')).ino, statSync(path.join(dir, 'probe.md')).ino);
+      rmSync(path.join(dir, 'probe.md'));
+      const f = folderIdOf(folder);
+      const made = await docs.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: '# Plan\n\nOne.\n' });
+      const url = `/folders/${f}/documents/${made.body.id}`;
+      for (const name of ['Plan.md', 'PLAN.MD']) {
+        const refused = await docs.call('POST', `${url}/rename`, { name });
+        assert.equal(refused.status, 409, JSON.stringify(refused.body));
+        assert.equal(refused.body.code, 'same_name');
+        assert.match(refused.body.error, /rename it to another name first/);
+        assert.deepEqual(listing(dir), ['plan.md'], `${name}: the file is there`);
+        const read = await docs.call('GET', url);
+        assert.deepEqual([read.status, read.body.name, read.body.markdown, read.body.revision], [200, 'plan.md', '# Plan\n\nOne.\n', 1], name);
+      }
+      assert.equal(commits(folder), 1, 'nothing was committed');
+      // In two steps it can be done: another name in between.
+      assert.equal((await docs.call('POST', `${url}/rename`, { name: 'tmp.md' })).status, 200);
+      const done = await docs.call('POST', `${url}/rename`, { name: 'Plan.md' });
+      assert.deepEqual([done.status, done.body.name, done.body.revision], [200, 'Plan.md', 3]);
+      assert.deepEqual(listing(dir), ['Plan.md']);
+      assert.equal(readFileSync(path.join(dir, 'Plan.md'), 'utf8'), '# Plan\n\nOne.\n');
+      assert.deepEqual((await docs.call('GET', '/folders')).body.folders[0].documents.map((d: any) => d.name), ['Plan.md']);
+    } finally {
+      await docs.close();
+    }
+  });
+
+  test('[casefold] a file that is taken in with capitals in its extension is not deleted by a rename form that was not changed', async () => {
+    const folder = casefolded('docs-case-upper-', { 'documents/README.MD': '# Readme\n' });
+    const docs = await portal({ a: folder });
+    const dir = path.join(folder, 'documents');
+    try {
+      const f = folderIdOf(folder);
+      const listed = (await docs.call('GET', '/folders')).body.folders[0].documents;
+      assert.deepEqual(listed.map((d: any) => d.name), ['README.MD']);
+      const url = `/folders/${f}/documents/${listed[0].id}`;
+      // What the form sent for the name as it was (it adds `.md`): the same file under a name that is not told apart from it.
+      const refused = await docs.call('POST', `${url}/rename`, { name: 'README.md' });
+      assert.equal(refused.status, 409, JSON.stringify(refused.body));
+      assert.deepEqual(listing(dir), ['README.MD']);
+      assert.equal(readFileSync(path.join(dir, 'README.MD'), 'utf8'), '# Readme\n');
+      assert.equal((await docs.call('GET', url)).status, 200);
+      assert.equal((await docs.call('DELETE', url)).status, 200, 'and it can be deleted as any');
+      assert.deepEqual(listing(dir), []);
+    } finally {
+      await docs.close();
+    }
+  });
+} else {
+  test('a rename that only changes the capitals of the name, or the form of a letter, is refused on a file system that does not tell them apart', (t) => {
+    const done = inCasefold(fileURLToPath(import.meta.url), '\\[casefold\\]');
+    if (!done) return t.skip('no case-insensitive file system can be made here (user namespaces, Linux 6.13 or later and chattr are needed)');
+    assert.ok(done.ok, done.output);
+    assert.match(done.output, /\[casefold\] a rename that only changes/);
+  });
+}
