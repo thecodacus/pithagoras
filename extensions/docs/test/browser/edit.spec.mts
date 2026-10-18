@@ -737,12 +737,16 @@ test('the toolbar makes the selected words bold or a link, a paragraph a heading
 
   // The kind of paragraph, from the list of styles; it says the kind where the caret is.
   const style = page.getByRole('combobox', { name: 'Text style' });
-  await expect(style).toHaveValue('paragraph');
-  await style.selectOption('h2');
-  await expect(style).toHaveValue('h2');
-  expect(await saved(page, store)).toBe('# The plan\n\n## Ship it on ***Friday***.\n\nThe build is green.\n');
+  await expect(style).toHaveText('Normal text');
+  await style.click();
+  await page.getByRole('option', { name: 'Heading 2' }).click();
+  await expect(style).toHaveText('Heading 2');
+  // Choosing gives the text the focus back (not the list's button), so that typing goes on in it.
+  await expect(editorOf(page)).toBeFocused();
+  // (The list taking the focus out of the text and the text taking it back saves it, so there is nothing more for Ctrl+S to write.)
+  await expect.poll(() => store.markdown).toBe('# The plan\n\n## Ship it on ***Friday***.\n\nThe build is green.\n');
   await editorOf(page).getByText('The plan').click();
-  await expect(style).toHaveValue('h1');
+  await expect(style).toHaveText('Heading 1');
 
   // Lists, one kind for another, and off again.
   await editorOf(page).getByText('The build is green.').click();

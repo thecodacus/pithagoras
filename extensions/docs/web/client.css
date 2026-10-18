@@ -98,7 +98,7 @@
 .pd-tool:disabled { opacity: .4; cursor: default; }
 .pd-tool-wide { padding: 0 10px; }
 .pd-tool-divider { width: 1px; height: 20px; margin: 0 4px; background: rgb(var(--line)); }
-.pd-style { width: auto; min-width: 9.5rem; height: 30px; padding-top: 0; padding-bottom: 0; }
+.pd-style { min-width: 9.5rem; height: 30px; padding-top: 0; padding-bottom: 0; }
 .pd-linkbox { display: flex; flex-basis: 100%; align-items: center; gap: 6px; padding: 4px 0; }
 .pd-linkbox input { max-width: 28rem; flex: 1; }
 

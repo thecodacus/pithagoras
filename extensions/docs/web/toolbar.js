@@ -123,18 +123,19 @@ export function toolbar(portal) {
       h(Tool, { icon: "undo", label: t("Undo"), keys: `${mod}+Z`, disabled: off || !f.undo, onClick: run("undo") }),
       h(Tool, { icon: "redo", label: t("Redo"), keys: `${mod}+Shift+Z`, disabled: off || !f.redo, onClick: run("redo") }),
       h(Divider),
-      h(
-        "select",
-        {
-          className: `${ui.classes.inputSmall} pd-style`,
-          "aria-label": t("Text style"),
-          title: t("Text style"),
-          disabled: off,
-          value: styles.some(([value]) => value === f.block) ? f.block : "paragraph",
-          onChange: (e) => onCommand("block", e.target.value),
+      h(ui.Select, {
+        className: "pd-style",
+        size: "sm",
+        "aria-label": t("Text style"),
+        disabled: off,
+        value: styles.some(([value]) => value === f.block) ? f.block : "paragraph",
+        options: styles.map(([value, label]) => ({ value, label })),
+        // The list gives the focus back to its button as it closes, after this: the text has it once that is done.
+        onChange: (value) => {
+          onCommand("block", value);
+          queueMicrotask(() => onFocusText?.());
         },
-        styles.map(([value, label]) => h("option", { key: value, value }, label)),
-      ),
+      }),
       h(Divider),
       h(Tool, { icon: "strong", label: t("Bold"), keys: `${mod}+B`, pressed: f.marks.strong, disabled: off, onClick: run("strong") }),
       h(Tool, { icon: "emphasis", label: t("Italic"), keys: `${mod}+I`, pressed: f.marks.emphasis, disabled: off, onClick: run("emphasis") }),
