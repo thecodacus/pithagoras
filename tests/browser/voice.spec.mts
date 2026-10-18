@@ -370,19 +370,40 @@ test('a sentence being dictated when another chat is opened is not sent to that 
   await page.addInitScript(() => localStorage.setItem('dictationMode', 'send'));
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
-  await page.route('**/voice/transcribe*', route => { const url = new URL(route.request().url()); asked.push(url.pathname); purposes.push(url.searchParams.get('purpose')); return route.fulfill({ json: { text: 'A dictated sentence.' } }); });
+  // The answer to what was said is held until the chat has been switched. Answered at once, it is the sentence of the chat it was
+  // started in, sent there when the switch comes late (a slow machine takes longer to click than a sentence takes to end), and
+  // that is what the portal does and the test would take for the fault.
+  let switched!: () => void;
+  const afterSwitch = new Promise<void>(resolve => { switched = resolve; });
+  await page.route('**/voice/transcribe*', async route => {
+    const url = new URL(route.request().url());
+    asked.push(url.pathname);
+    purposes.push(url.searchParams.get('purpose'));
+    await afterSwitch;
+    // The page has dropped the request by then, as it should: there is nobody to answer.
+    await route.fulfill({ json: { text: 'A dictated sentence.' } }).catch(() => {});
+  });
   // The chat switched to answers as the one the page starts in does.
   await page.route('**/api/sessions/other/commands', route => route.fulfill({ json: { commands: [] } }));
   await page.route('**/api/sessions/other/config', route => route.fulfill({ status: 503, json: {} }));
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Dictate a message' }).click();
   await expect(page.getByRole('button', { name: 'Stop dictating' })).toBeVisible({ timeout: 25000 });
-  await page.getByRole('button', { name: 'Inject speech' }).click();
-  // Mid-sentence: heard, not yet ended by a pause.
-  await expect(page.getByText('Hearing you')).toBeVisible({ timeout: 15000 });
-  // The sentence is already being transcribed for the chat it was started in, which is what the switch has to keep from the other one.
-  await expect.poll(() => asked.length, { timeout: 15000 }).toBeGreaterThan(0);
+  // The chat is switched in the middle of the sentence: heard, not yet ended by a pause, and already being transcribed for the chat
+  // it was started in, which is what the switch has to keep from the other one. The speech is long enough that the sentence is
+  // still going when a slow machine gets to the click. It is played in real time, and a machine too busy to keep up with it misses
+  // it, so it is played again when neither has happened after a while.
+  await page.evaluate(() => { (window as any).speechSeconds = 8; });
+  let injected = 0;
+  await expect.poll(async () => {
+    if (Date.now() - injected > 8000) {
+      injected = Date.now();
+      await page.getByRole('button', { name: 'Inject speech' }).click();
+    }
+    return asked.length > 0 && await page.getByText('Hearing you').isVisible();
+  }, { timeout: 30000, intervals: [100] }).toBe(true);
   await page.getByRole('button', { name: 'Switch chat' }).click();
+  switched();
   // The sentence is not to be sent to the chat it was not started in, which only waiting for as long as a send takes shows.
   await page.waitForTimeout(2500);
   await expect(page.getByTestId('sent')).toHaveText('0');

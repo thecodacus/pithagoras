@@ -1,8 +1,12 @@
 import { type Page } from '@playwright/test';
 import { test, expect, mockPortal, reply, DONE } from './portal-mock';
 
-/** A portal with a password: signed in once the right one is posted, signed out again when `expired` says so, and not answering while `down`. */
-async function portal(page: Page, state: { authed: boolean; expired?: boolean; down?: boolean; setup?: boolean; removed?: boolean; sso?: { name: string; only: boolean } }) {
+/**
+ * A portal with a password: signed in once the right one is posted, signed out again when `expired` says so, and not answering while `down`.
+ * `expireOnRename` forgets the browser at the rename's request and at no other: `expired` answers every request, and the page asks for
+ * the list now and then by itself, so a test that sets it and then clicks has the page find out first on a slow machine.
+ */
+async function portal(page: Page, state: { authed: boolean; expired?: boolean; expireOnRename?: boolean; down?: boolean; setup?: boolean; removed?: boolean; sso?: { name: string; only: boolean } }) {
   const calls = { status: 0, login: [] as unknown[], setup: [] as unknown[], rename: 0, ssoStarts: [] as string[] };
   const session = { id: 's1', title: 'Old name', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString() };
   await mockPortal(page, async ({ path: p, method, route, json, url }) => {
@@ -36,6 +40,10 @@ async function portal(page: Page, state: { authed: boolean; expired?: boolean; d
       state.authed = true;
       state.expired = false;
       return { ok: true };
+    }
+    if (p === '/api/sessions/s1' && method === 'PATCH' && state.expireOnRename) {
+      state.expireOnRename = false;
+      state.expired = true;
     }
     // The portal has forgotten this browser: what the server answers to a cookie it no longer takes.
     if (state.expired) return reply(401, { error: 'Unauthorized' });
@@ -82,12 +90,12 @@ test('a wrong password is said so, and asked again without looping on the 401', 
 });
 
 test('a login that runs out in the middle of the work returns to the form, and signing in again goes on', async ({ page }) => {
-  const state = { authed: true, expired: false };
+  const state = { authed: true, expired: false, expireOnRename: true };
   const calls = await portal(page, state);
   await page.goto('/sessions');
   await expect(page.getByRole('main').getByText('Old name')).toBeVisible();
 
-  state.expired = true;
+  // The login runs out as the rename is sent (see `expireOnRename`).
   await page.getByRole('button', { name: 'Rename Old name' }).click();
   const field = page.getByLabel('Session name');
   await field.fill('New name');

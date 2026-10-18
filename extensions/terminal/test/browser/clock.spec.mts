@@ -10,8 +10,13 @@ test('a job that starts after a long quiet is timed from the moment it starts, n
   await page.clock.install({ time: new Date('2026-01-01T10:00:00Z') });
   await page.goto('/tests/extension.html?page=terminal/clock');
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+  // The terminal is loaded and drawn (its job is listed, not running) before the clock is moved. The page loads an extension within
+  // fifteen seconds of the clock's, and a clock run forty seconds ahead while the module is still being fetched has given it up.
+  await expect(page.locator('.terminal-job-meta')).toBeVisible({ timeout: 15_000 });
   // Time stands still from here, and the quiet is forty seconds long.
-  await page.clock.pauseAt(new Date('2026-01-01T10:00:05Z'));
+  // The clock runs on from its first time until it is paused, so "five seconds on" is taken from where it is, not from where it began:
+  // a loaded machine takes longer than that to get here, and a time in the past cannot be paused at.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
   await page.clock.runFor(40_000);
   await page.getByRole('button', { name: 'Start' }).click();
   await expect(page.locator('.terminal-job-meta')).toHaveText('3s');

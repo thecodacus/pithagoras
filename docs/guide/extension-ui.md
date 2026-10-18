@@ -1043,7 +1043,8 @@ Files, which may be switched off or replaced. An extension's panel is
 extension's panel takes the place of another's that went by the name. The
 portal's own names are the portal's while those panels are its own. Of two
 extensions that name a panel alike, the one first in the slot's order has the
-name: a lower `order` first, then the one loaded first. The portal's own are:
+name: a lower `order` first, then the one whose extension comes first in the
+list of installed extensions. The portal's own are:
 
 | Name | `open` takes |
 | --- | --- |
@@ -1062,6 +1063,8 @@ mark it with a `msg()` of your own so that your texts' check finds it.
 
 A command is something an extension says it can be asked to do, for another
 extension or the portal to ask by name. Start the name with your package's.
+Should two extensions say the same name, the one first in the list of installed
+extensions answers to it, and the other does once that one is gone.
 
 ```js
 portal.commands.register("my-files.reveal", (path) => portal.panels.open("my-files/files", { path }));
@@ -1099,8 +1102,8 @@ portal.shortcuts.register({
 ```
 
 `default` is a physical key (`KeyboardEvent.code`) with `ctrl`, `alt`, `shift`
-or `meta`, or null for none. A key the portal or an extension loaded before
-yours has already is not taken from it: your shortcut has none until someone
+or `meta`, or null for none. A key the portal or an extension before
+yours in the list of installed extensions has already is not taken from it: your shortcut has none until someone
 chooses one. `run` is given the chat on screen and your own voice windows by
 their ids. It returns false when it had nothing to do, and the key goes on to
 whatever else wants it. The label is translated as your other texts are
@@ -1210,8 +1213,9 @@ portal.slots.register("chat.header.action", { id: "theme", component: () => {
 } });
 ```
 
-`extensions/theme-dusk` and `extensions/theme-warm` in the repository are each
-a whole theme in one `package.json`.
+`extensions/themes` in the repository is the example of an extension that is
+only themes: seven of them (Forest, Ocean, Rose, Amber, Mono, Dusk and Warm),
+each a whole theme in the one `package.json`.
 
 ## What is loaded, and when
 
@@ -1221,6 +1225,13 @@ switching one takes effect in the open page and in the server, without a
 reload or a restart.
 
 Of two installed packages that go by one name, the first is the one, whole.
+
+The browser halves are loaded at the same time, so which one comes into the
+page first is not something to rely on. Wherever the portal has to choose
+between extensions (the order of their entries in a slot, which of two shortcuts
+wanting one key has it, whose command answers to a name, the order of their
+themes in the picker) it goes by the order of the list of installed extensions,
+the same on every load.
 
 A package that a chat's folder brings (`.pi/` in a project) never has either
 half loaded. The agent can write that folder, and what it put there would run
@@ -1343,8 +1354,8 @@ of them takes from the portal, and what gives the same to an extension:
 It is the portal's test extension and is not shipped: copy it to start your
 own, and install your copy by its path. What the portal ships is in
 `extensions/`, under **Settings → Extensions → Discover → Comes with
-Pithagoras**: `extensions/theme-dusk` and `extensions/theme-warm` are extensions
-that are only a theme, and `extensions/docs` is a large one: a page in the
+Pithagoras**: `extensions/themes` is an extension
+that is only themes, and `extensions/docs` is a large one: a page in the
 sidebar, fed by its server half's routes, a stream that tells the page of
 changes, an editor built into the page, and tools for the agent that share the
 server half's store ([Documents](/guide/documents), whose last section says how

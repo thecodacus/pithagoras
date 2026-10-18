@@ -332,6 +332,8 @@ export interface ExtensionUi {
   /** Absent for a package that has only a server half. */
   entry?: string;
   style?: string;
+  /** The files its module imports along with itself, to be asked for at once rather than one level at a time. */
+  preload?: string[];
   /** Where its server half's own routes are, when it has one; why it is not running, when it could not be started. */
   server?: string;
   serverError?: string;

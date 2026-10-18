@@ -6,7 +6,7 @@ import { packageKinds, packageThemes } from "../core/server/src/extension-ui.ts"
 import { coloursOf, TOKENS } from "../core/web/src/theme.tsx";
 
 /**
- * The themes the portal ships, each a package with nothing but colours (Dusk, Warm, and the pack of five): that the
+ * The themes the portal ships, all in one package with nothing but colours (extensions/themes): that the
  * portal takes each whole, in light and in dark, and that its text is readable on every surface it sits on. WCAG asks
  * 4.5:1 of text and 3:1 of a mark such as the focus ring.
  */
@@ -28,7 +28,8 @@ const ratio = (a: Rgb, b: Rgb) => {
 /** A row's hover tint (the text colour over a raised surface at a twentieth), which a hint on it is read against. */
 const tint = (over: Rgb, under: Rgb): Rgb => under.map((u, i) => Math.round(over[i] * 0.05 + u * 0.95)) as Rgb;
 
-test("the portal ships its themes: Dusk, Warm, and Forest, Ocean, Rose, Amber and Mono", () => {
+test("the portal ships its themes in one package: Forest, Ocean, Rose, Amber, Mono, Dusk and Warm", () => {
+  assert.deepEqual(packages.map((dir) => packageThemes(dir)!.name), ["pithagoras-themes"]);
   const all = packages.flatMap((dir) => packageThemes(dir)!.themes.map((t) => t.name));
   assert.deepEqual(all.sort(), ["Amber", "Dusk", "Forest", "Mono", "Ocean", "Rose", "Warm"]);
 });

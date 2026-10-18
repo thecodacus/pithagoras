@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { bridgeExtensionUi, clientHalf, packageKinds, packageThemes, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../core/server/src/extension-ui.ts';
+import { bridgeExtensionUi, clientHalf, staticImports, packageKinds, packageThemes, serverHalf, validName, UI_RECEIVE, UI_SEND } from '../core/server/src/extension-ui.ts';
 import { choose, registerTheme, themes, themesSettled } from '../core/web/src/extensions/themes.ts';
-import { chosenPalette, choosePalette, coloursOf, toTriplet, TOKENS } from '../core/web/src/theme.tsx';
+import { chosenPalette, choosePalette, coloursOf, storedPalette, themeIdNow, toTriplet, TOKENS } from '../core/web/src/theme.tsx';
 import { register, slotEntries } from '../core/web/src/extensions/slots.ts';
+import { rankExtensions } from '../core/web/src/extensions/rank.ts';
 import { hasCommand, registerCommand, runCommand } from '../core/web/src/extensions/commands.ts';
 import { addStrings, forgetStrings, translate, translateCount, translateInContext, translateWithParts } from '../core/web/src/extensions/strings.ts';
 import { createElement, Fragment } from 'react';
@@ -52,6 +53,42 @@ test('a package that declares a browser half has its web folder, its module and 
   assert.equal(half.entry, 'client.js');
   assert.equal(half.style, 'look/client.css');
   assert.match(half.rev, /^[0-9a-z]+-[0-9a-z]+$/);
+});
+
+test('what a browser half imports along with itself is found by what each module says, down to the last, and not what it imports when called', () => {
+  const dir = pkg({ client: './web/client.js' }, ['web/client.js']);
+  const web = (file: string, text: string) => {
+    mkdirSync(path.dirname(path.join(dir, 'web', file)), { recursive: true });
+    writeFileSync(path.join(dir, 'web', file), text);
+  };
+  web('client.js', 'import { a } from "./a.js";\nimport"./side.js";\nexport * from "./re/export.js";\nimport("./lazy.js");\nexport default () => a;');
+  web('a.js', 'import{b as c}from"./sub/b.js";import x from "../outside.js";import "./style.css";export const a = c;');
+  web('sub/b.js', 'import { a } from "../a.js";\nimport type { T } from "./types.js";\nexport const b = 1;');
+  web('side.js', '');
+  web('re/export.js', 'export const r = 1;');
+  web('sub/types.js', '');
+  web('lazy.js', 'import "./never.js";');
+  web('never.js', '');
+  // The files that are there, by their path from the folder: not the module itself, which is asked for under its revision, and not a file that is not there.
+  assert.deepEqual(staticImports(clientHalf(dir)!).sort(), ['a.js', 're/export.js', 'side.js', 'sub/b.js', 'sub/types.js']);
+  // As it is changed, it is read again.
+  web('client.js', 'import "./never.js";');
+  assert.deepEqual(staticImports(clientHalf(dir)!), ['never.js']);
+});
+
+test('what a browser half imports is found in time in step with the size of its modules, whatever is in them, and a module too large to be one is not read', () => {
+  const dir = pkg({ client: './web/client.js' }, ['web/client.js']);
+  const web = (file: string, text: string) => writeFileSync(path.join(dir, 'web', file), text);
+  web('a.js', '');
+  // A long stretch that says "import" and "export" over and over without a quote or a semicolon, as a licence banner or a block of prose in a bundle may.
+  web('client.js', `import "./a.js";\n/* ${'import export '.repeat(25_000)} */`);
+  const before = process.cpuUsage();
+  assert.deepEqual(staticImports(clientHalf(dir)!), ['a.js']);
+  const { user, system } = process.cpuUsage(before);
+  assert.ok((user + system) / 1000 < 1000, `${(user + system) / 1000} ms of CPU for 350 KB`);
+  // Too large to be a module of an extension's: not read, and so nothing found in it.
+  web('client.js', `import "./a.js";\n/* ${'x'.repeat(2 * 1024 * 1024)} */`);
+  assert.deepEqual(staticImports(clientHalf(dir)!), []);
 });
 
 test('a module changed is a module under another revision', () => {
@@ -506,6 +543,43 @@ test('a theme is one an extension registered, chosen by its id and painted over 
   }
 });
 
+test('a theme chosen before Dusk and Warm moved into the themes package is still chosen, under its new id', () => {
+  const kept = new Map<string, string>();
+  const root = { dataset: { theme: 'dark' } as Record<string, string>, classList: { add() {}, remove() {} }, style: { setProperty() {}, removeProperty() {} } };
+  Object.assign(globalThis, {
+    document: { documentElement: root, querySelector: () => null },
+    window: { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), setTimeout: () => 0 },
+    getComputedStyle: () => ({ getPropertyValue: () => '10 10 12' }),
+    localStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => kept.set(k, v), removeItem: (k: string) => kept.delete(k) },
+  });
+  try {
+    assert.equal(themeIdNow('pithagoras-theme-dusk/dusk'), 'pithagoras-themes/dusk');
+    assert.equal(themeIdNow('pithagoras-theme-warm/warm'), 'pithagoras-themes/warm');
+    for (const same of ['pithagoras-themes/forest', 'my-pkg/dusk', 'constructor', '']) assert.equal(themeIdNow(same), same);
+
+    // What a browser kept before: the old id, with the colours it was chosen with.
+    const warm = { id: 'pithagoras-theme-warm/warm', name: 'Warm', light: { accent: '168 68 28' }, dark: { accent: '217 119 87' } };
+    kept.set('pithagoras.palette', JSON.stringify(warm));
+    assert.deepEqual(storedPalette(), { ...warm, id: 'pithagoras-themes/warm' });
+    assert.equal(JSON.parse(kept.get('pithagoras.palette')!).id, 'pithagoras-themes/warm', 'kept under the new id from then on');
+    kept.set('pithagoras.palette', JSON.stringify({ ...warm, id: 'my-pkg/warm' }));
+    assert.equal(storedPalette()?.id, 'my-pkg/warm', 'a theme of another package is left as it is');
+
+    // And an extension that still switches to it by the old id gets it.
+    const off = registerTheme('pithagoras-themes', { id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } });
+    try {
+      choose('pithagoras-theme-dusk/dusk');
+      assert.equal(chosenPalette()?.id, 'pithagoras-themes/dusk');
+      assert.throws(() => choose('pithagoras-theme-warm/warm'), /no theme called "pithagoras-theme-warm\/warm"/);
+    } finally {
+      choose(null);
+      off();
+    }
+  } finally {
+    for (const name of ['document', 'window', 'getComputedStyle', 'localStorage']) delete (globalThis as any)[name];
+  }
+});
+
 test('a package may name themes in its package.json and bring nothing else', () => {
   const dir = pkg({ themes: [{ id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' }, light: 'not colours' }, { id: 'nameless' }, 'not a theme'] }, []);
   assert.deepEqual(packageThemes(dir), { name: 'my-extension', version: '1.2.3', themes: [{ id: 'dusk', name: 'Dusk', dark: { accent: '#ff79c6' } }] });
@@ -514,9 +588,9 @@ test('a package may name themes in its package.json and bring nothing else', () 
   assert.equal(packageThemes(pkg({ themes: [] }, [])), undefined);
   assert.equal(packageThemes(pkg({ client: './web/client.js' }, ['web/client.js'])), undefined);
   // The one shipped as the example is one the page takes whole.
-  const dusk = packageThemes(path.resolve('extensions/theme-dusk'))!;
-  assert.equal(dusk.name, 'pithagoras-theme-dusk');
-  for (const theme of dusk.themes) {
+  const shipped = packageThemes(path.resolve('extensions/themes'))!;
+  assert.equal(shipped.name, 'pithagoras-themes');
+  for (const theme of shipped.themes) {
     assert.ok(coloursOf(theme.dark) && coloursOf(theme.light), theme.id);
     assert.deepEqual(Object.keys(theme.dark!).sort(), [...TOKENS].sort(), 'every colour of the portal\'s, in dark');
   }
@@ -524,7 +598,7 @@ test('a package may name themes in its package.json and bring nothing else', () 
 
 test('a package is told apart by what it brings: something for pi, something for the portal, colours', () => {
   assert.deepEqual(packageKinds(path.resolve('tests/fixtures/extensions/notes')), ['pi', 'pithagoras']);
-  assert.deepEqual(packageKinds(path.resolve('extensions/theme-dusk')), ['themes'], 'no code, so nothing for pi');
+  assert.deepEqual(packageKinds(path.resolve('extensions/themes')), ['themes'], 'no code, so nothing for pi');
   assert.deepEqual(packageKinds(path.resolve('extensions/subagent')), ['pi']);
   assert.deepEqual(packageKinds(pkg({ server: './server.js', themes: [{ id: 'a', name: 'A' }] }, ['server.js'])), ['pi', 'pithagoras', 'themes']);
   // A half it names and does not have is not one it brings.
@@ -554,6 +628,56 @@ test('an action on a call\'s card names its tool by a name or a pattern, and a s
   assert.throws(() => registerShortcut('probe', { id: 'text', label: 'Text', scope: 'voice', default: 'KeyN' as any, run }), /a key/);
   assert.throws(() => registerShortcut('probe', { id: 'chat', label: 'Chat', scope: 'chat' as any, default: null, run }), /scope/);
   registerShortcut('probe', { id: 'none', label: 'None', scope: 'voice', default: null, run })();
+});
+
+test('what two extensions both want goes by their places in the list of extensions, not by whose module came into the page first', async () => {
+  (globalThis as any).window ??= new EventTarget();
+  const { registerShortcut } = await import('../core/web/src/extensions/shortcuts.ts');
+  const { resolve } = await import('../core/web/src/keybindings.ts');
+  const run = () => {};
+  const component = () => null;
+  const key = { code: 'KeyQ' };
+  const keys = () => resolve({});
+  // The server lists a before b. b's module is the quicker one, as it may be on any load.
+  rankExtensions(['rank-a', 'rank-b']);
+  for (const [first, second] of [['rank-b', 'rank-a'], ['rank-a', 'rank-b']]) {
+    const off = [
+      registerShortcut(first, { id: 'q', label: 'Q', scope: 'voice', default: key, run }),
+      registerShortcut(second, { id: 'q', label: 'Q', scope: 'voice', default: key, run }),
+      register(first, 'nav.page', { id: 'p', title: first, component }),
+      register(second, 'nav.page', { id: 'p', title: second, component }),
+      registerTheme(first, { id: 't', name: first, dark: { accent: '#ff0000' } }),
+      registerTheme(second, { id: 't', name: second, dark: { accent: '#00ff00' } }),
+      registerCommand('rank.open', () => first, first),
+      registerCommand('rank.open', () => second, second),
+    ];
+    const says = `${first} loaded first`;
+    assert.deepEqual(Object.fromEntries(['rank-a', 'rank-b'].map((name) => [name, keys()[`x:${name}/q`]?.code ?? null])), { 'rank-a': 'KeyQ', 'rank-b': null }, says);
+    assert.deepEqual(slotEntries('nav.page').filter((e) => e.extension.startsWith('rank-')).map((e) => e.extension), ['rank-a', 'rank-b'], says);
+    assert.deepEqual(themes().filter((t) => t.extension.startsWith('rank-')).map((t) => t.extension), ['rank-a', 'rank-b'], says);
+    assert.equal(runCommand('rank.open'), 'rank-a', says);
+    // The one that answers is taken out: the other does.
+    off[6]!() ;
+    off[7]!();
+    off.slice(0, 6).forEach((f) => f());
+  }
+  // The list changes after both are in: what they hold is put in its order again.
+  const offs = [
+    registerShortcut('rank-b', { id: 'q', label: 'Q', scope: 'voice', default: key, run }),
+    registerShortcut('rank-a', { id: 'q', label: 'Q', scope: 'voice', default: key, run }),
+    registerCommand('rank.open', () => 'b', 'rank-b'),
+    registerCommand('rank.open', () => 'a', 'rank-a'),
+  ];
+  assert.equal(runCommand('rank.open'), 'a');
+  rankExtensions(['rank-b', 'rank-a']);
+  assert.equal(keys()['x:rank-b/q']?.code, 'KeyQ');
+  assert.equal(keys()['x:rank-a/q'], null);
+  assert.equal(runCommand('rank.open'), 'b');
+  // One extension saying a name twice is its own mistake, and refused.
+  assert.throws(() => registerCommand('rank.open', () => 0, 'rank-a'), /already a command called "rank\.open"/);
+  offs.forEach((f) => f());
+  assert.equal(hasCommand('rank.open'), false);
+  rankExtensions([]);
 });
 
 test('a window an extension brought that asks for a place has it before those that take what is left, and the other place when it is taken', () => {

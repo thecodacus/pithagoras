@@ -360,9 +360,11 @@ test('documents made to be slow to title do not hold the portal while they are l
     const docs = server({ a: site });
     // The first listing takes them into the folder's store (and its history), once: it is what comes after that is timed.
     await docs.folders();
-    const started = performance.now();
+    // The processor's time, not the clock's: a busy machine makes the process wait for its turn, which is not what a slow rule costs.
+    const started = process.cpuUsage();
     const [folder] = await docs.folders();
-    const took = performance.now() - started;
+    const { user, system } = process.cpuUsage(started);
+    const took = (user + system) / 1000;
     assert.equal(folder.documents.length, 1000, kind);
     // Before, these took from one and a half seconds (brackets) to twelve (blanks); an ordinary folder of this size takes a few dozen milliseconds.
     assert.ok(took < 1000, `${kind}: listing took ${Math.round(took)} ms`);

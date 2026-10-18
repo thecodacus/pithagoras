@@ -7,7 +7,8 @@ import { piSettingsPath, readPiSettings, updatePiSettings } from "../pi-settings
 import { extensionStash, setExtensionStash } from "../db.js";
 import { isFiltered, isSwitchedOff, setPackageEnabled, sourceOf } from "../extension-switch.js";
 import { sessions } from "../session-manager.js";
-import { clientHalf, packageKinds, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
+import { clientHalf, packageKinds, staticImports, packageThemes, serverHalf, type ClientHalf, type PackageKind, type PackageThemes, type ServerHalf } from "../extension-ui.js";
+import { sendCompressed } from "../compressed-file.js";
 import { bundledPath } from "../bundled.js";
 import { SUBAGENT_PACKAGE } from "../features.js";
 import { isServing, serverFailure, serversSettled, syncServerHalves } from "../extension-host.js";
@@ -323,9 +324,35 @@ export async function syncExtensionServers(): Promise<void> {
 export const followPackages = (): Promise<void> =>
   syncExtensionServers().catch((e) => console.error("[extensions] could not bring the server halves in line with what is installed:", e));
 
+/**
+ * The list of extensions is being put right at the start (see replaceRetiredExtensions): a page asking meanwhile waits
+ * for it, or it would find a theme chosen before the upgrade gone, and give it up.
+ */
+let preparing: Promise<unknown> = Promise.resolve();
+export const preparingExtensions = <T>(work: Promise<T>): Promise<T> => {
+  preparing = work.catch(() => {});
+  return work;
+};
+
 /** Where a page fetches a file of a package's web folder from. */
 const clientUrl = (half: ClientHalf, file: string) =>
   `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}?v=${half.rev}`;
+
+/**
+ * Where a module's import of `file` (a path from the web folder) is fetched from: the address the browser makes
+ * of it, which is not the one `encodeURIComponent` makes (it leaves `@`, `+` and the like as they are), so that
+ * what is fetched ahead is the very request the import then makes and finds answered. Nothing for a name the
+ * browser would not read as that file (a `#` or a `?` in it).
+ */
+function importUrl(half: ClientHalf, file: string): string | undefined {
+  const base = `/api/extension-ui/${half.name.split("/").map(encodeURIComponent).join("/")}/`;
+  const url = new URL(file, `http://portal${base}`);
+  const expected = `${decodeURIComponent(base)}${file}`;
+  return url.search === "" && url.hash === "" && decodeURIComponent(url.pathname) === expected ? url.pathname : undefined;
+}
+
+/** What a page asks for ahead with the module of `half`. */
+const preloadOf = (half: ClientHalf): string[] => staticImports(half).map((file) => importUrl(half, file)).filter((url) => url !== undefined);
 
 export function extensionsRouter(): Router {
   const router = express.Router();
@@ -333,6 +360,7 @@ export function extensionsRouter(): Router {
   router.get("/extension-ui", async (_req, res) => {
     try {
       // What is being started or stopped is waited for: a page is told where a server half's routes are only once they are there.
+      await preparing;
       await serversSettled();
       const { clients, servers, themed } = await halves();
       const names = [...new Set([...clients, ...servers, ...themed].map((half) => half.name))];
@@ -348,6 +376,8 @@ export function extensionsRouter(): Router {
             ...(themes ? { themes: themes.themes } : {}),
             ...(client ? { entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
+            // What its module imports along with itself, for the page to ask for all at once.
+            ...(client && preloadOf(client).length ? { preload: preloadOf(client) } : {}),
             // Where its server half's own routes are, when it has one that is running.
             ...(server && isServing(name) ? { server: `/api/x/${name.split("/").map(encodeURIComponent).join("/")}` } : {}),
             ...(failure ? { serverError: failure } : {}),
@@ -368,6 +398,8 @@ export function extensionsRouter(): Router {
       const file = half ? asked.slice(half.name.length + 1) : "";
       if (!half || !file) return res.status(404).json({ error: "Not found" });
       // Asked for by the module's revision, so what a page holds is never stale; checked each time all the same.
+      // A text file goes compressed to a browser that takes it; the rest, and what is refused, as it is.
+      if (await sendCompressed(req, res, half.dir, file)) return;
       res.sendFile(file, { root: half.dir, dotfiles: "deny", cacheControl: false, headers: { "Cache-Control": "no-cache" } }, (error) => {
         if (error && !res.headersSent) res.status(404).json({ error: "Not found" });
       });

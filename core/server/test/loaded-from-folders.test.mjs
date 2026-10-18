@@ -1,70 +1,15 @@
-import test, { mock } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inProcessHome, scratch } from "./server-harness.mjs";
+import { scratch } from "./server-harness.mjs";
+import { IN_PLACE, IN_PROJECTS, LOADED_IN_FOLDERS, allowed, conversation, folder, folders, guardAs, loadedAt, loadedPlaces, nova, refused, root, writtenIn } from "./loaded-from-folders-harness.mjs";
 
 // What pi, the MCP adapter, the heartbeat and the portal load out of a folder is said once, in
-// pi/loaded-from-folders.ts. What a colleague or a guest may write is held to that list, and a
-// test that walks it fails for a name that is on it and not held, wherever a conversation runs.
-
-inProcessHome("loaded-folders-");
-const { guardExtension } = await import("../dist/pi/guard.js");
-const { LOADED_IN_FOLDERS, loadedAt, loadedPlaces } = await import("../dist/pi/loaded-from-folders.js");
-const { addToolRule, deleteToolRule } = await import("../dist/db.js");
-const { agentsRoot, createAgent, deleteAgent } = await import("../dist/agents.js");
-const { IN_PLACE, IN_PROJECTS } = await import("../dist/pi/loaded-links.js");
-
-mock.method(console, "warn", () => {});
-
-const root = process.env.WORKSPACE_ROOT;
-const folder = scratch("loaded-folders-");
-const guardAs = (role, workspace) => {
-  const h = {};
-  guardExtension("t", () => ({ role, key: "priya" }), "s", true, () => ({ allowed: false, allowlist: [] }), workspace)({ on: (k, f) => (h[k] = f) });
-  return h;
-};
-/** Whether a write by this guard is refused as one that reaches what is loaded; a write the rules allow is undefined. */
-const outcome = (h, tool, where) => {
-  const result = h.tool_call({ toolName: tool, input: { path: where, content: "x", edits: [] } });
-  if (result === undefined) return "allowed";
-  return result.block === true && /^Refused: it writes to /.test(result.reason) ? "refused" : `blocked: ${result.reason}`;
-};
-const refused = (h, tool, where) => outcome(h, tool, where) === "refused";
-const allowed = (h, tool, where) => outcome(h, tool, where) === "allowed";
-
-/** Where a write to this entry is aimed in a folder: the file itself, or a file somewhere inside the folder. */
-const writtenIn = (dir, entry) => (entry.folder ? path.join(dir, entry.name, "deep", "x.ts") : path.join(dir, ...entry.name.split("/")));
-
-const rules = ["write", "edit"].map((tool) => {
-  const id = `rule-loaded-walk-${tool}`;
-  addToolRule({ id, role: "all", tool, pattern: "*", note: "", person_key: null });
-  return id;
-});
-test.after(() => rules.forEach(deleteToolRule));
-
-// Every kind of folder a conversation of the primary user, or the next one of an agent, may read from.
-mkdirSync(path.join(root, "site", "sub"), { recursive: true });
-mkdirSync(path.join(root, "mono", "packages", "api"), { recursive: true });
-const nova = createAgent({ name: "Nova" }).home;
-const gone = createAgent({ name: "Gone" });
-deleteAgent(gone.id, { deleteFolder: false });
-const kept = gone.home;
-const notMade = path.join(agentsRoot(), "finance");
-const conversation = path.join(folder, "conversation");
-mkdirSync(conversation, { recursive: true });
-const folders = {
-  "the folder of the conversation": conversation,
-  "another agent's home": nova,
-  "the folder kept from an agent that is gone": kept,
-  "the folder of an agent that is not made yet": notMade,
-  "the top of a project": path.join(root, "site"),
-  "a folder in a project": path.join(root, "site", "sub"),
-  "a folder deep in a project": path.join(root, "mono", "packages", "api"),
-};
-
+// pi/loaded-from-folders.ts (see loaded-from-folders-harness.mjs for how the tests walk it). The walk of the links is
+// in loaded-from-folders-links.test.mjs and loaded-from-folders-capitals.test.mjs.
 test("every name on the list is held, in every folder a conversation or a look runs in, whoever else is speaking there", () => {
   assert.ok(LOADED_IN_FOLDERS.length >= 10);
   for (const role of ["colleague", "guest"]) {
@@ -100,43 +45,6 @@ test("what the rule is for goes through: notes, the shared file, and names that 
     // A note called like one of the agent's files, in a folder no conversation runs in.
     assert.equal(allowed(as, "write", path.join(nova, "notes", "memory.md")), true);
     assert.equal(allowed(as, "write", path.join(nova, "notes", ".mcp.json")), true);
-  }
-});
-
-test("a link at a name on the list is followed to what it leads to, in whatever case, for a file that is not there yet, in a conversation's folder, an agent's, and any folder of a project", () => {
-  let n = 0;
-  const places = {
-    "the folder of the conversation": () => path.join(folder, `link-${n++}`),
-    "another agent's home": () => nova,
-    "the folder kept from an agent that is gone": () => kept,
-    "the folder of an agent that is not made yet": () => path.join(agentsRoot(), `later-${n++}`),
-    "the top of a project": () => path.join(root, `project-${n++}`),
-    "a folder deep in a project": () => path.join(root, `deep-${n++}`, "packages", "api"),
-    "the workspace root": () => root,
-  };
-  // The name is a link to something that is not there yet; what is written there is loaded under the name.
-  const linked = [];
-  for (const [spelling, spell] of [["as it is", (name) => name], ["in capitals", (name) => name.toUpperCase()]]) {
-    for (const [label, pick] of Object.entries(places)) {
-      for (const entry of LOADED_IN_FOLDERS) {
-        const dir = pick();
-        const target = path.join(folder, "behind", `${n++}`, entry.folder ? "dir" : "file");
-        const at = path.join(dir, ...spell(entry.name).split("/"));
-        mkdirSync(path.dirname(at), { recursive: true });
-        rmSync(at, { force: true }); // a file an agent's folder has already, such as the name it was made for
-        symlinkSync(target, at);
-        linked.push({ label: `${label}, ${spelling}`, entry, runsIn: label === "the folder of the conversation" ? dir : conversation, written: entry.folder ? path.join(target, "extensions", "x.ts") : target, beside: path.join(path.dirname(target), "other.md") });
-      }
-    }
-  }
-  for (const role of ["colleague", "guest"]) {
-    for (const { label, entry, runsIn, written, beside } of linked) {
-      const as = guardAs(role, runsIn);
-      assert.equal(refused(as, "write", written), true, `${role}: ${entry.name} as a link in ${label}, written as ${written}`);
-      assert.equal(refused(as, "edit", written), true, `${role}: ${entry.name} as a link in ${label}, edited as ${written}`);
-      // And a file beside it, which no link leads to, is a note.
-      assert.equal(allowed(as, "write", beside), true, `${role}: beside it in ${label}`);
-    }
   }
 });
 

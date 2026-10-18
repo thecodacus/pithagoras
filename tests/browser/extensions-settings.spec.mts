@@ -9,10 +9,10 @@ import { test, expect, mockPortal } from './portal-mock';
 const ext = (o: Record<string, unknown>) => ({ settings: [], enabled: true, scope: 'user', ...o });
 const web = ext({ spec: 'npm:pi-web-access', name: 'pi-web-access', version: '1.4.2', kinds: ['pi'], description: 'Web search for pi.' });
 const notes = ext({ spec: '/app/extensions/notes', name: 'pithagoras-notes', version: '0.2.0', kinds: ['pi', 'pithagoras'], description: 'Notes pinned to a chat.' });
-const dusk = ext({ spec: '/app/extensions/theme-dusk', name: 'pithagoras-theme-dusk', version: '0.1.0', kinds: ['themes'], description: 'A purple theme.' });
+const colours = ext({ spec: '/app/extensions/themes', name: 'pithagoras-themes', version: '0.1.0', kinds: ['themes'], description: 'More colours.' });
 const shipped = [
   { name: 'pithagoras-notes', version: '0.2.0', kinds: ['pi', 'pithagoras'], spec: '/app/extensions/notes', description: 'Notes pinned to a chat.' },
-  { name: 'pithagoras-theme-dusk', version: '0.1.0', kinds: ['themes'], spec: '/app/extensions/theme-dusk', description: 'A purple theme.' },
+  { name: 'pithagoras-themes', version: '0.1.0', kinds: ['themes'], spec: '/app/extensions/themes', description: 'More colours.' },
 ];
 const catalog = [{ name: 'pi-subagents', version: '1.1.0', description: 'Helpers for pi.', keywords: ['pi-package'], provider: false }];
 
@@ -24,7 +24,7 @@ async function portal(page: Page, installed: unknown[]) {
     if (path === '/api/packages/catalog') return { packages: catalog };
     if (path === '/api/packages' && method === 'POST') {
       posts.push(json().spec);
-      installed.push(dusk);
+      installed.push(colours);
       return { ok: true, output: '' };
     }
     return undefined;
@@ -36,7 +36,7 @@ const cards = (page: Page) => page.getByRole('tabpanel', { name: /Installed/ }).
 const chip = (page: Page, name: string | RegExp) => page.getByRole('group', { name: 'Show' }).getByRole('button', { name });
 
 test('what is installed is narrowed by what it brings: something for pi, something for the portal, colours', async ({ page }) => {
-  await portal(page, [web, notes, dusk]);
+  await portal(page, [web, notes, colours]);
   await page.goto('/settings/extensions');
   await expect(page.getByRole('tab', { name: /Installed/ })).toHaveAttribute('aria-selected', 'true');
   await expect(cards(page)).toHaveCount(3);
@@ -50,7 +50,7 @@ test('what is installed is narrowed by what it brings: something for pi, somethi
   await expect(chip(page, /^Pithagoras/)).toHaveAttribute('aria-pressed', 'true');
   await expect(cards(page)).toHaveText([/pithagoras-notes/]);
   await chip(page, /^Themes/).click();
-  await expect(cards(page)).toHaveText([/pithagoras-theme-dusk/]);
+  await expect(cards(page)).toHaveText([/pithagoras-themes/]);
   await chip(page, /^pi/).click();
   await expect(cards(page)).toHaveText([/pi-web-access/, /pithagoras-notes/]);
   await chip(page, /^All/).click();
@@ -81,9 +81,9 @@ test('the second view lists what can be installed: what comes with the portal, w
   // What comes with the portal: one already installed says so, the other is installed from its folder with one click.
   const own = view.locator('[data-setting="Comes with Pithagoras"]');
   await expect(own.getByRole('listitem').filter({ hasText: 'pithagoras-notes' })).toContainText('Installed');
-  await own.getByRole('button', { name: 'Install pithagoras-theme-dusk' }).click();
-  await expect(own.getByRole('listitem').filter({ hasText: 'pithagoras-theme-dusk' })).toContainText('Installed');
-  expect(posts).toEqual(['/app/extensions/theme-dusk']);
+  await own.getByRole('button', { name: 'Install pithagoras-themes' }).click();
+  await expect(own.getByRole('listitem').filter({ hasText: 'pithagoras-themes' })).toContainText('Installed');
+  expect(posts).toEqual(['/app/extensions/themes']);
 
   // And it is among the installed, counted on the tab.
   await page.getByRole('tab', { name: /Installed/ }).click();
@@ -152,7 +152,7 @@ test('a list of another page stands two abreast where there is room, as the pack
 });
 
 test('Settings takes the room a screen has: nearly all of a laptop, most of a wide one, and a phone as before', async ({ page }) => {
-  await portal(page, [web, notes, dusk]);
+  await portal(page, [web, notes, colours]);
   const dialog = page.getByRole('dialog', { name: 'Settings' });
 
   await page.setViewportSize({ width: 1440, height: 900 });

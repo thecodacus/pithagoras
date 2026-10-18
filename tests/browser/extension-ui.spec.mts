@@ -22,14 +22,15 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
   ];
   const model = { id: 'model-a', name: 'Model A', provider: 'llama-swap' };
   const state = {
-    installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false,
+    installed: true, revision: 1, probeServerError: undefined as string | undefined, themed: true, hangs: false, probeListed: true, openingHangs: false, preload: [] as string[],
     /** What the Notes extension's server half would tell a page opening a chat now. */
     opening: [] as unknown[],
     /** Themes the Notes package names beside its module. */
     notesThemes: undefined as unknown[] | undefined,
   };
-  // The example that is only a theme, as its package.json names it.
-  const dusk = JSON.parse(readFileSync(new URL('../../extensions/theme-dusk/package.json', import.meta.url), 'utf8'));
+  // The example that is only themes, as its package.json names it: Dusk is the one this uses.
+  const pack = JSON.parse(readFileSync(new URL('../../extensions/themes/package.json', import.meta.url), 'utf8'));
+  const dusk = { name: pack.name, version: pack.version, themes: pack.pithagoras.themes.filter((theme: { id: string }) => theme.id === 'dusk') };
   /** What the browser half said to its extension, by chat. */
   const said: { chat: string; extension: string; data: any }[] = [];
   await mockPortal(page, async ({ path: p, method, route, json }) => {
@@ -39,11 +40,11 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
       const v = `?v=${state.revision}`;
       return {
         extensions: [
-          ...(state.themed ? [{ name: dusk.name, version: dusk.version, themes: dusk.pithagoras.themes }] : []),
+          ...(state.themed ? [{ name: dusk.name, version: dusk.version, themes: dusk.themes }] : []),
           // A second package with themes of its own, two of them, one under the id the first uses.
           ...(state.themed ? [{ name: 'more-themes', version: '1.0.0', themes: [{ id: 'dusk', name: 'Noon', light: { accent: '#0055aa' } }, { id: 'midnight', name: 'Midnight', dark: { canvas: '#05070d' } }] }] : []),
-          ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}`, ...(state.notesThemes ? { themes: state.notesThemes } : {}) }] : []),
-          ...(probe ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
+          ...(state.installed ? [{ name: NAME, version: '0.2.0', entry: address(NAME, 'client.js') + v, style: address(NAME, 'client.css') + v, server: `/api/x/${NAME}`, ...(state.preload.length ? { preload: state.preload } : {}), ...(state.notesThemes ? { themes: state.notesThemes } : {}) }] : []),
+          ...(probe && state.probeListed ? [{ name: 'probe', version: '1.0.0', entry: address('probe', 'client.js') + v, server: '/api/x/probe', serverError: state.probeServerError }] : []),
           ...more.map((extension) => extension.listing),
         ],
       };
@@ -55,11 +56,12 @@ async function portal(page: Page, module = web('client.js'), probe?: string, als
     // The Notes extension's own route, as its server half answers it.
     if (p === `/api/x/${NAME}/notes`) return { chats: [{ id: 'b', title: 'Second chat', notes: [{ id: 1, text: 'Kept with the second chat', by: 'agent' }] }] };
     if (p === address(NAME, 'client.js')) { await route.fulfill({ contentType: 'text/javascript', body: module }); return DONE; }
+    if (state.preload.includes(p)) { await route.fulfill({ contentType: 'text/javascript', body: 'export const here = 1;' }); return DONE; }
     if (p === address(NAME, 'client.css')) { await route.fulfill({ contentType: 'text/css', body: web('client.css') }); return DONE; }
     if (p === '/api/sessions') return { sessions, executor: 'host' };
     const told = /^\/api\/sessions\/(\w+)\/extension-ui$/.exec(p);
     // Asked by a browser half that came into the page after the chat's stream had opened.
-    if (told && method === 'GET') return { pushes: state.opening };
+    if (told && method === 'GET') return state.openingHangs ? HANG : { pushes: state.opening };
     if (told && method === 'POST') { said.push({ chat: told[1], ...json() }); return { ok: true }; }
     if (/^\/api\/sessions\/\w+$/.test(p)) return sessions.find((s) => p.endsWith('/' + s.id));
     if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [model] }, named: { provider: null, model: null } };
@@ -135,7 +137,7 @@ const PROBE = `export default function (portal) {
   // A theme changer: it switches the portal to a theme another package brought, and back.
   portal.slots.register("chat.header.action", { id: "theme", component: () => {
     const now = portal.theme.use();
-    return h("button", { type: "button", "data-mode": now.mode, onClick: () => portal.theme.set(now.theme ? null : "pithagoras-theme-dusk/dusk") }, now.theme ? "Back to the portal's colours" : "Switch to Dusk");
+    return h("button", { type: "button", "data-mode": now.mode, onClick: () => portal.theme.set(now.theme ? null : "pithagoras-themes/dusk") }, now.theme ? "Back to the portal's colours" : "Switch to Dusk");
   } });
 }`;
 
@@ -261,6 +263,50 @@ test('an extension removed, or changed, is taken out of the page and loaded agai
   await changed({ installed: true, revision: 3 });
   await expect(page.getByRole('heading', { name: 'Notes' })).toBeVisible();
   await expect(sidebar(page).getByRole('button', { name: 'Notes' })).toHaveCount(1);
+});
+
+test("extensions come into the page at the same time: a slow one, or one told where its server half stands, holds none of the others back", async ({ page }) => {
+  const { changed, state } = await portal(page, web('client.js'), PROBE);
+  state.installed = false;
+  state.probeListed = false;
+  await page.goto('/s/a');
+  await expect(sidebar(page).getByRole('button', { name: 'Sessions' })).toBeVisible();
+  // Notes is first in the list, and what it asks the server when it comes into the open chat is never answered.
+  await changed({ installed: true, probeListed: true, openingHangs: true });
+  await expect(header(page).getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
+  await expect(page.getByTestId('overlay')).toContainText('Over First chat');
+});
+
+test("a server that never answers when an extension is told where its server half stands holds up no later change of what is installed", async ({ page }) => {
+  // The 15 seconds it is given are wound forward rather than waited for.
+  await page.clock.install();
+  const { changed, state } = await portal(page);
+  state.installed = false;
+  await page.goto('/s/a');
+  await expect(sidebar(page).getByRole('button', { name: 'Sessions' })).toBeVisible();
+  await changed({ installed: true, openingHangs: true });
+  const toggle = header(page).getByRole('button', { name: 'Notes', exact: true });
+  await expect(toggle).toBeVisible();
+  // Changed again while that one is still waiting: the next look at what is installed queues behind it.
+  await changed({ openingHangs: false, revision: 2, opening: [{ type: 'count', count: 3 }] });
+  await page.clock.fastForward(16_000);
+  await expect(toggle).toHaveAttribute('title', 'Notes (3)');
+});
+
+test("what the server says a module imports is asked for at once, with the module, and is let go with the extension", async ({ page }) => {
+  const { changed, state } = await portal(page);
+  const dep = address(NAME, 'dep.js');
+  state.preload = [dep];
+  const asked: string[] = [];
+  page.on('request', (request) => { if (new URL(request.url()).pathname === dep) asked.push(request.url()); });
+  await page.goto('/s/a');
+  await expect(header(page).getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
+  const link = page.locator(`link[rel="modulepreload"][href="${dep}"]`);
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveAttribute('data-extension-module', NAME);
+  expect(asked).toHaveLength(1);
+  await changed({ installed: false });
+  await expect(link).toHaveCount(0);
 });
 
 test('an extension that fails to load, or to draw, fails alone', async ({ page }) => {
@@ -428,6 +474,8 @@ test("an extension's own page in Settings, and why its server half is not runnin
   await row.getByRole('button', { name: /Configure/ }).click();
   await expect(dialog.getByTestId('probe-settings')).toHaveText("Probe's own settings");
   await page.goto('/settings/extensions');
+  // The page has asked for the list by now, so that what changes next is a change to what it has.
+  await expect(row).toBeVisible();
   await changed({ probeServerError: 'cannot start here' });
   await expect(dialog.getByRole('listitem').filter({ hasText: 'probe' }).getByRole('alert')).toHaveText('Its server half could not be started: cannot start here');
 });
@@ -491,7 +539,7 @@ test('a theme an extension brought is chosen in Settings or switched to by an ex
   await expect(colours).toHaveText(/The portal's own/);
   await colours.click();
   // Every theme of every installed extension is here, each with the package it came from, after the portal's own.
-  await expect(page.getByRole('option')).toHaveText([/^The portal's own/, /^Dusk.*pithagoras-theme-dusk/, /^Noon.*more-themes/, /^Midnight.*more-themes/]);
+  await expect(page.getByRole('option')).toHaveText([/^The portal's own/, /^Dusk.*pithagoras-themes/, /^Noon.*more-themes/, /^Midnight.*more-themes/]);
   // One of the second package's: it alone is in effect, and nothing of another theme with it.
   await page.getByRole('option', { name: /Midnight/ }).click();
   await expect.poll(() => colour('--canvas')).toBe('5 7 13');

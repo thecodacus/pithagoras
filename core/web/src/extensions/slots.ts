@@ -15,6 +15,7 @@ import { createElement, memo, useSyncExternalStore, type ComponentType } from "r
 // What a slot's entry says of itself and what its component is given are the public contract,
 // @pithagoras/extension-api: the portal draws exactly that.
 import type { Entry, SlotName } from "@pithagoras/extension-api";
+import { byRank, onRanked } from "./rank";
 import { translate } from "./strings";
 export type { Channel, Chat, ChatProps, Entry, PanelHandle, PanelProps, Panels, SlotMap, SlotName, ToolCallView, VoiceWindowOpened } from "@pithagoras/extension-api";
 
@@ -40,10 +41,23 @@ const ordered = (entries: Registered<SlotName>[]) =>
   entries
     .map((entry, at) => ({ entry, at }))
     .sort((a, b) => {
-      if (a.entry.order === undefined || b.entry.order === undefined) return a.entry.order === b.entry.order ? a.at - b.at : a.entry.order === undefined ? 1 : -1;
-      return a.entry.order - b.entry.order || a.at - b.at;
+      if (a.entry.order === undefined || b.entry.order === undefined) {
+        if (a.entry.order !== b.entry.order) return a.entry.order === undefined ? 1 : -1;
+      } else if (a.entry.order !== b.entry.order) {
+        return a.entry.order - b.entry.order;
+      }
+      // Not the order the modules came into the page in: see rank.ts.
+      return byRank(a.entry.extension, b.entry.extension) || a.at - b.at;
     })
     .map(({ entry }) => entry);
+
+// What is held is put in order again when the list of extensions changes.
+onRanked(() => {
+  for (const [slot, entries] of [...held]) {
+    const again = ordered([...entries]);
+    if (again.some((entry, at) => entry !== entries[at])) put(slot, again);
+  }
+});
 
 /**
  * An extension's part, drawn inside an element that says whose it is

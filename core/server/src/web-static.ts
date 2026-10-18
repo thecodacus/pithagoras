@@ -28,7 +28,7 @@ const isCopyOf = (copy: string, file: string): boolean => {
 };
 
 /** The encodings a request accepts, by its header: one given a quality of 0 is refused. */
-function accepted(header: unknown): Set<string> {
+export function accepted(header: unknown): Set<string> {
   const out = new Set<string>();
   for (const part of String(header ?? "").split(",")) {
     const [name, ...params] = part.trim().toLowerCase().split(";");

@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { local } from "./safe-storage";
+import { byRank, onRanked } from "./extensions/rank";
 
 import { msg, tc } from "./i18n";
 /**
@@ -76,13 +77,19 @@ export const ACTIONS: Action[] = [
   { id: "voice.sounds", label: msg("Turn sound effects on or off"), scope: "Voice mode", default: { code: "KeyM", shift: true } },
 ];
 
-/** The extensions' shortcuts, after the portal's own, in the order they were added. */
+/** The extensions' shortcuts, after the portal's own, in the order of their extensions (not of their loading, which differs from load to load), then as they were added. */
 const added = new Map<ActionId, Action>();
 let listed: readonly Action[] = ACTIONS;
+const inOrder = () => [...ACTIONS, ...[...added.values()].sort((a, b) => byRank(a.extension, b.extension))];
 function listChanged() {
-  listed = [...ACTIONS, ...added.values()];
+  listed = inOrder();
   window.dispatchEvent(new Event(CHANGED));
 }
+// Who comes first decides who keeps a key two of them want: see `resolve`.
+onRanked(() => {
+  const again = inOrder();
+  if (again.some((action, at) => action !== listed[at])) listChanged();
+});
 
 /** Every action there is now: the portal's own, then the extensions'. */
 export const actions = (): readonly Action[] => listed;

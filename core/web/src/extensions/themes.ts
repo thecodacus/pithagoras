@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { choosePalette, chosenPalette, coloursOf, type Colours, type Palette } from "../theme";
+import { choosePalette, chosenPalette, coloursOf, themeIdNow, type Colours, type Palette } from "../theme";
+import { byRank, onRanked } from "./rank";
 
 /**
  * The themes the installed extensions brought: each a set of colours in place
@@ -26,6 +27,14 @@ export interface Theme extends Palette {
 }
 
 let held: readonly Theme[] = [];
+const inOrder = (list: Theme[]): Theme[] => list.map((theme, at) => ({ theme, at })).sort((a, b) => byRank(a.theme.extension, b.theme.extension) || a.at - b.at).map(({ theme }) => theme);
+onRanked(() => {
+  const again = inOrder([...held]);
+  if (again.some((theme, at) => theme !== held[at])) {
+    held = again;
+    changed();
+  }
+});
 const watchers = new Set<() => void>();
 const changed = () => { for (const watcher of [...watchers]) watcher(); };
 
@@ -44,7 +53,7 @@ export function registerTheme(extension: string, given: ThemeGiven): () => void 
   if (!Object.keys(light).length && !Object.keys(dark).length) throw new Error(`The theme "${given.id}" sets no colours`);
   const theme: Theme = { id: `${extension}/${given.id}`, name: given.name, light, dark, extension };
   if (held.some((t) => t.id === theme.id)) throw new Error(`${extension} already has a theme called "${given.id}"`);
-  held = [...held, theme];
+  held = inOrder([...held, theme]);
   // The one in effect, as it is now: the copy kept in the browser may be an older version's.
   const chosen = chosenPalette();
   if (chosen?.id === theme.id && (chosen.name !== theme.name || !same(chosen.light, light) || !same(chosen.dark, dark))) choose(theme.id);
@@ -56,7 +65,7 @@ export function registerTheme(extension: string, given: ThemeGiven): () => void 
   };
 }
 
-/** The themes there are, in the order they came. */
+/** The themes there are, by their extension's place among the installed (not by whose module came first), then in the order they came. */
 export const themes = (): readonly Theme[] => held;
 
 /** The themes there are, drawn again when one comes or goes. */
@@ -71,10 +80,11 @@ export function useThemes(): readonly Theme[] {
 }
 
 /** Choose a theme by its id ("<package>/<id>"), or the portal's own with null. Throws for one there is none of. */
-export function choose(id: string | null): void {
-  if (id === null) return choosePalette(null);
+export function choose(requested: string | null): void {
+  if (requested === null) return choosePalette(null);
+  const id = themeIdNow(requested);
   const theme = held.find((t) => t.id === id);
-  if (!theme) throw new Error(`There is no theme called "${id}"`);
+  if (!theme) throw new Error(`There is no theme called "${requested}"`);
   choosePalette({ id: theme.id, name: theme.name, light: theme.light, dark: theme.dark });
 }
 
