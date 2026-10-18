@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { getDb, getSession } from "../db.js";
 import { unscopeKey } from "../agent.js";
+import { agentAt } from "../agents.js";
 import { placeProblem, routinePlace } from "../workspaces.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { fail, say } from "./tool-result.js";
@@ -22,9 +23,10 @@ import { insertRoutine, readTiming, timingSets } from "../routines/store.js";
  * chat — the agent writes the routine itself instead of telling you where the
  * button is.
  *
- * Only registered for sessions reached through a channel. A task session
- * working in some repository has no business touching the schedule, and a
- * routine run does not get them either: a routine able to create routines can
+ * Only registered for conversations with the agent: through a channel, on the
+ * Agent page, or a chat in an agent's home. A task session working in some
+ * repository has no business touching the schedule, and a routine run does not
+ * get them either: a routine able to create routines can
  * form a chain with nobody watching it.
  *
  * There is no delete. Disabling stops a routine firing and leaves it visible,
@@ -69,13 +71,19 @@ function problem(workspace: string | null): { problem?: string } {
   return why ? { problem: `${workspace}: ${why}. Its runs fail until it is given another place.` } : {};
 }
 
-/** A project to run in, by name or path, or Home when there is none: read as the HTTP API reads it. */
-function place(raw: unknown): { workspace: string | null } | { error: string } {
-  const where = routinePlace(raw);
+/**
+ * A project to run in, by name or path, or Home when there is none: read as the HTTP API reads it. Home is the home
+ * of the agent the conversation is with. Left as null (the first agent's) it would run as that agent, whichever
+ * agent was asked, so a routine made in a second agent's chat is placed in that agent's home.
+ */
+function place(raw: unknown, sessionId?: string): { workspace: string | null } | { error: string } {
+  const home = typeof raw === "string" ? /^\s*(home)?\s*$/i.test(raw) : raw === undefined || raw === null;
+  const agent = home && sessionId ? agentAt(getSession(sessionId)?.workspace ?? "") : undefined;
+  const where = routinePlace(agent ? agent.home : raw);
   return "error" in where ? { error: `Cannot run in "${raw}": ${where.error}` } : where;
 }
 
-const WORKSPACE_PARAM = Type.Optional(Type.String({ description: "Project name or path to run in, or home (the default: the agent's own folder)" }));
+const WORKSPACE_PARAM = Type.Optional(Type.String({ description: "Project name or path to run in, or home (the default: the folder of the agent you are, not a project)" }));
 
 /**
  * Where a routine created from a conversation should report.
@@ -141,7 +149,7 @@ export function routineTools(sessionId?: string) {
         if (!p.name?.trim()) return bad("A routine needs a name");
         const t = readTiming(p);
         if ("error" in t) return bad(t.error);
-        const where = place(p.workspace);
+        const where = place(p.workspace, sessionId);
         if ("error" in where) return bad(where.error);
 
         const back = reportBackTo(sessionId);
@@ -199,7 +207,7 @@ export function routineTools(sessionId?: string) {
           values.push(p.enabled ? 1 : 0);
         }
         if (p.workspace !== undefined) {
-          const where = place(p.workspace);
+          const where = place(p.workspace, sessionId);
           if ("error" in where) return bad(where.error);
           sets.push("workspace = ?");
           values.push(where.workspace);

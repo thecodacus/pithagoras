@@ -413,8 +413,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     modelId?: string;
     thinkingLevel?: string;
     /**
-     * Register the routine tools. Off unless asked: only a session reached
-     * through a channel should be able to touch the schedule.
+     * Register the routine tools. Off unless asked: only a conversation with
+     * the agent should be able to touch the schedule (see hasRoutineTools).
      */
     routineTools?: boolean;
     /** Register ask_question: only for a chat a person talks to in the portal's pages (see asksQuestions). */

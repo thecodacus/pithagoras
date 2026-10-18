@@ -255,6 +255,15 @@ function plain(text: unknown): string {
   return String(text ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim();
 }
 
+/**
+ * A conversation with the agent may manage routines: one reached through a channel or the Agent page, and a chat
+ * that works in an agent's own home (the "+" in the sidebar), which is the same conversation stored as a task. A
+ * task in a repository or a project has no business rescheduling anything, and a routine run is excluded, since a
+ * routine that can create routines can build a chain unwatched.
+ */
+const hasRoutineTools = (session: SessionRow) =>
+  session.kind === "agent" || (session.kind === "task" && agentAt(session.workspace) !== undefined);
+
 /** Whether the conversation gets the ask_question tool: see asksQuestions. */
 const canAsk = (session: SessionRow) => asksQuestions(session, onChannel(session));
 
@@ -1162,10 +1171,7 @@ class SessionManager extends EventEmitter {
       model: chosen.model || undefined,
       thinkingLevel: session.thinking_level || settings.thinkingLevel || undefined,
       sessionFile: session.pi_session_file || undefined,
-      // Channels only. A task session works inside somebody's repository and
-      // has no business rescheduling anything; a routine run is excluded too,
-      // since a routine that can create routines can build a chain unwatched.
-      routineTools: session.kind === "agent",
+      routineTools: hasRoutineTools(session),
       questions: canAsk(session),
       dialogs: showsDialogs(session, onChannel(session)),
       // A routine run gets the report tool instead: it is the one kind of
