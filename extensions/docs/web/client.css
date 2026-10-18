@@ -11,9 +11,29 @@
 .pd-folder h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .pd-path { margin: 2px 0 8px; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
 .pd-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.pd-list button { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.pd-list button:hover { border-color: rgb(var(--accent) / .5); }
-.pd-list button:focus-visible, .pd-back:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-open { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pd-open:hover { border-color: rgb(var(--accent) / .5); }
+.pd-open:focus-visible, .pd-back:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+/* A document's row: what can be done with it is at its right end, out of the way until the row is pointed at or has the focus (a touch screen cannot point). */
+.pd-row { position: relative; }
+.pd-row .pd-open { padding-right: 72px; }
+.pd-row-actions { position: absolute; top: 6px; right: 8px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.pd-row:hover .pd-row-actions, .pd-row:focus-within .pd-row-actions { opacity: 1; }
+@media (pointer: coarse) { .pd-row-actions { opacity: 1; } }
+.pd-row-action { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: none; color: rgb(var(--fg-subtle)); cursor: pointer; }
+.pd-row-action svg { width: 15px; height: 15px; }
+.pd-row-action:hover { background: rgb(var(--fg) / .08); color: rgb(var(--fg)); }
+.pd-row-danger:hover { background: rgb(var(--danger) / .1); color: rgb(var(--danger)); }
+.pd-row-action[aria-disabled="true"] { opacity: .6; cursor: default; }
+.pd-row-action:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+/* The file's name changed: in a row of a list, or under the bar of a document. */
+.pd-rename { display: flex; flex-direction: column; gap: 4px; }
+.pd-rename-row { border: 1px solid rgb(var(--accent) / .5); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; }
+.pd-rename-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pd-rename-input { min-width: 8rem; flex: 1 1 10rem; }
+.pd-rename-hint { font-size: 12px; }
+.pd-rename-problem { margin: 0; color: rgb(var(--danger)); font-size: 12px; overflow-wrap: anywhere; }
+.pd-doc > form.pd-rename { margin: 8px 16px 0; }
 .pd-title { font-weight: 600; overflow-wrap: anywhere; }
 .pd-meta { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
 .pd-document { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }

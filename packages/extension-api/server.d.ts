@@ -249,6 +249,25 @@ export interface ServerPortal {
     unsaved(base: string, rel: string): Promise<Unsaved | null>;
     /** Removes a file, or a folder and all in it, a link as the link. A folder holding git work only it has is refused (`unsaved`) unless `discard`. */
     remove(base: string, rel: string, options?: { discard?: boolean }): Promise<void>;
+    /**
+     * Takes away one plain file, and nothing else: a link or a folder is refused (`invalid`), where `remove` takes the link
+     * or all of the folder. For a server half that deletes a file of its own that the agent can change as it runs: the
+     * folder it is in is held open and the name is taken from it, so the file goes from the folder that was checked
+     * whatever its path leads to by then, and what is swapped onto the name meanwhile is never followed (a link goes as the
+     * link) or taken as a folder (it stays, with all in it). `direct` and `alone` as for `open`. `missing` for a file that
+     * is not there.
+     */
+    removeFile(base: string, rel: string, options?: FileOpenOptions): void;
+    /**
+     * Another name for one plain file in the folder it is in, never over something there, and a link or a folder is
+     * refused (`invalid`). The folder is held as for `removeFile`, and the new name is made as a second name of the file
+     * (a hard link, which the system refuses in the call itself for a name that is taken: `exists`, whatever an agent
+     * made there since the look) before the old one is removed, so a crash between leaves the file with both names, never
+     * with none; its owner, mode and content stay, and its `change` does not. A name the agent swapped for another thing
+     * meanwhile is `conflict`, and nothing is renamed. Where hard links are not possible it is a rename after a look.
+     * `direct` and `alone` as for `open`; the new path, from `base`.
+     */
+    renameFile(base: string, rel: string, name: string, options?: FileOpenOptions): string;
     /** A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. */
     makeFolder(base: string, rel: string, name: string): string;
     /**

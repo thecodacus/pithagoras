@@ -16,6 +16,8 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/download           the document's file, as an attachment
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
  *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/rename              gives its file another name { name }, which is a revision of its own (409 for a name that is taken)
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id                  deletes the document: its file, its comments and its history on the page
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/events             a stream of its revisions as they are made (server-sent events)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/history            its revisions, newest first (?before=, ?limit=)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/revisions/:revision  the text of one of them
@@ -39,7 +41,9 @@
  * message is where the document stands, so that a page that was away (a
  * reconnect, or a change between its load and its stream) finds out at once,
  * whatever it missed. A message says which revision, who made it and when; the
- * text is asked for from the document's own route. A change to the document's
+ * text (and the name, which a rename is a revision for) is asked for from the
+ * document's own route. A document that is deleted is told as `deleted`, once, and
+ * the page keeps its text: nothing more is said of it, and a request for it is a 404. A change to the document's
  * comments is told too (`threads`, with when), and the threads are asked for
  * from their own route. While a stream is open the
  * folder is looked at every couple of seconds for what changed outside the
@@ -1083,6 +1087,21 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.json({ ...doc, ...warn(markdown) });
   }));
 
+  portal.router.post("/folders/:folder/documents/:id/rename", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.json(await (await storeFor(folder.path)).rename(id, { name: req.body?.name }));
+  }));
+
+  portal.router.delete("/folders/:folder/documents/:id", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const { comments } = await (await storeFor(folder.path)).delete(id);
+    // A comment that was waiting to ask the agent has nothing to ask about any more.
+    for (const comment of comments) unwake(folder, comment);
+    res.json({ deleted: true });
+  }));
+
   portal.router.get("/folders/:folder/documents/:id/events", route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);
@@ -1109,11 +1128,17 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     // A page that lost the stream asks again after this long, with its last id: the first message tells it where things stand, so it is not needed.
     res.write("retry: 2000\n\n");
-    const write = ({ revision, author, at, threads }) =>
-      // A change to the comments is no revision: it has no id, which a reconnecting page would take for the last one it saw.
-      res.write(threads ? `event: threads\ndata: ${JSON.stringify({ at })}\n\n` : `id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`);
+    const write = ({ revision, author, at, threads, deleted }) =>
+      // A change to the comments is no revision: it has no id, which a reconnecting page would take for the last one it saw. Nor is a deletion.
+      res.write(
+        deleted
+          ? `event: deleted\ndata: ${JSON.stringify({ at })}\n\n`
+          : threads
+            ? `event: threads\ndata: ${JSON.stringify({ at })}\n\n`
+            : `id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`,
+      );
     write(now);
-    for (const change of queued) if (change.threads || change.revision > now.revision) write(change);
+    for (const change of queued) if (change.threads || change.deleted || change.revision > now.revision) write(change);
     send = write;
     const ping = setInterval(() => res.write(": ping\n\n"), pingMs);
     ping.unref?.();

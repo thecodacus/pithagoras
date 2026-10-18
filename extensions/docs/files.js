@@ -18,11 +18,12 @@ export const isDocumentName = (name) => typeof name === "string" && name.toLower
 /** What the store takes in by itself, found on disk: a name it can also write into a commit's trailers, on one line. */
 export const isAdoptable = (name) => isDocumentName(name) && name.length <= 255 && !/[\x00-\x1f\x7f]/.test(name);
 
-/** Something in the way of a write. `taken`: the name is another file's (a link, a folder, a second name), not a document's. */
+/** Something in the way of a write. `taken`: the name is another file's (a link, a folder, a second name), not a document's. `gone`: there is no such file. */
 export class Refused extends Error {
-  constructor(message, { taken = false } = {}) {
+  constructor(message, { taken = false, gone = false } = {}) {
     super(message);
     this.taken = taken;
+    this.gone = gone;
   }
 }
 
@@ -96,6 +97,48 @@ export function writeDocument(files, dir, name, bytes, { create = false } = {}) 
       case "missing":
         throw new Refused(e.message);
       // `failed` carries the system's code, which errors.js words for the person (a full disk, a folder it may not write in).
+      default:
+        throw e;
+    }
+  }
+}
+
+/**
+ * Takes away the document `name`, as it is: a plain file, with no second name (`shared`: a file that has one, which a rename that was cut off
+ * leaves), and nothing else. Done by the portal's `files.removeFile`, in the documents folder as it is held, so that what an agent does to the
+ * folder or the name meanwhile is not followed, and no folder is taken for a file. True when it was removed, false when it was gone already
+ * (that is what was asked for). Refused (`taken`: the name is something else now) for a link, a folder or a file with a second name.
+ */
+export function removeDocument(files, dir, name, { shared = false } = {}) {
+  if (!isDocumentName(name)) throw new Refused(`${name} is not a document's name in this folder`, { taken: true });
+  try {
+    files.removeFile(dir, name, { direct: true, alone: !shared });
+    return true;
+  } catch (e) {
+    if (e?.code === "missing") return false;
+    if (e?.code === "invalid") throw new Refused(e.message, { taken: true });
+    throw e;
+  }
+}
+
+/**
+ * Gives the document file `from` the name `to`, in the folder it is in, never over something that is there (`files.renameFile`: a second name is
+ * made first, which the system refuses for a taken name, then the old one is removed). Refused: `taken` for a name that something has (a file, a
+ * folder, a link, a file made there meanwhile); not `taken` for a `from` that is no plain document file now, or gone.
+ */
+export function renameDocument(files, dir, from, to) {
+  if (!isDocumentName(from) || !isAdoptable(to)) throw new Refused(`${isAdoptable(to) ? from : to} is not a document's name in this folder`);
+  try {
+    files.renameFile(dir, from, to, { direct: true, alone: true });
+  } catch (e) {
+    switch (e?.code) {
+      case "exists":
+        throw new Refused(e.message, { taken: true });
+      case "missing":
+        throw new Refused(e.message, { gone: true });
+      case "invalid":
+      case "conflict":
+        throw new Refused(e.message);
       default:
         throw e;
     }
