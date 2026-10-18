@@ -2,16 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
+import { chmodSync, chownSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import express from 'express';
 import docsServer from '../server.js';
 import { DocError, explained } from '../errors.js';
 import { GitError } from '../git.js';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
-import { scratch } from '../../../tests/helpers.mts';
+import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
 
 /**
  * What a person hits at the edges of the Documents extension, through its server half as the portal runs it: a document that is
@@ -21,76 +17,32 @@ import { scratch } from '../../../tests/helpers.mts';
  */
 
 const DATA = scratch('docs-hardening-data-');
-const UI_RECEIVE = 'pithagoras:v1:ui:receive';
 /** Permissions mean nothing to root: those tests are for a portal that is not. */
 const unprivileged = process.getuid?.() !== 0;
+/** The sandbox's closed folders are root's: only a portal that is root has what to turn away. */
+const privileged = !unprivileged;
 
 interface Options { faults?: { after(step: string): void }; wakeMs?: number; wakeLimitMs?: number; tell?: (chat: string) => Promise<boolean> }
 
-/** The server half for chats that work in these folders, with a stand-in for the portal's chats that rings a pi's bell. */
+/** The server half for chats that work in these folders, with a stand-in for the portal's chats that has the chat's pi say what it is told. */
 async function portal(chats: Record<string, string>, options: Options = {}) {
-  const router = express.Router();
-  const factories: ((pi: unknown, chat: unknown) => void)[] = [];
-  const logged: string[] = [];
-  const bells: Record<string, ((data: unknown) => void)[]> = {};
-  const sent: Record<string, any[]> = Object.fromEntries(Object.keys(chats).map((id) => [id, []]));
-  const tools = new Map<string, Map<string, any>>();
-  const told: string[] = [];
-  const start = (id: string) => {
-    if (tools.has(id)) return tools.get(id)!;
-    const mine = new Map<string, any>();
-    tools.set(id, mine);
-    bells[id] = [];
-    const pi = {
-      registerTool: (tool: any) => mine.set(tool.name, tool),
-      events: { on: (channel: string, handler: (data: unknown) => void) => { if (channel === UI_RECEIVE) bells[id].push(handler); return () => {}; } },
-      on: () => {},
-      sendMessage: (message: any) => sent[id].push(message),
-    };
-    for (const factory of factories) factory(pi, { id, title: `Chat ${id}`, workspace: chats[id], status: 'idle' });
-    return mine;
-  };
-  const stop = docsServer({
+  const mock = await mockPortal({
     extension: 'pithagoras-docs',
     executor: 'host',
-    log: (line: string) => logged.push(line),
-    router,
-    http: { json: express.json },
-    files: folderFiles,
-    sandbox: { on: () => false },
-    dataDir: () => DATA,
-    chats: {
-      list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
-      folder: (id: string) => realpathSync(chats[id]),
-      extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
-      async tell(id: string, data: unknown) {
-        told.push(id);
-        if (options.tell && !(await options.tell(id))) return false;
-        start(id);
-        for (const ring of bells[id]) ring({ extension: 'pithagoras-docs', data });
-        return true;
-      },
-    },
-  }, { dependencies: async () => true, faults: options.faults, pollMs: 0, wakeMs: options.wakeMs ?? 25, wakeLimitMs: options.wakeLimitMs }) as () => Promise<void>;
-  const app = express();
-  app.use('/x', router);
-  const server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/x`;
-  const call = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(base + url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    return { status: res.status, body: await res.json() as any };
-  };
+    chats,
+    dataDir: DATA,
+    followUp: options.tell ? async (chat) => ((await options.tell!(chat)) ? undefined : false) : undefined,
+  });
+  await mock.start(docsServer, { dependencies: async () => true, faults: options.faults, pollMs: 0, wakeMs: options.wakeMs ?? 25, wakeLimitMs: options.wakeLimitMs });
+  const { call } = await mock.serve();
   /** A tool of a chat's agent, called as pi calls it: its text, or the error it threw. */
   const agent = (chat: string) => async (name: string, params: unknown) => {
-    try {
-      const result = await start(chat).get(name)!.execute('call-1', params, undefined, undefined, {});
-      return { text: result.content[0].text as string, error: null };
-    } catch (e: any) {
-      return { text: '', error: e.message as string };
-    }
+    const result = await mock.pi(chat).call(name, params);
+    return { text: result.text as string, error: result.error };
   };
-  return { call, agent, sent, told, logged, close: async () => { await stop(); server.close(); } };
+  /** What each chat's pi was told to say, by chat: the messages themselves. */
+  const sent = new Proxy({} as Record<string, any[]>, { get: (_, id) => mock.said(String(id)).map(({ message }) => message) });
+  return { call, agent, sent, told: mock.followedUp, logged: mock.logged, close: () => mock.stop() };
 }
 
 const folderIdOf = (folder: string) => createHash('sha256').update(folder).digest('hex').slice(0, 16);
@@ -815,6 +767,45 @@ test('a chat that never starts says so after a while, and the next change to the
     await until(async () => (await threads())[0].ping.state === 'sent', 'the thread to say the chat took it');
     assert.equal(docs.sent.a.length, 1);
     assert.ok(docs.sent.a[0].content.includes('> Is it really, @agent?'));
+  } finally {
+    await docs.close();
+  }
+});
+
+// A folder the sandbox closed to the agent, renamed by the agent to `documents`
+
+test('a folder the sandbox closed to the agent is not the documents folder: nothing in it is listed, read, written or handed to the agent, whatever it is renamed to', { skip: !privileged }, async () => {
+  const AGENT = 10100;
+  const { folder, docs, f, id, url } = await withDocument('docs-hard-closed-');
+  try {
+    // As the sandbox has it: the chat's folder and the documents in it are the agent's, and the portal is root.
+    for (const where of [folder, path.join(folder, 'documents'), path.join(folder, 'documents', 'plan.md')]) chownSync(where, AGENT, AGENT);
+    assert.equal((await docs.call('GET', url)).status, 200, 'the agent\'s own folder is used');
+    // A folder the sandbox closed (root alone, 0700) beside it, with a document in it that the agent may not read.
+    mkdirSync(path.join(folder, 'closed'));
+    writeFileSync(path.join(folder, 'closed', 'secret.md'), '# Not for the agent\n\nThe key is hunter2.\n');
+    chownSync(path.join(folder, 'closed'), 0, 0);
+    chmodSync(path.join(folder, 'closed'), 0o700);
+    // The agent writes in its folder: it takes the documents folder out of the way and puts that one in its place.
+    renameSync(path.join(folder, 'documents'), path.join(folder, 'documents.aside'));
+    renameSync(path.join(folder, 'closed'), path.join(folder, 'documents'));
+    const listed = (await docs.call('GET', '/folders')).body;
+    assert.deepEqual(listed.folders, [], 'no document of it is listed');
+    assert.ok(!JSON.stringify(listed).includes('secret'));
+    // Nothing is read through the page, by a document it knew or by the name of the file.
+    for (const answer of [await docs.call('GET', url), await docs.call('GET', `${url}/history`)]) assert.ok(!JSON.stringify(answer.body).includes('hunter2'), JSON.stringify(answer.body));
+    // The agent is not handed it either: no document of the folder, and none can be made in it.
+    const listing = await docs.agent('a')('doc_list', {});
+    assert.ok(!listing.text.includes('secret'), listing.text);
+    const made = await docs.agent('a')('doc_create', { title: 'Mine' });
+    assert.match(made.error ?? '', /closed to the agent/);
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'Mine' })).status, 409);
+    assert.equal(existsSync(path.join(folder, 'documents', 'mine.md')), false, 'nothing was written into it');
+    assert.deepEqual(readdirSync(path.join(folder, 'documents')), ['secret.md']);
+    // Put back, the agent\'s own folder is used again, and its documents are where they were.
+    renameSync(path.join(folder, 'documents'), path.join(folder, 'closed'));
+    renameSync(path.join(folder, 'documents.aside'), path.join(folder, 'documents'));
+    assert.equal((await docs.call('GET', url)).status, 200);
   } finally {
     await docs.close();
   }

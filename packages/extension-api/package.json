@@ -1,7 +1,7 @@
 {
   "name": "@pithagoras/extension-api",
   "version": "1.0.0",
-  "description": "What a Pithagoras extension is given, as types, and the build that bundles one written in TypeScript and JSX",
+  "description": "What a Pithagoras extension is given, as types, the build that bundles one written in TypeScript and JSX, and a portal to test one against",
   "type": "module",
   "types": "./index.d.ts",
   "exports": {
@@ -12,13 +12,19 @@
       "types": "./server.d.ts"
     },
     "./build": "./build.mjs",
-    "./tailwind": "./tailwind.mjs"
+    "./tailwind": "./tailwind.mjs",
+    "./testing": {
+      "types": "./testing.d.ts",
+      "default": "./testing.mjs"
+    }
   },
   "files": [
     "index.d.ts",
     "server.d.ts",
     "build.mjs",
     "tailwind.mjs",
+    "testing.mjs",
+    "testing.d.ts",
     "README.md"
   ],
   "peerDependencies": {

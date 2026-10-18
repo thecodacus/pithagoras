@@ -3,16 +3,13 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import path from 'node:path';
-import express from 'express';
 import docsServer from '../server.js';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
-import { scratch } from '../../../tests/helpers.mts';
+import { mockPortal, scratch, type MockPage } from '@pithagoras/extension-api/testing';
+import { follow as followTopic } from './follow.mts';
 
 /**
- * A document that is changed while a page has it open (extensions/docs/server.js, store.js): the stream a page
+ * A document that is changed while a page has it open (extensions/docs/server.js, store.js): the topic a page
  * listens to, which tells it each revision as it is made, and the save of a page that started from an earlier
  * revision, which is put together with what was saved since. Against a real store on disk, with git, and a real
  * router in a real server; the agent works through its tools, the page through the routes.
@@ -21,9 +18,6 @@ import { scratch } from '../../../tests/helpers.mts';
 const DATA = scratch('docs-stream-data-');
 /** Permissions mean nothing to root: those tests are for a portal that is not. */
 const unprivileged = process.getuid?.() !== 0;
-
-/** One message of a stream: a frame up to the blank line, in its parts. */
-interface Frame { id?: string; event?: string; data?: any; comment?: string; retry?: string }
 
 /** Waits for `done`, or fails saying what it waited for (and `more`, where it knows more). */
 async function until(done: () => boolean, what: string, more: () => string = () => '', ms = 5000) {
@@ -36,124 +30,56 @@ async function until(done: () => boolean, what: string, more: () => string = () 
 
 /**
  * The server half for a chat in `folder`, or for the chats that work in the folders `folder` names (by chat; a test may add to it, as a chat
- * that is started). `pingMs` and `pollMs`: how often the stream is pinged and the folder looked at.
+ * that is started). `pollMs`: how often the folder is looked at.
  */
-async function portal(folder: string | Record<string, string>, { pingMs, pollMs = 40 }: { pingMs?: number; pollMs?: number } = {}) {
-  const router = express.Router();
-  const factories: ((pi: unknown, chat: unknown) => void)[] = [];
-  const logged: string[] = [];
-  const chats: Record<string, string> = typeof folder === 'string' ? { a: folder } : folder;
-  const stop = docsServer({
-    extension: 'pithagoras-docs',
-    executor: 'host',
-    log: (line: string) => logged.push(line),
-    router,
-    http: { json: express.json },
-    files: folderFiles,
-    sandbox: { on: () => false },
-    dataDir: () => DATA,
-    chats: {
-      list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
-      folder: (id: string) => chats[id],
-      extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
-    },
-  }, { dependencies: async () => true, pingMs, pollMs }) as () => Promise<void>;
-  const app = express();
-  app.use('/x', router);
-  const server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/x`;
-  const aborts: AbortController[] = [];
-  const call = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(base + url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    return { status: res.status, body: await res.json() as any };
-  };
-  /** A page's stream: the frames as they come, one at a time. */
-  async function listen(url: string, headers: Record<string, string> = {}) {
-    const abort = new AbortController();
-    aborts.push(abort);
-    const res = await fetch(base + url, { headers: { accept: 'text/event-stream', ...headers }, signal: abort.signal });
-    if (!res.ok || !res.headers.get('content-type')?.startsWith('text/event-stream')) return { res, status: res.status, body: await res.json().catch(() => null) as any };
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    /** The next frame, or null where the stream has ended. */
-    const frame = async (): Promise<Frame | null> => {
-      for (;;) {
-        const end = buffer.indexOf('\n\n');
-        if (end >= 0) {
-          const text = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          const out: Frame = {};
-          for (const line of text.split('\n')) {
-            if (line.startsWith(':')) out.comment = line.slice(1).trim();
-            else if (line.startsWith('data: ')) out.data = JSON.parse(line.slice(6));
-            else if (line.startsWith('id: ')) out.id = line.slice(4);
-            else if (line.startsWith('event: ')) out.event = line.slice(7);
-            else if (line.startsWith('retry: ')) out.retry = line.slice(7);
-          }
-          return out;
-        }
-        const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
-        if (done) return null;
-        buffer += decoder.decode(value, { stream: true });
-      }
-    };
-    /** The next revision the stream tells of. */
-    const revision = async () => {
-      for (;;) {
-        const next = await frame();
-        if (!next || next.event === 'revision') return next?.data ?? null;
-      }
-    };
-    return { res, status: res.status, body: null as any, frame, revision, close: () => abort.abort() };
+async function portal(folder: string | Record<string, string>, { pollMs = 40 }: { pollMs?: number } = {}) {
+  const chats: Record<string, string> = typeof folder === 'string' ? { a: folder } : { ...folder };
+  const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats, dataDir: DATA });
+  const stopHalf = await mock.start(docsServer, { dependencies: async () => true, pollMs });
+  const web = await mock.serve();
+  const { call } = web;
+  const pages: MockPage[] = [];
+  /** A page that listens to a topic (or to the address of the stream that was): message by message. */
+  async function listen(address: string) {
+    const page = mock.page();
+    pages.push(page);
+    return followTopic(page, address);
   }
-  const agent = () => {
-    const tools = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: 'a', title: 'Chat a', workspace: chats.a, status: 'idle' });
-    return async (name: string, params: unknown) => {
-      try {
-        const result = await tools.get(name).execute('call-1', params, undefined, undefined, {});
-        return { ok: true as const, text: result.content[0].text as string };
-      } catch (e: any) {
-        return { ok: false as const, error: e.message as string };
-      }
-    };
+  const agent = async (name: string, params: unknown) => {
+    const result = await mock.pi('a').call(name, params);
+    return result.error === null ? { ok: true as const, text: result.text as string } : { ok: false as const, error: result.error };
   };
   /**
-   * A page's stream, followed as it comes: every frame is kept, so that what it does not say can be told too. `told()` is the versions of
-   * the list it has said; `until` waits for something it will say.
+   * A page's listening, followed as it comes: every message is kept, so that what it does not say can be told too. `told()` is the versions
+   * of the list it has said; `until` waits for something it will say.
    */
-  async function follow(url: string) {
-    const stream = await listen(url);
-    const frames: Frame[] = [];
-    let ended = false;
-    void (async () => {
-      for (let next = await stream.frame?.(); next; next = await stream.frame?.()) frames.push(next);
-      ended = true;
-    })();
-    const told = () => frames.filter((f) => f.event === 'documents').map((f) => f.data.version as string);
+  async function follow(address: string) {
+    const stream = await listen(address);
+    const told = () => stream.frames().filter((m) => typeof m.version === 'string').map((m) => m.version as string);
     const wait = async (done: () => boolean, what: string, ms?: number) => {
-      await until(() => done() || ended, what, () => `the list was told as ${JSON.stringify(told())}`, ms);
-      if (!done()) throw new Error(`The stream ended before ${what}`);
+      await until(() => done() || stream.ended(), what, () => `the list was told as ${JSON.stringify(told())}`, ms);
+      if (!done()) throw new Error(`The topic was lost before ${what}`);
     };
-    return { ...stream, frames, told, ended: () => ended, until: wait, last: () => told().at(-1) };
+    return { ...stream, told, ended: stream.ended, until: wait, last: () => told().at(-1) };
   }
   return {
     call,
     listen,
     follow,
-    chats,
-    agent: agent(),
-    logged,
+    /** The chats that work in the folders: a test adds one (`docs.chats.b = folder`) or takes one away. */
+    chats: new Proxy(chats, {
+      set: (target, id: string, value: string) => (target[id] = value, mock.addChat(id, value), true),
+      deleteProperty: (target, id: string) => (delete target[id], mock.removeChat(id), true),
+    }),
+    agent,
+    logged: mock.logged,
     close: async () => {
-      for (const abort of aborts) abort.abort();
-      await stop();
-      server.close();
+      for (const page of pages) page.close();
+      await mock.stop();
     },
-    /** The stop alone, for a test of what it does to a stream. */
-    stop,
-    closeServer: () => server.close(),
+    /** The stop alone, for a test of what it does to a page that listens. */
+    stop: stopHalf,
+    mock,
   };
 }
 
@@ -165,7 +91,7 @@ const fileOf = (folder: string, name = 'plan.md') => readFileSync(path.join(fold
 const PLAN = '# Plan\n\nShip it on Friday.\n\nThe build is green.\n\nSign-off is on Monday.\n';
 
 /** A folder with one document, made through the page, and the portal for it. */
-async function withDocument(prefix: string, options: { pingMs?: number; pollMs?: number } = {}, markdown = PLAN) {
+async function withDocument(prefix: string, options: { pollMs?: number } = {}, markdown = PLAN) {
   const folder = realpathSync(scratch(prefix));
   const docs = await portal(folder, options);
   const f = folderIdOf(folder);
@@ -183,18 +109,17 @@ test('a page that listens is told where the document stands, and then each revis
   try {
     const stream = await docs.listen(events);
     assert.equal(stream.status, 200);
-    assert.equal(stream.res.headers.get('cache-control'), 'no-cache, no-transform');
-    assert.equal(stream.res.headers.get('x-accel-buffering'), 'no', 'a proxy is not to hold it');
-    // The first message is a retry, then where the document is: revision 1, by the page that made it.
-    assert.deepEqual(await stream.frame!(), { retry: '2000' });
+    // The first message is where the document is: revision 1, by the page that made it, marked as the first.
     const first = await stream.frame!();
     assert.equal(first?.event, 'revision');
-    assert.equal(first?.id, '1');
+    assert.equal(first?.first, true);
     assert.deepEqual({ ...first?.data, at: typeof first?.data.at }, { revision: 1, author: 'user', at: 'string' });
     assert.ok(!Number.isNaN(Date.parse(first?.data.at)));
 
     assert.equal((await edit(docs, id, 1, 'on Friday', 'on Thursday')).ok, true);
-    assert.deepEqual(await stream.revision!(), { revision: 2, author: 'agent', at: (await docs.call('GET', `${url}/history`)).body.revisions[0].at });
+    const second = await stream.frame!();
+    assert.equal(second?.first, false, 'only the first is marked');
+    assert.deepEqual(second?.data, { revision: 2, author: 'agent', at: (await docs.call('GET', `${url}/history`)).body.revisions[0].at });
     const saved = await docs.call('PUT', url, { markdown: `${PLAN}Another line.\n`, base: 2 });
     assert.equal(saved.status, 200);
     const third = await stream.revision!();
@@ -230,17 +155,17 @@ test('two pages listening to one document hear its revisions in the same order, 
   }
 });
 
-test('a page that comes back, with the id it last heard, is told where the document stands now, whatever it missed', async () => {
+test('a page that listens again is told where the document stands now, whatever it missed', async () => {
   const { docs, id, events } = await withDocument('docs-stream-again-');
   try {
     const first = await docs.listen(events);
     await first.revision!();
     first.close!();
     for (let n = 1; n <= 3; n++) assert.equal((await edit(docs, id, n, n === 1 ? 'on Friday' : `Friday ${n - 1}`, `Friday ${n}`)).ok, true);
-    // As the browser's EventSource asks again: with the id of the last message, which the first message here makes no use of.
-    const again = await docs.listen(events, { 'last-event-id': '1' });
-    const told = await again.revision!();
-    assert.deepEqual([told.revision, told.author], [4, 'agent']);
+    // As the portal asks again for a topic when its connection dropped: the first message tells where things stand, whatever came meanwhile.
+    const again = await docs.listen(events);
+    const told = await again.frame!();
+    assert.deepEqual([told?.data.revision, told?.data.author, told?.first], [4, 'agent', true]);
   } finally {
     await docs.close();
   }
@@ -271,13 +196,16 @@ test('revisions made while a stream is being opened are heard, in order, and the
   }
 });
 
-test('a stream for what is not there is refused as any request is, and none is opened', async () => {
+test('a topic for what is not there is refused as any request is, and nothing is listened to', async () => {
   const { docs, f, id, events } = await withDocument('docs-stream-refused-');
   try {
     for (const url of [`/folders/${f}/documents/0123456789abcdef/events`, `/folders/${f}/documents/..%2Fplan.md/events`, `/folders/0123456789abcdef/documents/${id}/events`, `/folders/${f}/documents/plan.md/events`]) {
       const refused = await docs.listen(url);
-      assert.equal(refused.status, 404, url);
-      assert.match(refused.body.error, /There is no such/);
+      assert.equal(refused.result, 'refused', url);
+    }
+    // Names that are no topic of the extension's at all.
+    for (const topic of ['doc', 'doc/', `doc/${f}`, `doc/${f}/${id}/more`, 'folders/x', `doc/${f.toUpperCase()}/${id}`, '../folders', 'other']) {
+      assert.equal(await docs.mock.page().listen(topic), 'refused', topic);
     }
     // And a folder with no store at all: nothing is made for it.
     const none = await docs.listen('/folders/0123456789abcdef/documents/0123456789abcdef/events');
@@ -327,20 +255,19 @@ test('the folder is looked at only while a page listens to it', async () => {
   }
 });
 
-test('a stream that is open gets a comment line every so often, and is ended when the extension is stopped', async () => {
-  const { docs, events } = await withDocument('docs-stream-ping-', { pingMs: 30, pollMs: 0 });
+test('a page that listens is let go when the extension is stopped: what was looked at for it is not looked at again, and the page is told the topic is lost', async () => {
+  const { folder, docs, events } = await withDocument('docs-stream-stop-', { pollMs: 30 });
   try {
     const stream = await docs.listen(events);
     await stream.revision!();
-    const comments: (string | undefined)[] = [];
-    for (let n = 0; n < 3; n++) comments.push((await stream.frame!())?.comment);
-    assert.deepEqual(comments, ['ping', 'ping', 'ping']);
     await docs.stop();
-    // Everything it had open is ended: a page's reconnect is the next thing it does.
-    let ended = false;
-    for (let n = 0; n < 20 && !ended; n++) ended = (await stream.frame!()) === null;
-    assert.equal(ended, true);
-    docs.closeServer();
+    // Everything it had open is let go: the page asks again when the extension is back.
+    assert.equal(await stream.frame!(), null);
+    assert.equal(stream.ended(), true);
+    // And not looked at again for changes outside.
+    writeFileSync(path.join(folder, 'documents', 'plan.md'), PLAN.replace('on Friday', 'on Wednesday'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(git(folder, 'rev-list', '--count', 'HEAD'), '1');
   } finally {
     await docs.close().catch(() => {});
   }
@@ -500,13 +427,10 @@ test('the page that lists the folders is told where the list stands, then its ne
   try {
     const stream = await docs.follow('/folders/events');
     assert.equal(stream.status, 200);
-    assert.equal(stream.res.headers.get('cache-control'), 'no-cache, no-transform');
-    assert.equal(stream.res.headers.get('x-accel-buffering'), 'no', 'a proxy is not to hold it');
     await stream.until(() => stream.told().length === 1, 'the first message');
-    assert.deepEqual(stream.frames[0], { retry: '2000' });
     // Nothing but a version, which says nothing of what the folders and their documents are called.
-    assert.equal(stream.frames[1].event, 'documents');
-    assert.deepEqual(Object.keys(stream.frames[1].data), ['version']);
+    assert.deepEqual(Object.keys(stream.frames()[0]).sort(), ['first', 'version']);
+    assert.equal(stream.frames()[0].first, true);
     assert.match(stream.last()!, /^[0-9a-f]{16}$/);
     // It is the version of the list the page asks for, which is then current: nothing more to ask.
     assert.equal((await listed(docs)).version, stream.last());
@@ -758,26 +682,23 @@ test('a burst of changes made at once ends with the version the list has', async
   }
 });
 
-test('a stream for the list is kept alive and ended with the extension, and one that is closed leaves the others to be told', async () => {
-  const { docs, f } = await withDocument('docs-list-ends-', { pingMs: 30 });
+test('a page listening to the list is let go with the extension, and one that stops leaves the others to be told', async () => {
+  const { docs, f } = await withDocument('docs-list-ends-');
   try {
     const one = await docs.follow('/folders/events');
     const two = await docs.follow('/folders/events');
     await one.until(() => one.told().length === 1, 'the first message');
     await two.until(() => two.told().length === 1, 'the first message');
-    // Kept alive, so that nothing between the portal and the page takes it for idle.
-    await one.until(() => one.frames.filter((frame) => frame.comment === 'ping').length >= 2, 'its pings');
     // One page goes: the other is told still, as the look at the folders goes on for it.
     one.close!();
-    await one.until(() => one.ended(), 'the stream to end');
     assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'More' })).status, 201);
     await two.until(() => two.told().length === 2, 'the new document');
+    await one.page.until(() => true);
+    assert.equal(one.told().length, 1, 'and the one that stopped hears nothing more');
     await docs.stop();
-    await two.until(() => two.ended(), 'the stream to be ended with the extension');
-    // One asked for after that is refused as a stopping extension's request.
-    const late = await docs.listen('/folders/events');
-    assert.equal(late.status, 503);
-    docs.closeServer();
+    await two.until(() => two.ended(), 'the topic to be lost with the extension');
+    // One asked for after that is turned away: nothing listens for a stopped extension.
+    assert.equal(await docs.mock.page().listen('folders'), 'lost');
   } finally {
     await docs.close().catch(() => {});
   }

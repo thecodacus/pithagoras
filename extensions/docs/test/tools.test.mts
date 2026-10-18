@@ -3,13 +3,9 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import path from 'node:path';
-import express from 'express';
 import docsServer from '../server.js';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
-import { scratch } from '../../../tests/helpers.mts';
+import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
 
 /**
  * The Documents extension's tools for the agent (extensions/docs/tools.js), through its server half: the tools are
@@ -23,53 +19,18 @@ type Result = { ok: true; text: string; details: any } | { ok: false; error: str
 
 /** The server half for chats that work in these folders (`chats`: the folder of each, by id), with pi run as `executor`. */
 async function portal(chats: Record<string, string>, executor = 'host') {
-  const router = express.Router();
-  const factories: ((pi: unknown, chat: unknown) => void)[] = [];
-  const logged: string[] = [];
-  const stop = docsServer({
-    extension: 'pithagoras-docs',
-    executor,
-    log: (line: string) => logged.push(line),
-    router,
-    http: { json: express.json },
-    files: folderFiles,
-    sandbox: { on: () => false },
-    dataDir: () => DATA,
-    chats: {
-      list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
-      folder: (id: string) => realpathSync(chats[id]),
-      extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
-    },
-  }, { dependencies: async () => true }) as () => Promise<void>;
-  const app = express();
-  app.use('/x', router);
-  const server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/x`;
+  const mock = await mockPortal({ extension: 'pithagoras-docs', executor, chats, dataDir: DATA });
+  await mock.start(docsServer, { dependencies: async () => true });
   /** The person, through the routes. */
-  const call = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(base + url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    return { status: res.status, body: await res.json() as any };
-  };
+  const { call } = await mock.serve();
   /** A chat's pi as the portal starts it: the tools the server half put into it, by name. */
-  const pi = (chat: string) => {
-    const tools = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
-    return tools;
-  };
+  const pi = (chat: string) => mock.pi(chat).tools;
   /** What the agent of a chat gets when it calls a tool: its text and details, or the refusal it reads. */
-  const agent = (chat: string) => {
-    const tools = pi(chat);
-    return async (name: string, params: unknown): Promise<Result> => {
-      try {
-        const result = await tools.get(name).execute('call-1', params, undefined, undefined, {});
-        return { ok: true, text: result.content[0].text, details: result.details };
-      } catch (e: any) {
-        return { ok: false, error: e.message };
-      }
-    };
+  const agent = (chat: string) => async (name: string, params: unknown): Promise<Result> => {
+    const result = await mock.pi(chat).call(name, params);
+    return result.error === null ? { ok: true, text: result.text, details: result.details } : { ok: false, error: result.error };
   };
-  return { call, pi, agent, factories, logged, close: async () => { await stop(); server.close(); } };
+  return { call, pi, agent, factories: mock.factories, logged: mock.logged, close: () => mock.stop() };
 }
 
 function folderWith(prefix: string, files: Record<string, string> = {}) {

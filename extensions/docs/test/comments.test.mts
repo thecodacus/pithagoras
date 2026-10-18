@@ -2,13 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import path from 'node:path';
-import express from 'express';
 import docsServer from '../server.js';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
-import { scratch } from '../../../tests/helpers.mts';
+import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
+import { follow } from './follow.mts';
 
 /**
  * The comments of the Documents extension (extensions/docs/store.js, server.js): threads anchored to a passage of
@@ -18,83 +15,14 @@ import { scratch } from '../../../tests/helpers.mts';
 
 const DATA = scratch('docs-comments-data-');
 
-interface Frame { id?: string; event?: string; data?: any; comment?: string }
-
 /** The server half for chats that work in these folders. */
 async function portal(folders: Record<string, string>, data = DATA) {
-  const router = express.Router();
-  const logged: string[] = [];
-  const stop = docsServer({
-    extension: 'pithagoras-docs',
-    log: (line: string) => logged.push(line),
-    router,
-    http: { json: express.json },
-    files: folderFiles,
-    sandbox: { on: () => false },
-    dataDir: () => data,
-    chats: {
-      list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
-      folder: (id: string) => realpathSync(folders[id]),
-    },
-  }, { dependencies: async () => true, pollMs: 40 }) as () => Promise<void>;
-  const app = express();
-  app.use('/x', router);
-  const server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/x`;
-  const aborts: AbortController[] = [];
-  const call = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(base + url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    const text = await res.text();
-    try { return { status: res.status, body: JSON.parse(text) as any }; } catch { throw new Error(`${method} ${url} ${res.status}: ${text.slice(0, 300)}`); }
-  };
-  /** A page's stream, frame by frame. */
-  async function listen(url: string) {
-    const abort = new AbortController();
-    aborts.push(abort);
-    const res = await fetch(base + url, { headers: { accept: 'text/event-stream' }, signal: abort.signal });
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const frame = async (): Promise<Frame | null> => {
-      for (;;) {
-        const end = buffer.indexOf('\n\n');
-        if (end >= 0) {
-          const text = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          const out: Frame = {};
-          for (const line of text.split('\n')) {
-            if (line.startsWith(':')) out.comment = line.slice(1).trim();
-            else if (line.startsWith('data: ')) out.data = JSON.parse(line.slice(6));
-            else if (line.startsWith('id: ')) out.id = line.slice(4);
-            else if (line.startsWith('event: ')) out.event = line.slice(7);
-          }
-          return out;
-        }
-        const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
-        if (done) return null;
-        buffer += decoder.decode(value, { stream: true });
-      }
-    };
-    /** The next frame of a kind, skipping the others. */
-    const next = async (event: string) => {
-      for (;;) {
-        const got = await frame();
-        if (!got || got.event === event) return got;
-      }
-    };
-    return { frame, next };
-  }
-  return {
-    call,
-    listen,
-    logged,
-    close: async () => {
-      for (const abort of aborts) abort.abort();
-      await stop();
-      server.close();
-    },
-  };
+  const mock = await mockPortal({ extension: 'pithagoras-docs', chats: folders, dataDir: data });
+  await mock.start(docsServer, { dependencies: async () => true, pollMs: 40 });
+  const { call } = await mock.serve();
+  /** A page's listening, message by message. */
+  const listen = (url: string) => follow(mock.page(), url);
+  return { call, listen, logged: mock.logged, close: () => mock.stop() };
 }
 
 const folderIdOf = (folder: string) => createHash('sha256').update(folder).digest('hex').slice(0, 16);

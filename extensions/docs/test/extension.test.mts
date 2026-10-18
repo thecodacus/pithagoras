@@ -8,8 +8,10 @@ import ts from 'typescript';
 import { ensureDependencies, missingDependencies } from '../deps.js';
 import { SECRET_WARNING } from '../secret.js';
 import docsServer from '../server.js';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
-import { scratch } from '../../../tests/helpers.mts';
+import { portalFiles, scratch } from '@pithagoras/extension-api/testing';
+
+/** The portal's own `portal.files`: what a server half is given for a chat's folder. */
+const folderFiles = await portalFiles();
 
 /** The portal's data folder for the stores. */
 const DATA = scratch('docs-ext-data-');
@@ -26,6 +28,8 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     log: (line: string) => logged.push(line),
     router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
     http: { json: () => () => {} },
+    push: () => {},
+    onListen: () => {},
     files: folderFiles,
     sandbox: { on: () => false },
     // The portal's data folder for the stores: one for the file, the stores are told apart by their folders' ids.
@@ -205,7 +209,8 @@ test('a pipe named like a document is no document, and asking for one does not h
   // A document whose file is swapped for a pipe after it was listed is asked for as well.
   const asking = `
     import docsServer from ${JSON.stringify(new URL('../server.js', import.meta.url).href)};
-    import { folderFiles } from ${JSON.stringify(new URL('../../../core/server/src/folder-files.ts', import.meta.url).href)};
+    import { portalFiles } from '@pithagoras/extension-api/testing';
+    const folderFiles = await portalFiles();
     import { execFileSync } from 'node:child_process';
     import { realpathSync, rmSync } from 'node:fs';
     const routes = new Map();
@@ -214,6 +219,8 @@ test('a pipe named like a document is no document, and asking for one does not h
       log: () => {},
       router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
       http: { json: () => () => {} },
+      push: () => {},
+      onListen: () => {},
       files: folderFiles,
       sandbox: { on: () => false },
       dataDir: () => process.env.DATA,

@@ -3,13 +3,9 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import path from 'node:path';
-import express from 'express';
 import docsServer from '../server.js';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
-import { scratch } from '../../../tests/helpers.mts';
+import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
 
 /**
  * The Documents extension's store, through its server half's routes: a real
@@ -32,22 +28,9 @@ const DATA = scratch('docs-store-data-');
  * agents run as users of their own.
  */
 async function portal(folders: Record<string, string>, options: { onStep?: (step: string) => void; gitTimeoutMs?: number; data?: string; sandbox?: boolean } = {}) {
-  const router = express.Router();
-  const logged: string[] = [];
   let armed: string | null = null;
-  const stop = docsServer({
-    extension: 'pithagoras-docs',
-    log: (line: string) => logged.push(line),
-    router,
-    http: { json: express.json },
-    files: folderFiles,
-    sandbox: { on: () => options.sandbox ?? false },
-    dataDir: () => options.data ?? DATA,
-    chats: {
-      list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
-      folder: (id: string) => realpathSync(folders[id]),
-    },
-  }, {
+  const mock = await mockPortal({ extension: 'pithagoras-docs', chats: folders, dataDir: options.data ?? DATA, sandbox: options.sandbox ?? false });
+  await mock.start(docsServer, {
     dependencies: async () => true,
     gitTimeoutMs: options.gitTimeoutMs,
     faults: {
@@ -58,26 +41,15 @@ async function portal(folders: Record<string, string>, options: { onStep?: (step
         throw new Error(`injected failure after the ${step}`);
       },
     },
-  }) as () => Promise<void>;
-  const app = express();
-  app.use('/x', router);
-  const server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/x`;
-  const call = async (method: string, url: string, body?: unknown): Promise<Answer> => {
-    const res = await fetch(base + url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    return { status: res.status, body: await res.json() };
-  };
+  });
+  const { call } = await mock.serve() as { call: (method: string, url: string, body?: unknown) => Promise<Answer> };
   const listed = async () => (await call('GET', '/folders')).body.folders;
   return {
     call,
     listed,
-    logged,
+    logged: mock.logged,
     fault: (step: string) => void (armed = step),
-    close: async () => {
-      await stop();
-      server.close();
-    },
+    close: () => mock.stop(),
   };
 }
 
@@ -423,7 +395,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
     import { chownSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
     import path from 'node:path';
     import docsServer from ${JSON.stringify(new URL('../server.js', import.meta.url).href)};
-    import { folderFiles } from ${JSON.stringify(new URL('../../../core/server/src/folder-files.ts', import.meta.url).href)};
+    import { mockPortal } from '@pithagoras/extension-api/testing';
     const root = mkdtempSync(path.join(process.env.WHERE, 'docs-owner-'));
     try {
       const folder = path.join(root, 'project');
@@ -438,13 +410,10 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       // The portal's data folder is the portal's own (root here), closed to the agent's user.
       const data = path.join(root, 'data');
       mkdirSync(data, { mode: 0o700 });
-      const router = express.Router();
-      const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: folderFiles, sandbox: { on: () => true }, dataDir: () => data,
-        chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => folder } }, { dependencies: async () => true });
-      const app = express(); app.use(router);
-      const server = app.listen(0, '127.0.0.1'); await new Promise((r) => server.once('listening', r));
-      const base = 'http://127.0.0.1:' + server.address().port;
-      const call = async (method, url, body) => (await fetch(base + url, { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) })).json();
+      const mock = await mockPortal({ extension: 'pithagoras-docs', chats: { a: folder }, dataDir: data, sandbox: true });
+      const stop = await mock.start(docsServer, { dependencies: async () => true });
+      const web = await mock.serve();
+      const call = async (method, url, body) => (await web.call(method, url, body)).body;
       const [listed] = (await call('GET', '/folders')).folders;
       const doc = listed.documents[0];
       const saved = await call('PUT', '/folders/' + listed.id + '/documents/' + doc.id, { markdown: '# Plan\\n\\nSaved by the portal.\\n', base: doc.revision });
@@ -452,7 +421,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       const own = (name) => { const s = statSync(path.join(folder, 'documents', name)); return [s.uid, s.gid, (s.mode & 0o777).toString(8)]; };
       const store = statSync(path.join(data, listed.id));
       console.log(JSON.stringify({ saved: saved.revision, made: made.name, plan: own('plan.md'), notes: own('notes.md'), store: [store.uid, (store.mode & 0o777).toString(8)] }));
-      await stop(); server.close();
+      await stop(); await mock.stop();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -2,13 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import path from 'node:path';
-import express from 'express';
 import docsServer from '../server.js';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
-import { scratch } from '../../../tests/helpers.mts';
+import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
 
 /**
  * The agent's tools for comments (extensions/docs/tools.js): doc_comment, doc_reply and doc_resolve, the comments in
@@ -21,51 +17,15 @@ const DATA = scratch('docs-comment-tools-data-');
 type Result = { ok: true; text: string; details: any } | { ok: false; error: string };
 
 async function portal(chats: Record<string, string>, faults?: { after(step: string): void }) {
-  const router = express.Router();
-  const factories: ((pi: unknown, chat: unknown) => void)[] = [];
-  const logged: string[] = [];
-  const stop = docsServer({
-    extension: 'pithagoras-docs',
-    executor: 'host',
-    log: (line: string) => logged.push(line),
-    router,
-    http: { json: express.json },
-    files: folderFiles,
-    sandbox: { on: () => false },
-    dataDir: () => DATA,
-    chats: {
-      list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
-      folder: (id: string) => realpathSync(chats[id]),
-      extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
-    },
-  }, { dependencies: async () => true, pollMs: 0, faults }) as () => Promise<void>;
-  const app = express();
-  app.use('/x', router);
-  const server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/x`;
-  const call = async (method: string, url: string, body?: unknown) => {
-    const res = await fetch(base + url, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    return { status: res.status, body: await res.json() as any };
+  const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats, dataDir: DATA });
+  await mock.start(docsServer, { dependencies: async () => true, pollMs: 0, faults });
+  const { call } = await mock.serve();
+  const agent = (chat: string) => async (name: string, params: unknown): Promise<Result> => {
+    const result = await mock.pi(chat).call(name, params);
+    return result.error === null ? { ok: true, text: result.text, details: result.details } : { ok: false, error: result.error };
   };
-  const agent = (chat: string) => {
-    const tools = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => tools.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
-    return async (name: string, params: unknown): Promise<Result> => {
-      try {
-        const result = await tools.get(name).execute('call-1', params, undefined, undefined, {});
-        return { ok: true, text: result.content[0].text, details: result.details };
-      } catch (e: any) {
-        return { ok: false, error: e.message };
-      }
-    };
-  };
-  const tools = (chat: string) => {
-    const found = new Map<string, any>();
-    for (const factory of factories) factory({ registerTool: (tool: any) => found.set(tool.name, tool), events: { on: () => () => {} }, on: () => {} }, { id: chat, title: `Chat ${chat}`, workspace: chats[chat], status: 'idle' });
-    return found;
-  };
-  return { call, agent, tools, logged, close: async () => { await stop(); server.close(); } };
+  const tools = (chat: string) => mock.pi(chat).tools;
+  return { call, agent, tools, logged: mock.logged, close: () => mock.stop() };
 }
 
 const folderIdOf = (folder: string) => createHash('sha256').update(folder).digest('hex').slice(0, 16);
