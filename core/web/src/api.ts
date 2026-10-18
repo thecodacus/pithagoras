@@ -1062,6 +1062,13 @@ export const api = {
 
   /** Jobs the agent left running in the chat's folder, and what extensions show about themselves. */
   background: (id: string) => json<BackgroundState>(`/api/sessions/${id}/background`),
+  /** Stops a job the agent left running. */
+  stopBackgroundJob: (id: string, key: string) => json<{ ok: true }>(`/api/sessions/${id}/background/${encodeURIComponent(key)}/stop`, { method: "POST" }),
+  /** Forgets the jobs that have finished. */
+  clearBackgroundJobs: (id: string) => json<{ ok: true }>(`/api/sessions/${id}/background/clear`, { method: "POST" }),
+  /** What a job wrote to its output file from byte `from` on, and how long the file is now. */
+  backgroundOutput: (id: string, key: string, from?: number) =>
+    json<{ text: string; from: number; size: number }>(`/api/sessions/${id}/background/${encodeURIComponent(key)}/output${from === undefined ? "" : `?from=${from}`}`),
   /** A message for a subagent that said it takes them (subagent protocol, input: true). */
   subagentInput: (id: string, agent: string, text: string) =>
     json<{ ok: true }>(`/api/sessions/${id}/subagents/${encodeURIComponent(agent)}/input`, {

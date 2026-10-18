@@ -133,6 +133,13 @@ happens then:
   document's name"), and your text stays in the editor. If `documents` itself
   became a link, nothing is written through it either: a save and the agent's
   `doc_create` are refused ("documents in this folder is a link").
+- A `documents` folder the [sandbox](/guide/sandbox) closed to the agent (a folder
+  only root may enter, which the agent renamed to this name) is not used: nothing in it
+  is listed or read, and nothing is written into it ("documents in this folder is
+  closed to the agent, so it is not used"). The portal reads this folder as root, and
+  would otherwise hand the agent what it could not read itself. A folder that is the
+  agent's own, or that its group or everyone may read, is used as ever; so is a file in it
+  the agent could read itself, and a file only root may read is left alone.
 - **Restore this revision** makes the file again too, from an earlier revision.
 - A **rename** is a new file to the portal: it is taken in as a document of its
   own, at revision 1, marked as an existing file, with none of the old
@@ -381,13 +388,14 @@ agent does through its document tools, and what is saved on the page, shows at
 once; what is changed outside the portal is noticed within a couple of
 seconds.
 
-The page keeps one connection open for the whole list (server-sent events),
-not one for each folder. The portal says over it only that the list is not what
-it was, and the page asks for the list again; the first message of a connection
-says where the list stands, so a change made while the connection was down is
-found as soon as it is back, and a page whose list is current asks for nothing.
-If the connection drops, the page opens it again after a few seconds, with longer
-waits. The list that is shown stays while it cannot be fetched.
+The page listens to one topic for the whole list (`folders`, on the portal's own
+connection for pages), not one for each folder. The portal says over it only that
+the list is not what it was, and the page asks for the list again; the first
+thing it hears says where the list stands, so a change made while the connection
+was down is found as soon as it is back, and a page whose list is current asks
+for nothing. If the connection drops, the portal opens it again after a few
+seconds, with longer waits, and the page listens again. The list that is shown
+stays while it cannot be fetched.
 
 The connection is open only while the list is on the page: opening a document,
 or going to another page of the portal, closes it, and so does closing the
@@ -436,7 +444,8 @@ What the editor does not do yet:
 
 You do not save by hand. The text is saved a second after you stop typing, when
 the cursor leaves the text, when you go back to the list or to another page of
-the portal, when the browser tab is hidden or closed, and at Ctrl+S. Each save
+the portal, when the browser tab is hidden or closed, and at Ctrl+S (⌘+S on a Mac;
+the keys are listed under Settings → Shortcuts, where you can change them). Each save
 is one revision. A page that is being closed can send only a small request (the
 browsers allow 64 KiB): when the document is larger than about 60 KB and you
 closed the tab with text not yet saved, the browser asks first whether to leave.
@@ -476,9 +485,9 @@ until a save without the secret has come in between.
 The page is told of each revision of the document it has open as it is made:
 by the agent, by another window of the portal, by Files or by an editor. It
 does not wait for your next save to find out. The page keeps one connection
-open for the document (server-sent events), and says where the document stands
-whenever the connection starts, so a change made while it was down is found as
-soon as it is back. If the text of a change cannot be fetched (the portal was
+listening to the document (the topic `doc/<folder>/<document>`), and hears where
+the document stands whenever it starts to listen, so a change made while the
+connection was down is found as soon as it is back. If the text of a change cannot be fetched (the portal was
 busy, say), the page asks again after a few seconds, with longer waits, and
 meanwhile shows the document as it was. A revision made outside the portal (Files, an editor, or
 the agent's own file tools) is noticed within a couple of seconds, and only
@@ -1008,21 +1017,21 @@ And how long things wait:
 This part is for whoever works on the extension, or builds another like it:
 Documents is the largest worked example of the [extension API](/guide/extension-ui).
 It imports nothing of the portal's core (`npm run check:boundaries` keeps it
-so), and reaches the portal only through that API and the portal's own routes
-(it opens a chat for a comment through `/api/sessions`).
+so), and reaches the portal only through that API: it opens a chat for a comment
+with `portal.chats.create`, wakes the agent with `chats.followUp`, and tells pages of changes
+with `push`.
 
 ```
 extensions/docs/
 ├── package.json     the manifest: the browser half, its style and the server half
 ├── package-lock.json  the versions it needs to run and to be built, which the build and the install keep to
 ├── build.mjs        builds the editor into web/editor.js
-├── server.js        the server half: routes, the streams, the wake of the agent
+├── server.js        the server half: routes, what the pages listen to, the wake of the agent
 ├── store.js         one folder's documents (class Store): files, history, comments
 ├── files.js         what a document's file is (its name, what refuses a write), on `portal.files`
 ├── git.js, guard.js the history in git, and the store's folder held open
 ├── place.js         where a folder's store is, and which folder it is for
 ├── tools.js         the agent's nine tools
-├── ping.js          what wakes the agent's chat, and what it is told
 ├── errors.js        the refusals, and what a failed disk, git or database is to a reader
 ├── secret.js        what a secret looks like, for the warning and for the agent's tools
 ├── deps.js          installs what the extension needs to run
@@ -1054,7 +1063,6 @@ its path and a document by an id the store gave it, never by a path:
 | `POST /folders/:folder/documents/upload` | A Markdown file the person uploaded `{ name, markdown }`, kept as it is under its own name |
 | `GET …/:id/download` | The document's file, as an attachment |
 | `GET`, `PUT /folders/:folder/documents/:id` | A document's Markdown and revision; a save `{ markdown, base }`, answered 409 with the current text when its changes meet later ones |
-| `GET …/:id/events` | A stream (server-sent events) of its revisions and comment changes |
 | `GET …/:id/history`, `…/revisions/:n`, `POST …/restore` | The history, one revision's text, and bringing one back |
 | `GET`, `POST …/:id/threads`, `…/threads/:thread/{comments,resolve,reopen,seen}` | The comment threads, and a reply |
 | `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away one of the person's comments `{ body }`. With `draft` (`?draft=1` for the delete) it is a comment saved as it is typed, by a client that does that (the page sends one only when it is sent): only the last comment of an open thread, not marked as edited. Otherwise any of theirs, open thread or resolved; a change is marked as edited |
@@ -1068,11 +1076,17 @@ writing, with its arguments as far as they have come), opens the panel for a
 document as it is stored, which it reads once when the edit begins. The server
 half does nothing for it: the tool saves when it runs, as before.
 
-A stream's first message says where the document stands (`revision`, with
-`id: <revision>`, the author and the time), so that a page that was away finds
-out at once; `threads` says the comments changed. A comment line goes out every
-25 seconds so that nothing between the portal and the page takes the stream for
-idle.
+**What a page listens to** are two kinds of topic of the portal's push channel
+(`portal.push`, `portal.onListen`: see the extension guide), and there is no
+stream of Documents' own. `folders` says `{ version }` whenever the list changes.
+`doc/<folder>/<document>` says `{ revision, author, at }` for each revision and
+`{ threads: true, at }` when the comments changed; the first thing a page hears on
+either is where things stand (marked `first`), so that a page that was away finds
+out at once. A page may listen to a document only if a chat works in its folder now
+and the folder's store has the document; anything else is refused and hears
+nothing. The folder is looked at every couple of seconds for changes made outside
+the page, while some page listens, and the portal stops all of it with the
+extension.
 
 **A write** is made under the folder's lock in three steps (the file, the git
 commit, the database) and any failure between them is put right the next time
@@ -1084,7 +1098,7 @@ what is wrong (`errors.js`), and anything else is logged and answered with
 
 **Options.** The server half takes a second argument, for tests: `dependencies`
 (what installs the packages), `faults` (breaks a write after a step), `gitTimeoutMs`,
-`pingMs`, `pollMs`, `wakeMs` and `wakeLimitMs` (the times in the table above).
+`pollMs`, `wakeMs` and `wakeLimitMs` (the times in the table above).
 
 **Tests.** They are beside the code, in `extensions/docs/test/`. Each file runs
 alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:
@@ -1094,10 +1108,10 @@ alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:
 | `store`, `extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, dependencies, German |
 | `hardening` | The edges: a file deleted or renamed, no rights, a broken store, saves at once, the size limit, a chat that never starts |
 | `tools` | The agent's tools |
-| `stream`, `live`, `merge`, `saver` | Telling a page of changes, and taking them in |
+| `stream`, `live`, `merge`, `saver` | Telling a page of changes (what it listens to), and taking them in |
 | `frame` | What the editor keeps apart from the Markdown: front matter and line endings |
 | `comments`, `comment-tools`, `anchor` | The comments and where their passages are |
-| `ping` | `@agent` and the wake |
+| `ping` | `@agent` and the wake (through the portal's `chats.followUp`) |
 | `browser/*.spec.mts` | The page, in a browser, against a stand-in for the server half. They build the editor first |
 
 ```

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LuCheck, LuCopy, LuDownload, LuEye, LuFileText, LuPencil, LuPlus, LuSave, LuTrash2, LuUndo2 } from "react-icons/lu";
 import { hear, known, useAsked, useCanvases, type Canvas } from "./feed";
-import { canvasPictures, pictureUrl } from "./pictures";
+import { canvasPictures } from "./pictures";
 import { Markdown, portal, Select, t } from "./portal";
 
 /**
@@ -177,7 +177,7 @@ export function Canvases({ chat, folder }: { chat: string; folder: string }) {
                 follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
               }}
             >
-              {canvas.content ? <Markdown>{canvasPictures(canvas.content, folder, (path) => pictureUrl(chat, path))}</Markdown> : <p className="canvas-empty">{t("A blank page. Ask the agent to write here, or start editing.")}</p>}
+              {canvas.content ? <Markdown>{canvasPictures(canvas.content, folder, (path) => portal.chats.files.pictureUrl(chat, path))}</Markdown> : <p className="canvas-empty">{t("A blank page. Ask the agent to write here, or start editing.")}</p>}
             </div>
           )}
           <footer>

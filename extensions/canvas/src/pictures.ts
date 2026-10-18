@@ -55,5 +55,3 @@ export function canvasPictures(markdown: string, folder: string, url: (path: str
   });
 }
 
-/** The portal's address for a picture in a chat's folder. */
-export const pictureUrl = (chat: string, path: string) => `/api/sessions/${chat}/picture?path=${encodeURIComponent(path)}`;

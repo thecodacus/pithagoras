@@ -76,7 +76,7 @@ function printDocument(title, html) {
   setTimeout(() => frame.isConnected && frame.remove(), 60_000);
 }
 
-export function documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember }) {
+export function documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember, editors }) {
   const { React, ui, t } = portal;
   const { useEffect, useRef, useState } = React;
   const h = React.createElement;
@@ -400,16 +400,11 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         const { status, base } = saver.state();
         if (status === "conflict" || status === "error" || (editor && saver.unsaved() && new TextEncoder().encode(JSON.stringify({ markdown: read(), base })).length > KEEPALIVE_BYTES)) e.preventDefault();
       };
+      // Save and comment are the portal's shortcuts (client.js), run for the editor that has the focus: this is what they do here.
+      const shortcuts = { mount, save, comment: () => now.current.comment() };
+      editors.add(shortcuts);
       const key = (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-          e.preventDefault();
-          save();
-        } else if (e.altKey && e.code === "KeyM" && (e.metaKey || (e.ctrlKey && /^m$/i.test(e.key))) && !e.getModifierState?.("AltGraph")) {
-          // As in a word processor: comment on what is selected, or open the comment at the cursor. Not AltGr+M (reported as Ctrl+Alt on
-          // Windows), which types a character on some layouts (µ on a German one): there it is a letter of the text, and is left to it.
-          e.preventDefault();
-          now.current.comment();
-        } else if (e.key === "Escape" && now.current.active !== null) {
+        if (e.key === "Escape" && now.current.active !== null) {
           // A card opened by a click has no focus in it: Escape in the text closes it too. With none open, Escape is left alone.
           e.preventDefault();
           now.current.close();
@@ -482,6 +477,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
 
       return () => {
         gone = true;
+        editors.delete(shortcuts);
         off?.();
         live?.close();
         window.removeEventListener("pagehide", hide);
@@ -672,8 +668,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       if (here && (opened.current.has(here) || chats.some((chat) => chat.id === here))) return here;
       if (!workspace) return null;
       try {
-        opening.current ??= portal.api
-          .json("/api/sessions", { method: "POST", body: JSON.stringify({ title: t("Comments on {title}", { title: doc.title }), workspace }) })
+        opening.current ??= portal.chats
+          .create({ title: t("Comments on {title}", { title: doc.title }), workspace })
           .then((chat) => {
             opened.current.add(chat.id);
             remember(chat.id);

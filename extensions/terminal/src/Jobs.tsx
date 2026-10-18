@@ -6,8 +6,6 @@ import { formatElapsed, stripAnsi } from "./text";
 /** Output kept on screen for one job; the file has the rest. */
 const KEEP = 400_000;
 
-const jobUrl = (chatId: string, key: string) => `/api/sessions/${encodeURIComponent(chatId)}/background/${encodeURIComponent(key)}`;
-
 /**
  * The agent's background jobs in a chat: which are running and for how long,
  * and one of them followed as it writes, like a background shell in Claude
@@ -65,7 +63,7 @@ export function Jobs({ chatId, selected, onSelect }: { chatId: string; selected:
                 className="terminal-jobs-clear"
                 onClick={() => {
                   setError(null);
-                  portal.api.json(`/api/sessions/${encodeURIComponent(chatId)}/background/clear`, { method: "POST" }).then(refreshBackground, (e) => setError((e as Error).message));
+                  portal.chats.background.clear(chatId).then(refreshBackground, (e) => setError((e as Error).message));
                 }}
                 title={t("Forget the finished jobs")}
               >
@@ -85,7 +83,7 @@ export function Jobs({ chatId, selected, onSelect }: { chatId: string; selected:
                     className="terminal-job-stop"
                     onClick={() => {
                       setError(null);
-                      portal.api.json(`${jobUrl(chatId, job.key)}/stop`, { method: "POST" }).then(refreshBackground, (e) => setError((e as Error).message));
+                      portal.chats.background.stop(chatId, job.key).then(refreshBackground, (e) => setError((e as Error).message));
                     }}
                   >
                     <LuSquare aria-hidden fill="currentColor" /> {t("Stop")}
@@ -126,8 +124,7 @@ const JobOutput = memo(function JobOutput({ chatId, jobKey, live }: { chatId: st
     let wait = 1000;
     const read = async () => {
       try {
-        const from = offset.current === undefined ? "" : `?from=${offset.current}`;
-        const out = await portal.api.json<{ text: string; from: number; size: number }>(`${jobUrl(chatId, jobKey)}/output${from}`);
+        const out = await portal.chats.background.output(chatId, jobKey, offset.current);
         if (stop) return;
         offset.current = out.size;
         wait = 1000;

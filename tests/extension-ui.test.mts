@@ -628,6 +628,41 @@ test('an action on a call\'s card names its tool by a name or a pattern, and a s
   assert.throws(() => registerShortcut('probe', { id: 'text', label: 'Text', scope: 'voice', default: 'KeyN' as any, run }), /a key/);
   assert.throws(() => registerShortcut('probe', { id: 'chat', label: 'Chat', scope: 'chat' as any, default: null, run }), /scope/);
   registerShortcut('probe', { id: 'none', label: 'None', scope: 'voice', default: null, run })();
+  // A shortcut for anywhere in the portal is one too, under a scope of its own in the list.
+  const { actions } = await import('../core/web/src/keybindings.ts');
+  const off = registerShortcut('probe', { id: 'everywhere', label: 'Everywhere', scope: 'app', default: { code: 'KeyS', ctrl: true }, run });
+  assert.deepEqual(actions().filter((a) => a.id.startsWith('x:probe/everywhere')).map((a) => [a.scope, a.extension]), [['Portal', 'probe']]);
+  assert.throws(() => registerShortcut('probe', { id: 'everywhere', label: 'Twice', scope: 'app', default: null, run }), /already a shortcut/);
+  off();
+  assert.deepEqual(actions().filter((a) => a.id.startsWith('x:probe/everywhere')), []);
+});
+
+test('a shortcut for anywhere in the portal is run by id with the key event and its target, and one that is not there or is for voice mode is not run that way', async () => {
+  (globalThis as any).window ??= new EventTarget();
+  const { registerShortcut, runAppShortcut, runShortcut } = await import('../core/web/src/extensions/shortcuts.ts');
+  const heard: unknown[] = [];
+  const target = { name: 'the editor' };
+  const event = { target } as unknown as KeyboardEvent;
+  const off = registerShortcut('runner', { id: 'save', label: 'Save', scope: 'app', default: null, run: (context) => void heard.push(context.target) });
+  const declines = registerShortcut('runner', { id: 'declines', label: 'Declines', scope: 'app', default: null, run: () => false });
+  const fails = registerShortcut('runner', { id: 'fails', label: 'Fails', scope: 'app', default: null, run: () => { throw new Error('its own'); } });
+  const voice = registerShortcut('runner', { id: 'voice', label: 'Voice', scope: 'voice', default: null, run: () => void heard.push('voice') });
+  assert.equal(runAppShortcut('x:runner/save', event), undefined);
+  assert.deepEqual(heard, [target]);
+  assert.equal(runAppShortcut('x:runner/declines', event), false, 'it had nothing to do');
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(runAppShortcut('x:runner/fails', event), false, 'a failure is its own: the key is left to the browser');
+  } finally {
+    console.error = quiet;
+  }
+  assert.equal(runAppShortcut('x:runner/voice', event), false, 'voice mode\'s is voice mode\'s');
+  assert.equal(runShortcut('x:runner/save', {} as any, () => ({}) as any), false, 'and voice mode does not run one for the portal');
+  assert.equal(runAppShortcut('x:runner/missing', event), false);
+  off();
+  assert.equal(runAppShortcut('x:runner/save', event), false, 'taken out');
+  for (const stop of [declines, fails, voice]) stop();
 });
 
 test('what two extensions both want goes by their places in the list of extensions, not by whose module came into the page first', async () => {

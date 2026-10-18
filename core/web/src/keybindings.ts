@@ -48,8 +48,8 @@ type CoreActionId =
 export interface Action {
   id: ActionId;
   label: string;
-  /** Where it works. Voice-mode ones only while voice mode is on. */
-  scope: "Voice mode";
+  /** Where it works. Voice-mode ones only while voice mode is on; "Portal" ones (an extension's) anywhere in the portal. */
+  scope: "Voice mode" | "Portal";
   /** Held rather than pressed: acts on the key going down and coming up. */
   hold?: boolean;
   /** Works while typing in a field too; only sensible with a modifier. */
@@ -255,6 +255,9 @@ export function bindingFrom(value: unknown): Binding | null | undefined {
 export function resetAll() {
   save({});
 }
+
+/** Whether keys go to a field the person is typing in. */
+export const isEditing = (target: EventTarget | null): boolean => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
 
 /** The shortcut a key event is, or undefined for a key alone that is only a modifier. */
 export function bindingOf(e: { code: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }): Binding | undefined {

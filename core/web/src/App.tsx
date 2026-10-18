@@ -31,6 +31,7 @@ import { setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { useSlot } from "./extensions/slots";
+import { useAppShortcuts } from "./extensions/app-shortcuts";
 
 // What the first draw needs is the shell, the chat and the sign-in page. The other pages, and the dialogs that
 // open over them, are fetched when they are first opened, so that they are not in the file everyone waits for.
@@ -52,6 +53,8 @@ const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general"
 export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).
   useLanguage();
+  // The extensions' shortcuts for anywhere in the portal.
+  useAppShortcuts();
   const [authed, setAuthed] = useState<boolean | null>(null);
   /** No password has been chosen yet: the first start, or after it was removed with the reset command. */
   const [setup, setSetup] = useState(false);

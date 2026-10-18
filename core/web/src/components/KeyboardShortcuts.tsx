@@ -59,6 +59,36 @@ export function KeyboardShortcuts() {
   }, [recording, layout, actions]);
 
   const changed = actions.some(a => describe(bindings[a.id], null, false) !== describe(plain[a.id], null, false));
+  const voice = actions.filter(a => a.scope === "Voice mode");
+  // What extensions brought for anywhere in the portal, which have a section of their own.
+  const portal = actions.filter(a => a.scope === "Portal");
+  const row = (action: (typeof actions)[number]) => {
+    const binding = bindings[action.id];
+    const isDefault = describe(binding, null, false) === describe(plain[action.id], null, false);
+    const listening = recording === action.id;
+    return <li key={action.id} className="flex flex-wrap items-center gap-2 px-3 py-2" aria-label={actionLabel(action)}>
+      <span className="min-w-0 flex-1 text-sm text-fg">
+        {actionLabel(action)}
+        {/* Whose it is, for a shortcut an extension brought. */}
+        {action.extension && <span className="ml-2 text-[11px] text-fg-faint">{action.extension}</span>}
+      </span>
+      {listening
+        ? <span className="text-xs text-accent" role="status">{t("Press the new keys…")}</span>
+        : binding ? <kbd className={kbdCls}>{describe(binding, layout)}</kbd> : <span className="text-xs text-fg-faint">{t("None")}</span>}
+      <div className="flex gap-1">
+        {listening
+          ? <button className={btnCls} onClick={() => setRecording(null)}>{t("Cancel")}</button>
+          : <button className={btnCls} onClick={() => { setNote(null); setRecording(action.id); }}>{t("Change")}</button>}
+        <button className={btnCls} disabled={listening || !binding} onClick={() => { setBinding(action.id, null); setNote(null); }}>{t("Clear")}</button>
+        <button className={btnCls} disabled={listening || isDefault} title={t("Back to {keys}", { keys: describe(plain[action.id], layout) || t("none") })} onClick={() => {
+          const took = resetBinding(action.id);
+          const taken = actions.find(a => a.id === took);
+          const label = taken && actionLabel(taken);
+          setNote(label ? () => () => t("That was used for “{action}”, which now has no shortcut.", { action: label }) : null);
+        }}>{t("Reset")}</button>
+      </div>
+    </li>;
+  };
   return <div className="xl:grid xl:grid-cols-[3fr_2fr] xl:items-start xl:gap-x-8">
     <section className="mb-6">
       <div className="flex items-start justify-between gap-3">
@@ -72,35 +102,16 @@ export function KeyboardShortcuts() {
       </div>
       {note && <p role="status" className="mt-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">{note()}</p>}
       <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Voice mode shortcuts")}>
-        {actions.map(action => {
-          const binding = bindings[action.id];
-          const isDefault = describe(binding, null, false) === describe(plain[action.id], null, false);
-          const listening = recording === action.id;
-          return <li key={action.id} className="flex flex-wrap items-center gap-2 px-3 py-2" aria-label={actionLabel(action)}>
-            <span className="min-w-0 flex-1 text-sm text-fg">
-              {actionLabel(action)}
-              {/* Whose it is, for a shortcut an extension brought. */}
-              {action.extension && <span className="ml-2 text-[11px] text-fg-faint">{action.extension}</span>}
-            </span>
-            {listening
-              ? <span className="text-xs text-accent" role="status">{t("Press the new keys…")}</span>
-              : binding ? <kbd className={kbdCls}>{describe(binding, layout)}</kbd> : <span className="text-xs text-fg-faint">{t("None")}</span>}
-            <div className="flex gap-1">
-              {listening
-                ? <button className={btnCls} onClick={() => setRecording(null)}>{t("Cancel")}</button>
-                : <button className={btnCls} onClick={() => { setNote(null); setRecording(action.id); }}>{t("Change")}</button>}
-              <button className={btnCls} disabled={listening || !binding} onClick={() => { setBinding(action.id, null); setNote(null); }}>{t("Clear")}</button>
-              <button className={btnCls} disabled={listening || isDefault} title={t("Back to {keys}", { keys: describe(plain[action.id], layout) || t("none") })} onClick={() => {
-                const took = resetBinding(action.id);
-                const taken = actions.find(a => a.id === took);
-      const label = taken && actionLabel(taken);
-                setNote(label ? () => () => t("That was used for “{action}”, which now has no shortcut.", { action: label }) : null);
-              }}>{t("Reset")}</button>
-            </div>
-          </li>;
-        })}
+        {voice.map(row)}
       </ul>
     </section>
+    {portal.length > 0 && <section className="mb-6">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Anywhere in the portal")}</h3>
+      <p className="mt-0.5 text-xs text-fg-subtle">{t("Brought by extensions. They work wherever you are, and while typing in a field only when the keys include Ctrl, Alt or the Windows key. Kept in this browser.")}</p>
+      <ul className="mt-2.5 divide-y divide-line rounded-xl border border-line bg-raised/40" aria-label={t("Portal shortcuts")}>
+        {portal.map(row)}
+      </ul>
+    </section>}
     <section className="mb-6">
       <h3 className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">{t("Chat")}</h3>
       <p className="mt-0.5 text-xs text-fg-subtle">{t("Part of how the message box works, so they are fixed. The character that opens the command list is the one exception: it is set under This browser.")}</p>

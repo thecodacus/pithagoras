@@ -422,8 +422,8 @@ test('every text the Documents page shows has a German one, and no German one is
           }
         }
       }
-      // A page's title in the sidebar is shown as well.
-      if (ts.isPropertyAssignment(n) && n.name.getText(src) === 'title' && ts.isStringLiteralLike(n.initializer) && name === 'client.js') shown.add(n.initializer.text);
+      // A page's title in the sidebar is shown as well, and so is the label of a shortcut in Settings.
+      if (ts.isPropertyAssignment(n) && ['title', 'label'].includes(n.name.getText(src)) && ts.isStringLiteralLike(n.initializer) && name === 'client.js') shown.add(n.initializer.text);
       ts.forEachChild(n, visit);
     };
     visit(src);

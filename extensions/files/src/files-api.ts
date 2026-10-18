@@ -31,9 +31,6 @@ export interface Unsaved {
   unknown?: true;
 }
 
-/** A route of the portal's own for a chat's folder. */
-const at = (sessionId: string, route: string, path: string, more = "") =>
-  `/api/sessions/${encodeURIComponent(sessionId)}/${route}?path=${encodeURIComponent(path)}${more}`;
 /** A route of Files' own server half. */
 const own = (sessionId: string, route: string, path: string, more = "") =>
   portal.api.url(`/chats/${encodeURIComponent(sessionId)}/${route}?path=${encodeURIComponent(path)}${more}`);
@@ -78,5 +75,5 @@ export const api = {
   /** The whole folder, or a folder in it. */
   archiveDownloadUrl: (sessionId: string, dir = "") => portal.api.url(`/chats/${encodeURIComponent(sessionId)}/archive${dir ? `?path=${encodeURIComponent(dir)}` : ""}`),
   /** A picture in the chat's folder, by its path there. `version` is anything that changes when the file does. */
-  pictureUrl: (sessionId: string, path: string, version?: string | number) => at(sessionId, "picture", path, version === undefined ? "" : `&v=${encodeURIComponent(String(version))}`),
+  pictureUrl: (sessionId: string, path: string, version?: string | number) => portal.chats.files.pictureUrl(sessionId, path, version),
 };

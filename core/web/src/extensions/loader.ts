@@ -172,6 +172,8 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
           const made = await api.createSession(options?.workspace, options?.title);
           return { id: made.id, title: made.title, workspace: made.workspace };
         },
+        files: { pictureUrl: api.pictureUrl, videoUrl: api.videoUrl, fileUrl: api.fileUrl, upload: api.uploadFile },
+        background: { stop: async (chatId, key) => void (await api.stopBackgroundJob(chatId, key)), clear: async (chatId) => void (await api.clearBackgroundJobs(chatId)), output: api.backgroundOutput },
       },
       shortcuts: { register: (shortcut) => kept(registerShortcut(ext.name, shortcut)) },
       server: {

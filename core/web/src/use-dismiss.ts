@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { isEscape } from "./shortcuts";
+import { inPopoverLayer } from "./overlay";
 
 /**
  * Closes a popover on a press outside it, or on Escape.
@@ -25,7 +26,7 @@ export function useDismiss(
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       // A list a select inside the popover opened, portaled to the body: still inside.
-      if ((target as Element).closest?.("[data-popover-layer]")) return;
+      if (inPopoverLayer(target)) return;
       if (!latest.current.within.some((r) => r.current?.contains(target))) latest.current.close();
     };
     const onKey = (e: KeyboardEvent) => {

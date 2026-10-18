@@ -8,7 +8,7 @@ import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinimize2, LuMinus, LuIma
 import { VoicePictures, shownPictures } from "./VoicePictures";
 import { VoiceConversation } from "./VoiceConversation";
 import { VoiceSettings, VOICE_RATES } from "./VoiceSettings";
-import { actions as actionList, describe, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
+import { actions as actionList, describe, isEditing, matches, useKeyLabels, useKeybindings, type ActionId } from "../keybindings";
 import { runShortcut } from "../extensions/shortcuts";
 import type { ToolCallView, VoiceWindows } from "@pithagoras/extension-api";
 import { MIN, clearOfDock, dockBox, dockSize, freeStrip, placeWindows, type Orb } from "../voice-windows";
@@ -49,7 +49,7 @@ const watchWide = (changed: () => void) => {
 };
 
 /** Where focus is typing, so Space and a paste belong to that and not to voice mode. */
-const editing = (target: EventTarget | null) => !!(target as Element | null)?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+const editing = isEditing;
 
 /**
  * A window an extension brought to voice mode: placed and sized as the
@@ -306,6 +306,8 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
         return;
       }
       for (const action of actionList()) {
+        // An extension's shortcut for anywhere in the portal is not voice mode's to run (see extensions/app-shortcuts.ts).
+        if (action.scope !== "Voice mode") continue;
         const act = action.extension ? () => runShortcut(action.id, keys.current.chat, keys.current.windowsOf) : actions[action.id];
         if (!act || !matches(bindings[action.id], e)) continue;
         const b = bindings[action.id]!;

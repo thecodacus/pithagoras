@@ -931,6 +931,10 @@ const de: Locale = {
     "Work while voice mode is on, except when typing in a field. Starting voice mode works from the chat too. Kept in this browser.": "Wirken, solange der Sprachmodus an ist, außer beim Tippen in einem Feld. Der Sprachmodus lässt sich auch aus dem Chat starten. In diesem Browser gespeichert.",
     "Reset all": "Alle zurücksetzen",
     "Voice mode shortcuts": "Tastenkürzel im Sprachmodus",
+    "Anywhere in the portal": "Überall im Portal",
+    "Brought by extensions. They work wherever you are, and while typing in a field only when the keys include Ctrl, Alt or the Windows key. Kept in this browser.":
+      "Von Erweiterungen mitgebracht. Sie funktionieren überall, und beim Tippen in einem Feld nur, wenn die Tasten Strg, Alt oder die Windows-Taste enthalten. Wird in diesem Browser gespeichert.",
+    "Portal shortcuts": "Tastenkürzel im Portal",
     "Press the new keys…": "Drück die neuen Tasten…",
     "Tab moves between buttons, so it cannot be a shortcut.": "Tab wechselt zwischen den Schaltflächen, darum kann es kein Tastenkürzel sein.",
     "None": "Keins",

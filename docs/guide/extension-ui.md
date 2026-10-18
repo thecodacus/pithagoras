@@ -141,11 +141,15 @@ with it either way.
 | `slots.register(slot, entry)` | Puts an entry into a [slot](#slots). Returns what takes it out |
 | `chats.use(chatId, pick?)` | A hook: [the chat as the page has it](#the-chat-s-events) |
 | `chats.on(chatId, handler)` | The same outside a component |
+| `chats.create({ title?, workspace? })` | A new chat, as New chat makes one, in a folder and under a name if you say them. Not opened: `navigate("/s/" + chat.id)` does that |
+| `chats.files.pictureUrl`, `videoUrl`, `fileUrl`, `upload` | [The portal's routes for a chat's folder](#the-portal-s-routes-for-a-chat), as calls and not as addresses to build |
+| `chats.background.stop`, `clear`, `output` | The jobs the agent left running: stop one, forget the finished, follow one's output |
 | `panels` | [Any panel of the chat on screen](#panels-and-commands), by name |
 | `commands` | [What can be asked of an extension by name](#panels-and-commands) |
 | `api.json(url, init?)` | A request as the portal's own are made |
 | `api.url(path)` | The address of a route of the package's [server half](#the-server-half) |
 | `server.on(handler)` | What the server half [says to this page](#telling-the-pages-open-on-a-chat) |
+| `server.on(topic, handler)` | What the server half [pushes to a topic](#pages-that-listen-to-a-topic), on any page: one with no chat open too |
 | `t(text, vars?)`, `locale` | [Its texts in other languages](#other-languages) |
 | `theme` | [Themes](#themes): add one, switch to one, follow the one in effect |
 | `ui` | [The portal's building blocks](#looking-like-the-portal) |
@@ -264,6 +268,7 @@ prefix of your own: the stylesheet is the page's.
 | `asksBeforeDeleting()` | Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when it is true |
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
+| `inOverlay(target)` | Whether a press is inside something the portal draws over the page: the list of a `Select`, the question `confirm` asks. A popover of yours that closes on a press outside it counts these as inside |
 
 The portal's own utility classes (Tailwind) exist only for what the portal
 itself uses, so do not rely on one being there. Style your markup in your own
@@ -670,6 +675,8 @@ restart the portal.
 | `chats.on("started" \| "stopped" \| "deleted", fn)` | A chat's pi started or stopped; the chat was deleted |
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
 | `chats.tell(chatId, data)` | To the package's own pi extension in a chat (`pithagoras:v1:ui:receive`) |
+| `chats.followUp(chatId, { text, details?, type? })` | [Says something to the chat's agent](#saying-something-to-the-agent) as a message of the package's, starting its pi if it was let go |
+| `push(topic, data)`, `onListen(handler)` | [Pages that listen to a topic](#pages-that-listen-to-a-topic): tell them what changed, and decide who may listen |
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
 | `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here) |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
@@ -777,6 +784,14 @@ easy to get wrong in a way that is a hole, not a bug:
   (macOS) a folder on the way can still be swapped between the check and the
   call, and so the portal gives nothing it makes away there (below). A pipe left
   there does not hold the server, and a device is not read.
+- **The agent can rename things.** With the [sandbox](/guide/sandbox) on, a folder or file the agent may not
+  enter is root's alone (mode 0700). The agent writes in its own folder, so it can rename that one to the name of a
+  folder your half reads as root on its behalf (`documents`), and your half would then hand it what it could not read
+  itself. Where your half keeps something under a name the agent can choose, pass `likeParent: true`
+  (`folder`, `list`, `read`, `readBytes`, `open`, `write`, `sweepTemp`): the folder, and the file in it, must be
+  something the agent could use itself: owned by the same user as the folder it is in, or readable by that folder's
+  group (when the folder's group is also its), or by everyone. Otherwise the call is refused (`invalid`). It is
+  checked on the folder as it is held, so it cannot be swapped in between.
 - **A save is put in place whole.** It is written beside the file and renamed
   over it, so a full disk leaves the file as it was, not empty. It keeps the
   file's mode and its owner, so a file the portal saved as root is still the
@@ -947,6 +962,81 @@ a chat is already open (the package was just installed, switched on or
 updated) is told what `onOpen` says for that chat then. What is said must be
 JSON: something that cannot be written as it is left out, with a line in the
 portal's log.
+
+### Pages that listen to a topic
+
+`chats.send` reaches the pages that have a chat open. A page that is not on a chat
+(your own page in the sidebar, a list of everything the package has) has none to
+ride, so it listens to a **topic** of your package's:
+
+```js
+// server.js
+portal.onListen(async (topic, page) => {
+  const match = /^note\/(\d+)$/.exec(topic);
+  if (topic !== "all" && !(match && notes.has(Number(match[1])))) return false;   // not something it has: refused, and heard of nothing
+  page.send(topic === "all" ? { count: notes.size } : notes.get(Number(match[1])));   // where things stand, first
+  return () => { /* the page stopped listening: undo what was started for it */ };
+});
+portal.push("all", { count: notes.size });          // to every page that listens to "all", now
+```
+
+```js
+// web/client.js
+const off = portal.server.on("all", (data) => setCount(data.count));   // from now on; off() stops
+```
+
+All the pages of the portal share one connection for every extension's topics, which the
+portal opens when something listens and opens again, after a wait that grows, when it drops. A
+topic is a name of at most 200 characters, with no control characters, and it is your package's
+own: another package's page does not hear it, and a page cannot make one up under another
+package's name. What is pushed must be JSON, and nothing is stored: a page that was not listening
+misses it.
+
+- **Who may listen is yours to say.** `onListen` is called for each page that asks, with the topic as the page
+  wrote it. Check that it names something the package has (a folder a chat works in now, a document
+  that is there) and return `false` to refuse; throwing refuses too, and a handler that takes over ten seconds
+  is refused. The portal has one login, so every page that is signed in is the same person, and with no
+  `onListen` any page may listen to any topic of the package's. Make the topic carry what it is about, and
+  check it, so that a page cannot listen to what it could not otherwise see.
+- **A page hears where things stand first.** `page.send(data)` tells the one page that began to listen,
+  and it hears that before anything pushed after. What is pushed while your handler is still working
+  reaches the page after it has answered, and not at all if it refuses, so tell the state and not an event
+  that may repeat it. After a dropped connection the page listens again and is told where things stand again.
+- **What you started for a page is yours to stop.** A function `onListen` returns is called once when the page stops listening:
+  it left (`server.on` returned function), its tab closed, its login ended, or your server half stopped. Count
+  the listeners of a folder there, and look at the folder only while one listens.
+- **Several handlers of one topic in a page share one listening.** The first begins it and hears where
+  things stand; one that comes while others listen hears what comes after, so ask for where things stand
+  yourself (a request) when you start.
+- **Your server half stopping** (the package is updated, or switched off and on) lets go of every page that listened:
+  each is told the topic was lost and asks again until your half is running, when `onListen` decides again.
+- The connection is behind the login and ended when the password changes, like the portal's other streams.
+
+Documents listens in two kinds of topic (`folders`, the list; `doc/<folder>/<document>`, one document) and
+refuses a document of a folder that no chat works in.
+
+### Saying something to the agent
+
+```js
+await portal.chats.followUp(chatId, { text: "The person asked you in a comment…", details: { thread }, type: "ping" });
+```
+
+The text goes into the conversation as a message of your package's, which the person reads as a notice and the
+model as a message of its own, after the turn that is going on or, when the agent is idle, at once: a turn starts.
+The chat's pi is started if it was let go. It resolves `true` once pi has taken it (the run it starts is not
+waited for), `false` where pi does not run in the portal's own process (`portal.executor` is not `"host"`), and
+rejects where the chat is gone. `details` is kept with the message for your own tools and cards; `type` names the
+kind when you have several. Only a server half can say it: a page cannot make the agent say anything through your
+package (`chats.tell` carries what a page says to your *pi extension*, which should not trust it as the agent's words).
+
+### The portal's routes for a chat
+
+A page of yours that shows or sends what is in a chat's folder does not build an address for the portal's own
+routes, which the message box and the conversation use too: `portal.chats.files.pictureUrl(chatId, path, version?)`
+is the address of a picture to draw (and `videoUrl`, `fileUrl` for a clip and for a file to save), `upload(chatId, dir, file)`
+sends a file into the folder (a taken name gets a number), and `portal.chats.background.stop(chatId, key)`,
+`clear(chatId)` and `output(chatId, key, from?)` stop a job the agent left running, forget the finished and follow one's output.
+Browsing and changing the folder is your own server half's, through `portal.files`.
 
 ### Tools that share the server half's state
 
@@ -1210,8 +1300,13 @@ extension registers it, and shows the job on its Background tab.
 
 A shortcut of your extension's is listed in Settings → Shortcuts with the
 portal's own, under your package's name, and changed or reset there the same
-way. Voice-mode shortcuts work while voice mode is on, except while someone is
-typing.
+way. There are two scopes. `"voice"` works while voice mode is on, except while
+someone is typing. `"app"` works anywhere in the portal, on any page, whether or
+not a chat is open; while someone types in a field a key alone is the field's, and one
+with Ctrl, Alt or the Windows/Command key in it is the shortcut's. It is not run while a dialog is
+open or for AltGr (Windows reports it as Ctrl+Alt, and some layouts type a character
+with it). It is heard after the page's own parts: one that handled the key has it. They
+are listed under "Anywhere in the portal".
 
 ```js
 portal.shortcuts.register({
@@ -1226,10 +1321,31 @@ portal.shortcuts.register({
 `default` is a physical key (`KeyboardEvent.code`) with `ctrl`, `alt`, `shift`
 or `meta`, or null for none. A key the portal or an extension before
 yours in the list of installed extensions has already is not taken from it: your shortcut has none until someone
-chooses one. `run` is given the chat on screen and your own voice windows by
+chooses one. A voice shortcut's `run` is given the chat on screen and your own voice windows by
 their ids. It returns false when it had nothing to do, and the key goes on to
 whatever else wants it. The label is translated as your other texts are
 ([Other languages](#other-languages)).
+
+An `"app"` shortcut is given the key event and where it was pressed, so that it can
+act only where it is meant to: an editor's save, run for the editor that has the focus.
+When `run` does not return false the browser's own meaning of the key is taken, so
+Ctrl+S does not also offer to save the page. Use the key of the platform for the default
+(Command on a Mac, Ctrl elsewhere).
+
+```js
+const editors = new Set();   // the editors that are open, each with its element
+portal.shortcuts.register({
+  id: "save",
+  label: "Save the document",
+  scope: "app",
+  default: { code: "KeyS", ...(/Mac/.test(navigator.platform) ? { meta: true } : { ctrl: true }) },
+  run: ({ target }) => {
+    const editor = [...editors].find((e) => e.element.contains(target));
+    if (!editor) return false;   // not in one of ours: Ctrl+S is the browser's
+    editor.save();
+  },
+});
+```
 
 ## Other languages
 
@@ -1450,7 +1566,7 @@ of them takes from the portal, and what gives the same to an extension:
 | Its tools' cards in voice mode saying what they do, and its tools telling a spoken turn to keep it short | `describe` on its `voice.window`; `voiceGuidelines` on its tools |
 | "Delete this document?" only for someone who wants to be asked | `ui.asksBeforeDeleting()` |
 | "Open in the agent terminal" on the card of a shell call | `chat.tool.action` |
-| A key in voice mode (T for the terminal) | `portal.shortcuts.register` |
+| A key in voice mode (T for the terminal); a key anywhere in the portal (Ctrl+S in an editor) | `portal.shortcuts.register` with scope `"voice"` or `"app"` |
 | Being opened by name from anywhere (`terminal`) | `name` on its `chat.panel` |
 | The running tray's jobs opening its Jobs tab, and the jobs themselves | The `jobs.show` command; `background` in `portal.chats.use` |
 | An emulator fetched only when its tab is opened | `ui.lazy` |

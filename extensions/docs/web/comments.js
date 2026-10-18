@@ -371,7 +371,7 @@ export function comments(portal, { when }) {
     // question the card asked is not outside.
     useEffect(() => {
       const away = (e) => {
-        if (box.current?.contains(e.target) || editor?.contains(e.target) || e.target.closest?.('[role="alertdialog"]')) return;
+        if (box.current?.contains(e.target) || editor?.contains(e.target) || ui.inOverlay(e.target)) return;
         onClose({ focus: false });
       };
       document.addEventListener("mousedown", away);

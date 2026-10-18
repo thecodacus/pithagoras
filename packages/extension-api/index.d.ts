@@ -6,7 +6,7 @@
  *
  * See docs/guide/extension-ui.md, "Building an extension".
  */
-import type { ComponentType, KeyboardEvent, LazyExoticComponent, ReactNode } from "react";
+import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, LazyExoticComponent, ReactNode } from "react";
 import type * as ReactNamespace from "react";
 
 // --- the chat, and what is drawn in it ---
@@ -407,7 +407,14 @@ export interface Ui {
   /** The time now, drawn again every `every` ms while `on`. */
   useNow(on: boolean, every?: number): number;
   /** Arrow keys for a row of tabs: on the element with `role="tablist"`. */
-  tabKeys(event: KeyboardEvent<HTMLElement>): void;
+  tabKeys(event: ReactKeyboardEvent<HTMLElement>): void;
+  /**
+   * Whether `target`, of a press, is inside something the portal draws over the page in a layer of its own: the list of a
+   * `Select` (drawn at the body, though it belongs to the popover it is in) or the question `confirm` asks. A popover of
+   * the extension's own that closes on a press outside it counts these as inside: `if (box.contains(e.target) ||
+   * ui.inOverlay(e.target)) return;`.
+   */
+  inOverlay(target: EventTarget | null): boolean;
 }
 
 // --- shortcuts ---
@@ -441,21 +448,39 @@ export type VoiceWindowOpened =
   | { by: "call"; call: ToolCallView }
   | { by: "open"; params?: unknown };
 
-/**
- * A keyboard shortcut of the extension's, listed in Settings → Shortcuts with
- * the portal's own and changed there the same way. `default` is the key it
- * has until someone chooses another, or null for none: a key the portal or
- * another extension has already is not taken from it. `run` returns false
- * when it had nothing to do, and the key goes on to whatever else wants it.
- * Voice-mode shortcuts work while voice mode is on, except while typing.
- */
-export interface Shortcut {
+/** What every shortcut has. */
+interface ShortcutBase {
   id: string;
   label: string;
-  scope: "voice";
+  /** The key it has until someone chooses another, or null for none: a key the portal or another extension has already is not taken from it. */
   default: KeyBinding | null;
+}
+
+/**
+ * A shortcut of the extension's for voice mode, listed in Settings → Shortcuts with the portal's own and changed there the same
+ * way. It works while voice mode is on, except while typing in a field. `run` returns false when it had nothing to do, and the
+ * key goes on to whatever else wants it.
+ */
+export interface VoiceShortcut extends ShortcutBase {
+  scope: "voice";
   run(context: { chat: Chat; windows: VoiceWindows }): boolean | void;
 }
+
+/**
+ * A shortcut of the extension's for anywhere in the portal, listed in Settings → Shortcuts and changed there the same way. It
+ * works whatever page is shown, whether or not a chat is open, and while typing in a field only when the key has Ctrl, Alt or
+ * the Windows/Command key in it (a key alone is the field's). It is not run while a dialog is open, nor for AltGr (Ctrl+Alt on
+ * Windows), which types a character on some layouts. It is heard after the page's own parts: one that handled the key (and called
+ * `preventDefault`) has it. `run` is given the key event and where it was pressed, to say whether it is for this extension's
+ * part of the page (an editor with the focus); it returns false when it had nothing to do, and the key goes on to the browser's
+ * own use of it. One key is one shortcut: the browser's own meaning of it is taken when `run` does not return false.
+ */
+export interface AppShortcut extends ShortcutBase {
+  scope: "app";
+  run(context: { target: EventTarget | null; event: KeyboardEvent }): boolean | void;
+}
+
+export type Shortcut = VoiceShortcut | AppShortcut;
 
 // --- the portal ---
 
@@ -539,6 +564,30 @@ export interface Portal {
      * chat.id)` does that. Rejects with an `ApiError` where the portal refuses the folder.
      */
     create(options?: { title?: string; workspace?: string }): Promise<Chat>;
+    /**
+     * The portal's own routes for the folder a chat works in, which its message box and its conversation use as well: no
+     * address is built by hand. `path` is relative to the chat's folder. A picture or a clip is drawn in the page, a
+     * file saved, and only what its bytes say it is is sent as that; `version` is anything that changes when the file does
+     * (the agent rewrites files in place), so that the browser asks again.
+     */
+    files: {
+      /** The address of a picture in the chat's folder (PNG, JPEG, GIF, WebP) to draw: for an `<img>`. */
+      pictureUrl(chatId: string, path: string, version?: string | number): string;
+      /** The address of a clip (WebM, MP4), played in parts as the player asks. */
+      videoUrl(chatId: string, path: string, version?: string | number): string;
+      /** The address of any file, to be saved and never shown. */
+      fileUrl(chatId: string, path: string, version?: string | number): string;
+      /** A file from this computer into the folder `dir` of the chat's, as it is; a taken name gets a number. The answer says what it is called. */
+      upload(chatId: string, dir: string, file: File, name?: string): Promise<{ path: string; size: number }>;
+    };
+    /** The jobs the agent left running in a chat (`ChatFeed.background` lists them). */
+    background: {
+      stop(chatId: string, key: string): Promise<void>;
+      /** Forgets the jobs that have finished. */
+      clear(chatId: string): Promise<void>;
+      /** What the job wrote to its output file from byte `from` on, and the file's length now (the `from` to ask with next). */
+      output(chatId: string, key: string, from?: number): Promise<{ text: string; from: number; size: number }>;
+    };
   };
   shortcuts: {
     /** A shortcut of the extension's: see `Shortcut`. Its label is translated as the extension's own texts are. */

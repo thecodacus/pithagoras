@@ -84,6 +84,8 @@ export default function (portal) {
     "No change": "Keine Änderung",
     "an earlier revision, the document is at {n}": "eine frühere Revision, das Dokument steht bei {n}",
     "Open in Documents": "In Dokumenten öffnen",
+    "Save the document": "Dokument speichern",
+    "Comment on the selection": "Auswahl kommentieren",
     Comments: "Kommentare",
     Comment: "Kommentieren",
     "Select less text: a comment can be on at most {n} characters.": "Wähle weniger Text aus: Ein Kommentar kann sich auf höchstens {n} Zeichen beziehen.",
@@ -355,11 +357,33 @@ export default function (portal) {
     },
   });
 
+  // Its shortcuts are the portal's, for anywhere in it (listed in Settings → Shortcuts, and changed there): they act on the editor that has the focus,
+  // and are the browser's own when none has (Ctrl+S then saves the page). The editors that are open are kept by the editor's half.
+  const editors = new Set();
+  const inFocus = (target) => [...editors].find((editor) => editor.mount.contains(target));
+  // The key of the platform: Command on a Mac, Ctrl elsewhere.
+  const command = /Mac|iPhone|iPad/.test(navigator.platform ?? "") ? { meta: true } : { ctrl: true };
+  portal.shortcuts.register({
+    id: "save",
+    label: "Save the document",
+    scope: "app",
+    default: { code: "KeyS", ...command },
+    run: ({ target }) => (inFocus(target) ? void inFocus(target).save() : false),
+  });
+  // As in a word processor: comment on what is selected, or open the comment at the cursor.
+  portal.shortcuts.register({
+    id: "comment",
+    label: "Comment on the selection",
+    scope: "app",
+    default: { code: "KeyM", alt: true, ...command },
+    run: ({ target }) => (inFocus(target) ? void inFocus(target).comment() : false),
+  });
+
   // The document editor's half (document-editor.js, with what it brings: the comments, the saver, the editor itself) is loaded when a
   // document is first opened, so that this module, which registers the page's entry in the sidebar, does not wait for it.
   let editorHalf = null;
   const loadEditorHalf = () =>
-    (editorHalf ??= import("./document-editor.js").then((module) => module.documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember })));
+    (editorHalf ??= import("./document-editor.js").then((module) => module.documentEditor(portal, { documentUrl, when, useAnswer, activeChat, remember, editors })));
 
   /** A document of a folder, for reading and writing: the editor's half is loaded first, with the page's loading state in its place. */
   function DocumentEditor(props) {
