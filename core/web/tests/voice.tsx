@@ -100,7 +100,8 @@ function Fixture() {
         await microphone.resume();
         const source = microphone.createBufferSource();
         source.buffer = await microphone.decodeAudioData(await (await fetch('/test-speech.wav')).arrayBuffer());
-        source.connect(destination); source.start(0, 0, 2.5);
+        // A test that switches chats mid-sentence sets `speechSeconds` for a stretch of the clip that outlasts its own slowness.
+        source.connect(destination); source.start(0, 0, (window as any).speechSeconds ?? 2.5);
       }}>Inject speech</button>
       <button onClick={() => { setRunning(true); setEvents(previous => [...previous, { seq: previous.length + 1, type: 'message_update', payload: { assistantMessageEvent: { type: 'text_delta', delta: 'Here is the first sentence. More' } } }]); }}>Stream reply</button>
       <button onClick={() => { setRunning(true); setEvents(previous => [...previous, { seq: previous.length + 1, type: 'message_update', payload: { assistantMessageEvent: { type: 'text_delta', delta: 'Try this:\n\n- first **bold** step\n- see [the docs](https://example.com/docs)\n\n```ts\nconst answer = 4' } } }]); }}>Stream markdown</button>

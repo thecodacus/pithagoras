@@ -389,12 +389,19 @@ test('a sentence being dictated when another chat is opened is not sent to that 
   await page.goto('/tests/voice.html');
   await page.getByRole('button', { name: 'Dictate a message' }).click();
   await expect(page.getByRole('button', { name: 'Stop dictating' })).toBeVisible({ timeout: 25000 });
-  // The sentence is being transcribed for the chat it was started in, which is what the switch has to keep from the other one.
-  // The speech is played in real time: a machine too busy to keep up with it misses it, and it is played again until it is heard.
+  // The chat is switched in the middle of the sentence: heard, not yet ended by a pause, and already being transcribed for the chat
+  // it was started in, which is what the switch has to keep from the other one. The speech is long enough that the sentence is
+  // still going when a slow machine gets to the click. It is played in real time, and a machine too busy to keep up with it misses
+  // it, so it is played again when neither has happened after a while.
+  await page.evaluate(() => { (window as any).speechSeconds = 8; });
+  let injected = 0;
   await expect.poll(async () => {
-    if (!asked.length) await page.getByRole('button', { name: 'Inject speech' }).click();
-    return asked.length;
-  }, { timeout: 30000, intervals: [4000] }).toBeGreaterThan(0);
+    if (Date.now() - injected > 8000) {
+      injected = Date.now();
+      await page.getByRole('button', { name: 'Inject speech' }).click();
+    }
+    return asked.length > 0 && await page.getByText('Hearing you').isVisible();
+  }, { timeout: 30000, intervals: [100] }).toBe(true);
   await page.getByRole('button', { name: 'Switch chat' }).click();
   switched();
   // The sentence is not to be sent to the chat it was not started in, which only waiting for as long as a send takes shows.
