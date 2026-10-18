@@ -150,6 +150,55 @@ test('a folder in the tree swapped for a file as the walk reaches it makes the r
   done();
 });
 
+/** What the agent does to the entry itself, not to a folder on the way to it: it goes aside, a link to the same name outside stands in its place. */
+function swapEntry(entry, leadsTo) {
+  return () => {
+    renameSync(entry, `${entry}.aside`);
+    symlinkSync(leadsTo, entry);
+  };
+}
+
+test('the last name of what is removed swapped for a link as the removal reaches it: the link is what goes, and what it leads to is left whole', async () => {
+  // A folder, swapped before it is looked at (the link goes) and right after (it is not opened through the link); and a file, before it is unlinked.
+  for (const [name, point, outcome] of [
+    ['tree', { promises: true, names: ['lstat'], when: (_name, [where]) => String(where).endsWith('/tree') }, 'none'],
+    ['tree', { promises: true, names: ['lstat'], after: true, when: (_name, [where]) => String(where).endsWith('/tree') }, 'failed'],
+    ['doc.md', { promises: true, names: ['unlink'], when: (_name, [where]) => String(where).endsWith('/doc.md') }, 'none'],
+  ]) {
+    const { base, sub, outside, done } = swappable();
+    mkdirSync(path.join(sub, 'tree', 'deeper'), { recursive: true });
+    writeFileSync(path.join(sub, 'tree', 'deeper', 'doc.md'), 'ours too');
+    mkdirSync(path.join(outside, 'tree', 'deeper'), { recursive: true });
+    writeFileSync(path.join(outside, 'tree', 'deeper', 'doc.md'), 'theirs too');
+    const before = names(outside);
+    let got;
+    assert.ok(await swappedAt(point, swapEntry(path.join(sub, name), path.join(outside, name)), async () => { got = await codeOf(() => removeEntry(base, `sub/${name}`, true)); }), name);
+    assert.equal(got, outcome, `${name}: ${outcome}`);
+    assert.deepEqual(names(outside), before, `${name}: nothing outside was removed`);
+    assert.equal(readFileSync(path.join(outside, 'doc.md'), 'utf8'), 'theirs');
+    assert.equal(readFileSync(path.join(outside, 'tree', 'deeper', 'doc.md'), 'utf8'), 'theirs too', `${name}: nor what the link leads to`);
+    assert.ok(existsSync(path.join(sub, `${name}.aside`)), `${name}: what was there goes on, aside, whole`);
+    assert.equal(existsSync(path.join(sub, name)), outcome === 'failed', `${name}: the link is gone, or left where the removal stopped`);
+    done();
+  }
+});
+
+test('the last name of what is renamed swapped for a link as the rename is made: the link is renamed, and what it leads to keeps its name', async () => {
+  for (const name of ['doc.md', 'tree']) {
+    const { base, sub, outside, done } = swappable();
+    mkdirSync(path.join(sub, 'tree'));
+    mkdirSync(path.join(outside, 'tree'));
+    const before = names(outside);
+    let got;
+    assert.ok(await swappedAt({ names: ['renameSync'], when: () => true }, swapEntry(path.join(sub, name), path.join(outside, name)), async () => { got = await codeOf(() => renameEntry(base, `sub/${name}`, 'renamed')); }), name);
+    assert.equal(got, 'none');
+    assert.deepEqual(names(outside), before, `${name}: nothing outside was renamed`);
+    assert.ok(lstatSync(path.join(sub, 'renamed')).isSymbolicLink(), `${name}: the link carries the new name`);
+    assert.ok(existsSync(path.join(sub, `${name}.aside`)));
+    done();
+  }
+});
+
 test('a tree of many files and folders is removed whole, a link in it as the link, and a folder that is too deep is not, with the reason', async () => {
   const { base, sub, done } = swappable();
   mkdirSync(path.join(sub, 'wide', 'a', 'b'), { recursive: true });
