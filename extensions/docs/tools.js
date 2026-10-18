@@ -16,7 +16,8 @@
  *     overwritten by an agent that read an older text
  *   - an edit is quoted text and its replacement, all of them or none
  *   - it makes a new document, never one in place of another, and cannot
- *     delete, restore or rewrite the history
+ *     rename or delete a document (that is the person's, on the page), restore
+ *     or rewrite the history
  *   - it does not write a secret into a document: the history would keep it
  *   - a comment is the agent's, never the person's, and it answers a comment by
  *     changing only the passage the comment is on, and saying in the thread what

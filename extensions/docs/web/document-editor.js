@@ -324,6 +324,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // it (it is not told of its own rename as of another's); the one a load found (what the notice names); whether the form that changes it is open.
     const [name, setName] = useState(doc.name);
     const nameNow = useRef(doc.name);
+    // The title the list shows: the first heading, or the file's name where there is none (so a rename can change it).
+    const [title, setTitle] = useState(doc.title);
     const askedName = useRef(null);
     const renamedTo = useRef(null);
     const [renaming, setRenaming] = useState(false);
@@ -613,6 +615,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
                   nameNow.current = body.name;
                   renamedTo.current = body.name;
                   setName(body.name);
+                  setTitle(body.title);
                 }
                 return body;
               },
@@ -622,13 +625,14 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
               },
             ),
           notify: ({ kind, revision, author }) => {
+            // What a load found renamed is told once, whatever came of the text: its own rename is no news, another window's is told as such.
+            const to = renamedTo.current;
+            renamedTo.current = null;
+            const own = to !== null && askedName.current === to;
+            if (own) askedName.current = null;
             if (kind === "conflict") return;
-            // Its own rename is no news; another window's is told as such.
-            if (renamedTo.current !== null) {
-              const to = renamedTo.current;
-              renamedTo.current = null;
-              if (askedName.current === to) askedName.current = null;
-              else setNotice({ kind: "renamed", name: to, revision });
+            if (to !== null) {
+              if (!own) setNotice({ kind: "renamed", name: to, revision });
               return;
             }
             setNotice({ kind, revision, author });
@@ -771,7 +775,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     /** Deletes the document, after the portal's question (which Settings → This browser can switch off); the page goes back to the list. */
     const removeDocument = async () => {
       const ok = await ui.confirm({
-        title: t("Delete “{title}”?", { title: doc.title }),
+        title: t("Delete “{title}”?", { title }),
         message: t("This deletes the file {name}, the comments on it and its history. It cannot be undone.", { name }),
         confirmLabel: t("Delete"),
         danger: true,
@@ -1303,7 +1307,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           "div",
           { className: "pd-docname" },
           h(Icon, { name: "file" }),
-          h("div", null, h("strong", { className: "pd-doctitle" }, doc.title), h("span", { className: "pd-meta" }, `documents/${name}`)),
+          h("div", null, h("strong", { className: "pd-doctitle" }, title), h("span", { className: "pd-meta" }, `documents/${name}`)),
         ),
         h("span", { className: "pd-state", "data-status": status, "aria-live": "polite" }, `${label} · ${t("Revision {n}", { n: base })}`),
         h(

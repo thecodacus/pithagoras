@@ -13,6 +13,8 @@ work in, which you and the agent edit together.
   earlier one can be brought back.
 - You and the agent comment on passages of a document, and write `@agent` in a
   comment to have the agent answer it.
+- You can rename a document (its file) and delete it, from the list or from the
+  open document ([below](#renaming-and-deleting-a-document)).
 
 Documents is not [Canvases](/guide/canvases). A canvas belongs to one
 conversation, and is kept by the portal (in memory, or in its database once
@@ -108,7 +110,10 @@ folder (folders first, then by name), as Files lists it.
 
 A document is a file, so [Files](/guide/files), the agent's own tools or an
 editor can delete it or give it another name while you have it open. What
-happens then:
+happens then is below. (Renaming or deleting a document from the Documents page
+is not this: the portal does it itself, and the document stays the same one, or
+is gone, with what went with it, as
+[described below](#renaming-and-deleting-a-document).)
 
 - The document is no longer listed, and asking for it is answered with "There
   is no such document". The list of documents on the page drops it within a
@@ -159,8 +164,8 @@ folder, not in your project: in `extension-data/pithagoras-docs/<id>`, where
 the page lists a folder's documents. It holds:
 
 - `git/`, a git repository of the extension's own, with one commit per
-  revision. It is not your project's repository and does not change it; it
-  holds only the documents.
+  revision (a rename and a deletion are revisions too). It is not your project's
+  repository and does not change it; it holds only the documents.
 - `docs.sqlite`, the comments and an index of the revisions.
 - `folder.json`, which folder it is for: its path, and which folder that is on
   this system (its device and inode).
@@ -325,6 +330,96 @@ A Markdown file put into a `documents` folder any other way (an upload in
 [Files](/guide/files), an editor, a copy) is a document too. While the page or a
 panel lists the documents, the portal watches each `documents` folder, and such
 a file is in the list a moment later.
+
+### Renaming and deleting a document
+
+Each row of the list (on the page and in the panel beside a chat) has two
+buttons at its right end, **Rename _name_** and **Delete _name_**, which show
+when the row is pointed at or has the keyboard focus, and always on a touch
+screen. An open document has the same two in the **Document actions** menu
+(**…**) of its bar, next to **Download**. The menu opens with **Rename** focused;
+the arrow keys, **Home** and **End** move in it, **Escape** closes it and the
+focus goes back to its button. In a row, Tab goes from the document's button to
+**Rename** and **Delete**.
+
+**Rename** changes the document's file name, `documents/<name>.md`. What you see
+of a document is two things, and this changes only the second: its **title** is
+its first heading (the list and the bar show it, [above](#the-page)) and is
+changed in the text; its **file name** is what you rename. The field takes the
+name without `.md`, which is added (an `.md` you write yourself is not doubled),
+has the name selected, and says this under it. **Enter** renames, **Escape** or
+**Cancel** gives it up, and the focus goes back to the button that opened the
+field. A name that is refused is said under the field, which stays open with what
+you wrote:
+
+- a name that another document has, or anything else in the folder has (a file,
+  a folder, a link)
+- a name that is not a document's: it must end in `.md`, may not start with a
+  dot, may not have `/`, `\` or a control character in it, and is at most 255
+  bytes
+
+A rename keeps the document: its id, its comments and their passages, its
+history and its text. It is a revision of its own (the same text, made by you,
+marked **Renamed from _old name_** in the [history](#history)), so every earlier
+revision can still be read and brought back, and a page that has the document
+open takes it as it takes any revision: it shows the new name, and what is typed
+there and not yet saved is kept and saved on top of it (a window that did not
+ask for the rename says "This document was renamed to …"). What was typed in the
+open document is saved before it is renamed. The agent finds the document by its id,
+so a rename costs it nothing except a new revision to read before its next edit.
+Only the page and the routes below rename: the agent has no tool for it.
+
+**Delete** asks first, as the portal does before it deletes anything ("Delete
+‘Title’? This deletes the file _name_, the comments on it and its history. It
+cannot be undone."). **Settings → This browser → Confirmations → Ask before
+deleting** ([Interface](/guide/interface#confirmations)) turns the question off,
+and the document is deleted at once. What is deleted:
+
+- the file, from the `documents` folder
+- the document's comments and their threads, and what waits on them (an `@agent`
+  that was not answered yet is not asked any more)
+- the document, from the lists and from its history on the page: asking for it is
+  answered with "There is no such document"
+
+Its file name is free again, and a document made under it is a new one, with
+nothing of the old one. The deletion is a commit of its own in the store's git
+repository ([below](#where-the-history-is-kept)), which is how the history says
+that the document is gone, so that the index made again from it does not bring it
+back. **The commits the document had stay in that repository** (git keeps what a
+commit once held), and nothing on the page reads them: for someone who runs the
+portal and wants a deleted document's text back, `git --git-dir=<the store's git>
+log --all` and `show <commit>:<file name>` find it. Its comments are not in
+git and cannot be brought back. Only a plain file is deleted: where the name is
+something else (a link, a folder, a file with a second name) the delete is
+refused ("… is not the document's file now") and the thing is left as it is. A
+document whose file is already gone (an outside deletion, [above](#a-file-that-is-deleted-or-renamed))
+is forgotten by the delete, with its comments.
+
+**An open document that is deleted from elsewhere** (another window, or the
+person who runs the portal) says so: "This document was deleted. Your text is
+kept here and is not saved." The text stays in the editor, nothing more is sent,
+and the bar's menu is off. **Save as a new document** makes a document of the text
+that is on the page (with the old title, and the same project or chat scope) and
+opens it; **Close** goes back to the list. A page that was not told (its
+connection was down) finds out with its next save, or when it asks for the
+comments again. Deleting from the page you have open leaves it at once, and the
+text typed since the last save goes with the document.
+
+**Where this is safe.** The portal may run as root (with the sandbox on) while the
+agent writes in the same folder, so a delete and a rename are not done by path:
+the `documents` folder is held open, and the file is taken away or given its new
+name through that folder, by `portal.files.removeFile` and `renameFile` ([A chat's
+folder](/guide/extension-ui#a-chat-s-folder)). A folder or a link that the agent
+puts where the file was between the look and the call is never followed or
+removed, and a rename never replaces what is at the new name.
+
+**Cut off in the middle.** The portal writes down what it is about to do before
+it touches the file. If it stops after the file was renamed or removed and
+before the history says so, the next time the store is used it finishes: the
+rename is committed (the document is the same one, not a new one made of the file
+under its new name), or the deletion is. A rename that was cut off between the
+two halves of the file's rename (the file has both names for a moment) loses the
+old name.
 
 ### Beside a chat
 
@@ -607,7 +702,8 @@ while there is such text.
 edge of the page, newest first, with who made each (you; the agent, through its
 document tools; or an outside change: Files, an editor, the agent's own file
 tools, or a save the portal could not finish) and when. A revision that restored
-an earlier one says which. It is the same panel as the list of comments
+an earlier one says which, and one that renamed the document says what it was
+called ([above](#renaming-and-deleting-a-document)). It is the same panel as the list of comments
 ([below](#comments)): at the same edge and in the same size, beside the text
 where the page is wide and over it, from the right, where it is narrow, with
 **Close**. Only one of the two is open at a time: opening one closes the other,
@@ -933,6 +1029,11 @@ the runner image does not get extensions.
 | `doc_delete_comment` | Deletes one of the agent's own comments or replies. A thread goes with its only comment. |
 | `doc_resolve` | Resolves a thread, with a last comment if the agent gives one. |
 
+None of them renames or deletes a document: that is for the person, on the page
+([above](#renaming-and-deleting-a-document)). The agent can still move or remove
+the file with its own file tools, which is what
+[A file that is deleted or renamed](#a-file-that-is-deleted-or-renamed) is about.
+
 The agent names a document by its id, never by a path. A document is the
 **project's** (every chat that works in the folder sees it) unless the agent
 makes it with `scope: chat`: that one is listed and read only in its chat. The
@@ -1097,7 +1198,7 @@ extensions/docs/
 ├── build.mjs        builds the editor into web/editor.js
 ├── server.js        the server half: routes, the streams, the wake of the agent
 ├── store.js         one folder's documents (class Store): files, history, comments
-├── files.js         what a document's file is (its name, what refuses a write), on `portal.files`
+├── files.js         what a document's file is (its name, what refuses a write, rename or removal), on `portal.files`
 ├── git.js, guard.js the history in git, and the store's folder held open
 ├── place.js         where a folder's store is, and which folder it is for
 ├── tools.js         the agent's nine tools
@@ -1133,7 +1234,9 @@ its path and a document by an id the store gave it, never by a path:
 | `POST /folders/:folder/documents/upload` | A Markdown file the person uploaded `{ name, markdown }`, kept as it is under its own name |
 | `GET …/:id/download` | The document's file, as an attachment |
 | `GET`, `PUT /folders/:folder/documents/:id` | A document's Markdown and revision; a save `{ markdown, base }`, answered 409 with the current text when its changes meet later ones |
-| `GET …/:id/events` | A stream (server-sent events) of its revisions and comment changes |
+| `POST …/:id/rename` | Another file name `{ name }` (`x.md`), as a revision of its own: 400 for a name that is not a document's, 409 for one that is taken (`exists`: the other document's id, or `null` for another file) |
+| `DELETE /folders/:folder/documents/:id` | Deletes the document: its file, its comments and its place in the lists (409 where its name is a link, a folder or a file with a second name) |
+| `GET …/:id/events` | A stream (server-sent events) of its revisions (`revision`), comment changes (`threads`) and its deletion (`deleted`, once) |
 | `GET …/:id/history`, `…/revisions/:n`, `POST …/restore` | The history, one revision's text, and bringing one back |
 | `GET`, `POST …/:id/threads`, `…/threads/:thread/{comments,resolve,reopen,seen}` | The comment threads, and a reply |
 | `PUT`, `DELETE …/threads/:thread/comments/:comment` | Change or take away one of the person's comments `{ body }`. With `draft` (`?draft=1` for the delete) it is a comment saved as it is typed, by a client that does that (the page sends one only when it is sent): only the last comment of an open thread, not marked as edited. Otherwise any of theirs, open thread or resolved; a change is marked as edited |
@@ -1155,7 +1258,17 @@ idle.
 
 **A write** is made under the folder's lock in three steps (the file, the git
 commit, the database) and any failure between them is put right the next time
-the store is used (`store.js`, top). Every refusal is a `DocError` with an HTTP
+the store is used (`store.js`, top). A rename or a delete begins with a fourth,
+first step: what is decided is written to the database (`pending`), then the
+file is renamed or removed (`portal.files.renameFile`, `removeFile`: the folder
+is held, nothing is followed), then the commit (a rename is a commit that takes the
+old name out of the tree and puts the new one in, with `Renamed-From`; a deletion
+takes the name out, with `Deleted: yes`) and the database. Recovery finishes what
+`pending` says from wherever the disk is (the file has the new name, or both, or
+only the old), and a rebuild of the index from the history takes the name from the
+last revision and drops what was deleted. A revision's text is read by its blob,
+not by the file name it had in that commit, which is what keeps the history of a
+renamed document readable. Every refusal is a `DocError` with an HTTP
 status, which a route answers and a tool turns into the error the agent reads;
 a failure of the disk, of git or of the database is made into one that says
 what is wrong (`errors.js`), and anything else is logged and answered with
@@ -1172,6 +1285,8 @@ alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:
 | --- | --- |
 | `store`, `extension` | The store and its routes against git on disk: history, recovery, where a store is, titles, listing, dependencies, German |
 | `hardening` | The edges: a file deleted or renamed, no rights, a broken store, saves at once, the size limit, a chat that never starts |
+| `rename` | A document renamed and deleted: what goes with a rename, the refusals, the pages told, a stop in the middle of either, the index made again from the history |
+| `files` | What a document's file is, and the calls on `portal.files` it is read, written, renamed and removed with |
 | `tools` | The agent's tools |
 | `stream`, `live`, `merge`, `saver` | Telling a page of changes, and taking them in |
 | `frame` | What the editor keeps apart from the Markdown: front matter and line endings |

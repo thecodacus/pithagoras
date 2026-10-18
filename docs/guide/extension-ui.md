@@ -676,7 +676,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -793,6 +793,24 @@ easy to get wrong in a way that is a hole, not a bug:
   not committed, commits no remote has, stashes) is refused (`unsaved`, with
   what it holds) unless `discard` says so. `unsaved(base, rel)` asks first, for
   a question that names it.
+- **A file of your own that you delete or rename goes by `removeFile` and
+  `renameFile`, not by `remove` and `rename`.** Those two take one plain file and
+  nothing else (a link or a folder is `invalid`, where `remove` takes the link or
+  all of the folder), and are done in the folder as it is held, not by its path:
+  the file goes from the folder that was checked, whatever its path leads to by
+  then. `removeFile` is an `unlink` of the name, which never follows a link (what
+  is swapped onto the name goes, and what it leads to stays) and never removes a
+  folder (`EISDIR`: nothing is lost, where a recursive remove by path takes the
+  folder and all in it). `renameFile` makes the new name a second name of the file
+  (a hard link) and then takes the old one away: the system refuses the link in
+  the call itself if something has the new name (`exists`, whatever the agent made
+  there since the look), where `rename` puts the file over it; a name swapped for
+  something else between the look and the call is `conflict`, and nothing is
+  renamed. A crash between the two halves leaves one file with two names, never
+  none. Where hard links cannot be made (a file system without them, or
+  `protected_hardlinks` for a file that is not the portal's own) it is a rename
+  after a look, with a short gap for a file that is made at the new name in
+  between. `direct` and `alone` are options of both, as of `open`.
 - **A save lasts.** After the rename the folder is synced too, so a crash
   right after leaves the new file, not the old one. An upload and a file the
   portal makes are synced the same way.
@@ -882,7 +900,9 @@ itself, for a server half that words a full disk differently from a missing righ
 [Documents](/guide/documents) is built on these: its files are read with
 `readBytes`, written with `write` (`create` for a new document, `direct`) and
 told changed by `change`; its folder is found with `folder`, made with
-`makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`.
+`makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`; a
+document is deleted with `removeFile` and renamed with `renameFile`
+(`direct`, `alone`).
 
 **Watching a chat's folder** is not in `portal.files`. A watch reads nothing and
 changes nothing, so it has none of the dangers above: it only tells that

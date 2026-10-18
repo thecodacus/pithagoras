@@ -465,6 +465,14 @@ test('a deleted document is gone: its file, its comments and its history on the 
     assert.equal((await docs.call('DELETE', url)).status, 404, 'once');
     assert.deepEqual((await docs.call('GET', '/folders')).body.folders ?? [], []);
     assert.deepEqual((await docs.call('GET', '/chats/a/documents')).body.documents, []);
+    // Nothing of it is left in the database: its revisions, its comments and their threads went with it.
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(path.join(storeOf(folder), 'docs.sqlite'), { readonly: true });
+    try {
+      for (const table of ['documents', 'revisions', 'threads', 'comments', 'pings']) assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n, 0, table);
+    } finally {
+      db.close();
+    }
     // The history says so, so that the index made again from it does not bring the document back; the commits it had stay.
     assert.deepEqual(tree(folder), []);
     assert.match(trailers(folder), /Doc-Id: [0-9a-f]{16}/);
@@ -619,6 +627,81 @@ test('a deletion deals with a document whose comments were waiting for the agent
     assert.deepEqual(docs.logged.filter((line) => /could not be asked/.test(line)), []);
   } finally {
     await docs.close();
+  }
+});
+
+test('a documents folder swapped for a link as a document is deleted or renamed: nothing outside it is removed or renamed, and the document stays', async () => {
+  for (const act of ['delete', 'rename'] as const) {
+    let swap: (() => void) | null = null;
+    // The portal's own `files`, but the agent's move is made in the time between the store's look at the folder and the call that works on it.
+    const racing = {
+      ...folderFiles,
+      removeFile: (...args: Parameters<typeof folderFiles.removeFile>) => { swap?.(); swap = null; return folderFiles.removeFile(...args); },
+      renameFile: (...args: Parameters<typeof folderFiles.renameFile>) => { swap?.(); swap = null; return folderFiles.renameFile(...args); },
+    } as typeof folderFiles;
+    const { folder, docs, id, url, dir } = await withDocument(`docs-${act}-race-`, { files: racing });
+    try {
+      const outside = folderWith(`docs-${act}-outside-`, { 'plan.md': 'theirs', 'new.md': 'theirs too' });
+      swap = () => { renameSync(dir, `${dir}.aside`); symlinkSync(outside, dir); };
+      const answer = act === 'delete' ? await docs.call('DELETE', url) : await docs.call('POST', `${url}/rename`, { name: 'new.md' });
+      assert.equal(answer.status, 409, `${act}: ${JSON.stringify(answer.body)}`);
+      assert.equal(swap, null, 'the swap was made');
+      assert.deepEqual(readdirSync(outside).sort(), ['new.md', 'plan.md'], `${act}: nothing outside was removed or made`);
+      assert.deepEqual([readFileSync(path.join(outside, 'plan.md'), 'utf8'), readFileSync(path.join(outside, 'new.md'), 'utf8')], ['theirs', 'theirs too']);
+      assert.equal(readFileSync(path.join(`${dir}.aside`, 'plan.md'), 'utf8'), TEXT_2, `${act}: and the folder that went aside was not touched`);
+      // The document is as it was, and nothing is left half done.
+      assert.deepEqual(readdirSync(`${dir}.aside`).filter((n) => !n.startsWith('.')), ['plan.md']);
+      assert.equal(commits(folder), 2);
+      assert.equal(id.length, 16);
+    } finally {
+      await docs.close();
+    }
+  }
+});
+
+test('a documents folder that is a link keeps the document from being deleted: it is not forgotten with its file left behind the link', async () => {
+  const { folder, docs, id, url, dir } = await withDocument('docs-delete-link-');
+  try {
+    const outside = folderWith('docs-delete-link-outside-', { 'plan.md': 'theirs' });
+    renameSync(dir, `${dir}.aside`);
+    symlinkSync(outside, dir);
+    const answer = await docs.call('DELETE', url);
+    assert.equal(answer.status, 409);
+    assert.match(answer.body.error, /documents in this folder is a link/);
+    assert.equal(readFileSync(path.join(outside, 'plan.md'), 'utf8'), 'theirs');
+    unlinkSync(dir);
+    renameSync(`${dir}.aside`, dir);
+    // Back where it was, the document is there with its comments.
+    const read = await docs.call('GET', url);
+    assert.deepEqual([read.body.id, read.body.name], [id, 'plan.md']);
+    assert.equal((await docs.call('GET', `${url}/threads`)).body.threads.length, 1);
+    assert.equal(commits(folder), 2);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a rename that fails again when it is finished is dropped, so that a disk that cannot be written does not keep the store from being used', async () => {
+  // Not an error the system says by a code: what is left of the rename is looked at on the next use, and tried once.
+  const breaking = { ...folderFiles, renameFile: () => { throw new Error('something unknown went wrong'); } } as typeof folderFiles;
+  const { folder, docs, id, url, dir } = await withDocument('docs-rename-dropped-', { files: breaking });
+  assert.equal((await docs.call('POST', `${url}/rename`, { name: 'after.md' })).status, 500);
+  await docs.close();
+  const again = await portal({ a: folder }, { files: breaking });
+  try {
+    // Used again at once, with the rename given up.
+    const read = await again.call('GET', url);
+    assert.deepEqual([read.status, read.body.id, read.body.name, read.body.revision], [200, id, 'plan.md', 2]);
+    assert.deepEqual(readdirSync(dir).filter((n) => !n.startsWith('.')), ['plan.md']);
+  } finally {
+    await again.close();
+  }
+  const third = await portal({ a: folder });
+  try {
+    assert.equal((await third.call('GET', url)).body.name, 'plan.md');
+    assert.equal(commits(folder), 2);
+  } finally {
+    await third.close();
   }
 });
 

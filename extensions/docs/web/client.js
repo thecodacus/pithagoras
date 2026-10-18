@@ -201,7 +201,6 @@ export default function (portal) {
     "Delete {name}": "{name} löschen",
     "New file name for {name}": "Neuer Dateiname für {name}",
     "This renames the file. The title is the document's first heading: change it in the text.": "Das benennt die Datei um. Der Titel ist die erste Überschrift des Dokuments: Ändere ihn im Text.",
-    "The document could not be renamed: {error}": "Das Dokument konnte nicht umbenannt werden: {error}",
     "The document could not be deleted: {error}": "Das Dokument konnte nicht gelöscht werden: {error}",
     "Delete “{title}”?": "„{title}“ löschen?",
     "This deletes the file {name}, the comments on it and its history. It cannot be undone.": "Das löscht die Datei {name}, die Kommentare dazu und den Verlauf. Das lässt sich nicht rückgängig machen.",

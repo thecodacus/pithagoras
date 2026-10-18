@@ -336,6 +336,16 @@ export class Store {
     }
   }
 
+  /** What stands where the documents folder is, when it is not one: a refusal (a link, or something that is not a folder), or nothing where there is no such place at all. */
+  blockedDocuments() {
+    try {
+      const stat = lstatSync(path.join(this.folder, DOCUMENTS));
+      return new DocError(409, stat.isSymbolicLink() ? "documents in this folder is a link" : "documents in this folder is not a folder");
+    } catch {
+      return null;
+    }
+  }
+
   /** The documents folder, made if it is not there: with the folder's owner and mode, so the agent can write in it as before. */
   makeDocumentsDir() {
     const found = this.documentsDir();
@@ -896,7 +906,7 @@ export class Store {
     }
     if (pending?.op !== op) return;
     try {
-      await (op === "rename" ? this.#carryRename(pending) : this.#carryDelete(pending));
+      await (op === "rename" ? this.#carryRename(pending, true) : this.#carryDelete(pending, true));
     } catch (e) {
       if (this.meta("pending") !== null) throw e;
     }
@@ -905,9 +915,11 @@ export class Store {
   /**
    * The rename that `pending` says (`{ id, from, to, author }`) carried out from wherever it is: the file has one of its two names,
    * or both (cut off between the two halves of a rename: it is one file with two names then), and the commit is made. Under the lock.
-   * A refusal on the disk (the new name is taken, the file is not a plain file) leaves things as they were, and is thrown as one.
+   * A refusal on the disk (the new name is taken, the file is not a plain file) leaves things as they were, and is thrown as one. Any
+   * other failure of the disk step leaves what was decided for the next look at the disk, which is `recovering` when it is that one: a
+   * second failure drops it, so that a disk that cannot be written does not keep the store from being used.
    */
-  async #carryRename({ id, from, to, author }) {
+  async #carryRename({ id, from, to, author }, recovering = false) {
     const row = this.row(id);
     // Done already (its commit was made, and the database is told: replayed, or by the transaction), or the document is gone.
     if (!row || row.revision === 0 || row.name === to) return this.clearPending();
@@ -937,7 +949,7 @@ export class Store {
       step?.();
     } catch (e) {
       // Only what says that the disk is as it was ends the rename: any other failure leaves what was decided, and the next look at the disk finishes it.
-      if (e instanceof Refused || e?.code === "failed") this.clearPending();
+      if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
       if (!(e instanceof Refused)) throw e;
       if (e.taken) throw new DocError(409, `A file called ${to} is in the way`, { exists: null });
       throw e.gone ? new DocError(404, "There is no such document") : new DocError(409, `${from} is not the document's file now (a link, a folder or a file with another name, or it changed meanwhile): it was not renamed`);
@@ -949,16 +961,26 @@ export class Store {
     this.clearPending();
   }
 
-  /** The deletion that `pending` says (`{ id, author }`) carried out from wherever it is: the file removed, if it still is there, and the commit. Under the lock. */
-  async #carryDelete({ id, author }) {
+  /**
+   * The deletion that `pending` says (`{ id, author }`) carried out from wherever it is: the file removed, if it still is there, and the
+   * commit. Under the lock. `recovering` as for a rename.
+   */
+  async #carryDelete({ id, author }, recovering = false) {
     const row = this.row(id);
     if (!row) return this.clearPending();
     const dir = this.documentsDir();
-    if (dir) {
+    if (!dir) {
+      // No folder to take the file from is nothing to remove; a link or a file called `documents` is something that is in the way, and the document stays.
+      const blocked = this.blockedDocuments();
+      if (blocked) {
+        this.clearPending();
+        throw blocked;
+      }
+    } else {
       try {
         removeDocument(this.files, dir, row.name);
       } catch (e) {
-        if (e instanceof Refused || e?.code === "failed") this.clearPending();
+        if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
         if (e instanceof Refused) throw new DocError(409, `${row.name} is not the document's file now (a link, a folder or a file with another name): it was not deleted`);
         throw e;
       }

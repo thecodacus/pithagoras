@@ -20,7 +20,7 @@ test.beforeAll(() => {
   execFileSync(process.execPath, [fileURLToPath(new URL('../../build.mjs', import.meta.url))], { stdio: 'ignore' });
 });
 
-interface Doc { id: string; name: string; title: string; revision: number; markdown: string }
+interface Doc { id: string; name: string; title: string; revision: number; markdown: string; /** No heading: it is called by its file's name. */ headless?: boolean }
 
 const PLAN: Doc = { id: '1111111111111111', name: 'plan.md', title: 'The plan', revision: 3, markdown: '# The plan\n\nShip it on Friday.\n\nThe build is green.\n' };
 const NOTES: Doc = { id: '2222222222222222', name: 'release.md', title: 'Release notes', revision: 1, markdown: '# Release notes\n\nNothing yet.\n' };
@@ -49,8 +49,13 @@ class Shelf {
     return { id: d.id, name: d.name, scope: 'project', chat: null, revision: d.revision, size: d.markdown.length, modified: '2026-10-01T11:00:00.000Z' };
   }
 
+  /** What a document is called: its first heading, or its file's name where it has none. */
+  titleOf(d: Doc) {
+    return d.headless ? d.name.replace(/\.md$/i, '') : d.title;
+  }
+
   listed() {
-    return this.docs.map((d) => ({ ...this.describe(d), title: d.title }));
+    return this.docs.map((d) => ({ ...this.describe(d), title: this.titleOf(d) }));
   }
 
   /** Done by someone else (another window, the agent): the next revision. */
@@ -71,7 +76,7 @@ class Shelf {
   document(method: string, id: string, tail: string, body: () => any) {
     const d = this.find(id);
     if (!d) return reply(404, { error: 'There is no such document' });
-    if (tail === '' && method === 'GET') return { ...this.describe(d), title: d.title, markdown: d.markdown };
+    if (tail === '' && method === 'GET') return { ...this.describe(d), title: this.titleOf(d), markdown: d.markdown };
     if (tail === '/threads') return { revision: d.revision, threads: [] };
     if (tail === '/history') return { revision: d.revision, revisions: [], more: false };
     if (tail === '' && method === 'PUT') {
@@ -523,6 +528,20 @@ test('a stream that dropped on a document that was deleted meanwhile finds that 
   await expect(page.getByRole('alert')).toContainText('This document was deleted.', { timeout: 10_000 });
   const streams = () => page.evaluate(() => (window as any).streams.filter((s: any) => s.url.includes('/documents/') && !s.closed).length);
   expect(await streams()).toBe(0);
+});
+
+test('a document with no heading is called by its file name, which a rename changes in the bar, and the question before it is deleted says the new one', async ({ page }) => {
+  const shelf = new Shelf([{ id: '5555555555555555', name: 'scratch.md', title: '', revision: 1, markdown: 'Just words.\n', headless: true }]);
+  await openDocument(page, shelf, '5555555555555555');
+  await expect(bar(page).locator('.pd-doctitle')).toHaveText('scratch');
+  const revision = shelf.renameElsewhere('5555555555555555', 'notes.md');
+  await tell(page, '5555555555555555', revision);
+  await expect(bar(page)).toContainText('documents/notes.md');
+  await expect(bar(page).locator('.pd-doctitle')).toHaveText('notes');
+  await actions(page).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await expect(dialog(page)).toContainText('Delete “notes”?');
+  await expect(dialog(page)).toContainText('This deletes the file notes.md');
 });
 
 test('the bar and the history say what a rename is in German, and the note that a document was renamed too', async ({ page }) => {
