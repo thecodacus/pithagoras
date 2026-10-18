@@ -3,7 +3,7 @@ import path from "node:path";
 import { bundledPath } from "./bundled.js";
 import { getSetting, packageRemoved, putSetting } from "./db.js";
 import { pi } from "./api/packages.js";
-import { followPackages, listInstalledPackages, preparingExtensions } from "./api/extensions.js";
+import { followPackages, listInstalledPackages, preparingExtensions, switchPackage } from "./api/extensions.js";
 import { isLocalSource, localPackagePath } from "./features.js";
 import { isSwitchedOff, sourceOf } from "./extension-switch.js";
 import { readPiSettings, updatePiSettings } from "./pi-settings.js";
@@ -75,13 +75,13 @@ const RETIRED: { folder: string; replacedBy: string }[] = [
   { folder: "theme-warm", replacedBy: "themes" },
 ];
 
-/** The names of the packages pi has installed, as their own package.json says. */
-async function installedNames(): Promise<Set<string>> {
-  const names = new Set<string>();
+/** The packages pi has installed, by the name their own package.json gives, with the source pi lists each as. */
+async function installedByName(): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
   for (const pkg of await listInstalledPackages()) {
     if (!pkg.path || !existsSync(path.join(pkg.path, "package.json"))) continue;
     try {
-      names.add(JSON.parse(readFileSync(path.join(pkg.path, "package.json"), "utf8"))?.name);
+      names.set(JSON.parse(readFileSync(path.join(pkg.path, "package.json"), "utf8"))?.name, pkg.spec);
     } catch {
       // Not one it could read: it names nothing.
     }
@@ -91,8 +91,9 @@ async function installedNames(): Promise<Set<string>> {
 
 /**
  * pi's list has entries for the folders of extensions the portal no longer ships: left in, pi reports each as a
- * package that is missing. They are taken out, with what the portal kept for them, and where one was switched on the
- * package that replaces it is installed unless it is installed already, so the person keeps what it gave.
+ * package that is missing. They are taken out, with what the portal kept for them. Where one was switched on, the
+ * package that replaces it is made sure of first (installed, or switched on where it was installed and switched off),
+ * so the person keeps what it gave; the entries stay until that worked, and a start where it did not tries again.
  * A folder of that name that is still there is someone's own and is left alone.
  * Resolves with the sources taken out.
  */
@@ -106,15 +107,9 @@ export async function replaceRetiredExtensions(dir = bundledPath("extensions")):
   const listed = readPiSettings().packages;
   const gone = (Array.isArray(listed) ? listed : []).filter((entry) => retiredAs(entry));
   if (!gone.length) return [];
-  await updatePiSettings((all) => {
-    if (Array.isArray(all.packages)) all.packages = all.packages.filter((entry) => !retiredAs(entry));
-  });
-  const sources = gone.map((entry) => sourceOf(entry)!);
-  for (const source of sources) await packageRemoved(source);
-  console.log(`[extensions] took out ${sources.join(", ")}: extensions the portal does not ship any more`);
   const wanted = new Set(gone.filter((entry) => !isSwitchedOff(entry)).map((entry) => retiredAs(entry)!.replacedBy));
   if (dir && wanted.size) {
-    const names = await installedNames();
+    const names = await installedByName();
     for (const folder of wanted) {
       let name: unknown;
       try {
@@ -122,15 +117,24 @@ export async function replaceRetiredExtensions(dir = bundledPath("extensions")):
       } catch {
         continue;
       }
-      if (typeof name !== "string" || names.has(name)) continue;
-      try {
+      if (typeof name !== "string") continue;
+      const spec = names.get(name);
+      if (spec === undefined) {
+        // A failure ends here, before anything is taken out: the next start finds the entries and tries again.
         await pi(["install", path.join(dir, folder)]);
         console.log(`[extensions] installed ${name}, which has what the extensions taken out had`);
-      } catch (e) {
-        console.error(`[extensions] could not install ${name}: ${(e as Error).message}`);
+      } else if (isSwitchedOff((readPiSettings().packages as unknown[] | undefined)?.find((e) => sourceOf(e) === spec))) {
+        await switchPackage(spec, true);
+        console.log(`[extensions] switched ${name} on, which has what the extensions taken out had`);
       }
     }
   }
+  await updatePiSettings((all) => {
+    if (Array.isArray(all.packages)) all.packages = all.packages.filter((entry) => !retiredAs(entry));
+  });
+  const sources = gone.map((entry) => sourceOf(entry)!);
+  for (const source of sources) await packageRemoved(source);
+  console.log(`[extensions] took out ${sources.join(", ")}: extensions the portal does not ship any more`);
   await followPackages();
   return sources;
 }
@@ -160,7 +164,7 @@ export async function installDefaultExtensions(dir = bundledPath("extensions")):
   const done = installedOnce();
   const due = defaultExtensions(dir).filter((ext) => !done.includes(ext.folder));
   if (!due.length) return [];
-  const names = await installedNames();
+  const names = new Set((await installedByName()).keys());
   const installed: string[] = [];
   for (const ext of due) {
     if (stopping) break;

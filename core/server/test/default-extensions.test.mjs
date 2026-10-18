@@ -32,6 +32,7 @@ case "$1" in
     ;;
   install)
     if [ -f ${JSON.stringify(path.join(home, "failing"))} ]; then case "$2" in *broken*) echo "npm error: could not install $2" >&2; exit 1;; esac; fi
+    if [ -f ${JSON.stringify(path.join(home, "failing-themes"))} ]; then case "$2" in */themes) echo "npm error: could not install $2" >&2; exit 1;; esac; fi
     echo "$2" >> "$state"
     node -e 'const fs=require("fs");const [file,dir]=process.argv.slice(1);const s=JSON.parse(fs.readFileSync(file,"utf8"));s.packages.push(dir);fs.writeFileSync(file,JSON.stringify(s))' "$settings" "$2"
     ;;
@@ -165,4 +166,40 @@ test("the start takes the entries out before it installs what the list names, al
     delete process.env.PORTAL_DEFAULT_EXTENSIONS;
   }
   assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [path.join(dir, "themes")]);
+});
+
+test("the theme package installed and switched off is switched on where Dusk was in use, and stays off where Dusk was off too", async () => {
+  const dir = shipped({ themes: "pithagoras-themes" }, ["themes"]);
+  const gone = path.join(home, "image", "extensions");
+  const themes = path.join(dir, "themes");
+  const off = { source: themes, extensions: [], skills: [], prompts: [], themes: [] };
+  writeFileSync(state, `${themes}\n`);
+  writeFileSync(settingsFile, JSON.stringify({ packages: [off, path.join(gone, "theme-dusk")] }));
+  assert.deepEqual(await replaceRetiredExtensions(dir), [path.join(gone, "theme-dusk")]);
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [themes], "on, as an entry the switch writes");
+  assert.deepEqual(installedNow(), [themes], "not installed again");
+
+  writeFileSync(settingsFile, JSON.stringify({ packages: [off, { source: path.join(gone, "theme-warm"), extensions: [], skills: [], prompts: [], themes: [] }] }));
+  assert.deepEqual(await replaceRetiredExtensions(dir), [path.join(gone, "theme-warm")]);
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [off], "both off: left as the person had them");
+});
+
+test("an install of the theme package that fails leaves the entries in, and the next start installs it and takes them out", async () => {
+  const dir = shipped({ themes: "pithagoras-themes" }, ["themes"]);
+  const dusk = path.join(home, "image", "extensions", "theme-dusk");
+  writeFileSync(state, "");
+  writeFileSync(settingsFile, JSON.stringify({ packages: [dusk] }));
+  setExtensionStash({ [dusk]: { source: dusk } });
+  writeFileSync(path.join(home, "failing-themes"), "");
+  await assert.rejects(replaceRetiredExtensions(dir), /could not install/);
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [dusk], "nothing was taken out");
+  assert.deepEqual(Object.keys(extensionStash()), [dusk]);
+  // The start itself says so and goes on.
+  assert.deepEqual(await installDefaultExtensions(dir), []);
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [dusk]);
+
+  rmSync(path.join(home, "failing-themes"));
+  assert.deepEqual(await installDefaultExtensions(dir), []);
+  assert.deepEqual(JSON.parse(readFileSync(settingsFile, "utf8")).packages, [path.join(dir, "themes")]);
+  assert.deepEqual(Object.keys(extensionStash()), []);
 });
