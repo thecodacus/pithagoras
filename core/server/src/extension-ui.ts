@@ -139,9 +139,13 @@ export function clientHalf(packageDir: string): ClientHalf | undefined {
 
 /** What a module names after `from`, or by an `import` of its own, to load with it: not `import()`, which waits until it is called. */
 const STATIC_IMPORTS = [
-  /\b(?:import|export)\b\s*(?:type\s+)?[^'"`;]*?\bfrom\s*(['"])([^'"]+)\1/g,
-  /(?:^|[;}\n])\s*import\s*(['"])([^'"]+)\1/g,
+  // Anchored where a statement starts and with a gap of bounded length, so that the time it takes is in step with the size of the file
+  // whatever is in it: an unbounded gap from every `import` or `export` in a long stretch without a quote is quadratic.
+  /(?:^|[;}\n/])\s*(?:import|export)\b\s*(?:type\s+)?[^'"`;]{0,1000}?\bfrom\s*(['"])([^'"]{1,500})\1/g,
+  /(?:^|[;}\n/])\s*import\s*(['"])([^'"]{1,500})\1/g,
 ];
+/** A module longer than this is not read for what it imports: an extension's own modules, bundled, are far below it. */
+const SCAN_LIMIT = 2 * 1024 * 1024;
 /** What a module imported, by where it was and how it stood: read again only when the file is not as it was. */
 const importsOf = new Map<string, { stamp: string; files: string[] }>();
 /** More than this is a folder that is not one module's, and preloading it would be a cost, not a help. */
@@ -168,6 +172,7 @@ export function staticImports(half: ClientHalf): string[] {
     let files: string[];
     try {
       const stat = statSync(path.join(half.dir, file));
+      if (stat.size > SCAN_LIMIT) continue;
       const stamp = `${stat.size}-${stat.mtimeMs}`;
       const had = importsOf.get(path.join(half.dir, file));
       if (had?.stamp === stamp) {

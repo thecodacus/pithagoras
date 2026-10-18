@@ -31,12 +31,14 @@ const WEB = { client: "./web/client.js", style: "./web/client.css" };
 const files = (marker) => ({
   "index.ts": "export const secret = 'the half pi loads';",
   "web/client.js": `import { dep } from "./dep.js";\nexport default function () { /* ${marker} */ dep; }`,
-  "web/dep.js": `import "./deeper/two.js";\nexport const dep = 1;\nexport const lazy = () => import("./lazy.js");`,
+  "web/dep.js": `import "./deeper/two.js";\nimport "./x@1+b$c.js";\nexport const dep = 1;\nexport const lazy = () => import("./lazy.js");`,
   "web/deeper/two.js": "export const two = 2;",
   "web/lazy.js": "export const lazy = 3;",
+  "web/x@1+b$c.js": "export const odd = 4;",
   "web/client.css": ".x { color: red; }",
   "web/img/logo.svg": "<svg xmlns='http://www.w3.org/2000/svg'/>",
   "web/.env": "KEY=value",
+  "web/huge.json": JSON.stringify({ text: "a line of a file far too large to be worth reading whole to compress it, ".repeat(Math.ceil(9 * 1024 * 1024 / 77)) }),
   "web/big.js": `export const lines = [\n${Array.from({ length: 400 }, (_, i) => `  "line ${i} of a module that is long enough to be worth compressing",`).join("\n")}\n];\n`,
 });
 const SERVER = "export default function (portal) { portal.router.get('/hello', (_req, res) => res.json({ from: portal.extension })); }";
@@ -119,8 +121,10 @@ test("what a module imports along with itself is listed, for the page to ask for
   const { extensions } = await (await fetch(at("/api/extension-ui"))).json();
   const notes = extensions.find((e) => e.name === "@codacus/notes");
   // Without the revision the module is asked for under: its import resolves to the file as it is addressed, and the page's fetch ahead must be that one.
-  assert.deepEqual(notes.preload, ["/api/extension-ui/%40codacus/notes/dep.js", "/api/extension-ui/%40codacus/notes/deeper/two.js"]);
-  assert.equal((await fetch(at(notes.preload[1]))).status, 200);
+  assert.deepEqual(notes.preload, ["/api/extension-ui/%40codacus/notes/dep.js", "/api/extension-ui/%40codacus/notes/deeper/two.js", "/api/extension-ui/%40codacus/notes/x@1+b$c.js"]);
+  // A name with characters a browser leaves as they are in an address is listed as it makes the address, or the import would fetch it again.
+  assert.equal(notes.preload[2], new URL("./x@1+b$c.js", at("/api/extension-ui/%40codacus/notes/dep.js")).pathname);
+  for (const address of notes.preload) assert.equal((await fetch(at(address))).status, 200, address);
   assert.equal(extensions.find((e) => e.name === "only-themes").preload, undefined);
 });
 
@@ -198,6 +202,11 @@ test("a text file of a package's web folder is sent compressed to a browser that
   assert.equal(again.status, 304);
   assert.equal(again.body.length, 0);
   assert.equal((await raw(address, { "accept-encoding": "gzip", "if-none-match": etag })).status, 200);
+  // One far larger than any module is streamed as it is, not read whole and compressed before its first byte.
+  const huge = await raw(address.replace("big.js", "huge.json"), { "accept-encoding": "br" });
+  assert.equal(huge.status, 200);
+  assert.equal(huge.headers["content-encoding"], undefined);
+  assert.ok(huge.body.length > 8 * 1024 * 1024);
   // A small file, a picture and a hidden file are not compressed here: the first two as they are, the last refused.
   const small = await raw(address.replace("big.js", "client.js"), { "accept-encoding": "br" });
   assert.equal(small.headers["content-encoding"], undefined);

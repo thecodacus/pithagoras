@@ -22,6 +22,8 @@ const deflate = promisify(gzip);
 const TEXT = new Set([".js", ".mjs", ".css", ".json", ".svg", ".html", ".txt", ".map"]);
 /** Below this a response is not worth the time it takes to compress, or the header it carries. */
 const SMALL = 1024;
+/** Above this a file is streamed as it is: it would be read whole and compressed before its first byte, for a file that is no module. */
+const LARGE = 8 * 1024 * 1024;
 /** What is kept compressed, in bytes: the oldest go first. A portal has a handful of extensions, and a few megabytes of each. */
 const KEPT = 64 * 1024 * 1024;
 
@@ -49,9 +51,12 @@ function compressed(key: string, stamp: string, file: string, encoding: "br" | "
   made.set(key, { stamp, body });
   body.then(
     (done) => {
-      sizes.set(body, done.length);
       // Only counted while it is still what is kept: a file changed meanwhile has replaced it.
-      if (made.get(key)?.body === body) held += done.length;
+      if (made.get(key)?.body !== body) return;
+      // One that is a large part of what is kept is sent, and not kept: it would send the rest of them out.
+      if (done.length > KEPT / 16) return forget(key);
+      sizes.set(body, done.length);
+      held += done.length;
       while (held > KEPT) {
         const oldest = made.keys().next().value;
         if (oldest === undefined || oldest === key) break;
@@ -81,7 +86,7 @@ export async function sendCompressed(req: Request, res: Response, root: string, 
   } catch {
     return false;
   }
-  if (!stat.isFile() || stat.size < SMALL) return false;
+  if (!stat.isFile() || stat.size < SMALL || stat.size > LARGE) return false;
   // The same address answers differently by what the browser takes: a cache in between has to know.
   res.setHeader("Vary", "Accept-Encoding");
   const wanted = accepted(req.headers["accept-encoding"]);

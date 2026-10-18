@@ -76,6 +76,21 @@ test('what a browser half imports along with itself is found by what each module
   assert.deepEqual(staticImports(clientHalf(dir)!), ['never.js']);
 });
 
+test('what a browser half imports is found in time in step with the size of its modules, whatever is in them, and a module too large to be one is not read', () => {
+  const dir = pkg({ client: './web/client.js' }, ['web/client.js']);
+  const web = (file: string, text: string) => writeFileSync(path.join(dir, 'web', file), text);
+  web('a.js', '');
+  // A long stretch that says "import" and "export" over and over without a quote or a semicolon, as a licence banner or a block of prose in a bundle may.
+  web('client.js', `import "./a.js";\n/* ${'import export '.repeat(25_000)} */`);
+  const before = process.cpuUsage();
+  assert.deepEqual(staticImports(clientHalf(dir)!), ['a.js']);
+  const { user, system } = process.cpuUsage(before);
+  assert.ok((user + system) / 1000 < 1000, `${(user + system) / 1000} ms of CPU for 350 KB`);
+  // Too large to be a module of an extension's: not read, and so nothing found in it.
+  web('client.js', `import "./a.js";\n/* ${'x'.repeat(2 * 1024 * 1024)} */`);
+  assert.deepEqual(staticImports(clientHalf(dir)!), []);
+});
+
 test('a module changed is a module under another revision', () => {
   const dir = pkg({ client: './web/client.js' }, ['web/client.js']);
   const before = clientHalf(dir)!.rev;

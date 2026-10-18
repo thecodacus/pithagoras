@@ -325,8 +325,24 @@ export const followPackages = (): Promise<void> =>
   syncExtensionServers().catch((e) => console.error("[extensions] could not bring the server halves in line with what is installed:", e));
 
 /** Where a page fetches a file of a package's web folder from. */
-const clientUrl = (half: ClientHalf, file: string, revised = true) =>
-  `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}${revised ? `?v=${half.rev}` : ""}`;
+const clientUrl = (half: ClientHalf, file: string) =>
+  `/api/extension-ui/${[...half.name.split("/"), ...file.split("/")].map(encodeURIComponent).join("/")}?v=${half.rev}`;
+
+/**
+ * Where a module's import of `file` (a path from the web folder) is fetched from: the address the browser makes
+ * of it, which is not the one `encodeURIComponent` makes (it leaves `@`, `+` and the like as they are), so that
+ * what is fetched ahead is the very request the import then makes and finds answered. Nothing for a name the
+ * browser would not read as that file (a `#` or a `?` in it).
+ */
+function importUrl(half: ClientHalf, file: string): string | undefined {
+  const base = `/api/extension-ui/${half.name.split("/").map(encodeURIComponent).join("/")}/`;
+  const url = new URL(file, `http://portal${base}`);
+  const expected = `${decodeURIComponent(base)}${file}`;
+  return url.search === "" && url.hash === "" && decodeURIComponent(url.pathname) === expected ? url.pathname : undefined;
+}
+
+/** What a page asks for ahead with the module of `half`. */
+const preloadOf = (half: ClientHalf): string[] => staticImports(half).map((file) => importUrl(half, file)).filter((url) => url !== undefined);
 
 export function extensionsRouter(): Router {
   const router = express.Router();
@@ -350,7 +366,7 @@ export function extensionsRouter(): Router {
             ...(client ? { entry: clientUrl(client, client.entry) } : {}),
             ...(client?.style ? { style: clientUrl(client, client.style) } : {}),
             // What its module imports along with itself, for the page to ask for all at once.
-            ...(client && staticImports(client).length ? { preload: staticImports(client).map((file) => clientUrl(client, file, false)) } : {}),
+            ...(client && preloadOf(client).length ? { preload: preloadOf(client) } : {}),
             // Where its server half's own routes are, when it has one that is running.
             ...(server && isServing(name) ? { server: `/api/x/${name.split("/").map(encodeURIComponent).join("/")}` } : {}),
             ...(failure ? { serverError: failure } : {}),
