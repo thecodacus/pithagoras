@@ -94,7 +94,8 @@ class Store {
   }
 }
 
-async function open(page: Page, store: Store, { editor = true }: { editor?: boolean } = {}) {
+/** `panel`: the document is opened in the panel beside a chat, not on the Documents page. */
+async function open(page: Page, store: Store, { editor = true, panel = false }: { editor?: boolean; panel?: boolean } = {}) {
   const sessions = [{ id: 'a', title: 'First chat', workspace: '/w/site', status: 'idle', kind: 'task', pinned: false, updated_at: new Date().toISOString(), provider: null, model: null, thinking_level: null }];
   const folders = [{ id: FOLDER, name: 'site', path: '/w/site', chats: [{ id: 'a', title: 'First chat' }], documents: [{ id: ID, name: 'plan.md', title: 'The plan', revision: store.revision, size: 40, modified: '2026-10-01T11:00:00.000Z' }] }];
   await mockPortal(page, async ({ path: p, method, url, route, json }) => {
@@ -112,10 +113,16 @@ async function open(page: Page, store: Store, { editor = true }: { editor?: bool
     if (p === `${DOCUMENT}/restore`) { const { revision, base } = json(); return store.restore(revision, base); }
     const revision = /\/revisions\/(\d+)$/.exec(p);
     if (revision && p.startsWith(`${DOCUMENT}/`)) { const found = store.revisions.find((r) => r.revision === Number(revision[1])); return found ? { ...found, markdown: found.markdown } : reply(404, { error: 'There is no such revision' }); }
+    if (p === `${API}/chats/a/documents`) return { folder: { id: FOLDER, name: 'site', path: '/w/site' }, documents: folders[0].documents };
     if (p === '/api/sessions') return { sessions, executor: 'host' };
     if (p === '/api/models') return { models: [], providers: {} };
+    if (/^\/api\/sessions\/\w+$/.test(p)) return sessions[0];
+    if (/^\/api\/sessions\/\w+\/(config|models)$/.test(p)) return { live: false, state: { model: null, thinkingLevel: 'medium' }, stats: null, thinking: { levels: ['off', 'medium'] }, models: { models: [] }, named: { provider: null, model: null } };
   });
-  await page.goto(`/x/${NAME}/documents?folder=${FOLDER}&doc=${ID}`);
+  if (!panel) return void (await page.goto(`/x/${NAME}/documents?folder=${FOLDER}&doc=${ID}`));
+  await page.goto('/s/a');
+  await page.locator('.panel-toggle[aria-label="Documents"]').click();
+  await page.getByRole('complementary', { name: 'Panels' }).getByRole('button', { name: /The plan/ }).click();
 }
 
 const editorOf = (page: Page) => page.locator('.pd-editor .ProseMirror');
@@ -541,14 +548,24 @@ test('the history lists the revisions, shows one, and brings it back as a new re
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   const rows = history.getByRole('listitem');
   await expect(rows).toHaveText([/^Revision 3Current\s*You · /, /^Revision 2\s*The agent · /, /^Revision 1\s*You · Created · /]);
 
   await history.getByRole('button', { name: /^Revision 2/ }).click();
-  await expect(history.locator('.pd-preview')).toContainText('Ship it soon.');
-  // What is shown is a look; the document is where it was.
+  // The old text is on the page, in the text's place, marked as an earlier revision that cannot be edited; the document is where it was.
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  await expect(page.locator('.pd-old-note')).toContainText('You are reading revision 2');
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await expect(editorOf(page)).toBeHidden();
+  await expect(page.getByRole('combobox', { name: 'Text style' })).toBeDisabled();
+  // The way back is on the page, and the panel stays open.
+  await page.getByRole('button', { name: 'Back to the current text' }).click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(editorOf(page)).toBeVisible();
+  await expect(history).toBeVisible();
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
   await history.getByRole('button', { name: 'Restore this revision' }).click();
 
   await expect(editorOf(page)).toContainText('Ship it soon.');
@@ -571,7 +588,7 @@ test('restoring saves what was typed first, as a revision to go back to', async 
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
   await page.getByRole('button', { name: 'History' }).click();
   await typeAtEnd(page, ' Unsaved words.');
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
   await history.getByRole('button', { name: 'Restore this revision' }).click();
   await expect(state(page)).toHaveText('Saved · Revision 5');
@@ -590,7 +607,7 @@ test('restoring waits for the choice when the text cannot be saved', async ({ pa
   store.elsewhere('# The plan\n\nTheirs.\n');
   await typeAtEnd(page, ' Mine.');
   await expect(page.locator('.pd-conflict')).toBeVisible();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
   await history.getByRole('button', { name: 'Restore this revision' }).click();
   // Nothing was restored, and the text is still there.
@@ -604,12 +621,13 @@ test('restoring a revision when the document has moved on shows the document as 
   await open(page, store);
   await expect(editorOf(page)).toContainText('Ship it on Friday.');
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await history.getByRole('button', { name: /^Revision 1/ }).click();
   store.elsewhere('# The plan\n\nTheirs.\n');
   await history.getByRole('button', { name: 'Restore this revision' }).click();
   await expect(page.locator('.pd-note')).toContainText('The document changed in the meantime and is now at revision 4. Restore revision 1 again if you still want it.');
   await expect(editorOf(page)).toContainText('Theirs.');
+  await expect(page.locator('.pd-old')).toHaveCount(0);
   await expect(state(page)).toHaveText('Saved · Revision 4');
   expect(store.markdown).toBe('# The plan\n\nTheirs.\n');
 });
@@ -619,7 +637,7 @@ test('an older page of the history is asked for when wanted', async ({ page }) =
   for (let n = 4; n <= 60; n++) store.elsewhere(`# The plan\n\nVersion ${n}.\n`);
   await open(page, store);
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await expect(history.getByRole('listitem')).toHaveCount(50);
   await expect(history.getByRole('listitem').first()).toContainText('Revision 60');
   await history.getByRole('button', { name: 'Show older revisions' }).click();
@@ -635,7 +653,7 @@ test('a revision that cannot be read says so, and the history that cannot be lis
   let broken = true;
   await page.route(`**${DOCUMENT}/history*`, (route) => (broken ? route.fulfill({ status: 500, json: { error: 'The documents store could not do that' } }) : route.fallback()));
   await page.getByRole('button', { name: 'History' }).click();
-  const history = page.getByRole('region', { name: 'History' });
+  const history = page.getByRole('complementary', { name: 'History' });
   await expect(history.getByRole('alert')).toContainText('The documents store could not do that');
   broken = false;
   await history.getByRole('button', { name: 'Try again' }).click();
@@ -664,8 +682,8 @@ test('the editor page speaks German in a German portal', async ({ page }) => {
   await expect(state(page)).toHaveText('Nicht gespeicherte Änderungen · Revision 3');
   await expect(state(page)).toHaveText('Gespeichert · Revision 4');
   await page.getByRole('button', { name: 'Verlauf' }).click();
-  await expect(page.getByRole('region', { name: 'Verlauf' }).getByRole('listitem').first()).toContainText('Revision 4Aktuell');
-  await expect(page.getByRole('region', { name: 'Verlauf' }).getByRole('listitem').last()).toContainText('Du · Erstellt · ');
+  await expect(page.getByRole('complementary', { name: 'Verlauf' }).getByRole('listitem').first()).toContainText('Revision 4Aktuell');
+  await expect(page.getByRole('complementary', { name: 'Verlauf' }).getByRole('listitem').last()).toContainText('Du · Erstellt · ');
   store.elsewhere('# Der Plan\n');
   await typeAtEnd(page, ' Noch mehr.');
   await expect(page.locator('.pd-conflict')).toContainText('Dieses Dokument wurde geändert, während du es bearbeitet hast, und steht jetzt bei Revision 5.');
@@ -843,3 +861,146 @@ test('a document opened on the page is the whole page: its bar, the toolbar and 
   await page.getByRole('button', { name: /All documents/ }).click();
   await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
 });
+
+/* The history is a panel at the side like the comments: the same place, size and way of closing, and one of the two at a time. */
+const sideBar = (page: Page, name: 'History' | 'Comments') => page.getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
+const sidePanel = (page: Page, name: 'History' | 'Comments') => page.getByRole('complementary', { name });
+
+/** Where the panel stands against the page's area below the bars, and the text's scroll box beside it. */
+async function sideGeometry(page: Page, name: 'History' | 'Comments') {
+  const [side, area, scroll] = await Promise.all([sidePanel(page, name).boundingBox(), page.locator('.pd-desk').boundingBox(), page.locator('.pd-scroll').boundingBox()]);
+  return { side: side!, area: area!, scroll: scroll! };
+}
+
+for (const where of ['the Documents page', 'the panel beside a chat'] as const) {
+  test(`the history opens at the side, as the comments do, in a wide and in a narrow page, on ${where}`, async ({ page }) => {
+    const panel = where !== 'the Documents page';
+    const store = new Store();
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await open(page, store, { panel });
+    await expect(editorOf(page)).toContainText('Ship it on Friday.');
+    // The panel beside a chat is narrow in itself; the Documents page is wide at 1400 and narrow at 700.
+    const sizes = panel ? ([[1400, 'narrow'], [700, 'narrow']] as const) : ([[1400, 'wide'], [700, 'narrow']] as const);
+    for (const [width, layout] of sizes) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', layout);
+      // The comments are where the history is to be, whatever the page.
+      await sideBar(page, 'Comments').click();
+      const comments = await sideGeometry(page, 'Comments');
+      await sideBar(page, 'Comments').click();
+      await expect(sidePanel(page, 'Comments')).toHaveCount(0);
+
+      await sideBar(page, 'History').click();
+      const { side, area, scroll } = await sideGeometry(page, 'History');
+      await expect(sidePanel(page, 'History').getByRole('listitem')).toHaveCount(3);
+      expect(side).toEqual(comments.side);
+      expect(Math.round(side.x + side.width)).toBe(Math.round(area.x + area.width));
+      expect(Math.round(side.y)).toBe(Math.round(area.y));
+      expect(Math.round(side.y + side.height)).toBe(Math.round(area.y + area.height));
+      expect(side.width).toBeLessThanOrEqual(320);
+      // Beside the text it pushes the page narrower; over it, the page keeps all its width.
+      if (layout === 'wide') expect(Math.round(scroll.x + scroll.width)).toBe(Math.round(side.x));
+      else expect(Math.round(scroll.x + scroll.width)).toBe(Math.round(area.x + area.width));
+      await sidePanel(page, 'History').getByRole('button', { name: 'Close' }).click();
+      await expect(sidePanel(page, 'History')).toHaveCount(0);
+      // The button it was opened from has the focus again.
+      await expect(sideBar(page, 'History')).toBeFocused();
+    }
+  });
+}
+
+test('the comments and the history replace each other, and the bar says which one is open', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  const [comments, history] = [sideBar(page, 'Comments'), sideBar(page, 'History')];
+  await expect(comments).toHaveAttribute('aria-expanded', 'false');
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+  await history.click();
+  await expect(sidePanel(page, 'History')).toBeVisible();
+  await expect(history).toHaveAttribute('aria-expanded', 'true');
+  // The comments in its place: the history is gone, not under it.
+  await comments.click();
+  await expect(sidePanel(page, 'Comments')).toBeVisible();
+  await expect(sidePanel(page, 'History')).toHaveCount(0);
+  await expect(comments).toHaveAttribute('aria-expanded', 'true');
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+  await history.click();
+  await expect(sidePanel(page, 'History')).toBeVisible();
+  await expect(sidePanel(page, 'Comments')).toHaveCount(0);
+  await expect(page.locator('.pd-side')).toHaveCount(1);
+  await expect(comments).toHaveAttribute('aria-expanded', 'false');
+  // The button that is open closes it.
+  await history.click();
+  await expect(page.locator('.pd-side')).toHaveCount(0);
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('an earlier revision looked at is on the page, read-only and marked, with the panel open; closing the panel goes back to the text', async ({ page }) => {
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  await expect(page.locator('.pd-old-note')).toContainText('You are reading revision 2, an earlier text');
+  await expect(history).toBeVisible();
+  // The chosen one is chosen again to be let go of.
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(page.locator('.pd-old-note')).toHaveCount(0);
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toBeVisible();
+  // Closing the panel (or taking the comments in its place) leaves the old text, not the page showing something nobody can reach.
+  await history.getByRole('button', { name: 'Close' }).click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(page.locator('.pd-old-note')).toHaveCount(0);
+  await expect(editorOf(page)).toBeVisible();
+  await sideBar(page, 'History').click();
+  await history.getByRole('button', { name: /^Revision 1/ }).click();
+  await expect(page.locator('.pd-old')).toBeVisible();
+  await sideBar(page, 'Comments').click();
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+});
+
+test('a revision is restored from the side panel in a narrow page too, and the page is the text again', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  const store = new Store();
+  await open(page, store);
+  await expect(editorOf(page)).toContainText('Ship it on Friday.');
+  await sideBar(page, 'History').click();
+  const history = sidePanel(page, 'History');
+  await history.getByRole('button', { name: /^Revision 2/ }).click();
+  await expect(page.locator('.pd-old')).toContainText('Ship it soon.');
+  // The note with the way back is above the panel, which covers the right of the page.
+  await expect(page.getByRole('button', { name: 'Back to the current text' })).toBeVisible();
+  await history.getByRole('button', { name: 'Restore this revision' }).click();
+  await expect(state(page)).toHaveText('Saved · Revision 4');
+  expect(store.restores).toEqual([{ revision: 2, base: 3 }]);
+  expect(store.markdown).toBe('# The plan\n\nShip it soon.\n');
+  await expect(page.locator('.pd-old')).toHaveCount(0);
+  await expect(editorOf(page)).toContainText('Ship it soon.');
+  await expect(history).toBeVisible();
+});
+
+for (const name of ['History', 'Comments'] as const) {
+  test(`Escape in the ${name.toLowerCase()} panel closes it and the focus goes back to its button`, async ({ page }) => {
+    const store = new Store();
+    await open(page, store);
+    await expect(editorOf(page)).toContainText('Ship it on Friday.');
+    await sideBar(page, name).click();
+    const panel = sidePanel(page, name);
+    await expect(panel).toBeVisible();
+    // With the focus in the text, Escape is the text's: the panel stays.
+    await editorOf(page).click();
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeVisible();
+    // With it inside the panel, it closes the panel.
+    await panel.getByRole('button', { name: 'Close' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(sideBar(page, name)).toBeFocused();
+  });
+}

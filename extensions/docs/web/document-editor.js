@@ -80,17 +80,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
   const { React, ui, t } = portal;
   const { useEffect, useRef, useState } = React;
   const h = React.createElement;
-  const { Comments, Popover } = comments(portal, { when });
+  const { Comments, Popover, SidePanel } = comments(portal, { when });
   const Toolbar = toolbar(portal);
 
   const Icon = ({ name }) =>
     h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, className: "pd-icon" }, h("path", { d: ICONS[name] }));
 
   /** A button of the document's bar: an icon, and its words where there is room for them. */
-  const BarButton = ({ icon, label, pressed, expanded, disabled, badge, onClick, children }) =>
+  const BarButton = ({ icon, label, pressed, expanded, disabled, badge, onClick, children, buttonRef }) =>
     h(
       "button",
-      { type: "button", className: "pd-barbutton", title: label, "aria-label": badge ? `${label} ${badge}` : undefined, "aria-pressed": pressed, "aria-expanded": expanded, disabled, onClick },
+      { type: "button", ref: buttonRef, className: "pd-barbutton", title: label, "aria-label": badge ? `${label} ${badge}` : undefined, "aria-pressed": pressed, "aria-expanded": expanded, disabled, onClick },
       h(Icon, { name: icon }),
       h("span", { className: "pd-barlabel" }, children ?? label),
       badge ? h("span", { className: "pd-count", "aria-hidden": true }, badge) : null,
@@ -169,15 +169,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     return "";
   }
 
-  /** The revisions of a document, newest first, and any of them read and brought back. */
-  function History({ folder, id, current, busy, onRestore }) {
+  /**
+   * The revisions of a document, newest first, in the side panel: any of them can be looked at (`shown`: the one chosen, which the
+   * page draws in the text's place, read-only, `onLook`) and brought back. The panel is the list and what can be done with the revision
+   * chosen; the text of it is on the page.
+   */
+  function History({ folder, id, current, busy, shown, onLook, onRestore, onClose }) {
     const url = documentUrl(folder, id);
     const [list, setList] = useState({ items: [], more: false });
     const [error, setError] = useState(null);
     const [loaded, setLoaded] = useState(false);
     const [asked, setAsked] = useState(0);
-    // The revision looked at: its number, and its text once it is there.
-    const [shown, setShown] = useState(null);
     const here = useRef(true);
     useEffect(() => {
       here.current = true;
@@ -203,17 +205,9 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       );
     };
 
-    const look = (revision) => {
-      setShown({ revision });
-      portal.api.json(`${url}/revisions/${revision}`).then(
-        (body) => here.current && setShown((now) => (now?.revision === revision ? { revision, markdown: body.markdown } : now)),
-        (e) => here.current && setShown((now) => (now?.revision === revision ? { revision, error: e.message } : now)),
-      );
-    };
-
     return h(
-      "section",
-      { className: "pd-history", "aria-label": t("History") },
+      SidePanel,
+      { kind: "history", title: t("History"), onClose },
       error && !list.items.length
         ? h(ui.LoadFailed, { error, onRetry: () => setAsked((n) => n + 1) })
         : !loaded
@@ -230,7 +224,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
                     { key: revision.revision },
                     h(
                       "button",
-                      { type: "button", "aria-pressed": shown?.revision === revision.revision, onClick: () => look(revision.revision) },
+                      // The one looked at is chosen again to be let go of.
+                      { type: "button", "aria-pressed": shown?.revision === revision.revision, onClick: () => onLook(shown?.revision === revision.revision ? null : revision.revision) },
                       h("span", { className: "pd-title" }, t("Revision {n}", { n: revision.revision }), revision.revision === current && h("span", { className: "pd-current" }, t("Current"))),
                       h("span", { className: "pd-meta" }, [WHO()[revision.author] ?? revision.author, whatOf(revision), when(revision.at)].filter(Boolean).join(" · ")),
                     ),
@@ -249,16 +244,9 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             h("strong", null, t("Revision {n}", { n: shown.revision })),
             shown.revision === current
               ? h("span", { className: "pd-meta" }, t("This is the current revision."))
-              : h("button", { type: "button", className: ui.classes.primarySmall, disabled: busy || shown.markdown === undefined, onClick: async () => (await onRestore(shown)) && here.current && setShown(null) }, t("Restore this revision")),
-            h("button", { type: "button", className: ui.classes.ghost, onClick: () => setShown(null) }, t("Close")),
+              : h("button", { type: "button", className: ui.classes.primarySmall, disabled: busy || shown.markdown === undefined, onClick: async () => (await onRestore(shown)) && onLook(null) }, t("Restore this revision")),
           ),
-          shown.error
-            ? h(ui.ErrorBanner, null, shown.error)
-            : shown.markdown === undefined
-              ? h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") })
-              : shown.markdown.trim()
-                ? h("div", { className: "pd-body" }, h(ui.Markdown, null, shown.markdown))
-                : h(ui.Empty, null, t("This document is empty.")),
+          shown.error && h(ui.ErrorBanner, null, shown.error),
         ),
     );
   }
@@ -278,7 +266,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const [broken, setBroken] = useState(null);
     const [notice, setNotice] = useState(null);
     const [problem, setProblem] = useState(null);
-    const [history, setHistory] = useState(false);
     const [busy, setBusy] = useState(false);
     // The call whose draft the person chose not to watch, or that began while they were working in the text: the text is shown.
     const [unwatched, setUnwatched] = useState(null);
@@ -323,10 +310,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // The whole of it, measured for whether the list of comments fits beside the sheet.
     const root = useRef(null);
     const [wide, setWide] = useState(false);
-    // Where the selection is, for the toolbar; whether the list of all the comments is shown; the card that is to have the focus when
+    // Where the selection is, for the toolbar; which panel is open at the side (the comments, the history, or none); the card that is to have the focus when
     // it opens (a click leaves the focus in the text); a count that draws the open card again, which places it again, when the text moved.
     const [format, setFormat] = useState(null);
-    const [listed, setListed] = useState(false);
+    const [side, setSide] = useState(null);
+    // The earlier revision looked at in the History panel (`{ revision, markdown }`, or `error`), which is drawn in the text's place.
+    const [looking, setLooking] = useState(null);
+    const looked = useRef(0);
+    const commentsButton = useRef(null);
+    const historyButton = useRef(null);
+    const listed = side === "comments";
+    const history = side === "history";
     const [takeFocus, setTakeFocus] = useState(null);
     const [, setRelayout] = useState(0);
     // What the editor's callbacks, which are made once, need of what the page is now.
@@ -557,7 +551,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     React.useLayoutEffect(() => {
       const frame = sheet.current?.getBoundingClientRect();
       let found = [];
-      if (ready && !watching && frame && frame.width >= MARGIN_MIN) {
+      if (ready && !watching && !old && frame && frame.width >= MARGIN_MIN) {
         for (const thread of threads.items) {
           if (thread.status !== "open" || thread.orphaned || thread.id === active || !texts.has(thread.id)) continue;
           const line = rectsOf(thread.id)[0];
@@ -615,6 +609,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           editor.replace(e.body.markdown ?? "");
           saver.adopt(e.body.revision, editor.markdown());
           setNotice({ kind: "moved", revision: e.body.revision, from: revision });
+          // The page is the document as it is now, not the old text beside a note that says it moved on.
+          look(null);
           return false;
         }
       } catch (e) {
@@ -643,7 +639,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     }, [ready, active]);
     // A thread that is looked at is brought into view in the list.
     useEffect(() => {
-      if (active && listed) workspace.current?.querySelector(`.pd-threads [data-thread="${CSS.escape(active)}"]`)?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+      if (active && listed) workspace.current?.querySelector(`.pd-side [data-thread="${CSS.escape(active)}"]`)?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
     }, [active, listed]);
 
     /** The passage selected is commented on: the text is saved first, so that the passage is in a revision the server has. */
@@ -669,7 +665,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       setTakeFocus(null);
       setActive(PENDING);
       // A list over the bottom of the page would cover the card.
-      if (!wide) setListed(false);
+      if (!wide) setSide(null);
       setCompose({ key: ++composed.current, passage, base: saver.state().base, threadId: null });
     };
 
@@ -791,7 +787,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       setActive(thread);
       parts.current?.editor.reveal(thread);
       // A list over the bottom of the page would cover the card.
-      if (!wide) setListed(false);
+      if (!wide) setSide(null);
     };
     /**
      * The card that is open is closed. A comment being written with nothing typed in it is given up with it; with words in it, it is
@@ -836,6 +832,32 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const watching = edited !== null && status === "saved" && unwatched !== draft.call;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
     const openCount = threads.items.filter((x) => x.status === "open").length;
+    // The side panel: one at a time, the other's place taken. Closed from within (Close, Escape), the button it was opened from has the focus again.
+    const openers = { comments: commentsButton, history: historyButton };
+    const closeSide = ({ focus = false } = {}) => {
+      if (focus && side) openers[side].current?.focus({ preventScroll: true });
+      setSide(null);
+    };
+    const toggleSide = (which) => setSide((now) => (now === which ? null : which));
+    /** An earlier revision read, to be drawn in the text's place; null goes back to the text. */
+    const look = (revision) => {
+      const mine = ++looked.current;
+      if (revision === null) return setLooking(null);
+      setLooking({ revision });
+      portal.api.json(`${url}/revisions/${revision}`).then(
+        (body) => mine === looked.current && setLooking({ revision, markdown: body.markdown }),
+        (e) => mine === looked.current && setLooking({ revision, error: e.message }),
+      );
+    };
+    // The revision is let go of with the panel it was chosen in.
+    useEffect(() => {
+      if (side !== "history") {
+        looked.current++;
+        setLooking(null);
+      }
+    }, [side]);
+    // An earlier revision is on the page in the text's place (the current one is the text itself); one that cannot be read is said in the panel.
+    const old = history && looking && looking.revision !== base && !looking.error ? looking : null;
     const print = () => {
       const editor = parts.current?.editor;
       if (editor) printDocument(doc.title, editor.html());
@@ -848,14 +870,16 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // says so: what is typed in it is not taken from under the person's hands.
     const shown = !written && active ? threads.items.find((x) => x.id === active) : null;
     const card =
-      ready && !watching
+      ready && !watching && !old
         ? written
           ? { key: `compose-${compose.key}`, compose, mark: compose.threadId ?? PENDING, thread: madeOf ?? { id: null, status: "open", orphaned: false, quote: compose.passage.quote, toAgent: false, answered: false, ping: null, comments: [] } }
           : shown && { key: shown.id, thread: shown, mark: shown.id }
         : null;
-    // The list of all the comments, when it is asked for.
+    // What is open at the side: the list of all the comments, or the history.
     const list =
-      listed && ready
+      history && ready
+        ? h(History, { folder, id, current: base, busy, shown: looking, onLook: look, onRestore: restore, onClose: closeSide })
+        : listed && ready
         ? h(Comments, {
             threads: ordered,
             loaded: threads.loaded,
@@ -865,7 +889,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             active,
             compose,
             drafts: drafts.current,
-            onClose: () => setListed(false),
+            onClose: closeSide,
             onRetry: () => void refresh.current(),
             onActivate: show,
             onWrite: write,
@@ -896,8 +920,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         h(
           "div",
           { className: "pd-bar-end" },
-          h(BarButton, { icon: "comments", label: t("Comments"), expanded: listed, badge: openCount || null, onClick: () => setListed((on) => !on) }),
-          h(BarButton, { icon: "history", label: history ? t("Hide history") : t("History"), expanded: history, disabled: !ready, onClick: () => setHistory((on) => !on) }),
+          h(BarButton, { icon: "comments", label: t("Comments"), expanded: listed, badge: openCount || null, buttonRef: commentsButton, onClick: () => toggleSide("comments") }),
+          h(BarButton, { icon: "history", label: t("History"), expanded: history, disabled: !ready, buttonRef: historyButton, onClick: () => toggleSide("history") }),
           h(Menu, {
             icon: "download",
             label: t("Download"),
@@ -910,7 +934,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           onExpand && h(BarButton, { icon: "expand", label: t("Open on its own page"), onClick: async () => (!parts.current || (await parts.current.saver.flush())) && onExpand() }, t("Full page")),
         ),
       ),
-      h(Toolbar, { format, disabled: !ready || watching, onCommand: (name, arg) => parts.current?.editor.command(name, arg), onComment: () => void startComment(), onFocusText: () => parts.current?.editor.focus() }),
+      h(Toolbar, { format, disabled: !ready || watching || Boolean(old), onCommand: (name, arg) => parts.current?.editor.command(name, arg), onComment: () => void startComment(), onFocusText: () => parts.current?.editor.focus() }),
       conflict &&
         h(
           "div",
@@ -954,7 +978,13 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           ),
           h("button", { type: "button", className: ui.classes.ghost, onClick: () => setNotice(null) }, t("Close")),
         ),
-      history && ready && h(History, { folder, id, current: base, busy, onRestore: restore }),
+      old &&
+        h(
+          "div",
+          { className: "pd-note pd-old-note", role: "status" },
+          h("span", null, t("You are reading revision {n}, an earlier text. It cannot be edited here; the document itself has not changed.", { n: old.revision })),
+          h("button", { type: "button", className: ui.classes.ghost, onClick: () => look(null) }, t("Back to the current text")),
+        ),
       broken && h(ui.ErrorBanner, null, t("The editor could not be loaded: {error}", { error: broken.message })),
       h(
         "div",
@@ -969,12 +999,18 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
               ref: sheet,
               // A click on the page under the text, or beside it, is a click in the text: the caret goes to its end, as on a word processor's page.
               onClick: (e) => {
-                if (!e.target.closest(".ProseMirror, .pd-popover, .pd-draft, button, a, input, textarea") && parts.current && !watching) parts.current.editor.focusEnd();
+                if (!e.target.closest(".ProseMirror, .pd-popover, .pd-draft, button, a, input, textarea") && parts.current && !watching && !old) parts.current.editor.focusEnd();
               },
             },
             !ready && !broken && h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }),
             watching && h("div", { className: "pd-editor pd-draft" }, h(ui.Markdown, null, shownOf(edited))),
-            h("div", { ref: host, className: "pd-editor", hidden: !ready || watching }),
+            old &&
+              h(
+                "div",
+                { className: "pd-editor pd-draft pd-old" },
+                old.markdown === undefined ? h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") }) : old.markdown.trim() ? h(ui.Markdown, null, old.markdown) : h(ui.Empty, null, t("This document is empty.")),
+              ),
+            h("div", { ref: host, className: "pd-editor", hidden: !ready || watching || Boolean(old) }),
             card &&
               h(Popover, {
                 key: card.key,

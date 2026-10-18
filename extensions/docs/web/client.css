@@ -49,7 +49,7 @@
 .pd-page.pd-panel:has(.pd-doc) { padding: 0; }
 .pd-document:has(> .pd-doc) { flex: 1; min-height: 0; margin: 0; gap: 0; }
 .pd-doc { display: flex; min-height: 0; flex: 1; flex-direction: column; container-type: inline-size; background: rgb(var(--surface)); }
-.pd-doc > .pd-conflict, .pd-doc > .pd-note, .pd-doc > .pd-history, .pd-doc > [role="alert"], .pd-doc > [role="status"], .pd-doc > div:not([class]) { margin: 8px 16px 0; }
+.pd-doc > .pd-conflict, .pd-doc > .pd-note, .pd-doc > [role="alert"], .pd-doc > [role="status"], .pd-doc > div:not([class]) { margin: 8px 16px 0; }
 .pd-icon { width: 16px; height: 16px; flex: none; }
 .pd-titlebar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 8px 16px; }
 .pd-titlebar .pd-back { margin-left: -6px; }
@@ -61,6 +61,7 @@
 .pd-bar-end { display: flex; align-items: center; gap: 2px; }
 .pd-barbutton { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 8px; background: none; padding: 6px 8px; color: rgb(var(--fg-muted)); font: inherit; font-size: 13px; cursor: pointer; }
 .pd-barbutton:hover:not(:disabled), .pd-barbutton[aria-pressed="true"], .pd-barbutton[aria-expanded="true"] { background: rgb(var(--raised)); color: rgb(var(--fg)); }
+.pd-barbutton[aria-expanded="true"] { box-shadow: inset 0 -2px 0 rgb(var(--accent)); }
 .pd-barbutton:disabled { opacity: .5; cursor: default; }
 .pd-barbutton:focus-visible, .pd-tool:focus-visible, .pd-menu-item:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-barlabel { display: inline-flex; align-items: center; gap: 6px; }
@@ -80,15 +81,16 @@
 /* What the agent is writing, as it comes: the note says so, and the draft is drawn in the editor's place until the call is done. */
 .pd-writing { border-color: rgb(var(--accent) / .4); }
 .pd-writing.is-failed { border-color: rgb(var(--warn) / .5); }
-.pd-history { border: 1px solid rgb(var(--line)); border-radius: 12px; background: rgb(var(--raised) / .5); padding: 10px; }
-.pd-revisions { display: flex; flex-direction: column; gap: 6px; max-height: 14rem; margin: 0 0 8px; padding: 0; overflow-y: auto; list-style: none; }
+.pd-revisions { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .pd-revisions button { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 6px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .pd-revisions button:hover, .pd-revisions button[aria-pressed="true"] { border-color: rgb(var(--accent) / .5); }
 .pd-revisions button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-current { margin-left: 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 500; }
-.pd-preview { margin-top: 8px; }
-.pd-preview-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
-.pd-preview .pd-body { max-height: 20rem; overflow: auto; }
+.pd-preview { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid rgb(var(--line)); padding-top: 10px; }
+.pd-preview-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* An earlier revision on the page in the text's place: the note under the bar says so, and the sheet is drawn as a copy, not as the text to type in. */
+.pd-old-note { border-color: rgb(var(--warn) / .6); background: rgb(var(--warn) / .1); }
+.pd-old { opacity: .92; }
 
 /* The toolbar: stays at the top while the text scrolls under it (the page below it scrolls, not this). */
 .pd-toolbar { z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 4px 12px; }
@@ -161,16 +163,16 @@
 .pd-popover .pd-thread-card { background: rgb(var(--raised)); box-shadow: 0 10px 32px rgb(0 0 0 / .3), 0 1px 3px rgb(0 0 0 / .16); padding: 12px 14px; }
 .pd-popover .pd-comments { gap: 12px; }
 .pd-popover[data-side] .pd-thread-card { border-color: rgb(var(--line)); }
-/* The list is a panel on the right edge, the full height of the page: beside the text where there is room for it, over it where there is not. */
-.pd-threads { display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow-y: auto; border-left: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 10px; }
-.pd-doc[data-layout="wide"] .pd-desk > .pd-threads { flex: 0 0 19rem; }
-.pd-doc[data-layout="narrow"] .pd-desk > .pd-threads { position: absolute; top: 0; right: 0; bottom: 0; z-index: 15; width: min(320px, 85%); box-shadow: -8px 0 28px rgb(0 0 0 / .22); }
+/* The comments and the history are a panel on the right edge, the full height of the page: beside the text where there is room for it, over it where there is not. */
+.pd-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow-y: auto; border-left: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 10px; }
+.pd-doc[data-layout="wide"] .pd-desk > .pd-side { flex: 0 0 19rem; }
+.pd-doc[data-layout="narrow"] .pd-desk > .pd-side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 15; width: min(320px, 85%); box-shadow: -8px 0 28px rgb(0 0 0 / .22); }
 .pd-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .pd-item { display: flex; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised) / .5); padding: 6px 10px; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .pd-item:hover, .pd-item[aria-current="true"] { border-color: rgb(var(--accent) / .6); }
 .pd-item:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-said { overflow-wrap: anywhere; }
-.pd-threads h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
+.pd-side h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
 .pd-count { border-radius: 999px; background: rgb(var(--accent) / .15); padding: 0 8px; color: rgb(var(--accent)); font-size: 11px; font-weight: 600; }
 .pd-hint { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; }
 .pd-thread-list { display: flex; flex-direction: column; gap: 8px; }

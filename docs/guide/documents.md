@@ -396,7 +396,7 @@ password changes. It names no folder, document or path; it says only that someth
 
 Click a document to open it in the editor. It is laid out as a word processor
 is: a bar with the document's name, where it stands, **Comments**, **History**
-and **Download**; a toolbar; and the page itself: the text is written on the whole
+and **Download** (the first two open a panel at the side, [below](#history)); a toolbar; and the page itself: the text is written on the whole
 of the area under the toolbar, one continuous surface with no box or frame around
 it (in the chat's panel as well as on the Documents page), in a column of a
 readable width with room at its sides. It scrolls by itself, so that the bar and
@@ -545,13 +545,25 @@ while there is such text.
 
 ## History
 
-**History** shows the document's revisions, newest first, with who made each
-(you; the agent, through its document tools; or an outside change: Files, an
-editor, the agent's own file tools, or a save the portal could not finish) and
-when. A revision that restored an earlier one says which.
-Click a revision to read its text.
+**History** in the bar opens the document's revisions as a panel at the right
+edge of the page, newest first, with who made each (you; the agent, through its
+document tools; or an outside change: Files, an editor, the agent's own file
+tools, or a save the portal could not finish) and when. A revision that restored
+an earlier one says which. It is the same panel as the list of comments
+([below](#comments)): at the same edge and in the same size, beside the text
+where the page is wide and over it, from the right, where it is narrow, with
+**Close**. Only one of the two is open at a time: opening one closes the other,
+and the bar's buttons show which one is open. **Escape** closes the panel while
+the cursor is in it, and the button it was opened from has the focus again.
 
-**Restore this revision** saves its text as a new revision, so the history only
+Click a revision to read its text. It is shown on the page, in the text's place,
+while the panel stays open: the text cannot be edited then, and a note under the
+bar says that you are reading revision _n_, an earlier text, and that the
+document itself has not changed. **Back to the current text** in the note (or a
+click on the revision again, or closing the panel) is the way back. The current
+revision is the text itself, so nothing is changed for it.
+
+**Restore this revision** (in the panel) saves its text as a new revision, so the history only
 grows. Text you have not saved yet is saved first, as a revision of its own, so
 the restore does not take it away. If it cannot be saved (a change meanwhile
 that you have not chosen about, or an error), nothing is restored until it is
@@ -607,10 +619,12 @@ as the text, and nothing of them is shown until you ask:
   the box; **AltGr+M** is left to the text (it types a character on some layouts); **Tab** from the text goes into the card,
   and **Escape** back to the text.
 - **Comments** in the bar, with how many threads are open, shows the **list** of
-  all the threads, and hides it again (**Close** in it does too). It is a panel
-  at the right edge of the page, the whole height of it: beside the text where
-  the page is wide (the text gets narrower), over it, from the right, where it is
-  narrow (a narrow panel, a phone). A thread on a passage is a line in it (the
+  all the threads, and hides it again (**Close** in it does too, and so does
+  **Escape** while the cursor is in it). It is a panel at the right edge of the
+  page, the whole height of it: beside the text where the page is wide (the text
+  gets narrower), over it, from the right, where it is narrow (a narrow panel, a
+  phone). The history is the same panel ([above](#history)), and the two replace
+  each other. A thread on a passage is a line in it (the
   words, and the last thing said): **choose** it and the text scrolls to the
   passage and its card opens there. A thread that has no passage to click, because
   its words are gone from the text (or could not be marked) or because it is

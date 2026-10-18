@@ -7,7 +7,7 @@
  * nobody's but the person's, and it is kept when the card is closed and opened again. Plain JavaScript like the rest of
  * the browser half, made with the portal's React and building blocks (`portal.ui`).
  *
- * Nothing else of the comments is drawn unless it is asked for: the bar's **Comments** shows the list (`Comments`) of all the
+ * Nothing else of the comments is drawn unless it is asked for: the bar's **Comments** shows the list (`Comments`, in the side panel of side.js) of all the
  * threads, a way to a thread that is out of reach in the text (its passage is gone, or it is resolved) and to the others, which
  * are chosen there and open in their card.
  *
@@ -17,6 +17,8 @@
  * It holds no data of its own: the page (document-editor.js) fetches the threads, tells the editor where their passages are, and
  * hands both over, with what to do when a comment is saved, changed, taken away, resolved or opened again.
  */
+import { sidePanel } from "./side.js";
+
 /** The most characters of the text of a passage a card shows. */
 const SHOWN_CHARS = 240;
 /** The most characters of a comment the list shows of it. */
@@ -41,6 +43,7 @@ export function comments(portal, { when }) {
   const { React, ui, t } = portal;
   const { useEffect, useRef, useState } = React;
   const h = React.createElement;
+  const SidePanel = sidePanel(portal);
 
   const WHO = () => ({ user: t("You"), agent: t("The agent") });
   const HINT = () => t("Write @agent in a comment to ask the agent to answer it.");
@@ -491,14 +494,8 @@ export function comments(portal, { when }) {
             onDeleteThread,
           });
     return h(
-      "aside",
-      { className: "pd-threads", "aria-label": t("Comments") },
-      h(
-        "div",
-        { className: "pd-list-head" },
-        h("h2", null, t("Comments"), openCount > 0 && h("span", { className: "pd-count" }, openCount)),
-        h("button", { type: "button", className: `${ui.classes.ghost} pd-act`, onClick: onClose }, t("Close")),
-      ),
+      SidePanel,
+      { kind: "comments", title: t("Comments"), count: openCount, onClose },
       h("p", { className: "pd-hint" }, HINT()),
       error && !loaded
         ? h(ui.LoadFailed, { error: t("Comments could not be loaded: {error}", { error: error.message }), onRetry })
@@ -516,5 +513,5 @@ export function comments(portal, { when }) {
     );
   }
 
-  return { Comments, Popover };
+  return { Comments, Popover, SidePanel };
 }
