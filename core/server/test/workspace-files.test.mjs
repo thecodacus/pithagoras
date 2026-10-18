@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import fs, { chmodSync, chownSync, closeSync, constants, existsSync, fstatSync, lutimesSync, renameSync, linkSync, lstatSync, mkdirSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, chownSync, closeSync, constants, existsSync, fstatSync, lutimesSync, renameSync, linkSync, lstatSync, mkdirSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1108,5 +1108,104 @@ test('a portal that is not root makes files for the folder\'s group only when th
   assert.deepEqual(stat('a.txt'), { uid: PORTAL, gid: GROUP, mode: 0o664 });
   assert.deepEqual(stat('b.txt'), { uid: PORTAL, gid: GROUP, mode: 0o664 });
   assert.deepEqual(stat('c'), { uid: PORTAL, gid: GROUP, mode: 0o775 });
+  done();
+});
+
+/** A folder `secret` of the person's or the portal's, closed to everyone else, with something in it, in the chat's folder. */
+function withSecret(dir) {
+  const secret = path.join(dir, 'secret');
+  mkdirSync(secret, { mode: 0o700 });
+  chmodSync(secret, 0o700);
+  writeFileSync(path.join(secret, 'data'), 'closed to the agent');
+  return { secret, was: statSync(secret) };
+}
+
+/** Runs `fn` with `swap` done right before the first open, by a name ending in `/evil`, of a folder: after `mkdir` and before the folder is looked at. */
+function swappedBeforeOpeningTheNewFolder(swap, fn) {
+  const real = fs.openSync;
+  let swapped = false;
+  fs.openSync = (where, flags, ...rest) => {
+    if (!swapped && String(where).endsWith('/evil') && typeof flags === 'number' && (flags & constants.O_DIRECTORY) !== 0) {
+      swapped = true;
+      swap();
+    }
+    return real(where, flags, ...rest);
+  };
+  syncBuiltinESMExports();
+  try {
+    fn();
+  } finally {
+    fs.openSync = real;
+    syncBuiltinESMExports();
+  }
+  return swapped;
+}
+
+test('a folder that took the name of a made one meanwhile is not given away: the agent cannot have a closed folder relabelled to itself', () => {
+  const { dir, base, done } = setup();
+  const { secret, was } = withSecret(dir);
+  chmodSync(dir, 0o775);
+  // What an agent that writes in the folder does between the mkdir and the open of the new folder: takes the new (empty) one
+  // away, and puts a folder of the same parent, the one it cannot enter, in its place.
+  if (root) chownSync(dir, AGENT, AGENT);
+  let outcome;
+  assert.ok(swappedBeforeOpeningTheNewFolder(() => {
+    rmdirSync(path.join(dir, 'evil'));
+    renameSync(secret, path.join(dir, 'evil'));
+  }, () => { outcome = code(() => makeFolder(base, '', 'evil')); }));
+  assert.equal(outcome, 'exists');
+  const now = statSync(path.join(dir, 'evil'));
+  assert.deepEqual([now.uid, now.gid, now.mode & 0o7777], [was.uid, was.gid, was.mode & 0o7777], 'its owner and mode are as they were');
+  assert.equal(readFileSync(path.join(dir, 'evil', 'data'), 'utf8'), 'closed to the agent');
+  done();
+});
+
+test('a folder is made closed until it has its mode, and an ordinary one is given the folder\'s', () => {
+  const { dir, base, done } = setup();
+  chmodSync(dir, 0o2775);
+  let modeWhenOpened;
+  const real = fs.openSync;
+  fs.openSync = (where, flags, ...rest) => {
+    if (String(where).endsWith('/made') && (flags & constants.O_DIRECTORY) !== 0) modeWhenOpened = statSync(where).mode & 0o7777;
+    return real(where, flags, ...rest);
+  };
+  syncBuiltinESMExports();
+  try {
+    makeFolder(base, '', 'made');
+  } finally {
+    fs.openSync = real;
+    syncBuiltinESMExports();
+  }
+  assert.equal(modeWhenOpened & 0o077, 0, 'no one else could write in it meanwhile');
+  assert.equal(statSync(path.join(dir, 'made')).mode & 0o7777, statSync(dir).mode & 0o7777);
+  done();
+});
+
+test('a folder the portal may search but not read is walked through, written in and made folders in', { skip: root }, () => {
+  const { dir, base, done } = setup();
+  const sub = path.join(dir, 'sub');
+  mkdirSync(path.join(sub, 'inner'), { recursive: true });
+  writeFileSync(path.join(sub, 'inner', 'f.txt'), 'x');
+  chmodSync(sub, 0o311);
+  try {
+    // On the way to a file...
+    assert.equal(readText(base, 'sub/inner/f.txt').content, 'x');
+    assert.equal(readBytes(base, 'sub/inner/f.txt').bytes.toString(), 'x');
+    writeText(base, 'sub/inner/g.txt', 'y');
+    assert.equal(makeFolder(base, 'sub/inner', 'made'), path.join('sub', 'inner', 'made'));
+    saveNewFile(base, 'sub/inner', 'up.txt', Buffer.from('z'));
+    // ...and as the folder itself: written in, though it cannot be read, so not listed or swept (and a sync of it is left out).
+    writeText(base, 'sub/own.txt', 'o');
+    assert.equal(makeFolder(base, 'sub', 'm2'), path.join('sub', 'm2'));
+    saveNewFile(base, 'sub', 'u2.txt', Buffer.from('u'));
+    assert.deepEqual(sweepTemp(base, 'sub'), []);
+    assert.equal(readText(base, 'sub/own.txt').content, 'o');
+  } finally {
+    chmodSync(sub, 0o755);
+    // A folder made in it has its mode.
+    if (existsSync(path.join(sub, 'm2'))) chmodSync(path.join(sub, 'm2'), 0o755);
+  }
+  assert.deepEqual(readdirSync(sub).sort(), ['inner', 'm2', 'own.txt', 'u2.txt']);
+  assert.deepEqual(readdirSync(path.join(sub, 'inner')).sort(), ['f.txt', 'g.txt', 'made', 'up.txt']);
   done();
 });

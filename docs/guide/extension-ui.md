@@ -776,7 +776,9 @@ easy to get wrong in a way that is a hole, not a bug:
   folder it is in is held open too, walked down from the chat's folder one part at
   a time and never through a link, and the file is read, made and put in place in
   that folder, whatever happens to the path meanwhile. That holds on Linux, where a
-  held folder can be named as `/proc/self/fd/<n>`; where there is no `/proc`
+  held folder can be named as `/proc/self/fd/<n>` (and a folder the portal may
+  search but not read still works: it is walked through with `O_PATH`, and only
+  its sync is left out); where there is no `/proc`
   (macOS) a folder on the way can still be swapped between the check and the
   call, and so the portal gives nothing it makes away there (below). A pipe left
   there does not hold the server, and a device is not read.
@@ -852,7 +854,12 @@ is a link. `alone` refuses a file with a second name. A refusal is `invalid`.
 uploaded have the mode, the owner and the group of the folder they are made in
 (a file 0644, and group-writable where the folder is), and a folder is given
 that through itself, never by its path, so that a link put in its place by the
-agent meanwhile gets nothing. The owner and the mode are the held folder's own,
+agent meanwhile gets nothing. A new folder is made closed to everyone but the portal
+and is given its mode and owner only if it is still the one that was made: `mkdir`
+and the open of the new folder are two calls by its name, and an agent that writes
+in the folder can swap another folder of it onto that name in between, so one that
+holds anything, or is on another file system, is left alone and the name is
+`exists`. The owner and the mode are the held folder's own,
 read from its descriptor, and a file or a folder is given away only once it is
 known to be in the chat's folder (Linux), so that a folder the agent swapped for
 a link cannot make the portal, as root, hand the agent a file anywhere else. With
