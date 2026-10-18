@@ -99,7 +99,10 @@ as an outside change. The
 portal sees the file as it is at that moment, so several outside changes made
 between two looks are one revision. The same happens to a save that the portal
 could not finish (it stopped in the middle, say): what reached the disk is kept
-as a revision.
+as a revision. Every document is looked at by its own file name, however many
+other things are in the `documents` folder. Only a Markdown file the portal has
+not seen yet is taken in as a new document from the first 2,000 entries of the
+folder (folders first, then by name), as Files lists it.
 
 ### A file that is deleted or renamed
 

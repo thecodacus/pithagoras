@@ -68,6 +68,15 @@ box and its conversation use as well.
   repository itself, or has changes a repository around it tracks, is asked
   about.
 
+What you make here belongs to the folder it is made in. A new file, an upload
+and a new folder get the folder's owner and group, and are writable by that group
+where the folder is, so that the agent, which with the [sandbox](/guide/sandbox)
+on is another user, can go on editing what you made. A file you save over keeps
+the owner, group and permissions it had. Where the portal is not allowed to give
+a file away (it is not root and the folder is someone else's), the file stays the
+portal's and is group-writable only if its group is the folder's. On a system
+without `/proc` (macOS) the portal gives nothing away at all.
+
 A save is made whole: the text is written beside the file and put in place, so a
 save that fails (a full disk, say) leaves the file as it was. The reason is shown
 above the editor; your text and the **Save** button stay, to copy or to try again.

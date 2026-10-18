@@ -206,9 +206,11 @@ export interface ServerPortal {
    * what the portal does for itself, for every server half to do the same.
    * The agent writes in that folder, links included, and the portal may run
    * with more rights than the agent does. So a path is checked as text and
-   * again where every link along it leads, a file is opened without following
-   * a link in its last place and used through what was opened, and a save is
-   * put in place whole. `base` is a folder from `chats.folder`; `rel` a path
+   * again where every link along it leads, the folder a file is in is held open
+   * (walked down from `base` without following a link, on Linux) and the file
+   * is made, opened and put in place in that folder, not in whatever the path
+   * leads to by then, a file is opened without following a link in its last
+   * place and used through what was opened, and a save is put in place whole. `base` is a folder from `chats.folder`; `rel` a path
    * in it, as the page sent it. What is refused throws an error with a `code`
    * (see FileRefusal). Use these rather than `fs` on a chat's folder: see
    * "A chat's folder" in the guide.
@@ -232,7 +234,8 @@ export interface ServerPortal {
      * (`exists`). The answer is the written file's own, with its `change`. With `direct`, `rel` must be a name in
      * `base` itself, reached through no link (see FileOpenOptions). A file that is made, not replaced, has the
      * folder's owner and group and is writable for the folder's group where the folder is, so that the agent, which
-     * may be another user than the portal, can go on editing it.
+     * may be another user than the portal, can go on editing it. Where the portal may not give a file away it stays
+     * in the portal's group, and is not writable for that group.
      */
     write(
       base: string,

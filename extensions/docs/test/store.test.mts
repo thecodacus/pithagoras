@@ -529,6 +529,56 @@ test('a store that fails to open does not keep its database open on every reques
   }
 });
 
+/** More folders than the portal's listing keeps (2,000, folders before files), so that no file of the documents folder is in it. */
+function pastTheListing(dir: string) {
+  for (let i = 0; i <= 2000; i++) mkdirSync(path.join(dir, `pictures-${String(i).padStart(4, '0')}`));
+}
+
+test('a document is checked for an outside change by its name, so that a folder with more entries than a listing keeps does not hide it', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-many-');
+  try {
+    const dir = path.join(folder, 'documents');
+    pastTheListing(dir);
+    // The agent rewrites it; the person, who was shown revision 1, saves.
+    writeFileSync(path.join(dir, 'plan.md'), '# Plan\n\nThe agent\'s, in a folder full of pictures.\n');
+    const stale = await docs.call('PUT', url, { markdown: '# Plan\n\nThe person\'s, on revision 1.\n', base: 1 });
+    assert.equal(stale.status, 409, JSON.stringify(stale.body));
+    assert.equal(stale.body.revision, 2);
+    assert.equal(stale.body.markdown, '# Plan\n\nThe agent\'s, in a folder full of pictures.\n');
+    assert.equal(readFileSync(path.join(dir, 'plan.md'), 'utf8'), '# Plan\n\nThe agent\'s, in a folder full of pictures.\n', 'the agent\'s text is not written over');
+    // Taken into the history as the agent's, so that it is not lost.
+    assert.equal(commits(folder), 2);
+    const history = (await docs.call('GET', `${url}/history`)).body;
+    assert.deepEqual(history.revisions.map((r: any) => [r.revision, r.author]), [[2, 'external'], [1, 'user']]);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a folder too big to be listed whole does not say that a document was never kept: its row stays until its file is seen to be gone', async () => {
+  const folder = folderWith('docs-store-many-gone-', { 'documents/.keep': '' });
+  const docs = await portal({ a: folder });
+  try {
+    const f = folderIdOf(folder);
+    // A new document whose commit never came: its row has no revision yet, and its file is taken in under its id.
+    docs.fault('write');
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'Notes', markdown: '# Notes\n' })).status, 500);
+    const file = path.join(folder, 'documents', 'notes.md');
+    rmSync(file);
+    pastTheListing(path.join(folder, 'documents'));
+    await docs.call('GET', '/folders');
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(path.join(storeOf(folder), 'docs.sqlite'), { readonly: true });
+    try {
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM documents WHERE name = 'notes.md'").get().n, 1, 'the row is kept');
+    } finally {
+      db.close();
+    }
+  } finally {
+    await docs.close();
+  }
+});
+
 test('a document an outside change pushed past 1 MB is restored over, not refused', async () => {
   const { folder, docs, url } = await withDocument('docs-store-big-', '# Plan\n\nOne.\n');
   try {

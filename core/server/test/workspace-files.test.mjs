@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import fs, { chmodSync, closeSync, existsSync, fstatSync, lutimesSync, renameSync, linkSync, mkdirSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, chownSync, closeSync, constants, existsSync, fstatSync, lutimesSync, renameSync, linkSync, lstatSync, mkdirSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import { scratch } from './server-harness.mjs';
 const files = await import('../dist/workspace-files.js');
-const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, openDownload, openFile, readBytes, saveNewFile, makeFolder, sweepTemp, MAX_EDIT_BYTES } = files;
+const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, openDownload, openFile, readBytes, saveNewFile, uploadTarget, makeFolder, sweepTemp, MAX_EDIT_BYTES } = files;
 const { folderFiles } = await import('../dist/folder-files.js');
 
 /** A folder to work in, and one beside it that nothing may reach. */
@@ -760,5 +762,351 @@ test('portal.files has them: the options reach the functions, and the old calls 
   const download = portalFiles.open(base, 'text.txt');
   closeSync(download.fd);
   assert.deepEqual([download.size, download.name], [4, 'text.txt']);
+  done();
+});
+
+// A folder on the way to a file, put aside and replaced by a link while the portal works.
+//
+// `resolveInside` checks a path once. What the agent does in its folder in the time between that check and the
+// call that uses the path decides where the portal, which with the sandbox on is root, makes, reads or removes
+// something. These swap a folder for a link to a folder outside the chat's, at a fixed point: right before the
+// first file call the operation makes after the check (so before the folder is walked) and right before the call
+// that does the work (so after the folder is held), with `fs` hooked the way the tests above hook it.
+
+const root = process.getuid?.() === 0;
+/** The user the sandbox runs the agent as, for a test that is run as root. */
+const AGENT = 10100;
+const FIRST = { names: ['openSync', 'mkdirSync', 'readdirSync'], when: () => true };
+const creating = { names: ['openSync'], when: (_name, [, flags]) => typeof flags === 'number' && (flags & constants.O_CREAT) !== 0 };
+const reaching = (name) => ({ names: ['openSync'], when: (_name, [where]) => String(where).endsWith(name) });
+
+/** The chat's folder with `sub` in it (and `sub/doc.md`), and beside it `outside`, which has a `doc.md` of its own and is closed to everyone else. */
+function swappable() {
+  const made = setup();
+  const { dir, outside } = made;
+  mkdirSync(path.join(dir, 'sub'));
+  writeFileSync(path.join(dir, 'sub', 'doc.md'), 'ours');
+  writeFileSync(path.join(outside, 'doc.md'), 'theirs');
+  chmodSync(outside, 0o700);
+  // As the sandbox has it: the folder is the agent's, and the portal that writes in it is root.
+  if (root) for (const where of [dir, path.join(dir, 'sub'), path.join(dir, 'sub', 'doc.md')]) chownSync(where, AGENT, AGENT);
+  const sub = path.join(dir, 'sub');
+  const aside = `${sub}.aside`;
+  /** What the agent does: the folder goes aside, a link to the folder outside stands in its place. */
+  const swap = () => {
+    renameSync(sub, aside);
+    symlinkSync(outside, sub);
+  };
+  return { ...made, sub, aside, swap };
+}
+
+/** Runs `fn` with `swap` done right before the first call of one of `point.names` for which `point.when` holds. Says whether it was done. */
+function swappedAt(point, swap, fn) {
+  const real = {};
+  let swapped = false;
+  for (const name of point.names) {
+    real[name] = fs[name];
+    fs[name] = (...args) => {
+      if (!swapped && point.when(name, args)) {
+        swapped = true;
+        swap();
+      }
+      return real[name](...args);
+    };
+  }
+  syncBuiltinESMExports();
+  try {
+    fn();
+  } finally {
+    for (const name of point.names) fs[name] = real[name];
+    syncBuiltinESMExports();
+  }
+  return swapped;
+}
+
+/** What is in a folder, sorted. */
+const names = (folder) => readdirSync(folder).sort();
+
+test('a folder swapped for a link before it is used is refused: a made folder is not made where the link leads', () => {
+  const { base, outside, aside, swap, done } = swappable();
+  const before = names(outside);
+  let outcome;
+  assert.ok(swappedAt(FIRST, swap, () => { outcome = code(() => makeFolder(base, 'sub', 'evil')); }));
+  assert.equal(outcome, 'invalid');
+  assert.deepEqual(names(outside), before, 'nothing was made outside');
+  assert.ok(!existsSync(path.join(aside, 'evil')));
+  done();
+});
+
+test('a folder is made in the folder that was checked, however the path is changed after: the link gets nothing, owner or mode', () => {
+  const { dir, base, outside, aside, swap, done } = swappable();
+  const before = names(outside);
+  chmodSync(path.join(dir, 'sub'), 0o775);
+  assert.ok(swappedAt({ names: ['mkdirSync'], when: () => true }, swap, () => { makeFolder(base, 'sub', 'evil'); }));
+  assert.deepEqual(names(outside), before, 'nothing was made outside');
+  assert.equal(statSync(outside).mode & 0o777, 0o700);
+  const made = statSync(path.join(aside, 'evil'));
+  assert.equal(made.mode & 0o777, 0o775, 'it is where the folder was held');
+  if (root) assert.deepEqual([made.uid, made.gid], [AGENT, AGENT], 'and the folder\'s owner is its');
+  done();
+});
+
+test('a file that is made is made in the folder that was checked: a link put there before the walk is refused, one put there after is not followed', () => {
+  for (const [point, outcome] of [[FIRST, 'invalid'], [creating, 'none']]) {
+    const { base, outside, aside, swap, done } = swappable();
+    const before = names(outside);
+    let got;
+    assert.ok(swappedAt(point, swap, () => { got = code(() => writeText(base, 'sub/notes.txt', 'the person\'s', undefined, true)); }));
+    assert.equal(got, outcome);
+    assert.deepEqual(names(outside), before, 'nothing was made outside');
+    assert.equal(existsSync(path.join(aside, 'notes.txt')), outcome === 'none');
+    if (root && outcome === 'none') assert.deepEqual([statSync(path.join(aside, 'notes.txt')).uid, statSync(path.join(aside, 'notes.txt')).gid], [AGENT, AGENT]);
+    done();
+  }
+});
+
+test('a file that is replaced is replaced in the folder that was checked, and not the one of that name that the link leads to', () => {
+  for (const [point, outcome] of [[FIRST, 'invalid'], [creating, 'none']]) {
+    const { base, outside, aside, swap, done } = swappable();
+    let got;
+    assert.ok(swappedAt(point, swap, () => { got = code(() => writeText(base, 'sub/doc.md', 'changed')); }));
+    assert.equal(got, outcome);
+    assert.equal(readFileSync(path.join(outside, 'doc.md'), 'utf8'), 'theirs');
+    assert.deepEqual(names(outside), ['doc.md', 'secret']);
+    assert.equal(readFileSync(path.join(aside, 'doc.md'), 'utf8'), outcome === 'none' ? 'changed' : 'ours');
+    done();
+  }
+});
+
+test('an upload is made and put in place in the folder that was checked', () => {
+  for (const point of [FIRST, creating]) {
+    const { base, outside, aside, swap, done } = swappable();
+    const before = names(outside);
+    let got;
+    assert.ok(swappedAt(point, swap, () => { got = code(() => saveNewFile(base, 'sub', 'up.txt', Buffer.from('uploaded'))); }));
+    assert.deepEqual(names(outside), before, 'nothing was made outside');
+    if (point === FIRST) assert.equal(got, 'invalid');
+    else {
+      assert.equal(got, 'none');
+      assert.equal(readFileSync(path.join(aside, 'up.txt'), 'utf8'), 'uploaded');
+      if (root) assert.deepEqual([statSync(path.join(aside, 'up.txt')).uid, statSync(path.join(aside, 'up.txt')).gid], [AGENT, AGENT]);
+    }
+    done();
+  }
+});
+
+test('an upload that is long in coming goes in place in the folder it began in, not where the path leads by then', () => {
+  const { base, outside, aside, swap, done } = swappable();
+  const before = names(outside);
+  const target = uploadTarget(base, 'sub', 'up.txt');
+  closeSync(target.fd);
+  swap();
+  const placed = target.finish();
+  assert.equal(placed, path.join('sub', 'up.txt'));
+  assert.deepEqual(names(outside), before, 'nothing was made outside');
+  assert.ok(existsSync(path.join(aside, 'up.txt')));
+  done();
+});
+
+test('a file is read from the folder that was checked: a link put in the folder\'s place gives the contents of what it leads to to nobody', () => {
+  const readers = {
+    readBytes: (base) => readBytes(base, 'sub/doc.md').bytes.toString(),
+    readText: (base) => readText(base, 'sub/doc.md').content,
+    openFile: (base) => {
+      const opened = openFile(base, 'sub/doc.md');
+      try { return readFileSync(opened.fd, 'utf8'); } finally { closeSync(opened.fd); }
+    },
+  };
+  for (const [reader, read] of Object.entries(readers)) {
+    for (const [point, outcome] of [[FIRST, 'invalid'], [reaching('/doc.md'), 'ours']]) {
+      const { base, swap, done } = swappable();
+      let got;
+      assert.ok(swappedAt(point, swap, () => { try { got = read(base); } catch (e) { got = e instanceof FileError ? e.code : `other:${e.message}`; } }), reader);
+      assert.equal(got, outcome, `${reader}: never what the link leads to`);
+      done();
+    }
+  }
+});
+
+test('the temporary files of cut-off saves are swept in the folder that was checked, not in the one a link leads to', () => {
+  for (const [point, swept] of [[FIRST, []], [{ names: ['unlinkSync'], when: () => true }, ['.a.md.0123456789ab.tmp']]]) {
+    const { sub, aside, outside, base, swap, done } = swappable();
+    const old = new Date(Date.now() - 5 * 60_000);
+    for (const folder of [sub, outside]) {
+      writeFileSync(path.join(folder, '.a.md.0123456789ab.tmp'), 'half');
+      utimesSync(path.join(folder, '.a.md.0123456789ab.tmp'), old, old);
+    }
+    let got;
+    assert.ok(swappedAt(point, swap, () => { got = sweepTemp(base, 'sub'); }));
+    assert.deepEqual(got, swept);
+    assert.ok(existsSync(path.join(outside, '.a.md.0123456789ab.tmp')), 'what is outside stays');
+    assert.equal(existsSync(path.join(aside, '.a.md.0123456789ab.tmp')), swept.length === 0);
+    done();
+  }
+});
+
+test('every folder on the way is held, not only the first: a deep one swapped for a link is refused too', () => {
+  for (const [point, outcome] of [[FIRST, 'invalid'], [creating, 'none']]) {
+    const { sub, base, outside, done } = swappable();
+    mkdirSync(path.join(sub, 'deep'));
+    const before = names(outside);
+    const deep = path.join(sub, 'deep');
+    const swapDeep = () => {
+      renameSync(deep, `${deep}.aside`);
+      symlinkSync(outside, deep);
+    };
+    let got;
+    assert.ok(swappedAt(point, swapDeep, () => { got = code(() => writeText(base, 'sub/deep/notes.txt', 'x', undefined, true)); }));
+    assert.equal(got, outcome);
+    assert.deepEqual(names(outside), before, 'nothing was made outside');
+    assert.equal(existsSync(path.join(`${deep}.aside`, 'notes.txt')), outcome === 'none');
+    done();
+  }
+});
+
+test('a link to a folder inside the chat\'s folder is still written through: the path is checked, and the folder held is the one it leads to', () => {
+  const { dir, base, done } = setup();
+  mkdirSync(path.join(dir, 'real'));
+  symlinkSync('real', path.join(dir, 'inside-link'));
+  writeText(base, 'inside-link/a.txt', 'a');
+  saveNewFile(base, 'inside-link', 'b.txt', Buffer.from('b'));
+  assert.equal(makeFolder(base, 'inside-link', 'c'), path.join('real', 'c'));
+  assert.deepEqual(readdirSync(path.join(dir, 'real')).sort(), ['a.txt', 'b.txt', 'c']);
+  assert.equal(readText(base, 'inside-link/a.txt').content, 'a');
+  assert.equal(readBytes(base, 'inside-link/b.txt').bytes.toString(), 'b');
+  assert.deepEqual(sweepTemp(base, 'inside-link'), []);
+  done();
+});
+
+test('a folder above the chat\'s folder that was swapped is found when the folder is held: nothing is made in what the link leads to', () => {
+  const { top, dir, done } = setup();
+  // The chat's folder is `top/work`; the check saw it there, and by the time of the call `top` leads elsewhere.
+  const base = baseDir(dir);
+  const elsewhere = scratch('wsfiles-elsewhere-');
+  mkdirSync(path.join(elsewhere, 'work'));
+  const before = names(path.join(elsewhere, 'work'));
+  const swapTop = () => {
+    renameSync(top, `${top}.aside`);
+    symlinkSync(elsewhere, top);
+  };
+  try {
+    let got;
+    assert.ok(swappedAt(FIRST, swapTop, () => { got = code(() => writeText(base, 'new.md', 'x', undefined, true)); }));
+    assert.equal(got, 'invalid');
+    assert.deepEqual(names(path.join(elsewhere, 'work')), before);
+  } finally {
+    rmSync(`${top}.aside`, { recursive: true, force: true });
+    done();
+  }
+});
+
+test('where descriptors cannot be named as paths the portal still works, and gives nothing away', () => {
+  const { dir, base, done } = setup();
+  chmodSync(dir, 0o775);
+  if (root) chownSync(dir, AGENT, AGENT);
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  try {
+    writeText(base, 'made.txt', 'x');
+    saveNewFile(base, '', 'up.txt', Buffer.from('y'));
+    makeFolder(base, '', 'folder');
+    writeText(base, 'made.txt', 'replaced');
+    assert.equal(readText(base, 'made.txt').content, 'replaced');
+    assert.deepEqual(sweepTemp(base, ''), []);
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+  }
+  for (const name of ['made.txt', 'up.txt', 'folder']) {
+    // Not the folder's, where it could not be known to be the chat's: the portal's own.
+    assert.equal(statSync(path.join(dir, name)).uid, process.getuid?.() ?? statSync(path.join(dir, name)).uid, name);
+  }
+  done();
+});
+
+/** The groups this process is in besides the one it makes files in, to stand in for the folder's group. */
+const otherGroup = () => process.getgroups?.().find((g) => g !== process.getegid?.());
+
+/** A portal that may not give anything away: the call fails as it does for a user who is not root. */
+function cannotGive(allow = () => false, fn) {
+  const real = fs.fchownSync;
+  fs.fchownSync = (fd, uid, gid) => {
+    if (!allow(uid, gid)) throw Object.assign(new Error('EPERM: operation not permitted, fchown'), { code: 'EPERM' });
+    return real(fd, uid, gid);
+  };
+  syncBuiltinESMExports();
+  try {
+    fn();
+  } finally {
+    fs.fchownSync = real;
+    syncBuiltinESMExports();
+  }
+}
+
+test('a portal that cannot give a file to the folder\'s group does not make it writable for its own group', { skip: root || otherGroup() === undefined }, () => {
+  const { dir, base, done } = setup();
+  const group = otherGroup();
+  chownSync(dir, process.getuid(), group);
+  chmodSync(dir, 0o775);
+  const modeOf = (name) => statSync(path.join(dir, name)).mode & 0o7777;
+  // Allowed nothing: the files are in the group this process makes them in, which is not the folder's.
+  cannotGive(undefined, () => {
+    writeText(base, 'a.txt', 'x');
+    saveNewFile(base, '', 'b.txt', Buffer.from('x'));
+    makeFolder(base, '', 'c');
+  });
+  for (const name of ['a.txt', 'b.txt', 'c']) assert.notEqual(statSync(path.join(dir, name)).gid, group, name);
+  assert.equal(modeOf('a.txt'), 0o644);
+  assert.equal(modeOf('b.txt'), 0o644);
+  assert.equal(modeOf('c') & 0o020, 0, 'a folder: no group-write');
+  assert.equal(modeOf('c') & 0o2000, 0, 'and no setgid');
+  // Allowed to change the group only (the portal is in the folder's group, as the owner is the folder's own, no): then the group is the folder's.
+  cannotGive((uid) => uid === -1, () => {
+    writeText(base, 'd.txt', 'x');
+    saveNewFile(base, '', 'e.txt', Buffer.from('x'));
+    makeFolder(base, '', 'f');
+  });
+  for (const name of ['d.txt', 'e.txt', 'f']) assert.equal(statSync(path.join(dir, name)).gid, group, name);
+  assert.equal(modeOf('d.txt'), 0o664);
+  assert.equal(modeOf('e.txt'), 0o664);
+  assert.equal(modeOf('f'), 0o775);
+  done();
+});
+
+test('a portal that is not root makes files for the folder\'s group only when they are in it (a child that gives up root, with the folder\'s group or without)', { skip: !root }, () => {
+  const { top, dir, base, done } = setup();
+  const OTHER = 10101, GROUP = 10102, PORTAL = 10103, USERS = 100;
+  chmodSync(top, 0o755);
+  chmodSync(dir, 0o775);
+  const script = `
+    const [dist, base, groups] = process.argv.slice(1);
+    const { writeText, saveNewFile, makeFolder } = await import(dist);
+    process.setgroups(JSON.parse(groups));
+    process.setgid(${USERS});
+    process.setuid(${PORTAL});
+    writeText(base, 'a.txt', 'x');
+    saveNewFile(base, '', 'b.txt', Buffer.from('x'));
+    makeFolder(base, '', 'c');
+  `;
+  const dist = fileURLToPath(new URL('../dist/workspace-files.js', import.meta.url));
+  const run = (groups) => execFileSync(process.execPath, ['--input-type=module', '-e', script, dist, base, JSON.stringify(groups)]);
+  const stat = (name) => ({ uid: statSync(path.join(dir, name)).uid, gid: statSync(path.join(dir, name)).gid, mode: statSync(path.join(dir, name)).mode & 0o7777 });
+  const clear = () => { for (const name of ['a.txt', 'b.txt', 'c']) rmSync(path.join(dir, name), { recursive: true }); };
+
+  // The folder is the portal's own, in a group the portal is not in: what it makes stays in the portal's group, which the folder
+  // does not let write, so it is not group-writable (it was, for the portal's group, 0664).
+  chownSync(dir, PORTAL, GROUP);
+  run([]);
+  assert.deepEqual(stat('a.txt'), { uid: PORTAL, gid: USERS, mode: 0o644 });
+  assert.deepEqual(stat('b.txt'), { uid: PORTAL, gid: USERS, mode: 0o644 });
+  assert.deepEqual(stat('c'), { uid: PORTAL, gid: USERS, mode: 0o755 });
+  clear();
+
+  // Someone else's folder that the portal writes in through the group: it may not give the files away, but they go to the folder's
+  // group, which is the one that may write in the folder.
+  chownSync(dir, OTHER, GROUP);
+  run([GROUP]);
+  assert.deepEqual(stat('a.txt'), { uid: PORTAL, gid: GROUP, mode: 0o664 });
+  assert.deepEqual(stat('b.txt'), { uid: PORTAL, gid: GROUP, mode: 0o664 });
+  assert.deepEqual(stat('c'), { uid: PORTAL, gid: GROUP, mode: 0o775 });
   done();
 });

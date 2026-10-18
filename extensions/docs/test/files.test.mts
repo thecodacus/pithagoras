@@ -1,0 +1,81 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
+import { lookAtDocument, readDocument, Refused, writeDocument } from '../files.js';
+import { scratch } from '../../../tests/helpers.mts';
+
+/**
+ * A document's file as Documents reads and writes it, on the portal's own `files`: a name in the documents folder and nothing a
+ * link led to, and no second name.
+ */
+
+/** A documents folder with `b.md` in it, and a link `a.md` to it, which `files.write` follows unless it is told to take the name as it is. */
+function linked() {
+  const dir = realpathSync(scratch('docs-files-'));
+  writeFileSync(path.join(dir, 'b.md'), 'b, as it was');
+  symlinkSync('b.md', path.join(dir, 'a.md'));
+  return dir;
+}
+
+const refused = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (e) {
+    return e instanceof Refused ? e : new Error(`not a refusal: ${e}`);
+  }
+  return null;
+};
+
+test('a document is not written through a link, with or without create: the file it leads to is left as it was', () => {
+  const dir = linked();
+  const bytes = Buffer.from('written through the link');
+  const without = refused(() => writeDocument(folderFiles, dir, 'a.md', bytes));
+  assert.ok(without instanceof Refused, `${without}`);
+  assert.equal(without.taken, false);
+  assert.equal(readFileSync(path.join(dir, 'b.md'), 'utf8'), 'b, as it was');
+  assert.ok(lstatSync(path.join(dir, 'a.md')).isSymbolicLink(), 'the link is as it was');
+
+  const created = refused(() => writeDocument(folderFiles, dir, 'a.md', bytes, { create: true }));
+  assert.ok(created instanceof Refused, `${created}`);
+  assert.equal(created.taken, true, 'the name is another file\'s');
+  assert.equal(readFileSync(path.join(dir, 'b.md'), 'utf8'), 'b, as it was');
+  assert.deepEqual(readdirSync(dir).sort(), ['a.md', 'b.md'], 'no temporary file is left');
+});
+
+test('a document is not written through a link to a name that is not there yet, nor over a second name of a file', () => {
+  const dir = realpathSync(scratch('docs-files-twin-'));
+  symlinkSync('later.md', path.join(dir, 'dangling.md'));
+  assert.ok(refused(() => writeDocument(folderFiles, dir, 'dangling.md', Buffer.from('x'), { create: true })) instanceof Refused);
+  assert.ok(refused(() => writeDocument(folderFiles, dir, 'dangling.md', Buffer.from('x'))) instanceof Refused);
+  assert.deepEqual(readdirSync(dir), ['dangling.md']);
+
+  writeFileSync(path.join(dir, 'one.md'), 'one');
+  linkSync(path.join(dir, 'one.md'), path.join(dir, 'two.md'));
+  assert.ok(refused(() => writeDocument(folderFiles, dir, 'two.md', Buffer.from('x'))) instanceof Refused);
+  assert.equal(readFileSync(path.join(dir, 'one.md'), 'utf8'), 'one');
+});
+
+test('a link is no document to read or look at either, and a plain file is both', () => {
+  const dir = linked();
+  assert.equal(readDocument(folderFiles, dir, 'a.md'), null);
+  assert.equal(lookAtDocument(folderFiles, dir, 'a.md', 4), null);
+  assert.equal(readDocument(folderFiles, dir, 'b.md')?.bytes.toString(), 'b, as it was');
+  assert.equal(lookAtDocument(folderFiles, dir, 'b.md', 4)?.head.toString(), 'b, a');
+  mkdirSync(path.join(dir, 'folder.md'));
+  assert.equal(readDocument(folderFiles, dir, 'folder.md'), null);
+});
+
+test('a document is written whole and keeps the key it is read by', () => {
+  const dir = realpathSync(scratch('docs-files-whole-'));
+  const made = writeDocument(folderFiles, dir, 'a.md', Buffer.from('first'), { create: true });
+  assert.equal(readDocument(folderFiles, dir, 'a.md')?.key, made.key);
+  const replaced = writeDocument(folderFiles, dir, 'a.md', Buffer.from('second'));
+  assert.equal(readFileSync(path.join(dir, 'a.md'), 'utf8'), 'second');
+  assert.equal(readDocument(folderFiles, dir, 'a.md')?.key, replaced.key);
+  assert.notEqual(replaced.key, made.key);
+  assert.ok(refused(() => writeDocument(folderFiles, dir, 'a.md', Buffer.from('third'), { create: true })) instanceof Refused, 'a made document is not replaced');
+  assert.ok(refused(() => writeDocument(folderFiles, dir, 'not-a-document.txt', Buffer.from('x'))) instanceof Refused);
+  assert.equal(readFileSync(path.join(dir, 'a.md'), 'utf8'), 'second');
+});

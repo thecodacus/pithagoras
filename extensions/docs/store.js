@@ -466,14 +466,16 @@ export class Store {
     const byName = new Set();
     for (const row of rows) {
       byName.add(row.name);
-      if (!names.has(row.name)) {
-        // A folder too big to be listed whole does not say that a file is not there.
-        if (row.revision === 0 && !listing.truncated) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
+      // Each document is looked at by its name, not found in the listing: a folder holds as many entries as the agent likes,
+      // the listing keeps 2,000 (folders first), and a document past the cut would never be seen to change, so that the
+      // person's save over the agent's edit would go through. Its key alone: a file that has not changed is not read.
+      const opened = lookAtDocument(this.files, dir, row.name);
+      if (!opened) {
+        // Never committed, and no file by that name (gone, or a link or a folder): forgotten. A listing that was cut off
+        // does not say that a name is not there.
+        if (row.revision === 0 && !listing.truncated && !names.has(row.name)) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
         continue;
       }
-      // Its key alone: a file that has not changed is not read.
-      const opened = lookAtDocument(this.files, dir, row.name);
-      if (!opened) continue;
       if (opened.key === row.stat) continue;
       const file = readDocument(this.files, dir, row.name);
       if (!file) continue;
