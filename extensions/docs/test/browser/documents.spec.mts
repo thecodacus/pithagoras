@@ -628,6 +628,26 @@ test('Markdown files are uploaded into the chat\'s folder from the panel, with t
   await expect(panels.locator('.ProseMirror h1')).toHaveText('Ideas');
 });
 
+test('a file that is not UTF-8 is not uploaded and the list says so; a UTF-8 file is sent with its byte order mark kept', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const { uploaded } = await portal(page);
+  await page.goto('/s/a');
+  await page.locator('.panel-toggle[aria-label="Documents"]').click();
+  const panels = page.getByRole('complementary', { name: 'Panels' });
+  const picker = panels.locator('input[type="file"]');
+  await picker.setInputFiles([
+    // Windows-1252: its "Ä" is the single byte C4, which is no UTF-8.
+    { name: 'old.md', mimeType: 'text/markdown', buffer: Buffer.from('# \xc4rger\n', 'latin1') },
+    { name: 'bom.md', mimeType: 'text/markdown', buffer: Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('# Ärger\n', 'utf8')]) },
+    { name: 'plain.md', mimeType: 'text/markdown', buffer: Buffer.from('# Ärger\n', 'utf8') },
+  ]);
+  await expect(panels.getByRole('alert')).toContainText('old.md is not UTF-8 text, so it is not sent. Save it as UTF-8 first.');
+  await expect.poll(() => uploaded).toEqual([
+    { name: 'bom.md', markdown: '\uFEFF# Ärger\n' },
+    { name: 'plain.md', markdown: '# Ärger\n' },
+  ]);
+});
+
 test('a document open in the panel opens on a page of its own, the whole of it, with Full page', async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 800 });
   await portal(page);

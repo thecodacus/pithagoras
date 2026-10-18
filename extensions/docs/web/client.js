@@ -149,6 +149,7 @@ export default function (portal) {
     "Drop Markdown files here to add them as documents": "Markdown-Dateien hier ablegen, um sie als Dokumente hinzuzufügen",
     "{name} is not a Markdown file (.md).": "{name} ist keine Markdown-Datei (.md).",
     "{name} is bigger than 1 MB.": "{name} ist größer als 1 MB.",
+    "{name} is not UTF-8 text, so it is not sent. Save it as UTF-8 first.": "{name} ist kein UTF-8-Text und wird deshalb nicht gesendet. Speichere die Datei zuerst als UTF-8.",
     "{name} could not be uploaded: {error}": "{name} konnte nicht hochgeladen werden: {error}",
     Download: "Herunterladen",
     "Markdown (.md)": "Markdown (.md)",

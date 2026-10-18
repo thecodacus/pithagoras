@@ -175,6 +175,29 @@ test('a Markdown file the person uploads is a document as it is, under its own n
   assert.equal((await docs.call('GET', '/folders/:folder/documents/:id/download', { folder: folder.id, id: '0123456789abcdef' })).status, 404);
 });
 
+test('an uploaded name that is cut to 80 characters is never cut in the middle of a character made of two (no U+FFFD in the name)', async () => {
+  const site = folderWith('docs-upload-cut-', { 'documents/plan.md': '# The plan\n' });
+  const docs = server({ a: site });
+  const [folder] = await docs.folders();
+  const upload = (name: string) => docs.call('POST', '/folders/:folder/documents/upload', { folder: folder.id }, { name, markdown: 'x' });
+  // 79 letters and an emoji (two UTF-16 units): the second unit would be the 81st.
+  const cut = await upload(`${'a'.repeat(79)}😀.md`);
+  assert.equal(cut.status, 201);
+  assert.equal(cut.body.name, `${'a'.repeat(79)}.md`);
+  // Within the limit the whole emoji stays, and the same name again gets a number: cut so that the number fits, not through the emoji.
+  const whole = await upload(`${'b'.repeat(77)}😀.md`);
+  assert.equal(whole.body.name, `${'b'.repeat(77)}😀.md`);
+  const again = await upload(`${'b'.repeat(77)}😀.md`);
+  assert.equal(again.body.name, `${'b'.repeat(77)}-2.md`);
+  const names = readdirSync(path.join(site, 'documents'));
+  assert.equal(names.length, 4);
+  for (const name of names) assert.ok(name.isWellFormed() && !name.includes('\uFFFD'), name);
+  // A name of astral characters throughout stays a name the file system takes (80 units are at most 240 bytes).
+  const many = await upload(`${'😀'.repeat(60)}.md`);
+  assert.equal(many.status, 201);
+  assert.equal(many.body.name, `${'😀'.repeat(40)}.md`);
+});
+
 test('a pipe named like a document is no document, and asking for one does not hold the portal', () => {
   const site = folderWith('docs-pipe-', { 'documents/plan.md': '# Plan', 'documents/other.md': '# Other' });
   execFileSync('mkfifo', [path.join(site, 'documents', 'pipe.md')]);

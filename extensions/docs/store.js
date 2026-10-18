@@ -88,23 +88,34 @@ export function slugOf(title) {
   return slug || "document";
 }
 
+/** `text` cut to at most `max` UTF-16 units, never in the middle of a character made of two (it would be a lone surrogate, which becomes U+FFFD on disk). */
+function cut(text, max) {
+  let end = 0;
+  for (const char of text) {
+    if (end + char.length > max) break;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}
+
 /**
  * A file's own name (without `.md`), for a document that keeps it (an upload): the last part of a path, what cannot be in a file
  * name on one line taken out, no leading dot, at most 80 characters. Empty where nothing is left.
  */
 export function fileNameOf(name) {
-  return String(name ?? "")
-    .normalize("NFC")
-    .split(/[\/\\]/)
-    .at(-1)
-    .replace(/[\x00-\x1f\x7f]+/g, "-")
-    .replace(/^[\s.]+/, "")
-    .slice(0, 80)
-    .trim();
+  return cut(
+    String(name ?? "")
+      .normalize("NFC")
+      .split(/[\/\\]/)
+      .at(-1)
+      .replace(/[\x00-\x1f\x7f]+/g, "-")
+      .replace(/^[\s.]+/, ""),
+    80,
+  ).trim();
 }
 
 /** The slug, or the slug with a number, cut so that the whole stays within 80 characters. */
-const numbered = (slug, n) => (n === 1 ? slug : `${slug.slice(0, 80 - String(n).length - 1).replace(/-+$/, "")}-${n}`);
+const numbered = (slug, n) => (n === 1 ? slug : `${cut(slug, 80 - String(n).length - 1).replace(/-+$/, "")}-${n}`);
 
 /** What kind of revision a commit's trailers describe. */
 function kindOf({ revision, author, restoredFrom }) {

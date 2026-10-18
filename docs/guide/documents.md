@@ -314,8 +314,9 @@ opened is said above the list, with the reason ([above](#when-a-folders-document
 (`.md` or `.markdown`) to that folder's `documents` folder, several at once. You
 can also drop them on the list. A file is kept as it is, under its own name
 (a `.markdown` file is saved as `.md`); a name that is taken gets a number. A
-file that is not Markdown, or is bigger than 1 MB, is not sent, and the list
-says so. A single file uploaded on its own opens at once.
+file that is not Markdown, is bigger than 1 MB, or is not UTF-8 text (a file saved
+in Windows-1252, say, whose umlauts would be lost) is not sent, and the list
+says so. A byte order mark at the start of a file is kept. A single file uploaded on its own opens at once.
 
 A Markdown file put into a `documents` folder any other way (an upload in
 [Files](/guide/files), an editor, a copy) is a document too. While the page or a

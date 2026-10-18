@@ -881,6 +881,16 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     })());
   }
 
+  /** Which folder `dir` is (the file system's own numbers for it), or null where it is not there: a folder made again is another one. */
+  function identity(dir) {
+    try {
+      const { dev, ino } = lstatSync(dir);
+      return `${dev}:${ino}`;
+    } catch {
+      return null;
+    }
+  }
+
   /** Stops watching the documents folder of folder `id`. */
   function unwatchDir(id) {
     const watched = lists.watchers.get(id);
@@ -897,15 +907,23 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
    */
   function watchDirs() {
     const found = folders();
-    for (const [id, watched] of lists.watchers) if (!found.has(id) || documentsOf(found.get(id).path) !== watched.dir) unwatchDir(id);
+    // A watch follows the folder it was set on, not its name: one removed and made again is watched no more and is watched anew.
+    for (const [id, watched] of lists.watchers) if (!found.has(id) || documentsOf(found.get(id).path) !== watched.dir || identity(watched.dir) !== watched.identity) unwatchDir(id);
     for (const [id, folder] of found) {
       if (lists.watchers.has(id)) continue;
       const dir = documentsOf(folder.path);
       if (!dir) continue;
       try {
-        const watched = { dir, watcher: null, timer: null };
+        const watched = { dir, identity: identity(dir), watcher: null, timer: null };
         // A burst of events (a write through a temporary file, a copy of many) is one look.
         watched.watcher = watch(dir, { persistent: false }, () => {
+          // The folder itself was removed or made again: this watch is dead, and the folder is watched anew without waiting for the next look.
+          if (identity(dir) !== watched.identity) {
+            unwatchDir(id);
+            watchDirs();
+            void look(id);
+            return;
+          }
           clearTimeout(watched.timer);
           watched.timer = setTimeout(() => void look(id), 100);
           watched.timer.unref?.();

@@ -167,8 +167,15 @@ export function comments(portal, { when }) {
    * card of a comment that is being written on a passage: with no thread yet (`thread.id` is null) until it is sent, which
    * makes the thread, and the card is the thread's in the list from then on.
    */
-  function Thread({ thread, text, marked, settled, active, composing, float, onPick, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
-    const [value, setValue] = useState("");
+  function Thread({ thread, text, marked, settled, active, composing, float, drafts, draftKey, onPick, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
+    // What is typed is kept in `drafts` as well: the card is drawn again from nothing when the margin and the list change places or
+    // the margin is hidden, and the words are not lost with it. The page warns of them before it is left (document-editor.js).
+    const [value, setValueNow] = useState(() => drafts.get(draftKey) ?? "");
+    const setValue = (words) => {
+      if (words) drafts.set(draftKey, words);
+      else drafts.delete(draftKey);
+      setValueNow(words);
+    };
     const [sending, setSending] = useState(false);
     const [error, setError] = useState(null);
     const open = thread.status === "open";
@@ -180,17 +187,7 @@ export function comments(portal, { when }) {
       mounted.current = true;
       return () => void (mounted.current = false);
     }, []);
-    // A comment typed and not sent is lost with the page: the browser asks first, as it does for a document not saved.
     const unsent = Boolean(value.trim());
-    useEffect(() => {
-      if (!unsent) return;
-      const warn = (e) => {
-        e.preventDefault();
-        e.returnValue = "";
-      };
-      window.addEventListener("beforeunload", warn);
-      return () => window.removeEventListener("beforeunload", warn);
-    }, [unsent]);
 
     /** Does `work`, and says why if it did not go through. */
     const run = async (work) => {
@@ -238,6 +235,7 @@ export function comments(portal, { when }) {
 
     // In the margin only the card looked at (or one being written, or one with something typed in it) has the box to answer in.
     const answering = !float || active || composing || unsent;
+    const pickable = float && !active && Boolean(thread.id);
     return h(
       "article",
       {
@@ -246,7 +244,17 @@ export function comments(portal, { when }) {
         "data-status": thread.status,
         "aria-current": active ? "true" : undefined,
         "aria-label": composing ? t("New comment") : t("Comment thread"),
-        onClick: float && !active && thread.id ? () => onPick?.(thread.id) : undefined,
+        onClick: pickable ? () => onPick?.(thread.id) : undefined,
+        // A card is looked at with the keyboard as well (Enter or Space on the card itself): it has the box and the buttons then,
+        // and a thread whose passage is gone has no other way to them.
+        tabIndex: pickable ? 0 : undefined,
+        onKeyDown: pickable
+          ? (e) => {
+              if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+              e.preventDefault();
+              onPick?.(thread.id);
+            }
+          : undefined,
       },
       composing && !thread.id && h("strong", null, t("New comment")),
       h(Passage, { text: text ?? thread.quote, onClick: marked ? () => onActivate(thread.id) : undefined }),
@@ -304,7 +312,7 @@ export function comments(portal, { when }) {
    * not be fetched. `compose` is the comment being written on a passage, if one is: its `threadId` is the thread sending it made,
    * which is its card and not one of the list's until the card is let go.
    */
-  return function Comments({ threads, loaded, error, texts, settled, active, compose, float = false, anchor, relayout, onPick, onRetry, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
+  return function Comments({ threads, loaded, error, texts, settled, active, compose, drafts = new Map(), float = false, anchor, relayout, onPick, onRetry, onActivate, onWrite, onFinish, onCancel, onResolve, onReopen, onSeen, onEdit, onDelete, onDeleteThread }) {
     const [resolved, setResolved] = useState(false);
     // In the margin: the tops of the cards, by their keys, once they have been measured, and the elements they are measured by.
     const [tops, setTops] = useState(() => new Map());
@@ -327,6 +335,8 @@ export function comments(portal, { when }) {
         float,
         onPick,
         thread,
+        drafts,
+        draftKey: thread.id,
         text: texts.get(thread.id),
         marked: texts.has(thread.id),
         settled,
@@ -352,6 +362,8 @@ export function comments(portal, { when }) {
       h(Thread, {
         key: `compose-${compose.key}`,
         thread: composed,
+        drafts,
+        draftKey: `compose-${compose.key}`,
         text: made ? texts.get(made.id) : compose.passage.text,
         marked: Boolean(made) && texts.has(made.id),
         settled,

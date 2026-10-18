@@ -48,7 +48,14 @@ export function uploads(portal) {
             said.push(t("{name} is bigger than 1 MB.", { name: file.name }));
             continue;
           }
-          const markdown = await file.text();
+          // Read as UTF-8 exactly, with a byte order mark kept: a file in another encoding is said, not stored with its umlauts turned into �.
+          let markdown;
+          try {
+            markdown = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
+          } catch {
+            said.push(t("{name} is not UTF-8 text, so it is not sent. Save it as UTF-8 first.", { name: file.name }));
+            continue;
+          }
           made.push(await portal.api.json(portal.api.url(`/folders/${encodeURIComponent(folder)}/documents/upload`), { method: "POST", body: JSON.stringify({ name: file.name, markdown }) }));
         } catch (e) {
           said.push(t("{name} could not be uploaded: {error}", { name: file.name, error: e.message }));

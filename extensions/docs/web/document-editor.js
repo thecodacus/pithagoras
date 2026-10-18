@@ -302,6 +302,19 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const opened = useRef(new Set());
     const opening = useRef(null);
     const composed = useRef(0);
+    // Comments typed and not sent, by the card they are in (comments.js): they outlive the cards, which are drawn again when the
+    // margin and the list change places or the margin is hidden. A comment typed and not sent is lost with the page: the browser
+    // asks first, as it does for a document not saved.
+    const drafts = useRef(new Map());
+    useEffect(() => {
+      const warn = (e) => {
+        if (![...drafts.current.values()].some((words) => words.trim())) return;
+        e.preventDefault();
+        e.returnValue = "";
+      };
+      window.addEventListener("beforeunload", warn);
+      return () => window.removeEventListener("beforeunload", warn);
+    }, []);
     const workspace = useRef(null);
     // The whole of it, measured for whether the comments fit beside the sheet.
     const root = useRef(null);
@@ -604,6 +617,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       if (!passage) return;
       if (passage.quote.length > MAX_QUOTE) return setCommentProblem(t("Select less text: a comment can be on at most {n} characters.", { n: MAX_QUOTE }));
       setActive(null);
+      // A comment that was being written on another passage is given up with this one.
+      for (const key of drafts.current.keys()) if (key.startsWith("compose-")) drafts.current.delete(key);
       setCompose({ key: ++composed.current, passage, base: saver.state().base, threadId: null });
     };
 
@@ -666,9 +681,13 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       setCompose(null);
       setActive(thread.id);
     };
-    const cancel = (writing) => setCompose((now) => (now?.key === writing.key ? null : now));
+    const cancel = (writing) => {
+      drafts.current.delete(`compose-${writing.key}`);
+      setCompose((now) => (now?.key === writing.key ? null : now));
+    };
     /** A thread that is gone, from the server or from another window, is gone from the list and from the text. */
     const dropped = (id) => {
+      drafts.current.delete(id);
       setThreads((now) => ({ ...now, items: now.items.filter((x) => x.id !== id) }));
       setActive((now) => (now === id ? null : now));
     };
@@ -822,6 +841,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
               settled: asked === wanted,
               active,
               compose,
+              drafts: drafts.current,
               float: margin,
               anchor,
               relayout: `${relayout}/${active}/${float}`,

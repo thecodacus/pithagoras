@@ -1238,3 +1238,74 @@ test('on a wide page each card is in the margin level with its passage, and the 
   await page.getByRole('button', { name: /Comments/ }).first().click();
   await expect(cards(page)).toHaveCount(3);
 });
+
+test('a comment typed and not sent survives the page crossing the width of the margin and the margin being hidden, and the page still asks before it is left', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  const store = new Store();
+  const thread = seeded(store, 'The build is green.', 'Is it?');
+  await open(page, store);
+  const asks = () => page.evaluate(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; });
+  expect(await asks()).toBe(false);
+  // A reply in the margin goes on being there when the page is narrowed to a list, and when it is widened again.
+  const card = cards(page).filter({ hasText: 'Is it?' });
+  await pick(card);
+  await card.getByRole('textbox', { name: 'Reply' }).fill('Half a reply');
+  await page.setViewportSize({ width: 700, height: 1000 });
+  await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', 'list');
+  await expect(cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await expect(page.locator('.pd-doc')).toHaveAttribute('data-layout', 'float');
+  await expect(cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  // A comment being written on a passage is kept when the margin is hidden with the bar's button and shown again.
+  await select(page, 'Sign-off is on Monday.');
+  await commentButton(page).click();
+  await panel(page).locator('.pd-compose').getByRole('textbox').fill('Unsent words');
+  await page.getByRole('button', { name: /Comments/ }).first().click();
+  await expect(panel(page)).toHaveCount(0);
+  // Hidden, what was typed is still the page's to warn of.
+  expect(await asks()).toBe(true);
+  await page.getByRole('button', { name: /Comments/ }).first().click();
+  await expect(panel(page).locator('.pd-compose').getByRole('textbox')).toHaveValue('Unsent words');
+  await expect(card.getByRole('textbox', { name: 'Reply' })).toHaveValue('Half a reply');
+  // Sent, it is gone from the drafts: the reply makes no more asking, and the box is empty for the next one.
+  await card.getByRole('textbox', { name: 'Reply' }).press('Control+Enter');
+  await expect(card.locator('li')).toHaveCount(2);
+  await panel(page).locator('.pd-compose').getByRole('button', { name: 'Cancel' }).click();
+  await expect(panel(page).locator('.pd-compose')).toHaveCount(0);
+  expect(await asks()).toBe(false);
+  await page.setViewportSize({ width: 700, height: 1000 });
+  await expect(cards(page).filter({ hasText: 'Is it?' }).getByRole('textbox', { name: 'Reply' })).toHaveValue('');
+  expect(thread.id).toBeTruthy();
+});
+
+test('in the margin every card is reached with the keyboard, an orphaned thread too: Enter on it gives the box to answer in and the buttons', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  const text = '# Notes\n\nA line.\n\nSign-off is on Monday.\n';
+  const store = new Store();
+  store.texts.set(3, text);
+  seeded(store, 'Sign-off is on Monday.', 'Who signs off?');
+  seeded(store, 'A line.', 'Which line?');
+  store.elsewhere(text.replace('Sign-off is on Monday.\n', ''));
+  await open(page, store, { ready: 'Notes' });
+  const gone = cards(page).filter({ hasText: 'Who signs off?' });
+  await expect(gone).toContainText('The passage this comment was on is no longer in the document.');
+  await expect(gone.getByRole('textbox')).toHaveCount(0);
+  await expect(gone.getByRole('button', { name: 'Resolve' })).toHaveCount(0);
+  // Focused (it is in the tab order) and opened with Enter.
+  await expect(gone).toHaveAttribute('tabindex', '0');
+  await gone.focus();
+  await expect(gone).toBeFocused();
+  await gone.press('Enter');
+  await expect(gone).toHaveAttribute('aria-current', 'true');
+  await expect(gone.getByRole('textbox', { name: 'Reply' })).toBeVisible();
+  await gone.getByRole('textbox', { name: 'Reply' }).focus();
+  await expect(gone.getByRole('textbox', { name: 'Reply' })).toBeFocused();
+  await expect(gone.getByRole('button', { name: 'Resolve' })).toBeVisible();
+  // Space does the same on another card, and a key typed in a card's own box is not taken for it.
+  const other = cards(page).filter({ hasText: 'Which line?' });
+  await other.focus();
+  await other.press('Space');
+  await expect(other).toHaveAttribute('aria-current', 'true');
+  await other.getByRole('textbox', { name: 'Reply' }).pressSequentially('two words');
+  await expect(other.getByRole('textbox', { name: 'Reply' })).toHaveValue('two words');
+});
