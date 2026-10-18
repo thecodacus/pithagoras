@@ -69,10 +69,11 @@ A destination is a conversation that already exists — you pick "telegram —
 Sam Rivera", not a chat id. Only channels that can start a conversation appear;
 a webhook cannot, because it only ever answers a request that is already open.
 
-A routine created from a chat reports back **into that chat** — asking for a
-morning summary in Telegram means "tell me here". The portal-wide default
-applies to routines created any other way, and to conversations whose channel
-cannot be messaged out of the blue.
+A routine created from a conversation that came through a channel reports back
+**into that conversation** — asking for a morning summary in Telegram means
+"tell me here". The portal-wide default applies to routines created any other
+way, a chat in the portal's own pages included, and to conversations whose
+channel cannot be messaged out of the blue.
 
 What a routine says into a conversation becomes part of it. Ask "what did you
 mean by that?" the next morning and the agent knows what "that" was, because the
@@ -151,9 +152,10 @@ agent's home, a chat on the Agents page, and a conversation that came through a
 channel. So "remind me every morning to check the backups" writes the routine
 instead of telling you where the button is. They are for you: a routine runs as
 you, so a colleague or a guest cannot make, change or run one through the agent,
-whatever is [allowed](/people/rules) for them. A routine made from a chat in the
-portal reports to the portal-wide default (see [Reporting back](#reporting-back)),
-as such a chat has no channel to answer on.
+whatever is [allowed](/people/rules) for them. A routine made from a chat runs in
+the home of the agent you asked, unless you name a project, and one made from a chat
+in the portal reports to the portal-wide default (see
+[Reporting back](#reporting-back)), as such a chat has no channel to answer on.
 
 A chat working in a project or any other folder that is not an agent's home does
 not get them — a session working inside your repository has no business

@@ -62,3 +62,39 @@ test("a routine run in the agent's home does not, so a routine cannot build a ch
 test("a heartbeat look in the agent's home does not", async () => {
   assert.deepEqual(await toolsOf("look", "heartbeat", process.env.AGENT_HOME), []);
 });
+
+/** The routine a conversation's `routine_create` makes, when it is given no workspace (or says home). */
+async function created(id, kind, workspace, extra = {}, params = {}) {
+  mkdirSync(workspace, { recursive: true });
+  createSession({ id, title: id, workspace, executor: "host", kind, ...extra });
+  const client = await sessions.ensureClient(id);
+  try {
+    const tools = {};
+    routineTools(id)({ registerTool: (tool) => (tools[tool.name] = tool) });
+    await tools.routine_create.execute("call", { name: `Daily ${id}`, instructions: "x", schedule: "@daily", ...params });
+    return getDb().prepare("SELECT workspace FROM routines WHERE name = ?").get(`Daily ${id}`).workspace;
+  } finally {
+    client.dispose();
+  }
+}
+const { routineTools } = await import("../dist/pi/routine-tools.js");
+const { getDb } = await import("../dist/db.js");
+const { routinesIn } = await import("../dist/api/routines.js");
+
+test("a routine made in a second agent's chat runs in that agent's home, not the first agent's", async () => {
+  const second = createAgent({ name: "Third" });
+  assert.equal(await created("third-chat", "task", second.home), second.home);
+  assert.equal(await created("third-home", "task", second.home, {}, { workspace: "home" }), second.home);
+  assert.deepEqual(routinesIn(second.home).map((r) => r.name).sort(), ["Daily third-chat", "Daily third-home"]);
+});
+
+test("a routine made in the first agent's chat stays null, which follows the first agent's home", async () => {
+  assert.equal(await created("first-routine", "task", process.env.AGENT_HOME), null);
+});
+
+test("a project named for the routine is kept as asked", async () => {
+  const project = path.join(process.env.WORKSPACE_ROOT, "proj");
+  mkdirSync(project, { recursive: true });
+  const second = createAgent({ name: "Fourth" });
+  assert.equal(await created("proj-routine", "task", second.home, {}, { workspace: project }), project);
+});

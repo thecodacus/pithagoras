@@ -259,8 +259,7 @@ function plain(text: unknown): string {
  * A conversation with the agent may manage routines: one reached through a channel or the Agent page, and a chat
  * that works in an agent's own home (the "+" in the sidebar), which is the same conversation stored as a task. A
  * task in a repository or a project has no business rescheduling anything, and a routine run is excluded, since a
- * routine that can create routines can build a chain unwatched. Read at each launch: a session's workspace is
- * fixed, but an agent that is deleted leaves its folder, and a chat there is then no conversation with an agent.
+ * routine that can create routines can build a chain unwatched.
  */
 const hasRoutineTools = (session: SessionRow) =>
   session.kind === "agent" || (session.kind === "task" && agentAt(session.workspace) !== undefined);
