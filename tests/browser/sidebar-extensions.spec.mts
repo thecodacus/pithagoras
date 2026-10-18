@@ -26,17 +26,17 @@ const listViewer = (page: Page, on = true) => page.evaluate((on) => (window as a
 test.describe('with extension pages', () => {
   test.use({ installed: ['tests/fixtures/extensions/notes', 'tests/fixtures/extensions/viewer'] });
 
-  test('the pages are in one group below the portal\'s own, not among them', async ({ page }) => {
+  test('the pages are in one group above Audit, not among the portal\'s own', async ({ page }) => {
     await portal(page);
     await page.goto('/sessions');
     await expect(header(page)).toHaveAttribute('aria-expanded', 'true');
     await expect(header(page)).toHaveAttribute('aria-controls', (await group(page).getAttribute('id'))!);
     await expect(group(page).getByRole('button', { name: 'Notes' })).toBeVisible();
-    // Below Audit, the last of the portal's own, and indented in the group: not a destination of the list itself.
+    // Above Audit, which stays the last destination, and indented in the group: not a destination of the list itself.
     const labels = await nav(page).getByRole('button').evaluateAll((items) => items.map((b) => b.textContent!.trim()));
-    expect(labels.slice(-3)).toEqual(['Audit', 'Extensions', 'Notes']);
+    expect(labels.slice(-3)).toEqual(['Extensions', 'Notes', 'Audit']);
     const at = async (name: string) => (await nav(page).getByRole('button', { name, exact: true }).boundingBox())!.x;
-    expect(await at('Notes')).toBeGreaterThan(await at('Audit'));
+    expect(await at('Notes')).toBeGreaterThan(await at('Routines'));
     // Its icon is the size of the portal's own.
     const sizes = await nav(page).getByRole('button').evaluateAll((items) => Object.fromEntries(items.map((b) => [b.textContent!.trim(), b.querySelector('svg')!.getBoundingClientRect().width])));
     expect(sizes.Notes).toBeGreaterThan(0);
@@ -108,6 +108,8 @@ test.describe('with extension pages', () => {
     await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
     await expect(trigger).not.toHaveAttribute('aria-current', /.+/);
+    // The puzzle is directly before Audit, which stays the last of the destinations.
+    expect(await rail.getByRole('button').evaluateAll((items) => items.map((b) => b.getAttribute('aria-label')).slice(-3))).toEqual(['Extensions', 'Audit', 'Settings']);
     await listViewer(page);
 
     // Opened with Enter: the first page has the focus, and the arrows go round.
@@ -163,19 +165,19 @@ test.describe('with extension pages', () => {
     await expect(trigger).toBeVisible();
     await listViewer(page);
 
-    // Tab goes on to the next button of the rail, Shift+Tab back to the one before: not to the start of the page.
+    // Tab goes on to the next button of the rail (Audit, which comes after the puzzle), Shift+Tab back to the one before: not to the start of the page.
     await trigger.focus();
     await page.keyboard.press('Enter');
     await expect(menu).toBeVisible();
     await page.keyboard.press('Tab');
     await expect(menu).toHaveCount(0);
-    await expect(rail.getByRole('button', { name: 'Settings' })).toBeFocused();
+    await expect(rail.getByRole('button', { name: 'Audit' })).toBeFocused();
     await trigger.focus();
     await page.keyboard.press('Enter');
     await expect(menu).toBeVisible();
     await page.keyboard.press('Shift+Tab');
     await expect(menu).toHaveCount(0);
-    await expect(rail.getByRole('button', { name: 'Audit' })).toBeFocused();
+    await expect(rail.getByRole('button', { name: 'Routines' })).toBeFocused();
 
     // The page the focus is on is unlisted: the focus is on the one now in its place, and Enter still picks.
     await trigger.focus();

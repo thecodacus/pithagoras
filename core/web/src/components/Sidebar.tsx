@@ -215,8 +215,9 @@ export const Sidebar = memo(function Sidebar({
     ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
     // And only while there is an endpoint to make pictures or videos with.
     ...(hasMedia ? [{ to: "media" as const, icon: <LuImages />, label: t("Media") }] : []),
-    { to: "audit", icon: <LuShield />, label: t("Audit") },
   ];
+  // Last of the destinations, after the extensions' group.
+  const audit = { to: "audit" as const, icon: <LuShield />, label: t("Audit") };
   // The pages the installed extensions brought are kept apart from the portal's own: one group, so that
   // many extensions do not fill the sidebar.
   // An extension's icon is a bare <svg>, sized here as the portal's own icons size themselves: by the text beside them.
@@ -252,6 +253,7 @@ export const Sidebar = memo(function Sidebar({
             </RailButton>
           ))}
           {extensionPages.length > 0 && <RailMenu icon={<LuPuzzle />} label={t("Extensions")} items={extensionPages} current={extensionCurrent ? view : null} onPick={onNavigate} />}
+          <RailButton icon={audit.icon} label={audit.label} onClick={() => onNavigate(audit.to)} current={view === audit.to} />
           <div className="mt-auto" />
           <RailButton icon={<LuSettings />} label={t("Settings")} onClick={onOpenSettings} />
         </nav>
@@ -281,6 +283,7 @@ export const Sidebar = memo(function Sidebar({
           <NavItem key={d.to} icon={d.icon} label={d.label} onClick={() => onNavigate(d.to)} active={view === d.to} />
         ))}
         {extensionPages.length > 0 && <ExtensionsGroup pages={extensionPages} view={view} onNavigate={onNavigate} />}
+        <NavItem icon={audit.icon} label={audit.label} onClick={() => onNavigate(audit.to)} active={view === audit.to} />
 
         {startError && <p role="alert" className="px-2.5 pt-1 text-xs text-danger">{startError}</p>}
       </nav>
