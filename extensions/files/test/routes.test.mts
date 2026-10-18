@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { portalFiles } from "@pithagoras/extension-api/testing";
 import { inProcessHome } from "../../../core/server/test/server-harness.mjs";
 
 /**
  * Files' routes (src/server.ts), on what the portal gives every server half for
- * a chat's folder (`portal.files`, extension-host.ts's folderFiles): the
+ * a chat's folder (`portal.files`): the
  * portal's own checks, reached the way Files reaches them.
  */
 
@@ -19,8 +20,7 @@ process.env.GIT_CONFIG_NOSYSTEM = "1";
 writeFileSync(process.env.GIT_CONFIG_GLOBAL, "[user]\n\tname = Tester\n\temail = t@example.com\n[init]\n\tdefaultBranch = main\n");
 
 const { default: express } = await import("express");
-const { folderFiles } = await import("../../../core/server/dist/extension-host.js");
-const { baseDir } = await import("../../../core/server/dist/workspace-files.js");
+const folderFiles = await portalFiles();
 const { routes } = await import("../src/server.ts");
 
 const work = path.join(home, "work");
@@ -54,7 +54,7 @@ async function withApi(fn: (base: string) => Promise<void>, files: typeof folder
   const router = express.Router();
   routes(router, express.json(), files, (id) => {
     if (id !== "del") throw new Error("No such chat");
-    return baseDir(work);
+    return realpathSync(work);
   });
   app.use("/api/x/pithagoras-files", router);
   const server = app.listen(0);

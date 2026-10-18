@@ -2,9 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { folderFiles } from '../../../core/server/src/folder-files.ts';
+import { portalFiles } from '@pithagoras/extension-api/testing';
 import { lookAtDocument, readDocument, Refused, writeDocument } from '../files.js';
 import { scratch } from '../../../tests/helpers.mts';
+
+const folderFiles = await portalFiles();
 
 /**
  * A document's file as Documents reads and writes it, on the portal's own `files`: a name in the documents folder and nothing a
