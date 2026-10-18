@@ -131,7 +131,7 @@ creation — the portal handles that, but it is worth knowing when a local model
 seems not to stick.
 
 A package can also bring an interface of its own to the portal (a panel beside
-the conversation, its own card for its tool's calls, a page in the sidebar) and
+the conversation, its own card for its tool's calls, a page in the sidebar, under **Extensions**) and
 a server half with routes of its own. See
 [Building an extension](/guide/extension-ui).
 [Documents](/guide/documents), which ships in the repository, is one: a page

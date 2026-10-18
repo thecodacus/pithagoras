@@ -466,8 +466,13 @@ portal.slots.register("voice.window", { id: "viewer", title: "Viewer", place: "m
 
 ### A page
 
-A `nav.page` is at `/x/<package>/<id>`, with an entry in the sidebar after
-the portal's own. `useShown()` is a hook, called as the sidebar is drawn:
+A `nav.page` is at `/x/<package>/<id>`, with an entry in the sidebar. The
+entries of every extension are together in one group, **Extensions**, after
+the portal's own pages and before **Audit**, which stays last. The group folds
+like a folder, is remembered per browser, and is held open while one of its
+pages is showing. On the folded sidebar it is one puzzle button, before the
+one for Audit, that opens a menu of the pages. With no page, there is neither.
+`useShown()` is a hook, called as the sidebar is drawn:
 whether the entry is listed now. Use it for a page whose service is not set
 up, as the browser's page is not listed before there is a browser. Until it
 returns `true` the entry is not listed; the page is at its address either way.

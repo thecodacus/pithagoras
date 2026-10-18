@@ -532,6 +532,7 @@ const de: Locale = {
     "MCP": "MCP",
     "Servers the agent can pull tools from": "Server, von denen der Agent Tools holen kann",
     "Extensions": "Erweiterungen",
+    "Open while one of its pages is showing": "Offen, solange eine ihrer Seiten angezeigt wird",
     "Install and manage packages": "Pakete installieren und verwalten",
     "Reach": "Erreichbarkeit",
     "Two-way links into the agent": "Verbindungen in beide Richtungen zum Agenten",

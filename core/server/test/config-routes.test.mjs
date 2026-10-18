@@ -199,6 +199,27 @@ test("a spec of a documented shape reaches pi as one argument of its own", async
   assert.deepEqual(runs(), [...specs.map((s) => ["pi", "install", s]), ["pi", "remove", "npm:pkg@1.0.0"]]);
 });
 
+test("a folder is removed by its full path: pi reads the one it is given from where it runs, not from where it wrote it", async () => {
+  // As `pi install` writes them: relative to pi's own folder, so that most are `../..` and one inside it has no `./`.
+  writeFileSync(settingsFile, JSON.stringify({ packages: ["../../some/ext", "inner/ext", { source: "~/other/ext", extensions: [] }, "~", "file:///srv/exts/my-ext", "npm:pkg"] }));
+  for (const spec of ["../../some/ext", "inner/ext", "~/other/ext", "~", "file:///srv/exts/my-ext"]) assert.equal((await send("/api/packages", "DELETE", { spec })).status, 200, spec);
+  assert.equal((await send("/api/packages", "DELETE", { spec: "npm:pkg" })).status, 200);
+  assert.deepEqual(runs().filter((r) => r[1] === "remove"), [
+    ["pi", "remove", path.resolve(agent, "../../some/ext")],
+    ["pi", "remove", path.resolve(agent, "inner/ext")],
+    ["pi", "remove", path.resolve(process.env.HOME, "other/ext")],
+    ["pi", "remove", path.resolve(process.env.HOME)],
+    ["pi", "remove", "/srv/exts/my-ext"],
+    ["pi", "remove", "npm:pkg"],
+  ]);
+});
+
+test("a folder that pi does not list is held to the documented shapes before it is removed", async () => {
+  writeFileSync(settingsFile, JSON.stringify({ packages: ["inner/ext"] }));
+  assert.equal((await send("/api/packages", "DELETE", { spec: "other/ext" })).status, 400);
+  assert.deepEqual(runs(), []);
+});
+
 test("a package pi cannot install is an error with pi's words, and the next one still goes", async () => {
   refused(await send("/api/packages", "POST", { spec: "npm:fails" }), 500, /no such package/);
   assert.equal((await send("/api/packages", "POST", { spec: "npm:works" })).status, 200);

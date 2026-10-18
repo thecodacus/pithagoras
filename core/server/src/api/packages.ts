@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
-import { piSettingsPath, writePiSettingsText } from "../pi-settings.js";
+import { piSettingsPath, readPiSettings, writePiSettingsText } from "../pi-settings.js";
+import { sourceOf } from "../extension-switch.js";
+import { piPackageArg } from "../features.js";
 import { packageRemoved } from "../db.js";
 import express, { type Router } from "express";
 import { searchCatalog } from "../catalog.js";
@@ -78,11 +80,14 @@ export function packagesRouter(): Router {
 
   router.delete("/packages", async (req, res) => {
     const spec = req.body?.spec;
-    if (typeof spec !== "string" || !SPEC_RE.test(spec)) {
+    // What the list shows comes back, so also a folder inside pi's own one, which is written there without a leading "./".
+    const packages = readPiSettings().packages;
+    const listed = Array.isArray(packages) && packages.some((e) => sourceOf(e) === spec);
+    if (typeof spec !== "string" || !(listed || SPEC_RE.test(spec))) {
       return res.status(400).json({ error: "Invalid package spec" });
     }
     try {
-      const { stdout, stderr } = await pi(["remove", spec]);
+      const { stdout, stderr } = await pi(["remove", piPackageArg(spec)]);
       await packageRemoved(spec);
       await followPackages();
       res.json({ ok: true, output: (stdout + stderr).trim() });
