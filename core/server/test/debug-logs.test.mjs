@@ -155,14 +155,17 @@ test('what is not a secret is left alone, ids and counts and paths among it', ()
 });
 
 test('a long text is scrubbed in a moment, however it is built', () => {
-  const began = Date.now();
+  // The processor's time, not the clock's: a machine busy with other tests lets this wait for its turn for seconds, and a
+  // pattern that backtracks is slow by orders of magnitude, in the time it takes and not in the time it waited.
+  const began = process.cpuUsage();
   for (const text of ['a-'.repeat(20_000), 'token'.repeat(20_000), 'a'.repeat(100_000), 'x://'.repeat(20_000), 'Bearer ' + 'a'.repeat(100_000), '-----BEGIN PRIVATE KEY-----'.repeat(2000)]) {
     scrubSecrets(text);
     debugText('x', 'y', { note: text });
   }
   const out = printed('debug', () => console.debug('a-'.repeat(2_000_000)));
   assert.ok(out.length <= 16_100, `a raw debug line is cut before it is scanned, not ${out.length} characters`);
-  assert.ok(Date.now() - began < 3000, `took ${Date.now() - began} ms`);
+  const { user, system } = process.cpuUsage(began);
+  assert.ok((user + system) / 1000 < 3000, `took ${Math.round((user + system) / 1000)} ms of processor time`);
 });
 
 test('the values of the process\'s own secret environment variables are taken out wherever they stand', () => {
