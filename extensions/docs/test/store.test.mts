@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import express from 'express';
 import docsServer from '../server.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /**
@@ -40,7 +40,7 @@ async function portal(folders: Record<string, string>, options: { onStep?: (step
     log: (line: string) => logged.push(line),
     router,
     http: { json: express.json },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => options.sandbox ?? false },
     dataDir: () => options.data ?? DATA,
     chats: {
@@ -283,11 +283,17 @@ test('what a crash leaves (a temporary file, a stale index.lock) is cleared, and
   try {
     const temp = path.join(folder, 'documents', '.plan.md.0123456789ab.tmp');
     writeFileSync(temp, 'half a document');
+    // Left a while ago: a save of Files' that is under this moment writes such a file too, and is not removed (below).
+    utimesSync(temp, new Date(Date.now() - 120_000), new Date(Date.now() - 120_000));
+    const inFlight = path.join(folder, 'documents', '.other.md.fedcba987654.tmp');
+    writeFileSync(inFlight, 'a save that is under way');
     writeFileSync(path.join(storeOf(folder), 'git', 'index.lock'), '');
     // Not the store's: kept.
     writeFileSync(path.join(folder, 'documents', '.notes.tmp'), 'the agent\'s');
     assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).body.revision, 2);
     assert.equal(existsSync(temp), false);
+    assert.equal(existsSync(inFlight), true, 'a temporary file that is not old is a save under way, and is left');
+    rmSync(inFlight);
     assert.equal(existsSync(path.join(storeOf(folder), 'git', 'index.lock')), false);
     assert.equal(existsSync(path.join(folder, 'documents', '.notes.tmp')), true);
 
@@ -417,7 +423,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
     import { chownSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
     import path from 'node:path';
     import docsServer from ${JSON.stringify(new URL('../server.js', import.meta.url).href)};
-    import { resolveInside } from ${JSON.stringify(new URL('../../../core/server/src/workspace-files.ts', import.meta.url).href)};
+    import { folderFiles } from ${JSON.stringify(new URL('../../../core/server/src/folder-files.ts', import.meta.url).href)};
     const root = mkdtempSync(path.join(process.env.WHERE, 'docs-owner-'));
     try {
       const folder = path.join(root, 'project');
@@ -433,7 +439,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       const data = path.join(root, 'data');
       mkdirSync(data, { mode: 0o700 });
       const router = express.Router();
-      const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: { inside: resolveInside }, sandbox: { on: () => true }, dataDir: () => data,
+      const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: folderFiles, sandbox: { on: () => true }, dataDir: () => data,
         chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => folder } }, { dependencies: async () => true });
       const app = express(); app.use(router);
       const server = app.listen(0, '127.0.0.1'); await new Promise((r) => server.once('listening', r));

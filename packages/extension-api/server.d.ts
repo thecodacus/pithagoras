@@ -55,8 +55,34 @@ export interface Unsaved {
  * changed since it was read (`conflict`), a name that is taken (`exists`),
  * too large (`too_large`), the system refusing (`failed`), and a folder that
  * holds git work nothing else has (`unsaved`, with `unsaved` on the error).
+ * For `failed`, `errno` on the error is the system's own code (`ENOSPC`,
+ * `EACCES`, `EROFS`…) and `cause` the error it gave.
  */
 export type FileRefusal = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
+
+/** What opens a file for `files.open` and `files.readBytes`, beyond the checks every path gets. */
+export interface FileOpenOptions {
+  /**
+   * `rel` must be a name in `base` itself, reached through no link: refused (`invalid`) when following links led it
+   * anywhere else, even to another file in the folder. For a file that is to be only what its name says.
+   */
+  direct?: boolean;
+  /** A file with a second name (a hard link, which may be outside the folder) is refused (`invalid`). */
+  alone?: boolean;
+}
+
+/**
+ * A file read, with what tells it changed. `change` is an opaque text that differs whenever the file was written
+ * (in place: its times; or put in place by a rename: its inode), so a caller that keeps it can tell a changed
+ * file from an unchanged one without reading it; compare it for equality only.
+ */
+export interface FileBytes {
+  bytes: Buffer;
+  /** The whole file's size, also when only its start was read. */
+  size: number;
+  mtime: number;
+  change: string;
+}
 
 export interface GitStepOptions {
   /** What the step reads on its standard input. */
@@ -195,23 +221,51 @@ export interface ServerPortal {
     /** A file's text, or that it has none to show. */
     read(base: string, rel: string): FileContent;
     /**
-     * Saves a file's text, at most 1 MB, through a file beside it put in place by a rename, keeping its mode and
-     * its owner. With `expected`, the modification time it was read at, a file changed since is refused
-     * (`conflict`); with `create`, one that is there already (`exists`).
+     * A file's bytes as they are, at most 1 MB (`too_large`), with its `change`. With `head`, only that many bytes
+     * from the start are read (0: none, to ask for `change` alone).
      */
-    write(base: string, rel: string, content: string, options?: { expected?: number; create?: boolean }): { size: number; mtime: number };
+    readBytes(base: string, rel: string, options?: FileOpenOptions & { head?: number }): FileBytes;
+    /**
+     * Saves a file's text or bytes, at most 1 MB, through a file beside it put in place by a rename (and the folder
+     * synced after, so it lasts through a crash), keeping its mode and its owner. With `expected`, the modification
+     * time it was read at, a file changed since is refused (`conflict`); with `create`, one that is there already
+     * (`exists`). The answer is the written file's own, with its `change`. With `direct`, `rel` must be a name in
+     * `base` itself, reached through no link (see FileOpenOptions). A file that is made, not replaced, has the
+     * folder's owner and group and is writable for the folder's group where the folder is, so that the agent, which
+     * may be another user than the portal, can go on editing it.
+     */
+    write(
+      base: string,
+      rel: string,
+      content: string | Uint8Array,
+      options?: { expected?: number; create?: boolean; direct?: boolean },
+    ): { size: number; mtime: number; change: string };
     /** Another name in the same folder, never over something there; a link is renamed as the link. The new path, from `base`. */
     rename(base: string, rel: string, name: string): string;
     /** What removing `rel` would lose that nothing else has, or null for nothing. */
     unsaved(base: string, rel: string): Promise<Unsaved | null>;
     /** Removes a file, or a folder and all in it, a link as the link. A folder holding git work only it has is refused (`unsaved`) unless `discard`. */
     remove(base: string, rel: string, options?: { discard?: boolean }): Promise<void>;
-    /** A new folder `name` in the folder `rel`; its path, from `base`. */
+    /** A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. */
     makeFolder(base: string, rel: string, name: string): string;
-    /** The checked path of a folder in `base`, for what reads the whole of it (an archive). */
-    folder(base: string, rel: string): string;
-    /** A plain file opened once, for sending: read from `fd`, not from the path again. The caller closes it. */
-    open(base: string, rel: string): { fd: number; size: number; name: string };
+    /**
+     * The checked path of a folder in `base`, for what reads the whole of it (an archive). With `direct`, a folder
+     * that is a name in `base` itself and no link (`invalid` otherwise), for a half that keeps something in a
+     * folder of that name.
+     */
+    folder(base: string, rel: string, options?: { direct?: boolean }): string;
+    /**
+     * Removes the temporary files that saves in the folder `rel` left behind when they were cut off, and returns
+     * their names. Only those older than `olderThanMs` (by default a minute): a save of the portal's own or of
+     * another half that is under way has such a file for a moment, and it is not removed under it.
+     */
+    sweepTemp(base: string, rel: string, options?: { olderThanMs?: number }): string[];
+    /**
+     * A plain file opened once, to read or send: read from `fd`, not from the path again, and with its `mtime` and
+     * `change` as they were when it was opened. A file kept open this way is the file the name had then, whatever
+     * is put in its place after. The caller closes it.
+     */
+    open(base: string, rel: string, options?: FileOpenOptions): { fd: number; size: number; name: string; mtime: number; change: string };
   };
   git: {
     /**

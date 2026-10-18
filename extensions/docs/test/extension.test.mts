@@ -8,7 +8,7 @@ import ts from 'typescript';
 import { ensureDependencies, missingDependencies } from '../deps.js';
 import { SECRET_WARNING } from '../secret.js';
 import docsServer from '../server.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /** The portal's data folder for the stores. */
@@ -26,7 +26,7 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     log: (line: string) => logged.push(line),
     router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
     http: { json: () => () => {} },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => false },
     // The portal's data folder for the stores: one for the file, the stores are told apart by their folders' ids.
     dataDir: () => DATA,
@@ -205,7 +205,7 @@ test('a pipe named like a document is no document, and asking for one does not h
   // A document whose file is swapped for a pipe after it was listed is asked for as well.
   const asking = `
     import docsServer from ${JSON.stringify(new URL('../server.js', import.meta.url).href)};
-    import { resolveInside } from ${JSON.stringify(new URL('../../../core/server/src/workspace-files.ts', import.meta.url).href)};
+    import { folderFiles } from ${JSON.stringify(new URL('../../../core/server/src/folder-files.ts', import.meta.url).href)};
     import { execFileSync } from 'node:child_process';
     import { realpathSync, rmSync } from 'node:fs';
     const routes = new Map();
@@ -214,7 +214,7 @@ test('a pipe named like a document is no document, and asking for one does not h
       log: () => {},
       router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
       http: { json: () => () => {} },
-      files: { inside: resolveInside },
+      files: folderFiles,
       sandbox: { on: () => false },
       dataDir: () => process.env.DATA,
       chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },

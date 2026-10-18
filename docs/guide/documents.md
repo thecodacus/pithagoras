@@ -1015,7 +1015,7 @@ extensions/docs/
 ├── build.mjs        builds the editor into web/editor.js
 ├── server.js        the server half: routes, the streams, the wake of the agent
 ├── store.js         one folder's documents (class Store): files, history, comments
-├── files.js         a document's file, read and written safely
+├── files.js         what a document's file is (its name, what refuses a write), on `portal.files`
 ├── git.js, guard.js the history in git, and the store's folder held open
 ├── place.js         where a folder's store is, and which folder it is for
 ├── tools.js         the agent's nine tools

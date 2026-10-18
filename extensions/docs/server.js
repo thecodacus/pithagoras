@@ -419,9 +419,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
    */
   function documentsOf(folder) {
     try {
-      const dir = portal.files.inside(folder, DOCUMENTS);
-      // `inside` follows links: one that was followed comes back under another path.
-      return dir === path.join(folder, DOCUMENTS) && lstatSync(dir).isDirectory() ? dir : null;
+      return portal.files.folder(folder, DOCUMENTS, { direct: true });
     } catch {
       return null;
     }
@@ -534,8 +532,8 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         if (!(await ready)) throw new DocError(503, "The documents store's packages are not installed yet");
         Database = (await import("better-sqlite3")).default;
       }
-      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), inside: portal.files.inside, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
-      return Store.open(folder, { dir, inside: portal.files.inside, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
+      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: portal.files, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
+      return Store.open(folder, { dir, files: portal.files, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
     })();
     stores.set(folder, opening);
     return opening;

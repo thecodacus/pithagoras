@@ -676,7 +676,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -691,9 +691,22 @@ portal.router.get("/chats/:id/files", (req, res) => {
 });
 // A body is read only where a route asks for it.
 portal.router.post("/chats/:id/notes", portal.http.json(), (req, res) => { /* req.body */ });
-// So a route can take a file as it comes, of any size.
-portal.router.post("/chats/:id/upload", (req, res) => req.pipe(createWriteStream(target)).on("finish", () => res.json({ ok: true })));
+// A route that takes a file reads the body itself, and saves it with portal.files (not req.pipe into a path built from the
+// folder and a name: that follows a link the agent left there).
+portal.router.post("/chats/:id/upload", async (req, res) => {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    if ((size += chunk.length) > 1024 * 1024) return res.status(413).json({ error: "At most 1 MB" });
+    chunks.push(chunk);
+  }
+  const folder = portal.chats.folder(req.params.id);
+  res.json(portal.files.write(folder, String(req.query.name), Buffer.concat(chunks), { create: true }));
+});
 ```
+A file that may be bigger than 1 MB, and has to be streamed to disk, has no call
+in `portal.files` yet; do not build its path yourself, see
+[A chat's folder](#a-chat-s-folder).
 
 Routes are written from the package's own root. From the browser half,
 `portal.api.url("/chats/a/files")` is their address and `portal.api.json` asks
@@ -771,6 +784,9 @@ easy to get wrong in a way that is a hole, not a bug:
   not committed, commits no remote has, stashes) is refused (`unsaved`, with
   what it holds) unless `discard` says so. `unsaved(base, rel)` asks first, for
   a question that names it.
+- **A save lasts.** After the rename the folder is synced too, so a crash
+  right after leaves the new file, not the old one. An upload and a file the
+  portal makes are synced the same way.
 - **Limits:** a file over 1 MB is not read or saved as text, and a folder with
   more than 2,000 entries is listed in part (`truncated`), cut before each is
   looked at, so a huge folder does not hold the thread every chat is served on.
@@ -796,6 +812,64 @@ portal.router.put("/chats/:id/file", portal.http.json(), (req, res) => {
 What reads a whole folder, such as an archive, takes it from `files.folder`,
 checked; a download is sent from the descriptor `files.open` gives. Files'
 server half (`extensions/files/src/server.ts`) is a complete example.
+
+**Bytes, and telling a file changed.** `read` gives text, and says "binary"
+for a file with null bytes. For a file that is not text, or must come back
+exactly as it was, `readBytes` gives a `Buffer`, and `write` takes one (a file
+is still at most 1 MB). Both, and `open`, tell `change` and `mtime` as they
+were when the file was opened; `write` answers with those of the file it wrote.
+`change` is a text to keep and compare for equality, nothing more: it differs
+when the file was written in place (its times) and when another file was put
+there by a rename (its inode), so a page of notes can tell "unchanged" from
+"changed" without reading the file. `head` reads only the start of a file
+(`head: 0` none at all, for its `change`), and `open` keeps a descriptor that
+reads the file as it was opened, whatever is put in its place after.
+
+```js
+const stamp = portal.files.readBytes(folder, "notes.md", { head: 0 }).change;   // no bytes read
+if (stamp !== saved.change) {
+  const { bytes, change } = portal.files.readBytes(folder, "notes.md");
+}
+```
+
+For a file that is to be exactly what its name says, `direct` and `alone` are
+options of `open` and `readBytes` (`direct` of `write` and `folder` too).
+`direct` refuses a name that a link led somewhere else (even to another file in
+the folder, which `inside` follows without a word), or that is a way, not a
+name; a half that keeps its files in a folder of its own name in the chat's
+folder asks `folder(base, "documents", { direct: true })` and is told when that
+is a link. `alone` refuses a file with a second name. A refusal is `invalid`.
+
+**What the portal makes is the agent's to edit.** A file that `write` makes
+(not one it replaces), a folder that `makeFolder` makes and a file that is
+uploaded have the mode, the owner and the group of the folder they are made in
+(a file 0644, and group-writable where the folder is), and a folder is given
+that through itself, never by its path, so that a link put in its place by the
+agent meanwhile gets nothing. With the sandbox on, the portal is root and the
+agent another user: what the portal made as root would not be the agent's to
+change otherwise. Where the portal may not give a file away, it stays its own.
+
+**Temporary files.** A save writes `.<name>.<12 hex>.tmp` beside the file until
+it is renamed. One that was cut off stays. `sweepTemp(base, rel)` removes those
+older than a minute (`olderThanMs` to change that) and says which: a save of
+the portal's or of another half that is under way has such a file too, and the
+age is what keeps it. Do not match the names and remove them yourself.
+
+A refusal for the system's own reasons is `failed`, and says which on the error:
+`e.errno` is `ENOSPC`, `EACCES`, `EROFS` and so on, and `e.cause` the error
+itself, for a server half that words a full disk differently from a missing right.
+
+[Documents](/guide/documents) is built on these: its files are read with
+`readBytes`, written with `write` (`create` for a new document, `direct`) and
+told changed by `change`; its folder is found with `folder`, made with
+`makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`.
+
+**Watching a chat's folder** is not in `portal.files`. A watch reads nothing and
+changes nothing, so it has none of the dangers above: it only tells that
+something happened, and a half that then looks does so through `portal.files`.
+What a watch needs is the extension's own (when a folder made again counts as
+another, what to fall back on when the system cannot watch), so use `fs.watch`
+on the folder `portal.files.folder` gave you, and look when it says so.
 
 ### Telling the pages open on a chat
 

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  type BigIntStats,
   closeSync,
   constants,
   fchmodSync,
@@ -49,13 +50,20 @@ export const MAX_ENTRIES = 2_000;
 export type FileErrorCode = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 
 export class FileError extends Error {
+  /** With "failed": the system's own code for it (ENOSPC, EACCES, EROFS…), for a caller that says more than the sentence does. */
+  readonly errno?: string;
+
   constructor(
     readonly code: FileErrorCode,
     message: string,
     /** With "unsaved": what the delete would lose. */
     readonly unsaved?: Unsaved,
+    /** With "failed": the error the system gave. */
+    cause?: unknown,
   ) {
-    super(message);
+    super(message, cause === undefined ? undefined : { cause });
+    const errno = (cause as NodeJS.ErrnoException | undefined)?.code;
+    if (typeof errno === "string") this.errno = errno;
   }
 }
 
@@ -243,19 +251,109 @@ export function readText(base: string, rel: unknown): FileContent {
   }
 }
 
+/** What opens a file for reading, beyond the checks every path gets. */
+export interface OpenOptions {
+  /**
+   * `rel` is a name in `base` itself, reached through no link: refused (`invalid`) when `resolveInside` led it
+   * elsewhere, even to another file inside the folder. For a file that is only to be what its name says.
+   */
+  direct?: boolean;
+  /** A file with a second name (a hard link, which may be outside the folder) is refused (`invalid`). */
+  alone?: boolean;
+}
+
 /**
- * A plain file opened for sending as a download: the descriptor, its size and its name.
+ * What tells that a file's content changed without reading it: its identity
+ * (inode), size and times. A write in place changes the times, a file put in
+ * place by a rename its inode.
+ */
+const changeOf = (st: BigIntStats) => `${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
+/** The modification time in ms, with its fraction, worked out as Node does for `Stats.mtimeMs`, so that the two agree to the last digit. */
+const mtimeOf = (st: BigIntStats) => Number(st.mtimeNs / 1_000_000_000n) * 1000 + Number(st.mtimeNs % 1_000_000_000n) / 1e6;
+
+/** The checked path of `rel`, and with `direct` only if it is that name in `base` and nothing a link led to. */
+function placeOf(base: string, rel: unknown, direct: boolean | undefined): string {
+  const file = resolveInside(base, rel);
+  if (direct && (path.dirname(file) !== base || path.basename(file) !== String(rel))) {
+    throw new FileError("invalid", "That is not a file directly in the folder");
+  }
+  return file;
+}
+
+/**
+ * A plain file opened for reading or sending: the descriptor, its size, its
+ * name, and when it was changed last (`mtime`, and `change`, which differs
+ * whenever the file was written, or put in place by a rename).
  *
- * What is sent is read from the descriptor that was opened here, without
+ * What is read or sent comes from the descriptor that was opened here, without
  * following a link, so nothing can be swapped in between the check and the
  * send. Handing the path on to be opened again is what that would allow, and it
  * would also treat a name that starts with a dot as one to refuse. The caller
  * owns the descriptor.
  */
-export function openDownload(base: string, rel: unknown): { fd: number; size: number; name: string } {
-  const file = resolveInside(base, rel);
+export function openFile(
+  base: string,
+  rel: unknown,
+  options: OpenOptions = {},
+): { fd: number; size: number; name: string; mtime: number; change: string } {
+  const file = placeOf(base, rel, options.direct);
   const fd = openPlain(file, constants.O_RDONLY);
-  return { fd, size: fstatSync(fd).size, name: path.basename(file) };
+  try {
+    const st = fstatSync(fd, { bigint: true });
+    if (options.alone && st.nlink !== 1n) throw new FileError("invalid", "That file has another name elsewhere (a hard link)");
+    return { fd, size: Number(st.size), name: path.basename(file), mtime: mtimeOf(st), change: changeOf(st) };
+  } catch (e) {
+    closeSync(fd);
+    throw e;
+  }
+}
+
+/** A plain file opened for sending as a download: the descriptor, its size and its name. The caller owns the descriptor. */
+export function openDownload(base: string, rel: unknown): { fd: number; size: number; name: string } {
+  const { fd, size, name } = openFile(base, rel);
+  return { fd, size, name };
+}
+
+/**
+ * A file's bytes, as they are: no text is made of them, and a file with null
+ * bytes is not set aside as binary. At most 1 MB (`too_large`), as `readText`
+ * has it. With `head`, only that many bytes from the start are read (none, for
+ * a caller that wants only `change`), and `size` is still the whole file's.
+ */
+export function readBytes(
+  base: string,
+  rel: unknown,
+  options: OpenOptions & { head?: number } = {},
+): { bytes: Buffer; size: number; mtime: number; change: string } {
+  const { fd, size, mtime, change } = openFile(base, rel, options);
+  try {
+    if (size > MAX_EDIT_BYTES) throw new FileError("too_large", `Files over ${MAX_EDIT_BYTES / 1024 / 1024} MB are not read here`);
+    const want = Math.min(size, Math.max(0, Math.floor(options.head ?? size)));
+    const buffer = Buffer.alloc(want);
+    let read = 0;
+    while (read < want) {
+      const n = readSync(fd, buffer, read, want - read, read);
+      // Shorter than it was when it was measured.
+      if (n === 0) break;
+      read += n;
+    }
+    return { bytes: buffer.subarray(0, read), size, mtime, change };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** The rename of a save is only lasting once the folder that holds it is synced. */
+function syncFolder(dir: string): void {
+  let fd: number | undefined;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY);
+    fsyncSync(fd);
+  } catch {
+    // Some file systems cannot sync a folder; the rename stands all the same.
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 /** Larger than this, a picture is not shown: it is a download like any other file. */
@@ -321,7 +419,7 @@ function ioFailure(e: unknown, what: string, after: string): unknown {
   if (code === "ENOENT") return new FileError("missing", "There is no such file or folder");
   if (code === "ENOTDIR") return new FileError("invalid", "That is not a folder");
   if (code && ["ENOSPC", "EDQUOT", "EIO", "EROFS", "EACCES", "EPERM", "EFBIG", "ENOTEMPTY", "EBUSY"].includes(code)) {
-    return new FileError("failed", `${what} (${code}). ${after}`);
+    return new FileError("failed", `${what} (${code}). ${after}`, undefined, e);
   }
   return e;
 }
@@ -329,8 +427,27 @@ function ioFailure(e: unknown, what: string, after: string): unknown {
 /** A save that did not happen: the file is as it was. */
 const writeFailure = (e: unknown) => ioFailure(e, "The file could not be saved", "It was left as it was.");
 
+/** What a save can be told beyond the text and the time the person saw. */
+export interface WriteOptions {
+  /** `rel` is a name in `base` itself, reached through no link (see OpenOptions.direct). */
+  direct?: boolean;
+}
+
 /**
- * Saves a file's text.
+ * What a file or folder that is made in `dir` is given: the mode of the folder
+ * (a file: 0644, and writable for the folder's group where the folder is) and
+ * its owner and group. With the sandbox on the portal writes as root in a
+ * folder the agent's user works in, and what the portal makes has to be
+ * something the agent goes on editing; where the portal is not allowed to
+ * give a file away it stays the portal's, as it always was.
+ */
+function madeIn(dir: string): { mode: number; owner: { uid: number; gid: number } } {
+  const folder = statSync(dir);
+  return { mode: 0o644 | (folder.mode & 0o020), owner: { uid: folder.uid, gid: folder.gid } };
+}
+
+/**
+ * Saves a file's text, or its bytes.
  *
  * `expected` is the modification time the editor was showing. If the file has
  * changed since — the agent writes here too — the save is refused instead of
@@ -342,20 +459,26 @@ const writeFailure = (e: unknown) => ioFailure(e, "The file could not be saved",
  * file whose time has moved, so the next save is refused as a conflict. Done this
  * way a failed save leaves the file exactly as it was. The rename also replaces
  * whatever is at the name and does not follow it, so a link put there after the
- * check is replaced, not written through.
+ * check is replaced, not written through. The folder is synced after it, so the
+ * rename lasts through a crash.
+ *
+ * The answer is the written file's own (read from the descriptor it was
+ * written through), with its `change`: see openFile.
  */
 export function writeText(
   base: string,
   rel: unknown,
-  content: string,
+  content: string | Uint8Array,
   expected?: number,
   /** Only make it: a file already there is not replaced. What "New file" means. */
   createOnly = false,
-): { size: number; mtime: number } {
-  if (Buffer.byteLength(content, "utf8") > MAX_EDIT_BYTES) {
+  options: WriteOptions = {},
+): { size: number; mtime: number; change: string } {
+  const data = typeof content === "string" ? Buffer.from(content, "utf8") : content;
+  if (data.length > MAX_EDIT_BYTES) {
     throw new FileError("too_large", `Files over ${MAX_EDIT_BYTES / 1024 / 1024} MB are not edited here`);
   }
-  const target = resolveInside(base, rel);
+  const target = placeOf(base, rel, options.direct);
   if (target === base) throw new FileError("invalid", "That is the folder, not a file");
   // Looked at before anything is written, and without O_CREAT: a file that is
   // there is checked as it is, so an emptied one is compared like any other. One
@@ -383,9 +506,15 @@ export function writeText(
     if (!(e instanceof FileError) || e.code !== "missing") throw writeFailure(e);
     if (expected !== undefined) throw new FileError("conflict", CHANGED);
     existed = false;
+    try {
+      ({ mode, owner } = madeIn(path.dirname(target)));
+    } catch (e) {
+      throw writeFailure(e);
+    }
   }
 
-  const temp = path.join(path.dirname(target), `.${tempStem(path.basename(target))}.${randomBytes(6).toString("hex")}.tmp`);
+  const folderOf = path.dirname(target);
+  const temp = path.join(folderOf, `.${tempStem(path.basename(target))}.${randomBytes(6).toString("hex")}.tmp`);
   let fd: number | undefined;
   try {
     fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
@@ -398,12 +527,9 @@ export function writeText(
         // Not allowed to give it away; it stays ours.
       }
     }
-    const data = Buffer.from(content, "utf8");
     let written = 0;
     while (written < data.length) written += writeSync(fd, data, written, data.length - written, written);
     fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
     if (existed) {
       renameSync(temp, target);
     } else {
@@ -417,13 +543,17 @@ export function writeText(
         renameSync(temp, target);
       }
     }
+    // After the rename or link, which both change the file's times.
+    const after = fstatSync(fd, { bigint: true });
+    closeSync(fd);
+    fd = undefined;
+    syncFolder(folderOf);
+    return { size: Number(after.size), mtime: mtimeOf(after), change: changeOf(after) };
   } catch (e) {
     if (fd !== undefined) closeSync(fd);
     rmSync(temp, { force: true });
     throw writeFailure(e);
   }
-  const after = statSync(target);
-  return { size: after.size, mtime: after.mtimeMs };
 }
 
 /**
@@ -507,9 +637,9 @@ export function renameEntry(base: string, rel: unknown, newName: unknown): strin
   return path.relative(base, to);
 }
 
-/** The checked path of a folder, for archiving it. */
-export function folderPath(base: string, rel: unknown): string {
-  const dir = resolveInside(base, rel);
+/** The checked path of a folder, for archiving it. With `direct`, a folder that is a name in `base` itself (see OpenOptions.direct). */
+export function folderPath(base: string, rel: unknown, options: { direct?: boolean } = {}): string {
+  const dir = placeOf(base, rel, options.direct);
   const st = lstatSync(dir, { throwIfNoEntry: false });
   if (!st) throw new FileError("missing", "There is no such folder");
   if (!st.isDirectory()) throw new FileError("invalid", "That is not a folder");
@@ -518,17 +648,42 @@ export function folderPath(base: string, rel: unknown): string {
 
 /**
  * Makes a folder inside `dir`. Like a new file, it never takes the place of
- * something already there. Returns its path, from the chat's folder.
+ * something already there. It has the mode, owner and group of the folder it
+ * is made in, so that the agent can write in it as it can there (see madeIn).
+ * Returns its path, from the chat's folder.
  */
 export function makeFolder(base: string, dirRel: unknown, name: unknown): string {
   const clean = checkName(name);
   const parent = folderPath(base, dirRel);
   const target = path.join(parent, clean);
-  if (lexists(target)) throw new FileError("exists", `There is already something called "${clean}" here`);
+  const taken = () => new FileError("exists", `There is already something called "${clean}" here`);
+  if (lexists(target)) throw taken();
   try {
-    mkdirSync(target);
+    const inParent = statSync(parent);
+    const mode = inParent.mode & 0o7777;
+    mkdirSync(target, { mode });
+    // Given its mode and owner through the folder that is opened, never by its path: a link put where it was, by an agent
+    // that writes in the folder, would have what it leads to changed, and the portal may be root.
+    let fd: number | undefined;
+    try {
+      fd = openSync(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ELOOP" || (e as NodeJS.ErrnoException).code === "ENOTDIR") throw taken();
+      throw e;
+    }
+    try {
+      fchmodSync(fd, mode);
+      try {
+        fchownSync(fd, inParent.uid, inParent.gid);
+      } catch {
+        // Not allowed to give it away: it stays ours.
+      }
+    } finally {
+      closeSync(fd);
+    }
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new FileError("exists", `There is already something called "${clean}" here`);
+    if (e instanceof FileError) throw e;
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") throw taken();
     throw ioFailure(e, "The folder could not be made", "Nothing was changed.");
   }
   return path.relative(base, target);
@@ -550,6 +705,46 @@ export function fitBytes(name: string, max: number): string {
  */
 function tempStem(name: string): string {
   return fitBytes(name, 100);
+}
+
+/** The temporary file a save writes beside its file until it is put in place: `.<name>.<12 hex>.tmp`. */
+const SAVE_TEMP = /^\..+\.[0-9a-f]{12}\.tmp$/;
+/** How old a temporary file of a save must be to be taken for one that was cut off. Far more than a save takes. */
+export const TEMP_GRACE_MS = 60_000;
+
+/**
+ * Removes the temporary files that saves in the folder `rel` left behind when
+ * they were cut off (the portal stopped, the disk was full), and returns their
+ * names. A save in the folder that is under way writes such a file too, in the
+ * time between making it and putting it in place; so only one older than
+ * `olderThanMs` (a minute) is taken for a leftover, and nothing of a save by
+ * Files or another half is removed under it. A link of that name is removed as
+ * the link it is.
+ */
+export function sweepTemp(base: string, rel: unknown, olderThanMs = TEMP_GRACE_MS): string[] {
+  const dir = resolveInside(base, rel);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  const now = Date.now();
+  for (const name of names) {
+    if (!SAVE_TEMP.test(name)) continue;
+    const file = path.join(dir, name);
+    try {
+      const st = lstatSync(file);
+      if (!st.isFile() && !st.isSymbolicLink()) continue;
+      if (now - st.mtimeMs < olderThanMs) continue;
+      unlinkSync(file);
+      removed.push(name);
+    } catch {
+      // Gone since it was listed, or not ours to remove: left.
+    }
+  }
+  return removed;
 }
 
 /**
@@ -575,7 +770,8 @@ export function numbered(name: string, n: number): string {
  * "name (2).ext", as a download folder does, because the person dropping a
  * file wants it in, not a question. The name is settled only when the file is
  * complete, and put in place by a link, which fails rather than replaces if
- * something took the name in the meantime; then the next number is tried.
+ * something took the name in the meantime; then the next number is tried. The
+ * folder is synced after it, so the file lasts through a crash.
  */
 export function uploadTarget(
   base: string,
@@ -587,7 +783,15 @@ export function uploadTarget(
   const temp = path.join(parent, `.${tempStem(clean)}.${randomBytes(6).toString("hex")}.upload`);
   let fd: number;
   try {
-    fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+    const { mode, owner } = madeIn(parent);
+    fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
+    // The mode is cut by the umask on creation; this is the one it is to have.
+    fchmodSync(fd, mode);
+    try {
+      fchownSync(fd, owner.uid, owner.gid);
+    } catch {
+      // Not allowed to give it away: it stays ours.
+    }
   } catch (e) {
     throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
   }
@@ -598,6 +802,7 @@ export function uploadTarget(
       try {
         linkSync(temp, target);
         unlinkSync(temp);
+        syncFolder(parent);
         return path.relative(base, target);
       } catch (e) {
         const code = (e as NodeJS.ErrnoException).code;
@@ -606,6 +811,7 @@ export function uploadTarget(
         if (code === "EPERM" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
           if (lexists(target)) continue;
           renameSync(temp, target);
+          syncFolder(parent);
           return path.relative(base, target);
         }
         abandon();

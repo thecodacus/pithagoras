@@ -29,9 +29,11 @@ export function explained(e, dir = null) {
   const denied = forThePerson(403, `The portal is not allowed to use the documents store${dir ? ` in ${dir}` : ""} (permission denied)`);
   // The store's own files are named through its open folder (/proc/self/fd/…) or by its path; anything else is in the documents folder.
   const inStore = typeof e?.path === "string" && (e.path.startsWith("/proc/self/fd/") || (dir !== null && e.path.startsWith(dir)));
-  if (e?.code === "EACCES" || e?.code === "EPERM") return inStore ? denied : new DocError(403, "The portal is not allowed to change files in this folder's documents folder (permission denied)");
-  if (e?.code === "EROFS") return readOnly;
-  if (e?.code === "ENOSPC" || e?.code === "EDQUOT") return noRoom;
+  // A refusal of `portal.files` for the system's reasons (a write of a document) carries the system's code as `errno`.
+  const code = e?.code === "failed" && typeof e.errno === "string" ? e.errno : e?.code;
+  if (code === "EACCES" || code === "EPERM") return inStore ? denied : new DocError(403, "The portal is not allowed to change files in this folder's documents folder (permission denied)");
+  if (code === "EROFS") return readOnly;
+  if (code === "ENOSPC" || code === "EDQUOT") return noRoom;
   if (e instanceof GitError) {
     if (e.spawn === "ENOENT") return forThePerson(500, "git could not be found on the portal's PATH: the history of the documents is kept with it");
     // git is a child process: what the disk said reaches it as words, not as an error code.

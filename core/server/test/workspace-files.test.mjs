@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, closeSync, existsSync, fstatSync, lutimesSync, renameSync, linkSync, mkdirSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import { scratch } from './server-harness.mjs';
 const files = await import('../dist/workspace-files.js');
-const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, openDownload, MAX_EDIT_BYTES } = files;
+const { FileError, baseDir, listDir, readText, writeText, removeEntry, renameEntry, folderPath, resolveInside, openDownload, openFile, readBytes, saveNewFile, makeFolder, sweepTemp, MAX_EDIT_BYTES } = files;
+const { folderFiles } = await import('../dist/folder-files.js');
 
 /** A folder to work in, and one beside it that nothing may reach. */
 function setup() {
@@ -440,4 +442,323 @@ test('a refusal is sent with its code, so that the page does not have to read th
   assert.deepEqual(answer(new FileError('conflict', 'The file changed after you opened it')), { status: 409, body: { error: 'The file changed after you opened it', code: 'conflict' } });
   assert.deepEqual(answer(new FileError('exists', 'Something with that name is already here')), { status: 409, body: { error: 'Something with that name is already here', code: 'exists' } });
   assert.equal(answer(new FileError('too_large', 'Too big')).body.code, 'too_large');
+});
+
+/** The folders that are synced while `fn` runs: a save is only lasting once the folder it renamed in is. */
+function syncedFolders(fn) {
+  const real = fs.fsyncSync;
+  const folders = [];
+  fs.fsyncSync = (fd) => {
+    const st = fstatSync(fd);
+    if (st.isDirectory()) folders.push(st.ino);
+    return real(fd);
+  };
+  syncBuiltinESMExports();
+  try {
+    fn();
+  } finally {
+    fs.fsyncSync = real;
+    syncBuiltinESMExports();
+  }
+  return folders;
+}
+
+test('a save takes bytes as well as text, and writes them as they are', () => {
+  const { dir, base, done } = setup();
+  const bytes = Buffer.from([0, 1, 2, 255, 254, 0, 0x80]);
+  const saved = writeText(base, 'b.bin', bytes);
+  assert.deepEqual(readFileSync(path.join(dir, 'b.bin')), bytes);
+  assert.equal(saved.size, bytes.length);
+  // The limit counts bytes, not characters: 600,000 of these are 1.2 MB.
+  assert.equal(code(() => writeText(base, 'big.txt', 'é'.repeat(600_000))), 'too_large');
+  assert.equal(code(() => writeText(base, 'big.bin', Buffer.alloc(MAX_EDIT_BYTES + 1))), 'too_large');
+  writeText(base, 'b.bin', Buffer.alloc(MAX_EDIT_BYTES));
+  assert.equal(statSync(path.join(dir, 'b.bin')).size, MAX_EDIT_BYTES);
+  done();
+});
+
+test('bytes are read as they are, null bytes included, up to 1 MB, and the start of a file alone', () => {
+  const { dir, base, done } = setup();
+  const bytes = Buffer.from([0, 1, 2, 3, 0, 0xff]);
+  writeFileSync(path.join(dir, 'b.bin'), bytes);
+  const read = readBytes(base, 'b.bin');
+  assert.deepEqual(read.bytes, bytes);
+  assert.equal(read.size, 6);
+  assert.equal(read.mtime, readText(base, 'b.bin').mtime);
+  assert.deepEqual(readBytes(base, 'b.bin', { head: 2 }).bytes, bytes.subarray(0, 2));
+  assert.equal(readBytes(base, 'b.bin', { head: 2 }).size, 6, 'the size is the whole file\'s');
+  assert.equal(readBytes(base, 'b.bin', { head: 0 }).bytes.length, 0);
+  assert.equal(readBytes(base, 'b.bin', { head: 100 }).bytes.length, 6);
+  assert.equal(readBytes(base, 'b.bin', { head: 0 }).change, read.change, 'a look at it alone says the same');
+  writeFileSync(path.join(dir, 'big.bin'), Buffer.alloc(MAX_EDIT_BYTES + 1));
+  assert.equal(code(() => readBytes(base, 'big.bin')), 'too_large');
+  assert.equal(code(() => readBytes(base, 'gone.bin')), 'missing');
+  mkdirSync(path.join(dir, 'sub'));
+  assert.equal(code(() => readBytes(base, 'sub')), 'invalid');
+  done();
+});
+
+test('what is opened says when it changed: a write in place and a file put there by a rename both differ, a look does not', () => {
+  const { dir, base, done } = setup();
+  const file = path.join(dir, 'a.md');
+  writeFileSync(file, 'one');
+  const first = openFile(base, 'a.md');
+  closeSync(first.fd);
+  const again = openFile(base, 'a.md');
+  closeSync(again.fd);
+  assert.equal(again.change, first.change, 'nothing happened to it');
+  assert.equal(first.name, 'a.md');
+  // In place: the same file, other times.
+  utimesSync(file, new Date(), new Date(Date.now() + 60_000));
+  const touched = readBytes(base, 'a.md');
+  assert.notEqual(touched.change, first.change);
+  // Put in place by a rename, with the same size, the same times and the same content: another file all the same.
+  const stat = statSync(file);
+  writeFileSync(path.join(dir, 'other'), 'one');
+  utimesSync(path.join(dir, 'other'), stat.atime, stat.mtime);
+  renameSync(path.join(dir, 'other'), file);
+  assert.equal(readBytes(base, 'a.md').size, touched.size);
+  assert.notEqual(readBytes(base, 'a.md').change, touched.change, 'its inode is another');
+  done();
+});
+
+test('a save answers with the change of the file it wrote, which is what opening it says after', () => {
+  const { dir, base, done } = setup();
+  writeFileSync(path.join(dir, 'a.md'), 'old');
+  const replaced = writeText(base, 'a.md', 'newer');
+  assert.equal(replaced.change, readBytes(base, 'a.md').change);
+  assert.equal(replaced.mtime, readBytes(base, 'a.md').mtime);
+  const made = writeText(base, 'made.md', 'x', undefined, true);
+  assert.equal(made.change, readBytes(base, 'made.md').change);
+  assert.notEqual(made.change, replaced.change);
+  done();
+});
+
+test('an open file is the one the name had then: what is put in its place after is not read through it', () => {
+  const { dir, base, done } = setup();
+  writeFileSync(path.join(dir, 'a.md'), 'the first');
+  const opened = openFile(base, 'a.md');
+  try {
+    writeText(base, 'a.md', 'the second');
+    const buffer = Buffer.alloc(opened.size);
+    assert.equal(readSync(opened.fd, buffer, 0, opened.size, 0), opened.size);
+    assert.equal(buffer.toString(), 'the first');
+  } finally {
+    closeSync(opened.fd);
+  }
+  done();
+});
+
+test('direct: a name in the folder itself, never one that a link led to, for reading and for saving', () => {
+  const { dir, base, outside, done } = setup();
+  writeFileSync(path.join(dir, 'real.md'), 'real');
+  symlinkSync('real.md', path.join(dir, 'inside-link.md'));
+  symlinkSync(path.join(outside, 'secret'), path.join(dir, 'out-link.md'));
+  mkdirSync(path.join(dir, 'sub'));
+  writeFileSync(path.join(dir, 'sub', 'deep.md'), 'deep');
+  const direct = { direct: true };
+  assert.equal(readBytes(base, 'real.md', direct).bytes.toString(), 'real');
+  // Without it a link inside the folder is followed, as ever; with it, it is not a file by that name.
+  assert.equal(readBytes(base, 'inside-link.md').bytes.toString(), 'real');
+  assert.equal(code(() => readBytes(base, 'inside-link.md', direct)), 'invalid');
+  assert.equal(code(() => readBytes(base, 'out-link.md', direct)), 'invalid');
+  assert.equal(code(() => openFile(base, 'inside-link.md', direct)), 'invalid');
+  assert.equal(code(() => readBytes(base, 'sub/deep.md', direct)), 'invalid', 'a name, not a way');
+  assert.equal(code(() => readBytes(base, 'nowhere.md', direct)), 'missing');
+  // A save does not write through the link either, however it is spelled.
+  assert.equal(code(() => writeText(base, 'inside-link.md', 'x', undefined, false, direct)), 'invalid');
+  assert.equal(readFileSync(path.join(dir, 'real.md'), 'utf8'), 'real');
+  assert.equal(code(() => writeText(base, 'inside-link.md', 'x', undefined, true, direct)), 'invalid');
+  assert.equal(code(() => writeText(base, 'sub/deep.md', 'x', undefined, false, direct)), 'invalid');
+  writeText(base, 'real.md', 'changed', undefined, false, direct);
+  assert.equal(readFileSync(path.join(dir, 'real.md'), 'utf8'), 'changed');
+  done();
+});
+
+test('alone: a file with a second name is not read, whatever it is a second name of', () => {
+  const { dir, base, outside, done } = setup();
+  linkSync(path.join(outside, 'secret'), path.join(dir, 'twin.md'));
+  assert.equal(readBytes(base, 'twin.md').bytes.toString(), 'top secret');
+  assert.equal(code(() => readBytes(base, 'twin.md', { alone: true })), 'invalid');
+  assert.equal(code(() => openFile(base, 'twin.md', { alone: true })), 'invalid');
+  writeFileSync(path.join(dir, 'one.md'), 'one');
+  assert.equal(readBytes(base, 'one.md', { alone: true }).bytes.toString(), 'one');
+  done();
+});
+
+test('a file that is made has the folder\'s mode (group-writable where the folder is), and one that is replaced keeps its own', () => {
+  const { dir, base, done } = setup();
+  chmodSync(dir, 0o775);
+  writeText(base, 'like.md', 'x');
+  assert.equal(statSync(path.join(dir, 'like.md')).mode & 0o777, 0o664);
+  saveNewFile(base, '', 'up.md', Buffer.from('x'));
+  assert.equal(statSync(path.join(dir, 'up.md')).mode & 0o777, 0o664, 'an upload too');
+  chmodSync(dir, 0o755);
+  writeText(base, 'like2.md', 'x');
+  assert.equal(statSync(path.join(dir, 'like2.md')).mode & 0o777, 0o644);
+  chmodSync(path.join(dir, 'like2.md'), 0o600);
+  writeText(base, 'like2.md', 'y');
+  assert.equal(statSync(path.join(dir, 'like2.md')).mode & 0o777, 0o600);
+  // The owner and group are the folder's where the portal may give them away (it does not in a test that runs as someone).
+  assert.deepEqual([statSync(path.join(dir, 'like.md')).uid, statSync(path.join(dir, 'like.md')).gid], [statSync(dir).uid, statSync(dir).gid]);
+  done();
+});
+
+test('a folder that is made has the mode of the folder it is made in', () => {
+  const { dir, base, done } = setup();
+  chmodSync(dir, 0o775);
+  makeFolder(base, '', 'a');
+  assert.equal(statSync(path.join(dir, 'a')).mode & 0o777, 0o775);
+  chmodSync(dir, 0o750);
+  makeFolder(base, '', 'b');
+  assert.equal(statSync(path.join(dir, 'b')).mode & 0o777, 0o750);
+  assert.equal(code(() => makeFolder(base, '', 'b')), 'exists');
+  writeFileSync(path.join(dir, 'file'), 'x');
+  assert.equal(code(() => makeFolder(base, '', 'file')), 'exists');
+  done();
+});
+
+test('a folder that is made is given its mode through itself: a link put in its place meanwhile gets nothing', () => {
+  const { dir, base, outside, done } = setup();
+  const victim = path.join(outside, 'secret');
+  chmodSync(victim, 0o600);
+  chmodSync(dir, 0o775);
+  // What the agent could do where the portal is root and the folder is the agent's to write in: put a link where the folder
+  // was just made, before it is given its mode.
+  const real = fs.mkdirSync;
+  fs.mkdirSync = (target, ...rest) => {
+    const made = real(target, ...rest);
+    rmSync(target, { recursive: true });
+    symlinkSync(victim, target);
+    return made;
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.equal(code(() => makeFolder(base, '', 'swapped')), 'exists');
+  } finally {
+    fs.mkdirSync = real;
+    syncBuiltinESMExports();
+  }
+  assert.equal(statSync(victim).mode & 0o777, 0o600, 'what the link leads to keeps its mode');
+  assert.equal(readFileSync(victim, 'utf8'), 'top secret');
+  done();
+});
+
+test('a folder is found as a name in the folder itself, and a link to a folder is none', () => {
+  const { dir, base, outside, done } = setup();
+  mkdirSync(path.join(dir, 'documents'));
+  mkdirSync(path.join(dir, 'real'));
+  symlinkSync('real', path.join(dir, 'inside-link'));
+  symlinkSync(outside, path.join(dir, 'out-link'));
+  writeFileSync(path.join(dir, 'file'), 'x');
+  assert.equal(folderPath(base, 'documents', { direct: true }), path.join(base, 'documents'));
+  assert.equal(folderPath(base, 'inside-link'), path.join(base, 'real'), 'followed, as ever');
+  assert.equal(code(() => folderPath(base, 'inside-link', { direct: true })), 'invalid');
+  assert.equal(code(() => folderPath(base, 'out-link', { direct: true })), 'invalid');
+  assert.equal(code(() => folderPath(base, 'file', { direct: true })), 'invalid');
+  assert.equal(code(() => folderPath(base, 'gone', { direct: true })), 'missing');
+  done();
+});
+
+test('the temporary files of saves that were cut off are swept, and one of a save that is under way is not', () => {
+  const { dir, base, done } = setup();
+  const old = new Date(Date.now() - 5 * 60_000);
+  const left = (name, when) => { writeFileSync(path.join(dir, name), 'half'); utimesSync(path.join(dir, name), when, when); };
+  left('.a.md.0123456789ab.tmp', old);
+  const recent = new Date(Date.now() - 10_000);
+  left('.b.md.fedcba987654.tmp', recent);
+  // Not a save's: no hex, not a temporary file, a folder of that name, and a file somebody called so on purpose is the price of the name.
+  left('.notes.tmp', old);
+  left('plain.md', old);
+  left('.c.md.0123456789ab.upload', old);
+  mkdirSync(path.join(dir, '.d.md.0123456789ab.tmp'));
+  utimesSync(path.join(dir, '.d.md.0123456789ab.tmp'), old, old);
+  symlinkSync('/nowhere', path.join(dir, '.e.md.0123456789ab.tmp'));
+  lutimesSync(path.join(dir, '.e.md.0123456789ab.tmp'), recent, recent);
+  const swept = sweepTemp(base, '');
+  // The two that are ten seconds old wait.
+  assert.deepEqual(swept, ['.a.md.0123456789ab.tmp']);
+  const names = readdirSync(dir).sort();
+  assert.deepEqual(names, ['.b.md.fedcba987654.tmp', '.c.md.0123456789ab.upload', '.d.md.0123456789ab.tmp', '.e.md.0123456789ab.tmp', '.notes.tmp', 'plain.md']);
+  // With a shorter wait everything that is a save's temporary file goes, a link as the link, a folder not at all.
+  assert.deepEqual(sweepTemp(base, '', 5_000).sort(), ['.b.md.fedcba987654.tmp', '.e.md.0123456789ab.tmp']);
+  assert.deepEqual(readdirSync(dir).sort(), ['.c.md.0123456789ab.upload', '.d.md.0123456789ab.tmp', '.notes.tmp', 'plain.md']);
+  // A folder that is not there, or leads out, is nothing to sweep.
+  assert.deepEqual(sweepTemp(base, 'gone'), []);
+  assert.equal(code(() => sweepTemp(base, '../outside')), 'invalid');
+  done();
+});
+
+test('a save that is under way is not swept: the temporary file it has is its own and is put in place', () => {
+  const { dir, base, done } = setup();
+  writeFileSync(path.join(dir, 'a.md'), 'old');
+  // Swept at the moment the save has its file written and not renamed yet, which is what another half's sweep could do.
+  const real = fs.renameSync;
+  let swept;
+  fs.renameSync = (from, to) => {
+    swept = sweepTemp(base, '');
+    return real(from, to);
+  };
+  syncBuiltinESMExports();
+  try {
+    writeText(base, 'a.md', 'new');
+  } finally {
+    fs.renameSync = real;
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(swept, []);
+  assert.equal(readFileSync(path.join(dir, 'a.md'), 'utf8'), 'new');
+  done();
+});
+
+test('the folder is synced after a save, a made file and an upload, so the rename lasts through a crash', () => {
+  const { dir, base, done } = setup();
+  const ino = statSync(dir).ino;
+  writeFileSync(path.join(dir, 'a.txt'), 'old');
+  assert.ok(syncedFolders(() => writeText(base, 'a.txt', 'replaced')).includes(ino), 'a file replaced');
+  assert.ok(syncedFolders(() => writeText(base, 'new.txt', 'made')).includes(ino), 'a file made');
+  assert.ok(syncedFolders(() => saveNewFile(base, '', 'up.txt', Buffer.from('uploaded'))).includes(ino), 'a file uploaded');
+  assert.equal(readFileSync(path.join(dir, 'up.txt'), 'utf8'), 'uploaded');
+  done();
+});
+
+test('a failure of the disk is a refusal that still says which: the system\'s code is on it', () => {
+  const { dir, base, done } = setup();
+  writeFileSync(path.join(dir, 'a.txt'), 'x');
+  chmodSync(dir, 0o555);
+  try {
+    // A privileged portal may write anywhere: only where the folder really is closed.
+    if (process.getuid?.() === 0) return;
+    const e = (() => { try { writeText(base, 'a.txt', 'y'); } catch (err) { return err; } })();
+    assert.ok(e instanceof FileError);
+    assert.equal(e.code, 'failed');
+    assert.equal(e.errno, 'EACCES');
+    assert.equal(e.cause.code, 'EACCES');
+  } finally {
+    chmodSync(dir, 0o755);
+    done();
+  }
+});
+
+test('portal.files has them: the options reach the functions, and the old calls are as they were', () => {
+  const { dir, base, done } = setup();
+  writeFileSync(path.join(dir, 'real.md'), 'real');
+  symlinkSync('real.md', path.join(dir, 'link.md'));
+  const portalFiles = folderFiles;
+  assert.equal(portalFiles.readBytes(base, 'real.md', { head: 2 }).bytes.toString(), 're');
+  assert.equal(code(() => portalFiles.readBytes(base, 'link.md', { direct: true })), 'invalid');
+  assert.equal(code(() => portalFiles.write(base, 'link.md', Buffer.from('x'), { direct: true })), 'invalid');
+  const saved = portalFiles.write(base, 'real.md', Buffer.from([0, 1]), { direct: true });
+  assert.equal(saved.size, 2);
+  const opened = portalFiles.open(base, 'real.md', { alone: true, direct: true });
+  closeSync(opened.fd);
+  assert.equal(opened.change, saved.change);
+  // As before: text in, a mode time out, a conflict for a file that moved on, a made file that is not replaced.
+  assert.equal(portalFiles.write(base, 'text.txt', 'text').size, 4);
+  assert.equal(code(() => portalFiles.write(base, 'text.txt', 'again', { create: true })), 'exists');
+  assert.equal(code(() => portalFiles.write(base, 'text.txt', 'again', { expected: 1 })), 'conflict');
+  const download = portalFiles.open(base, 'text.txt');
+  closeSync(download.fd);
+  assert.deepEqual([download.size, download.name], [4, 'text.txt']);
+  done();
 });

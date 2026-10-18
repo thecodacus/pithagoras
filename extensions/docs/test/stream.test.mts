@@ -8,7 +8,7 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import express from 'express';
 import docsServer from '../server.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /**
@@ -49,7 +49,7 @@ async function portal(folder: string | Record<string, string>, { pingMs, pollMs 
     log: (line: string) => logged.push(line),
     router,
     http: { json: express.json },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => false },
     dataDir: () => DATA,
     chats: {

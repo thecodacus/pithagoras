@@ -12,7 +12,7 @@
  * group; the documents stay where the agent and Files can read them.
  *
  * A write (save, create, restore) goes in three steps, under the folder's
- * lock: the file is written in place (files.js), the change is committed with
+ * lock: the file is written in place (files.js, on the portal's `files`), the change is committed with
  * trailers that name the document, its revision and its author, and the
  * database is told in one transaction. A failure between the steps is put
  * right the next time the store is used ("recovery", before every request
@@ -49,13 +49,13 @@
  * whole thread they started while the agent has not commented in it.
  */
 import { randomBytes } from "node:crypto";
-import { accessSync, closeSync, constants, fchmodSync, fchownSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
+import { accessSync, closeSync, constants, lstatSync, openSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
 import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
-import { isAdoptable, isDocumentName, isTempName, isPlainFile, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
+import { isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, writeDocument } from "./files.js";
 import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
 
@@ -189,18 +189,16 @@ export class Store {
   /**
    * The store of `folder` (a chat's folder, as the portal names it), opened
    * in `dir` (place.js has seen to which one it is): made where it is not
-   * there yet, then put right. `inside` is the portal's files helper.
+   * there yet, then put right. `files` is the portal's `files`.
    * `faults` lets a test break a write after one of its steps, or do
    * what someone else could in between: `faults.after(step)` is called
-   * after "write" and after "commit", and while a missing `documents` folder
-   * is made, after it is made ("documents") and after it is opened
-   * ("documents-open").
+   * after "write" and after "commit".
    * `gitTimeoutMs` is how long one git run may take. `onRevision` is told of
    * every revision made from here on, as it is made (see `commit`), and
    * `onThreads` of every change to a document's comments.
    */
-  static async open(folder, { dir, inside, Database, faults, gitTimeoutMs, onRevision, onThreads }) {
-    const store = new Store(folder, dir, inside, faults, gitTimeoutMs, onRevision, onThreads);
+  static async open(folder, { dir, files, Database, faults, gitTimeoutMs, onRevision, onThreads }) {
+    const store = new Store(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads);
     try {
       await store.#open(Database);
     } catch (e) {
@@ -216,9 +214,9 @@ export class Store {
     return store;
   }
 
-  constructor(folder, dir, inside, faults, gitTimeoutMs, onRevision, onThreads) {
+  constructor(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads) {
     this.folder = folder;
-    this.inside = inside;
+    this.files = files;
     this.faults = faults;
     this.gitTimeoutMs = gitTimeoutMs;
     this.onRevision = onRevision;
@@ -315,10 +313,8 @@ export class Store {
 
   /** The documents folder, or nothing when there is none (or it is a link, which is none). */
   documentsDir() {
-    const dir = path.join(this.folder, DOCUMENTS);
     try {
-      if (this.inside(this.folder, DOCUMENTS) !== dir) return null;
-      return lstatSync(dir).isDirectory() ? dir : null;
+      return this.files.folder(this.folder, DOCUMENTS, { direct: true });
     } catch {
       return null;
     }
@@ -328,51 +324,21 @@ export class Store {
   makeDocumentsDir() {
     const found = this.documentsDir();
     if (found) return found;
-    const dir = path.join(this.folder, DOCUMENTS);
-    let followed;
     try {
-      followed = this.inside(this.folder, DOCUMENTS);
+      this.files.makeFolder(this.folder, "", DOCUMENTS);
+    } catch (e) {
+      // Made meanwhile, or something else is called that: which it is decides what is said.
+      if (e?.code !== "exists") throw e;
+    }
+    const made = this.documentsDir();
+    if (made) return made;
+    let link = false;
+    try {
+      link = lstatSync(path.join(this.folder, DOCUMENTS)).isSymbolicLink();
     } catch {
-      // A link that leads out of the folder is refused by `inside`: it is a link all the same.
-      throw new DocError(409, "documents in this folder is a link");
+      // Gone again: it is neither.
     }
-    if (followed !== dir) throw new DocError(409, "documents in this folder is a link");
-    const folder = lstatSync(this.folder);
-    try {
-      mkdirSync(dir, { mode: folder.mode & 0o7777 });
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-    }
-    this.fault("documents");
-    // Opened once, never through a link, and its mode and owner set through that descriptor: with the sandbox on the portal is root and
-    // the agent can write in the chat folder, so a link put where the folder was between a check and a `chmod` by path would have its
-    // target given the chat folder's mode and owner.
-    let fd;
-    try {
-      fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    } catch (e) {
-      if (e.code !== "ELOOP" && e.code !== "ENOTDIR") throw e;
-      // Which of the two it is only changes what is said: nothing was opened, or changed.
-      let link = e.code === "ELOOP";
-      try {
-        link ||= lstatSync(dir).isSymbolicLink();
-      } catch {
-        // Gone again: it is neither.
-      }
-      throw new DocError(409, link ? "documents in this folder is a link" : "documents in this folder is not a folder");
-    }
-    try {
-      this.fault("documents-open");
-      fchmodSync(fd, folder.mode & 0o7777);
-      try {
-        fchownSync(fd, folder.uid, folder.gid);
-      } catch {
-        // The portal is not root: the folder is its own already.
-      }
-    } finally {
-      closeSync(fd);
-    }
-    return dir;
+    throw new DocError(409, link ? "documents in this folder is a link" : "documents in this folder is not a folder");
   }
 
   row(id) {
@@ -485,30 +451,31 @@ export class Store {
       for (const row of rows) if (row.revision === 0) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
       return;
     }
-    let entries;
+    let listing;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      listing = this.files.list(dir, "");
     } catch {
       return;
     }
+    // What a save of another half left when it was cut off; one under way is not touched.
+    this.files.sweepTemp(dir, "");
     const names = new Set();
-    for (const entry of entries) {
-      if (isTempName(entry.name) && (entry.isFile() || entry.isSymbolicLink())) rmSync(path.join(dir, entry.name), { force: true });
-      else if (entry.isFile() && isDocumentName(entry.name)) names.add(entry.name);
-    }
+    // A link is not a document, whatever it leads to.
+    for (const entry of listing.entries) if (entry.type === "file" && !entry.link && isDocumentName(entry.name)) names.add(entry.name);
     const changed = [];
     const byName = new Set();
     for (const row of rows) {
       byName.add(row.name);
       if (!names.has(row.name)) {
-        if (row.revision === 0) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
+        // A folder too big to be listed whole does not say that a file is not there.
+        if (row.revision === 0 && !listing.truncated) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
         continue;
       }
-      const opened = openDocument(this.inside, dir, row.name);
+      // Its key alone: a file that has not changed is not read.
+      const opened = lookAtDocument(this.files, dir, row.name);
       if (!opened) continue;
-      closeSync(opened.fd);
       if (opened.key === row.stat) continue;
-      const file = readDocument(this.inside, dir, row.name);
+      const file = readDocument(this.files, dir, row.name);
       if (!file) continue;
       const blob = blobId(file.bytes);
       if (blob === row.blob) this.db.prepare("UPDATE documents SET stat = ? WHERE id = ?").run(file.key, row.id);
@@ -523,7 +490,7 @@ export class Store {
     for (const name of [...names].sort()) {
       if (room <= 0) break;
       if (byName.has(name) || !isAdoptable(name)) continue;
-      const file = readDocument(this.inside, dir, name);
+      const file = readDocument(this.files, dir, name);
       if (!file) continue;
       const id = randomBytes(8).toString("hex");
       this.db.prepare("INSERT INTO documents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, now, now);
@@ -562,13 +529,9 @@ export class Store {
       const asking = new Map(this.db.prepare("SELECT doc_id, COUNT(*) AS n FROM threads WHERE status = 'open' AND to_agent = 1 GROUP BY doc_id").all().map((r) => [r.doc_id, r.n]));
       for (const row of this.rows()) {
         if (row.revision === 0) continue;
-        const opened = openDocument(this.inside, dir, row.name);
-        if (!opened) continue;
-        try {
-          out.push({ ...this.describe(row, opened), openThreads: open.get(row.id) ?? 0, answeredThreads: answered.get(row.id) ?? 0, askingThreads: asking.get(row.id) ?? 0, head: readOpen(opened.fd, Math.min(headBytes, opened.size)) });
-        } finally {
-          closeSync(opened.fd);
-        }
+        const looked = lookAtDocument(this.files, dir, row.name, headBytes);
+        if (!looked) continue;
+        out.push({ ...this.describe(row, looked), openThreads: open.get(row.id) ?? 0, answeredThreads: answered.get(row.id) ?? 0, askingThreads: asking.get(row.id) ?? 0, head: looked.head });
       }
       return out;
     });
@@ -611,7 +574,7 @@ export class Store {
 
   fileOf(row) {
     const dir = this.documentsDir();
-    return dir ? readDocument(this.inside, dir, row.name) : null;
+    return dir ? readDocument(this.files, dir, row.name) : null;
   }
 
   /** A refusal when the portal may not read the documents folder `dir`: an unreadable folder is not an empty one, nor are its files gone. */
@@ -633,7 +596,7 @@ export class Store {
     const dir = this.documentsDir();
     const closed = dir && this.closed(dir);
     if (closed) return closed;
-    if (dir && isPlainFile(this.inside, dir, row.name)) return new DocError(409, "The document's file is bigger than 1 MB, or the portal is not allowed to read it");
+    if (dir && isPlainFile(dir, row.name)) return new DocError(409, "The document's file is bigger than 1 MB, or the portal is not allowed to read it");
     return new DocError(404, "There is no such document");
   }
 
@@ -659,14 +622,14 @@ export class Store {
         if (taken) {
           // A document whose file is gone (deleted, or renamed) is not there to be told of: the number after it is used, not an error
           // about a document that is neither listed nor readable.
-          if (exclusive && isPlainFile(this.inside, dir, name)) throw new DocError(409, `A document called ${name} exists already`, { exists: taken.id });
+          if (exclusive && isPlainFile(dir, name)) throw new DocError(409, `A document called ${name} exists already`, { exists: taken.id });
           continue;
         }
         let written;
         // The row first, without a revision: a failure after the file is written leaves a file recovery takes in under this id.
         this.db.prepare("INSERT INTO documents (id, name, scope, chat_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, name, scope, chat, now, now);
         try {
-          written = writeDocument(this.inside, dir, name, bytes, { create: true });
+          written = writeDocument(this.files, dir, name, bytes, { create: true });
         } catch (e) {
           this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
           // Anything in the way (a file, a link, a second name) makes the name taken: the next number is free.
@@ -769,7 +732,7 @@ export class Store {
     if (!dir) throw new DocError(404, "There is no such document");
     let written;
     try {
-      written = writeDocument(this.inside, dir, row.name, bytes, { create });
+      written = writeDocument(this.files, dir, row.name, bytes, { create });
     } catch (e) {
       if (e instanceof Refused) throw new DocError(409, e.taken ? "Another file took the document's name" : e.message);
       throw e;
@@ -824,7 +787,7 @@ export class Store {
       if (file?.bytes.equals(bytes)) return { ...this.describe(row, file), changed: false };
       // A file that is only too big to be read (an outside change) is written over, as a save would; only no file at all is made again.
       const dir = file ? null : this.documentsDir();
-      const replace = !file && dir !== null && isPlainFile(this.inside, dir, row.name);
+      const replace = !file && dir !== null && isPlainFile(dir, row.name);
       return this.#write(row, bytes, { author, subject: `Restore ${row.name} to revision ${revision}`, restoredFrom: revision, create: !file && !replace });
     });
   }

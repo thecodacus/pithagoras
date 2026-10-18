@@ -13,7 +13,8 @@ import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
-import { baseDir, folderPath, listDir, makeFolder, openDownload, readText, removeEntry, renameEntry, resolveInside, unsavedAt, writeText } from "./workspace-files.js";
+import { folderFiles } from "./folder-files.js";
+import { baseDir } from "./workspace-files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
@@ -46,6 +47,7 @@ import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithag
 
 // What a server half is given is the public contract, @pithagoras/extension-api/server: the portal implements it here.
 export type { Chat, ServerPortal } from "@pithagoras/extension-api/server";
+export { folderFiles };
 
 interface Running {
   half: ServerHalf;
@@ -493,25 +495,6 @@ export function chatEvent(chatId: string, event: Record<string, unknown>): void 
     for (const handler of ext.events) guarded(ext.half.name, "hearing a chat's event", () => handler(chatId, event));
   }
 }
-
-/**
- * `portal.files`: a chat's folder read and changed by the portal's own code
- * (workspace-files.ts), for every server half. The agent writes in that
- * folder, links included, and a server half runs in the portal's process with
- * the portal's rights: see "A chat's folder" in the guide.
- */
-export const folderFiles: ServerPortal["files"] = {
-  inside: (base, rel) => resolveInside(base, rel),
-  list: (base, rel) => listDir(base, rel),
-  read: (base, rel) => readText(base, rel),
-  write: (base, rel, content, options = {}) => writeText(base, rel, content, options.expected, options.create === true),
-  rename: (base, rel, name) => renameEntry(base, rel, name),
-  unsaved: (base, rel) => unsavedAt(base, rel),
-  remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true),
-  makeFolder: (base, rel, name) => makeFolder(base, rel, name),
-  folder: (base, rel) => folderPath(base, rel),
-  open: (base, rel) => openDownload(base, rel),
-};
 
 /** Whether a server half is keeping this chat's pi. */
 export function extensionHolds(chatId: string): boolean {

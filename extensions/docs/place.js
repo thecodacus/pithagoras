@@ -102,7 +102,7 @@ function closedData(dir) {
  * document of the store is in the folder, with the text it had at one of its
  * revisions. The store is read, not opened for use: nothing in it is changed.
  */
-function knows(Database, dir, documents, inside) {
+function knows(Database, dir, documents, files) {
   if (!documents) return false;
   let db;
   try {
@@ -111,7 +111,7 @@ function knows(Database, dir, documents, inside) {
     db = new Database(file, { readonly: true, fileMustExist: true });
     const has = db.prepare("SELECT 1 FROM revisions r JOIN documents d ON d.id = r.doc_id WHERE d.name = ? AND r.blob = ?");
     for (const { name } of db.prepare("SELECT DISTINCT name FROM documents WHERE revision > 0 LIMIT ?").all(COMPARED)) {
-      const text = readDocument(inside, documents, name);
+      const text = readDocument(files, documents, name);
       if (text && has.get(name, blobId(text.bytes))) return true;
     }
     return false;
@@ -151,7 +151,7 @@ function leadsTo(place, here) {
  * the folder's documents are the ones it knows: an inode is reused when a
  * folder is deleted and another made.
  */
-function movedStore(data, id, here, documents, inside, Database) {
+function movedStore(data, id, here, documents, files, Database) {
   let names;
   try {
     names = readdirSync(data);
@@ -163,7 +163,7 @@ function movedStore(data, id, here, documents, inside, Database) {
     const dir = path.join(data, name);
     const bound = readBinding(dir);
     if (!bound || bound.dev !== here.dev || bound.ino !== here.ino || leadsTo(bound.path, here)) continue;
-    if (knows(Database, dir, documents, inside)) return dir;
+    if (knows(Database, dir, documents, files)) return dir;
   }
   return null;
 }
@@ -309,7 +309,7 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
  * folder's documents folder (or nothing), `sandbox` whether agents run as users
  * of their own (a store of an earlier version is then not moved).
  */
-export async function placeStore({ data, id, folder, documents, inside, Database, sandbox = false, faults, log }) {
+export async function placeStore({ data, id, folder, documents, files, Database, sandbox = false, faults, log }) {
   closedData(data);
   const dir = path.join(data, id);
   const here = identityOf(folder);
@@ -322,14 +322,14 @@ export async function placeStore({ data, id, folder, documents, inside, Database
     const bound = readBinding(dir);
     // Made by hand, or by a version before the binding: this folder's, as its id says.
     if (!bound || (bound.dev === here.dev && bound.ino === here.ino)) return leftover();
-    if (knows(Database, dir, documents, inside)) {
+    if (knows(Database, dir, documents, files)) {
       log(`The documents store of ${folder} was made for another folder with the same documents (a restore, say): it is this folder's now`);
       return leftover();
     }
     putAside(dir, log);
   }
   // The folder's own store, where it was moved from, before an old one in the folder: that is a leftover then (a copy kept by hand).
-  const moved = movedStore(data, id, here, documents, inside, Database);
+  const moved = movedStore(data, id, here, documents, files, Database);
   if (moved) {
     renameSync(moved, dir);
     log(`The documents store of ${folder} followed it from ${readBinding(dir)?.path ?? path.basename(moved)}`);
