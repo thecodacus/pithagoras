@@ -24,7 +24,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, readlinkSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
 
 const MAX_SCROLLBACK = 200_000;
 
@@ -47,53 +46,6 @@ const STALL_MS = 10_000;
 
 /** What a client that is behind may have queued while another keeps up, before it is let go for it. */
 const MAX_BEHIND = 4_000_000;
-
-/** How many /proc entries signalSession reads at once: well under any open-file limit. */
-const STAT_BATCH = 256;
-
-/** Fields of /proc/<pid>/stat after the command name, which may hold spaces: [0] is the state, [3] the session. */
-const fieldsOf = (stat) => stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-
-function statOf(pid) {
-  try {
-    return fieldsOf(readFileSync(`/proc/${pid}/stat`, "utf8"));
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Signals every process in a session, and says which they were.
- *
- * A walk of /proc (every process on the host), read without holding up the
- * event loop: a busy host has thousands, and a closing panel is no reason for
- * every open stream to stall. Read a batch at a time rather than one after
- * another, which on such a host kept the hangup waiting on thousands of reads.
- */
-async function signalSession(session, signal) {
-  let pids;
-  try {
-    pids = (await readdir("/proc")).filter((name) => /^\d+$/.test(name));
-  } catch {
-    return [];
-  }
-  const members = [];
-  for (let i = 0; i < pids.length; i += STAT_BATCH) {
-    const stats = await Promise.all(
-      pids.slice(i, i + STAT_BATCH).map((pid) => readFile(`/proc/${pid}/stat`, "utf8").then((stat) => ({ pid, stat }), () => undefined)),
-    );
-    for (const found of stats) {
-      if (!found || Number(fieldsOf(found.stat)[3]) !== session) continue;
-      try {
-        process.kill(Number(found.pid), signal);
-        members.push(Number(found.pid));
-      } catch {
-        // Gone already, or not ours to signal.
-      }
-    }
-  }
-  return members;
-}
 
 export default function terminal(portal) {
   /**
@@ -163,8 +115,8 @@ export default function terminal(portal) {
    * Never the portal's own: signalled, that would take the portal down with it.
    */
   function sessionOf(shell) {
-    const session = Number(statOf(shell)?.[3]);
-    return session > 0 && session !== Number(statOf(process.pid)?.[3]) ? session : undefined;
+    const session = Number(portal.proc.stat(shell)?.[3]);
+    return session > 0 && session !== Number(portal.proc.stat(process.pid)?.[3]) ? session : undefined;
   }
 
   /**
@@ -197,7 +149,7 @@ export default function terminal(portal) {
           // Gone already; the walk finds whatever it left.
         }
       }
-      const members = session ? signalSession(session, "SIGHUP") : Promise.resolve([]);
+      const members = session ? portal.proc.signalSession(session, "SIGHUP") : Promise.resolve([]);
       void members.then(() => {
         if (!term.exited) term.proc.kill("SIGTERM");
       });
@@ -208,7 +160,7 @@ export default function terminal(portal) {
             .then((pids) => {
               for (const pid of pids) {
                 // Still in that session: a pid given to something else since is not.
-                if (Number(statOf(pid)?.[3]) !== session) continue;
+                if (Number(portal.proc.stat(pid)?.[3]) !== session) continue;
                 try {
                   process.kill(pid, "SIGKILL");
                 } catch {

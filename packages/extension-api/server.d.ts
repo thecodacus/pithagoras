@@ -391,6 +391,23 @@ export interface ServerPortal {
     at(folder: string): GitHandle;
   };
   /**
+   * The processes of the host, read from `/proc` (Linux; elsewhere `stat` finds nothing and `signalSession` signals
+   * nobody). For a package that runs a shell or a job of its own and must find, and end, what that started.
+   */
+  proc: {
+    /**
+     * The fields of `/proc/<pid>/stat` after the command's name, which may hold spaces: `[0]` is the state, `[1]` the
+     * parent, `[2]` the process group and `[3]` the session. Undefined when there is no such process.
+     */
+    stat(pid: number | string): string[] | undefined;
+    /**
+     * Signals every process of a session and says which they were. It walks `/proc`, every process of the host, a batch at
+     * a time so that the portal's other work is not held up while it does; a process that is gone already, or is not the
+     * portal's to signal, is left out.
+     */
+    signalSession(session: number, signal: NodeJS.Signals): Promise<number[]>;
+  };
+  /**
    * A folder of the package's own in the portal's data folder, made (closed to
    * everyone but the portal, 0700) when it is asked for: for what the portal
    * runs as itself on and an agent must not shape, such as a git repository

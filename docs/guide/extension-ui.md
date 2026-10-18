@@ -1217,6 +1217,16 @@ installed. `ok` lists exit codes that are answers rather than failures,
 writing; 16 MB of output). What reading turns off is looked up once for each
 handle: make one for each request rather than keeping it.
 
+### The host's processes
+
+An extension that runs a shell or a job of its own finds, and ends, what that
+started through `portal.proc` (Linux's `/proc`): `portal.proc.stat(pid)` is the
+fields of `/proc/<pid>/stat` after the command's name (`[0]` the state, `[1]`
+the parent, `[3]` the session), or `undefined` where there is no such process,
+and `portal.proc.signalSession(session, signal)` signals every process of a
+session and resolves with which they were. It reads `/proc` a batch at a time,
+so a busy host does not hold up the portal's other work while it does.
+
 ### Building on another extension
 
 An extension can give others something to build on, as a library does: a
@@ -1593,6 +1603,7 @@ of them takes from the portal, and what gives the same to an extension:
 | A window in voice mode that shows the file of the card that was tapped | `opened` given to its `voice.window`, `opensFor(call, chat)` |
 | Its name in the page's language | `title` with `msg()`, and `locale.add` |
 | git and gh in a chat's folder, safely, with a write at a time | `portal.git.at(folder)` |
+| Find and end the processes of a shell or a job you started | `portal.proc` |
 | What changed in the history it shows, counted and dated in the page's language | `portal.tp`, `portal.tc`, `portal.tx`, `portal.format` |
 | Its components styled with the portal's utilities | `buildExtension` with `tailwind: true` |
 | A card of its own for its tool in the conversation | `chat.tool` |

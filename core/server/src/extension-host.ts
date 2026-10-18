@@ -18,6 +18,7 @@ import { baseDir } from "./workspace-files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
+import { signalSession, statOf } from "./proc-stat.js";
 import { addGate, dropExtension, pushToPages, validTopic } from "./extension-push.js";
 import { installPackages, missingPackages } from "./extension-install.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
@@ -255,6 +256,7 @@ function portalFor(ext: Running): ServerPortal {
     },
     files: folderFiles,
     git: { at: gitAt },
+    proc: { stat: (pid) => statOf(pid), signalSession },
     dataDir: () => {
       // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
       const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));

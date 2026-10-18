@@ -42,6 +42,12 @@ export async function portalFiles() {
   return (await core("folder-files")).folderFiles;
 }
 
+/** The portal's own `portal.proc` (proc-stat.ts), for a test that calls a server half by hand. */
+export async function portalProc() {
+  const { statOf, signalSession } = await core("proc-stat");
+  return { stat: (pid) => statOf(pid), signalSession };
+}
+
 const scratches = [];
 process.on("exit", () => {
   for (const folder of scratches) rmSync(folder, { recursive: true, force: true });
@@ -118,6 +124,7 @@ function fakePi(extension, chat, factories, mock) {
 export async function mockPortal(options = {}) {
   const { default: express } = await import("express");
   const { folderFiles } = options.files ? { folderFiles: options.files } : await core("folder-files");
+  const proc = await portalProc();
   const hub = await core("extension-push");
   const git = options.git === false ? undefined : (await core("git")).gitAt;
   const extension = options.extension ?? "pithagoras-test";
@@ -270,6 +277,7 @@ export async function mockPortal(options = {}) {
       personEnv: () => ({ ...process.env }),
     },
     files: folderFiles,
+    proc,
     git: { at: (folder) => (git ? git(folder) : (() => { throw new Error("The mock was made without git"); })()) },
     dataDir: dataFolder,
   };

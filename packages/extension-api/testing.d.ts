@@ -113,5 +113,8 @@ export function mockPortal(options?: MockPortalOptions): Promise<MockPortal>;
 /** The portal's own `portal.files`, for a test that calls a server half by hand and needs no more of a portal than that. */
 export function portalFiles(): Promise<ServerPortal["files"]>;
 
+/** The portal's own `portal.proc` (`/proc` of the host), for a test that calls a server half by hand and needs no more of a portal than that. */
+export function portalProc(): Promise<ServerPortal["proc"]>;
+
 /** A new folder (its real path) in the system's temp directory, removed when the process ends. */
 export function scratch(prefix?: string): string;

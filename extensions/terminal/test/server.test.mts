@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import express from "express";
+import { portalProc } from "@pithagoras/extension-api/testing";
 import terminal from "../server.js";
 import { personsEnv } from "../../../core/server/src/background.ts";
 import { scratch } from "../../../tests/helpers.mts";
@@ -11,7 +12,7 @@ import { scratch } from "../../../tests/helpers.mts";
 /**
  * The terminal extension's server half: a shell of the person's own, over a
  * pty, its output streamed and its input posted. Given a portal as the portal
- * gives it one: its routes on a router, the person's environment, and the
+ * gives it one: its routes on a router, the person's environment, the host's processes, and the
  * folder of a chat, where the chat "gone" has a folder that is not there.
  * The pty is util-linux's `script`, and the shell's processes are found in
  * /proc: Linux's, as where the portal runs.
@@ -26,6 +27,7 @@ const stop = terminal({
   router,
   http: { json: express.json, endWithLogin: () => () => {} },
   sandbox: { personEnv: personsEnv },
+  proc: await portalProc(),
   chats: { folder: (id: string) => (id === "gone" ? path.join(home, "no-such-folder") : path.join(home, "work")) },
 } as any);
 const app = express();
