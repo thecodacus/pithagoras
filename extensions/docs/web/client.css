@@ -94,6 +94,9 @@
 .pd-old h1 { font-size: 2.3em; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; }
 .pd-old h2 { font-size: 1.6em; font-weight: 600; line-height: 1.25; }
 .pd-old h3 { font-size: 1.25em; font-weight: 600; line-height: 1.3; }
+.pd-old ul, .pd-old ol { padding-left: 1.5rem; }
+.pd-old ul { list-style: disc; }
+.pd-old ol { list-style: decimal; }
 
 /* The toolbar: stays at the top while the text scrolls under it (the page below it scrolls, not this). */
 .pd-toolbar { z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 4px 12px; }

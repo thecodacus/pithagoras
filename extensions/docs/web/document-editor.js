@@ -454,17 +454,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           return;
         }
         if (gone) return void editor.destroy();
-        // What an earlier visit left unsaved, read before the document is taken as it stands (that forgets it).
-        const kept = readDraft(folder, id);
-        saver.adopt(doc.revision, editor.markdown());
-        if (kept && kept.markdown !== editor.markdown()) {
-          editor.replace(kept.markdown);
-          keepDraft(folder, id, kept);
-          // Written on the revision the document is at: saved as it is. On another one: the document was changed since, and the person chooses.
-          if (kept.base === doc.revision) saver.changed();
-          else saver.conflicted({ revision: doc.revision, markdown: doc.markdown }, kept.base);
-          setNotice({ kind: "draft" });
-        }
         /** Puts a text in the box, keeping the caret where it is. */
         const put = (next) => {
           if (sourceBox.current) replaceText(sourceBox.current, next);
@@ -492,6 +481,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             sourceBox.current?.setSelectionRange(sourceBox.current.value.length, sourceBox.current.value.length);
           },
         };
+        // What an earlier visit left unsaved, read before the document is taken as it stands (that forgets it).
+        const kept = readDraft(folder, id);
+        saver.adopt(doc.revision, editor.markdown());
+        if (kept && kept.markdown !== editor.markdown()) {
+          editor.replace(kept.markdown);
+          keepDraft(folder, id, kept);
+          // Written on the revision the document is at: saved as it is. On another one: the document was changed since, and the person chooses.
+          if (kept.base === doc.revision) saver.changed();
+          else saver.conflicted({ revision: doc.revision, markdown: doc.markdown }, kept.base);
+          setNotice({ kind: "draft" });
+        }
         parts.current = {
           editor: proxy,
           visual: editor,
