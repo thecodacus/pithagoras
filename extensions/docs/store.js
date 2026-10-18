@@ -49,7 +49,7 @@
  * whole thread they started while the agent has not commented in it.
  */
 import { randomBytes } from "node:crypto";
-import { accessSync, closeSync, constants, lstatSync, openSync, rmSync } from "node:fs";
+import { accessSync, closeSync, constants, lstatSync, openSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
@@ -237,7 +237,15 @@ export class Store {
       fresh = true;
     }
     if (fresh) await this.repo.init();
-    this.guard.audit();
+    // What git reads besides its objects is taken away through the portal's own removal, which walks by descriptors.
+    const held = realpathSync.native(this.guard.at());
+    await this.guard.audit(async (rel) => {
+      try {
+        await this.files.remove(held, rel, { discard: true });
+      } catch (e) {
+        if (e?.code !== "missing") throw e;
+      }
+    });
     // Which folder it is for: told once, and again when the folder has moved or been restored (place.js decided it is the same).
     this.bound = bindingFor(this.folder);
     if (!sameBinding(readBinding(this.guard.at()), this.bound)) writeBinding(this.guard.at(), this.bound);

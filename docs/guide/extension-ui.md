@@ -676,7 +676,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `hold`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -790,7 +790,14 @@ easy to get wrong in a way that is a hole, not a bug:
   folder itself, and a folder holding git work that exists nowhere else (changes
   not committed, commits no remote has, stashes) is refused (`unsaved`, with
   what it holds) unless `discard` says so. `unsaved(base, rel)` asks first, for
-  a question that names it.
+  a question that names it. A folder is taken away with all in it through
+  descriptors: each folder below the one it is in is opened without following a
+  link and emptied through its own descriptor, never found again by its path,
+  which `rm` does and which follows a folder the agent swapped for a link while
+  the walk was under way (as root, into whatever the link leads to). A folder
+  that is swapped under the walk stops it (`failed`) and leaves the rest; one
+  nested more than 512 deep is not taken away here. A rename and a listing are
+  done in the folder as it is held, too.
 - **A save lasts.** After the rename the folder is synced too, so a crash
   right after leaves the new file, not the old one. An upload and a file the
   portal makes are synced the same way.
@@ -816,9 +823,23 @@ portal.router.put("/chats/:id/file", portal.http.json(), (req, res) => {
 });
 ```
 
-What reads a whole folder, such as an archive, takes it from `files.folder`,
-checked; a download is sent from the descriptor `files.open` gives. Files'
-server half (`extensions/files/src/server.ts`) is a complete example.
+What reads a whole folder, such as an archive, holds it: `files.hold(base, rel)`
+opens the folder without following a link in any place on the way, and a child
+process is given the descriptor, not a path (`files.folder` gives a checked path,
+and a child started with it reads whatever a link put there since leads to). A
+download is sent from the descriptor `files.open` gives. Every folder on the way
+needs read permission for the portal. Files' server half
+(`extensions/files/src/server.ts`) is a complete example, its archive:
+
+```js
+const held = portal.files.hold(folder, "box");   // refuses what `folder` refuses
+try {
+  // The child has the descriptor as its stdio number 3 and names the folder by it.
+  spawn("tar", ["-czf", "-", "-C", held.inChild(3), "."], { stdio: ["ignore", "pipe", "pipe", ...(held.fd === undefined ? [] : [held.fd])] });
+} finally {
+  held.close();   // the child has its own copy by now
+}
+```
 
 **Bytes, and telling a file changed.** `read` gives text, and says "binary"
 for a file with null bytes. For a file that is not text, or must come back

@@ -21,7 +21,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { rm } from "node:fs/promises";
+import { lstat, open as openHandle, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { holdsWork, unsavedIn, unsavedRefusal, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
@@ -148,9 +148,25 @@ export function resolveInside(base: string, rel: unknown): string {
 /** What is directly in a folder: folders first, then files, each by name. */
 export function listDir(base: string, rel: unknown): { path: string; entries: FileEntry[]; truncated: boolean } {
   const target = resolveInside(base, rel);
+  // Held for the whole listing: what is listed is this folder, whatever the path leads to by the time each entry is looked at.
+  let held: Held;
+  try {
+    held = holdFolder(base, target);
+  } catch (e) {
+    if (e instanceof FileError && e.code === "missing") throw new FileError("missing", "There is no such folder");
+    throw e;
+  }
+  try {
+    return listHeld(base, target, held);
+  } finally {
+    held.close();
+  }
+}
+
+function listHeld(base: string, target: string, held: Held): { path: string; entries: FileEntry[]; truncated: boolean } {
   let names;
   try {
-    names = readdirSync(target, { withFileTypes: true });
+    names = readdirSync(held.here, { withFileTypes: true });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOTDIR") throw new FileError("invalid", "That is not a folder");
     throw new FileError("missing", "There is no such folder");
@@ -170,7 +186,7 @@ export function listDir(base: string, rel: unknown): { path: string; entries: Fi
   }
   const entries: FileEntry[] = [];
   for (const dirent of candidates) {
-    const full = path.join(target, dirent.name);
+    const full = held.at(dirent.name);
     try {
       let st = lstatSync(full);
       let type: FileEntry["type"] = st.isDirectory() ? "dir" : "file";
@@ -541,7 +557,7 @@ function ioFailure(e: unknown, what: string, after: string): unknown {
   // Gone since it was looked at, or the folder it was to go in is not there.
   if (code === "ENOENT") return new FileError("missing", "There is no such file or folder");
   if (code === "ENOTDIR") return new FileError("invalid", "That is not a folder");
-  if (code && ["ENOSPC", "EDQUOT", "EIO", "EROFS", "EACCES", "EPERM", "EFBIG", "ENOTEMPTY", "EBUSY"].includes(code)) {
+  if (code && ["ENOSPC", "EDQUOT", "EIO", "EROFS", "EACCES", "EPERM", "EFBIG", "ENOTEMPTY", "EBUSY", "EMFILE", "ENFILE"].includes(code)) {
     return new FileError("failed", `${what} (${code}). ${after}`, undefined, e);
   }
   return e;
@@ -753,10 +769,72 @@ export async function unsavedAt(base: string, rel: unknown): Promise<Unsaved | n
   return unsavedIn(base, entryPlace(base, rel, "removed"));
 }
 
+/** How deep a folder may be that is taken away: each level is a descriptor held open until it is empty. */
+const MAX_REMOVE_DEPTH = 512;
+/** Files taken away at once in a folder; the folders in it one at a time, so that the descriptors held are no more than its depth. */
+const UNLINKS_AT_ONCE = 32;
+
+/**
+ * `name` in the folder `parent` taken away: a file, link or pipe by its own name (never what a link leads to), a folder
+ * after what is in it. `parent` is the path of a held folder (`/proc/self/fd/<n>`), so that nothing done to a path
+ * leads this elsewhere; each folder below it is opened without following a link and emptied through its own
+ * descriptor, which is why this is not `rm`: its walk finds a folder by its path and may follow one that was swapped
+ * for a link in the time between, and the portal, which may be root, would empty whatever that leads to.
+ */
+async function removeBelow(parent: string, name: string, depth = 0): Promise<void> {
+  const place = `${parent}/${name}`;
+  let stat;
+  try {
+    stat = await lstat(place);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw e;
+  }
+  if (!stat.isDirectory()) return void (await unlinkQuietly(place));
+  if (depth >= MAX_REMOVE_DEPTH) throw new FileError("failed", "It is nested too deeply to be deleted here. Nothing more was changed.");
+  const folder = await openHandle(place, OPEN_FOLDER);
+  try {
+    const here = `/proc/self/fd/${folder.fd}`;
+    // What the agent writes meanwhile may keep a folder from being empty: it is emptied again, a few times.
+    for (let round = 0; ; round++) {
+      const entries = await readdir(here, { withFileTypes: true });
+      const files = entries.filter((entry) => !entry.isDirectory());
+      for (let i = 0; i < files.length; i += UNLINKS_AT_ONCE) {
+        await Promise.all(files.slice(i, i + UNLINKS_AT_ONCE).map((entry) => unlinkQuietly(`${here}/${entry.name}`)));
+      }
+      for (const entry of entries) if (entry.isDirectory()) await removeBelow(here, entry.name, depth + 1);
+      try {
+        await rmdir(place);
+        return;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return;
+        if (code !== "ENOTEMPTY" || round >= 4) throw e;
+      }
+    }
+  } finally {
+    await folder.close();
+  }
+}
+
+/** A file, link or pipe taken away by its name; one that is gone is what was asked for. */
+async function unlinkQuietly(place: string): Promise<void> {
+  try {
+    await unlink(place);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  }
+}
+
 /**
  * Removes a file, or a folder and all that is in it. A link is removed as the
  * link it is, and what it points at stays. The folder itself is not removable
  * from here: that is the chat's place, not something in it.
+ *
+ * The folder the entry is in is held (see holdFolder) and everything below it
+ * is walked through descriptors, never by a path that could be sent elsewhere
+ * (see removeBelow). Where descriptors cannot be named (no /proc) it is `rm`
+ * by the checked path, as it was.
  *
  * A folder that holds git work nothing else has — a clone with commits no
  * remote has, changes not committed, stashes — or a repository's .git is
@@ -768,12 +846,22 @@ export async function removeEntry(base: string, rel: unknown, discard = false): 
     const unsaved = await unsavedIn(base, target);
     if (unsaved && holdsWork(unsaved)) throw new FileError("unsaved", unsavedRefusal(unsaved).error, unsaved);
   }
+  const held = holdFolder(base, path.dirname(target));
   try {
     // Not rmSync: a folder with many files is seconds on the thread that serves every chat.
     // A file that has gone since it was looked for is what was asked for.
-    await rm(target, { recursive: true, force: true });
+    if (held.pinned) await removeBelow(held.here, path.basename(target));
+    else await rm(held.at(path.basename(target)), { recursive: true, force: true });
   } catch (e) {
+    if (e instanceof FileError) throw e;
+    const code = (e as NodeJS.ErrnoException)?.code;
+    // A folder in the tree was swapped for a link, or for a file, while it was walked: nothing was followed, and the rest is left.
+    if (code === "ELOOP" || code === "ENOTDIR" || code === "EISDIR") {
+      throw new FileError("failed", "It could not be deleted (something in it was replaced while it was being deleted). Nothing more was changed.", undefined, e);
+    }
     throw ioFailure(e, "It could not be deleted", "Nothing more was changed.");
+  } finally {
+    held.close();
   }
 }
 
@@ -790,6 +878,9 @@ function checkName(name: unknown): string {
  * Gives a file or a folder another name, in the folder it is in. It is a new
  * name, not a new place, and it never replaces something that is already there.
  * A link is renamed as the link it is. Returns the new path, from the folder.
+ *
+ * Both names are in the folder as it is held (see holdFolder): as root, a rename
+ * by path in a folder that was swapped for a link would move a file there.
  */
 export function renameEntry(base: string, rel: unknown, newName: unknown): string {
   const name = checkName(newName);
@@ -797,22 +888,74 @@ export function renameEntry(base: string, rel: unknown, newName: unknown): strin
   const parent = path.dirname(from);
   const to = path.join(parent, name);
   if (to === from) return path.relative(base, to);
-  if (lexists(to)) throw new FileError("exists", `There is already something called "${name}" here`);
+  const held = holdFolder(base, parent);
   try {
-    renameSync(from, to);
-  } catch (e) {
-    throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+    if (lexists(held.at(name))) throw new FileError("exists", `There is already something called "${name}" here`);
+    try {
+      renameSync(held.at(path.basename(from)), held.at(name));
+    } catch (e) {
+      throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+    }
+  } finally {
+    held.close();
   }
   return path.relative(base, to);
 }
 
-/** The checked path of a folder, for archiving it. With `direct`, a folder that is a name in `base` itself (see OpenOptions.direct). */
+/**
+ * The checked path of a folder, for what reads the whole of it. With `direct`, a folder that is a name in `base` itself (see
+ * OpenOptions.direct). It is a folder inside `base` when this answers, and a path is only a path: what must read exactly this folder,
+ * whatever is done to its place after, holds it.
+ *
+ * The folder it is in is held and the folder looked at in it, so that a link put on the way since the check is refused, not
+ * followed. The folder itself is looked at, not opened: whether it may be read is for whoever reads it to find out.
+ */
 export function folderPath(base: string, rel: unknown, options: { direct?: boolean } = {}): string {
   const dir = placeOf(base, rel, options.direct);
-  const st = lstatSync(dir, { throwIfNoEntry: false });
+  let st;
+  if (dir === base) {
+    st = lstatSync(dir, { throwIfNoEntry: false });
+  } else {
+    const held = holdFolder(base, path.dirname(dir));
+    try {
+      st = lstatSync(held.at(path.basename(dir)), { throwIfNoEntry: false });
+    } finally {
+      held.close();
+    }
+  }
   if (!st) throw new FileError("missing", "There is no such folder");
   if (!st.isDirectory()) throw new FileError("invalid", "That is not a folder");
   return dir;
+}
+
+/** A folder held open for what must read exactly it, whatever is done to its path after: see holdForReading. */
+export interface HeldFolder {
+  /** Where this process names it: through the open descriptor where the system has them, else the checked path. */
+  path: string;
+  /** The open descriptor (Linux), to be given to a child process in its `stdio`; none where the system cannot name descriptors. */
+  fd?: number;
+  /** The folder's own name, for a file made of it; empty for the chat's folder. */
+  name: string;
+  /** Where a child process that was given `fd` as its stdio number `n` names it. */
+  inChild(n: number): string;
+  close(): void;
+}
+
+/**
+ * The folder `rel` held open, for what reads the whole of it, such as an archive: a path is only a path, and the
+ * child process that is started with the checked one reads whatever a link put there since leads to, as root in a
+ * folder the agent writes in. Held, it is the folder that was checked (see holdFolder). The caller closes it.
+ */
+export function holdForReading(base: string, rel: unknown, options: { direct?: boolean } = {}): HeldFolder {
+  const dir = folderPath(base, rel, options);
+  const held = holdFolder(base, dir);
+  return {
+    path: held.here,
+    ...(held.pinned ? { fd: held.fd } : {}),
+    name: dir === base ? "" : path.basename(dir),
+    inChild: (n) => (held.pinned ? `/proc/self/fd/${n}` : dir),
+    close: () => held.close(),
+  };
 }
 
 /**

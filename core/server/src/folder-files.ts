@@ -1,6 +1,7 @@
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 import {
   folderPath,
+  holdForReading,
   listDir,
   makeFolder,
   openFile,
@@ -35,6 +36,7 @@ export const folderFiles: ServerPortal["files"] = {
   remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true),
   makeFolder: (base, rel, name) => makeFolder(base, rel, name),
   folder: (base, rel, options = {}) => folderPath(base, rel, options),
+  hold: (base, rel, options = {}) => holdForReading(base, rel, options),
   sweepTemp: (base, rel, options = {}) => sweepTemp(base, rel, options.olderThanMs),
   open: (base, rel, options = {}) => openFile(base, rel, options),
 };

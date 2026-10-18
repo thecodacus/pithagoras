@@ -1,6 +1,7 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio, type StdioOptions } from "node:child_process";
 import { closeSync, createReadStream } from "node:fs";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import type { Request, RequestHandler, Response, Router } from "express";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
 
@@ -169,14 +170,22 @@ export function routes(router: Router, json: RequestHandler, files: Files, folde
   router.get("/chats/:id/archive", (req, res) => {
     const at = base(req, res);
     if (!at) return;
-    let dir: string;
+    // Held open: tar is given this very folder, not a path that a link put there since the check could lead elsewhere.
+    let held: ReturnType<Files["hold"]>;
     try {
-      dir = files.folder(at, pathOf(req));
+      held = files.hold(at, pathOf(req));
     } catch (e) {
       return fail(res, e);
     }
-    const name = path.basename(dir).replace(/[^a-zA-Z0-9_.-]/g, "_") || "workspace";
-    const tar = spawn("tar", ["-czf", "-", ...ARCHIVE_EXCLUDES.map((d) => `--exclude=${d}`), "-C", dir, "."]);
+    const name = (held.name || path.basename(at)).replace(/[^a-zA-Z0-9_.-]/g, "_") || "workspace";
+    let tar: ChildProcessByStdio<null, Readable, Readable>;
+    try {
+      const stdio: StdioOptions = ["ignore", "pipe", "pipe", ...(held.fd === undefined ? [] : [held.fd])];
+      tar = spawn("tar", ["-czf", "-", ...ARCHIVE_EXCLUDES.map((d) => `--exclude=${d}`), "-C", held.inChild(3), "."], { stdio }) as ChildProcessByStdio<null, Readable, Readable>;
+    } finally {
+      // The child has its own copy of the descriptor from here on, or none if it did not start.
+      held.close();
+    }
     // Not announced until tar has made something: a tar that cannot start, or dies at once, is then an error the
     // person is told of, not a file of zero bytes that the browser calls finished.
     let started = false;

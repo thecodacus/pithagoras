@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import semver from "semver";
@@ -251,7 +251,8 @@ function portalFor(ext: Running): ServerPortal {
       // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
       const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));
       mkdirSync(dir, { recursive: true, mode: 0o700 });
-      return dir;
+      // As the real folder it is: what a call of `portal.files` is given as its base must have no link on the way to it.
+      return realpathSync(dir);
     },
   };
 }

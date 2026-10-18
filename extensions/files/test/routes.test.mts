@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "../../../core/server/test/server-harness.mjs";
 
@@ -49,10 +49,10 @@ function commitHere(dir: string) {
 }
 
 /** The routes as the portal mounts a server half's: at /api/x/<package>, no body read unless a route asks. */
-async function withApi(fn: (base: string) => Promise<void>) {
+async function withApi(fn: (base: string) => Promise<void>, files: typeof folderFiles = folderFiles) {
   const app = express();
   const router = express.Router();
-  routes(router, express.json(), folderFiles, (id) => {
+  routes(router, express.json(), files, (id) => {
     if (id !== "del") throw new Error("No such chat");
     return baseDir(work);
   });
@@ -143,6 +143,30 @@ test("a file and a folder are renamed in place, a file downloaded as it is, and 
     assert.ok((await archive.arrayBuffer()).byteLength > 0);
     assert.equal((await fetch(`${base}/archive?path=box/new.txt`).then(answer)).status, 400, "a file is not a folder");
   });
+});
+
+test("the archive is of the folder that was checked: a link put in its place right after the check is not what tar reads", async () => {
+  mkdirSync(path.join(work, "arch"));
+  writeFileSync(path.join(work, "arch", "ours.txt"), "ours");
+  mkdirSync(path.join(outside, "arch"), { recursive: true });
+  writeFileSync(path.join(outside, "arch", "secret.txt"), "theirs");
+  // The agent swaps the folder for a link to one outside in the moment between the portal's check and the start of tar:
+  // right after the call that checked it, whichever of the two calls the half made.
+  const swapAfter = <T,>(call: T): T => {
+    renameSync(path.join(work, "arch"), path.join(work, "arch.aside"));
+    symlinkSync(path.join(outside, "arch"), path.join(work, "arch"));
+    return call;
+  };
+  const files = { ...folderFiles, folder: (...args: Parameters<typeof folderFiles.folder>) => swapAfter(folderFiles.folder(...args)), hold: (...args: Parameters<typeof folderFiles.hold>) => swapAfter(folderFiles.hold(...args)) };
+  await withApi(async (base) => {
+    const archive = await fetch(`${base}/archive?path=arch`);
+    assert.equal(archive.status, 200);
+    const tgz = path.join(home, "arch.tar.gz");
+    writeFileSync(tgz, Buffer.from(await archive.arrayBuffer()));
+    const listed = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" });
+    assert.match(listed, /ours\.txt/);
+    assert.doesNotMatch(listed, /secret\.txt/, "what the link leads to is not in the archive");
+  }, files);
 });
 
 test("a clone with commits no remote has is refused with what it holds, and goes when that is meant", async () => {

@@ -24,12 +24,12 @@
  *     could have changed it), or refused with the reason
  */
 import { randomBytes } from "node:crypto";
-import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { DocError } from "./errors.js";
 import { readDocument } from "./files.js";
 import { blobId } from "./git.js";
-import { Guard, isOurs, OPEN_DIR, removeEntry } from "./guard.js";
+import { Guard, isOurs, OPEN_DIR } from "./guard.js";
 
 /** Where an earlier version kept the store: in the folder itself. */
 export const LEGACY_STORE = ".pithagoras-docs";
@@ -236,8 +236,10 @@ async function copyTree(src, fd, dst, depth) {
  * it, or remove it as root. Nothing is changed where it is refused. False
  * where there is none.
  */
-async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
+async function moveLegacy({ folder, data, id, dir, sandbox, files, faults, log }) {
   const old = path.join(folder, LEGACY_STORE);
+  // The portal's own removal, which walks through descriptors and never follows a link swapped in on the way, as root in a folder an agent writes in.
+  const remove = (parent, name) => files.remove(parent, name, { discard: true });
   let stat;
   try {
     stat = lstatSync(old);
@@ -261,7 +263,7 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
       renameSync(old, dir);
       const moved = lstatSync(dir);
       if (!moved.isDirectory() || !isOurs(moved)) {
-        removeEntry(data, id);
+        await remove(realpathSync(data), id);
         throw refused("it was replaced while it was moved");
       }
     } catch (e) {
@@ -272,7 +274,7 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
     if (copy) {
       // What an earlier try that was cut off left.
       try {
-        for (const left of readdirSync(data)) if (left.startsWith(`.moving-${id}-`)) removeEntry(data, left);
+        for (const left of readdirSync(data)) if (left.startsWith(`.moving-${id}-`)) await remove(realpathSync(data), left);
       } catch {
         // Only junk: the move does not wait on it.
       }
@@ -283,7 +285,7 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
         renameSync(path.join(data, temp), dir);
       } catch (e) {
         try {
-          removeEntry(data, temp);
+          await remove(realpathSync(data), temp);
         } catch {
           // Said by what refuses the move; this is only what it left.
         }
@@ -291,7 +293,7 @@ async function moveLegacy({ folder, data, id, dir, sandbox, faults, log }) {
       }
       // Moved, not copied: the old one goes. Its removal is by descriptors, never by what a path leads to now.
       try {
-        removeEntry(folder, LEGACY_STORE);
+        await remove(folder, LEGACY_STORE);
       } catch (e) {
         log(`The documents store was moved into the portal's data folder, but ${LEGACY_STORE} in ${folder} could not be removed (${e.code ?? e.message}): remove it`);
       }
@@ -335,6 +337,6 @@ export async function placeStore({ data, id, folder, documents, files, Database,
     log(`The documents store of ${folder} followed it from ${readBinding(dir)?.path ?? path.basename(moved)}`);
     return leftover();
   }
-  await moveLegacy({ folder, data, id, dir, sandbox, faults, log });
+  await moveLegacy({ folder, data, id, dir, sandbox, files, faults, log });
   return dir;
 }

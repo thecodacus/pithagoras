@@ -60,6 +60,20 @@ export interface Unsaved {
  */
 export type FileRefusal = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 
+/** A folder held open by `files.hold`: it stays the folder that was checked, whatever is done to its path after. */
+export interface HeldFolder {
+  /** Where this process names it: through the open descriptor on Linux, else the checked path. */
+  path: string;
+  /** The open descriptor (Linux), to be given to a child process in its `stdio`; none where the system cannot name descriptors. */
+  fd?: number;
+  /** The folder's own name, for a file made of it (`site` for `site.tar.gz`); empty for the chat's folder. */
+  name: string;
+  /** Where a child process that was given `fd` as its stdio number `n` names the folder: `spawn("tar", ["-C", held.inChild(3), "."], { stdio: ["ignore", "pipe", "pipe", held.fd] })`. */
+  inChild(n: number): string;
+  /** The caller closes it, also when the child failed to start. */
+  close(): void;
+}
+
 /** What opens a file for `files.open` and `files.readBytes`, beyond the checks every path gets. */
 export interface FileOpenOptions {
   /**
@@ -289,6 +303,13 @@ export interface ServerPortal {
      * folder of that name.
      */
     folder(base: string, rel: string, options?: { direct?: boolean }): string;
+    /**
+     * A folder opened once and held, for a child process that reads all of it (an archive by `tar`): `folder` gives a
+     * path, and a child started with it reads whatever a link put on the way leads to by then. The folder is opened
+     * without following a link in any place on the way, from `base` down, and the child names it through the
+     * descriptor it is given. The caller closes it. Refuses what `folder` refuses, and a folder the portal may not read.
+     */
+    hold(base: string, rel: string, options?: { direct?: boolean }): HeldFolder;
     /**
      * Removes the temporary files that saves in the folder `rel` left behind when they were cut off, and returns
      * their names. Only those older than `olderThanMs` (by default a minute): a save of the portal's own or of

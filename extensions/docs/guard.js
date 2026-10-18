@@ -16,7 +16,7 @@
  * before every git run, so a store that was replaced, or that something opened
  * to others, is refused until it is opened again, which puts it right.
  */
-import { closeSync, constants, fchmodSync, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, chmodSync, openSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, chmodSync, openSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { DocError } from "./errors.js";
 
@@ -31,55 +31,6 @@ const ofStore = (dir, message) => Object.assign(new DocError(409, `${message} (t
 /** What git trusts in a repository besides its objects, that could send it elsewhere or make it run something: gone or written new. */
 const MISTRUSTED = ["commondir", "config.worktree", "shallow", "hooks", "info/grafts", "info/attributes", "objects/info/alternates", "objects/info/http-alternates"];
 export const OPEN_DIR = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
-
-/**
- * `name` in the folder `parent` taken away: a file, link or pipe by its own name (never what a link leads to), a folder
- * after what is in it. This runs as root on what an agent of the sandbox could shape, so a folder is never removed by
- * its path (`rmSync` with `recursive` walks by path, and on some Node versions follows a folder swapped for a link
- * while it works): each is opened without following a link, and emptied through that descriptor.
- */
-export function removeEntry(parent, name) {
-  const place = `${parent}/${name}`;
-  let stat;
-  try {
-    stat = lstatSync(place);
-  } catch (e) {
-    if (e.code === "ENOENT") return;
-    throw e;
-  }
-  if (!stat.isDirectory()) {
-    unlinkSync(place);
-    return;
-  }
-  const fd = openSync(place, OPEN_DIR);
-  try {
-    const here = Guard.pinning ? `/proc/self/fd/${fd}` : place;
-    for (const entry of readdirSync(here)) removeEntry(here, entry);
-  } finally {
-    closeSync(fd);
-  }
-  rmdirSync(place);
-}
-
-/** `rel` (names joined by `/`) below the folder `root` taken away, each folder on the way opened without following a link. Nothing there is nothing to do. */
-function removeBelow(root, rel) {
-  const parts = rel.split("/");
-  const name = parts.pop();
-  const opened = [];
-  try {
-    let here = root;
-    for (const part of parts) {
-      const fd = openSync(`${here}/${part}`, OPEN_DIR);
-      opened.push(fd);
-      here = Guard.pinning ? `/proc/self/fd/${fd}` : `${here}/${part}`;
-    }
-    removeEntry(here, name);
-  } catch (e) {
-    if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;
-  } finally {
-    for (const fd of opened) closeSync(fd);
-  }
-}
 
 /** What `git init` makes of `config`, without the work tree it names: the one every run names itself. */
 const CONFIG = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n";
@@ -195,21 +146,24 @@ export class Guard {
    * place of the objects folder, or a pipe, leads git elsewhere as well. It is
    * done once when a store is opened, not on every request, when the objects
    * are too many to walk over.
+   *
+   * `remove(rel)` takes away what is at `rel` in the store, a folder with all in it, through descriptors (the
+   * portal's `files.remove`); one that is not there is not an error.
    */
-  audit() {
+  async audit(remove) {
     this.#own();
     this.#walk("", 0);
-    this.#control();
+    await this.#control(remove);
   }
 
   /** What git reads besides its objects, gone or written new. */
-  #control() {
+  async #control(remove) {
     try {
       lstatSync(this.at("git"));
     } catch {
       return;
     }
-    for (const name of MISTRUSTED) removeBelow(this.at("git"), name);
+    for (const name of MISTRUSTED) await remove(`git/${name}`);
     const temp = this.at(`git/config.${randomBytes(6).toString("hex")}.tmp`);
     writeFileSync(temp, CONFIG, { flag: "wx", mode: 0o600 });
     renameSync(temp, this.at("git/config"));
