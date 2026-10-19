@@ -71,6 +71,7 @@ import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
 import { useSlot } from "../extensions/slots";
+import { translate } from "../extensions/strings";
 import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
 
@@ -219,9 +220,20 @@ export const ConfigModal = memo(function ConfigModal({
     const own = extensions.flatMap((x) => [
       { tab: "extensions", ext: x.spec, title: x.name, words: `${x.description ?? ""} extension settings`, where: t("Extension settings") },
       ...x.settings.map((st) => ({ tab: "extensions", ext: x.spec, section: t("Settings"), title: humanKey(st.key), words: `${st.key} ${x.name}`, where: x.name })),
+      // What the extension's own page says is on it, in the words the page shows, and in English too.
+      ...settingsPages.filter((page) => page.extension === x.name).flatMap((page) =>
+        (page.search ?? []).map((found) => ({
+          tab: "extensions",
+          ext: x.spec,
+          title: translate(x.name, found.title),
+          ...(found.section ? { section: translate(x.name, found.section) } : {}),
+          words: `${found.words ?? ""} ${found.title} ${found.section ?? ""}`,
+          where: x.name,
+        })),
+      ),
     ]);
     return [...fixed, ...own];
-  }, [extensions, lang]);
+  }, [extensions, settingsPages, lang]);
 
   const go = (entry: SettingEntry) => {
     setNav(entry.ext ? { kind: "ext", spec: entry.ext } : { kind: "tab", id: entry.tab as Tab });

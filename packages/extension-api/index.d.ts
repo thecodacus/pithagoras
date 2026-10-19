@@ -196,8 +196,15 @@ export interface SlotMap {
    * up). Until it says yes, it is not. The page is at its address either way.
    */
   "nav.page": { entry: { title: string; icon?: ComponentType; useShown?: () => boolean }; props: {} };
-  /** The extension's page in Settings, above the fields the portal found for it. */
-  "settings.page": { entry: {}; props: {} };
+  /**
+   * The extension's page in Settings, above the fields the portal found for
+   * it. `search` is what Settings' search finds on the page, beside the
+   * extension's name: each a `title`, the heading on the page it is under
+   * (`section`, scrolled to), and other `words` someone might type for it.
+   * Titles and headings are said in the page's language as the extension's
+   * own `t` says them, so a heading is found as the page shows it.
+   */
+  "settings.page": { entry: { search?: { title: string; section?: string; words?: string }[] }; props: {} };
 }
 export type SlotName = keyof SlotMap;
 

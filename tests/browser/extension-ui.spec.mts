@@ -133,7 +133,11 @@ const PROBE = `export default function (portal) {
     h(function Has() { return h("span", { "data-testid": "has", "data-browser": String(portal.panels.useHas("browser")), "data-files": String(portal.panels.useHas("files")), "data-runs": String(portal.panels.useHas("probe/runs")) }); }),
     h("button", { type: "button", onClick: () => portal.panels.open("browser") }, "Show the browser")) });
   portal.slots.register("chat.composer.above", { id: "chip", component: ({ chat }) => h("div", { "data-testid": "above" }, "Above the box of " + chat.id) });
-  portal.slots.register("settings.page", { id: "own", component: () => h("p", { "data-testid": "probe-settings" }, "Probe's own settings") });
+  portal.slots.register("settings.page", {
+    id: "own",
+    search: [{ title: "Probe colours", section: "Colours", words: "palette paint" }],
+    component: () => h("div", null, h("p", { "data-testid": "probe-settings" }, "Probe's own settings"), h("div", { style: { height: "1600px" } }), h("h3", null, "Colours"), h("p", null, "The palette.")),
+  });
   // A theme changer: it switches the portal to a theme another package brought, and back.
   portal.slots.register("chat.header.action", { id: "theme", component: () => {
     const now = portal.theme.use();
@@ -478,6 +482,16 @@ test("an extension's own page in Settings, and why its server half is not runnin
   await expect(row).toBeVisible();
   await changed({ probeServerError: 'cannot start here' });
   await expect(dialog.getByRole('listitem').filter({ hasText: 'probe' }).getByRole('alert')).toHaveText('Its server half could not be started: cannot start here');
+});
+
+test("Settings' search finds what an extension's own page says is on it, and goes to its heading there", async ({ page }) => {
+  await portal(page, undefined, PROBE);
+  await page.goto('/settings/general');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByLabel('Search settings').fill('palette');
+  await dialog.getByRole('option', { name: /Probe colours/ }).click();
+  await expect(dialog.getByTestId('probe-settings')).toBeAttached();
+  await expect(dialog.getByRole('heading', { name: 'Colours' })).toBeInViewport();
 });
 
 test.describe('beside a window that asks for the side', () => {
