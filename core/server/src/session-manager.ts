@@ -3168,5 +3168,9 @@ class SessionManager extends EventEmitter {
 }
 
 export const sessions = new SessionManager();
-setChatBridge({ tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data), offers: (chatId, tool) => sessions.toolOffered(chatId, tool) });
+setChatBridge({
+  tell: (chatId, extension, data) => sessions.tellExtension(chatId, extension, data),
+  offers: (chatId, tool) => sessions.toolOffered(chatId, tool),
+  reload: () => sessions.reloadIdle(),
+});
 export { SESSION_ROOT, IMAGE_ROOT };

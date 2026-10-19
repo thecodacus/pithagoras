@@ -100,6 +100,18 @@ export interface ServerPortal {
    * does with it. Those that build on it start after it, and are stopped before it and started again whenever it is.
    */
   provide(factory: (consumer: { name: string }) => unknown): void;
+  tools: {
+    /**
+     * Says which of the tools its pi extension registers (`chats.extend`) it
+     * offers now, where that follows its settings: image generation, say,
+     * once somebody has set up where pictures are made. Settings → Tools then
+     * lists those before any chat has reported them, and leaves out the ones
+     * it remembers that are not offered. Asked each time a list is drawn, so
+     * keep it quick. After a change, `chats.reload()` gives it to the chats
+     * that are open.
+     */
+    offer(tools: () => { name: string; description?: string }[]): void;
+  };
   extensions: {
     /**
      * What an extension this one builds on gives it (see `provide`): one its package.json names in `pithagoras.requires`,
@@ -157,6 +169,13 @@ export interface ServerPortal {
     onEvent(handler: (chatId: string, event: Record<string, unknown>) => void): void;
     /** To the package's own pi extension in a chat, starting its pi if need be. False where pi does not run in the portal. */
     tell(chatId: string, data: unknown): Promise<boolean>;
+    /**
+     * Loads every chat's pi that is idle again, as switching a package on or
+     * off does: each then has what the server halves add to it now. A chat
+     * that is working, compacting or being edited is left as it is until then,
+     * and counted as `waiting`.
+     */
+    reload(): Promise<{ reloaded: number; waiting: number }>;
     /**
      * A pi extension of the package's, made here: registered in every chat's
      * pi as it starts, so its tools hold what this module holds. Only where pi

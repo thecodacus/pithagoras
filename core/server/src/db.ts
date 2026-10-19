@@ -2689,6 +2689,15 @@ export function knownTools(): KnownTool[] {
  * For a chat, `folder` is where it runs, whose project may bring packages of
  * its own.
  */
+/**
+ * What each running server half that follows its settings offers now, by its name (`portal.tools.offer`): set by the
+ * extension host, which this module cannot import.
+ */
+let serverHalfOffers: () => Map<string, { name: string; description?: string }[]> = () => new Map();
+export function setServerHalfOffers(read: typeof serverHalfOffers): void {
+  serverHalfOffers = read;
+}
+
 export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<KnownTool, "package" | "inline"> & { inline?: true; cached?: true })[] {
   const user = readPiSettings().packages;
   const project = folder ? readProjectPiSettings(folder).packages : undefined;
@@ -2710,7 +2719,17 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   // Every MCP server's tools, from the adapter's cache, whether a chat has had them one by one or not: a server is a
   // group like any other, whole or tool by tool. A tool a chat reported is listed as it reported it.
   const seen = new Set(known.map((t) => t.name));
-  const available = [...known, ...catalogue.filter((t) => !seen.has(t.name))].filter(toolAvailability(user, project));
+  // A server half that says what its pi extension registers now (portal.tools.offer): of its tools that are remembered,
+  // only those are listed, and those are listed before a chat has reported them. Its tools are known by its name, which
+  // the portal files them under as an inline extension's.
+  const halves = serverHalfOffers();
+  const offered = (tool: KnownTool) => !(tool.inline === true && halves.has(tool.source)) || halves.get(tool.source)!.some((t) => t.name === tool.name);
+  const remembered = [...known, ...catalogue.filter((t) => !seen.has(t.name))].filter(toolAvailability(user, project)).filter(offered);
+  const listed = new Set(remembered.map((t) => t.name));
+  const fromHalves: KnownTool[] = [...halves].flatMap(([source, tools]) =>
+    tools.filter((t) => !listed.has(t.name)).map((t) => ({ name: t.name, source, package: null, inline: true, ...(t.description ? { description: t.description } : {}) })),
+  );
+  const available = [...remembered, ...fromHalves];
   return [...available, ...notYetSeen(available, images, editing, videos)]
     .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline))
     .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline))

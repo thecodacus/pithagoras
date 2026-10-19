@@ -7,7 +7,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getSession, listSessions, type SessionRow } from "./db.js";
+import { getSession, listSessions, setServerHalfOffers, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
@@ -66,7 +66,27 @@ interface Running {
   uses: Set<string>;
   /** Its file's revision and those of all it builds on, as it started: a change in any is a start anew. See plan. */
   sig: string;
+  /** The tools its pi extension registers now, where that follows its settings (`tools.offer`). */
+  offers?: () => OfferedTool[];
 }
+
+/** A tool a server half says it offers now: see `tools.offer`. */
+type OfferedTool = { name: string; description?: string };
+
+/**
+ * What each running server half that follows its settings offers now, by its name: the tools lists read it (shownTools).
+ * One whose answer fails is left out, as if it had said nothing: its tools are listed as they were remembered.
+ */
+export function offeredTools(): Map<string, OfferedTool[]> {
+  const offered = new Map<string, OfferedTool[]>();
+  for (const ext of running.values()) {
+    if (!ext.offers) continue;
+    const said = guarded(ext.half.name, "saying which tools it offers", () => ext.offers!());
+    if (Array.isArray(said)) offered.set(ext.half.name, said.filter((t) => typeof t?.name === "string" && t.name !== ""));
+  }
+  return offered;
+}
+setServerHalfOffers(offeredTools);
 
 const running = new Map<string, Running>();
 /** Why a package's server half is not running, by the package's name. */
@@ -126,9 +146,11 @@ function wire(name: string, data: unknown): string | undefined {
 /** How the host reaches what only the session manager can do, which it cannot import: the manager imports it. */
 let tellChat: (chatId: string, extension: string, data: unknown) => Promise<boolean> = async () => false;
 let toolOffered: (chatId: string, tool: string) => "direct" | "lazy" | undefined = () => undefined;
-export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof toolOffered }): void {
+let reloadChats: () => Promise<{ reloaded: number; waiting: number }> = async () => ({ reloaded: 0, waiting: 0 });
+export function setChatBridge(bridge: { tell: typeof tellChat; offers: typeof toolOffered; reload: typeof reloadChats }): void {
   tellChat = bridge.tell;
   toolOffered = bridge.offers;
+  reloadChats = bridge.reload;
 }
 
 function whoOf(chatId: string) {
@@ -171,6 +193,12 @@ function portalFor(ext: Running): ServerPortal {
       if (typeof factory !== "function") throw new TypeError("provide takes a function: (consumer) => what that consumer is given");
       ext.provider = factory;
     },
+    tools: {
+      offer(names) {
+        if (typeof names !== "function") throw new TypeError("offer takes a function: () => the tools offered now");
+        ext.offers = names;
+      },
+    },
     extensions: {
       use(of) {
         if (ext.half.requires?.[of] === undefined && ext.half.optional?.[of] === undefined) {
@@ -211,6 +239,7 @@ function portalFor(ext: Running): ServerPortal {
       on: (event, handler) => void ext.life.on(event, handler),
       onEvent: (handler) => void ext.events.push(handler),
       tell: (chatId, data) => tellChat(chatId, name, data),
+      reload: () => reloadChats(),
       offers: (chatId, tool) => toolOffered(chatId, tool),
       extend: (factory) => void ext.factories.push(factory),
       hold: (chatId) => {
