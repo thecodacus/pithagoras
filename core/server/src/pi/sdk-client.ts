@@ -440,8 +440,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     lazySets?: string[];
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
-    /** False lets a run act on what it read — see guardExtension. */
-    enforceTaint?: boolean;
+    /** The taint rules a run may act against after it read something untrusted, read at each call — see guardExtension. */
+    exemptNow?: () => ReadonlySet<string>;
     /** Read at each tool call, so a change takes effect without a restart. */
     browserNow?: () => { allowed: boolean; allowlist: string[] };
     /** What this chat's subagents run on, asked when one starts: see subagent-protocol.ts. */
@@ -509,7 +509,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             opts.sessionDir,
             opts.whoNow ?? (() => ({ role: "primary" })),
             opts.sessionId,
-            opts.enforceTaint !== false,
+            opts.exemptNow ?? (() => new Set()),
             opts.browserNow ?? (() => ({ allowed: false, allowlist: [] })),
             opts.cwd,
             [path.join(pi.getAgentDir(), "skills"), ...(builtinSkills ? [builtinSkills] : [])],

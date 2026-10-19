@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { bareRef } from "../browser/ref.js";
-import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, trustedResults, useGrant, type McpView, type ToolRule } from "../db.js";
+import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, trustedResults, untrustResult, useGrant, type McpView, type ToolRule } from "../db.js";
 import { injectionSignals, type Signal } from "./injection.js";
 import { PORTAL_BROWSER_TOOLS, mcpServerOf } from "../tool-policy.js";
 import { DATA_DIR } from "../data-dir.js";
@@ -1197,14 +1197,16 @@ function viaMcp(toolName: string, input: Record<string, unknown>): { toolName: s
   return { toolName: input.tool.trim(), input: given ?? {} };
 }
 
-/** The rule that refuses this call after untrusted content: the call's own, or that of the tool an `mcp` call reaches. */
-function taintRule(toolName: string, input: Record<string, unknown>, context: RuleContext): Rule | undefined {
+/** The rules this call is the shape of after untrusted content, in their order: the call's own, and those of the tool an `mcp` call reaches. */
+function taintRules(toolName: string, input: Record<string, unknown>, context: RuleContext): Rule[] {
   const reached = viaMcp(toolName, input);
-  return (
-    RULES.find((rule) => rule.hit(toolName, input, context)) ??
-    (reached ? RULES.find((rule) => rule.hit(reached.toolName, reached.input, { workspace: context.workspace })) : undefined)
+  return RULES.filter(
+    (rule) => rule.hit(toolName, input, context) || (reached !== undefined && rule.hit(reached.toolName, reached.input, { workspace: context.workspace })),
   );
 }
+
+/** The rules after a suspected injection as the Guard page shows them: each one's name and what it holds back. */
+export const GUARD_RULES: readonly { name: string; why: string }[] = RULES.map(({ name, why }) => ({ name, why }));
 
 /**
  * Driving the agent's browser, in either of the two shapes the MCP adapter
@@ -1773,7 +1775,15 @@ export function wrapUntrusted(text: string): string {
  * the portal can mark one that read something outside a tool call (see
  * taintSession) and say whether the rules for a tainted one hold it now.
  */
-const taints = new Map<string, { mark: () => void; holds: () => boolean; trusted: (id: string) => void }>();
+const taints = new Map<
+  string,
+  {
+    mark: () => void;
+    refuses: (toolName: string, input: Record<string, unknown>, context: RuleContext) => Rule | undefined;
+    trusted: (id: string) => void;
+    untrusted: (id: string) => void;
+  }
+>();
 
 /**
  * Marks a conversation as having read untrusted content, as a tool result that
@@ -1795,12 +1805,18 @@ export function trustFlagged(portalSessionId: string, id: string): void {
   taints.get(portalSessionId)?.trusted(id);
 }
 
+/** The person takes their trust in a flagged result back: it holds the conversation back again, now and when it is opened again. */
+export function untrustFlagged(portalSessionId: string, id: string): void {
+  untrustResult(portalSessionId, id);
+  taints.get(portalSessionId)?.untrusted(id);
+}
+
 /**
  * The rule that would refuse this call in a conversation that has read something
- * untrusted, when it has and the rules are enforced there; otherwise undefined.
+ * untrusted, when it has and that rule holds there; otherwise undefined.
  */
 function taintRuleFor(portalSessionId: string, toolName: string, input: Record<string, unknown>, context: RuleContext): Rule | undefined {
-  return taints.get(portalSessionId)?.holds() ? taintRule(toolName, input, context) : undefined;
+  return taints.get(portalSessionId)?.refuses(toolName, input, context);
 }
 
 /**
@@ -1818,13 +1834,13 @@ export function guardExtension(
   whoNow: () => { role: string; key?: string } = () => ({ role: "primary" }),
   portalSessionId?: string,
   /**
-   * Whether the taint rules block. Off for work that legitimately reads
-   * something untrusted and then acts on it — a routine that reads logs and
-   * fixes what it found trips them honestly, because fetching the logs taints
-   * the session and the fix is a push. The envelope still marks the content:
-   * labelling costs nothing and is the half that never gets in the way.
+   * The taint rules that do not block here, by name (GUARD_RULE_NAMES), read at each call: what a routine is exempt
+   * from, for work that legitimately reads something untrusted and then acts on it — a routine that reads logs and
+   * fixes what it found trips them honestly, because fetching the logs taints the session and the fix is a push.
+   * Nothing else is exempt from any. The envelope still marks the content: labelling costs nothing and is the half
+   * that never gets in the way.
    */
-  enforceTaint = true,
+  exemptNow: () => ReadonlySet<string> = () => new Set(),
   /**
    * Whether this session may drive the browser, read at each call rather than
    * fixed at launch — turning it on should work now, not after a restart
@@ -1881,8 +1897,13 @@ export function guardExtension(
     if (portalSessionId) {
       const taint = {
         mark: () => { marked = true; },
-        holds: () => isTainted() && enforceTaint,
+        refuses: (toolName: string, input: Record<string, unknown>, context: RuleContext) => {
+          if (!isTainted()) return undefined;
+          const exempt = exemptNow();
+          return taintRules(toolName, input, context).find((rule) => !exempt.has(rule.name));
+        },
         trusted: (id: string) => { trusted = new Set([...trusted, id]); },
+        untrusted: (id: string) => { trusted = new Set([...trusted].filter((one) => one !== id)); },
       };
       taints.set(portalSessionId, taint);
       // Only its own: a reload starts the next one before this one is gone.
@@ -2050,9 +2071,11 @@ export function guardExtension(
       }
       // The rule that refuses this call because the conversation has read something untrusted, if any.
       // It refuses whatever allows the call, so a one-off approval is not spent on it first: see below.
-      // The rule a conversation that has read something untrusted holds this call to, worked out once.
-      const ruleNow = isTainted() ? taintRule(event.toolName, event.input ?? {}, { workspace, files }) : undefined;
-      const heldByTaint = enforceTaint ? ruleNow : undefined;
+      // The rules a conversation that has read something untrusted holds this call to, worked out once: the first that
+      // holds here refuses it, and one it is exempt from is what the log says let it through.
+      const matched = isTainted() ? taintRules(event.toolName, event.input ?? {}, { workspace, files }) : [];
+      const exempt = matched.length ? exemptNow() : new Set<string>();
+      const heldByTaint = matched.find((rule) => !exempt.has(rule.name));
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -2146,13 +2169,11 @@ export function guardExtension(
       }
 
       if (!isTainted()) return undefined;
-      const rule = ruleNow;
-      if (!rule) return undefined;
-
-      // Recorded even when it does not block: "this ran with the guard off" is
-      // the thing you want to find later, and it is invisible otherwise.
-      if (!enforceTaint) {
-        note("allowed-by-exemption", `${rule.name} — the guard is off here`);
+      const rule = heldByTaint;
+      if (!rule) {
+        // Recorded even when it does not block: "this ran with a rule off" is
+        // the thing you want to find later, and it is invisible otherwise.
+        if (matched[0]) note("allowed-by-exemption", `${matched[0].name} — exempt for this routine`);
         return undefined;
       }
 

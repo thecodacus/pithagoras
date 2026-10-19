@@ -197,7 +197,7 @@ test("a tool switched off is not described to the model as one a script can call
 
 test("the guard refuses a call a script makes to a tool that is switched off, whatever pi lets it find", () => {
   const handlers = {};
-  guardExtension("t", () => ({ role: "primary", key: "me" }), "codemode-unit", true, () => ({ allowed: false, allowlist: [] }), undefined, [], () => new Set(["scripted"]))({ on: (k, f) => (handlers[k] = f) });
+  guardExtension("t", () => ({ role: "primary", key: "me" }), "codemode-unit", () => new Set(), () => ({ allowed: false, allowlist: [] }), undefined, [], () => new Set(["scripted"]))({ on: (k, f) => (handlers[k] = f) });
   const call = (extra) => handlers.tool_call({ toolName: "scripted", toolCallId: "c/1", input: { path: "x" }, ...extra });
   assert.equal(call({ parentToolCallId: "c" })?.block, true);
   assert.match(call({ parentToolCallId: "c" }).reason, /switched off in this conversation, and a script does not reach it either/);

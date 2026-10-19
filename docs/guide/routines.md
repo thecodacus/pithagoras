@@ -98,8 +98,13 @@ they say**. Fetching the logs taints the session, and the fix is a push. Greppin
 those logs for the word `token` looks like reading credentials. Nothing is
 wrong, and the run stops anyway.
 
-**Injection guard** on a routine's page turns the blocking off for that routine
-alone. Two things stay:
+**Settings → Guard** lets that routine alone do what a rule holds back, one rule
+at a time: the log-fixing routine above needs `publish` and maybe
+`read-credentials` off, and nothing else. Every other rule still holds for it,
+and its runs read the change at their next call. The routine's own page says how
+its rules stand, with a link to change them. A routine from before the Guard page
+whose one switch was off is exempt from every rule until you switch some back on.
+Two things stay:
 
 - Untrusted content is still labelled as untrusted, so the agent knows what it
   is reading. That half never gets in the way.

@@ -86,7 +86,7 @@ import {
   withdrawnMcpTools,
   type McpView,
   browserAllowlist,
-  routineGuards,
+  routineExemptions,
   updateSession,
   type EventRow,
   type SessionRow,
@@ -1177,8 +1177,8 @@ class SessionManager extends EventEmitter {
       // A routine run gets the report tool instead: it is the one kind of
       // session with nobody on the other end to read what it found.
       routineSlug: session.kind === "routine" ? session.routine_slug : undefined,
-      // A routine may be exempted from the taint rules; nothing else can be.
-      enforceTaint: session.kind === "routine" ? routineGuards(session.routine_slug) : true,
+      // A routine may be exempted from taint rules, read per call as browserNow is; nothing else can be.
+      exemptNow: () => (session.kind === "routine" ? routineExemptions(session.routine_slug) : new Set<string>()),
       // Re-read per call: the row is what the UI toggles, and a session that
       // has to be restarted to notice is a switch that looks broken.
       browserNow: () => {

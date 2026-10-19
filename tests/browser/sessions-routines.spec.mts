@@ -7,7 +7,7 @@ async function portal(page: Page, opts: { routine?: Record<string, unknown>; ren
   const other = { ...session, id: 's2', title: 'Other chat', workspace: '/w/notes' };
   const routine = {
     id: 'r1', slug: 'build', name: 'Nightly build', enabled: true, schedule: '0 2 * * *', runAt: null, mode: 'repeats', done: false,
-    instructions: 'Build it', freshSession: false, guard: true, browser: false, workspace: null, reportChannel: null, reportTarget: null,
+    instructions: 'Build it', freshSession: false, guard: true, exempt: [], browser: false, workspace: null, reportChannel: null, reportTarget: null,
     lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '', updatedAt: '1',
     workspaceProblem: null, ...opts.routine,
   };
@@ -177,7 +177,10 @@ test('a routine\'s switches say what they switch and whether they are on, and it
   await page.getByRole('button', { name: /Nightly build/ }).click();
   // The one beside the name, and the two rows: each is a switch with its state, not a button.
   await expect(page.getByRole('switch', { name: 'Nightly build' })).toHaveAttribute('aria-checked', 'true');
-  await expect(page.getByRole('switch', { name: /^Injection guard/ })).toHaveAttribute('aria-checked', 'true');
+  // The guard's rules are no switch here: the routine says how they stand, and Settings → Guard changes them one by one.
+  await expect(page.getByRole('switch', { name: /^Injection guard/ })).toHaveCount(0);
+  await expect(page.getByText('Every rule holds after a run reads something that looks like a prompt injection.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Change' })).toHaveAttribute('href', '/settings/guard');
   await expect(page.getByRole('switch', { name: /^Fresh session each run/ })).toHaveAttribute('aria-checked', 'false');
   // The browser is no switch of its own any more: it is a group in the routine's tools, off, and saved as it is flipped.
   await expect(page.getByRole('switch', { name: /^Browser/ })).toHaveCount(0);

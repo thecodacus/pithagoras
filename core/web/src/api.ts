@@ -90,8 +90,10 @@ export interface Routine {
   done: boolean;
   instructions: string;
   freshSession: boolean;
-  /** False lets this routine act on what it read — see the guard. */
+  /** False lets this routine act on what it read against at least one of the guard's rules — see `exempt`. */
   guard: boolean;
+  /** The guard's rules its runs are exempt from, by name: set in Settings → Guard. */
+  exempt: string[];
   /** True lets this routine's runs drive the agent's browser. */
   browser: boolean;
   /** Where its runs happen: null for Home, else a project's directory. */
@@ -894,6 +896,14 @@ export const api = {
   disconnectBrowser: () =>
     json<{ connectedAs: string | null }>("/api/browser/connect", { method: "DELETE" }),
   sandbox: () => json<SandboxState>("/api/sandbox"),
+  guard: () => json<GuardState>("/api/guard"),
+  setGuardServer: (name: string, trusted: boolean) =>
+    json<{ name: string; trusted: boolean }>(`/api/guard/servers/${encodeURIComponent(name)}`, { method: "PUT", body: JSON.stringify({ trusted }) }),
+  setGuardRoutine: (id: string, exempt: string[]) =>
+    json<{ id: string; exempt: string[] }>(`/api/guard/routines/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ exempt }) }),
+  revokeApproval: (id: string) => json<{ ok: true }>(`/api/guard/approvals/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  untrustResult: (sessionId: string, id: string) =>
+    json<{ ok: true }>(`/api/guard/trusted/${encodeURIComponent(sessionId)}/${encodeURIComponent(id)}`, { method: "DELETE" }),
   setSandbox: (policy: SandboxPolicy) =>
     json<{ policy: SandboxPolicy; report: SandboxReport; chats: { reloaded: number; waiting: number } }>("/api/sandbox", { method: "PUT", body: JSON.stringify(policy) }),
   setBrowserCursor: (on: boolean) =>
@@ -2079,6 +2089,23 @@ export interface SandboxState {
   trustedDir: string;
   secretsDir: string;
   lastReport: SandboxReport | null;
+}
+
+/** Settings → Guard: what the guard holds the agent to, and what of it can be changed there. */
+export interface GuardState {
+  /** Whether pi runs with the guard here: not under the container executor. */
+  running: boolean;
+  sandbox: "on" | "off" | "unavailable";
+  /** Whether a primary user is named. */
+  primary: boolean;
+  /** Whether the routine reports' chat is set, which is where approvals are asked for. */
+  approvalsTo: boolean;
+  rules: { name: string; why: string }[];
+  /** The MCP servers, and whether each is counted as the person's own; the browser's never is. */
+  servers: { name: string; trusted: boolean; browser: boolean }[];
+  routines: { id: string; name: string; exempt: string[] }[];
+  approvals: { id: string; sessionId: string; chat: string | null; tool: string; subject: string; expiresAt: string }[];
+  trusted: { sessionId: string; chat: string | null; results: { id: string; tool?: string; signals?: string[]; excerpt?: string }[] }[];
 }
 
 export type ProviderKind = "llama-cpp" | "llama-swap" | "ollama" | "openrouter" | "hosted" | "custom";

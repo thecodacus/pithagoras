@@ -10,6 +10,7 @@ import {
   LuFileJson,
   LuFolder,
   LuHammer,
+  LuShield,
   LuShieldCheck,
   LuImages,
   LuInfo,
@@ -52,6 +53,7 @@ import { UpdateSection } from "./UpdateSection";
 import { Modal, useUnsavedDraft } from "./Modal";
 import { ToolDefaults } from "./ToolDefaults";
 import { SandboxSettings } from "./SandboxSettings";
+import { GuardSettings } from "./GuardSettings";
 import { isEnter } from "../shortcuts";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { ProvidersPanel } from "./ProvidersPanel";
@@ -107,6 +109,7 @@ const GROUPS: { label: string; tabs: TabDef[] }[] = [
     tabs: [
       { id: "tools", label: msg("Tools"), icon: <LuHammer />, hint: msg("What the agent may reach for, by default") },
       { id: "sandbox", label: msg("Sandbox"), icon: <LuShieldCheck />, hint: msg("What the agent may read, change and run") },
+      { id: "guard", label: msg("Guard"), icon: <LuShield />, hint: msg("What the agent is held to after it reads something untrusted") },
       { id: "media", label: msg("Media"), icon: <LuImages />, hint: msg("The image and video models behind making pictures and videos") },
       { id: "skills", label: msg("Skills"), icon: <LuWrench />, hint: msg("Procedures the agent can reach for") },
       { id: "mcp", label: msg("MCP"), icon: <LuPlug />, hint: msg("Servers the agent can pull tools from") },
@@ -321,6 +324,7 @@ export const ConfigModal = memo(function ConfigModal({
       {nav.kind === "tab" && nav.id === "add-ons" && <PortalExtensions onError={setError} />}
       {nav.kind === "tab" && nav.id === "tools" && <ToolDefaults onError={setError} />}
       {nav.kind === "tab" && nav.id === "sandbox" && <SandboxSettings onError={setError} />}
+      {nav.kind === "tab" && nav.id === "guard" && <GuardSettings onError={setError} onOpen={(id) => setNav({ kind: "tab", id })} />}
       {nav.kind === "tab" && nav.id === "media" && <MediaPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "skills" && <SkillsPanel onError={setError} />}
       {nav.kind === "tab" && nav.id === "mcp" && <McpPanel onError={setError} />}
