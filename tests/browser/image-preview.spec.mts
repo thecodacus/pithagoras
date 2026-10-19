@@ -394,18 +394,37 @@ test.describe('in the chat', () => {
   });
 });
 
+/** Voice mode on the voice fixture, with what is installed answered by `module`'s extension where there is one. */
+async function voiceMode(page: Page, module?: string) {
+  await page.route('**/api/browser', (route) => route.fulfill({ json: { running: false, sessions: [], install: { container: 'stopped' } } }));
+  await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
+  await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
+  await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
+  await page.route('**/voice/speech', (route) => route.fulfill({ status: 204 }));
+  if (module) {
+    await page.route('**/api/extension-ui', (route) => route.fulfill({ json: { extensions: [{ name: 'my-pictures', version: '1.0.0', entry: '/api/extension-ui/my-pictures/client.js?v=1' }] } }));
+    await page.route('**/api/extension-ui/my-pictures/client.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: module }));
+  }
+  await folder(page, 'test');
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+}
+
+test("an extension draws a tile of its own on its tool's card in voice mode, in the place of the mark, told of the call", async ({ page }) => {
+  const TILE = `export default function (portal) {
+    const h = portal.React.createElement;
+    portal.slots.register("chat.tool", { id: "pics", tool: "generate_image", component: ({ card }) => card, tile: ({ call, chat }) => h("span", { "data-testid": "my-tile" }, call.status + " " + typeof call.since + " " + chat.id) });
+  }`;
+  await voiceMode(page, TILE);
+  await page.getByRole('button', { name: "Call an extension's generate_image" }).click();
+  const theirs = page.locator('.voice-tool-float', { hasText: 'A cat on a sofa' });
+  await expect(theirs.getByTestId('my-tile')).toHaveText('done number test');
+  await expect(theirs.locator(':scope > svg')).toHaveCount(0);
+});
+
 test.describe('in voice mode', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.route('**/api/browser', (route) => route.fulfill({ json: { running: false, sessions: [], install: { container: 'stopped' } } }));
-    await page.route('**/api/sessions/test/commands', (route) => route.fulfill({ json: { commands: [] } }));
-    await page.route('**/api/sessions/test/config', (route) => route.fulfill({ status: 503, json: {} }));
-    await page.route('**/api/voice', (route) => route.fulfill({ json: { enabled: true } }));
-    await page.route('**/voice/speech', (route) => route.fulfill({ status: 204 }));
-    await folder(page, 'test');
-    await page.goto('/tests/voice.html');
-    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
-    await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
-  });
+  test.beforeEach(async ({ page }) => voiceMode(page));
 
   test('the card of a picture shows the same preview as a tile: being made, made, not made', async ({ page }) => {
     await page.getByRole('button', { name: 'Start generating a picture' }).click();
@@ -440,22 +459,6 @@ test.describe('in voice mode', () => {
     await expect(theirs).toContainText('Making a picture');
     await expect(theirs.locator('.image-preview')).toHaveCount(0);
     await expect(theirs.locator(':scope > svg')).toHaveCount(1);
-  });
-
-  test("an extension draws a tile of its own on its tool's card, in the place of the mark, told of the call", async ({ page }) => {
-    const TILE = `export default function (portal) {
-      const h = portal.React.createElement;
-      portal.slots.register("chat.tool", { id: "pics", tool: "generate_image", component: ({ card }) => card, tile: ({ call, chat }) => h("span", { "data-testid": "my-tile" }, call.status + " " + typeof call.since + " " + chat.id) });
-    }`;
-    await page.route('**/api/extension-ui', (route) => route.fulfill({ json: { extensions: [{ name: 'my-pictures', version: '1.0.0', entry: '/api/extension-ui/my-pictures/client.js?v=1' }] } }));
-    await page.route('**/api/extension-ui/my-pictures/client.js*', (route) => route.fulfill({ contentType: 'text/javascript', body: TILE }));
-    await page.reload();
-    await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
-    await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
-    await page.getByRole('button', { name: "Call an extension's generate_image" }).click();
-    const theirs = page.locator('.voice-tool-float', { hasText: 'A cat on a sofa' });
-    await expect(theirs.getByTestId('my-tile')).toHaveText('done number test');
-    await expect(theirs.locator(':scope > svg')).toHaveCount(0);
   });
 
   test('the picture of a call that ends is fetched once in voice mode, for the chat behind the stage, the card and the picture window', async ({ page }) => {
