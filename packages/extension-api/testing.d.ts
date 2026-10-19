@@ -1,5 +1,9 @@
 /**
- * A portal to test an extension's server half against: see testing.mjs.
+ * A portal to test an extension's server half against: see testing.mjs, and "Testing a server half" in the guide.
+ *
+ * It stands on the portal's own source (files, the push hub, the sqlite driver), found beside this package, so it works
+ * where this package is the one in a checkout of the portal, as for the extensions that come with it. With the package
+ * from npm there is no portal beside it, and `mockPortal()` rejects, saying so.
  */
 import type { ServerHalf, ServerPortal, Chat } from "./server";
 
@@ -56,9 +60,13 @@ export interface MockPortalOptions {
   extensions?: Record<string, unknown>;
   /** Called before `chats.tell` starts the chat's pi and rings its bell: false says the chat cannot be reached, a throw fails, anything else goes on. It may hold the answer. */
   tell?: (chat: string, data: unknown) => Promise<boolean | void> | boolean | void;
-  /** The same for `chats.followUp`, which starts the chat's pi and has it say the message. */
+  /**
+   * The same for `chats.followUp`, which starts the chat's pi and has it say the message. As the portal's, it resolves
+   * `true` once the message is handed to pi (a pi that refuses it shows as a `portal_failed` event, heard by `chats.onEvent`)
+   * and `false` when `executor` is not "host".
+   */
   followUp?: (chat: string, message: { text: string; details?: unknown; type?: string }) => Promise<boolean | void> | boolean | void;
-  /** `pi.sendMessage` of every chat's pi throws this. */
+  /** `pi.sendMessage` of every chat's pi throws this; `chats.followUp` still resolves, and the chat's events say `portal_failed`. */
   sendThrows?: string;
 }
 

@@ -6,15 +6,16 @@
  *   const stop = await mock.start(serverHalf);        // the module's default export, called with the mock's portal
  *   const web = await mock.serve();                    // its routes, on a port of their own
  *   const { status, body } = await web.call("GET", "/chats/a/notes");
- *   const page = await mock.page();                    // a page of the portal that listens to topics
+ *   const page = mock.page();                          // a page of the portal that listens to topics
  *   await page.listen("notes");
  *   await mock.stop();
  *
  * What an extension relies on for its safety is the portal's, not made up here: `portal.files` is the portal's
  * own (`core/server/src/folder-files.ts`, checks and all), and so is the hub that
  * carries `portal.push` to the pages (`extension-push.ts`), found beside this package in a checkout of the portal
- * (its TypeScript source when tests run under tsx, its build otherwise). Pass `files` to stand on
- * another. What the portal does with the agent is faked in the smallest way the extensions need:
+ * (its TypeScript source when tests run under tsx, its build otherwise). So this entry works where this package is
+ * the one in a checkout (the extensions that come with the portal); with the package from npm there is no portal
+ * beside it, and `mockPortal()` says so. Pass `files` to stand on another. What the portal does with the agent is faked in the smallest way the extensions need:
  * a chat's pi (`mock.pi(chat)`) is an object that keeps the tools and the messages it is given.
  */
 import { spawn } from "node:child_process";
@@ -48,11 +49,15 @@ export async function portalProc() {
   return { stat: (pid) => statOf(pid), signalSession };
 }
 
+/** A package of the portal's server (its express, its better-sqlite3), found from there: beside this package in a checkout. */
+async function fromPortal(name) {
+  const { createRequire } = await import("node:module");
+  return createRequire(new URL("../../core/server/package.json", import.meta.url))(name);
+}
+
 /** The portal's own `portal.sqlite` (the better-sqlite3 the portal runs on), for a test that calls a server half by hand. */
 export async function portalSqlite() {
-  const { createRequire } = await import("node:module");
-  // From the portal's server, whose driver it is: beside this package in a checkout.
-  return createRequire(new URL("../../core/server/package.json", import.meta.url))("better-sqlite3");
+  return fromPortal("better-sqlite3");
 }
 
 const scratches = [];
@@ -129,11 +134,12 @@ function fakePi(extension, chat, factories, mock) {
  * @param {(chat: string, message: object) => Promise<boolean | void> | boolean | void} [options.followUp]   the same for `chats.followUp`, which starts the chat's pi and has it say the message
  */
 export async function mockPortal(options = {}) {
-  const { default: express } = await import("express");
+  // The portal's hub first: where there is no portal beside this package, that is what the failure says, not a package missing.
+  const hub = await core("extension-push");
+  const express = await fromPortal("express");
   const { folderFiles } = options.files ? { folderFiles: options.files } : await core("folder-files");
   const proc = await portalProc();
   const sqlite = options.sqlite ?? (await portalSqlite());
-  const hub = await core("extension-push");
   const git = options.git === false ? undefined : (await core("git")).gitAt;
   const extension = options.extension ?? "pithagoras-test";
 
@@ -247,14 +253,23 @@ export async function mockPortal(options = {}) {
         if (typeof message?.text !== "string" || !message.text.trim()) throw new TypeError("A follow-up needs text");
         if (!chats.has(chat)) throw new Error("No such chat");
         mock.followedUp.push({ chat, ...message });
+        // As the portal answers where its executor does not run pi in its own process: the agent cannot be reached.
+        if (portal.executor !== "host") return false;
         // The hook may hold the answer, throw, or say false: the agent cannot be reached. Without a word the message is said.
         if ((await options.followUp?.(chat, message)) === false) return false;
         const pi = mock.pi(chat);
         // As the portal puts it in the conversation: a message of the package's, seen by the person, run after the turn that is going on.
-        pi.pi.sendMessage(
-          { customType: message.type ? `${extension}:${message.type}` : extension, content: message.text, display: true, details: message.details },
-          { deliverAs: "followUp", triggerTurn: true },
-        );
+        // It is handed over and not waited for, so a pi that refuses it is no failure of the call: the chat's events say so
+        // (`portal_failed`, which `chats.onEvent` hears).
+        try {
+          pi.pi.sendMessage(
+            { customType: message.type ? `${extension}:${message.type}` : extension, content: message.text, display: true, details: message.details },
+            { deliverAs: "followUp", triggerTurn: true },
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          queueMicrotask(() => mock.event(chat, { type: "portal_failed", error: `A message from ${extension} could not be delivered: ${reason}` }));
+        }
         return true;
       },
       offers: () => "direct",

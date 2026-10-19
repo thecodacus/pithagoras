@@ -297,9 +297,10 @@ export interface ServerPortal {
     /**
      * Says something to a chat's agent as a message of the package's: it is put in the conversation, where the person
      * reads it as a notice, after the turn that is going on, or at once (a turn starts) when the agent is idle. The
-     * chat's pi is started if it was let go. Resolves true once pi has taken it (the run it starts is not waited for),
-     * false where pi does not run in the portal's own process; rejects where the chat is gone or its pi could not
-     * start. `details` is kept with the message for the package's own tools and cards; `type` names the kind of
+     * chat's pi is started if it was let go. Resolves true as soon as the message is handed to pi (neither the run it
+     * starts nor pi's answer is waited for: a message pi then refuses is a `portal_failed` event of the chat, which
+     * `onEvent` hears), false where pi does not run in the portal's own process; rejects where the chat is gone or its pi
+     * could not start. `details` is kept with the message for the package's own tools and cards; `type` names the kind of
      * message when the package has several (the message is the package's `<name>:<type>`).
      */
     followUp(chatId: string, message: { text: string; details?: unknown; type?: string }): Promise<boolean>;

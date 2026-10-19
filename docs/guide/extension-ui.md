@@ -1101,7 +1101,8 @@ misses it.
   the listeners of a folder there, and look at the folder only while one listens.
 - **Several handlers of one topic in a page share one listening.** The first begins it and hears where
   things stand; one that comes while others listen hears what comes after, so ask for where things stand
-  yourself (a request) when you start.
+  yourself (a request) when you start. A handler that comes as the last one stopped, in the same tick (an effect
+  that runs again), is the first again: the page asks anew and is told where things stand.
 - **Your server half stopping** (the package is updated, or switched off and on) lets go of every page that listened:
   each is told the topic was lost and asks again until your half is running, when `onListen` decides again.
 - The connection is behind the login and ended when the password changes, like the portal's other streams.
@@ -1117,8 +1118,9 @@ await portal.chats.followUp(chatId, { text: "The person asked you in a commentâ€
 
 The text goes into the conversation as a message of your package's, which the person reads as a notice and the
 model as a message of its own, after the turn that is going on or, when the agent is idle, at once: a turn starts.
-The chat's pi is started if it was let go. It resolves `true` once pi has taken it (the run it starts is not
-waited for), `false` where pi does not run in the portal's own process (`portal.executor` is not `"host"`), and
+The chat's pi is started if it was let go. It resolves `true` as soon as the message is handed to pi (neither the run
+it starts nor pi's answer is waited for: a message pi then refuses shows as a `portal_failed` event of the chat, which
+`chats.onEvent` hears), `false` where pi does not run in the portal's own process (`portal.executor` is not `"host"`), and
 rejects where the chat is gone. `details` is kept with the message for your own tools and cards; `type` names the
 kind when you have several. Only a server half can say it: a page cannot make the agent say anything through your
 package (`chats.tell` carries what a page says to your *pi extension*, which should not trust it as the agent's words).
@@ -1642,6 +1644,35 @@ the repository's root. The portal's own specs never install one of these: where
 they need an extension's panel or window, they install a stand-in,
 `tests/fixtures/extensions/console`, so that any extension that comes with the
 portal can be removed without a spec of the portal's failing.
+
+### Testing a server half
+
+`@pithagoras/extension-api/testing` gives a test a portal to call a server half with, so that its routes, tools and
+pushes are tried without the portal's own code in the test:
+
+```js
+import { mockPortal, scratch } from "@pithagoras/extension-api/testing";
+import serverHalf from "../server.js";
+
+const mock = await mockPortal({ extension: "my-notes", chats: { a: scratch() } });   // chat "a" works in a new folder
+await mock.start(serverHalf);                 // your default export, called with the mock's portal
+const web = await mock.serve();               // its routes, on a port of their own
+const { status, body } = await web.call("GET", "/chats/a/notes");
+const page = mock.page();                     // a page that listens to topics
+await page.listen("notes");
+await mock.stop();
+```
+
+What your half relies on for its safety is the portal's own, not made up: `portal.files`, `portal.proc`,
+`portal.sqlite` and the hub that carries `portal.push` to the pages. What happens with the agent is faked in the smallest
+way an extension needs: a chat's pi (`mock.pi(chat)`) keeps the tools and messages it is given, `chats.followUp` answers as
+the portal's does (it resolves `true` once the message is handed to pi, `false` when `executor` is not `"host"`, and a pi that
+refuses the message shows as a `portal_failed` event, which `chats.onEvent` hears), and the options `tell`, `followUp` and
+`sendThrows` steer what a chat's pi answers.
+
+It stands on the portal's source, so it needs a checkout of the portal: `mockPortal()` finds `core/server` beside the
+package, and says so when it is not there. That is where the extensions that come with the portal are. An extension
+developed on its own, with the package from npm, cannot use it, and tests its server half with a mock of its own.
 
 ## Keeping it fast
 

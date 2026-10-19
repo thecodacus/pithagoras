@@ -15,7 +15,7 @@ import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
  */
 
 const DATA = scratch('docs-ping-data-');
-interface Options { order?: string[]; tell?: 'works' | 'false' | 'throws'; sendThrows?: string; wakeMs?: number }
+interface Options { order?: string[]; tell?: 'works' | 'false' | 'throws'; wakeMs?: number }
 
 /**
  * The server half for chats that work in these folders, with a portal whose `chats.followUp` does what the portal's does: starts the
@@ -28,7 +28,6 @@ async function portal(chats: Record<string, string>, options: Options = {}) {
     executor: 'host',
     chats,
     dataDir: DATA,
-    sendThrows: options.sendThrows,
     async followUp() {
       await state.hold;
       if (state.tell === 'throws') throw new Error('This chat was discarded');
@@ -568,17 +567,6 @@ test('when the agent cannot be reached the comment is kept and the thread says i
     } finally {
       await docs.close();
     }
-  }
-});
-
-test('a chat whose pi cannot take the message is reported as not delivered, with the reason', async () => {
-  const { docs, person, threads } = await withDocument('docs-ping-refused-', ['a'], { sendThrows: 'The runtime is not ready' });
-  try {
-    await person('Hello, @agent?');
-    await until(async () => (await threads())[0].ping.state === 'failed');
-    assert.equal((await threads())[0].ping.error, 'The runtime is not ready');
-  } finally {
-    await docs.close();
   }
 });
 
