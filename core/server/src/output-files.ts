@@ -35,14 +35,23 @@ function kindOf(base: string, rel: string): FileKind | undefined {
     return undefined;
   }
   try {
-    const head = Buffer.alloc(VIDEO_HEAD);
-    const bytes = head.subarray(0, readSync(opened.fd, head, 0, head.length, 0));
-    if (opened.size <= MAX_PICTURE_BYTES && pictureType(bytes)) return "picture";
-    if (opened.size <= MAX_VIDEO_BYTES && videoType(bytes)) return "video";
+    const type = mediaTypeAt(opened.fd);
+    if (opened.size <= MAX_PICTURE_BYTES && type?.startsWith("image/")) return "picture";
+    if (opened.size <= MAX_VIDEO_BYTES && type?.startsWith("video/")) return "video";
     return "file";
   } finally {
     closeSync(opened.fd);
   }
+}
+
+/**
+ * What an open file is by its first bytes, where it is a picture (PNG, JPEG, GIF, WebP) or a clip a browser plays
+ * (WebM, MP4): its type. Nothing for any other file, whatever it is called.
+ */
+export function mediaTypeAt(fd: number): string | undefined {
+  const head = Buffer.alloc(VIDEO_HEAD);
+  const bytes = head.subarray(0, readSync(fd, head, 0, head.length, 0));
+  return pictureType(bytes) ?? videoType(bytes)?.mimeType;
 }
 
 /** The files a call's answer names, as they are in the chat's folder `folder` now. */

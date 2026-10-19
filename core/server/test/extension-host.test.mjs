@@ -27,6 +27,7 @@ let revs = 0;
 let current;
 
 const MODULE = `
+  const { closeSync: require_close } = await import("node:fs");
   const seen = (globalThis.seen ??= { life: [], events: [], stopped: 0, started: 0 });
   seen.started++;
   seen.portal = portal;
@@ -37,15 +38,13 @@ const MODULE = `
   portal.router.get("/chats/:id", (req, res) => { const chat = portal.chats.get(req.params.id); chat ? res.json({ chat, folder: portal.chats.folder(chat.id) }) : res.status(404).json({ error: "No such chat" }); });
   portal.router.get("/boom", () => { throw new Error("its own failure"); });
   portal.router.get("/files/:name", (req, res) => res.json({ name: req.params.name, query: req.query }));
-  // A file made in a chat's folder, and one of it sent: as a picture or a clip by its bytes, or as it is.
+  // A file made in a chat's folder, and one of it sent: what it is by its bytes is the package's to look at.
   portal.router.post("/make", portal.http.raw({ type: "*/*", limit: "5mb" }), (req, res) => res.json({ path: portal.files.create(portal.chats.folder("a"), "", req.query.name, req.body) }));
-  portal.router.get("/send/:as", (req, res) => {
-    try {
-      const file = portal.files.open(portal.chats.folder("a"), req.query.path, req.params.as === "plain" ? undefined : { as: req.params.as });
-      portal.http.send(req, res, file, req.query.download ? { download: req.query.download } : {});
-    } catch (e) {
-      res.status(400).json({ code: e.code, error: e.message });
-    }
+  portal.router.get("/opened", (req, res) => { const { fd, ...file } = portal.files.open(portal.chats.folder("a"), req.query.path); res.json(file); require_close(fd); });
+  portal.router.get("/send", (req, res) => {
+    const file = portal.files.open(portal.chats.folder("a"), req.query.path);
+    if (req.query.only === "pictures" && !file.mimeType?.startsWith("image/")) { require_close(file.fd); return res.status(400).json({ error: "not a picture" }); }
+    portal.http.send(req, res, file, req.query.download ? { download: req.query.download } : {});
   });
   portal.chats.onOpen((chatId) => (chatId === "quiet" ? undefined : { type: "state", for: chatId }));
   // One that cannot be written as JSON: left out, and nothing else is the worse for it.
@@ -140,7 +139,7 @@ test("a server half is told of the chats, and of the folder each works in", asyn
   assert.throws(() => portal.files.inside(folder, "../elsewhere"));
 });
 
-test("a server half makes a file in a chat's folder, never over one that is there, and sends a picture as the portal sends its own", async () => {
+test("a server half makes a file in a chat's folder, never over one that is there, is told what a file is by its bytes, and sends it as the portal sends its own", async () => {
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
   const make = (name, body) => fetch(at(`/api/x/@codacus/notes/make?name=${encodeURIComponent(name)}`), { method: "POST", headers: { "content-type": "application/octet-stream" }, body }).then((r) => r.json());
   assert.deepEqual(await make("dot.png", png), { path: "dot.png" });
@@ -148,8 +147,15 @@ test("a server half makes a file in a chat's folder, never over one that is ther
   assert.deepEqual(readFileSync(path.join(work, "dot (2).png")), png);
   writeFileSync(path.join(work, "notes.txt"), "not a picture\n");
 
-  const send = (as, file, headers = {}, extra = "") => fetch(at(`/api/x/@codacus/notes/send/${as}?path=${encodeURIComponent(file)}${extra}`), { headers });
-  const picture = await send("picture", "dot.png");
+  // What a file is, by its bytes and not its name; nothing for one that is no picture or clip.
+  const opened = async (file) => (await fetch(at(`/api/x/@codacus/notes/opened?path=${encodeURIComponent(file)}`))).json();
+  assert.deepEqual(await opened("dot.png"), { size: png.length, name: "dot.png", mimeType: "image/png" });
+  writeFileSync(path.join(work, "dot.txt"), png);
+  assert.equal((await opened("dot.txt")).mimeType, "image/png", "named as text, a picture all the same");
+  assert.equal("mimeType" in (await opened("notes.txt")), false);
+
+  const send = (only, file, headers = {}, extra = "") => fetch(at(`/api/x/@codacus/notes/send?only=${only}&path=${encodeURIComponent(file)}${extra}`), { headers });
+  const picture = await send("pictures", "dot.png");
   assert.equal(picture.status, 200);
   assert.equal(picture.headers.get("content-type"), "image/png");
   assert.equal(picture.headers.get("x-content-type-options"), "nosniff");
@@ -157,18 +163,17 @@ test("a server half makes a file in a chat's folder, never over one that is ther
   assert.deepEqual(Buffer.from(await picture.arrayBuffer()), png);
   // A version the browser has is not sent again, and the part a player asks for is sent alone.
   // As a browser revalidates: fetch would add "no-cache" to a request with If-None-Match of its own, which is never fresh.
-  assert.equal((await send("picture", "dot.png", { "if-none-match": picture.headers.get("etag"), "cache-control": "max-age=0" })).status, 304);
-  const part = await send("picture", "dot.png", { range: "bytes=0-3" });
+  assert.equal((await send("pictures", "dot.png", { "if-none-match": picture.headers.get("etag"), "cache-control": "max-age=0" })).status, 304);
+  const part = await send("pictures", "dot.png", { range: "bytes=0-3" });
   assert.equal(part.status, 206);
   assert.deepEqual(Buffer.from(await part.arrayBuffer()), png.subarray(0, 4));
-  // By its bytes, not its name.
-  assert.deepEqual(await (await send("picture", "notes.txt")).json(), { code: "invalid", error: "That is not a PNG, JPEG, GIF or WebP picture" });
-  assert.equal((await send("video", "dot.png")).status, 400);
-  // A file of no type said is bytes to be saved; any file can be sent to be saved.
-  const plain = await send("plain", "notes.txt");
+  // The package refuses what it does not take.
+  assert.equal((await send("pictures", "notes.txt")).status, 400);
+  // A file that is no picture or clip is bytes to be saved; any file can be sent to be saved.
+  const plain = await send("any", "notes.txt");
   assert.equal(plain.headers.get("content-type"), "application/octet-stream");
   assert.match(plain.headers.get("content-disposition"), /^attachment; filename="notes.txt"/);
-  assert.match((await send("picture", "dot.png", {}, "&download=dot.png")).headers.get("content-disposition"), /^attachment; filename="dot.png"/);
+  assert.match((await send("any", "dot.png", {}, "&download=dot.png")).headers.get("content-disposition"), /^attachment; filename="dot.png"/);
 });
 
 /** What a page hears under `event: extension` on a chat's stream, until `enough` of it has come. */

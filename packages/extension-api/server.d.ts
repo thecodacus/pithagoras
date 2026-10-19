@@ -66,9 +66,12 @@ export interface AgentFolder {
   home?: true;
 }
 
-/** A file opened by `files.open`, to read from `fd` and send. With `as`, what its bytes say it is. */
-export type OpenedFile = { fd: number; size: number; name: string };
-export type OpenedMedia = OpenedFile & { mimeType: string };
+/**
+ * A file opened by `files.open`, to read from `fd` and send. `mimeType` is what
+ * its first bytes say it is where it is a picture (PNG, JPEG, GIF, WebP) or a
+ * clip a browser plays (WebM, MP4), whatever it is called; absent for any other.
+ */
+export type OpenedFile = { fd: number; size: number; name: string; mimeType?: string };
 
 export type FileRefusal = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 
@@ -167,11 +170,12 @@ export interface ServerPortal {
      * Sends a file opened by `files.open` as the portal sends its own: with
      * its type, a policy that keeps it from running anything, a version a
      * browser revalidates (304), and the part a player asks for (`Range`).
-     * `cache` is the Cache-Control (default `private, no-cache`); with
-     * `download`, a file name, it is sent to be saved and never shown. Closes
-     * the file once sent, or at once when the response is gone already.
+     * A file with no `mimeType` is sent to be saved, under its name, and never
+     * shown. `cache` is the Cache-Control (default `private, no-cache`); with
+     * `download`, a file name, any file is sent to be saved. Closes the file
+     * once sent, or at once when the response is gone already.
      */
-    send(req: Request, res: Response, file: OpenedFile & { mimeType?: string }, options?: { cache?: string; download?: string }): void;
+    send(req: Request, res: Response, file: OpenedFile, options?: { cache?: string; download?: string }): void;
   };
   chats: {
     get(id: string): Chat | undefined;
@@ -265,14 +269,12 @@ export interface ServerPortal {
     makeFolder(base: string, rel: string, name: string): string;
     /** The checked path of a folder in `base`, for what reads the whole of it (an archive). */
     folder(base: string, rel: string): string;
-    /** A plain file opened once, for sending: read from `fd`, not from the path again. The caller closes it. */
-    open(base: string, rel: string): OpenedFile;
     /**
-     * A picture (PNG, JPEG, GIF or WebP, at most 25 MB) or a clip the portal
-     * plays, by its bytes and not its name, opened as `open` opens a file, with
-     * the type its bytes say. Anything else is refused (`invalid`, `too_large`).
+     * A plain file opened once, for sending: read from `fd`, not from the path
+     * again. The caller closes it. `mimeType` says what it is by its bytes, for
+     * a picture or a clip; what it may be is the caller's to decide.
      */
-    open(base: string, rel: string, options: { as: "picture" | "video" }): OpenedMedia;
+    open(base: string, rel: string): OpenedFile;
     /**
      * Keeps `data` as a new file called `name` in the folder `rel`: what a
      * server half makes for the person, a picture say. Written beside its place

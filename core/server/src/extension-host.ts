@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync } from "node:fs";
+import { closeSync, mkdirSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import semver from "semver";
@@ -13,8 +13,8 @@ import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
-import { baseDir, folderPath, listDir, makeFolder, openDownload, openPicture, readText, removeEntry, renameEntry, resolveInside, saveNewFile, unsavedAt, writeText } from "./workspace-files.js";
-import { openVideo } from "./video-files.js";
+import { baseDir, folderPath, listDir, makeFolder, openDownload, readText, removeEntry, renameEntry, resolveInside, saveNewFile, unsavedAt, writeText } from "./workspace-files.js";
+import { mediaTypeAt } from "./output-files.js";
 import { sendFile } from "./api/files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
@@ -560,8 +560,16 @@ export const folderFiles: ServerPortal["files"] = {
   remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true),
   makeFolder: (base, rel, name) => makeFolder(base, rel, name),
   folder: (base, rel) => folderPath(base, rel),
-  open: ((base: string, rel: string, options?: { as: "picture" | "video" }) =>
-    options?.as === "picture" ? openPicture(base, rel) : options?.as === "video" ? openVideo(base, rel) : openDownload(base, rel)) as ServerPortal["files"]["open"],
+  open: (base, rel) => {
+    const opened = openDownload(base, rel);
+    try {
+      const mimeType = mediaTypeAt(opened.fd);
+      return mimeType ? { ...opened, mimeType } : opened;
+    } catch (e) {
+      closeSync(opened.fd);
+      throw e;
+    }
+  },
   create: (base, rel, name, data) => saveNewFile(base, rel, name, data),
 };
 
