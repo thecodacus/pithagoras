@@ -54,7 +54,7 @@ import path from "node:path";
 import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
-import { bindingFor, identityOf, readBinding, sameBinding, writeBinding } from "./place.js";
+import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
 import { isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, removeDocument, renameDocument, writeDocument } from "./files.js";
 import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
@@ -80,7 +80,12 @@ const isId = (id) => /^\d+$/.test(id?.dev) && /^\d+$/.test(id?.ino);
 const sameId = (stat, id) => Boolean(stat) && isId(id) && String(stat.dev) === id.dev && String(stat.ino) === id.ino;
 
 /** What is said of a documents folder that is not the one the documents were kept in. */
-const REPLACED = "The documents folder here is not the folder these documents were kept in (it was replaced, or another folder was moved onto its name), so nothing was deleted or renamed. Making a new document here takes the folder as it is.";
+const REPLACED = "The documents folder here is not the folder these documents were kept in (it was replaced, or another folder was moved onto its name), so nothing was deleted or renamed. If the folder that is there is the one you want (a restore, say), making a new document here takes it as the documents folder.";
+/**
+ * What is said of a folder at the name `documents` that the portal turns away: the sandbox closed it to the agent, and it was renamed to this name (or it is
+ * one the agent could read but not write in, which the portal does not write in either: it acts in a folder the agent could use itself).
+ */
+const CLOSED = "documents in this folder is closed to the agent, or the agent could not write in it, so it is not used";
 
 export { DocError };
 
@@ -344,7 +349,10 @@ export class Store {
     this.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
   }
 
-  /** The documents folder, or nothing when there is none (or it is a link, which is none). */
+  /**
+   * The documents folder, or nothing when there is none (or it is a link, which is none, or a folder the sandbox closed to the agent: the agent
+   * can rename such a folder to this name, and the portal, which reads it as root, would hand the agent what it holds, so `likeParent`).
+   */
   documentsDir() {
     try {
       return this.files.folder(this.folder, DOCUMENTS, { direct: true, likeParent: true });
@@ -353,11 +361,13 @@ export class Store {
     }
   }
 
-  /** What stands where the documents folder is, when it is not one: a refusal (a link, or something that is not a folder), or nothing where there is no such place at all. */
+  /** What stands where the documents folder is, when it is not one: a refusal (a link, a folder that is turned away, or something that is not a folder), or nothing where there is no such place at all. */
   blockedDocuments() {
     try {
       const stat = lstatSync(path.join(this.folder, DOCUMENTS));
-      return new DocError(409, stat.isSymbolicLink() ? "documents in this folder is a link" : "documents in this folder is not a folder");
+      if (stat.isSymbolicLink()) return new DocError(409, "documents in this folder is a link");
+      // A folder that is there and is turned away by `documentsDir`: it is closed to the agent.
+      return stat.isDirectory() ? new DocError(409, CLOSED, { code: "folder_closed" }) : new DocError(409, "documents in this folder is not a folder");
     } catch {
       return null;
     }
@@ -366,12 +376,13 @@ export class Store {
   /**
    * The documents folder, made if it is not there: with the folder's owner and mode, so the agent can write in it as before. A folder made
    * here is the one the store holds to (`pin`), and so is one it finds when it holds to none. `trust`: a person made a document, so the
-   * folder as it is now is the one, also when it is another than the store held to (it was replaced on purpose).
+   * folder as it is now is the one, also when it is another than the store held to (it was replaced on purpose). Only a folder that
+   * `documentsDir` gives is ever held to: one the sandbox closed to the agent is refused (409), however it came to be called `documents`.
    */
   makeDocumentsDir({ trust = false } = {}) {
     const found = this.documentsDir();
     if (found) {
-      if (trust || !this.pinned()) this.pin(found);
+      if (trust || !this.pinned()) this.pin();
       return found;
     }
     try {
@@ -382,18 +393,10 @@ export class Store {
     }
     const made = this.documentsDir();
     if (made) {
-      this.pin(made);
+      this.pin();
       return made;
     }
-    let what = "not a folder";
-    try {
-      const found = lstatSync(path.join(this.folder, DOCUMENTS));
-      // A folder that is there and is neither: the portal turned it away (the sandbox closed it to the agent, and it was renamed to this name).
-      what = found.isSymbolicLink() ? "a link" : found.isDirectory() ? "closed to the agent, so it is not used" : what;
-    } catch {
-      // Gone again: it is none of these.
-    }
-    throw new DocError(409, `documents in this folder is ${what}`);
+    throw this.blockedDocuments() ?? new DocError(409, "documents in this folder is not a folder");
   }
 
   /**
@@ -410,28 +413,39 @@ export class Store {
     }
   }
 
-  /** Holds to the documents folder `dir`: the one made here, or the first the store sees. */
-  pin(dir) {
+  /**
+   * Which folder is at `documents` now, `{ dev, ino }`, told by the portal from the folder as it holds it (`files.identity`), not from a look at
+   * the path: and only a folder the agent could use itself (`likeParent`), told on that same folder, so that a folder the sandbox closed to the
+   * agent is never given an identity, however the agent swaps it in. Nothing where there is none, or it is a link, or it is closed.
+   */
+  documentsIdentity() {
     try {
-      this.setMeta("documents", JSON.stringify(identityOf(dir)));
+      return this.files.identity(this.folder, DOCUMENTS, { direct: true, likeParent: true });
     } catch {
-      // Gone again: nothing to hold to.
+      return null;
     }
   }
 
   /**
-   * Whether `dir` is the folder a deletion or a rename may act in, which is `expected` (the folder it was decided in) or else the one held to: it
-   * is returned as `{ dev, ino }`, for the call that acts to check on the folder it holds (`expect` of files.js); else a 409. This look is for the
-   * clear refusal; what stops a folder moved there after it is the call's own check, on the descriptor.
+   * Holds to the documents folder that is there now: the one made here, or the first the store sees. Only if it is one the agent could use
+   * itself (`documentsIdentity`): a folder that is not is never held to, so the store never acts in it, and a pin that exists stays as it is.
    */
-  holds(dir, expected = this.pinned()) {
-    let here = null;
-    try {
-      here = identityOf(dir);
-    } catch {
-      // Gone since it was found: it is not that folder.
-    }
-    if (!here || (expected && (here.dev !== expected.dev || here.ino !== expected.ino))) throw new DocError(409, REPLACED, { code: "folder_replaced" });
+  pin() {
+    const found = this.documentsIdentity();
+    if (found) this.setMeta("documents", JSON.stringify(found));
+  }
+
+  /**
+   * Whether the documents folder is the folder a deletion or a rename may act in, which is `expected` (the folder it was decided in) or else the
+   * one held to: it is returned as `{ dev, ino }`, for the call that acts to check on the folder it holds (`expect` of files.js); else a 409. This
+   * look is for the clear refusal; what stops a folder moved there after it is the call's own check, on the descriptor.
+   */
+  holds(expected = this.pinned()) {
+    // Gone since it was found, a link now, or closed to the agent: it is not that folder. A folder that is still there to be read, and is not one to hold to,
+    // is one the agent could not write in.
+    const here = this.documentsIdentity();
+    if (!here) throw this.documentsDir() ? new DocError(409, CLOSED, { code: "folder_closed" }) : new DocError(409, REPLACED, { code: "folder_replaced" });
+    if (expected && (here.dev !== expected.dev || here.ino !== expected.ino)) throw new DocError(409, REPLACED, { code: "folder_replaced" });
     return expected ?? here;
   }
 
@@ -461,8 +475,7 @@ export class Store {
   async recover() {
     rmSync(this.repo.gitPath("index.lock"), { force: true });
     // The documents folder the store sees first is the one it holds to (see `pinned`); a folder made here was held to when it was made.
-    const documents = this.documentsDir();
-    if (documents && !this.pinned()) this.pin(documents);
+    if (!this.pinned() && this.documentsDir()) this.pin();
     await this.replay();
     // A rename that was cut off before its commit is finished first: the file under its new name would be taken in as a document of its own.
     await this.resume("rename");
@@ -722,6 +735,11 @@ export class Store {
    */
   unreadable(row) {
     const dir = this.documentsDir();
+    // A folder that is turned away (closed to the agent) is why, not that there is no document.
+    if (!dir) {
+      const blocked = this.blockedDocuments();
+      if (blocked?.extra.code === "folder_closed") return blocked;
+    }
     const closed = dir && this.closed(dir);
     if (closed) return closed;
     if (dir && isPlainFile(dir, row.name)) return new DocError(409, "The document's file is bigger than 1 MB, or the portal is not allowed to read it");
@@ -760,8 +778,11 @@ export class Store {
           written = writeDocument(this.files, dir, name, bytes, { create: true });
         } catch (e) {
           this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
-          // Anything in the way (a file, a link, a second name) makes the name taken: the next number is free.
+          // Anything in the way (a file, a link, a second name) makes the name taken: the next number is free. Not a folder that the agent could not
+          // write in: no name is free there.
           if (e instanceof Refused) {
+            const blocked = this.documentsIdentity() ? null : this.blockedDocuments();
+            if (blocked) throw blocked;
             if (exclusive) throw new DocError(409, `A file called ${name} is in the way`, { exists: null });
             continue;
           }
@@ -862,7 +883,12 @@ export class Store {
     try {
       written = writeDocument(this.files, dir, row.name, bytes, { create });
     } catch (e) {
-      if (e instanceof Refused) throw new DocError(409, e.taken ? "Another file took the document's name" : e.message);
+      if (e instanceof Refused) {
+        // The portal turns a folder away that the agent could not write in as it does a name that is taken: which it was is a look away.
+        const blocked = this.documentsIdentity() ? null : this.blockedDocuments();
+        if (blocked) throw blocked;
+        throw new DocError(409, e.taken ? "Another file took the document's name" : e.message);
+      }
       throw e;
     }
     this.fault("write");
@@ -944,7 +970,7 @@ export class Store {
       const dir = this.documentsDir();
       if (!dir) throw this.unreadable(row);
       // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for.
-      const folder = this.holds(dir);
+      const folder = this.holds();
       const was = this.statOf(dir, row.name);
       const there = this.statOf(dir, to);
       // A name the file system does not tell from the file's own (it differs in capitals, or in the form of a letter) is the file's own name there:
@@ -977,7 +1003,7 @@ export class Store {
       const comments = this.db.prepare("SELECT c.id FROM comments c JOIN threads t ON t.id = c.thread_id WHERE t.doc_id = ? ORDER BY c.rowid").all(row.id).map((c) => c.id);
       // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for. No folder is no file to take away.
       const dir = this.documentsDir();
-      const folder = dir ? this.holds(dir) : null;
+      const folder = dir ? this.holds() : null;
       const there = dir ? this.statOf(dir, row.name) : null;
       const pending = { op: "delete", id: row.id, name: row.name, author, folder, file: there?.isFile() ? idOf(there) : null, done: false };
       this.setMeta("pending", JSON.stringify(pending));
@@ -1035,7 +1061,7 @@ export class Store {
       throw new DocError(404, "There is no such document");
     }
     try {
-      this.holds(dir, folder);
+      this.holds(folder);
     } catch (e) {
       this.clearPending();
       throw e;
@@ -1062,7 +1088,7 @@ export class Store {
       if (e.moved) throw new DocError(409, REPLACED, { code: "folder_replaced" });
       if (e.taken) throw new DocError(409, `A file called ${to} is in the way`, { exists: null });
       // The portal says `conflict` for a file that changed and for a folder that is not the one asked for alike: which it was is a look away.
-      if (!e.gone) this.holds(dir, folder);
+      if (!e.gone) this.holds(folder);
       throw e.gone ? new DocError(404, "There is no such document") : new DocError(409, `${from} is not the document's file now (a link, a folder or a file with another name, or it changed meanwhile): it was not renamed`);
     }
     this.fault("rename");
@@ -1096,7 +1122,7 @@ export class Store {
         }
       } else if (folder) {
         try {
-          this.holds(dir, folder);
+          this.holds(folder);
         } catch (e) {
           this.clearPending();
           throw e;
@@ -1116,6 +1142,8 @@ export class Store {
             if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
             if (e instanceof Refused) {
               if (e.moved) throw new DocError(409, REPLACED, { code: "folder_replaced" });
+              // The portal says `invalid` for a name that is something else and for a folder it turns away (closed to the agent) alike: which it was is a look away.
+              this.holds(folder);
               throw new DocError(409, `${row.name} is not the document's file now (a link, a folder or a file with another name): it was not deleted`);
             }
             throw e;

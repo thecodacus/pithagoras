@@ -1017,6 +1017,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // What the agent is writing is shown as it comes while the person has nothing unsaved, unless they chose the saved text.
     const watching = edited !== null && status === "saved" && unwatched !== draft.call;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
+    const stateText = `${label} · ${t("Revision {n}", { n: base })}`;
     const openCount = threads.items.filter((x) => x.status === "open").length;
     /**
      * The text is written in the other way: in the editor, or as Markdown in a box. What is in the one goes to the other (nothing is lost, and
@@ -1232,13 +1233,16 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         "div",
         { className: "pd-titlebar" },
         h("button", { type: "button", className: "pd-back", onClick: leave }, `← ${t("All documents")}`),
+        // Where the document stands is in the name's place, at its end: what it says (and in what language, and how wide the face) changes while it is
+        // typed in, and a bar whose row wraps by it moves its buttons between the press and the release of a click. The room of the name is what the
+        // bar's row is counted by, and is the same for every text; a text that does not fit is cut, with the whole of it in the tooltip.
         h(
           "div",
           { className: "pd-docname" },
           h(Icon, { name: "file" }),
           h("div", null, h("strong", { className: "pd-doctitle" }, title), h("span", { className: "pd-meta" }, `documents/${name}`)),
+          h("span", { className: "pd-state", "data-status": status, "aria-live": "polite", title: stateText }, stateText),
         ),
-        h("span", { className: "pd-state", "data-status": status, "aria-live": "polite" }, `${label} · ${t("Revision {n}", { n: base })}`),
         h(
           "div",
           { className: "pd-bar-end" },

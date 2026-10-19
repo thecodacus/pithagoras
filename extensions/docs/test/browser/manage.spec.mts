@@ -252,6 +252,39 @@ test('a rename form that was not changed asks for nothing, also for a file whose
   expect(shelf.requests).toEqual(['POST 6666666666666666/rename {"name":"Guide.MD"}']);
 });
 
+test('a file whose name ends in .md twice is opened as plan.md, and a form that was not changed asks for nothing; a name written with its .md has that one taken off, and no second', async ({ page }) => {
+  const shelf = new Shelf([{ id: '7777777777777777', name: 'plan.md.md', title: 'The plan', revision: 1, markdown: '# The plan\n' }]);
+  await portal(page, shelf);
+  await page.goto(`/x/${NAME}/documents`);
+  const row = site(page).getByRole('listitem').first();
+  await row.getByRole('button', { name: 'Rename plan.md.md' }).click();
+  const field = page.getByRole('textbox', { name: 'New file name for plan.md.md' });
+  // The file's own extension is said after the field; the field has the rest, `.md` of its own included.
+  await expect(field).toHaveValue('plan.md');
+  await expect(row.locator('.pd-rename-field .pd-meta').nth(1)).toHaveText('.md');
+  // Enter with nothing changed: the form closes and nothing is sent (it was a rename to `plan.md`, another file's name).
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('textbox', { name: /New file name/ })).toHaveCount(0);
+  expect(shelf.requests).toEqual([]);
+  // Nor is the field written again as it was (spaces around it).
+  await row.getByRole('button', { name: 'Rename plan.md.md' }).click();
+  await field.fill('  plan.md ');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('textbox', { name: /New file name/ })).toHaveCount(0);
+  expect(shelf.requests).toEqual([]);
+  // A name that is written with its extension has that one taken off, and the file's own is put back: one, not two.
+  await row.getByRole('button', { name: 'Rename plan.md.md' }).click();
+  await field.fill('draft.md');
+  await page.keyboard.press('Enter');
+  await expect(row).toContainText('draft.md');
+  expect(shelf.requests).toEqual(['POST 7777777777777777/rename {"name":"draft.md"}']);
+  await row.getByRole('button', { name: 'Rename draft.md' }).click();
+  await page.getByRole('textbox', { name: 'New file name for draft.md' }).fill('final.md.md');
+  await page.keyboard.press('Enter');
+  await expect(row).toContainText('final.md.md');
+  expect(shelf.requests.at(-1)).toEqual('POST 7777777777777777/rename {"name":"final.md.md"}');
+});
+
 test('a name that is refused is said under the field, which stays with what was typed, and is tried again', async ({ page }) => {
   const shelf = new Shelf();
   await portal(page, shelf);

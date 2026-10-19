@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import { scratch } from './server-harness.mjs';
-const { FileError, baseDir, listDir, removeEntry, renameEntry, folderPath, holdForReading, readBytes, readText, writeText, openFile, sweepTemp, removeFile, renameFile, folderIdentity } = await import('../dist/workspace-files.js');
+const { FileError, baseDir, listDir, removeEntry, renameEntry, folderPath, holdForReading, readBytes, readText, writeText, openFile, sweepTemp, removeFile, renameFile, folderIdentity, setAgentAccess } = await import('../dist/workspace-files.js');
 
 /**
  * What is removed, renamed, listed or read whole in a chat's folder, with a folder on the way to it swapped for a link
@@ -462,6 +462,7 @@ test('a folder is held for reading as it is opened, without following a link in 
  * The sandbox closes a folder the agent may not enter to root alone, mode 0700 (0750 for its tools' group). The agent writes in its own
  * folder and can rename that folder to the name of one the portal reads as root on its behalf (`documents`): the portal then hands the
  * agent what it could not read itself. `likeParent` turns such a folder, and a file in one the agent can write that it could not read, away.
+ * Told for the agent the sandbox runs (`setAgentAccess`), which is set while the folder exists; none where the test is not root (the sandbox is off).
  */
 function closable() {
   const made = swappable();
@@ -473,10 +474,15 @@ function closable() {
   writeFileSync(path.join(dir, 'closed', 'secret.md'), '# the sandbox kept this from the agent');
   if (root) {
     for (const where of [path.join(dir, 'documents'), path.join(dir, 'documents', 'plan.md')]) chownSync(where, AGENT, AGENT);
-    chownSync(path.join(dir, 'closed'), 0, 0);
-    chmodSync(path.join(dir, 'closed'), 0o700);
+    // The none rule makes a folder root:root 0700 and a file in it root:root 0600.
+    for (const where of [path.join(dir, 'closed'), path.join(dir, 'closed', 'secret.md')]) {
+      chownSync(where, 0, 0);
+      chmodSync(where, statSync(where).isDirectory() ? 0o700 : 0o600);
+    }
+    // The sandbox's agent, whom the portal is told of (extension-host.ts): what is closed is told for it, not by who owns the folder.
+    setAgentAccess(() => ({ uid: AGENT, groups: [AGENT] }));
   }
-  return { ...made, documents: path.join(dir, 'documents'), closed: path.join(dir, 'closed'), outside, sub };
+  return { ...made, documents: path.join(dir, 'documents'), closed: path.join(dir, 'closed'), outside, sub, done: () => { setAgentAccess(() => undefined); made.done(); } };
 }
 
 test('a folder the sandbox closed to the agent is not used under another name: its files are not read, listed or written', { skip: !root }, async () => {
@@ -554,7 +560,7 @@ test('what is open to the agent is used as ever: its own, its group\'s, and ever
 });
 
 test('the portal\'s own user sees nothing closed that it made or owns: what is its own is used', async () => {
-  // As a plain user (and as root without a user of the agent\'s): every folder here is owned by the same user, so nothing is refused.
+  // As a plain user the sandbox is off, no agent is told of and the folders are all the portal\'s own, so nothing is refused.
   const { base, documents, done } = closable();
   const asDocuments = { direct: true, alone: true, likeParent: true };
   chmodSync(documents, 0o700);

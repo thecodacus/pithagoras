@@ -31,10 +31,10 @@ console.log(rounds);
 
 /**
  * Runs `act(folder, options)` in a loop against the racer for MS, where `folder` is the documents folder's path and `options` are
- * `{ direct, alone }` and, with `expect`, `expect: { dev, ino }` of that folder. Returns how often the folder the agent cannot enter was acted in,
+ * `{ direct, alone }` and, with `expect`, `expect: { dev, ino }` of that folder; with `likeParent`, `likeParent: true`. Returns how often the folder the agent cannot enter was acted in,
  * how many calls were made and how many rounds the agent moved the folders; null where the agent's user cannot run node here (it moved nothing).
  */
-export async function race(act, { expect }) {
+export async function race(act, { expect = false, likeParent = false } = {}) {
   const top = scratch('wsfiles-race-');
   chmodSync(top, 0o755);
   const work = path.join(top, 'work');
@@ -54,7 +54,7 @@ export async function race(act, { expect }) {
   const inReal = (name) => `/proc/self/fd/${fdReal}/${name}`;
   const inClosed = (name) => `/proc/self/fd/${fdClosed}/${name}`;
   const id = statSync(real, { bigint: true });
-  const options = { direct: true, alone: true, ...(expect ? { expect: { dev: id.dev, ino: id.ino } } : {}) };
+  const options = { direct: true, alone: true, ...(likeParent ? { likeParent: true } : {}), ...(expect ? { expect: { dev: id.dev, ino: id.ino } } : {}) };
   let racer;
   let rounds = '';
   try {

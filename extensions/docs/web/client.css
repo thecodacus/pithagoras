@@ -73,7 +73,9 @@
 .pd-icon { width: 16px; height: 16px; flex: none; }
 .pd-titlebar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 8px 16px; }
 .pd-titlebar .pd-back { margin-left: -6px; }
-.pd-docname { display: flex; min-width: min(100%, 9rem); flex: 1 1 9rem; align-items: center; gap: 8px; }
+/* The name has the room of its row, and where the document stands (Saved, Unsaved changes…) is at the end of it, inside it: the bar wraps by this room and
+   by the buttons, never by what the text says, which changes with the state and the language. A text that does not fit is cut (the tooltip has it whole). */
+.pd-docname { display: flex; min-width: min(100%, 16rem); flex: 1 1 16rem; align-items: center; gap: 8px; }
 .pd-docname > .pd-icon { color: rgb(var(--accent)); }
 .pd-docname > div { display: flex; min-width: 0; flex-direction: column; }
 .pd-doctitle { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -86,7 +88,7 @@
 .pd-barbutton:focus-visible, .pd-tool:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-barlabel { display: inline-flex; align-items: center; gap: 6px; }
 @container (max-width: 480px) { .pd-barlabel { display: none; } }
-.pd-state { color: rgb(var(--fg-subtle)); font-size: 12px; white-space: nowrap; }
+.pd-state { min-width: 0; max-width: calc(100% - 8rem); flex: none; margin-left: auto; overflow: hidden; color: rgb(var(--fg-subtle)); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .pd-state[data-status="conflict"], .pd-state[data-status="error"] { color: rgb(var(--warn)); }
 .pd-conflict { border: 1px solid rgb(var(--warn) / .35); border-radius: 12px; background: rgb(var(--warn) / .1); padding: 10px 12px; }
 .pd-conflict p { margin: 0; }
@@ -236,9 +238,9 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
 .pd-modes button[aria-pressed="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 2px rgb(0 0 0 / .18); }
 .pd-modes button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-modes button:disabled { opacity: .5; cursor: default; }
-/* A bar that is not wide (a window with the portal's sidebar open) keeps the room for the document's name: the switch is two icons. The room is for the
-   longest thing the bar says as well ("Unsaved changes · Revision 12"): where it only fits while the text is saved, the bar wraps when it is typed in,
-   and the buttons move between the press and the release of a click on one of them (a wide face, as on a system with DejaVu Sans). */
+/* A bar that is not wide (a window with the portal's sidebar open) keeps the room for the document's name: the switch is two icons. What the bar says of
+   where the document stands is cut to the room it has, so the bar wraps by its buttons and the name's room (see .pd-docname) and by nothing the text says:
+   its height is the same in every state and language, and the buttons do not move between the press and the release of a click on one of them. */
 @container (max-width: 1150px) { .pd-modelabel { display: none; } .pd-modes button { padding: 4px 7px; } }
 /* The text as Markdown, in the editor's place: the same column, plain, in a monospace face; the page scrolls, not the box (source.js keeps it as high as its text). */
 .pd-source { display: block; width: 100%; min-height: 16rem; margin: 0; border: 0; border-radius: 0; background: none; padding: 0; resize: none; overflow: hidden; outline: none; color: inherit; font: 14.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; cursor: text; }

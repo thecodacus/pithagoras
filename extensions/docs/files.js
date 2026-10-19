@@ -140,7 +140,7 @@ export function removeDocument(files, dir, name, { shared = false, expect } = {}
 export function renameDocument(files, dir, from, to, { expect } = {}) {
   if (!isDocumentName(from) || !isAdoptable(to)) throw new Refused(`${isAdoptable(to) ? from : to} is not a document's name in this folder`);
   try {
-    files.renameFile(dir, from, to, { direct: true, alone: true, likeParent: true, ...(expect ? { expect } : {}) });
+    files.renameFile(dir, from, to, { ...AS_DOCUMENT, ...(expect ? { expect } : {}) });
   } catch (e) {
     switch (e?.code) {
       case "exists":

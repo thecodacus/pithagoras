@@ -152,7 +152,7 @@ export function listDir(base: string, rel: unknown, options: { likeParent?: bool
   // Held for the whole listing: what is listed is this folder, whatever the path leads to by the time each entry is looked at.
   let held: Held;
   try {
-    held = holdFolder(base, target, options);
+    held = holdFolder(base, target, options.likeParent ? READ_IN : 0);
   } catch (e) {
     if (e instanceof FileError && e.code === "missing") throw new FileError("missing", "There is no such folder");
     throw e;
@@ -306,6 +306,8 @@ interface Held {
    * a call elsewhere: Linux. Where it is not, the names are the checked path's, as they were before.
    */
   readonly pinned: boolean;
+  /** The agent the folder was held for (`likeParent`), who a file in it is looked at for too; nothing where none was asked for or the sandbox is off. */
+  readonly agent?: AgentAccess;
   /** `name` in the folder: one name, no place. */
   at(name: string): string;
   close(): void;
@@ -316,28 +318,48 @@ const CLOSED_FOLDER = "That folder is closed to the agent, so it is left alone";
 const CLOSED_FILE = "That file is closed to the agent, so it is left alone";
 
 /**
- * Whether the agent that works in a folder (owned by `inside`) could use something of its own accord, told from the
- * something's owner and mode: it is the folder's owner's own (the agent's user, as the sandbox has it), or its group
- * can read it and the group is the folder's (the agents' group), or everyone can. The sandbox closes what an agent
- * may not enter to root alone, mode 0700 (or to its tools' group, 0750): that is none of these.
+ * Who the agent is that works in a folder, as the sandbox runs it: the user and the groups (its own and the sandbox group) the kernel
+ * decides by when the agent opens something. The portal says (setAgentAccess); nothing where the agent is not another user (the sandbox is
+ * off), and then nothing is closed to it that the portal's own user may use.
  */
-function usableByAgent(st: { uid: number; gid: number; mode: number }, inside: { uid: number; gid: number }): boolean {
-  if (st.uid === inside.uid) return true;
-  if (st.gid === inside.gid && (st.mode & 0o050) === 0o050) return true;
-  return (st.mode & 0o005) === 0o005;
+export interface AgentAccess {
+  uid: number;
+  /** Its group and the groups it is also in. */
+  groups: number[];
 }
 
-/** The held folder `fd` is refused when the agent that works in the folder it is in could not use it (see usableByAgent). */
-function closedToAgent(fd: number): void {
-  let parent: number | undefined;
+let agentAccessIn: (folder: string) => AgentAccess | undefined = () => undefined;
+
+/** Tells which agent works in a folder, and as whom: the portal sets it where the sandbox is (extension-host.ts). */
+export function setAgentAccess(resolve: (folder: string) => AgentAccess | undefined): void {
+  agentAccessIn = resolve;
+}
+
+/** The agent that works in `base`, or nothing where there is none to tell. Who it is not being known is a refusal: what is not known to be open to the agent is closed. */
+function agentIn(base: string): AgentAccess | undefined {
   try {
-    // The folder it is in, as the descriptor has it: not by a path that could lead anywhere by now.
-    parent = openFolder(`/proc/self/fd/${fd}/..`, WALK_FOLDER);
-    if (usableByAgent(fstatSync(fd), fstatSync(parent))) return;
-  } finally {
-    if (parent !== undefined) closeSync(parent);
+    return agentAccessIn(base);
+  } catch {
+    throw new FileError("invalid", "Who the agent is here could not be told, so the folder is left alone");
   }
-  throw new FileError("invalid", CLOSED_FOLDER);
+}
+
+/** What the agent must be allowed to do to a folder the portal reads in for it (list it and open what is in it), changes in (make, replace, take away and give names), or both. */
+const READ_IN = 0o5;
+const CHANGE_IN = 0o3;
+const USE_IN = 0o7;
+/** And to a file the portal reads for it. */
+const READ_FILE = 0o4;
+
+/**
+ * Whether `agent` may do `need` (a mask of 4 read, 2 write, 1 search or run) to something with this owner and mode, as the kernel decides it:
+ * by the owner's bits if the agent's user owns it, else by the group's if its group is one of the agent's, else by everyone's. The sandbox
+ * closes what an agent may not enter to root: `root:root 0700` for a folder (0600 a file), `root:` the tools' group 0750 for the keys.
+ * Who owns a folder or a file says nothing: a project is root's, with the sandbox's group set on it, and so is the closed folder in it.
+ */
+function mayAs(st: { uid: number; gid: number; mode: number }, agent: AgentAccess, need: number): boolean {
+  const bits = st.uid === agent.uid ? (st.mode >> 6) & 7 : agent.groups.includes(st.gid) ? (st.mode >> 3) & 7 : st.mode & 7;
+  return (bits & need) === need;
 }
 
 /**
@@ -360,25 +382,29 @@ function closedToAgent(fd: number): void {
  * does not give anything it makes away (see handOver), so the worst that is left is a
  * file the portal owns in the wrong place, as it was before.
  */
-function holdFolder(base: string, dir: string, options: { likeParent?: boolean } = {}): Held {
+function holdFolder(base: string, dir: string, need = 0): Held {
   const below = pathBelow(base, dir);
   if (below === undefined) throw new FileError("invalid", "That path leads outside the folder");
+  // The agent first: who it is not being known is a refusal before anything is opened.
+  const agent = need ? agentIn(base) : undefined;
+  // The folder held is the one asked about, told from its own descriptor: not one looked at by its path before.
+  const closed = (fd: number) => {
+    if (agent && !mayAs(fstatSync(fd), agent, need)) throw new FileError("invalid", CLOSED_FOLDER);
+  };
   if (!namesDescriptors()) {
     const fd = openFolder(dir);
-    if (options.likeParent) {
-      try {
-        const parent = lstatSync(path.dirname(base));
-        if (!usableByAgent(fstatSync(fd), parent)) throw new FileError("invalid", CLOSED_FOLDER);
-      } catch (e) {
-        closeSync(fd);
-        throw e;
-      }
+    try {
+      closed(fd);
+    } catch (e) {
+      closeSync(fd);
+      throw e;
     }
     let open = true;
     return {
       fd,
       here: dir,
       pinned: false,
+      agent,
       at: (name) => path.join(dir, name),
       close: () => {
         if (open) closeSync(fd);
@@ -392,12 +418,12 @@ function holdFolder(base: string, dir: string, options: { likeParent?: boolean }
     // The part of the path above `base` is not walked, so it is checked on what was opened: a folder up there swapped for a
     // link since `base` was made canonical leads this open somewhere else, and the descriptor says where.
     if (realpathSync.native(named(fd)) !== path.resolve(base)) throw new FileError("invalid", "That path leads outside the folder");
-    if (options.likeParent) closedToAgent(fd);
     for (const part of below.split(path.sep).filter(Boolean)) {
       const next = openFolder(`${named(fd)}/${part}`, WALK_FOLDER);
       closeSync(fd);
       fd = next;
     }
+    closed(fd);
   } catch (e) {
     closeSync(fd);
     throw e;
@@ -408,6 +434,7 @@ function holdFolder(base: string, dir: string, options: { likeParent?: boolean }
     fd: held,
     here: named(held),
     pinned: true,
+    agent,
     at: (name) => `${named(held)}/${name}`,
     close: () => {
       if (open) closeSync(held);
@@ -424,7 +451,7 @@ function openIn(base: string, file: string, flags: number, likeParent = false): 
   if (file === base) throw new FileError("invalid", "That is not a plain file");
   let held: Held;
   try {
-    held = holdFolder(base, path.dirname(file), { likeParent });
+    held = holdFolder(base, path.dirname(file), likeParent ? READ_IN : 0);
   } catch (e) {
     if (e instanceof FileError && e.code === "missing") throw new FileError("missing", "There is no such file");
     throw e;
@@ -432,7 +459,7 @@ function openIn(base: string, file: string, flags: number, likeParent = false): 
   try {
     const fd = openPlain(held.at(path.basename(file)), flags);
     // A file the agent could not read itself is not read for it.
-    if (likeParent && !usableByAgent(fstatSync(fd), fstatSync(held.fd))) {
+    if (held.agent && !mayAs(fstatSync(fd), held.agent, READ_FILE)) {
       closeSync(fd);
       throw new FileError("invalid", CLOSED_FILE);
     }
@@ -478,9 +505,12 @@ export interface OpenOptions {
   /** A file with a second name (a hard link, which may be outside the folder) is refused (`invalid`). */
   alone?: boolean;
   /**
-   * `base` itself, and the file, must be something the agent that works in the folder `base` is in could use: refused
-   * (`invalid`) when the sandbox closed it to the agent (see usableByAgent). For what an agent may rename into a place
-   * the portal reads as root on its behalf.
+   * For what the portal reads or writes as root in a folder that an agent can write next to, and so rename things into (a folder
+   * the sandbox closed to the agent, moved to the name of one the portal reads for it, would be handed to it): `base`, and the file,
+   * must be something the agent itself could use, told as the kernel would for the user and groups the sandbox runs the agent as
+   * (setAgentAccess), from the owner and mode of the folder as it is held: the agent may read and search the folder for what is
+   * read in it, write in it and search it for what is changed, and read the file. Refused (`invalid`) otherwise. Where the sandbox
+   * is off nothing is refused.
    */
   likeParent?: boolean;
 }
@@ -667,7 +697,7 @@ const writeFailure = (e: unknown) => ioFailure(e, "The file could not be saved",
 export interface WriteOptions {
   /** `rel` is a name in `base` itself, reached through no link (see OpenOptions.direct). */
   direct?: boolean;
-  /** `base`, and a file that is replaced, must be something the agent could use (see OpenOptions.likeParent). */
+  /** `base` must be a folder the agent could write in, and a file that is replaced one it could read (see OpenOptions.likeParent). */
   likeParent?: boolean;
 }
 
@@ -761,7 +791,7 @@ export function writeText(
   // whatever happens to the path meanwhile (see holdFolder).
   let held: Held;
   try {
-    held = holdFolder(base, path.dirname(target), { likeParent: options.likeParent });
+    held = holdFolder(base, path.dirname(target), options.likeParent ? CHANGE_IN : 0);
   } catch (e) {
     // A folder that is gone is a file that is gone: what the person was shown is out of date.
     if (e instanceof FileError && e.code === "missing" && expected !== undefined) throw new FileError("conflict", CHANGED);
@@ -784,7 +814,7 @@ export function writeText(
         const st = fstatSync(fd);
         if (createOnly) throw new FileError("exists", `There is already something called "${name}" here`);
         if (st.nlink > 1) throw new FileError("invalid", "That file is shared with another, so it is left alone");
-        if (options.likeParent && !usableByAgent(st, fstatSync(held.fd))) throw new FileError("invalid", CLOSED_FILE);
+        if (held.agent && !mayAs(st, held.agent, READ_FILE)) throw new FileError("invalid", CLOSED_FILE);
         if (expected !== undefined && Math.abs(st.mtimeMs - expected) > 1) throw new FileError("conflict", CHANGED);
         // Not setuid or setgid: a file the portal writes does not carry them over (see handOver).
         mode = st.mode & 0o1777;
@@ -943,7 +973,7 @@ function entryAt(base: string, rel: unknown, verb: "removed" | "renamed", option
  * `likeParent`, and with `expect` refused (`conflict`) unless the held folder is that one, told by its descriptor, before anything is changed.
  */
 function holdEntryFolder(base: string, dir: string, options: ChangeOptions): Held {
-  const held = holdFolder(base, dir, { likeParent: options.likeParent });
+  const held = holdFolder(base, dir, options.likeParent ? CHANGE_IN : 0);
   const expect = options.expect;
   if (!expect) return held;
   try {
@@ -1240,24 +1270,22 @@ export function renameFile(base: string, rel: unknown, newName: unknown, options
  */
 export function folderPath(base: string, rel: unknown, options: { direct?: boolean; likeParent?: boolean } = {}): string {
   const dir = placeOf(base, rel, options.direct);
+  const agent = options.likeParent ? agentIn(base) : undefined;
   let st;
-  let inside: { uid: number; gid: number } | undefined;
   if (dir === base) {
     st = lstatSync(dir, { throwIfNoEntry: false });
-    if (options.likeParent) inside = lstatSync(path.dirname(dir), { throwIfNoEntry: false });
   } else {
     const held = holdFolder(base, path.dirname(dir));
     try {
       st = lstatSync(held.at(path.basename(dir)), { throwIfNoEntry: false });
-      inside = fstatSync(held.fd);
     } finally {
       held.close();
     }
   }
   if (!st) throw new FileError("missing", "There is no such folder");
   if (!st.isDirectory()) throw new FileError("invalid", "That is not a folder");
-  // The folder as the folder it is in has it: one the sandbox closed to the agent is not the agent's to have put there under a name.
-  if (options.likeParent && inside && !usableByAgent(st, inside)) throw new FileError("invalid", CLOSED_FOLDER);
+  // A look at the folder as it is by its name: what acts in it holds it and asks again of the folder it holds (see folderIdentity).
+  if (agent && !mayAs(st, agent, READ_IN)) throw new FileError("invalid", CLOSED_FOLDER);
   return dir;
 }
 
@@ -1293,19 +1321,43 @@ export function holdForReading(base: string, rel: unknown, options: { direct?: b
 
 /**
  * Which folder `rel` is, on this system: its device and inode as text (an inode can be wider than a number), read from the folder
- * as it is held (see holdFolder), so that it is the folder the checks were made on and not what its path leads to by the time it is
- * looked at. No two folders have the same pair at once; a folder that is moved keeps it, and one that is deleted and made again does
- * not (a number can be given to the next folder made, though, so it tells that a folder is the one it was while it exists, not for ever).
- * `direct` and `likeParent` as for `folderPath`.
+ * as it is held, so that it is the folder the checks were made on and not what its path leads to by the time it is looked at. No
+ * two folders have the same pair at once; a folder that is moved keeps it, and one that is deleted and made again does not (a
+ * number can be given to the next folder made, though, so it tells that a folder is the one it was while it exists, not for ever).
+ * `direct` as for `folderPath`. With `likeParent` the folder must be one the agent could read and write in (`invalid` otherwise, see
+ * OpenOptions.likeParent): for a caller that holds to a folder and acts in it later, so it is asked of the folder the identity is read
+ * from, not of one looked at before, which an agent swaps for another between a look at the path and this call.
  */
 export function folderIdentity(base: string, rel: unknown, options: { direct?: boolean; likeParent?: boolean } = {}): { dev: string; ino: string } {
-  const dir = folderPath(base, rel, options);
-  const held = holdFolder(base, dir, { likeParent: options.likeParent });
+  const dir = placeOf(base, rel, options.direct);
+  const idOf = (st: BigIntStats) => ({ dev: String(st.dev), ino: String(st.ino) });
+  if (dir === base) {
+    const held = holdFolder(base, base, options.likeParent ? USE_IN : 0);
+    try {
+      return idOf(fstatSync(held.fd, { bigint: true }));
+    } finally {
+      held.close();
+    }
+  }
+  const agent = options.likeParent ? agentIn(base) : undefined;
+  // The folder it is in is held and the folder opened in it, never followed: that descriptor is looked at and is the one asked about.
+  const parent = holdFolder(base, path.dirname(dir));
   try {
-    const st = fstatSync(held.fd, { bigint: true });
-    return { dev: String(st.dev), ino: String(st.ino) };
+    let fd: number;
+    try {
+      fd = openFolder(parent.at(path.basename(dir)), WALK_FOLDER);
+    } catch (e) {
+      if (e instanceof FileError && e.code === "missing") throw new FileError("missing", "There is no such folder");
+      throw e;
+    }
+    try {
+      if (agent && !mayAs(fstatSync(fd), agent, USE_IN)) throw new FileError("invalid", CLOSED_FOLDER);
+      return idOf(fstatSync(fd, { bigint: true }));
+    } finally {
+      closeSync(fd);
+    }
   } finally {
-    held.close();
+    parent.close();
   }
 }
 
@@ -1418,7 +1470,7 @@ export function sweepTemp(base: string, rel: unknown, olderThanMs = TEMP_GRACE_M
   const dir = resolveInside(base, rel);
   let held: Held;
   try {
-    held = holdFolder(base, dir, options);
+    held = holdFolder(base, dir, options.likeParent ? CHANGE_IN : 0);
   } catch (e) {
     // Not there, not a folder, or no longer what the check saw: nothing is swept.
     if (e instanceof FileError) return [];

@@ -409,7 +409,9 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
   /**
    * A folder's `documents` folder, or nothing when it has none. Only a folder
    * of that name itself: a link called `documents` leads to another folder of
-   * the project, which is not the documents' to be listed or written.
+   * the project, which is not the documents' to be listed or written. And not one
+   * the sandbox closed to the agent (`likeParent`): the agent can rename such a
+   * folder to this name, and the portal would list and watch it as root.
    */
   function documentsOf(folder) {
     try {

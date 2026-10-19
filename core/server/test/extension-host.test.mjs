@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { inProcessHome } from "./server-harness.mjs";
@@ -316,6 +316,60 @@ test("with the sandbox on, what a server half runs for a chat runs as the chat's
     assert.equal(secret, "nothing");
   } finally {
     delete process.env.PORTAL_OWN_SECRET;
+    saveSandboxPolicy({ ...policy, enabled: false });
+  }
+});
+
+test("with the sandbox on, files.* with likeParent turn away what the chat's agent could not use itself: a closed folder renamed to documents, and a closed file moved into it, by the agent as the sandbox runs it", { skip: noSandbox }, async () => {
+  const exists = (kind, name) => spawnSync("getent", [kind, name]).status === 0;
+  if (!exists("group", "pi-sandbox")) execFileSync("groupadd", ["--gid", "10010", "pi-sandbox"]);
+  if (!exists("passwd", "pi-tools")) execFileSync("useradd", ["--uid", "10002", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "pi-tools"]);
+  const shared = Number(execFileSync("getent", ["group", "pi-sandbox"], { encoding: "utf8" }).split(":")[2]);
+  await host.syncServerHalves([write(MODULE)]);
+  const { portal } = seen();
+  const { parsePolicy, saveSandboxPolicy, defaultRules } = await import("../dist/sandbox/policy.js");
+  const policy = parsePolicy({ enabled: true, rules: defaultRules(), trusted: [] });
+  saveSandboxPolicy(policy);
+  // A project the portal made, as the sandbox leaves it: root's, with the sandbox's group on it. Closed to the agent: root:root 0700, a file 0600.
+  const project = path.join(process.env.WORKSPACE_ROOT, "likeparent");
+  const documents = path.join(project, "documents");
+  mkdirSync(documents, { recursive: true });
+  writeFileSync(path.join(documents, "plan.md"), "# ours");
+  mkdirSync(path.join(project, "secrets"));
+  writeFileSync(path.join(project, "secrets", "keys.md"), "# root only");
+  writeFileSync(path.join(project, "creds.md"), "# root only too");
+  for (const where of [project, documents]) execFileSync("sh", ["-c", `chown 0:${shared} ${where} && chmod 2775 ${where}`]);
+  execFileSync("sh", ["-c", `chown 0:${shared} ${documents}/plan.md && chmod 664 ${documents}/plan.md && chown 0:0 ${project}/secrets ${project}/secrets/keys.md ${project}/creds.md && chmod 700 ${project}/secrets && chmod 600 ${project}/secrets/keys.md ${project}/creds.md`]);
+  const use = { direct: true, alone: true, likeParent: true };
+  const code = (fn) => { try { fn(); } catch (e) { return e.code ?? e.message; } return "none"; };
+  try {
+    // The agent cannot read what is closed: it is the user the sandbox runs it as, and the portal asks the kernel's question of that user.
+    const asAgent = (...argv) => portal.sandbox.run("a", argv, { cwd: project });
+    const cannot = await asAgent("cat", "secrets/keys.md");
+    assert.notEqual(cannot.code, 0, "the agent cannot read the closed folder itself");
+    // As things are: the agent's folder is used.
+    assert.equal(portal.files.folder(project, "documents", { direct: true, likeParent: true }), documents);
+    assert.equal(portal.files.readBytes(documents, "plan.md", use).bytes.toString(), "# ours");
+    assert.deepEqual(portal.files.list(documents, "", { likeParent: true }).entries.map((e) => e.name), ["plan.md"]);
+    assert.equal(portal.files.identity(project, "documents", { direct: true, likeParent: true }).ino, String(statSync(documents).ino));
+    // The agent moves the closed file in, and the closed folder onto the name (a rename needs the right to write in the project only).
+    assert.equal((await asAgent("mv", "creds.md", "documents/creds.md")).code, 0, "the agent can move what it cannot read");
+    assert.equal(code(() => portal.files.readBytes(documents, "creds.md", use)), "invalid", "a closed file in documents is not read for the agent");
+    assert.equal(portal.files.readBytes(documents, "plan.md", use).bytes.toString(), "# ours", "and the others are");
+    assert.equal((await asAgent("mv", "documents", "documents.aside")).code, 0);
+    assert.equal((await asAgent("mv", "secrets", "documents")).code, 0);
+    assert.equal(code(() => portal.files.folder(project, "documents", { direct: true, likeParent: true })), "invalid");
+    assert.equal(code(() => portal.files.identity(project, "documents", { direct: true, likeParent: true })), "invalid");
+    assert.equal(code(() => portal.files.list(documents, "", { likeParent: true })), "invalid");
+    assert.equal(code(() => portal.files.readBytes(documents, "keys.md", use)), "invalid");
+    assert.equal(code(() => portal.files.read(documents, "keys.md", { likeParent: true })), "invalid");
+    assert.equal(code(() => portal.files.write(documents, "new.md", "x", { create: true, direct: true, likeParent: true })), "invalid");
+    assert.equal(code(() => portal.files.removeFile(documents, "keys.md", use)), "invalid");
+    assert.equal(code(() => portal.files.renameFile(documents, "keys.md", "other.md", use)), "invalid");
+    assert.deepEqual(readdirSync(documents), ["keys.md"], "nothing was made, removed or renamed in it");
+    // The portal itself reads it as ever, where it does not ask.
+    assert.equal(portal.files.readBytes(documents, "keys.md", { direct: true }).bytes.toString(), "# root only");
+  } finally {
     saveSandboxPolicy({ ...policy, enabled: false });
   }
 });

@@ -8,6 +8,7 @@ import docsServer from '../server.js';
 import { DocError, explained } from '../errors.js';
 import { GitError } from '../git.js';
 import { mockPortal, scratch } from '@pithagoras/extension-api/testing';
+import { setAgentAccess } from '../../../core/server/src/workspace-files.ts';
 
 /**
  * What a person hits at the edges of the Documents extension, through its server half as the portal runs it: a document that is
@@ -778,8 +779,9 @@ test('a folder the sandbox closed to the agent is not the documents folder: noth
   const AGENT = 10100;
   const { folder, docs, f, id, url } = await withDocument('docs-hard-closed-');
   try {
-    // As the sandbox has it: the chat's folder and the documents in it are the agent's, and the portal is root.
+    // As the sandbox has it: the chat's folder and the documents in it are the agent's, and the portal is root, which is told who the agent is.
     for (const where of [folder, path.join(folder, 'documents'), path.join(folder, 'documents', 'plan.md')]) chownSync(where, AGENT, AGENT);
+    setAgentAccess(() => ({ uid: AGENT, groups: [AGENT] }));
     assert.equal((await docs.call('GET', url)).status, 200, 'the agent\'s own folder is used');
     // A folder the sandbox closed (root alone, 0700) beside it, with a document in it that the agent may not read.
     mkdirSync(path.join(folder, 'closed'));
@@ -807,6 +809,7 @@ test('a folder the sandbox closed to the agent is not the documents folder: noth
     renameSync(path.join(folder, 'documents.aside'), path.join(folder, 'documents'));
     assert.equal((await docs.call('GET', url)).status, 200);
   } finally {
+    setAgentAccess(() => undefined);
     await docs.close();
   }
 });
