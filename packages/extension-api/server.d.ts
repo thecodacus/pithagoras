@@ -96,26 +96,40 @@ export interface FileOpenOptions {
   direct?: boolean;
   /** A file with a second name (a hard link, which may be outside the folder) is refused (`invalid`). */
   alone?: boolean;
-  /** As for `FolderUse.likeParent`, and the file as well: one the agent could not read itself is refused. */
+  /** As for `FolderUse.likeParent`, and the file as well: one the agents could not read themselves is refused. */
   likeParent?: boolean;
+  /** The chats whose agents work in the folder: see `FolderUse.chats`. */
+  chats?: readonly string[];
 }
 
 /**
  * For what the portal reads or writes as root in a folder that an agent can write next to and so rename things into.
  * The sandbox closes a folder the agent may not enter to root alone (`root:root` mode 0700, a file 0600), and the agent
  * can rename it to the name of a folder the portal reads on its behalf (`documents`), or move such a file into it: then
- * the portal hands the agent what it could not read itself. Who owns a folder says nothing about that (a project is
- * root's, with the sandbox's group set on it, and the closed folder in it is root's too), so with `likeParent` the
- * folder, and a file in it, are told as the kernel would for the agent itself, from the owner, group and mode of the
- * folder as it is held, for the user and the groups the sandbox runs the agent as: the owner's bits if the agent's user
- * owns it, else the group's if the group is one of the agent's (its own, or the sandbox group), else everyone's.
- * What is read from the folder (`list`, `read`, `readBytes`, `open`, `folder`) needs the agent to read and search it, what
- * is changed in it (`write`, `removeFile`, `renameFile`, `sweepTemp`) to write in it and search it, a folder that is held
- * to (`identity`) both, and a file that is read, or replaced, to be readable by it. Refused (`invalid`) otherwise. Where
- * the sandbox is off the agent is the portal's own user, and nothing is refused.
+ * the portal hands the agent what it could not read itself. And it closes a subtree by its top folder only: what is
+ * inside keeps the rights the wider rule gave it, so a folder below a closed one is as closed as that one.
+ *
+ * With `likeParent` the folder, and a file in it, are told as the kernel would for the agents themselves, for the user
+ * and the groups the sandbox runs each as: the owner's bits if the agent's user owns it, else the group's if the group
+ * is one of the agent's (its own, or the sandbox group), else everyone's. Who owns a folder says nothing (a project is
+ * root's, with the sandbox's group set on it, and the closed folder in it is root's too). Every folder of the path from
+ * `/` down to the folder must be one they may search, as the kernel needs for a path, the folder itself, as it is held,
+ * one they may read and search for what is read from it (`list`, `read`, `readBytes`, `open`, `folder`), write in and search
+ * for what is changed in it (`write`, `remove`, `rename`, `removeFile`, `renameFile`, `sweepTemp`), or both for a folder that is held to
+ * (`identity`), and a file one they may read. In a sticky folder (mode 1777) what is taken away, renamed or replaced must
+ * be one of their own, as for the kernel. Refused (`invalid`) otherwise. Where the sandbox is off the agent is the
+ * portal's own user, and nothing is refused. POSIX ACLs are not read: the mode bits are what is asked, and the
+ * sandbox sets no ACL.
  */
 export interface FolderUse {
   likeParent?: boolean;
+  /**
+   * The chats whose agents work in the folder (their ids, from `chats.list`): every one of them must be able to use it, as what is
+   * read in it for one is handed to the others. The agent is not taken from the folder's path, which a link can lead into another
+   * agent's home: the sandbox runs a chat's agent by the workspace stored for that chat, and so does this. With `likeParent`
+   * and the sandbox on, none named, or one that is not known, is a refusal.
+   */
+  chats?: readonly string[];
 }
 
 /** What `removeFile` and `renameFile` take beyond `FileOpenOptions`. */
@@ -380,18 +394,18 @@ export interface ServerPortal {
       base: string,
       rel: string,
       content: string | Uint8Array,
-      options?: { expected?: number; create?: boolean; direct?: boolean; likeParent?: boolean },
+      options?: FolderUse & { expected?: number; create?: boolean; direct?: boolean },
     ): { size: number; mtime: number; change: string };
     /**
      * Another name in the same folder, never over something there (a file or a link is made a second name by a hard link, which the
      * system refuses for a name that is taken even if the agent made it a moment ago, and only then loses its old name); a link
      * is renamed as the link. The new path, from `base`. `direct`, `likeParent` (the folder `base`) and `expect` as for `removeFile`.
      */
-    rename(base: string, rel: string, name: string, options?: Pick<FileChangeOptions, "direct" | "likeParent" | "expect">): string;
+    rename(base: string, rel: string, name: string, options?: Pick<FileChangeOptions, "direct" | "likeParent" | "chats" | "expect">): string;
     /** What removing `rel` would lose that nothing else has, or null for nothing. */
     unsaved(base: string, rel: string): Promise<Unsaved | null>;
     /** Removes a file, or a folder and all in it, a link as the link. A folder holding git work only it has is refused (`unsaved`) unless `discard`. */
-    remove(base: string, rel: string, options?: { discard?: boolean } & Pick<FileChangeOptions, "direct" | "likeParent" | "expect">): Promise<void>;
+    remove(base: string, rel: string, options?: { discard?: boolean } & Pick<FileChangeOptions, "direct" | "likeParent" | "chats" | "expect">): Promise<void>;
     /**
      * Takes away one plain file, and nothing else: a link or a folder is refused (`invalid`), where `remove` takes the link
      * or all of the folder. For a server half that deletes a file of its own that the agent can change as it runs: the
@@ -422,7 +436,7 @@ export interface ServerPortal {
      * that is a name in `base` itself and no link (`invalid` otherwise), for a half that keeps something in a
      * folder of that name.
      */
-    folder(base: string, rel: string, options?: { direct?: boolean; likeParent?: boolean }): string;
+    folder(base: string, rel: string, options?: FolderUse & { direct?: boolean }): string;
     /**
      * Which folder `rel` is, on this system: its device and inode as text, read from the folder as it is held, so that it is
      * the folder the checks were made on and not what its path leads to by then. No two folders have the same pair at once, a
@@ -432,7 +446,7 @@ export interface ServerPortal {
      * folder that is given an identity is the one that passed (a closed folder is `invalid`, also when it was swapped in
      * between a look at the path and this call).
      */
-    identity(base: string, rel: string, options?: { direct?: boolean; likeParent?: boolean }): { dev: string; ino: string };
+    identity(base: string, rel: string, options?: FolderUse & { direct?: boolean }): { dev: string; ino: string };
     /**
      * A folder opened once and held, for a child process that reads all of it (an archive by `tar`): `folder` gives a
      * path, and a child started with it reads whatever a link put on the way leads to by then. The folder is opened
@@ -465,7 +479,7 @@ export interface ServerPortal {
      * their names. Only those older than `olderThanMs` (by default a minute): a save of the portal's own or of
      * another half that is under way has such a file for a moment, and it is not removed under it.
      */
-    sweepTemp(base: string, rel: string, options?: { olderThanMs?: number; likeParent?: boolean }): string[];
+    sweepTemp(base: string, rel: string, options?: FolderUse & { olderThanMs?: number }): string[];
     /**
      * A plain file opened once, to read or send: read from `fd`, not from the path again, and with its `mtime` and
      * `change` as they were when it was opened. A file kept open this way is the file the name had then, whatever

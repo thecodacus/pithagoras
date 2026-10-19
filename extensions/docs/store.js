@@ -55,7 +55,7 @@ import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
 import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
-import { isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, removeDocument, renameDocument, writeDocument } from "./files.js";
+import { forChats, isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, removeDocument, renameDocument, writeDocument } from "./files.js";
 import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
 
@@ -223,10 +223,11 @@ export class Store {
    * after "write" and after "commit".
    * `gitTimeoutMs` is how long one git run may take. `onRevision` is told of
    * every revision made from here on, as it is made (see `commit`), and
-   * `onThreads` of every change to a document's comments.
+   * `onThreads` of every change to a document's comments. `chats` gives the ids of the chats that work in the folder, which are asked
+   * again at the start of each thing the store does: the agents of all of them must be able to use the documents folder (`likeParent`).
    */
-  static async open(folder, { dir, files, Database, faults, gitTimeoutMs, onRevision, onThreads }) {
-    const store = new Store(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads);
+  static async open(folder, { dir, files, Database, faults, gitTimeoutMs, onRevision, onThreads, chats }) {
+    const store = new Store(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads, chats);
     try {
       await store.#open(Database);
     } catch (e) {
@@ -242,9 +243,12 @@ export class Store {
     return store;
   }
 
-  constructor(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads) {
+  constructor(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads, chats) {
     this.folder = folder;
-    this.files = files;
+    // What the portal reads or writes in the documents folder it does for the agents of the chats that work in the folder: told with each call.
+    this.chats = chats;
+    this.actors = [];
+    this.files = forChats(files, () => this.actors);
     this.faults = faults;
     this.gitTimeoutMs = gitTimeoutMs;
     this.onRevision = onRevision;
@@ -332,6 +336,7 @@ export class Store {
   locked(work) {
     const next = this.queue.then(async () => {
       try {
+        this.actors = this.chats?.() ?? [];
         return await work();
       } catch (e) {
         throw explained(e, this.storeDir);

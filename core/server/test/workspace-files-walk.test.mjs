@@ -17,6 +17,8 @@ const { FileError, baseDir, listDir, removeEntry, renameEntry, folderPath, holdF
  */
 
 const root = process.getuid?.() === 0;
+/** The chat whose agent works in the folder, named with every call that asks for what the agent could use (`setAgentAccess` says who it is). */
+const CHATS = ['a'];
 /** The user the sandbox runs the agent as, for a test that is run as root. */
 const AGENT = 10100;
 const codeOf = async (fn) => { try { await fn(); } catch (e) { return e instanceof FileError ? e.code : `other:${e.message}`; } return 'none'; };
@@ -466,7 +468,9 @@ test('a folder is held for reading as it is opened, without following a link in 
  */
 function closable() {
   const made = swappable();
-  const { dir, sub, outside } = made;
+  const { top, dir, sub, outside } = made;
+  // The folders above the chat's folder are open to everyone: the kernel needs search on each of them for a path, and the agent's own folders are the ones closed here.
+  chmodSync(top, 0o755);
   // `documents` is the agent's; `closed` is the sandbox's, with a document in it, beside it in the agent's folder.
   mkdirSync(path.join(dir, 'documents'));
   writeFileSync(path.join(dir, 'documents', 'plan.md'), '# ours');
@@ -480,38 +484,38 @@ function closable() {
       chmodSync(where, statSync(where).isDirectory() ? 0o700 : 0o600);
     }
     // The sandbox's agent, whom the portal is told of (extension-host.ts): what is closed is told for it, not by who owns the folder.
-    setAgentAccess(() => ({ uid: AGENT, groups: [AGENT] }));
+    setAgentAccess(() => [{ uid: AGENT, groups: [AGENT] }]);
   }
   return { ...made, documents: path.join(dir, 'documents'), closed: path.join(dir, 'closed'), outside, sub, done: () => { setAgentAccess(() => undefined); made.done(); } };
 }
 
 test('a folder the sandbox closed to the agent is not used under another name: its files are not read, listed or written', { skip: !root }, async () => {
   const { base, dir, closed, documents, done } = closable();
-  const asDocuments = { direct: true, alone: true, likeParent: true };
+  const asDocuments = { direct: true, alone: true, likeParent: true, chats: CHATS };
   // The agent\'s own folder is used as ever.
-  assert.equal(folderPath(base, 'documents', { direct: true, likeParent: true }), documents);
+  assert.equal(folderPath(base, 'documents', { direct: true, likeParent: true, chats: CHATS }), documents);
   assert.equal(readBytes(documents, 'plan.md', asDocuments).bytes.toString(), '# ours');
-  assert.deepEqual(listDir(documents, '', { likeParent: true }).entries.map((entry) => entry.name), ['plan.md']);
+  assert.deepEqual(listDir(documents, '', { likeParent: true, chats: CHATS }).entries.map((entry) => entry.name), ['plan.md']);
   // Renamed to the name of that one, the closed folder is refused wherever it is asked for: by name, and on the folder itself.
   renameSync(documents, `${documents}.aside`);
   renameSync(closed, documents);
-  assert.equal(await codeOf(() => folderPath(base, 'documents', { direct: true, likeParent: true })), 'invalid');
+  assert.equal(await codeOf(() => folderPath(base, 'documents', { direct: true, likeParent: true, chats: CHATS })), 'invalid');
   assert.equal(await codeOf(() => readBytes(documents, 'secret.md', asDocuments)), 'invalid');
-  assert.equal(await codeOf(() => readText(documents, 'secret.md', { likeParent: true })), 'invalid');
+  assert.equal(await codeOf(() => readText(documents, 'secret.md', { likeParent: true, chats: CHATS })), 'invalid');
   assert.equal(await codeOf(() => openFile(documents, 'secret.md', asDocuments)), 'invalid');
-  assert.equal(await codeOf(() => listDir(documents, '', { likeParent: true })), 'invalid');
-  assert.equal(await codeOf(() => writeText(documents, 'new.md', 'x', undefined, true, { direct: true, likeParent: true })), 'invalid');
-  assert.deepEqual(sweepTemp(documents, '', 0, { likeParent: true }), [], 'and nothing is swept in it');
+  assert.equal(await codeOf(() => listDir(documents, '', { likeParent: true, chats: CHATS })), 'invalid');
+  assert.equal(await codeOf(() => writeText(documents, 'new.md', 'x', undefined, true, { direct: true, likeParent: true, chats: CHATS })), 'invalid');
+  assert.deepEqual(sweepTemp(documents, '', 0, { likeParent: true, chats: CHATS }), [], 'and nothing is swept in it');
   assert.ok(!existsSync(path.join(documents, 'new.md')));
   // Nor is anything taken away in it or given another name: what the sandbox kept from the agent stays as it was.
   for (const [what, call] of [
     ['removeFile', async () => removeFile(documents, 'secret.md', asDocuments)],
     ['renameFile', async () => renameFile(documents, 'secret.md', 'other.md', asDocuments)],
-    ['removeEntry', () => removeEntry(documents, 'secret.md', true, { direct: true, likeParent: true })],
-    ['renameEntry', async () => renameEntry(documents, 'secret.md', 'other.md', { direct: true, likeParent: true })],
+    ['removeEntry', () => removeEntry(documents, 'secret.md', true, { direct: true, likeParent: true, chats: CHATS })],
+    ['renameEntry', async () => renameEntry(documents, 'secret.md', 'other.md', { direct: true, likeParent: true, chats: CHATS })],
   ]) assert.equal(await codeOf(call), 'invalid', what);
   assert.deepEqual(names(documents), ['secret.md']);
-  assert.equal(await codeOf(() => folderIdentity(base, 'documents', { direct: true, likeParent: true })), 'invalid');
+  assert.equal(await codeOf(() => folderIdentity(base, 'documents', { direct: true, likeParent: true, chats: CHATS })), 'invalid');
   assert.deepEqual(folderIdentity(base, 'documents', { direct: true }), folderIdentity(base, 'documents'), 'without the option nothing is asked of its owner');
   // Without the option nothing is asked of its owner: the portal\'s other uses of a folder are as ever.
   assert.equal(readBytes(documents, 'secret.md', { direct: true }).bytes.toString(), '# the sandbox kept this from the agent');
@@ -521,8 +525,8 @@ test('a folder the sandbox closed to the agent is not used under another name: i
 
 test('a folder is checked as it is held: one swapped for the closed one right after it was looked at is refused when it is read', { skip: !root }, async () => {
   const { base, closed, documents, done } = closable();
-  const asDocuments = { direct: true, alone: true, likeParent: true };
-  const folder = folderPath(base, 'documents', { direct: true, likeParent: true });
+  const asDocuments = { direct: true, alone: true, likeParent: true, chats: CHATS };
+  const folder = folderPath(base, 'documents', { direct: true, likeParent: true, chats: CHATS });
   // The agent swaps them in the moment between the portal looking at the folder and reading from it.
   renameSync(documents, `${documents}.aside`);
   renameSync(closed, documents);
@@ -533,13 +537,13 @@ test('a folder is checked as it is held: one swapped for the closed one right af
   renameSync(path.join(second.closed, 'secret.md'), path.join(second.documents, 'moved.md'));
   assert.equal(await codeOf(() => readBytes(second.documents, 'moved.md', asDocuments)), 'invalid', 'a file owned by root alone in the agent\'s folder');
   assert.equal(readBytes(second.documents, 'plan.md', asDocuments).bytes.toString(), '# ours', 'the others are read');
-  assert.equal(await codeOf(() => writeText(second.documents, 'moved.md', 'x', undefined, false, { direct: true, likeParent: true })), 'invalid', 'nor is it replaced');
+  assert.equal(await codeOf(() => writeText(second.documents, 'moved.md', 'x', undefined, false, { direct: true, likeParent: true, chats: CHATS })), 'invalid', 'nor is it replaced');
   second.done();
 });
 
 test('what is open to the agent is used as ever: its own, its group\'s, and everyone\'s', { skip: !root }, async () => {
   const { base, dir, documents, done } = closable();
-  const asDocuments = { direct: true, alone: true, likeParent: true };
+  const asDocuments = { direct: true, alone: true, likeParent: true, chats: CHATS };
   // Root\'s, but readable by everyone: the agent could read it itself, so nothing is given it that it did not have.
   chownSync(documents, 0, 0);
   chmodSync(documents, 0o755);
@@ -562,13 +566,13 @@ test('what is open to the agent is used as ever: its own, its group\'s, and ever
 test('the portal\'s own user sees nothing closed that it made or owns: what is its own is used', async () => {
   // As a plain user the sandbox is off, no agent is told of and the folders are all the portal\'s own, so nothing is refused.
   const { base, documents, done } = closable();
-  const asDocuments = { direct: true, alone: true, likeParent: true };
+  const asDocuments = { direct: true, alone: true, likeParent: true, chats: CHATS };
   chmodSync(documents, 0o700);
   if (!root) {
-    assert.equal(folderPath(base, 'documents', { direct: true, likeParent: true }), documents);
+    assert.equal(folderPath(base, 'documents', { direct: true, likeParent: true, chats: CHATS }), documents);
     assert.equal(readBytes(documents, 'plan.md', asDocuments).bytes.toString(), '# ours');
-    assert.deepEqual(listDir(documents, '', { likeParent: true }).entries.map((entry) => entry.name), ['plan.md']);
-    assert.equal(writeText(documents, 'next.md', 'x', undefined, true, { direct: true, likeParent: true }).size, 1);
+    assert.deepEqual(listDir(documents, '', { likeParent: true, chats: CHATS }).entries.map((entry) => entry.name), ['plan.md']);
+    assert.equal(writeText(documents, 'next.md', 'x', undefined, true, { direct: true, likeParent: true, chats: CHATS }).size, 1);
   }
   done();
 });

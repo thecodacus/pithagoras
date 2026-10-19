@@ -440,15 +440,25 @@ folders are root's, mode 0700) onto the name `documents`, or move a closed file 
 it, and what the portal does in a folder, or reads from a file, it does with its own
 rights. So the portal asks, with the [sandbox](/guide/sandbox) on, whether the agent
 could use the folder, and the file, itself: as the kernel would tell it for the user
-and the groups the agent runs as, from the owner, group and mode of the folder as the
-portal holds it (a project is root's too, so who owns it says nothing). A folder, and a
-file in it, that the agent could not read is not read: its files are not listed as
-documents or taken in, `doc_read` and the page do not give them, and the store never
-holds to it (the page says "documents in this folder is closed to the agent"). To
-hold to a folder, to write in it and to delete or rename in it, the agent must also be
-allowed to write there; a folder the agent can only read (a read-only project) is read
-and not changed in. With the sandbox off the agent is the portal's own user, and
-nothing is closed to it.
+and the groups the agent runs as, from the owner, group and mode of what the portal
+holds. The agent is the one the sandbox runs each chat of the folder as, by the
+workspace stored for the chat, so a link the agent puts where that path was does not
+change who is asked; if the folder has chats of more than one agent, all of them
+must be able to use it. A project is root's too, so who owns a folder says nothing,
+and the sandbox closes a subtree only by its top folder (what is inside keeps the
+group's rights), so **every folder of the path** from `/` down to the documents
+folder must be searchable by the agent, as the kernel needs for it, and none of them
+may have been replaced by a link. A folder, and a file in it, that the agent could not
+read is not read: its files are not listed as documents or taken in, `doc_read` and
+the page do not give them, and the store never holds to it (the page says "documents
+in this folder is closed to the agent"). To hold to a folder, to write in it and to
+delete or rename in it, the agent must also be allowed to write there; a folder the
+agent can only read (a read-only project) is read and not changed in. In a sticky
+folder (mode 1777) only what is the agent's own is deleted, renamed or replaced, as
+for the agent. With the sandbox off the agent is the portal's own user, and nothing
+is closed to it. One thing is not asked: POSIX ACLs. Only the mode bits count; the
+sandbox sets no ACL, but one that a person put on a folder or file of a chat is not
+seen.
 
 A delete and a rename are done only in the folder held to: it is checked on the folder
 the call holds, in the call itself (`expect`), not by a look at the path before.

@@ -75,6 +75,7 @@ import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import path from "node:path";
 import { explained } from "./errors.js";
+import { forChats } from "./files.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
 import { SECRET, SECRET_WARNING } from "./secret.js";
 import { frontMatterEnd } from "./src/frame.js";
@@ -407,15 +408,33 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
   }
 
   /**
+   * The chats that work in a folder now (their ids): the agents of all of them must be able to use what the portal reads or writes there for them
+   * (`likeParent` of `files.*`), which takes no agent from the folder's path.
+   */
+  function chatsIn(folder) {
+    const ids = [];
+    for (const chat of portal.chats.list()) {
+      try {
+        if (portal.chats.folder(chat.id) === folder) ids.push(chat.id);
+      } catch {
+        // Its folder is gone: it works in none.
+      }
+    }
+    return ids;
+  }
+
+  /**
    * A folder's `documents` folder, or nothing when it has none. Only a folder
    * of that name itself: a link called `documents` leads to another folder of
    * the project, which is not the documents' to be listed or written. And not one
-   * the sandbox closed to the agent (`likeParent`): the agent can rename such a
-   * folder to this name, and the portal would list and watch it as root.
+   * the sandbox closed to the agents of its chats (`likeParent`), or one that is
+   * reached through such a folder: the agent can rename such a folder to this name,
+   * and the portal would list and watch it as root. `chats` are the ids of those
+   * chats, as `folders()` has them, or looked up.
    */
-  function documentsOf(folder) {
+  function documentsOf(folder, chats = chatsIn(folder)) {
     try {
-      return portal.files.folder(folder, DOCUMENTS, { direct: true, likeParent: true });
+      return portal.files.folder(folder, DOCUMENTS, { direct: true, likeParent: true, chats });
     } catch {
       return null;
     }
@@ -525,8 +544,8 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
     const id = idOf(folder);
     if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document", { code: "deleted" });
     const opening = (async () => {
-      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: portal.files, Database: portal.sqlite, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
-      return Store.open(folder, { dir, files: portal.files, Database: portal.sqlite, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
+      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: forChats(portal.files, chatsIn(folder)), Database: portal.sqlite, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
+      return Store.open(folder, { dir, files: portal.files, chats: () => chatsIn(folder), Database: portal.sqlite, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
     })();
     stores.set(folder, opening);
     return opening;
@@ -730,7 +749,7 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
    * for what changed sees all the same.
    */
   async function described(folder, { say, titles = true }) {
-    const dir = documentsOf(folder.path);
+    const dir = documentsOf(folder.path, folder.chats?.map((chat) => chat.id));
     if (!dir) return {};
     const name = path.basename(folder.path) || folder.path;
     let documents;
@@ -870,10 +889,10 @@ export default function (portal, { faults, gitTimeoutMs, pollMs = POLL_MS, wakeM
   function watchDirs() {
     const found = folders();
     // A watch follows the folder it was set on, not its name: one removed and made again is watched no more and is watched anew.
-    for (const [id, watched] of lists.watchers) if (!found.has(id) || documentsOf(found.get(id).path) !== watched.dir || !watched.watch.current()) unwatchDir(id);
+    for (const [id, watched] of lists.watchers) if (!found.has(id) || documentsOf(found.get(id).path, found.get(id).chats.map((chat) => chat.id)) !== watched.dir || !watched.watch.current()) unwatchDir(id);
     for (const [id, folder] of found) {
       if (lists.watchers.has(id)) continue;
-      const dir = documentsOf(folder.path);
+      const dir = documentsOf(folder.path, folder.chats.map((chat) => chat.id));
       if (!dir) continue;
       try {
         const watched = { dir, watch: null };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { inProcessHome } from "./server-harness.mjs";
@@ -285,6 +285,17 @@ test("a server half changed is stopped and started anew, one gone is stopped, an
   assert.match(readFileSync(path.join(pkg, "server.js"), "utf8"), /nothing to stop/);
 });
 
+/**
+ * The folders above `where` made searchable by everyone: the kernel needs search on each of them for an agent to reach it, and the portal asks the
+ * same (files.* with likeParent), while a test's home is made closed to all but its owner. What the tests close on purpose is closed after.
+ */
+function reachable(where) {
+  for (let up = path.dirname(where); up !== path.dirname(up); up = path.dirname(up)) {
+    const mode = statSync(up).mode;
+    if (!(mode & 0o001)) chmodSync(up, mode | 0o001);
+  }
+}
+
 // The sandbox needs root on Linux, as the portal runs in its image, and its tools.
 const linuxRoot = process.platform === "linux" && process.getuid?.() === 0;
 const has = (cmd) => spawnSync("sh", ["-c", `command -v ${cmd}`]).status === 0;
@@ -334,13 +345,17 @@ test("with the sandbox on, files.* with likeParent turn away what the chat's age
   const project = path.join(process.env.WORKSPACE_ROOT, "likeparent");
   const documents = path.join(project, "documents");
   mkdirSync(documents, { recursive: true });
+  reachable(project);
   writeFileSync(path.join(documents, "plan.md"), "# ours");
   mkdirSync(path.join(project, "secrets"));
   writeFileSync(path.join(project, "secrets", "keys.md"), "# root only");
   writeFileSync(path.join(project, "creds.md"), "# root only too");
   for (const where of [project, documents]) execFileSync("sh", ["-c", `chown 0:${shared} ${where} && chmod 2775 ${where}`]);
   execFileSync("sh", ["-c", `chown 0:${shared} ${documents}/plan.md && chmod 664 ${documents}/plan.md && chown 0:0 ${project}/secrets ${project}/secrets/keys.md ${project}/creds.md && chmod 700 ${project}/secrets && chmod 600 ${project}/secrets/keys.md ${project}/creds.md`]);
-  const use = { direct: true, alone: true, likeParent: true };
+  // The chat whose agent works there: the portal tells who the agent is from the workspace stored for it, as the sandbox runs it.
+  createSession({ id: "lp", title: "Like parent", workspace: project, executor: "host" });
+  const like = { likeParent: true, chats: ["lp"] };
+  const use = { direct: true, alone: true, ...like };
   const code = (fn) => { try { fn(); } catch (e) { return e.code ?? e.message; } return "none"; };
   try {
     // The agent cannot read what is closed: it is the user the sandbox runs it as, and the portal asks the kernel's question of that user.
@@ -348,27 +363,81 @@ test("with the sandbox on, files.* with likeParent turn away what the chat's age
     const cannot = await asAgent("cat", "secrets/keys.md");
     assert.notEqual(cannot.code, 0, "the agent cannot read the closed folder itself");
     // As things are: the agent's folder is used.
-    assert.equal(portal.files.folder(project, "documents", { direct: true, likeParent: true }), documents);
+    assert.equal(portal.files.folder(project, "documents", { direct: true, ...like }), documents);
     assert.equal(portal.files.readBytes(documents, "plan.md", use).bytes.toString(), "# ours");
-    assert.deepEqual(portal.files.list(documents, "", { likeParent: true }).entries.map((e) => e.name), ["plan.md"]);
-    assert.equal(portal.files.identity(project, "documents", { direct: true, likeParent: true }).ino, String(statSync(documents).ino));
+    assert.deepEqual(portal.files.list(documents, "", like).entries.map((e) => e.name), ["plan.md"]);
+    assert.equal(portal.files.identity(project, "documents", { direct: true, ...like }).ino, String(statSync(documents).ino));
     // The agent moves the closed file in, and the closed folder onto the name (a rename needs the right to write in the project only).
     assert.equal((await asAgent("mv", "creds.md", "documents/creds.md")).code, 0, "the agent can move what it cannot read");
     assert.equal(code(() => portal.files.readBytes(documents, "creds.md", use)), "invalid", "a closed file in documents is not read for the agent");
     assert.equal(portal.files.readBytes(documents, "plan.md", use).bytes.toString(), "# ours", "and the others are");
     assert.equal((await asAgent("mv", "documents", "documents.aside")).code, 0);
     assert.equal((await asAgent("mv", "secrets", "documents")).code, 0);
-    assert.equal(code(() => portal.files.folder(project, "documents", { direct: true, likeParent: true })), "invalid");
-    assert.equal(code(() => portal.files.identity(project, "documents", { direct: true, likeParent: true })), "invalid");
-    assert.equal(code(() => portal.files.list(documents, "", { likeParent: true })), "invalid");
+    assert.equal(code(() => portal.files.folder(project, "documents", { direct: true, ...like })), "invalid");
+    assert.equal(code(() => portal.files.identity(project, "documents", { direct: true, ...like })), "invalid");
+    assert.equal(code(() => portal.files.list(documents, "", like)), "invalid");
     assert.equal(code(() => portal.files.readBytes(documents, "keys.md", use)), "invalid");
-    assert.equal(code(() => portal.files.read(documents, "keys.md", { likeParent: true })), "invalid");
-    assert.equal(code(() => portal.files.write(documents, "new.md", "x", { create: true, direct: true, likeParent: true })), "invalid");
+    assert.equal(code(() => portal.files.read(documents, "keys.md", like)), "invalid");
+    assert.equal(code(() => portal.files.write(documents, "new.md", "x", { create: true, direct: true, ...like })), "invalid");
     assert.equal(code(() => portal.files.removeFile(documents, "keys.md", use)), "invalid");
     assert.equal(code(() => portal.files.renameFile(documents, "keys.md", "other.md", use)), "invalid");
     assert.deepEqual(readdirSync(documents), ["keys.md"], "nothing was made, removed or renamed in it");
     // The portal itself reads it as ever, where it does not ask.
     assert.equal(portal.files.readBytes(documents, "keys.md", { direct: true }).bytes.toString(), "# root only");
+  } finally {
+    saveSandboxPolicy({ ...policy, enabled: false });
+  }
+});
+
+test("with the sandbox on, the agent files.* ask for is the chat's own, from the workspace stored for it: a stored path that leads into another agent's home is checked as the chat's agent, not as the one whose home it leads to", { skip: noSandbox }, async () => {
+  const exists = (kind, name) => spawnSync("getent", [kind, name]).status === 0;
+  if (!exists("group", "pi-sandbox")) execFileSync("groupadd", ["--gid", "10010", "pi-sandbox"]);
+  if (!exists("passwd", "pi-tools")) execFileSync("useradd", ["--uid", "10002", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "pi-tools"]);
+  await host.syncServerHalves([write(MODULE)]);
+  const { portal } = seen();
+  const { parsePolicy, saveSandboxPolicy, defaultRules, sandboxSupport } = await import("../dist/sandbox/policy.js");
+  const { identityOf } = await import("../dist/sandbox/identity.js");
+  const { createAgent } = await import("../dist/agents.js");
+  const policy = parsePolicy({ enabled: true, rules: defaultRules(), trusted: [] });
+  saveSandboxPolicy(policy);
+  try {
+    // A second agent, with its home as the sandbox leaves it (root's, its group\'s alone, 2770), and a documents folder of its own in it.
+    const second = createAgent({ name: "Second" });
+    const who = identityOf(second, sandboxSupport());
+    const shared = who.shared;
+    const workspace = path.join(second.home, "ws");
+    const documents = path.join(workspace, "documents");
+    mkdirSync(documents, { recursive: true });
+    reachable(second.home);
+    writeFileSync(path.join(documents, "plan.md"), "# second\'s own");
+    for (const where of [second.home, workspace, documents]) execFileSync("sh", ["-c", `chown 0:${who.gid} ${where} && chmod 2770 ${where}`]);
+    execFileSync("sh", ["-c", `chown 0:${who.gid} ${documents}/plan.md && chmod 660 ${documents}/plan.md`]);
+    // The first agent\'s chat: a project of its own, whose stored path is a link that leads into the second agent\'s home (a person made it, or the
+    // agent put it there where it writes: the path it resolves to is not the agent\'s to decide).
+    const link = path.join(process.env.WORKSPACE_ROOT, "leads-into-another-home");
+    execFileSync("ln", ["-s", workspace, link]);
+    createSession({ id: "led", title: "Led", workspace: link, executor: "host" });
+    createSession({ id: "second-own", title: "Second\'s own", workspace: workspace, executor: "host" });
+    assert.equal(portal.chats.folder("led"), workspace, "what the chat\'s folder is now: the second agent\'s home");
+    const code = (fn) => { try { fn(); } catch (e) { return e.code ?? e.message; } return "none"; };
+    const asked = (chats, rel = "documents") => code(() => portal.files.folder(workspace, rel, { direct: true, likeParent: true, chats }));
+    const read = (chats) => code(() => portal.files.readBytes(documents, "plan.md", { direct: true, alone: true, likeParent: true, chats }));
+    // The kernel: the first agent cannot read it, the second can.
+    assert.notEqual((await portal.sandbox.run("led", ["cat", path.join(documents, "plan.md")], { cwd: "/" })).code, 0, "the chat\'s agent cannot read the second agent\'s home");
+    assert.equal((await portal.sandbox.run("second-own", ["cat", path.join(documents, "plan.md")], { cwd: "/" })).code, 0);
+    // The portal asks the same of the agent each chat is run as, not of the one whose home the path leads into.
+    assert.equal(asked(["led"]), "invalid", "the chat whose stored path leads there is its own agent\'s, which has no right to it");
+    assert.equal(read(["led"]), "invalid");
+    assert.equal(asked(["second-own"]), "none");
+    assert.equal(read(["second-own"]), "none");
+    assert.equal(asked(["led", "second-own"]), "invalid", "every chat\'s agent must be able to");
+    assert.equal(read(["led", "second-own"]), "invalid");
+    assert.equal(asked([]), "invalid", "no chat named: the agent is not taken from the path");
+    assert.equal(asked(["no-such-chat"]), "invalid");
+    assert.equal(asked(undefined), "invalid");
+    // Without the option the portal reads it as ever, for the page.
+    assert.equal(portal.files.readBytes(documents, "plan.md", { direct: true }).bytes.toString(), "# second\'s own");
+    assert.ok(shared > 0);
   } finally {
     saveSandboxPolicy({ ...policy, enabled: false });
   }

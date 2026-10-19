@@ -781,7 +781,7 @@ test('a folder the sandbox closed to the agent is not the documents folder: noth
   try {
     // As the sandbox has it: the chat's folder and the documents in it are the agent's, and the portal is root, which is told who the agent is.
     for (const where of [folder, path.join(folder, 'documents'), path.join(folder, 'documents', 'plan.md')]) chownSync(where, AGENT, AGENT);
-    setAgentAccess(() => ({ uid: AGENT, groups: [AGENT] }));
+    setAgentAccess(() => [{ uid: AGENT, groups: [AGENT] }]);
     assert.equal((await docs.call('GET', url)).status, 200, 'the agent\'s own folder is used');
     // A folder the sandbox closed (root alone, 0700) beside it, with a document in it that the agent may not read.
     mkdirSync(path.join(folder, 'closed'));

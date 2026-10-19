@@ -33,6 +33,8 @@ const named = (real: boolean) => (real ? 'root' : 'modes');
 const THE_AGENT = (real: boolean) => (real ? { uid: AGENT, groups: [AGENT, SHARED] } : { uid: 61234, groups: [61234, 61235] });
 const setpriv = root && spawnSync('setpriv', ['--version']).status === 0;
 after(() => setAgentAccess(() => undefined));
+/** As the portal tells it: the agents of the chats named, and none for none (which refuses): a call that does not say whose chats work in the folder is refused. */
+const agentsOf = (real: boolean) => (chats: readonly string[]) => (chats.length ? [THE_AGENT(real)] : []);
 
 const SECRET = '# Secret\n\nThe sandbox kept this from the agent.\n';
 const SECRET_PLAN = '# Plan\n\nThe sandbox kept this from the agent, too.\n';
@@ -134,7 +136,7 @@ function scene(prefix: string, real: boolean, { documents = true } = {}) {
     for (const where of documents ? [folder, dir] : [folder]) chmodSync(where, 0o777);
     for (const where of [closed, path.join(closed, 'secret.md'), path.join(closed, 'plan.md'), creds]) chmodSync(where, statSync(where).isDirectory() ? 0o700 : 0o600);
   }
-  setAgentAccess(() => THE_AGENT(real));
+  setAgentAccess(agentsOf(real));
   const aside = `${dir}.aside`;
   /** What the agent does, as the agent where it can: a user of its own, in its group and the sandbox's. */
   const mv = (from: string, to: string) => {
@@ -172,7 +174,65 @@ async function withPlan(prefix: string, real: boolean, { stop = false } = {}) {
   return { ...s, docs, id, url: `/folders/${s.f}/documents/${id}`, own };
 }
 
+/**
+ * A project whose every folder is the agent's, below a folder the sandbox closed: the "none" rule is `root:root 0700` on the folder it names, and what
+ * is inside keeps the group's rights. The kernel needs search on each folder of a path, so the agent can reach nothing in it by a path, and the
+ * portal, which reaches the project as root, must not read it, list it, take it in or hold to it for the agent.
+ */
 for (const real of flavours) {
+  test(`[${named(real)}] a project below a closed folder is not read, listed, taken in or held to, though every folder in it is the agent's: and is as soon as the folder above is open`, async () => {
+    const top = realpathSync(scratch('docs-closed-above-'));
+    chmodSync(top, 0o755);
+    const outer = path.join(top, 'outer');
+    const folder = path.join(outer, 'proj');
+    const dir = path.join(folder, 'documents');
+    mkdirSync(dir, { recursive: true });
+    for (const where of [folder, dir]) {
+      if (real) chownSync(where, 0, SHARED);
+      chmodSync(where, real ? 0o2775 : 0o777);
+    }
+    if (real) chownSync(outer, 0, 0);
+    setAgentAccess(agentsOf(real));
+    const f = folderIdOf(folder);
+    const docs = await portal({ a: folder });
+    try {
+      // Open, the project is the agent's as ever.
+      chmodSync(outer, 0o755);
+      const made = await docs.call('POST', `/folders/${f}/documents`, { title: 'Plan', markdown: '# Plan\n\nOurs.\n' });
+      assert.equal(made.status, 201, JSON.stringify(made.body));
+      const url = `/folders/${f}/documents/${made.body.id}`;
+      assert.equal(existsSync(path.join(dir, 'plan.md')), true);
+      assert.match(JSON.stringify(await docs.agent('a')('doc_list', {})), /"Plan"/);
+      const own = idOf(dir);
+      assert.deepEqual(await pinOf(folder), own);
+      // The folder above is closed (the none rule): nothing in the project is the agent's to reach, whatever the folders below say.
+      chmodSync(outer, 0o700);
+      const listed = await docs.agent('a')('doc_list', {});
+      assert.ok(listed.ok, JSON.stringify(listed));
+      assert.match((listed as any).text, /^No documents yet/);
+      assert.doesNotMatch(JSON.stringify((await docs.call('GET', '/folders')).body), /Plan|plan/);
+      assert.equal((await docs.agent('a')('doc_read', { id: made.body.id })).ok, false, 'not read for the agent');
+      const read = await docs.call('GET', url);
+      assert.equal(read.status, 409, JSON.stringify(read.body));
+      assert.doesNotMatch(JSON.stringify(read.body), /Ours/);
+      for (const [what, answer] of [
+        ['save', await docs.call('PUT', url, { markdown: '# Plan\n\nChanged.\n', base: 1 })],
+        ['rename', await docs.call('POST', `${url}/rename`, { name: 'other.md' })],
+        ['delete', await docs.call('DELETE', url)],
+        ['create', await docs.call('POST', `/folders/${f}/documents`, { title: 'Fresh', markdown: '# Fresh\n' })],
+      ] as const) assert.equal(answer.status, 409, `${what}: ${JSON.stringify(answer.body)}`);
+      assert.deepEqual(readdirSync(dir).sort(), ['plan.md'], 'nothing was made, renamed or removed');
+      assert.equal(readFileSync(path.join(dir, 'plan.md'), 'utf8'), '# Plan\n\nOurs.\n');
+      assert.deepEqual(await pinOf(folder), own, 'and the folder held to is the same');
+      // Open again: the document is there, as it was.
+      chmodSync(outer, 0o755);
+      assert.match(JSON.stringify(await docs.agent('a')('doc_read', { id: made.body.id })), /Ours\./);
+      assert.equal((await docs.call('DELETE', url)).status, 200);
+    } finally {
+      await docs.close();
+    }
+  });
+
   test(`[${named(real)}] a closed folder that the agent renamed to documents before anything was listed is not held to, read or listed: not by the agent's doc_list, nor by the page`, async () => {
     // A chat's folder in which Documents was never used: no store, and no documents folder of the agent's.
     const s = scene('docs-closed-fresh-', real, { documents: false });
@@ -367,3 +427,34 @@ for (const real of flavours) {
     }
   });
 }
+
+test('[root] the agents of every chat that works in the folder are asked, not one: a folder that one of them could not use is not read for the others', { skip: !root }, async () => {
+  const w = await withPlan('docs-closed-chats-', true, { stop: true });
+  // Two agents work in the folder: the first is in the sandbox's group, the other is not.
+  const OTHER = { uid: AGENT + 5, groups: [AGENT + 5] };
+  const asked: string[][] = [];
+  setAgentAccess((chats) => {
+    asked.push([...chats]);
+    return chats.map((id) => (id === 'a' ? THE_AGENT(true) : OTHER));
+  });
+  chmodSync(w.dir, 0o2770);
+  for (const name of readdirSync(w.dir)) chmodSync(path.join(w.dir, name), 0o660);
+  const both = await portal({ a: w.folder, b: w.folder });
+  try {
+    const listed = await both.agent('a')('doc_list', {});
+    assert.match((listed as any).text, /^No documents yet/, 'the other chat\'s agent could not use the folder, and what is read for one is handed to the other');
+    assert.deepEqual(asked.at(-1)?.sort(), ['a', 'b'], 'the chats of the folder are named, each of them');
+    assert.equal((await both.call('GET', w.url)).status, 409);
+    assert.equal((await both.call('DELETE', w.url)).status, 409);
+    assert.equal(readFileSync(path.join(w.dir, 'plan.md'), 'utf8'), '# Plan\n\nOurs.\n');
+  } finally {
+    await both.close();
+  }
+  const alone = await portal({ a: w.folder });
+  try {
+    assert.match(JSON.stringify(await alone.agent('a')('doc_list', {})), /"Plan"/, 'with its own chat alone the folder is used');
+    assert.equal((await alone.call('GET', w.url)).status, 200);
+  } finally {
+    await alone.close();
+  }
+});
