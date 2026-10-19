@@ -150,6 +150,8 @@ export function Menu({
           <div
             ref={menuRef}
             id={menuId}
+            // A press in the list is not outside the popover the menu is in (see overlay.ts).
+            data-popover-layer
             role="menu"
             aria-label={label}
             onKeyDown={onMenuKey}

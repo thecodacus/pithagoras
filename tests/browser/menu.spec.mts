@@ -96,3 +96,19 @@ test('a menu at the bottom of the window opens above its button, and scrolls whe
     expect(m!.y).toBeGreaterThanOrEqual(0);
   }).toPass();
 });
+
+for (const how of ['hook', 'extension'] as const) {
+  test(`a press in the list of a menu in a popover that closes on a press outside it (${how === 'hook' ? "the portal's hook" : 'ui.inOverlay'}) is not outside it`, async ({ page }) => {
+    await page.getByRole('button', { name: `Popover ${how}` }).click();
+    const popover = page.getByRole('group', { name: `Popover ${how} popover` });
+    await popover.getByRole('button', { name: `More ${how}` }).click();
+    // The list is drawn at the body, outside the popover: choosing from it is a press the popover must leave alone, or it is gone
+    // (and the menu with it) before the click reaches the choice.
+    await page.getByRole('menuitem', { name: `Archive ${how}` }).click();
+    await expect(page.getByTestId('log')).toHaveText(`archive ${how}`);
+    await expect(popover).toBeVisible();
+    // A press that is elsewhere still closes it.
+    await page.getByRole('button', { name: 'Elsewhere' }).click();
+    await expect(popover).toHaveCount(0);
+  });
+}

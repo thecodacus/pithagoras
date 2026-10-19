@@ -291,7 +291,7 @@ prefix of your own: the stylesheet is the page's.
 | `asksBeforeDeleting()` | Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when it is true |
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
-| `inOverlay(target)` | Whether a press is inside something the portal draws over the page: the list of a `Select`, the question `confirm` asks. A popover of yours that closes on a press outside it counts these as inside |
+| `inOverlay(target)` | Whether a press is inside something the portal draws over the page: the list of a `Select` or a `Menu`, the question `confirm` asks. A popover of yours that closes on a press outside it counts these as inside |
 | `isEnter(event)`, `isEscape(event)` | Enter that means "done" and Escape that means "never mind", not the ones that pick or dismiss a word of an input method (Japanese, Chinese, Korean). Use them in a key handler instead of `event.key === "Enter"` |
 
 The portal's own utility classes (Tailwind) exist only for what the portal

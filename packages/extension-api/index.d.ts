@@ -453,7 +453,7 @@ export interface Ui {
   tabKeys(event: ReactKeyboardEvent<HTMLElement>): void;
   /**
    * Whether `target`, of a press, is inside something the portal draws over the page in a layer of its own: the list of a
-   * `Select` (drawn at the body, though it belongs to the popover it is in) or the question `confirm` asks. A popover of
+   * `Select` or a `Menu` (drawn at the body, though it belongs to the popover it is in) or the question `confirm` asks. A popover of
    * the extension's own that closes on a press outside it counts these as inside: `if (box.contains(e.target) ||
    * ui.inOverlay(e.target)) return;`.
    */
