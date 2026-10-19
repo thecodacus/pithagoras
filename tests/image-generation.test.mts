@@ -1581,7 +1581,7 @@ test("the API says whether several pictures are taken, and reloads chats when th
   }
 });
 
-test("a tool rule for edit_image is matched on each picture, whether it is named by path or by a list, never on the list's JSON", async () => {
+test("a tool rule for a call that names files in a list (edit_image's pictures, or any tool's) is matched on each, never on the list's JSON", async () => {
   const { ruleAllows, guardExtension } = await import("../core/server/src/pi/guard.ts");
   const { addToolRule, deleteToolRule, listToolRules } = await import("../core/server/src/db.ts");
   const rule = (pattern: string, more: Record<string, unknown> = {}) =>
@@ -1612,12 +1612,16 @@ test("a tool rule for edit_image is matched on each picture, whether it is named
   assert.equal(allows(folder, { path: "shared/a.png", paths: ["private.png"], prompt: "p" }), false);
   assert.equal(allows(folder, { path: "private.png", paths: ["shared/a.png"], prompt: "p" }), false);
   assert.equal(allows(folder, { paths: "private.png", prompt: "p" }), false, "a list given as text, as pi may coerce it");
-  // A call that names no picture, an empty list, or something that is no name is allowed by nothing, even by a rule for everything.
+  // An empty list, or one with something that is no name in it, is allowed by nothing, even by a rule for everything.
   const anything = [rule("*")];
-  for (const input of [{ prompt: "p" }, { paths: [], prompt: "p" }, { paths: [""], prompt: "p" }, { paths: ["a.png", 5], prompt: "p" }, { path: 5, prompt: "p" }]) {
+  for (const input of [{ paths: [], prompt: "p" }, { paths: [""], prompt: "p" }, { paths: ["a.png", 5], prompt: "p" }]) {
     assert.equal(allows(anything, input), false, JSON.stringify(input));
   }
   assert.equal(allows(anything, { paths: ["a.png", "b.png"], prompt: "p" }), true);
+  // Any tool's list is the same: the guard knows no tool by its name for it.
+  const pdfs = [rule("shared/*", { tool: "merge_pdfs" })];
+  assert.equal(ruleAllows(pdfs, "colleague", "merge_pdfs", { paths: ["shared/a.pdf", "shared/b.pdf"] }), true);
+  assert.equal(ruleAllows(pdfs, "colleague", "merge_pdfs", { paths: ["shared/a.pdf", "private.pdf"] }), false);
 
   // The rule's role, person and tool count as for any call.
   assert.equal(allows(folder, { paths: ["shared/a.png"], prompt: "p" }, "stranger"), false);
@@ -1631,7 +1635,8 @@ test("a tool rule for edit_image is matched on each picture, whether it is named
   assert.equal(ruleAllows([bash("ls*")], "colleague", "bash", { command: "ls -l 2>&1" }), true);
   assert.equal(ruleAllows([bash("ls*")], "colleague", "bash", { command: "ls; rm x" }), false);
   assert.equal(ruleAllows([rule("docs/*", { tool: "write" })], "colleague", "write", { path: "docs/a.md", content: "x" }), true);
-  assert.equal(ruleAllows([rule("*shared*", { tool: "other_tool" })], "colleague", "other_tool", { paths: ["a"], note: "shared" }), true, "a tool of another name keeps its arguments' JSON");
+  assert.equal(ruleAllows([rule("*shared*", { tool: "other_tool" })], "colleague", "other_tool", { files: ["a"], note: "shared" }), true, "one that names no path keeps its arguments' JSON");
+  assert.equal(ruleAllows([rule("*shared*", { tool: "other_tool" })], "colleague", "other_tool", { paths: ["a"], note: "shared" }), false, "one with a list is matched on each of it");
 
   // As the guard asks it, with the rules in the portal's own table: the call goes through for the pictures the rule allows and is refused for the rest.
   const added = [{ id: "issue90-a", pattern: "shared/*" }];

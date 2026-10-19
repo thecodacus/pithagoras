@@ -8,7 +8,6 @@ import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-form
 import { bareRef } from "../browser/ref.js";
 import { listToolRules, mcpView, recordAudit, trustResult, trustedResults, useGrant, type McpView, type ToolRule } from "../db.js";
 import { injectionSignals, type Signal } from "./injection.js";
-import { EDIT_IMAGE_TOOL } from "../image-generation.js";
 import { PORTAL_BROWSER_TOOLS, mcpServerOf } from "../tool-policy.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
 import { agentsRoot, listAgents } from "../agents.js";
@@ -480,48 +479,57 @@ const subjectOf = (toolName: string, input: Record<string, unknown>) =>
   toolName === "bash" ? cmd(input) : target(input) || JSON.stringify(input);
 
 /**
- * What a rule must allow for a call: one subject, or one for each picture of an
- * edit_image given a list. A list has no `path`, so matched like any other
+ * Whether a call names files in a list (`paths`), any tool's: edit_image given
+ * several pictures is one. Each is then a subject of its own (subjectsOf). A
+ * list given as text, as pi may coerce one, is a list of one.
+ */
+const listsPaths = (input: Record<string, unknown>) => Array.isArray(input.paths) || typeof input.paths === "string";
+
+/**
+ * What a rule must allow for a call: one subject, or one for each file of a call
+ * that names them in a list. A list has no `path`, so matched like any other
  * tool's arguments it would be matched on their JSON — a rule for a folder
  * would match nothing, and one for a word would match the prompt or another
- * picture of the list. Each picture is a subject instead, as if the pictures
- * were asked for one at a time. Every name the call carries is one, `path` and
- * `paths` alike, so that the one the tool uses is never the one left unchecked;
- * a call that names no picture is allowed by nothing, and fails in the tool.
+ * file of the list. Each file is a subject instead, as if the files were asked
+ * for one at a time. Every name the call carries is one, `path` and `paths`
+ * alike, so that the one the tool uses is never the one left unchecked; a list
+ * with a name that is no text in it is allowed by nothing, and fails in the tool.
  */
 function subjectsOf(toolName: string, input: Record<string, unknown>): string[] {
-  if (toolName !== EDIT_IMAGE_TOOL) return [subjectOf(toolName, input)];
+  if (!listsPaths(input)) return [subjectOf(toolName, input)];
   const named = (value: unknown): unknown[] => (Array.isArray(value) ? value : value === undefined ? [] : [value]);
   return [...named(input.path), ...named(input.paths)].map((name) => (typeof name === "string" ? name.trim() : ""));
 }
 
 /**
- * Between the pictures of an edit_image call where somebody approves it. A line
- * break, not a comma: a picture's name may hold a comma and a space, hardly a
- * line break, so the pictures can be told apart again (see rulePatterns).
+ * Between the files of a call that names several where somebody approves it. A
+ * line break, not a comma: a file's name may hold a comma and a space, hardly a
+ * line break, so the files can be told apart again (see rulePatterns).
  */
-const PICTURE_SEP = "\n";
+const PATHS_SEP = "\n";
 
 /**
  * What a call is called where a person is asked to approve it, and in the log:
  * what a one-off approval is matched on, exactly. The command, or the path, and
- * for an edit_image the path of each picture, one to a line, in the order of the
- * call, so that the agent can write it as an `action` however the pictures were
- * named. The prompt is not part of it, as the prompt of one picture never was.
+ * for a call that names several files the path of each, one to a line, in the
+ * order of the call, so that the agent can write it as an `action` however the
+ * files were named. The rest of the call (a prompt) is not part of it, as it
+ * never was of one file.
  */
 export function callSubject(toolName: string, input: Record<string, unknown>): string {
-  if (toolName !== EDIT_IMAGE_TOOL) return subjectOf(toolName, input).trim();
-  return subjectsOf(toolName, input).join(PICTURE_SEP).trim() || JSON.stringify(input);
+  if (!listsPaths(input)) return subjectOf(toolName, input).trim();
+  return subjectsOf(toolName, input).join(PATHS_SEP).trim() || JSON.stringify(input);
 }
 
 /**
  * The patterns a standing approval of `action` is written as: the action itself,
- * and for an edit_image one for each picture of it, since a rule is matched on
- * each picture (see subjectsOf) and one that held them all would match none.
+ * and for one that names several files (a line each) one for each of them, since
+ * a rule is matched on each file (see subjectsOf) and one that held them all
+ * would match none. A command keeps its lines: it is one subject.
  */
 export function rulePatterns(toolName: string, action: string): string[] {
-  if (toolName !== EDIT_IMAGE_TOOL) return [action];
-  return action.split(PICTURE_SEP).map((line) => line.trim()).filter(Boolean);
+  if (toolName === "bash" || !action.includes(PATHS_SEP)) return [action];
+  return action.split(PATHS_SEP).map((line) => line.trim()).filter(Boolean);
 }
 
 /**
@@ -567,7 +575,7 @@ export function ruleAllows(
   if (toolName === "bash") {
     subjects[0] = subjects[0].replace(STDERR_IDIOM, "").trim();
     if (CHAINING.test(subjects[0])) return false;
-  } else if (toolName === EDIT_IMAGE_TOOL || target(input)) {
+  } else if (listsPaths(input) || target(input)) {
     // A path is what it leads to, not how it was written: `*` in a rule for
     // /srv/site/* must not reach /srv/site/../../root. A `..` that is left
     // after tidying leads out of wherever the rule's place is, and so does a
@@ -805,7 +813,8 @@ function callOf(toolName: string, action: string): Record<string, unknown> {
  * have them say yes to something that cannot happen.
  */
 export function approvalCannotHelp(toolName: string, action: string, workspace: string | undefined, portalSessionId?: string): string | undefined {
-  if (toolName === EDIT_IMAGE_TOOL) return undefined;
+  // Several files, a line each: an approval for each of them, which is what is asked for (see rulePatterns).
+  if (toolName !== "bash" && action.includes(PATHS_SEP)) return undefined;
   // A read is never asked for: where it is allowed it needs no approval, and an approval does not open the rest.
   if (PATH_READERS.has(toolName)) return "it is a read, which needs no approval where it is allowed and is held to the folder of this conversation where it is not";
   const input = callOf(toolName, action);
@@ -1213,7 +1222,7 @@ export function guardExtension(
             (event.toolName === "bash"
               ? ""
               : ` For this call the actionTool is ${event.toolName} and the action is ` +
-                (event.toolName === EDIT_IMAGE_TOOL ? "the path of each picture, one to a line, in this order, exactly" : "exactly") +
+                (listsPaths(event.input ?? {}) ? "the path of each file it names, one to a line, in this order, exactly" : "exactly") +
                 `:\n${subject}`),
         };
       }
