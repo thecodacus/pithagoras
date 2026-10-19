@@ -54,7 +54,7 @@ export async function race(act, { expect = false, likeParent = false } = {}) {
   const inReal = (name) => `/proc/self/fd/${fdReal}/${name}`;
   const inClosed = (name) => `/proc/self/fd/${fdClosed}/${name}`;
   const id = statSync(real, { bigint: true });
-  const options = { direct: true, alone: true, ...(likeParent ? { likeParent: true } : {}), ...(expect ? { expect: { dev: id.dev, ino: id.ino } } : {}) };
+  const options = { direct: true, alone: true, ...(likeParent ? { likeParent: true, chats: ['a'] } : {}), ...(expect ? { expect: { dev: id.dev, ino: id.ino } } : {}) };
   let racer;
   let rounds = '';
   try {

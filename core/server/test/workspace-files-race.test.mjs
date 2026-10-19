@@ -28,7 +28,7 @@ for (const [what, act] of [['removeFile', removing], ['renameFile', renaming]]) 
   test(`${what} as root never acts in a closed folder that the agent moved onto the documents folder's place, when it is told the folder is to be one the agent could use`, { skip: !root && 'only as root', timeout: 60_000 }, async (t) => {
     // No folder named: the check is on the folder the call holds, so the closed one is turned away whenever it is the one that is there.
     // The agent is the user the racer runs as, in its own group.
-    setAgentAccess(() => ({ uid: AGENT, groups: [AGENT] }));
+    setAgentAccess(() => [{ uid: AGENT, groups: [AGENT] }]);
     const told = await race(act, { likeParent: true }).finally(() => setAgentAccess(() => undefined));
     if (!told) return t.skip('the agent\'s user cannot run node here');
     assert.ok(told.rounds > 100, `the agent moved the folders (${told.rounds} rounds)`);

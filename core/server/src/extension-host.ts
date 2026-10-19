@@ -50,19 +50,32 @@ export type { Chat, ServerPortal } from "@pithagoras/extension-api/server";
 export { folderFiles };
 
 /**
- * Who the agent is that works in a folder, for what `files.*` is asked with `likeParent`: the user and groups the sandbox runs it as
- * (`asAgent`, exec.ts), for the agent the folder belongs to as `whoOf` has it. Nothing while the sandbox is off: the agent is the
- * portal's own user then. Kept for a second per agent: the answer is a few processes (`getent`), and a listing asks for each file.
+ * Who the agents of some chats are, for what `files.*` is asked with `likeParent`: the user and groups the sandbox runs each as (`asAgent`,
+ * exec.ts), for the agent the sandbox runs the chat by: from the workspace stored for the chat, as sandbox/tools.ts has it, never from the path the
+ * folder leads to now, which an agent can lead elsewhere with a link (into another agent's home, say). Nothing while the sandbox is off: the agent
+ * is the portal's own user then. A chat that is not known throws, which is a refusal. Whether the sandbox is on and who an agent is are a few
+ * processes (`getent`) and a listing asks for each file: they are kept for a second. That is of the sandbox and its agents, not of any folder.
  */
-const agentAccess = new Map<string, { at: number; access: AgentAccess | undefined }>();
-setAgentAccess((folder) => {
-  const agent = agentOf(folder) ?? defaultAgent();
-  const known = agentAccess.get(agent.id);
-  if (known && Date.now() - known.at < 1000) return known.access;
-  const who = sandboxOn() ? identityOf(agent, sandboxSupport()) : undefined;
-  const access = who && { uid: who.uid, groups: [who.gid, who.shared] };
-  agentAccess.set(agent.id, { at: Date.now(), access });
-  return access;
+let sandboxIsOn = { at: 0, on: false };
+const agentAccess = new Map<string, { at: number; access: AgentAccess }>();
+setAgentAccess((chats) => {
+  const now = Date.now();
+  if (now - sandboxIsOn.at > 1000) sandboxIsOn = { at: now, on: sandboxOn() };
+  if (!sandboxIsOn.on) return undefined;
+  const found = new Map<number, AgentAccess>();
+  for (const id of chats) {
+    const row = getSession(id);
+    if (!row) throw new Error("No such chat");
+    const agent = agentOf(row.workspace) ?? defaultAgent();
+    let known = agentAccess.get(agent.id);
+    if (!known || now - known.at > 1000) {
+      const who = identityOf(agent, sandboxSupport());
+      known = { at: now, access: { uid: who.uid, groups: [who.gid, who.shared] } };
+      agentAccess.set(agent.id, known);
+    }
+    found.set(known.access.uid, known.access);
+  }
+  return [...found.values()];
 });
 
 interface Running {

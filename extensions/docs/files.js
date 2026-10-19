@@ -32,6 +32,24 @@ export class Refused extends Error {
 }
 
 /**
+ * `portal.files`, told whose chats work in the folder: a call that asks for `likeParent` says which chats' agents must be able to use what it reads or
+ * changes there, as the portal does not take the agent from the folder's path (which a link can lead into another agent's home). `chats` is the list
+ * of their ids, or a function that gives it as each call is made.
+ */
+export function forChats(files, chats) {
+  const optionsAt = { folder: 2, identity: 2, list: 2, read: 2, readBytes: 2, open: 2, sweepTemp: 2, removeFile: 2, write: 3, renameFile: 3 };
+  const bound = { ...files };
+  for (const [name, at] of Object.entries(optionsAt)) {
+    bound[name] = (...args) => {
+      const options = args[at];
+      if (options?.likeParent && options.chats === undefined) args[at] = { ...options, chats: typeof chats === "function" ? chats() : chats };
+      return files[name](...args);
+    };
+  }
+  return bound;
+}
+
+/**
  * A file that is a document's: directly in the folder, through no link, with the one name, in a folder that is the agent's to have (the portal
  * reads and writes it as root: a folder the sandbox closed to the agent, renamed to `documents`, is none), and a file the agent could read.
  */

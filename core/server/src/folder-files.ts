@@ -32,7 +32,7 @@ export const folderFiles: ServerPortal["files"] = {
   read: (base, rel, options = {}) => readText(base, rel, options),
   readBytes: (base, rel, options = {}) => readBytes(base, rel, options),
   write: (base, rel, content, options = {}) =>
-    writeText(base, rel, content, options.expected, options.create === true, { direct: options.direct, likeParent: options.likeParent }),
+    writeText(base, rel, content, options.expected, options.create === true, { direct: options.direct, likeParent: options.likeParent, chats: options.chats }),
   rename: (base, rel, name) => renameEntry(base, rel, name),
   unsaved: (base, rel) => unsavedAt(base, rel),
   remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true),
@@ -41,6 +41,6 @@ export const folderFiles: ServerPortal["files"] = {
   makeFolder: (base, rel, name) => makeFolder(base, rel, name),
   folder: (base, rel, options = {}) => folderPath(base, rel, options),
   identity: (base, rel, options = {}) => folderIdentity(base, rel, options),
-  sweepTemp: (base, rel, options = {}) => sweepTemp(base, rel, options.olderThanMs, { likeParent: options.likeParent }),
+  sweepTemp: (base, rel, options = {}) => sweepTemp(base, rel, options.olderThanMs, { likeParent: options.likeParent, chats: options.chats }),
   open: (base, rel, options = {}) => openFile(base, rel, options),
 };
