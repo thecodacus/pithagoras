@@ -199,10 +199,19 @@ const declaredValues = (input: Record<string, unknown>, files: readonly string[]
     return (Array.isArray(value) ? value : [value]).filter((one): one is string => typeof one === "string");
   });
 
+/** Where secrets are kept, by a path's name: keys, tokens, and the folders tools keep their logins in. */
+const SECRET_PLACES = /auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:ssh|aws|docker|kube|gnupg)(?=\/|$|[\s'"*}])|\.config\/(?:gh|gcloud|hub)(?=\/|$|[\s'"*}])|\.netrc/i;
+
 /** Whether a call reads a place where secrets are kept: the command, or the path, and each file a tool declares (`files`). */
 function readsCredentials(tool: string, input: Record<string, unknown>, files?: readonly string[]): boolean {
-  const secret = (where: string) => /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh(?=\/|$|[\s'"*}])|\.netrc)/i.test(where) || SECRET_NAMES.test(where);
-  return secret(tool === "bash" ? cmd(input) : target(input)) || declaredValues(input, files).some(secret);
+  const secret = (where: string) => SECRET_PLACES.test(where) || SECRET_NAMES.test(where);
+  if (tool !== "bash") return secret(target(input)) || declaredValues(input, files).some(secret);
+  const command = cmd(input);
+  // gh hands its token out by more than one spelling.
+  if (/\bgh\s+auth\s+(?:token\b|status\b[^|;&\n]*(?:--show-token|\s-t\b))/.test(command)) return true;
+  // A command by its words, each a place or a name: a word with a blank in it is a message or a search, not a place
+  // (`git commit -m "fix token refresh"`); and the code an interpreter runs, which names places inside its own text.
+  return lexShell(command, undefined).some((one) => [one.program, ...one.args, ...one.writes].some((word) => !/\s/.test(word) && secret(word)) || secret(codeOf(one)));
 }
 
 /** The options git takes before the subcommand that read the next word as their value (the others, `--no-pager` or `-p`, stand alone). */
@@ -228,28 +237,43 @@ function pushesGit(command: string): boolean {
 /** curl's short flags that take a value, which swallows the rest of their group: in `-ofile.tar` the `f` is no flag. */
 const CURL_VALUE_FLAGS = "oAbcCeEHKmQrtuUwxXyYzW";
 
-/** Whether a short-flag group has one of `wanted` before a flag that takes the rest as its value: `-sd`, `-sSLd@file`, `-sfT`. */
-function hasShortFlag(command: string, wanted: string): boolean {
-  for (const group of command.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
-    for (const flag of group[1]) {
-      if (wanted.includes(flag)) return true;
-      if (CURL_VALUE_FLAGS.includes(flag)) break;
+/**
+ * curl carrying data out: a body (`-d`, `-F`, `-T`, alone or in a group such as `-sd`; `--data*`, `--form`, `--json`,
+ * `--upload-file`) or a method that has one (`-X POST`, `-XPUT`, `--request=PATCH`). Read from its own words.
+ */
+function curlSends(args: string[]): boolean {
+  const bodyMethod = (value: string | undefined) => /^(?:POST|PUT|PATCH)$/i.test(value ?? "");
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (/^--(?:data|form|upload-file|json)\b/.test(arg)) return true;
+    if (arg === "--request" || arg === "--method") {
+      if (bodyMethod(args[i + 1])) return true;
+      continue;
+    }
+    if (/^--(?:request|method)=/.test(arg)) {
+      if (bodyMethod(arg.slice(arg.indexOf("=") + 1))) return true;
+      continue;
+    }
+    if (!/^-[A-Za-z]/.test(arg)) continue;
+    for (let k = 1; k < arg.length; k++) {
+      if ("dFT".includes(arg[k])) return true;
+      if (arg[k] === "X") {
+        if (bodyMethod(k < arg.length - 1 ? arg.slice(k + 1) : args[i + 1])) return true;
+        break;
+      }
+      if (CURL_VALUE_FLAGS.includes(arg[k])) break;
     }
   }
   return false;
 }
 
-/**
- * curl or wget carrying data out: a body (`-d`, `-F`, `-T` alone or in a group such
- * as `-sd`, `--data*`, `--form`, `--json`, `--upload-file`, `--post-data`,
- * `--post-file`, `--body-data`, `--body-file`) or a method that has one. wget's
- * short flags are not looked at: its `-d` is debug and its `-nd` no directories.
- */
+/** wget carrying data out: `--post-data`, `--post-file`, `--body-data`, `--body-file`, or a method that has one. Its short flags are not looked at: its `-d` is debug. */
+const wgetSends = (args: string[]): boolean =>
+  args.some((arg, i) => /^--(?:post-data|post-file|body-data|body-file)\b/.test(arg) || (/^--method(?:=|$)/.test(arg) && /^(?:POST|PUT|PATCH)$/i.test(arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : (args[i + 1] ?? ""))));
+
+/** curl or wget carrying data out (see curlSends, wgetSends), in any command of the line. */
 function sendsData(command: string): boolean {
-  const withBody = /--(?:data|form|upload-file|json|post-data|post-file|body-data|body-file)\b/;
-  const withMethod = /(?:--request|--method)(?:\s+|=)["']?(?:POST|PUT|PATCH)\b|(?:^|\s)-[A-Za-z]*X\s*["']?(?:POST|PUT|PATCH)\b/i;
-  if (/\bcurl\b/.test(command) && (hasShortFlag(command, "dFT") || withBody.test(command) || withMethod.test(command))) return true;
-  return /\bwget\b/.test(command) && (withBody.test(command) || withMethod.test(command));
+  return lexShell(command, undefined).some(({ name, args }) => (name === "curl" && curlSends(args)) || (name === "wget" && wgetSends(args)));
 }
 
 /**
@@ -259,14 +283,20 @@ function sendsData(command: string): boolean {
 interface SimpleCommand {
   /** Whether it takes the output of the one before it through a pipe. */
   piped: boolean;
+  /** The word it is run by, as written (`./install.sh`). */
+  program: string;
   /** What it runs, past the wrappers that run another command (sudo, env, timeout and the like), assignments and keywords. */
   name: string;
   /** The words after it, quotes taken off. */
   args: string[];
+  /** The wrappers it is run through. */
+  via: string[];
   /** Where its output is sent: what a `>`, `>>` or `&>` that is not quoted names. */
   writes: string[];
-  /** Whether it is given input from a file or a here-string (`<`, `<<<`; not `< /dev/null`), or a here-document. */
+  /** Whether it is given input from a file (`<`, not `< /dev/null`), or the output of a command in a here-string or a here-document. */
   fed: boolean;
+  /** The text it is handed to read: here-document bodies and here-strings. */
+  input: string;
   /** The folder it runs in as far as the line says (a `cd` before it), or undefined where that cannot be told. */
   dir: string | undefined;
 }
@@ -285,83 +315,131 @@ const WRAPPERS: Record<string, { values: string; first?: number }> = {
   command: { values: "" },
   exec: { values: "a" },
   setsid: { values: "" },
+  sshpass: { values: "pfdP" },
   xargs: { values: "IiLlnPdEsa" },
 };
 
 /** Words that open or close a compound command, which run what follows them. */
 const KEYWORDS = new Set(["!", "{", "}", "if", "then", "else", "elif", "do", "while", "until"]);
 
-/** `~` and `~/…` as the shell has them. */
-const homeOf = (word: string) => (word === "~" ? os.homedir() : word.startsWith("~/") ? path.join(os.homedir(), word.slice(2)) : word);
+/** `~`, `~/…` and `$HOME/…` as the shell has them. */
+const homeOf = (word: string) => {
+  const home = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/.exec(word);
+  return home ? path.join(os.homedir(), word.slice(home[0].length)) : word;
+};
 
 /** The shells, and the interpreters that run what they read from their input when they are given nothing else to run. */
 const SHELLS = /^(?:ba|z|d|k|fi)?sh$/;
 const INTERPRETERS = /^(?:python[\d.]*|perl|ruby|node|nodejs|php|deno|bun)$/;
 
-/**
- * A command line's simple commands, read as a shell reads them on their face: words split at unquoted blanks, with
- * quotes and backslashes taken off; commands split at unquoted `|`, `;`, `&`, `&&`, `||`, line breaks, parentheses
- * and backticks (a line break after a pipe or an operator only continues the line); redirects taken out of the
- * words; here-document bodies, and comments, skipped; a `cd` followed for the commands after it (and undone at the
- * end of a subshell); and the script of `sh -c` (`bash -lc`, `sudo sh -c`) read as commands of its own. `dir` is the
- * folder the line starts in, where it is known. Not a parser: what is inside `"$(…)"` stays a word.
- */
+/** How deep substitutions and `sh -c` scripts are read into: deeper than any line a model writes, and a bound on the work. */
+const LEX_DEPTH = 8;
+
+/** A command line's simple commands: see lexFrom. `dir` is the folder the line starts in, where it is known. */
 function lexShell(command: string, dir: string | undefined, depth = 0): SimpleCommand[] {
+  return lexFrom(command, 0, dir, depth).commands;
+}
+
+/**
+ * The simple commands of a command line from `start`, read as a shell reads them on their face: words split at
+ * unquoted blanks, with quotes and backslashes taken off; commands split at unquoted `|`, `;`, `&`, `&&`, `||`, line
+ * breaks and parentheses (a line break after a pipe or an operator only continues the line); redirects taken out of
+ * the words; arithmetic (`$((…))`) kept as a word; a command substitution (`$(…)`, backticks, in double quotes too)
+ * read as commands of its own and kept as the word it stands in; here-document bodies kept as the input of the
+ * command they are given to, and read as commands where that is a shell; comments skipped; a `cd` followed for the
+ * commands after it (and undone at the end of a subshell); and the script of `sh -c` (`bash -lc`, `sudo sh -c`) read
+ * as commands of its own. With `until`, it stops at the `)` or backtick that ends the substitution it reads, and says
+ * where. Not a parser: a `case` pattern's `)` ends a substitution early, which leaves more to be read, not less.
+ */
+function lexFrom(command: string, start: number, dir: string | undefined, depth: number, until?: ")" | "`"): { commands: SimpleCommand[]; end: number } {
   const commands: SimpleCommand[] = [];
+  const nested: SimpleCommand[] = [];
   let words: string[] = [];
   let writes: string[] = [];
   let fed = false;
+  let input = "";
   let piped = false;
   let word = "";
   let inWord = false;
+  let quotedWord = false;
   let quote: string | undefined;
-  /** What the next word is the target of: a write, a dup of a descriptor (`>&2`), an input, or a here-document's end. */
+  /** What the next word is the target of: a write, a dup of a descriptor (`>&2`), an input, a here-string, or a here-document's end. */
   let target: "write" | "dup" | "read" | "here" | "heredoc" | "heredoc-tabs" | undefined;
-  const heredocs: { end: string; tabs: boolean }[] = [];
+  /** The here-documents of the command being read, and those whose bodies come after the next line break. */
+  let opened: { end: string; tabs: boolean; quoted: boolean }[] = [];
+  const bodies: { end: string; tabs: boolean; quoted: boolean; owner: SimpleCommand }[] = [];
   const dirs: (string | undefined)[] = [];
+  const push = (into: SimpleCommand[], from: SimpleCommand[]) => {
+    for (const one of from) into.push(one);
+  };
 
   const endWord = () => {
     if (!inWord) return;
     const done = word;
+    const quotedDone = quotedWord;
     word = "";
     inWord = false;
+    quotedWord = false;
     const kind = target;
     target = undefined;
     if (kind === "write" || (kind === "dup" && !/^(?:\d+|-)$/.test(done))) writes.push(done);
     else if (kind === "read") fed ||= done !== "/dev/null";
-    else if (kind === "here") fed = true;
-    else if (kind === "heredoc" || kind === "heredoc-tabs") {
-      heredocs.push({ end: done, tabs: kind === "heredoc-tabs" });
-      fed = true;
-    } else if (kind === undefined) words.push(done);
+    else if (kind === "here") {
+      input += `${done}\n`;
+      fed ||= /\$\(|`/.test(done);
+    } else if (kind === "heredoc" || kind === "heredoc-tabs") opened.push({ end: done, tabs: kind === "heredoc-tabs", quoted: quotedDone });
+    else if (kind === undefined) words.push(done);
   };
   const endCommand = (nextPiped: boolean) => {
     endWord();
     // A redirect with nothing after it names nothing.
     target = undefined;
-    if (words.length || writes.length) {
-      const made = commandOf(words, writes, fed, piped, dir);
+    if (words.length || writes.length || opened.length || input) {
+      const made = commandOf(words, writes, fed, input, piped, dir);
       commands.push(made);
+      for (const heredoc of opened) bodies.push({ ...heredoc, owner: made });
       if (made.name === "cd" || made.name === "pushd") {
         const to = made.args.find((arg) => !arg.startsWith("-"));
         const goes = to === undefined ? os.homedir() : homeOf(to);
         dir = /[$`]/.test(goes) || goes === "-" ? undefined : path.isAbsolute(goes) ? path.resolve(goes) : dir === undefined ? undefined : path.resolve(dir, goes);
       }
-      // What `sh -c` runs is a line of its own, in the same folder.
-      if (SHELLS.test(made.name) && depth < 3) {
+      if (SHELLS.test(made.name) && depth < LEX_DEPTH) {
         const at = made.args.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg));
+        // What `sh -c` runs is a line of its own, in the same folder; and so is what a shell without one is handed to read.
         const script = at < 0 ? undefined : made.args.slice(at + 1).find((arg) => !arg.startsWith("-"));
-        if (script !== undefined) commands.push(...lexShell(script, dir, depth + 1));
+        if (script !== undefined) push(commands, lexShell(script, dir, depth + 1));
+        else if (made.input) push(commands, lexShell(made.input, dir, depth + 1));
       }
     }
     words = [];
     writes = [];
+    opened = [];
     fed = false;
+    input = "";
     piped = nextPiped;
   };
   const empty = () => !inWord && !words.length && !writes.length && target === undefined;
+  /** A substitution from `at` (its `$(` or backtick), read as commands of its own; the word it stands in keeps its text. */
+  const substitute = (at: number, open: number, close: ")" | "`"): number => {
+    if (depth >= LEX_DEPTH) return at + open - 1;
+    const inner = lexFrom(command, at + open, dir, depth + 1, close);
+    push(nested, inner.commands);
+    word += command.slice(at, inner.end + 1);
+    inWord = true;
+    return inner.end;
+  };
+  /** Arithmetic from `at`, to the `))` that closes it: a value, not commands. */
+  const arithmetic = (at: number): number => {
+    let level = 0;
+    for (let k = at; k < command.length; k++) {
+      if (command[k] === "(") level++;
+      else if (command[k] === ")" && --level === 0) return k;
+    }
+    return command.length - 1;
+  };
 
-  for (let i = 0; i < command.length; i++) {
+  let i = start;
+  for (; i < command.length; i++) {
     const c = command[i];
     if (quote === "'") {
       if (c === "'") quote = undefined;
@@ -373,19 +451,28 @@ function lexShell(command: string, dir: string | undefined, depth = 0): SimpleCo
       else if (c === "\\" && i + 1 < command.length && '"\\$`\n'.includes(command[i + 1])) {
         if (command[i + 1] !== "\n") word += command[i + 1];
         i++;
-      } else word += c;
+      } else if (c === "$" && command.startsWith("$((", i)) {
+        const end = arithmetic(i + 1);
+        word += command.slice(i, end + 1);
+        i = end;
+      } else if (c === "$" && command[i + 1] === "(") i = substitute(i, 2, ")");
+      else if (c === "`") i = substitute(i, 1, "`");
+      else word += c;
       continue;
     }
+    if (until !== undefined && c === until && (until === "`" || !dirs.length)) break;
     if (c === "'" || c === '"') {
       quote = c;
       inWord = true;
+      quotedWord = true;
       continue;
     }
     if (c === "\\" && i + 1 < command.length) {
-      // A backslash before a line break continues the line.
+      // A backslash before a line break continues the line; before a word, it quotes it.
       if (command[i + 1] !== "\n") {
         word += command[i + 1];
         inWord = true;
+        quotedWord = true;
       }
       i++;
       continue;
@@ -400,17 +487,24 @@ function lexShell(command: string, dir: string | undefined, depth = 0): SimpleCo
     }
     if (c === "\n") {
       // Only a line break that ends a command ends one: after a pipe or an operator the command goes on.
-      if (!empty()) endCommand(false);
-      // A here-document's body is text for the command, up to the line that ends it.
-      while (heredocs.length) {
-        const { end, tabs } = heredocs.shift()!;
-        let next = command.indexOf("\n", i + 1);
+      if (!empty() || opened.length) endCommand(false);
+      // A here-document's body is text for the command it is given to, up to the line that ends it.
+      while (bodies.length) {
+        const { end, tabs, quoted, owner } = bodies.shift()!;
+        const lines: string[] = [];
         for (;;) {
+          const next = command.indexOf("\n", i + 1);
           const line = command.slice(i + 1, next < 0 ? command.length : next);
           i = next < 0 ? command.length : next;
-          if ((tabs ? line.replace(/^\t+/, "") : line) === end || next < 0) break;
-          next = command.indexOf("\n", i + 1);
+          if ((tabs ? line.replace(/^\t+/, "") : line) === end) break;
+          lines.push(line);
+          if (next < 0) break;
         }
+        const body = lines.join("\n");
+        owner.input += `${body}\n`;
+        // Unquoted, a body has its substitutions run: what they put there is not what the model wrote.
+        if (!quoted && /\$\(|`/.test(body)) owner.fed = true;
+        if (SHELLS.test(owner.name) && !owner.args.some((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg)) && depth < LEX_DEPTH) push(commands, lexShell(body, owner.dir, depth + 1));
       }
       continue;
     }
@@ -426,17 +520,30 @@ function lexShell(command: string, dir: string | undefined, depth = 0): SimpleCo
       endCommand(c === "|" && !doubled);
       continue;
     }
-    if (c === "(" || c === ")" || c === "`") {
-      endCommand(false);
-      if (c === "(") dirs.push(dir);
-      else if (c === ")" && dirs.length) dir = dirs.pop();
+    if (c === "$" && command.startsWith("$((", i)) {
+      const end = arithmetic(i + 1);
+      word += command.slice(i, end + 1);
+      inWord = true;
+      i = end;
       continue;
     }
     if (c === "$" && command[i + 1] === "(") {
-      // A command substitution runs a command of its own; its value is a word of this one.
+      i = substitute(i, 2, ")");
+      continue;
+    }
+    if (c === "`") {
+      i = substitute(i, 1, "`");
+      continue;
+    }
+    if (c === "(" && command[i + 1] === "(" && empty()) {
+      // An arithmetic command: a value, not commands.
+      i = arithmetic(i);
+      continue;
+    }
+    if (c === "(" || c === ")") {
       endCommand(false);
-      dirs.push(dir);
-      i++;
+      if (c === "(") dirs.push(dir);
+      else if (dirs.length) dir = dirs.pop();
       continue;
     }
     if (c === ">" || c === "<") {
@@ -448,7 +555,7 @@ function lexShell(command: string, dir: string | undefined, depth = 0): SimpleCo
         continue;
       }
       // A descriptor's number before it (`2>`) is part of the redirect, not a word.
-      if (inWord && /^\d+$/.test(word)) {
+      if (inWord && !quotedWord && /^\d+$/.test(word)) {
         word = "";
         inWord = false;
       } else endWord();
@@ -480,11 +587,13 @@ function lexShell(command: string, dir: string | undefined, depth = 0): SimpleCo
     inWord = true;
   }
   endCommand(false);
-  return commands;
+  push(commands, nested);
+  return { commands, end: Math.min(i, command.length - 1) };
 }
 
 /** A simple command's name and arguments, past assignments, keywords and the wrappers that run another command. */
-function commandOf(words: string[], writes: string[], fed: boolean, piped: boolean, dir: string | undefined): SimpleCommand {
+function commandOf(words: string[], writes: string[], fed: boolean, input: string, piped: boolean, dir: string | undefined): SimpleCommand {
+  const via: string[] = [];
   let at = 0;
   while (at < words.length) {
     const word = words[at];
@@ -492,8 +601,10 @@ function commandOf(words: string[], writes: string[], fed: boolean, piped: boole
       at++;
       continue;
     }
-    const wrapper = WRAPPERS[path.basename(word)];
+    const named = path.basename(word);
+    const wrapper = Object.hasOwn(WRAPPERS, named) ? WRAPPERS[named] : undefined;
     if (!wrapper) break;
+    via.push(named);
     at++;
     let first = wrapper.first ?? 0;
     while (at < words.length) {
@@ -528,7 +639,8 @@ function commandOf(words: string[], writes: string[], fed: boolean, piped: boole
       break;
     }
   }
-  return { piped, name: at < words.length ? path.basename(words[at]) : "", args: words.slice(at + 1), writes, fed, dir };
+  const program = at < words.length ? words[at] : "";
+  return { piped, program, name: path.basename(program), args: words.slice(at + 1), via, writes, fed, input, dir };
 }
 
 /**
@@ -543,7 +655,7 @@ function readOptions(args: string[], shortValues: string, longValues: string[] =
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--") {
-      operands.push(...args.slice(i + 1));
+      for (const rest of args.slice(i + 1)) operands.push(rest);
       break;
     }
     if (arg.startsWith("--")) {
@@ -578,18 +690,80 @@ function savedAs(url: string): string | undefined {
   }
 }
 
+/** The files a download command saves to, by its words: curl's `-o` and `-O` (in `--output-dir`), wget's `-O`, or the address's name (in `-P`). */
+function downloadsOf({ name, args }: SimpleCommand): string[] {
+  if (name === "curl") {
+    const { operands, given } = readOptions(args, CURL_VALUE_FLAGS, ["--output", "--output-dir", "--url", "--config"]);
+    const saved = [...given("-o"), ...given("--output")];
+    // `-O` saves each address under its own name, in `--output-dir` if it is given.
+    if (given("-O").length || given("--remote-name").length || given("--remote-name-all").length) {
+      const folder = given("--output-dir")[0];
+      for (const url of [...operands, ...given("--url")]) {
+        const named = savedAs(url);
+        if (named) saved.push(folder ? path.join(folder, named) : named);
+      }
+    }
+    return saved;
+  }
+  if (name === "wget") {
+    const { operands, given } = readOptions(args, "OoaiBetTwQUlARDIXP", ["--output-document", "--directory-prefix"]);
+    const named = [...given("-O"), ...given("--output-document")];
+    if (named.length) return named.filter((file) => file !== "-");
+    // Without a name of its own a download keeps the address's, in `-P` if it is given.
+    const folder = [...given("-P"), ...given("--directory-prefix")][0];
+    const saved = folder ? [folder] : [];
+    for (const url of operands) {
+      const file = savedAs(url);
+      if (file) saved.push(folder ? path.join(folder, file) : file);
+    }
+    return saved;
+  }
+  return [];
+}
+
+/** The code an interpreter is given to run on its face: what its `-c`, `-e` (and `-E`, `-p`, `-r`) options carry, and what it is handed to read. */
+function codeOf({ name, args, input }: SimpleCommand): string {
+  if (!INTERPRETERS.test(name)) return "";
+  const code: string[] = [input];
+  for (let i = 0; i < args.length; i++) {
+    const option = /^-[A-Za-z]*[cepEr]$/.exec(args[i]);
+    if (option) code.push(args[++i] ?? "");
+    else if (/^-[A-Za-z]*[ce]./.test(args[i])) code.push(args[i].replace(/^-[A-Za-z]*?[ce]/, ""));
+  }
+  return code.join("\n");
+}
+
 /** Whether an interpreter's arguments give it nothing to run but its input: options alone, none of which is a script, a module or code. */
 const runsInput = (args: string[]) => args.every((arg) => arg === "-" || (arg.startsWith("-") && !/^-[A-Za-z]*[cmeEpr]/.test(arg) && !/^--(?:eval|print|require|import|command|module)\b/.test(arg)));
 
 /**
  * What runs as a program from the network or from another command's output: a pipe into a shell, a pipe into an
- * interpreter given nothing to run but its input (`| python3`, `| python3 -`, and not `| python3 -m json.tool`), and
- * a shell, `source` or `eval` handed the output of a download (`sh -c "$(curl …)"`, `bash <(curl …)`).
+ * interpreter given nothing to run but its input (`| python3`, `| python3 -`, and not `| python3 -m json.tool`), the
+ * input of xargs made the code of what it runs, a shell, `source` or `eval` handed the output of a download
+ * (`sh -c "$(curl …)"`, `bash <(curl …)`, `bash <<< "$(curl …)"`), and a download run in the same line, by a shell or
+ * an interpreter or as the program itself (`curl -o i.sh … && sh i.sh`).
  */
 function runsPiped(command: string): boolean {
   if (/(?:\b(?:ba|z|d|k)?sh|\bsource|(?:^|[\s;&|(])\.)\s+<\(/.test(command)) return true;
   if (/(?:\b(?:ba|z|d|k)?sh(?:\s+-\w+)*\s+-[A-Za-z]*c[A-Za-z]*|\beval)\s+["']?(?:\$\(|`)\s*(?:curl|wget)\b/.test(command)) return true;
-  return lexShell(command, undefined).some(({ piped, name, args }) => piped && (SHELLS.test(name) || (INTERPRETERS.test(name) && runsInput(args))));
+  if (/<\s*<\(\s*(?:curl|wget)\b/.test(command)) return true;
+  const fetched = new Set<string>();
+  for (const one of lexShell(command, undefined)) {
+    for (const file of downloadsOf(one)) fetched.add(path.normalize(file));
+    const shell = SHELLS.test(one.name);
+    const runs = shell || INTERPRETERS.test(one.name) || one.name === "source" || one.name === ".";
+    const first = one.args.find((arg) => !arg.startsWith("-"));
+    if ((runs && first !== undefined && fetched.has(path.normalize(first))) || (one.program && fetched.has(path.normalize(one.program)))) return true;
+    if (shell && /(?:\$\(|`)\s*(?:curl|wget)\b/.test(one.input)) return true;
+    if (!one.piped) continue;
+    if (one.via.includes("xargs")) {
+      // What xargs reads becomes the arguments of what it runs: code only where the last of them is a code option.
+      if ((shell || INTERPRETERS.test(one.name)) && /^-[A-Za-z]*[ce]$/.test(one.args[one.args.length - 1] ?? "")) return true;
+      continue;
+    }
+    if (shell || (INTERPRETERS.test(one.name) && runsInput(one.args))) return true;
+  }
+  return false;
 }
 
 /** A place on another machine, as scp and rsync write it: `host:path`, `user@host:path`, `rsync://host/path`. */
@@ -604,24 +778,35 @@ const AWS_FLAGS = new Set(["--recursive", "--dryrun", "--quiet", "--only-show-er
 /** rsync's long options that take a value. */
 const RSYNC_VALUES = ["--exclude", "--include", "--filter", "--rsh", "--rsync-path", "--exclude-from", "--include-from", "--files-from", "--log-file", "--chmod", "--chown", "--port", "--partial-dir", "--backup-dir", "--suffix", "--timeout", "--bwlimit", "--max-size", "--min-size", "--temp-dir", "--password-file", "--compare-dest", "--copy-dest", "--link-dest", "--out-format", "--usermap", "--groupmap", "--info", "--debug", "--contimeout", "--max-delete", "--modify-window", "--block-size"];
 
+/** A script's own request with a body, in the code an interpreter runs. */
+const SCRIPT_SENDS = [
+  /\b(?:requests|httpx|session)\.(?:post|put|patch)\s*\(/i,
+  /\bfetch\s*\([\s\S]*?\b(?:method\s*:\s*["'`](?:POST|PUT|PATCH)|body\s*:)/i,
+  /\bRequest\s*\([^)]*\b(?:data\s*=|method\s*=\s*["'](?:POST|PUT|PATCH))/,
+  /\burlopen\s*\(\s*[^,()]+(?:\([^()]*\))?\s*,\s*(?!\w+\s*=)[^)\s]|\burlopen\s*\([^)]*\bdata\s*=/,
+];
+
 /**
  * What else carries data out of the box than curl and wget: copying to another machine (scp, rsync, sftp's `put`),
  * a connection fed another command's output or a file (nc, ncat, socat, telnet, ssh; not one to this machine), sending
- * mail, httpie with a body, a gist or a write to the GitHub API, a copy to a cloud bucket, and a script's own request
- * with a body.
+ * mail, httpie with a body, a gist or a write through the GitHub API, a copy to a cloud bucket, and a request with a
+ * body in the code an interpreter runs.
  */
 function sendsElsewhere(command: string): boolean {
-  if (/\b(?:requests|httpx|session)\.(?:post|put|patch)\s*\(|\bfetch\s*\([\s\S]*?\b(?:method\s*:\s*["'`](?:POST|PUT|PATCH)|body\s*:)/i.test(command)) return true;
-  if (/\bRequest\s*\([^)]*\b(?:data\s*=|method\s*=\s*["'](?:POST|PUT|PATCH))|\burlopen\s*\(\s*[^,()]+(?:\([^()]*\))?\s*,\s*[^)\s]/.test(command)) return true;
-  return lexShell(command, undefined).some(({ piped, fed, name, args }) => {
+  return lexShell(command, undefined).some((one) => {
+    const { piped, fed, name, args } = one;
+    const code = codeOf(one);
+    if (code && SCRIPT_SENDS.some((pattern) => pattern.test(code))) return true;
     switch (name) {
       // A connection that is fed another command's output or a file, to another machine.
       case "nc":
       case "ncat":
       case "netcat":
       case "telnet": {
-        const host = args.find((arg) => !arg.startsWith("-"));
-        return (piped || fed) && !(host && LOOPBACK.test(host));
+        const { operands, given } = readOptions(args, "wpsiqxXOITVPe");
+        if (given("-U").length) return false;
+        const host = operands[0];
+        return (piped || fed) && !(host !== undefined && LOOPBACK.test(host));
       }
       case "socat": {
         const addresses = args.filter((arg) => !arg.startsWith("-") || arg === "-");
@@ -668,18 +853,15 @@ function sendsElsewhere(command: string): boolean {
         );
       }
       case "gh": {
-        const words = args.filter((arg) => !arg.startsWith("-"));
-        return (
-          (words[0] === "gist" && words[1] === "create") ||
-          (words[0] === "api" &&
-            args.some(
-              (arg, i) =>
-                /^(?:-[fF]|--field|--raw-field|--input)$/.test(arg) ||
-                /^-[fF]./.test(arg) ||
-                ((arg === "-X" || arg === "--method") && /^(?:POST|PUT|PATCH)$/i.test(args[i + 1] ?? "")) ||
-                /^(?:-X|--method=)(?:POST|PUT|PATCH)$/i.test(arg),
-            ))
-        );
+        const { operands, given } = readOptions(args, "XfFHpqtR", ["--method", "--field", "--raw-field", "--input", "--header", "--jq", "--template", "--hostname", "--preview", "--cache", "--repo"]);
+        if (operands[0] === "gist" && operands[1] === "create") return true;
+        if (operands[0] !== "api") return false;
+        // A field is a body where gh sends one: with a method that has one, or none, which is a POST; a GraphQL query is a read unless it is a mutation.
+        const method = (given("-X")[0] ?? given("--method")[0] ?? "").toUpperCase();
+        if (given("--input").length) return true;
+        if (method) return ["POST", "PUT", "PATCH"].includes(method);
+        const fields = [...given("-f"), ...given("-F"), ...given("--field"), ...given("--raw-field")];
+        return operands[1] === "graphql" ? fields.some((field) => /\bmutation\b/.test(field)) : fields.length > 0;
       }
       case "aws": {
         const { operands } = readOptions(args.filter((arg) => !AWS_FLAGS.has(arg)), "", [], true);
@@ -704,19 +886,33 @@ function sendsElsewhere(command: string): boolean {
   });
 }
 
+/** Whether a folder is one on the disk; a place that cannot be looked at is not known to be one. */
+function isFolder(place: string): boolean {
+  try {
+    return statSync(place).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The places a command line writes to, as far as its words say, each with the folder it is written from: what a
  * redirect names; `tee`'s files; what cp, install, ln and rsync write (their last operand or `-t`, and the name each
  * source keeps in it); all of mv's (a file moved away is changed too); the files of an edit in place (`sed -i`,
- * `perl -i`, `ruby -i`, not their script); dd's `of=`; a download's file or folder (`curl -o`, `curl -O`, `wget`
- * however it names it); the folder a clone (`git clone`, `gh repo clone`), an unzip or an untar goes into.
+ * `perl -i`, `ruby -i`, not their script); dd's `of=`; a download's file or folder (see downloadsOf); the folder a
+ * clone (`git clone`, `gh repo clone`), an unzip or an untar goes into.
  */
 function shellWrites(command: string, dir: string | undefined): { place: string; dir: string | undefined }[] {
   const places: { place: string; dir: string | undefined }[] = [];
   for (const one of lexShell(command, dir)) {
-    const at = (place: string, from = one.dir) => place && places.push({ place, dir: from });
+    const at = (place: string, from = one.dir) => {
+      if (place) places.push({ place, dir: from });
+    };
     for (const place of one.writes) at(place);
-    const { name, args } = one;
+    for (const file of downloadsOf(one)) at(file);
+    const { name } = one;
+    // An empty word is no file: macOS's `sed -i ''` gives the suffix as one.
+    const args = one.args.filter((arg) => arg !== "");
     const copying = (shortValues: string, longValues: string[]) => {
       const { operands, given } = readOptions(args, shortValues, longValues);
       const into = [...given("-t"), ...given("--target-directory")];
@@ -728,9 +924,7 @@ function shellWrites(command: string, dir: string | undefined): { place: string;
       // source, or by what is on the disk.
       const where = homeOf(destination);
       const resolved = path.isAbsolute(where) ? where : one.dir === undefined ? undefined : path.resolve(one.dir, where);
-      const folder =
-        into.length > 0 || sources.length > 1 || /\/$/.test(destination) || [".", "..", "~"].includes(destination) ||
-        (resolved !== undefined && statSync(resolved, { throwIfNoEntry: false })?.isDirectory() === true);
+      const folder = into.length > 0 || sources.length > 1 || /\/$/.test(destination) || [".", "..", "~"].includes(destination) || (resolved !== undefined && isFolder(resolved));
       if (folder) for (const source of sources) at(path.join(destination, path.basename(source)));
     };
     switch (name) {
@@ -766,38 +960,10 @@ function shellWrites(command: string, dir: string | undefined): { place: string;
       case "dd":
         for (const arg of args) if (arg.startsWith("of=")) at(arg.slice(3));
         break;
-      case "curl": {
-        const { operands, given } = readOptions(args, CURL_VALUE_FLAGS, ["--output", "--output-dir", "--url", "--config"]);
-        for (const file of [...given("-o"), ...given("--output")]) at(file);
-        // `-O` saves each address under its own name, in `--output-dir` if it is given.
-        if (given("-O").length || given("--remote-name").length || given("--remote-name-all").length) {
-          const folder = given("--output-dir")[0];
-          for (const url of [...operands, ...given("--url")]) {
-            const name = savedAs(url);
-            if (name) at(folder ? path.join(folder, name) : name);
-          }
-        }
-        break;
-      }
-      case "wget": {
-        const { operands, given } = readOptions(args, "OoaiBetTwQUlARDIXP", ["--output-document", "--directory-prefix"]);
-        const named = [...given("-O"), ...given("--output-document")];
-        for (const file of named) if (file !== "-") at(file);
-        // Without a name of its own a download keeps the address's, in `-P` if it is given.
-        if (!named.length) {
-          const folder = [...given("-P"), ...given("--directory-prefix")][0];
-          if (folder) at(folder);
-          for (const url of operands) {
-            const name = savedAs(url);
-            if (name) at(folder ? path.join(folder, name) : name);
-          }
-        }
-        break;
-      }
       case "git": {
         const { operands, given } = readOptions(args, "Cc", ["--git-dir", "--work-tree"]);
-        const from = given("-C").reduce<string | undefined>((folder, c) => (folder === undefined ? undefined : path.resolve(folder, homeOf(c))), one.dir);
         if (operands[0] !== "clone") break;
+        const from = given("-C").reduce<string | undefined>((folder, c) => (folder === undefined ? undefined : path.resolve(folder, homeOf(c))), one.dir);
         const cloned = readOptions(operands.slice(1), "obcju", ["--origin", "--branch", "--config", "--depth", "--reference", "--separate-git-dir", "--template", "--upload-pack", "--jobs"]).operands;
         const into = cloned[1] ?? (cloned[0] ? path.posix.basename(cloned[0].replace(/\/+$/, "")).replace(/\.git$/, "") : undefined);
         if (into) at(into, given("-C").length ? from : one.dir);
@@ -813,8 +979,10 @@ function shellWrites(command: string, dir: string | undefined): { place: string;
         for (const folder of readOptions(args, "dPx").given("-d")) at(folder);
         break;
       case "tar": {
-        const { given } = readOptions(args, "CfbTXIL", ["--directory", "--file"]);
-        if (args.some((arg) => /^-?[A-Za-z]*x/.test(arg) || arg === "--extract" || arg === "--get")) for (const folder of [...given("-C"), ...given("--directory")]) at(folder);
+        // Extraction by its mode only: an old-style first word, a dash group with x, or --extract; never by a file's name.
+        const mode = [args[0] && !args[0].startsWith("-") ? args[0] : "", ...args.filter((arg) => /^-[A-Za-z]+$/.test(arg))].join("");
+        const extracts = (/x/.test(mode) || args.includes("--extract") || args.includes("--get")) && !/c/.test(mode) && !args.includes("--create");
+        if (extracts) for (const folder of [...readOptions(args, "CfbTXIL", ["--directory", "--file"]).given("-C"), ...readOptions(args, "CfbTXIL", ["--directory", "--file"]).given("--directory")]) at(folder);
         break;
       }
     }
@@ -822,15 +990,34 @@ function shellWrites(command: string, dir: string | undefined): { place: string;
   return places;
 }
 
+/** A shell's start-up file, a schedule or a service: what runs later on its own, by its whole path. */
+const STARTUP = /(?:^|\/)\.(?:bashrc|bash_profile|bash_login|bash_aliases|zshrc|zprofile|zshenv|zlogin|profile)$|^\/etc\/(?:profile\.d\/|cron\.[a-z]+\/|crontab$|systemd\/system\/|bash\.bashrc$|zsh\/)|\/\.config\/(?:autostart|systemd\/user)\//;
+
 /**
- * Why a place a command writes to is what the portal, pi or the MCP adapter load as the agent's own (see
- * writesLoadedFile), or undefined: from the folder the command runs in where the line says it, else by its name, in
- * every folder.
+ * Why the places a command line writes to (see shellWrites) include what the portal, pi or the MCP adapter load as the
+ * agent's own (see writesLoadedFiles), or undefined: from the folder each is written from where the line says it,
+ * else by its name alone (a relative place whose folder cannot be told is not taken to be in the portal's own folder).
  */
-function writesOwnByShell({ place, dir }: { place: string; dir: string | undefined }, workspace: string | undefined): string | undefined {
-  const named = homeOf(place);
-  if (path.isAbsolute(named)) return writesLoadedFile(named, workspace);
-  return dir === undefined ? writesLoadedFile(named, undefined) : writesLoadedFile(path.resolve(dir, named), workspace);
+function shellWritesOwn(command: string, workspace: string | undefined): string | undefined {
+  const known: string[] = [];
+  for (const { place, dir } of shellWrites(command, workspace)) {
+    const named = homeOf(place);
+    if (path.isAbsolute(named)) known.push(named);
+    else if (dir !== undefined) known.push(path.resolve(dir, named));
+    else {
+      const entry = loadedAt(named);
+      if (entry) return REFUSAL[entry.as];
+    }
+  }
+  return writesLoadedFiles(known.filter((place) => !place.startsWith("/dev/")), workspace);
+}
+
+/** Whether a command line writes to a shell's start-up file, a schedule or a service (see STARTUP). */
+function shellWritesStartup(command: string, workspace: string | undefined): boolean {
+  return shellWrites(command, workspace).some(({ place, dir }) => {
+    const named = homeOf(place);
+    return STARTUP.test(path.isAbsolute(named) || dir === undefined ? named : path.resolve(dir, named));
+  });
 }
 
 const RULES: Rule[] = [
@@ -870,10 +1057,12 @@ const RULES: Rule[] = [
     hit: (tool, input, { workspace }) =>
       tool === "routine_create" ||
       tool === "routine_update" ||
-      ((tool === "write" || tool === "edit") && (PERSIST_PATHS.test(target(input)) || writesLoadedFile(target(input), workspace) !== undefined)) ||
+      ((tool === "write" || tool === "edit") &&
+        (PERSIST_PATHS.test(target(input)) || STARTUP.test(homeOf(target(input))) || writesLoadedFile(target(input), workspace) !== undefined)) ||
       (tool === "bash" && (/\b(crontab|systemd-run|at\s+now)\b/.test(cmd(input)) ||
         (PERSIST_PATHS.test(cmd(input)) && writesFiles(cmd(input))) ||
-        shellWrites(cmd(input), workspace).some((written) => writesOwnByShell(written, workspace) !== undefined))),
+        shellWritesStartup(cmd(input), workspace) ||
+        shellWritesOwn(cmd(input), workspace) !== undefined)),
   },
   {
     name: "delegate",
@@ -1457,14 +1646,8 @@ function keptFromAll(toolName: string, input: Record<string, unknown>, workspace
   const asPrimary = runsAsPrimary(toolName);
   if (asPrimary) return asPrimary;
   if (readsCredentials(toolName, input, files)) return "it reads a place where secrets are kept";
-  if (toolName === "bash") {
-    // What a command that is allowed writes, by its words: a redirect, a copy, a download, a clone.
-    for (const written of shellWrites(cmd(input), workspace)) {
-      const why = writesOwnByShell(written, workspace);
-      if (why) return why;
-    }
-    return undefined;
-  }
+  // What a command that is allowed writes, by its words: a redirect, a copy, a download, a clone.
+  if (toolName === "bash") return shellWritesOwn(cmd(input), workspace);
   for (const asked of [target(input), ...declaredValues(input, files)]) {
     const why = asked ? writesLoadedFile(asked, workspace) : undefined;
     if (why) return why;
@@ -1476,12 +1659,19 @@ function keptFromAll(toolName: string, input: Record<string, unknown>, workspace
  * Why a tool that writes to `asked` would write to what is loaded as the agent's own (see writesInstructions), or
  * undefined: held in the folder of this conversation and every agent's home, as written and as they really are.
  */
-function writesLoadedFile(asked: string, workspace: string | undefined): string | undefined {
-  if (workspace === undefined) return writesInstructions([path.resolve(asked)]);
-  const typed = askedPath(asked, workspace);
-  if (typed === undefined) return undefined;
+const writesLoadedFile = (asked: string, workspace: string | undefined): string | undefined => writesLoadedFiles([asked], workspace);
+
+/** writesLoadedFile for each of several places, looked at together: the links into what is loaded are walked once. */
+function writesLoadedFiles(asked: string[], workspace: string | undefined): string | undefined {
+  if (!asked.length) return undefined;
+  if (workspace === undefined) return writesInstructions(asked.map((one) => path.resolve(one)));
+  const typed = asked.flatMap((one) => {
+    const place = askedPath(one, workspace);
+    return place === undefined ? [] : [place, realPathAhead(place)];
+  });
+  if (!typed.length) return undefined;
   const homes = [workspace, ...listAgents().map((agent) => agent.home)].flatMap((home) => [path.resolve(home), realPath(home) ?? path.resolve(home)]);
-  return writesInstructions([typed, realPathAhead(typed)], homes);
+  return writesInstructions(typed, homes);
 }
 
 /**
@@ -1853,8 +2043,9 @@ export function guardExtension(
       }
       // The rule that refuses this call because the conversation has read something untrusted, if any.
       // It refuses whatever allows the call, so a one-off approval is not spent on it first: see below.
-      const context: RuleContext = { workspace, files };
-      const heldByTaint = isTainted() && enforceTaint ? taintRule(event.toolName, event.input ?? {}, context) : undefined;
+      // The rule a conversation that has read something untrusted holds this call to, worked out once.
+      const ruleNow = isTainted() ? taintRule(event.toolName, event.input ?? {}, { workspace, files }) : undefined;
+      const heldByTaint = enforceTaint ? ruleNow : undefined;
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -1948,7 +2139,7 @@ export function guardExtension(
       }
 
       if (!isTainted()) return undefined;
-      const rule = heldByTaint ?? taintRule(event.toolName, event.input ?? {}, context);
+      const rule = ruleNow;
       if (!rule) return undefined;
 
       // Recorded even when it does not block: "this ran with the guard off" is

@@ -117,13 +117,19 @@ problem are refused:
 
 | Rule | Why |
 | --- | --- |
-| `pipe-to-shell` | Downloading something and running it unseen: a pipe into a shell, or into `python`, `perl`, `ruby`, `node` or `php` given nothing to run but what comes in (`curl … \| python3`, and not `\| python3 -m json.tool`), and a shell, `source` or `eval` handed a download (`bash <(curl …)`, `sh -c "$(curl …)"`) |
+| `pipe-to-shell` | Downloading something and running it unseen: a pipe into a shell, or into `python`, `perl`, `ruby`, `node` or `php` given nothing to run but what comes in (`curl … \| python3`, and not `\| python3 -m json.tool`); a shell, `source` or `eval` handed a download (`bash <(curl …)`, `sh -c "$(curl …)"`, `bash <<< "$(curl …)"`); and a download run in the same line (`curl -o i.sh … && sh i.sh`) |
 | `write-to-path` | A file on `PATH` runs later, without anyone asking |
 | `upload` | Data carried out: `curl`/`wget` with a body (`-d`, `-F`, `-T`, alone or folded into a group like `-sd`; `--data*`, `--form`, `--json`, `--post-data`, `--post-file`, `--body-*`) or a `POST`, `PUT` or `PATCH`; `scp` or `rsync` to another machine; a pipe or a file into `nc`, `socat`, `telnet` or `ssh`; mail sent (`mail`, `sendmail`, `mutt -s`, `himalaya … send`); httpie with a body; `gh gist create` and a write through `gh api`; a copy to an S3, GCS or rclone remote; a script's own `requests.post` or `fetch` with a body |
 | `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
 | `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
 | `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`, `.mcp.json`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
 | `delegate` | A `subagent` runs its own pi, which has no guard, and a routine runs in a session of its own, without this conversation's rules, so a tainted session may start neither |
+
+A command is read as a shell reads it on its face, not by its letters: past
+`sudo`, `env`, `timeout` and the like, into `sh -c '…'` and `bash -lc '…'`, into
+`$(…)` and backticks, and into a here-document handed to a shell, following a
+`cd` before a write. Quoted text is text: an arrow in a commit message is no
+redirect, and `git commit -m "fix token refresh"` names no secret.
 
 Enforcement is **tainted-only** on purpose. A session writing code in a
 repository never meets any of this; the rules apply exactly where the risk
