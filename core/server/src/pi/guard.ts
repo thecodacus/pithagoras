@@ -73,7 +73,19 @@ function untrustedResult(toolName: string, input: Record<string, unknown>, fromA
   if (toolName === "mcp") return !trusted(proxiedServer(input, mcp.servers));
   // A tool the adapter registered is a server's whatever it is called (the adapter can name them without the
   // server, and merges servers from configs other than the portal's), and one whose server is not told is no trusted one's.
-  return (fromAdapter || mcp.serverTool(toolName)) && !trusted(mcpServerOf(toolName, mcp.servers));
+  return (fromAdapter || mcp.serverTool(toolName)) && !trusted(onlyServerOf(toolName, mcp.servers));
+}
+
+/**
+ * The server a tool's name is of, where no other configured server could have it: with `my-notes` and `my`, the name
+ * `my_notes_search` is `my-notes`' `search` and as well `my`'s `notes_search`, and which the adapter runs is not told
+ * by the name. Such a name is no trusted server's.
+ */
+function onlyServerOf(name: string, servers: readonly string[]): string | undefined {
+  const server = mcpServerOf(name, servers);
+  if (server === undefined) return undefined;
+  const others = servers.filter((other) => other !== server && name.startsWith(`${other.replace(/[-.]/g, "_")}_`));
+  return others.length ? undefined : server;
 }
 
 /**
@@ -85,8 +97,11 @@ function proxiedServer(input: Record<string, unknown>, servers: readonly string[
   const same = (name: string) => name.trim().replace(/[-.]/g, "_");
   const asked = typeof input.tool === "string" ? same(input.tool) : "";
   if (!asked) return undefined;
+  // What the adapter does before or instead of running the tool (a search, a description, a connection, its UI
+  // sessions' messages) hands back what every server says: only a plain call of a tool is that server's own words.
+  if (["action", "search", "describe", "connect"].some((key) => input[key] !== undefined && input[key] !== null && input[key] !== "")) return undefined;
   if (typeof input.server === "string" && input.server.trim()) return servers.find((server) => same(server) === same(input.server as string));
-  return mcpServerOf(asked, servers);
+  return onlyServerOf(asked, servers);
 }
 
 /**
@@ -1806,9 +1821,10 @@ export function trustFlagged(portalSessionId: string, id: string): void {
 }
 
 /** The person takes their trust in a flagged result back: it holds the conversation back again, now and when it is opened again. */
-export function untrustFlagged(portalSessionId: string, id: string): void {
-  untrustResult(portalSessionId, id);
+export function untrustFlagged(portalSessionId: string, id: string): boolean {
+  if (!untrustResult(portalSessionId, id)) return false;
   taints.get(portalSessionId)?.untrusted(id);
+  return true;
 }
 
 /**
@@ -2173,7 +2189,7 @@ export function guardExtension(
       if (!rule) {
         // Recorded even when it does not block: "this ran with a rule off" is
         // the thing you want to find later, and it is invisible otherwise.
-        if (matched[0]) note("allowed-by-exemption", `${matched[0].name} — exempt for this routine`);
+        if (matched.length) note("allowed-by-exemption", `${matched.map((one) => one.name).join(", ")} — exempt for this routine`);
         return undefined;
       }
 

@@ -1480,9 +1480,13 @@ export function trustResult(sessionId: string, id: string): void {
   putSetting(trustedKey(sessionId), JSON.stringify([...trustedResults(sessionId), id]));
 }
 
-export function untrustResult(sessionId: string, id: string): void {
-  const left = [...trustedResults(sessionId)].filter((one) => one !== id);
+/** Takes a trusted result back. False when it was not trusted. */
+export function untrustResult(sessionId: string, id: string): boolean {
+  const had = trustedResults(sessionId);
+  if (!had.has(id)) return false;
+  const left = [...had].filter((one) => one !== id);
   putSetting(trustedKey(sessionId), left.length ? JSON.stringify(left) : "");
+  return true;
 }
 
 /** Every conversation's trusted results, by the conversation: what the Guard page lists, to take back. */
@@ -1815,9 +1819,12 @@ export function openGrants(): OpenGrant[] {
     .all(new Date().toISOString()) as OpenGrant[];
 }
 
-/** Takes an approval back before it is spent: it is marked used, as one that was, so it never is. False when there was none to take. */
-export function revokeGrant(id: string): boolean {
-  return getDb().prepare("UPDATE grants SET used_at = ? WHERE id = ? AND used_at IS NULL").run(new Date().toISOString(), id).changes > 0;
+/** Takes an approval back before it is spent: it is marked used, as one that was, so it never is. What it was; undefined when there was none to take. */
+export function revokeGrant(id: string): OpenGrant | undefined {
+  const open = openGrants().find((grant) => grant.id === id);
+  if (!open) return undefined;
+  getDb().prepare("UPDATE grants SET used_at = ? WHERE id = ? AND used_at IS NULL").run(new Date().toISOString(), id);
+  return open;
 }
 
 export interface AuditRow {

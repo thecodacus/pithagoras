@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Select } from "./Select";
 import {
   LuBot,
@@ -614,6 +614,7 @@ function RoutineDetail({
     workspace !== (from.workspace ?? "") ||
     report !== reportValue(from);
   const dirty = differs(r);
+  const navigate = useNavigate();
 
   const fill = (from: Routine) => {
     setName(from.name);
@@ -768,7 +769,22 @@ function RoutineDetail({
                 : t("Off for this routine: {rules}. What they would have stopped is recorded in Audit.", { rules: r.exempt.join(", ") })}
             </p>
           </div>
-          <Link to="/settings/guard" className="shrink-0 text-xs text-accent hover:underline">
+          <Link
+            to={`/settings/guard?routine=${encodeURIComponent(r.id)}`}
+            className="shrink-0 text-xs text-accent hover:underline"
+            aria-label={t("Change the guard's rules for {routine}", { routine: r.name })}
+            onClick={(e) => {
+              // Settings takes the place of this page: what is typed and not saved is asked about first.
+              if (!dirty) return;
+              e.preventDefault();
+              void confirmDialog({
+                title: t("Leave without saving?"),
+                message: t("What you changed in this routine and did not save is lost."),
+                confirmLabel: t("Leave"),
+                danger: true,
+              }).then((leave) => leave && navigate(`/settings/guard?routine=${encodeURIComponent(r.id)}`));
+            }}
+          >
             {t("Change")}
           </Link>
         </div>

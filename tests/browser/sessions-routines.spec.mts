@@ -180,7 +180,7 @@ test('a routine\'s switches say what they switch and whether they are on, and it
   // The guard's rules are no switch here: the routine says how they stand, and Settings → Guard changes them one by one.
   await expect(page.getByRole('switch', { name: /^Injection guard/ })).toHaveCount(0);
   await expect(page.getByText('Every rule holds after a run reads something that looks like a prompt injection.')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Change' })).toHaveAttribute('href', '/settings/guard');
+  await expect(page.getByRole('link', { name: "Change the guard's rules for Nightly build" })).toHaveAttribute('href', '/settings/guard?routine=r1');
   await expect(page.getByRole('switch', { name: /^Fresh session each run/ })).toHaveAttribute('aria-checked', 'false');
   // The browser is no switch of its own any more: it is a group in the routine's tools, off, and saved as it is flipped.
   await expect(page.getByRole('switch', { name: /^Browser/ })).toHaveCount(0);

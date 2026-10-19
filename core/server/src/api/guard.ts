@@ -121,8 +121,9 @@ export function guardRouter(): Router {
 
   /** An approval taken back before it is spent. */
   router.delete("/guard/approvals/:id", (req, res) => {
-    if (!revokeGrant(req.params.id)) return res.status(404).json({ error: "That approval was spent, ran out or was taken back already" });
-    recordAudit({ kind: "revoked", reason: "One-off approval taken back before it was spent" });
+    const grant = revokeGrant(req.params.id);
+    if (!grant) return res.status(404).json({ error: "That approval was spent, ran out or was taken back already" });
+    recordAudit({ kind: "revoked", tool: grant.tool, subject: grant.subject, reason: "One-off approval taken back before it was spent", sessionId: grant.session_id });
     res.json({ ok: true });
   });
 
@@ -130,7 +131,7 @@ export function guardRouter(): Router {
   router.delete("/guard/trusted/:session/:result", (req, res) => {
     const { session, result } = req.params;
     if (!/^[0-9a-f]{16}$/.test(result)) return res.status(400).json({ error: "Not a result" });
-    untrustFlagged(session, result);
+    if (!untrustFlagged(session, result)) return res.status(404).json({ error: "That result is not trusted" });
     recordAudit({ kind: "untrusted", reason: `Flagged result ${result} is no longer trusted`, sessionId: session });
     res.json({ ok: true });
   });

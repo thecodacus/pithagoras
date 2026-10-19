@@ -266,8 +266,11 @@ export function routinesRouter(toolsChanged: (slug: string) => void = () => {}):
       getDb().prepare(`UPDATE routines SET ${sets.join(", ")} WHERE id = ?`).run(...values, row.id);
       routineSupervisor.refreshSchedules([row.id]);
     }
-    // The old one switch for the guard's rules, as it always meant: every rule on, or every rule off. The rules one by one are the Guard page's.
-    if (typeof req.body?.guard === "boolean") setRoutineExemptions(row.id, req.body.guard ? [] : GUARD_RULE_NAMES);
+    // The old one switch for the guard's rules: on puts every rule back; off takes every rule off a routine that holds
+    // to all of them, and leaves one exempt from some as it is, since off is what is read back for it (see toApi): the
+    // rules one by one are the Guard page's.
+    if (req.body?.guard === true) setRoutineExemptions(row.id, []);
+    else if (req.body?.guard === false && routineExemptions(row.slug).size === 0) setRoutineExemptions(row.id, GUARD_RULE_NAMES);
     // Its tools' lists as well, which are what a run goes by: the switch alone would answer 200 and change nothing.
     if (typeof req.body?.browser === "boolean") {
       const slug = rowById(row.id)!.slug;

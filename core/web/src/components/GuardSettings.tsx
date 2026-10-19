@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LuRefreshCw } from "react-icons/lu";
+import { useSearchParams } from "react-router-dom";
 import { api, type GuardState } from "../api";
 import { formatDateTime, msg, t, tp } from "../i18n";
 import type { Tab } from "../settings-tabs";
@@ -48,13 +49,13 @@ const ALWAYS: { title: string; why: string }[] = [
   },
 ];
 
-/** A line of the guard's state: what it is, how it stands, and the tab where it is set. */
+/** A line of the guard's state: what it is, how it stands, and the tab where it is set. On a narrow screen how it stands goes under what it is. */
 function StatusRow({ label, value, warn, tab, onOpen }: { label: string; value: string; warn?: boolean; tab: Tab; onOpen: (tab: Tab) => void }) {
   return (
-    <li className="flex items-center gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2 text-sm">
-      <span className="min-w-0 flex-1 text-fg-muted">{label}</span>
-      <span className={warn ? "text-warn" : "text-fg"}>{value}</span>
-      <button type="button" className={ghostCls} onClick={() => onOpen(tab)}>
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-raised/40 px-3 py-2 text-sm">
+      <span className="min-w-0 flex-1 basis-40 text-fg-muted">{label}</span>
+      <span className={`min-w-0 [overflow-wrap:anywhere] ${warn ? "text-warn" : "text-fg"}`}>{value}</span>
+      <button type="button" className={ghostCls} aria-label={t("Open {label}", { label })} onClick={() => onOpen(tab)}>
         {t("Open")}
       </button>
     </li>
@@ -65,13 +66,20 @@ function StatusRow({ label, value, warn, tab, onOpen }: { label: string; value: 
  * Settings → Guard: what the guard holds the agent to, and the little of it that is a switch. A routine may be let
  * do what a rule after a suspected injection holds back, one rule at a time; an MCP server may be counted as the
  * person's own; what was allowed once, an approval not yet spent or a flagged result that was trusted, may be taken
- * back. The rest is shown with its reason. Each change is saved at once, as the tool switches are.
+ * back. The rest is shown with its reason. Each change is shown at once and saved, as the tool switches are; changes
+ * made while another saves are saved too, and one the server refuses is put back by itself.
  */
 export function GuardSettings({ onError, onOpen }: { onError: (message: string) => void; onOpen: (tab: Tab) => void }) {
   const [state, setState] = useState<GuardState | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const had = useRef(false);
-  const [busy, setBusy] = useState<string | null>(null);
+  /** The routine a page asked to be shown (`?routine=`): its group is open, and scrolled to. */
+  const [params] = useSearchParams();
+  const wanted = params.get("routine");
+  const wantedRef = useRef<HTMLDivElement>(null);
+  /** Where focus goes when the thing that had it is taken away: the list it was in. */
+  const approvalsRef = useRef<HTMLDivElement>(null);
+  const trustedRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     try {
@@ -90,6 +98,10 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
     void load();
   }, []);
 
+  useEffect(() => {
+    if (state && wanted) wantedRef.current?.scrollIntoView({ block: "center" });
+  }, [state !== null, wanted]);
+
   if (failed && !had.current) return <LoadFailed error={failed} onRetry={load} />;
   if (!state) {
     return (
@@ -99,24 +111,29 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
     );
   }
 
-  /** A change, shown at once and saved; the page is read again if the server says no, so that it shows what holds. */
-  const change = async (key: string, next: GuardState, save: () => Promise<unknown>) => {
-    const before = state;
-    setState(next);
-    setBusy(key);
+  /**
+   * A change: shown at once by `apply`, saved, and taken back by `undo` if the server says no, on what the page shows
+   * by then, so that a change made meanwhile stays. The page is read again then, to show what holds.
+   */
+  const change = async (apply: (s: GuardState) => GuardState, undo: (s: GuardState) => GuardState, save: () => Promise<unknown>) => {
+    setState((s) => (s ? apply(s) : s));
     try {
       await save();
     } catch (e) {
-      setState(before);
+      setState((s) => (s ? undo(s) : s));
       onError((e as Error).message);
       void load();
-    } finally {
-      setBusy(null);
     }
   };
 
+  /** After a thing is taken out of a list, focus goes to the next one there, or to the list. */
+  const refocus = (list: HTMLDivElement | null) =>
+    requestAnimationFrame(() => (list?.querySelector<HTMLElement>("button") ?? list)?.focus());
+
   const ruleText = (name: string) => (RULE_TEXT[name] ? t(RULE_TEXT[name]) : state.rules.find((rule) => rule.name === name)?.why ?? name);
   const sandbox = state.sandbox === "on" ? t("On") : state.sandbox === "off" ? t("Off") : t("Not available here");
+  const setExempt = (id: string, exempt: string[]) => (s: GuardState) => ({ ...s, routines: s.routines.map((one) => (one.id === id ? { ...one, exempt } : one)) });
+  const setTrusted = (name: string, trusted: boolean) => (s: GuardState) => ({ ...s, servers: s.servers.map((one) => (one.name === name ? { ...one, trusted } : one)) });
 
   return (
     <div>
@@ -162,35 +179,34 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
         ) : (
           <div className="space-y-2">
             {state.routines.map((routine) => (
-              <DetailsGroup
-                key={routine.id}
-                title={routine.name}
-                summary={
-                  routine.exempt.length === 0
-                    ? t("Every rule holds")
-                    : routine.exempt.length === state.rules.length
-                      ? t("Every rule is off")
-                      : t("Off: {rules}", { rules: routine.exempt.join(", ") })
-                }
-              >
-                {state.rules.map((rule) => {
-                  const holds = !routine.exempt.includes(rule.name);
-                  return (
+              <div key={routine.id} ref={routine.id === wanted ? wantedRef : undefined}>
+                <DetailsGroup
+                  title={routine.name}
+                  defaultOpen={routine.id === wanted}
+                  summary={
+                    routine.exempt.length === 0
+                      ? t("Every rule holds")
+                      : routine.exempt.length === state.rules.length
+                        ? t("Every rule is off")
+                        : t("Off: {rules}", { rules: routine.exempt.join(", ") })
+                  }
+                >
+                  {state.rules.map((rule) => (
                     <SwitchRow
                       key={rule.name}
                       title={rule.name}
+                      label={t("{rule} holds for {routine}", { rule: rule.name, routine: routine.name })}
                       detail={ruleText(rule.name)}
-                      on={holds}
-                      disabled={busy !== null}
+                      on={!routine.exempt.includes(rule.name)}
                       onChange={(on) => {
-                        const exempt = on ? routine.exempt.filter((name) => name !== rule.name) : [...routine.exempt, rule.name];
-                        const next = { ...state, routines: state.routines.map((one) => (one.id === routine.id ? { ...one, exempt } : one)) };
-                        void change(`routine:${routine.id}`, next, () => api.setGuardRoutine(routine.id, exempt));
+                        const before = routine.exempt;
+                        const exempt = on ? before.filter((name) => name !== rule.name) : [...before, rule.name];
+                        void change(setExempt(routine.id, exempt), setExempt(routine.id, before), () => api.setGuardRoutine(routine.id, exempt));
                       }}
                     />
-                  );
-                })}
-              </DetailsGroup>
+                  ))}
+                </DetailsGroup>
+              </div>
             ))}
           </div>
         )}
@@ -209,25 +225,24 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
           </Empty>
         ) : (
           <div className="space-y-1.5">
-            {state.servers.map((server) => (
-              <SwitchRow
-                key={server.name}
-                title={server.name}
-                detail={
-                  server.browser
-                    ? t("The browser's pages are anybody's words: always outside content.")
-                    : server.trusted
-                      ? t("Counted as your own: what it says is neither marked nor checked.")
-                      : t("Outside content: what it says is marked and checked.")
-                }
-                on={server.trusted}
-                disabled={server.browser || busy !== null}
-                onChange={(trusted) => {
-                  const next = { ...state, servers: state.servers.map((one) => (one.name === server.name ? { ...one, trusted } : one)) };
-                  void change(`server:${server.name}`, next, () => api.setGuardServer(server.name, trusted));
-                }}
-              />
-            ))}
+            {state.servers.map((server) =>
+              server.browser ? (
+                // Not a switch that is off: it never is one.
+                <div key={server.name} className="rounded-xl border border-line bg-raised/40 p-3 text-sm text-fg [overflow-wrap:anywhere]">
+                  {server.name}
+                  <span className="mt-0.5 block text-xs text-fg-muted">{t("The browser's pages are anybody's words: always outside content.")}</span>
+                </div>
+              ) : (
+                <SwitchRow
+                  key={server.name}
+                  title={server.name}
+                  label={t("Count {server} as your own", { server: server.name })}
+                  detail={server.trusted ? t("Counted as your own: what it says is neither marked nor checked.") : t("Outside content: what it says is marked and checked.")}
+                  on={server.trusted}
+                  onChange={(trusted) => void change(setTrusted(server.name, trusted), setTrusted(server.name, !trusted), () => api.setGuardServer(server.name, trusted))}
+                />
+              ),
+            )}
           </div>
         )}
       </Section>
@@ -236,68 +251,81 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
         title={t("Allowed once")}
         hint={t("Approvals the primary user gave for one go that are not spent yet. Each runs out after 15 minutes; take one back before then if it should not run.")}
       >
-        {state.approvals.length === 0 ? (
-          <Empty>{t("No approval is waiting to be spent.")}</Empty>
-        ) : (
-          <ul className="space-y-1.5">
-            {state.approvals.map((approval) => (
-              <Item
-                key={approval.id}
-                title={approval.chat ?? t("A chat that was deleted")}
-                detail={
-                  <>
-                    <span className="font-mono">{approval.tool}</span>: <span className="font-mono break-all">{approval.subject}</span>
-                    <span className="block">{t("Runs out at {time}", { time: formatDateTime(approval.expiresAt, { timeStyle: "short" }) })}</span>
-                  </>
-                }
-                action={t("Revoke")}
-                busy={busy === `approval:${approval.id}`}
-                onAction={() => {
-                  const next = { ...state, approvals: state.approvals.filter((one) => one.id !== approval.id) };
-                  void change(`approval:${approval.id}`, next, () => api.revokeApproval(approval.id));
-                }}
-              />
-            ))}
-          </ul>
-        )}
+        <div ref={approvalsRef} tabIndex={-1} className="outline-none">
+          {state.approvals.length === 0 ? (
+            <Empty>{t("No approval is waiting to be spent.")}</Empty>
+          ) : (
+            <ul className="space-y-1.5">
+              {state.approvals.map((approval) => (
+                <Item
+                  key={approval.id}
+                  title={approval.chat ?? t("A chat that was deleted")}
+                  detail={
+                    <>
+                      <span className="font-mono">{approval.tool}</span>: <span className="font-mono">{approval.subject}</span>
+                      <span className="block">{t("Runs out at {time}", { time: formatDateTime(approval.expiresAt, { timeStyle: "short" }) })}</span>
+                    </>
+                  }
+                  action={t("Revoke")}
+                  label={t("Revoke {tool}: {subject}", { tool: approval.tool, subject: approval.subject })}
+                  onAction={() => {
+                    const without = (s: GuardState) => ({ ...s, approvals: s.approvals.filter((one) => one.id !== approval.id) });
+                    refocus(approvalsRef.current);
+                    void change(without, (s) => ({ ...s, approvals: [approval, ...s.approvals] }), () => api.revokeApproval(approval.id));
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
       </Section>
 
       <Section
         title={t("Trusted results")}
         hint={t("Results flagged as a suspected injection that you looked at and trusted, so that they no longer hold their chat back. Take the trust back and the chat is held again.")}
       >
-        {state.trusted.length === 0 ? (
-          <Empty>{t("Nothing flagged has been trusted.")}</Empty>
-        ) : (
-          <ul className="space-y-1.5">
-            {state.trusted.flatMap((chat) =>
-              chat.results.map((result) => (
-                <Item
-                  key={`${chat.sessionId}:${result.id}`}
-                  title={chat.chat ?? t("A chat that was deleted")}
-                  detail={
-                    <>
-                      {result.tool && <span className="font-mono">{result.tool}</span>}
-                      {result.signals?.length ? <span>{` · ${tp(result.signals.length, "{n} sign", "{n} signs", { n: result.signals.length })}: ${result.signals.join(", ")}`}</span> : null}
-                      {result.excerpt && <span className="block truncate">{result.excerpt}</span>}
-                    </>
-                  }
-                  action={t("Un-trust")}
-                  busy={busy === `trusted:${result.id}`}
-                  onAction={() => {
-                    const next = {
-                      ...state,
-                      trusted: state.trusted
-                        .map((one) => (one.sessionId === chat.sessionId ? { ...one, results: one.results.filter((r) => r.id !== result.id) } : one))
-                        .filter((one) => one.results.length),
-                    };
-                    void change(`trusted:${result.id}`, next, () => api.untrustResult(chat.sessionId, result.id));
-                  }}
-                />
-              )),
-            )}
-          </ul>
-        )}
+        <div ref={trustedRef} tabIndex={-1} className="outline-none">
+          {state.trusted.length === 0 ? (
+            <Empty>{t("Nothing flagged has been trusted.")}</Empty>
+          ) : (
+            <ul className="space-y-1.5">
+              {state.trusted.flatMap((chat) =>
+                chat.results.map((result) => {
+                  const where = chat.chat ?? t("A chat that was deleted");
+                  return (
+                    <Item
+                      key={`${chat.sessionId}:${result.id}`}
+                      title={where}
+                      detail={
+                        <>
+                          {result.tool && <span className="font-mono">{result.tool}</span>}
+                          {result.signals?.length ? <span>{` · ${tp(result.signals.length, "{n} sign", "{n} signs", { n: result.signals.length })}: ${result.signals.join(", ")}`}</span> : null}
+                          {result.excerpt && <span className="block truncate">{result.excerpt}</span>}
+                        </>
+                      }
+                      action={t("Un-trust")}
+                      label={t("Un-trust a result in {chat}", { chat: where })}
+                      onAction={() => {
+                        const keep = (s: GuardState, put: boolean) => ({
+                          ...s,
+                          trusted: put
+                            ? s.trusted.some((one) => one.sessionId === chat.sessionId)
+                              ? s.trusted.map((one) => (one.sessionId === chat.sessionId ? { ...one, results: [...one.results, result] } : one))
+                              : [...s.trusted, { ...chat, results: [result] }]
+                            : s.trusted
+                                .map((one) => (one.sessionId === chat.sessionId ? { ...one, results: one.results.filter((r) => r.id !== result.id) } : one))
+                                .filter((one) => one.results.length),
+                        });
+                        refocus(trustedRef.current);
+                        void change((s) => keep(s, false), (s) => keep(s, true), () => api.untrustResult(chat.sessionId, result.id));
+                      }}
+                    />
+                  );
+                }),
+              )}
+            </ul>
+          )}
+        </div>
       </Section>
 
       <Section title={t("Always on")} hint={t("These are not switches. Each is here with the reason it is not one.")}>
@@ -315,14 +343,14 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
 }
 
 /** One thing allowed once, with the button that takes it back. */
-function Item({ title, detail, action, busy, onAction }: { title: string; detail: ReactNode; action: string; busy: boolean; onAction: () => void }) {
+function Item({ title, detail, action, label, onAction }: { title: string; detail: ReactNode; action: string; label: string; onAction: () => void }) {
   return (
     <li className="flex items-start gap-3 rounded-xl border border-line bg-raised/40 px-3 py-2 text-sm">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
         <span className="text-fg">{title}</span>
         <span className="mt-0.5 block text-xs text-fg-faint">{detail}</span>
       </div>
-      <button type="button" className={btnCls} disabled={busy} onClick={onAction}>
+      <button type="button" className={`${btnCls} shrink-0`} aria-label={label} onClick={onAction}>
         {action}
       </button>
     </li>

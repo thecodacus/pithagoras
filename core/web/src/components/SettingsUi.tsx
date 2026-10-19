@@ -114,8 +114,8 @@ export function DetailsGroup({ title, summary, defaultOpen = false, children }: 
     <details ref={root} open={defaultOpen} data-setting={title} className="rounded-xl border border-line bg-raised/40">
       {/* The chevron that turns is the page's own for every disclosure (index.css). */}
       <summary className="flex items-center px-3 py-2 text-xs">
-        <span className="text-fg-muted">{title}</span>
-        <span className="ml-auto min-w-0 truncate text-fg-faint">{summary}</span>
+        <span className="min-w-0 truncate text-fg-muted" title={title}>{title}</span>
+        <span className="ml-auto min-w-0 truncate pl-2 text-fg-faint">{summary}</span>
       </summary>
       <div className="space-y-3 border-t border-line p-3">{children}</div>
     </details>
@@ -273,16 +273,19 @@ export function Switch({
   );
 }
 
-/** A setting that is a switch: what it is on the left, the switch on the right. */
-export function SwitchRow({ title, detail, on, onChange, disabled, note }: { title: ReactNode; detail?: ReactNode; on: boolean; onChange: (on: boolean) => void; disabled?: boolean; note?: ReactNode }) {
+/**
+ * A setting that is a switch: what it is on the left, the switch on the right. The switch is named by `label`, or by
+ * the title where that is text: a label says what the switch is about where the title alone would be one of several alike.
+ */
+export function SwitchRow({ title, detail, on, onChange, disabled, note, label }: { title: ReactNode; detail?: ReactNode; on: boolean; onChange: (on: boolean) => void; disabled?: boolean; note?: ReactNode; label?: string }) {
   return (
     <div className={`flex items-start gap-3 rounded-xl border border-line bg-raised/40 p-3 ${disabled ? "opacity-60" : ""}`}>
-      <div className="min-w-0 flex-1 text-sm text-fg">
+      <div className="min-w-0 flex-1 text-sm text-fg [overflow-wrap:anywhere]">
         {title}
         {detail && <span className="mt-0.5 block text-xs text-fg-faint">{detail}</span>}
         {note && <span className="mt-1 block text-xs text-warn">{note}</span>}
       </div>
-      <Switch on={on} onChange={onChange} disabled={disabled} label={typeof title === "string" ? title : t("Switch")} />
+      <Switch on={on} onChange={onChange} disabled={disabled} label={label ?? (typeof title === "string" ? title : t("Switch"))} />
     </div>
   );
 }

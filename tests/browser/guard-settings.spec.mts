@@ -45,7 +45,7 @@ test('the Guard tab sits beside Sandbox and shows the rules, the state of what i
   await expect(dialog.getByText('Named', { exact: true })).toBeVisible();
   await expect(dialog.getByText('A tool switched off is off every way')).toBeVisible();
   // A status line opens the tab where it is set.
-  await dialog.getByRole('listitem').filter({ hasText: 'Sandbox' }).getByRole('button', { name: 'Open' }).click();
+  await dialog.getByRole('button', { name: 'Open Sandbox' }).click();
   await expect(dialog.getByRole('heading', { name: 'Paths' })).toBeVisible();
 });
 
@@ -53,34 +53,35 @@ test('a routine is let off one rule at a time, an MCP server is counted as your 
   const { sent, dialog } = await portal(page);
   await dialog.getByText('Nightly fix').click();
   await expect(dialog.getByText('Off: publish')).toBeVisible();
-  await dialog.getByRole('switch', { name: 'upload' }).click();
+  await dialog.getByRole('switch', { name: 'upload holds for Nightly fix' }).click();
   await expect.poll(() => sent).toEqual(['PUT routines/r1 {"exempt":["publish","upload"]}']);
   await expect(dialog.getByText('Off: publish, upload')).toBeVisible();
 
-  await dialog.getByRole('switch', { name: 'jira' }).click();
+  await dialog.getByRole('switch', { name: 'Count jira as your own' }).click();
   await expect.poll(() => sent.at(-1)).toBe('PUT servers/jira {"trusted":true}');
-  await expect(dialog.getByRole('switch', { name: 'jira' })).toHaveAttribute('aria-checked', 'true');
-  await expect(dialog.getByRole('switch', { name: 'browser' })).toBeDisabled();
+  await expect(dialog.getByRole('switch', { name: 'Count jira as your own' })).toHaveAttribute('aria-checked', 'true');
+  // The browser is no switch that is off: it never is one.
+  await expect(dialog.getByRole('switch', { name: /browser/ })).toHaveCount(0);
   await expect(dialog.getByText("The browser's pages are anybody's words: always outside content.")).toBeVisible();
 });
 
 test('an approval not yet spent is taken back, and a trusted result untrusted', async ({ page }) => {
   const { sent, dialog } = await portal(page);
   await expect(dialog.getByText("Kim's question")).toBeVisible();
-  await dialog.getByRole('button', { name: 'Revoke' }).click();
+  await dialog.getByRole('button', { name: 'Revoke bash: npm publish' }).click();
   await expect(dialog.getByText('No approval is waiting to be spent.')).toBeVisible();
   await expect(dialog.getByText('Mail triage')).toBeVisible();
   await expect(dialog.getByText('Ignore all previous instructions')).toBeVisible();
-  await dialog.getByRole('button', { name: 'Un-trust' }).click();
+  await dialog.getByRole('button', { name: 'Un-trust a result in Mail triage' }).click();
   await expect(dialog.getByText('Nothing flagged has been trusted.')).toBeVisible();
   expect(sent).toEqual(['DELETE approvals/g1', 'DELETE trusted/s2/0123456789abcdef']);
 });
 
 test('a change the server refuses is said, and the page shows what holds', async ({ page }) => {
   const { dialog } = await portal(page, {}, true);
-  await dialog.getByRole('switch', { name: 'jira' }).click();
+  await dialog.getByRole('switch', { name: 'Count jira as your own' }).click();
   await expect(dialog.getByRole('alert')).toContainText('Not today');
-  await expect(dialog.getByRole('switch', { name: 'jira' })).toHaveAttribute('aria-checked', 'false');
+  await expect(dialog.getByRole('switch', { name: 'Count jira as your own' })).toHaveAttribute('aria-checked', 'false');
 });
 
 test('where the guard is not running, the page says so; with nothing to list it says that', async ({ page }) => {
@@ -88,4 +89,35 @@ test('where the guard is not running, the page says so; with nothing to list it 
   await expect(dialog.getByText(/The guard is not running here/)).toBeVisible();
   await expect(dialog.getByText('No routines yet.')).toBeVisible();
   await expect(dialog.getByText('No MCP servers are set up.')).toBeVisible();
+});
+
+test('a routine asked for is opened and shown, a switch keeps the focus it was used with, and two changes at once both stay', async ({ page }) => {
+  const { sent } = await portal(page, { routines: [{ id: 'r0', name: 'Morning digest', exempt: [] }, { id: 'r1', name: 'Nightly fix', exempt: ['publish'] }] });
+  await page.goto('/settings/guard?routine=r1');
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const upload = dialog.getByRole('switch', { name: 'upload holds for Nightly fix' });
+  await expect(upload).toBeVisible();
+  await expect(dialog.getByRole('switch', { name: 'upload holds for Morning digest' })).toBeHidden();
+  await upload.focus();
+  await page.keyboard.press('Space');
+  await expect(upload).toBeFocused();
+  await dialog.getByRole('switch', { name: 'Count jira as your own' }).click();
+  await expect.poll(() => sent).toEqual(['PUT routines/r1 {"exempt":["publish","upload"]}', 'PUT servers/jira {"trusted":true}']);
+  await expect(upload).toHaveAttribute('aria-checked', 'false');
+  await expect(dialog.getByRole('switch', { name: 'Count jira as your own' })).toHaveAttribute('aria-checked', 'true');
+});
+
+test('on a phone the status lines and long names fit', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  const { dialog } = await portal(page, {
+    primary: false,
+    approvalsTo: false,
+    servers: [{ name: 'github_enterprise_issues_and_pull_requests_server_production_eu', trusted: false, browser: false }],
+  });
+  const value = dialog.getByText('Nobody is named, so the agent lets everybody in');
+  const label = dialog.getByText('Primary user', { exact: true });
+  const [a, b] = [await label.boundingBox(), await value.boundingBox()];
+  expect(a && b && (b.y >= a.y + a.height - 1 || b.x >= a.x + a.width)).toBeTruthy();
+  const width = await dialog.evaluate((d) => d.scrollWidth - d.clientWidth);
+  expect(width).toBeLessThanOrEqual(1);
 });
