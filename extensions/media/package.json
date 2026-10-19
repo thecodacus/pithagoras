@@ -1,0 +1,19 @@
+{
+  "name": "pithagoras-media",
+  "version": "0.1.0",
+  "description": "Pictures and videos for Pithagoras: the agent's image and video tools and their cards in the chat, a Media page that makes, edits and keeps them, and the endpoints they are made with",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {},
+  "pithagoras": { "client": "./web/client.js", "style": "./web/client.css", "server": "./server.js" },
+  "scripts": { "build": "node build.mjs && tsc --noEmit -p ." },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "react-icons": "5.7.0"
+  },
+  "license": "Apache-2.0"
+}

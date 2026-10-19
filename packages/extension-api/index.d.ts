@@ -86,6 +86,22 @@ export interface ToolCallView {
   files?: CallFile[];
 }
 
+/** A picture for `ui.ImageViewer`. */
+export interface ViewerPicture {
+  /** Tells it from the others in the list, and is what `from` of another points at. */
+  id: string;
+  /** Where the picture is, as an <img> takes it. Also what Open in a new tab and Download go to. */
+  src: string;
+  /** What it shows, for those who cannot see it. */
+  alt: string;
+  /** Shown under it, when there is something to say: its title. */
+  caption?: string;
+  /** What Download names the file, when the address does not say. */
+  fileName?: string;
+  /** The `id` of the picture this one was edited from, where that is known. */
+  from?: string;
+}
+
 /** A file a call gave the person, in the chat's folder: see ToolCallView.files. */
 export interface CallFile {
   /** Relative to the chat's folder. */
@@ -141,9 +157,15 @@ export interface SlotMap {
    *
    * `tile`, where given, is drawn small on the call's card in voice mode, in
    * place of the mark that says how it stands: a picture being made, say.
+   * `describe` is what that card says of the call, in place of the portal's
+   * words for a tool it does not know ("Using make picture").
    */
   "chat.tool": {
-    entry: { tool: string; tile?: ComponentType<{ call: ToolCallView; chat: Chat }> };
+    entry: {
+      tool: string;
+      tile?: ComponentType<{ call: ToolCallView; chat: Chat }>;
+      describe?: (call: ToolCallView, chat: Chat) => { label: string; detail?: string } | undefined;
+    };
     props: ChatProps & { call: ToolCallView; card: ReactNode };
   };
   /**
@@ -198,13 +220,15 @@ export interface SlotMap {
   "nav.page": { entry: { title: string; icon?: ComponentType; useShown?: () => boolean }; props: {} };
   /**
    * The extension's page in Settings, above the fields the portal found for
-   * it. `search` is what Settings' search finds on the page, beside the
-   * extension's name: each a `title`, the heading on the page it is under
-   * (`section`, scrolled to), and other `words` someone might type for it.
-   * Titles and headings are said in the page's language as the extension's
-   * own `t` says them, so a heading is found as the page shows it.
+   * it, at /settings/x/<extension>. `title` and `icon` are its entry in
+   * Settings' list, in place of the extension's name and the mark every
+   * extension has. `search` is what Settings' search finds on the page,
+   * beside the extension's name: each a `title`, the heading on the page it is
+   * under (`section`, scrolled to), and other `words` someone might type for
+   * it. Titles and headings are said in the page's language as the
+   * extension's own `t` says them, so a heading is found as the page shows it.
    */
-  "settings.page": { entry: { search?: { title: string; section?: string; words?: string }[] }; props: {} };
+  "settings.page": { entry: { title?: string; icon?: ComponentType; search?: { title: string; section?: string; words?: string }[] }; props: {} };
 }
 export type SlotName = keyof SlotMap;
 
@@ -427,6 +451,7 @@ export interface Ui {
    * plays. `file`, a picture a call gave, is the picture shown, and a click
    * opens the chat's viewer at it; `onOpen` is a click otherwise. `compact` is
    * the small tile voice mode's cards show, and `actions` what goes under it.
+   * `pictureId` marks it (`data-picture-id`) for a viewer's `anchor` to find.
    */
   ImagePreview: ComponentType<{
     state: "making" | "done" | "failed";
@@ -444,11 +469,46 @@ export interface Ui {
     compact?: boolean;
     onOpen?: () => void;
     actions?: ReactNode;
+    pictureId?: string;
   }>;
+  /**
+   * The portal's picture viewer, over the page: the pictures to step through,
+   * opened at `startId`, with zoom, Open in a new tab and Download. `anchor` is
+   * where focus goes when it closes, for the picture shown last; `actions` are
+   * more buttons beside Close, for the picture shown.
+   */
+  ImageViewer: ComponentType<{
+    pictures: ViewerPicture[];
+    startId: string;
+    onClose: () => void;
+    anchor?: (id: string) => HTMLElement | null | undefined;
+    actions?: (picture: ViewerPicture) => ReactNode;
+  }>;
+  /**
+   * A dialog over the page, as the portal's own: Escape and a click beside it
+   * close it, after asking when `unsaved` says something typed in it is not
+   * saved (or a part of it says so with `useUnsavedDraft`).
+   */
+  Modal: ComponentType<{ title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; unsaved?: boolean }>;
+  /**
+   * A group of settings that folds, as Settings' own: its `title` and a
+   * `summary` of what is set in it while it is folded. Settings' search opens
+   * it when what it finds is in it.
+   */
+  DetailsGroup: ComponentType<{ title: string; summary: ReactNode; defaultOpen?: boolean; children: ReactNode }>;
+  /**
+   * A hook: this part of a dialog (a page in Settings, a `Modal`) holds
+   * something typed in that is not saved, so closing the dialog asks first.
+   */
+  useUnsavedDraft(unsaved: boolean): void;
   /** A question with two answers, asked over the page: resolves true for yes. */
   confirm(options: ConfirmOptions): Promise<boolean>;
-  /** The look of the portal's own fields and buttons, as class names for a `className`. */
-  classes: { input: string; inputSmall: string; codeArea: string; button: string; primary: string; primarySmall: string; ghost: string };
+  /**
+   * The look of the portal's own fields and buttons, as class names for a
+   * `className`; `viewerButton` and `iconButton` are the buttons over a
+   * picture and in a viewer's head (`aria-pressed` drawn as chosen).
+   */
+  classes: { input: string; inputSmall: string; codeArea: string; button: string; primary: string; primarySmall: string; ghost: string; viewerButton: string; iconButton: string };
   /** Copies text, where the page is served over plain HTTP as well. Resolves false when it could not. */
   copyText(text: string): Promise<boolean>;
   /** Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when true. */
@@ -528,8 +588,14 @@ export interface Portal {
   /** The portal's own React: what a component drawn in a slot has to be made with, for its hooks to work. */
   React: typeof ReactNamespace;
   slots: { register<S extends SlotName>(slot: S, entry: Entry<S>): () => void };
-  /** Go to a page of the portal: "/s/<chat id>", "/x/<extension>/<page id>". */
-  navigate(path: string): void;
+  /**
+   * Go to a page of the portal: "/s/<chat id>", "/x/<extension>/<page id>",
+   * "/settings/x/<extension>". With `replace`, in place of the page shown in
+   * the browser's history (a page that keeps what it shows in its address).
+   */
+  navigate(path: string, options?: { replace?: boolean }): void;
+  /** A hook: the page's address, drawn again when it changes, Back and Forward included. */
+  useLocation(): { path: string; search: string };
   ui: Ui;
   api: {
     /** A request as the portal's own are made: JSON back, an ApiError with what was said for one refused, and a login that is gone told to the page. */
