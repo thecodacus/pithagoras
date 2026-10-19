@@ -964,6 +964,88 @@ test('every folder on the way is held, not only the first: a deep one swapped fo
   }
 });
 
+/** swappedAt, for a call that is awaited: the hooks stay until it has settled. */
+async function swappedWhile(point, swap, fn) {
+  const real = {};
+  let swapped = false;
+  for (const name of point.names) {
+    real[name] = fs[name];
+    fs[name] = (...args) => {
+      if (!swapped && point.when(name, args)) {
+        swapped = true;
+        swap();
+      }
+      return real[name](...args);
+    };
+  }
+  syncBuiltinESMExports();
+  try {
+    await fn();
+  } finally {
+    for (const name of point.names) fs[name] = real[name];
+    syncBuiltinESMExports();
+  }
+  return swapped;
+}
+
+test('a folder on the way swapped for a link while git is asked about a delete: the delete is refused, and nothing where the link leads goes', async () => {
+  const { sub, aside, outside, base, swap, done } = swappable();
+  mkdirSync(path.join(sub, 'victim'));
+  writeFileSync(path.join(sub, 'victim', 'kept.txt'), 'ours');
+  mkdirSync(path.join(outside, 'victim'));
+  writeFileSync(path.join(outside, 'victim', 'precious.txt'), 'theirs');
+  // The agent moves while git is asked whether the folder holds work: removeEntry awaits that before it removes anything.
+  const removing = codeOf(() => removeEntry(base, 'sub/victim'));
+  swap();
+  assert.equal(await removing, 'invalid');
+  assert.equal(readFileSync(path.join(outside, 'victim', 'precious.txt'), 'utf8'), 'theirs', 'what the link leads to stays');
+  assert.equal(readFileSync(path.join(aside, 'victim', 'kept.txt'), 'utf8'), 'ours', 'and the folder that went aside is as it was');
+  done();
+});
+
+test('a delete goes on in the folder that was checked once it is held: the folder a link put in its place leads to stays', async () => {
+  const { sub, aside, outside, base, swap, done } = swappable();
+  mkdirSync(path.join(sub, 'victim', 'deeper'), { recursive: true });
+  writeFileSync(path.join(sub, 'victim', 'deeper', 'a.txt'), 'ours');
+  mkdirSync(path.join(outside, 'victim'));
+  writeFileSync(path.join(outside, 'victim', 'precious.txt'), 'theirs');
+  assert.ok(await swappedWhile(reaching('/victim'), swap, () => removeEntry(base, 'sub/victim', true)));
+  assert.equal(readFileSync(path.join(outside, 'victim', 'precious.txt'), 'utf8'), 'theirs');
+  assert.deepEqual(names(aside), ['doc.md'], 'the one that was checked is the one that went');
+  done();
+});
+
+test('a folder in what is deleted swapped for a link as it is reached: the link goes, and what it leads to stays', async () => {
+  const { dir, base, outside, done } = setup();
+  const inner = path.join(dir, 'tree', 'inner');
+  mkdirSync(inner, { recursive: true });
+  writeFileSync(path.join(inner, 'a.txt'), 'ours');
+  writeFileSync(path.join(outside, 'a.txt'), 'theirs');
+  const swapInner = () => {
+    renameSync(inner, path.join(dir, 'inner.aside'));
+    symlinkSync(outside, inner);
+  };
+  assert.ok(await swappedWhile(reaching('/inner'), swapInner, () => removeEntry(base, 'tree', true)));
+  assert.ok(!existsSync(path.join(dir, 'tree')), 'the folder went, with the link in it');
+  assert.deepEqual(names(outside), ['a.txt', 'secret']);
+  assert.equal(readFileSync(path.join(outside, 'a.txt'), 'utf8'), 'theirs');
+  assert.equal(readFileSync(path.join(dir, 'inner.aside', 'a.txt'), 'utf8'), 'ours', 'what was moved out of it is not reached');
+  done();
+});
+
+test('a rename is done in the folder that was checked: refused when a link took its place before it is held, and in the folder that is held after', () => {
+  for (const [point, outcome] of [[FIRST, 'invalid'], [{ names: ['renameSync'], when: () => true }, 'none']]) {
+    const { aside, outside, base, swap, done } = swappable();
+    let got;
+    assert.ok(swappedAt(point, swap, () => { got = code(() => renameEntry(base, 'sub/doc.md', 'doc.old')); }));
+    assert.equal(got, outcome);
+    assert.deepEqual(names(outside), ['doc.md', 'secret'], 'nothing was renamed where the link leads');
+    assert.equal(readFileSync(path.join(outside, 'doc.md'), 'utf8'), 'theirs');
+    assert.deepEqual(names(aside), outcome === 'none' ? ['doc.old'] : ['doc.md']);
+    done();
+  }
+});
+
 test('a link to a folder inside the chat\'s folder is still written through: the path is checked, and the folder held is the one it leads to', () => {
   const { dir, base, done } = setup();
   mkdirSync(path.join(dir, 'real'));

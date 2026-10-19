@@ -21,7 +21,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { rm } from "node:fs/promises";
+import { lstat, readdir, rmdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { holdsWork, unsavedIn, unsavedRefusal, type Unsaved } from "./git.js";
 import { pictureType } from "./prompt-images.js";
@@ -270,6 +270,9 @@ const WALK_FOLDER = (() => {
   return OPEN_FOLDER;
 })();
 
+/** A descriptor as a path, `/proc/self/fd/<n>`: the folder it is, whatever its path leads to now (see holdFolder). */
+const named = (descriptor: number) => `/proc/self/fd/${descriptor}`;
+
 /** A folder opened without following a link in its last place. */
 function openFolder(where: string, flags = OPEN_FOLDER): number {
   try {
@@ -305,6 +308,27 @@ interface Held {
   /** `name` in the folder: one name, no place. */
   at(name: string): string;
   close(): void;
+}
+
+/**
+ * The folder open on `fd`, whose checked path is `dir`, as a Held: named through its descriptor where descriptors can be
+ * named (`pinned`), else by its path, which leaves the gap that holdFolder tells of.
+ */
+function heldOf(fd: number, dir: string, agents?: AgentAccess[]): Held {
+  const pinned = namesDescriptors();
+  const here = pinned ? named(fd) : dir;
+  let open = true;
+  return {
+    fd,
+    here,
+    pinned,
+    agents,
+    at: (name) => (pinned ? `${here}/${name}` : path.join(dir, name)),
+    close: () => {
+      if (open) closeSync(fd);
+      open = false;
+    },
+  };
 }
 
 /** What is said of a folder or a file that the sandbox closed to the agent. */
@@ -440,20 +464,8 @@ function holdFolder(base: string, dir: string, use?: Use): Held {
       closeSync(fd);
       throw e;
     }
-    let open = true;
-    return {
-      fd,
-      here: dir,
-      pinned: false,
-      agents,
-      at: (name) => path.join(dir, name),
-      close: () => {
-        if (open) closeSync(fd);
-        open = false;
-      },
-    };
+    return heldOf(fd, dir, agents);
   }
-  const named = (descriptor: number) => `/proc/self/fd/${descriptor}`;
   // For the agents the walk starts at `/`: the kernel needs search on every folder of a path, and the sandbox closes a subtree by its top folder
   // alone (what is inside keeps the group's rights), so a path that leads through a closed folder is closed all the way down. No folder on the
   // way is followed as a link, `base` itself included (it is a canonical path, so one that is a link now was swapped).
@@ -474,19 +486,7 @@ function holdFolder(base: string, dir: string, use?: Use): Held {
     closeSync(fd);
     throw e;
   }
-  const held = fd;
-  let open = true;
-  return {
-    fd: held,
-    here: named(held),
-    pinned: true,
-    agents,
-    at: (name) => `${named(held)}/${name}`,
-    close: () => {
-      if (open) closeSync(held);
-      open = false;
-    },
-  };
+  return heldOf(fd, dir, agents);
 }
 
 /**
@@ -680,9 +680,13 @@ export const MAX_PICTURE_BYTES = 25 * 1024 * 1024;
  * drawn inline must really be one of the four kinds a browser draws and
  * nothing else, so that no page and no script is ever served under this
  * portal's origin from a file the agent wrote.
+ *
+ * With `likeParent`, for a picture an agent names: one the agent could not
+ * read itself is refused (see AgentUse).
  */
-export function openPicture(base: string, rel: unknown): { fd: number; size: number; name: string; mimeType: string } {
-  const opened = openDownload(base, rel);
+export function openPicture(base: string, rel: unknown, options: AgentUse = {}): { fd: number; size: number; name: string; mimeType: string } {
+  const { fd, size, name } = openFile(base, rel, options);
+  const opened = { fd, size, name };
   try {
     if (opened.size > MAX_PICTURE_BYTES) throw new FileError("too_large", "The picture is over 25 MB; download it instead");
     const head = Buffer.alloc(12);
@@ -699,10 +703,11 @@ export function openPicture(base: string, rel: unknown): { fd: number; size: num
 /**
  * A picture in the folder, read whole, for one that is sent on as it is, to an
  * image endpoint to be changed. Opened as a picture shown is: checked by its
- * bytes and its size, and never through a link out of the folder.
+ * bytes and its size, and never through a link out of the folder; `options` as
+ * for openPicture.
  */
-export function readPicture(base: string, rel: unknown): { bytes: Buffer; mimeType: string; name: string } {
-  return readOpened(openPicture(base, rel));
+export function readPicture(base: string, rel: unknown, options: AgentUse = {}): { bytes: Buffer; mimeType: string; name: string } {
+  return readOpened(openPicture(base, rel, options));
 }
 
 /** A file opened by openPicture or openVideo, read whole and closed. */
@@ -953,6 +958,12 @@ export async function unsavedAt(base: string, rel: unknown): Promise<Unsaved | n
  * A folder that holds git work nothing else has — a clone with commits no
  * remote has, changes not committed, stashes — or a repository's .git is
  * refused, with what it holds, unless `discard` says that is meant.
+ *
+ * Asking git takes a while, and an agent can put a link where a folder on the
+ * way was meanwhile: a removal by the path would then go where the link leads,
+ * as root and with all that is there. So the folder the entry is in is held
+ * once git has answered (see holdFolder), and the entry is removed through it
+ * (see removeIn).
  */
 export async function removeEntry(base: string, rel: unknown, discard = false): Promise<void> {
   const target = entryPlace(base, rel, "removed");
@@ -960,12 +971,80 @@ export async function removeEntry(base: string, rel: unknown, discard = false): 
     const unsaved = await unsavedIn(base, target);
     if (unsaved && holdsWork(unsaved)) throw new FileError("unsaved", unsavedRefusal(unsaved).error, unsaved);
   }
+  let held: Held;
   try {
-    // Not rmSync: a folder with many files is seconds on the thread that serves every chat.
-    // A file that has gone since it was looked for is what was asked for.
-    await rm(target, { recursive: true, force: true });
+    held = holdFolder(base, path.dirname(target));
+  } catch (e) {
+    // A file that has gone since it was looked for, with the folder it was in, is what was asked for.
+    if (e instanceof FileError && e.code === "missing") return;
+    throw e;
+  }
+  try {
+    const name = path.basename(target);
+    const st = await lstat(held.at(name)).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === "ENOENT") return undefined;
+      throw e;
+    });
+    if (st) await removeIn(held, name, st.isDirectory());
   } catch (e) {
     throw ioFailure(e, "It could not be deleted", "Nothing more was changed.");
+  } finally {
+    held.close();
+  }
+}
+
+/** What is said when an entry is turned into another thing while it is removed, and so is left as it is now. */
+const CHANGED_WHILE_REMOVED = "It changed while it was deleted, and what it is now was left";
+
+/**
+ * Removes `name` in the held folder: `folder` says whether it was a folder (not a link to one) when it was looked at.
+ * A folder is opened from the held one without following a link (as holdFolder walks), emptied through its own
+ * descriptor, one name at a time and each the same way, and then its name is taken away; anything else goes by
+ * `unlink`, which never follows a link. So what goes is what is in the folder that was checked, whatever an agent swaps
+ * in on the way: a link put where a folder was goes as the link it is, and what it leads to stays; a folder put where
+ * a file was is left. Off the thread for each name, not by rmSync: a folder with many files is seconds on the thread
+ * that serves every chat. A name that has gone since it was listed is what was asked for.
+ */
+async function removeIn(held: Held, name: string, folder: boolean): Promise<void> {
+  const place = held.at(name);
+  if (!folder) {
+    try {
+      await unlink(place);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return;
+      // A folder took the name since it was looked at. (POSIX says EPERM for it where Linux says EISDIR.)
+      if (code === "EISDIR" || (code === "EPERM" && lstatSync(place, { throwIfNoEntry: false })?.isDirectory())) {
+        throw new FileError("conflict", CHANGED_WHILE_REMOVED);
+      }
+      throw e;
+    }
+    return;
+  }
+  let fd: number;
+  try {
+    fd = openSync(place, OPEN_FOLDER);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return;
+    // A link or a file took the folder's name since it was looked at (a link is ENOTDIR too: O_DIRECTORY is looked at before O_NOFOLLOW).
+    if (code === "ELOOP" || code === "ENOTDIR") return removeIn(held, name, false);
+    throw e;
+  }
+  const inner = heldOf(fd, place);
+  try {
+    for (const entry of await readdir(inner.here, { withFileTypes: true })) await removeIn(inner, entry.name, entry.isDirectory());
+  } finally {
+    inner.close();
+  }
+  try {
+    await rmdir(place);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return;
+    // Not a folder any more: the one that was emptied was moved away, and something else took its name.
+    if (code === "ENOTDIR") throw new FileError("conflict", CHANGED_WHILE_REMOVED);
+    throw e;
   }
 }
 
@@ -989,11 +1068,16 @@ export function renameEntry(base: string, rel: unknown, newName: unknown): strin
   const parent = path.dirname(from);
   const to = path.join(parent, name);
   if (to === from) return path.relative(base, to);
-  if (lexists(to)) throw new FileError("exists", `There is already something called "${name}" here`);
+  // In the folder as it is held (see holdFolder): a folder on the way that an agent swapped for a link since the check is refused, or, once it is
+  // held, makes no difference, and the rename is never sent where the link leads.
+  const held = holdFolder(base, parent);
   try {
-    renameSync(from, to);
+    if (lexists(held.at(name))) throw new FileError("exists", `There is already something called "${name}" here`);
+    renameSync(held.at(path.basename(from)), held.at(name));
   } catch (e) {
     throw ioFailure(e, "It could not be renamed", "It keeps its name.");
+  } finally {
+    held.close();
   }
   return path.relative(base, to);
 }

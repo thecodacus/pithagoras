@@ -2540,13 +2540,14 @@ class SessionManager extends EventEmitter {
    * A picture or a clip in the chat's folder, as the page would fetch it:
    * checked by its bytes, and never through a link out of the folder.
    * Undefined for one that is gone since, or is no longer one: there is
-   * nothing to send then.
+   * nothing to send then. Read for the chat's agent, whose tool named it, so
+   * that a file the sandbox closed to the agent is not sent on (see AgentUse).
    */
   private fileShown(sessionId: string, file: ShownFile): Omit<SentFile, "title"> | undefined {
     const session = getSession(sessionId);
     if (!session) return undefined;
     try {
-      const { bytes, mimeType, name } = (file.kind === "video" ? readVideo : readPicture)(baseDir(session.workspace), file.path);
+      const { bytes, mimeType, name } = (file.kind === "video" ? readVideo : readPicture)(baseDir(session.workspace), file.path, { likeParent: true, chats: [sessionId] });
       return { data: bytes.toString("base64"), mimeType, name };
     } catch {
       return undefined;

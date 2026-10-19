@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { inProcessHome } from "./helpers.mts";
@@ -14,6 +14,7 @@ const { GenerateImageTool, takenByAnother } = await import("../core/server/src/p
 const { GENERATED_DIR } = await import("../core/server/src/image-gallery.ts");
 const editing = await import("../core/server/src/image-editing.ts");
 const { EditImageTool, editedName } = await import("../core/server/src/pi/edit-image-tool.ts");
+const { setAgentAccess } = await import("../core/server/src/workspace-files.ts");
 
 // The first bytes of each kind a browser draws, padded: that is all the check reads.
 const pad = (head: number[], to = 64) => Buffer.concat([Buffer.from(head), Buffer.alloc(to)]);
@@ -1110,6 +1111,28 @@ function chatWith(files: Record<string, Buffer> = { "photo.png": PNG }) {
   }
   return folder;
 }
+
+test("a picture the sandbox closed to the agent is not edited for it, and nothing of it is sent", async () => {
+  const folder = chatWith({ "photo.png": PNG, "closed/secret.png": PNG });
+  // The folders above the chat's are open to everyone, as a sandbox has them; what is closed to the agent is a folder of its own.
+  for (const open of [temp, folder]) chmodSync(open, 0o755);
+  chmodSync(path.join(folder, "closed"), 0o700);
+  const { origin, seen, server } = await fake((_req, res) => json(res, { data: [{ b64_json: b64(WEBP) }] }));
+  // The agent is another user than the portal: everyone, to the files.
+  setAgentAccess(() => [{ uid: 61234, groups: [61234] }]);
+  try {
+    reset();
+    gen.saveImageGeneration({ baseUrl: origin, apiKey: KEY, editEnabled: true });
+    const { call } = loadEdit(folder);
+    await assert.rejects(call({ path: "closed/secret.png", prompt: "p" }), /closed to the agent/);
+    assert.equal(seen.length, 0, "nothing was sent");
+    assert.equal((await call({ path: "photo.png", prompt: "p" })).details.files[0].path, "generated-images/photo-edited.webp", "one it may read is edited");
+  } finally {
+    setAgentAccess(() => undefined);
+    server.close();
+    reset();
+  }
+});
 
 test("while editing is off, or has no address, the edit tool is not there at all", () => {
   reset();

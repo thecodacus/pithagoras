@@ -570,14 +570,14 @@ test("while video generation is off, or has no address, neither tool is there at
   assert.deepEqual(load(folder).registered, []);
   assert.equal(load(folder).tool.registered(), false);
   const shown: any[] = [];
-  showVideoTool(folder)({ registerTool: (t: any) => shown.push(t) });
+  showVideoTool(folder, "tool-show")({ registerTool: (t: any) => shown.push(t) });
   assert.deepEqual(shown, []);
 
   gen.saveVideoGeneration({ baseUrl: "https://video.example.com", enabled: true });
   const on = load(folder);
   assert.deepEqual(on.registered.map((t) => t.name), ["generate_video"]);
   assert.equal(on.tool.registered(), true);
-  showVideoTool(folder)({ registerTool: (t: any) => shown.push(t) });
+  showVideoTool(folder, "tool-show")({ registerTool: (t: any) => shown.push(t) });
   assert.deepEqual(shown.map((t) => t.name), ["show_video"]);
   // Loaded again after a switch, as pi does on a reload: it follows.
   off();
@@ -792,7 +792,7 @@ test("show_video shows a clip of the chat's folder by its bytes, and nothing els
   writeFileSync(path.join(temp, "outside.webm"), WEBM);
   symlinkSync(path.join(temp, "outside.webm"), path.join(folder, "link.webm"));
   const tools: any[] = [];
-  showVideoTool(folder)({ registerTool: (t: any) => tools.push(t) });
+  showVideoTool(folder, "tool-show")({ registerTool: (t: any) => tools.push(t) });
   const show = (p: any) => tools[0].execute("id", p);
   assert.deepEqual((await show({ path: "clips/a.webm", title: " A clip " })).details, { files: [{ path: "clips/a.webm", title: "A clip" }] });
   assert.deepEqual((await show({ path: path.join(folder, "b.mp4") })).details, { files: [{ path: "b.mp4" }] });
@@ -800,7 +800,7 @@ test("show_video shows a clip of the chat's folder by its bytes, and nothing els
   await assert.rejects(show({ path: "d.png" }), /not a WebM or MP4/);
   await assert.rejects(show({ path: path.join(temp, "outside.webm") }), /Only a video in the chat's folder/);
   await assert.rejects(show({ path: "link.webm" }), /./, "a link out of the folder is not followed");
-  assert.equal(videoIn(folder, "b.mp4"), "b.mp4");
+  assert.equal(videoIn(folder, "b.mp4", {}), "b.mp4");
   off();
 });
 

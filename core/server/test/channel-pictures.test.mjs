@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inProcessHome } from "./server-harness.mjs";
 
@@ -15,6 +15,7 @@ const { createSession, findChannelSession, getDb } = await import("../dist/db.js
 const { channelSupervisor } = await import("../dist/channels/supervisor.js");
 const { IMAGE_ROOT, sessions } = await import("../dist/session-manager.js");
 const { SdkPiClient } = await import("../dist/pi/sdk-client.js");
+const { setAgentAccess } = await import("../dist/workspace-files.js");
 
 getDb().prepare("INSERT INTO channels (id, slug, kind, name, config) VALUES ('c1', 'sig', 'test', 'Test', '{}')").run();
 
@@ -116,6 +117,45 @@ test("what a call gives goes to a channel as it is given, with the words after i
     assert.equal(failed, "Drawing it.\n\n📎 sales.csv\n\nSales doubled.\n\n📎 A fox (fox.mp4)");
   } finally {
     sessions.submit = realSubmit;
+  }
+});
+
+test("a picture or a clip a call gives that the sandbox closed to the agent is not sent on: it is named, as a file that was not sent", async () => {
+  const workspace = path.join(home, "closed-ws");
+  mkdirSync(path.join(workspace, "closed"), { recursive: true });
+  writeFileSync(path.join(workspace, "chart.png"), PNG);
+  writeFileSync(path.join(workspace, "closed", "secret.png"), PNG);
+  writeFileSync(path.join(workspace, "closed", "clip.mp4"), MP4);
+  // The folders above the chat's are open to everyone, as a sandbox has them; what is closed to the agent is a folder of its own.
+  chmodSync(home, 0o755);
+  chmodSync(path.join(workspace, "closed"), 0o700);
+  createSession({ id: "closed", title: "closed", workspace, executor: "host" });
+  // The agent is another user than the portal: everyone, to the files.
+  setAgentAccess(() => [{ uid: 61234, groups: [61234] }]);
+  const realSubmit = sessions.submit;
+  sessions.submit = async () => {
+    setImmediate(() => {
+      pi.emit("event", { type: "agent_start" });
+      pi.emit("event", {
+        type: "tool_execution_end",
+        toolCallId: "c1",
+        toolName: "plot_tool",
+        result: { content: [{ type: "text", text: "done" }], details: { files: [{ path: "closed/secret.png" }, { path: "closed/clip.mp4" }, { path: "chart.png" }] } },
+      });
+      pi.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Here." }] } });
+      pi.emit("event", { type: "agent_settled" });
+    });
+  };
+  try {
+    const sent = [];
+    const reply = await sessions.ask("closed", "show me", { streamText: false, onPicture: (picture) => sent.push(picture), onVideo: (video) => sent.push(video) });
+    assert.deepEqual(sent.map((file) => file.name), ["chart.png"], "only what the agent could read itself");
+    assert.doesNotMatch(JSON.stringify(sent), new RegExp(MP4.toString("base64").slice(0, 12)));
+    assert.match(reply, /📎 closed\/secret\.png/);
+    assert.match(reply, /📎 closed\/clip\.mp4/);
+  } finally {
+    sessions.submit = realSubmit;
+    setAgentAccess(() => undefined);
   }
 });
 

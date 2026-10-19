@@ -87,12 +87,16 @@ export function editedName(original: string, ext: string): string {
   return `${fitBytes(stem || "image", MAX_STEM_BYTES)}-edited.${ext}`;
 }
 
-/** A picture of the chat's folder that is to be sent: where it is in the folder, as show_image needs it, and its bytes. */
-function readOriginal(folder: string, given: unknown): { original: string; bytes: Buffer } {
+/**
+ * A picture of the chat's folder that is to be sent: where it is in the folder, as show_image needs it, and its bytes. Read for the agent of
+ * `sessionId`, which named it: not a picture the sandbox closed to it (see AgentUse).
+ */
+function readOriginal(folder: string, given: unknown, sessionId: string | undefined): { original: string; bytes: Buffer } {
   if (typeof given !== "string") throw new Error("Name the picture by its path in the chat's folder.");
+  const as = { likeParent: true, chats: sessionId ? [sessionId] : [] };
   try {
-    const original = pictureIn(folder, given, "edited");
-    return { original, bytes: readPicture(baseDir(folder), original).bytes };
+    const original = pictureIn(folder, given, as, "edited");
+    return { original, bytes: readPicture(baseDir(folder), original, as).bytes };
   } catch (e) {
     // The words the folder's routes have for it ("download it instead") are no way forward for an edit.
     if (e instanceof FileError && e.code === "too_large") {
@@ -166,7 +170,7 @@ export class EditImageTool {
         const images: Buffer[] = [];
         for (const [i, given] of named.entries()) {
           try {
-            const one = readOriginal(folder, given);
+            const one = readOriginal(folder, given, sessionId);
             originals.push(one.original);
             images.push(one.bytes);
           } catch (e) {

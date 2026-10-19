@@ -37,8 +37,8 @@ export function saveGenerated(folder: string, bytes: Buffer, ext: string, name =
     if (!(e instanceof FileError && e.code === "exists")) throw e;
   }
   const rel = saveNewFile(base, GENERATED_DIR, name, bytes);
-  // Checked as the page will fetch it, so a call that succeeds is one that shows.
-  return pictureIn(folder, rel);
+  // Checked as the page will fetch it, so a call that succeeds is one that shows. The portal's own file, made just now: not one the agent named.
+  return pictureIn(folder, rel, {});
 }
 
 /**

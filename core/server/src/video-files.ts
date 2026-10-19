@@ -1,6 +1,6 @@
 import { closeSync, readSync } from "node:fs";
 import path from "node:path";
-import { FileError, openDownload, readOpened } from "./workspace-files.js";
+import { type AgentUse, FileError, openDownload, openFile, readOpened } from "./workspace-files.js";
 
 /**
  * What a clip is, by its first bytes, and how one is opened to be shown.
@@ -143,10 +143,12 @@ export function videoType(head: Buffer): { ext: VideoExt; mimeType: string } | u
 
 /**
  * A clip in the folder, opened to be played in the page, not saved. Checked by its bytes and its size, and never
- * through a link out of the folder (see openDownload). The descriptor is the caller's to close.
+ * through a link out of the folder (see openDownload); with `likeParent`, for a clip an agent names, one the agent
+ * could not read itself is refused (see AgentUse). The descriptor is the caller's to close.
  */
-export function openVideo(base: string, rel: unknown): { fd: number; size: number; name: string; mimeType: string } {
-  const opened = openDownload(base, rel);
+export function openVideo(base: string, rel: unknown, options: AgentUse = {}): { fd: number; size: number; name: string; mimeType: string } {
+  const { fd, size, name } = openFile(base, rel, options);
+  const opened = { fd, size, name };
   try {
     if (opened.size > MAX_VIDEO_BYTES) throw new FileError("too_large", `The video is over ${MAX_VIDEO_BYTES / 1024 / 1024} MB; download it instead`);
     const head = Buffer.alloc(VIDEO_HEAD);
@@ -160,8 +162,9 @@ export function openVideo(base: string, rel: unknown): { fd: number; size: numbe
   }
 }
 
-/** A clip in the folder, read whole, for a channel to send on: opened as one that is played is. */
-export const readVideo = (base: string, rel: unknown): { bytes: Buffer; mimeType: string; name: string } => readOpened(openVideo(base, rel));
+/** A clip in the folder, read whole, for a channel to send on: opened as one that is played is, `options` as for openVideo. */
+export const readVideo = (base: string, rel: unknown, options: AgentUse = {}): { bytes: Buffer; mimeType: string; name: string } =>
+  readOpened(openVideo(base, rel, options));
 
 /** What the open file is, by its first bytes. */
 function formatAt(fd: number): VideoFormat {

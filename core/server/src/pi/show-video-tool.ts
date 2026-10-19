@@ -4,7 +4,7 @@ import { Type } from "typebox";
 import { pathBelow } from "../within.js";
 import { SHOW_VIDEO_TOOL, videoGenerationReady } from "../video-generation.js";
 import { openVideo } from "../video-files.js";
-import { FileError, baseDir } from "../workspace-files.js";
+import { type AgentUse, FileError, baseDir } from "../workspace-files.js";
 
 /**
  * Putting a clip in front of the person: one the agent made with a tool of its
@@ -21,8 +21,8 @@ import { FileError, baseDir } from "../workspace-files.js";
 /** Where `p` is below `root`, relative to it; null when it is not below it, or is `root` itself. */
 const under = (root: string, p: string): string | null => pathBelow(root, p) || null;
 
-/** Where `given` is inside `folder`, relative to it, or an explanation why it is not. `action` is what is to be done with the clip, for that. */
-export function videoIn(folder: string, given: string, action = "shown"): string {
+/** Where `given` is inside `folder`, relative to it, or an explanation why it is not. `as` and `action` as for pictureIn. */
+export function videoIn(folder: string, given: string, as: AgentUse, action = "shown"): string {
   const base = baseDir(folder);
   // The folder as the agent names it may reach the real one through a link: an absolute path is taken inside either.
   // openVideo then checks what the path really leads to.
@@ -31,12 +31,15 @@ export function videoIn(folder: string, given: string, action = "shown"): string
     throw new FileError("invalid", `Only a video in the chat's folder can be ${action}. Copy it there first.`);
   }
   // Checked as the page will fetch it, so a call that succeeds is one that plays.
-  closeSync(openVideo(base, rel).fd);
+  closeSync(openVideo(base, rel, as).fd);
   return rel;
 }
 
-/** An ExtensionFactory — see pi's InlineExtension. Registers nothing while video generation is off or has no address. */
-export function showVideoTool(folder: string) {
+/**
+ * An ExtensionFactory — see pi's InlineExtension. Registers nothing while video generation is off or has no address. `sessionId` is the chat,
+ * whose agent the clip is opened for.
+ */
+export function showVideoTool(folder: string, sessionId: string) {
   return (pi: any) => {
     if (!videoGenerationReady()) return;
     pi.registerTool({
@@ -50,7 +53,7 @@ export function showVideoTool(folder: string) {
         title: Type.Optional(Type.String({ description: "A few words shown above it" })),
       }),
       execute: async (_id: string, p: { path: string; title?: string }) => {
-        const rel = videoIn(folder, p.path);
+        const rel = videoIn(folder, p.path, { likeParent: true, chats: [sessionId] });
         const title = typeof p.title === "string" ? p.title.trim().slice(0, 120) : "";
         const details = { files: [{ path: rel, ...(title ? { title } : {}) }] };
         return { content: [{ type: "text", text: `Shown to the user: ${rel}` }], details };

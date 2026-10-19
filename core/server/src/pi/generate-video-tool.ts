@@ -49,7 +49,8 @@ export function saveGeneratedVideo(folder: string, bytes: Buffer, ext: string, n
   }
   const rel = saveNewFile(base, GENERATED_VIDEOS_DIR, name, bytes);
   // Checked as the page will fetch it, so that a clip that is said to play does.
-  return sniffVideo(bytes.subarray(0, 64)).playable ? videoIn(folder, rel) : rel;
+  // The portal's own file, made just now: not one the agent named.
+  return sniffVideo(bytes.subarray(0, 64)).playable ? videoIn(folder, rel, {}) : rel;
 }
 
 /** The longest clip the tool asks for, in seconds: far more than any model makes, so that a typo is refused and a long clip is not. */
@@ -123,8 +124,10 @@ export class GenerateVideoTool {
         const frame = (given: unknown, which: "first" | "last"): { from: string; picture: { bytes: Buffer; mimeType: string } } | undefined => {
           if (given === undefined || given === null || !String(given).trim()) return undefined;
           try {
-            const from = pictureIn(folder, String(given), `used as the ${which} frame`);
-            const read = readPicture(baseDir(folder), from);
+            // Read for the chat's agent, which named it: not a picture the sandbox closed to it.
+            const as = { likeParent: true, chats: sessionId ? [sessionId] : [] };
+            const from = pictureIn(folder, String(given), as, `used as the ${which} frame`);
+            const read = readPicture(baseDir(folder), from, as);
             return { from, picture: { bytes: read.bytes, mimeType: read.mimeType } };
           } catch (e) {
             // The Files panel's words for it ("download it instead") are no way forward here.
