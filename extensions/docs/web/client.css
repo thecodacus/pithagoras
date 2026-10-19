@@ -11,9 +11,29 @@
 .pd-folder h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .pd-path { margin: 2px 0 8px; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
 .pd-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.pd-list button { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.pd-list button:hover { border-color: rgb(var(--accent) / .5); }
-.pd-list button:focus-visible, .pd-back:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.pd-open { display: flex; width: 100%; flex-direction: column; gap: 2px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pd-open:hover { border-color: rgb(var(--accent) / .5); }
+.pd-open:focus-visible, .pd-back:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+/* A document's row: what can be done with it is at its right end, out of the way until the row is pointed at or has the focus (a touch screen cannot point). */
+.pd-row { position: relative; }
+.pd-row .pd-open { padding-right: 72px; }
+.pd-row-actions { position: absolute; top: 6px; right: 8px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.pd-row:hover .pd-row-actions, .pd-row:focus-within .pd-row-actions { opacity: 1; }
+@media (pointer: coarse) { .pd-row-actions { opacity: 1; } }
+.pd-row-action { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: none; color: rgb(var(--fg-subtle)); cursor: pointer; }
+.pd-row-action svg { width: 15px; height: 15px; }
+.pd-row-action:hover { background: rgb(var(--fg) / .08); color: rgb(var(--fg)); }
+.pd-row-danger:hover { background: rgb(var(--danger) / .1); color: rgb(var(--danger)); }
+.pd-row-action[aria-disabled="true"] { opacity: .6; cursor: default; }
+.pd-row-action:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+/* The file's name changed: in a row of a list, or under the bar of a document. */
+.pd-rename { display: flex; flex-direction: column; gap: 4px; }
+.pd-rename-row { border: 1px solid rgb(var(--accent) / .5); border-radius: 10px; background: rgb(var(--raised)); padding: 8px 12px; }
+.pd-rename-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pd-rename-input { min-width: 8rem; flex: 1 1 10rem; }
+.pd-rename-hint { font-size: 12px; }
+.pd-rename-problem { margin: 0; color: rgb(var(--danger)); font-size: 12px; overflow-wrap: anywhere; }
+.pd-doc > form.pd-rename { margin: 8px 16px 0; }
 .pd-title { font-weight: 600; overflow-wrap: anywhere; }
 .pd-meta { margin: 0; color: rgb(var(--fg-subtle)); font-size: 12px; overflow-wrap: anywhere; }
 .pd-document { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
@@ -53,7 +73,9 @@
 .pd-icon { width: 16px; height: 16px; flex: none; }
 .pd-titlebar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; border-bottom: 1px solid rgb(var(--line)); background: rgb(var(--surface)); padding: 8px 16px; }
 .pd-titlebar .pd-back { margin-left: -6px; }
-.pd-docname { display: flex; min-width: min(100%, 9rem); flex: 1 1 9rem; align-items: center; gap: 8px; }
+/* The name has the room of its row, and where the document stands (Saved, Unsaved changes…) is at the end of it, inside it: the bar wraps by this room and
+   by the buttons, never by what the text says, which changes with the state and the language. A text that does not fit is cut (the tooltip has it whole). */
+.pd-docname { display: flex; min-width: min(100%, 16rem); flex: 1 1 16rem; align-items: center; gap: 8px; }
 .pd-docname > .pd-icon { color: rgb(var(--accent)); }
 .pd-docname > div { display: flex; min-width: 0; flex-direction: column; }
 .pd-doctitle { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -70,7 +92,7 @@
 .pd-menu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: flex; min-width: 13rem; flex-direction: column; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--surface)); padding: 4px; box-shadow: 0 10px 30px rgb(0 0 0 / .18); }
 .pd-menu-item { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: none; padding: 7px 10px; color: rgb(var(--fg)); font: inherit; font-size: 13px; text-align: left; text-decoration: none; cursor: pointer; }
 .pd-menu-item:hover { background: rgb(var(--raised)); }
-.pd-state { color: rgb(var(--fg-subtle)); font-size: 12px; white-space: nowrap; }
+.pd-state { min-width: 0; max-width: calc(100% - 8rem); flex: none; margin-left: auto; overflow: hidden; color: rgb(var(--fg-subtle)); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .pd-state[data-status="conflict"], .pd-state[data-status="error"] { color: rgb(var(--warn)); }
 .pd-conflict { border: 1px solid rgb(var(--warn) / .35); border-radius: 12px; background: rgb(var(--warn) / .1); padding: 10px 12px; }
 .pd-conflict p { margin: 0; }
@@ -220,8 +242,10 @@ button.pd-quote:focus-visible { outline: 2px solid rgb(var(--accent)); outline-o
 .pd-modes button[aria-pressed="true"] { background: rgb(var(--surface)); color: rgb(var(--fg)); box-shadow: 0 1px 2px rgb(0 0 0 / .18); }
 .pd-modes button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
 .pd-modes button:disabled { opacity: .5; cursor: default; }
-/* A bar that is not wide (a window with the portal's sidebar open) keeps the room for the document's name: the switch is two icons. */
-@container (max-width: 1000px) { .pd-modelabel { display: none; } .pd-modes button { padding: 4px 7px; } }
+/* A bar that is not wide (a window with the portal's sidebar open) keeps the room for the document's name: the switch is two icons. What the bar says of
+   where the document stands is cut to the room it has, so the bar wraps by its buttons and the name's room (see .pd-docname) and by nothing the text says:
+   its height is the same in every state and language, and the buttons do not move between the press and the release of a click on one of them. */
+@container (max-width: 1150px) { .pd-modelabel { display: none; } .pd-modes button { padding: 4px 7px; } }
 /* The text as Markdown, in the editor's place: the same column, plain, in a monospace face; the page scrolls, not the box (source.js keeps it as high as its text). */
 .pd-source { display: block; width: 100%; min-height: 16rem; margin: 0; border: 0; border-radius: 0; background: none; padding: 0; resize: none; overflow: hidden; outline: none; color: inherit; font: 14.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; tab-size: 2; white-space: pre-wrap; cursor: text; }
 .pd-source[hidden] { display: none; }

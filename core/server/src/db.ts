@@ -830,6 +830,15 @@ export function listSessions(): SessionRow[] {
 }
 
 /**
+ * One session of every kind (tasks, routine runs, Agent-page and channel conversations, heartbeats) for each workspace they were made for, as stored.
+ * Sessions are not pruned (a routine that makes a fresh session for each run keeps every one), but what an agent can reach depends on the workspace
+ * and not on the session, so one of them stands for the rest. One query, and a row for each workspace, not for each session.
+ */
+export function sessionsByWorkspace(): SessionRow[] {
+  return getDb().prepare("SELECT s.* FROM sessions s JOIN (SELECT MIN(id) AS id FROM sessions GROUP BY workspace) m ON s.id = m.id").all() as SessionRow[];
+}
+
+/**
  * The chats the sidebar lists: the tasks, and the conversations started on the
  * Agent page, which are chats with that agent like any other. Those that came
  * through a channel stay on the Agent page.

@@ -12,7 +12,7 @@
  * group; the documents stay where the agent and Files can read them.
  *
  * A write (save, create, restore) goes in three steps, under the folder's
- * lock: the file is written in place (files.js), the change is committed with
+ * lock: the file is written in place (files.js, on the portal's `files`), the change is committed with
  * trailers that name the document, its revision and its author, and the
  * database is told in one transaction. A failure between the steps is put
  * right the next time the store is used ("recovery", before every request
@@ -48,18 +48,24 @@
  * whenever they like; a thread goes with its only comment, and the person takes away a
  * whole thread they started while the agent has not commented in it.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
-import { accessSync, closeSync, constants, fchmodSync, fchownSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
+import { accessSync, closeSync, constants, lstatSync, openSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DocError, explained } from "./errors.js";
 import { blobId, GitError, messageFor, parseTrailers, Repo } from "./git.js";
 import { Guard } from "./guard.js";
 import { bindingFor, readBinding, sameBinding, writeBinding } from "./place.js";
-import { isAdoptable, isDocumentName, isTempName, isPlainFile, MAX_BYTES, openDocument, readDocument, readOpen, Refused, writeDocument } from "./files.js";
+import { forChats, isAdoptable, isDocumentName, isPlainFile, lookAtDocument, MAX_BYTES, readDocument, Refused, removeDocument, renameDocument, writeDocument } from "./files.js";
 import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
 
 export const DOCUMENTS = "documents";
+/**
+ * The session whose agent is making the call the store is doing something for (the agent's tools set it, see tools.js): its agent must be able to use the
+ * documents folder whatever the chats that work in the folder are, since where its own folder leads is not for the agent to decide.
+ */
+export const callingChat = new AsyncLocalStorage();
 /** As many documents as a folder lists: the store takes in no more than that. */
 export const MAX_DOCUMENTS = 1000;
 /** As many comment threads as one document has, and comments in one thread. */
@@ -72,6 +78,20 @@ const SCHEMA = 1;
 const GC_EVERY = 100;
 
 export const isDocumentId = (id) => typeof id === "string" && /^[0-9a-f]{16}$/.test(id);
+
+/** Which file or folder a stat is, on this system: its device and inode as text (an inode can be wider than a number), as place.js tells a folder. */
+const idOf = (stat) => ({ dev: String(stat.dev), ino: String(stat.ino) });
+const isId = (id) => /^\d+$/.test(id?.dev) && /^\d+$/.test(id?.ino);
+/** Whether `stat` (from a `bigint` look) is the file or folder `id` names. */
+const sameId = (stat, id) => Boolean(stat) && isId(id) && String(stat.dev) === id.dev && String(stat.ino) === id.ino;
+
+/** What is said of a documents folder that is not the one the documents were kept in. */
+const REPLACED = "The documents folder here is not the folder these documents were kept in (it was replaced, or another folder was moved onto its name), so nothing was deleted or renamed. If the folder that is there is the one you want (a restore, say), making a new document here takes it as the documents folder.";
+/**
+ * What is said of a folder at the name `documents` that the portal turns away: the sandbox closed it to the agent, and it was renamed to this name (or it is
+ * one the agent could read but not write in, which the portal does not write in either: it acts in a folder the agent could use itself).
+ */
+const CLOSED = "documents in this folder is closed to the agent, or the agent could not write in it, so it is not used";
 
 export { DocError };
 
@@ -114,12 +134,25 @@ export function fileNameOf(name) {
   ).trim();
 }
 
+/**
+ * The file name a person asks a document to have, or a 400 that says what is wrong with it: as a document's name is anywhere (`.md`, no way
+ * in it, no dot to start), and one the store could take in by itself, on one line (it is written into a commit's trailers).
+ */
+function nameGiven(input) {
+  if (typeof input !== "string") throw new DocError(400, "A document's name must be text", { code: "invalid" });
+  const name = input.normalize("NFC").trim();
+  if (Buffer.byteLength(name, "utf8") > 255) throw new DocError(400, "A file name can be at most 255 bytes", { code: "invalid" });
+  if (!isAdoptable(name)) throw new DocError(400, "A document's file name ends in .md, does not start with a dot, and has no / or \\ or control character in it", { code: "invalid" });
+  return name;
+}
+
 /** The slug, or the slug with a number, cut so that the whole stays within 80 characters. */
 const numbered = (slug, n) => (n === 1 ? slug : `${cut(slug, 80 - String(n).length - 1).replace(/-+$/, "")}-${n}`);
 
 /** What kind of revision a commit's trailers describe. */
-function kindOf({ revision, author, restoredFrom }) {
+function kindOf({ revision, author, restoredFrom, renamedFrom }) {
   if (restoredFrom) return "restore";
+  if (renamedFrom) return "rename";
   if (author === "external") return revision === 1 ? "adopted" : "recovered";
   return revision === 1 ? "create" : "save";
 }
@@ -146,6 +179,7 @@ CREATE TABLE IF NOT EXISTS revisions (
   kind TEXT NOT NULL,
   restored_from INTEGER,
   at TEXT NOT NULL,
+  renamed_from TEXT,
   PRIMARY KEY (doc_id, revision)
 );
 CREATE TABLE IF NOT EXISTS threads (
@@ -189,18 +223,17 @@ export class Store {
   /**
    * The store of `folder` (a chat's folder, as the portal names it), opened
    * in `dir` (place.js has seen to which one it is): made where it is not
-   * there yet, then put right. `inside` is the portal's files helper.
+   * there yet, then put right. `files` is the portal's `files`.
    * `faults` lets a test break a write after one of its steps, or do
    * what someone else could in between: `faults.after(step)` is called
-   * after "write" and after "commit", and while a missing `documents` folder
-   * is made, after it is made ("documents") and after it is opened
-   * ("documents-open").
+   * after "write" and after "commit".
    * `gitTimeoutMs` is how long one git run may take. `onRevision` is told of
    * every revision made from here on, as it is made (see `commit`), and
-   * `onThreads` of every change to a document's comments.
+   * `onThreads` of every change to a document's comments. `chats` gives the ids of the chats that work in the folder, which are asked
+   * again at the start of each thing the store does: the agents of all of them must be able to use the documents folder (`likeParent`).
    */
-  static async open(folder, { dir, inside, Database, faults, gitTimeoutMs, onRevision, onThreads }) {
-    const store = new Store(folder, dir, inside, faults, gitTimeoutMs, onRevision, onThreads);
+  static async open(folder, { dir, files, Database, faults, gitTimeoutMs, onRevision, onThreads, chats }) {
+    const store = new Store(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads, chats);
     try {
       await store.#open(Database);
     } catch (e) {
@@ -216,9 +249,12 @@ export class Store {
     return store;
   }
 
-  constructor(folder, dir, inside, faults, gitTimeoutMs, onRevision, onThreads) {
+  constructor(folder, dir, files, faults, gitTimeoutMs, onRevision, onThreads, chats) {
     this.folder = folder;
-    this.inside = inside;
+    // What the portal reads or writes in the documents folder it does for the agents of the chats that work in the folder: told with each call.
+    this.chats = chats;
+    this.actors = [];
+    this.files = forChats(files, () => this.actors);
     this.faults = faults;
     this.gitTimeoutMs = gitTimeoutMs;
     this.onRevision = onRevision;
@@ -259,6 +295,8 @@ export class Store {
     this.db.exec(SCHEMA_SQL);
     // A database made before comments could be changed has no mark for it: added, and the older comments have none.
     if (!this.db.prepare("PRAGMA table_info(comments)").all().some((column) => column.name === "edited_at")) this.db.exec("ALTER TABLE comments ADD COLUMN edited_at TEXT");
+    // So has a database made before a document could be renamed: the revisions that were are not renames.
+    if (!this.db.prepare("PRAGMA table_info(revisions)").all().some((column) => column.name === "renamed_from")) this.db.exec("ALTER TABLE revisions ADD COLUMN renamed_from TEXT");
     const version = this.meta("schema");
     if (version && Number(version) > SCHEMA) throw new DocError(500, `The documents database is of a later version (${version})`);
     this.setMeta("schema", String(SCHEMA));
@@ -294,8 +332,11 @@ export class Store {
 
   /** Runs `work` once everything before it in this folder is done: one write at a time, and no read in the middle of one. */
   locked(work) {
+    // Asked here, in the caller's own context: the work runs later.
+    const caller = callingChat.getStore();
     const next = this.queue.then(async () => {
       try {
+        this.actors = [...new Set([...(caller ? [caller] : []), ...(this.chats?.() ?? [])])];
         return await work();
       } catch (e) {
         throw explained(e, this.storeDir);
@@ -313,66 +354,125 @@ export class Store {
     this.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
   }
 
-  /** The documents folder, or nothing when there is none (or it is a link, which is none). */
+  /**
+   * The documents folder, or nothing when there is none (or it is a link, which is none, or a folder the sandbox closed to the agent: the agent
+   * can rename such a folder to this name, and the portal, which reads it as root, would hand the agent what it holds, so `likeParent`).
+   */
   documentsDir() {
-    const dir = path.join(this.folder, DOCUMENTS);
     try {
-      if (this.inside(this.folder, DOCUMENTS) !== dir) return null;
-      return lstatSync(dir).isDirectory() ? dir : null;
+      return this.files.folder(this.folder, DOCUMENTS, { direct: true, likeParent: true });
     } catch {
       return null;
     }
   }
 
-  /** The documents folder, made if it is not there: with the folder's owner and mode, so the agent can write in it as before. */
-  makeDocumentsDir() {
-    const found = this.documentsDir();
-    if (found) return found;
-    const dir = path.join(this.folder, DOCUMENTS);
-    let followed;
+  /**
+   * What stands where the documents folder is, when it is not one: a refusal (a link, a folder that is turned away, or something that is not a folder), or
+   * nothing where there is no such place at all. What is there is told only where the agents could look: in a folder they cannot search it is not theirs to
+   * know whether there is anything, so the answer is the same refusal whatever stands there.
+   */
+  blockedDocuments() {
     try {
-      followed = this.inside(this.folder, DOCUMENTS);
+      this.files.folder(this.folder, "", { likeParent: true });
+    } catch (e) {
+      if (e?.code === "invalid") return new DocError(409, CLOSED, { code: "folder_closed" });
+    }
+    try {
+      const stat = lstatSync(path.join(this.folder, DOCUMENTS));
+      if (stat.isSymbolicLink()) return new DocError(409, "documents in this folder is a link");
+      // A folder that is there and is turned away by `documentsDir`: it is closed to the agent.
+      return stat.isDirectory() ? new DocError(409, CLOSED, { code: "folder_closed" }) : new DocError(409, "documents in this folder is not a folder");
     } catch {
-      // A link that leads out of the folder is refused by `inside`: it is a link all the same.
-      throw new DocError(409, "documents in this folder is a link");
+      return null;
     }
-    if (followed !== dir) throw new DocError(409, "documents in this folder is a link");
-    const folder = lstatSync(this.folder);
+  }
+
+  /**
+   * The documents folder, made if it is not there: with the folder's owner and mode, so the agent can write in it as before. A folder made
+   * here is the one the store holds to (`pin`), and so is one it finds when it holds to none. `trust`: a person made a document, so the
+   * folder as it is now is the one, also when it is another than the store held to (it was replaced on purpose). Only a folder that
+   * `documentsDir` gives is ever held to: one the sandbox closed to the agent is refused (409), however it came to be called `documents`.
+   */
+  makeDocumentsDir({ trust = false } = {}) {
+    const found = this.documentsDir();
+    if (found) {
+      if (trust || !this.pinned()) this.pin();
+      return found;
+    }
     try {
-      mkdirSync(dir, { mode: folder.mode & 0o7777 });
+      this.files.makeFolder(this.folder, "", DOCUMENTS, { likeParent: true });
     } catch (e) {
-      if (e.code !== "EEXIST") throw e;
+      // The agents could not make it themselves (the folder is closed to them, or they may not write in it): nothing was made, and what is said is what is
+      // said of a folder that is closed to them.
+      if (e?.code === "invalid") throw this.blockedDocuments() ?? new DocError(409, CLOSED, { code: "folder_closed" });
+      // Made meanwhile, or something else is called that: which it is decides what is said.
+      if (e?.code !== "exists") throw e;
     }
-    this.fault("documents");
-    // Opened once, never through a link, and its mode and owner set through that descriptor: with the sandbox on the portal is root and
-    // the agent can write in the chat folder, so a link put where the folder was between a check and a `chmod` by path would have its
-    // target given the chat folder's mode and owner.
-    let fd;
+    const made = this.documentsDir();
+    if (made) {
+      this.pin();
+      return made;
+    }
+    throw this.blockedDocuments() ?? new DocError(409, "documents in this folder is not a folder");
+  }
+
+  /**
+   * The documents folder the store holds to, `{ dev, ino }`, or nothing before it has had one. A deletion and a rename act in this folder and
+   * no other: the folder at `documents` can be replaced by another folder of the chat's (one the agent may not write in, moved onto the
+   * name), and what the portal does there it does with its own rights.
+   */
+  pinned() {
     try {
-      fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    } catch (e) {
-      if (e.code !== "ELOOP" && e.code !== "ENOTDIR") throw e;
-      // Which of the two it is only changes what is said: nothing was opened, or changed.
-      let link = e.code === "ELOOP";
-      try {
-        link ||= lstatSync(dir).isSymbolicLink();
-      } catch {
-        // Gone again: it is neither.
-      }
-      throw new DocError(409, link ? "documents in this folder is a link" : "documents in this folder is not a folder");
+      const found = JSON.parse(this.meta("documents") ?? "null");
+      return isId(found) ? { dev: found.dev, ino: found.ino } : null;
+    } catch {
+      return null;
     }
+  }
+
+  /**
+   * Which folder is at `documents` now, `{ dev, ino }`, told by the portal from the folder as it holds it (`files.identity`), not from a look at
+   * the path: and only a folder the agent could use itself (`likeParent`), told on that same folder, so that a folder the sandbox closed to the
+   * agent is never given an identity, however the agent swaps it in. Nothing where there is none, or it is a link, or it is closed.
+   */
+  documentsIdentity() {
     try {
-      this.fault("documents-open");
-      fchmodSync(fd, folder.mode & 0o7777);
-      try {
-        fchownSync(fd, folder.uid, folder.gid);
-      } catch {
-        // The portal is not root: the folder is its own already.
-      }
-    } finally {
-      closeSync(fd);
+      return this.files.identity(this.folder, DOCUMENTS, { direct: true, likeParent: true });
+    } catch {
+      return null;
     }
-    return dir;
+  }
+
+  /**
+   * Holds to the documents folder that is there now: the one made here, or the first the store sees. Only if it is one the agent could use
+   * itself (`documentsIdentity`): a folder that is not is never held to, so the store never acts in it, and a pin that exists stays as it is.
+   */
+  pin() {
+    const found = this.documentsIdentity();
+    if (found) this.setMeta("documents", JSON.stringify(found));
+  }
+
+  /**
+   * Whether the documents folder is the folder a deletion or a rename may act in, which is `expected` (the folder it was decided in) or else the
+   * one held to: it is returned as `{ dev, ino }`, for the call that acts to check on the folder it holds (`expect` of files.js); else a 409. This
+   * look is for the clear refusal; what stops a folder moved there after it is the call's own check, on the descriptor.
+   */
+  holds(expected = this.pinned()) {
+    // Gone since it was found, a link now, or closed to the agent: it is not that folder. A folder that is still there to be read, and is not one to hold to,
+    // is one the agent could not write in.
+    const here = this.documentsIdentity();
+    if (!here) throw this.documentsDir() ? new DocError(409, CLOSED, { code: "folder_closed" }) : new DocError(409, REPLACED, { code: "folder_replaced" });
+    if (expected && (here.dev !== expected.dev || here.ino !== expected.ino)) throw new DocError(409, REPLACED, { code: "folder_replaced" });
+    return expected ?? here;
+  }
+
+  /** What `name` in the documents folder `dir` is on the disk, not followed (numbers as bigints), or nothing. */
+  statOf(dir, name) {
+    try {
+      return lstatSync(path.join(dir, name), { bigint: true });
+    } catch {
+      return null;
+    }
   }
 
   row(id) {
@@ -391,8 +491,14 @@ export class Store {
   /** Puts right what a write cut off, or someone else changed, left: see the top of this file. Under the lock. */
   async recover() {
     rmSync(this.repo.gitPath("index.lock"), { force: true });
+    // The documents folder the store sees first is the one it holds to (see `pinned`); a folder made here was held to when it was made.
+    if (!this.pinned() && this.documentsDir()) this.pin();
     await this.replay();
+    // A rename that was cut off before its commit is finished first: the file under its new name would be taken in as a document of its own.
+    await this.resume("rename");
     await this.takeIn();
+    // A deletion after what was written outside is taken in, so that an edit that came before it is in the history.
+    await this.resume("delete");
   }
 
   /** Commits the database does not know yet, told to it from their trailers, in order. */
@@ -410,7 +516,8 @@ export class Store {
       const { time, message } = await this.repo.commit(sha);
       const groups = parseTrailers(message);
       const blobs = await this.repo.blobsIn(sha, [...new Set(groups.map((g) => g.name))]);
-      read.push({ sha, at: new Date(time * 1000).toISOString(), groups: groups.filter((g) => blobs.has(g.name)).map((g) => ({ ...g, blob: blobs.get(g.name) })) });
+      // A document that was deleted is not in the commit's tree: it has no blob, and is told by the commit all the same.
+      read.push({ sha, at: new Date(time * 1000).toISOString(), groups: groups.filter((g) => g.deleted || blobs.has(g.name)).map((g) => (g.deleted ? g : { ...g, blob: blobs.get(g.name) })) });
     }
     this.db.transaction(() => {
       if (rebuild) {
@@ -430,14 +537,21 @@ export class Store {
   record(sha, groups, at, keys = new Map()) {
     const now = new Date().toISOString();
     for (const group of groups) {
+      // The document is gone, with its comments (they go with the row); what was said of its text stays in the history.
+      if (group.deleted) {
+        this.db.prepare("DELETE FROM documents WHERE id = ?").run(group.id);
+        continue;
+      }
       if (!this.row(group.id)) {
         // Its name may be another's by now: that one keeps it, and this one's history stays in git.
         if (this.db.prepare("SELECT 1 FROM documents WHERE name = ?").get(group.name)) continue;
         this.db.prepare("INSERT INTO documents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(group.id, group.name, at, at);
       }
+      // Another name for the same document, unless that name is another document's (a rebuild that meets one it cannot place keeps what it has).
+      if (group.renamedFrom) this.db.prepare("UPDATE documents SET name = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM documents WHERE name = ? AND id != ?)").run(group.name, group.id, group.name, group.id);
       this.db
-        .prepare("INSERT OR REPLACE INTO revisions (doc_id, revision, sha, blob, author, kind, restored_from, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(group.id, group.revision, sha, group.blob, group.author, kindOf(group), group.restoredFrom ?? null, at);
+        .prepare("INSERT OR REPLACE INTO revisions (doc_id, revision, sha, blob, author, kind, restored_from, at, renamed_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(group.id, group.revision, sha, group.blob, group.author, kindOf(group), group.restoredFrom ?? null, at, group.renamedFrom ?? null);
       this.db
         .prepare("UPDATE documents SET revision = ?, blob = ?, stat = ?, updated_at = ? WHERE id = ? AND revision < ?")
         .run(group.revision, group.blob, keys.get(group.id) ?? null, now, group.id, group.revision);
@@ -446,19 +560,23 @@ export class Store {
   }
 
   /**
-   * Commits `groups` (`{ id, name, blob, revision, author, restoredFrom }`),
+   * Commits `groups` (`{ id, name, blob, revision, author, restoredFrom, renamedFrom, deleted }`),
    * one commit for all, and tells the database. `keys`: the files' change keys
-   * as written, by document id. Returns the commit. Every write goes through
+   * as written, by document id. `remove`: names that are taken out of the
+   * history's tree (what a document was called before it was renamed); so is
+   * the name of a group that is `deleted`. Returns the commit. Every write goes through
    * here, under the lock, so `onRevision` hears the revisions in the order they
    * were made.
    */
-  async commit(subject, groups, keys) {
+  async commit(subject, groups, keys, { remove = [] } = {}) {
     const parent = this.meta("head");
-    const sha = await this.repo.commitEntries(parent, groups, messageFor(subject, groups));
+    const entries = [...remove.map((name) => ({ name, blob: null })), ...groups.map((g) => (g.deleted ? { name: g.name, blob: null } : g))];
+    const sha = await this.repo.commitEntries(parent, entries, messageFor(subject, groups));
     this.fault("commit");
     const at = new Date().toISOString();
     this.db.transaction(() => this.record(sha, groups, at, keys))();
-    for (const group of groups) this.told({ id: group.id, revision: group.revision, author: group.author, at });
+    // A deleted document has no revision to tell: the pages that have it open are told that it is gone.
+    for (const group of groups) this.told(group.deleted ? { id: group.id, deleted: true, at } : { id: group.id, revision: group.revision, author: group.author, at });
     if (++this.commits % GC_EVERY === 0) await this.repo.gc();
     return sha;
   }
@@ -485,30 +603,33 @@ export class Store {
       for (const row of rows) if (row.revision === 0) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
       return;
     }
-    let entries;
+    let listing;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      listing = this.files.list(dir, "", { likeParent: true });
     } catch {
       return;
     }
+    // What a save of another half left when it was cut off; one under way is not touched.
+    this.files.sweepTemp(dir, "", { likeParent: true });
     const names = new Set();
-    for (const entry of entries) {
-      if (isTempName(entry.name) && (entry.isFile() || entry.isSymbolicLink())) rmSync(path.join(dir, entry.name), { force: true });
-      else if (entry.isFile() && isDocumentName(entry.name)) names.add(entry.name);
-    }
+    // A link is not a document, whatever it leads to.
+    for (const entry of listing.entries) if (entry.type === "file" && !entry.link && isDocumentName(entry.name)) names.add(entry.name);
     const changed = [];
     const byName = new Set();
     for (const row of rows) {
       byName.add(row.name);
-      if (!names.has(row.name)) {
-        if (row.revision === 0) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
+      // Each document is looked at by its name, not found in the listing: a folder holds as many entries as the agent likes,
+      // the listing keeps 2,000 (folders first), and a document past the cut would never be seen to change, so that the
+      // person's save over the agent's edit would go through. Its key alone: a file that has not changed is not read.
+      const opened = lookAtDocument(this.files, dir, row.name);
+      if (!opened) {
+        // Never committed, and no file by that name (gone, or a link or a folder): forgotten. A listing that was cut off
+        // does not say that a name is not there.
+        if (row.revision === 0 && !listing.truncated && !names.has(row.name)) this.db.prepare("DELETE FROM documents WHERE id = ?").run(row.id);
         continue;
       }
-      const opened = openDocument(this.inside, dir, row.name);
-      if (!opened) continue;
-      closeSync(opened.fd);
       if (opened.key === row.stat) continue;
-      const file = readDocument(this.inside, dir, row.name);
+      const file = readDocument(this.files, dir, row.name);
       if (!file) continue;
       const blob = blobId(file.bytes);
       if (blob === row.blob) this.db.prepare("UPDATE documents SET stat = ? WHERE id = ?").run(file.key, row.id);
@@ -523,7 +644,7 @@ export class Store {
     for (const name of [...names].sort()) {
       if (room <= 0) break;
       if (byName.has(name) || !isAdoptable(name)) continue;
-      const file = readDocument(this.inside, dir, name);
+      const file = readDocument(this.files, dir, name);
       if (!file) continue;
       const id = randomBytes(8).toString("hex");
       this.db.prepare("INSERT INTO documents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, now, now);
@@ -537,10 +658,14 @@ export class Store {
     await this.commit(subject, groups, new Map(groups.map((g) => [g.id, g.key])));
   }
 
-  /** A document's row, or a 404. */
+  /**
+   * A document's row, or a 404 that says `deleted`: this server half has no such document. That is how a page that has the document open tells
+   * its deletion from any other 404 (the portal's own, while this half is not running yet, or a chat's folder that is not listed): only this one
+   * means the document is gone.
+   */
   existing(id) {
     const row = isDocumentId(id) ? this.row(id) : null;
-    if (!row || row.revision === 0) throw new DocError(404, "There is no such document");
+    if (!row || row.revision === 0) throw new DocError(404, "There is no such document", { code: "deleted" });
     return row;
   }
 
@@ -562,13 +687,9 @@ export class Store {
       const asking = new Map(this.db.prepare("SELECT doc_id, COUNT(*) AS n FROM threads WHERE status = 'open' AND to_agent = 1 GROUP BY doc_id").all().map((r) => [r.doc_id, r.n]));
       for (const row of this.rows()) {
         if (row.revision === 0) continue;
-        const opened = openDocument(this.inside, dir, row.name);
-        if (!opened) continue;
-        try {
-          out.push({ ...this.describe(row, opened), openThreads: open.get(row.id) ?? 0, answeredThreads: answered.get(row.id) ?? 0, askingThreads: asking.get(row.id) ?? 0, head: readOpen(opened.fd, Math.min(headBytes, opened.size)) });
-        } finally {
-          closeSync(opened.fd);
-        }
+        const looked = lookAtDocument(this.files, dir, row.name, headBytes);
+        if (!looked) continue;
+        out.push({ ...this.describe(row, looked), openThreads: open.get(row.id) ?? 0, answeredThreads: answered.get(row.id) ?? 0, askingThreads: asking.get(row.id) ?? 0, head: looked.head });
       }
       return out;
     });
@@ -611,7 +732,7 @@ export class Store {
 
   fileOf(row) {
     const dir = this.documentsDir();
-    return dir ? readDocument(this.inside, dir, row.name) : null;
+    return dir ? readDocument(this.files, dir, row.name) : null;
   }
 
   /** A refusal when the portal may not read the documents folder `dir`: an unreadable folder is not an empty one, nor are its files gone. */
@@ -631,9 +752,14 @@ export class Store {
    */
   unreadable(row) {
     const dir = this.documentsDir();
+    // A folder that is turned away (closed to the agent) is why, not that there is no document.
+    if (!dir) {
+      const blocked = this.blockedDocuments();
+      if (blocked?.extra.code === "folder_closed") return blocked;
+    }
     const closed = dir && this.closed(dir);
     if (closed) return closed;
-    if (dir && isPlainFile(this.inside, dir, row.name)) return new DocError(409, "The document's file is bigger than 1 MB, or the portal is not allowed to read it");
+    if (dir && isPlainFile(dir, row.name)) return new DocError(409, "The document's file is bigger than 1 MB, or the portal is not allowed to read it");
     return new DocError(404, "There is no such document");
   }
 
@@ -649,7 +775,7 @@ export class Store {
     return this.locked(async () => {
       await this.recover();
       if (this.rows().length >= MAX_DOCUMENTS) throw new DocError(409, `A folder holds at most ${MAX_DOCUMENTS} documents`);
-      const dir = this.makeDocumentsDir();
+      const dir = this.makeDocumentsDir({ trust: author === "user" });
       const slug = given === undefined ? slugOf(title) : fileNameOf(given) || slugOf(title);
       const id = randomBytes(8).toString("hex");
       const now = new Date().toISOString();
@@ -659,18 +785,21 @@ export class Store {
         if (taken) {
           // A document whose file is gone (deleted, or renamed) is not there to be told of: the number after it is used, not an error
           // about a document that is neither listed nor readable.
-          if (exclusive && isPlainFile(this.inside, dir, name)) throw new DocError(409, `A document called ${name} exists already`, { exists: taken.id });
+          if (exclusive && isPlainFile(dir, name)) throw new DocError(409, `A document called ${name} exists already`, { exists: taken.id });
           continue;
         }
         let written;
         // The row first, without a revision: a failure after the file is written leaves a file recovery takes in under this id.
         this.db.prepare("INSERT INTO documents (id, name, scope, chat_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, name, scope, chat, now, now);
         try {
-          written = writeDocument(this.inside, dir, name, bytes, { create: true });
+          written = writeDocument(this.files, dir, name, bytes, { create: true });
         } catch (e) {
           this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
-          // Anything in the way (a file, a link, a second name) makes the name taken: the next number is free.
+          // Anything in the way (a file, a link, a second name) makes the name taken: the next number is free. Not a folder that the agent could not
+          // write in: no name is free there.
           if (e instanceof Refused) {
+            const blocked = this.documentsIdentity() ? null : this.blockedDocuments();
+            if (blocked) throw blocked;
             if (exclusive) throw new DocError(409, `A file called ${name} is in the way`, { exists: null });
             continue;
           }
@@ -741,11 +870,11 @@ export class Store {
    */
   async #merged(row, file, base, markdown, bytes, author) {
     if (!Number.isInteger(base) || base < 1 || base >= row.revision) return null;
-    const found = this.db.prepare("SELECT sha FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, base);
+    const found = this.db.prepare("SELECT blob FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, base);
     if (!found) return null;
     let was;
     try {
-      was = await this.repo.show(found.sha, row.name);
+      was = await this.repo.blobText(found.blob);
     } catch (e) {
       if (e instanceof GitError) return null;
       throw e;
@@ -769,9 +898,14 @@ export class Store {
     if (!dir) throw new DocError(404, "There is no such document");
     let written;
     try {
-      written = writeDocument(this.inside, dir, row.name, bytes, { create });
+      written = writeDocument(this.files, dir, row.name, bytes, { create });
     } catch (e) {
-      if (e instanceof Refused) throw new DocError(409, e.taken ? "Another file took the document's name" : e.message);
+      if (e instanceof Refused) {
+        // The portal turns a folder away that the agent could not write in as it does a name that is taken: which it was is a look away.
+        const blocked = this.documentsIdentity() ? null : this.blockedDocuments();
+        if (blocked) throw blocked;
+        throw new DocError(409, e.taken ? "Another file took the document's name" : e.message);
+      }
       throw e;
     }
     this.fault("write");
@@ -787,9 +921,9 @@ export class Store {
       await this.recover();
       const row = this.existing(id);
       const list = this.db
-        .prepare("SELECT revision, author, kind, restored_from AS restoredFrom, at FROM revisions WHERE doc_id = ? AND revision < ? ORDER BY revision DESC LIMIT ?")
+        .prepare("SELECT revision, author, kind, restored_from AS restoredFrom, renamed_from AS renamedFrom, at FROM revisions WHERE doc_id = ? AND revision < ? ORDER BY revision DESC LIMIT ?")
         .all(row.id, before ?? Number.MAX_SAFE_INTEGER, limit + 1);
-      return { revision: row.revision, revisions: list.slice(0, limit).map((r) => ({ ...r, restoredFrom: r.restoredFrom ?? undefined })), more: list.length > limit };
+      return { revision: row.revision, revisions: list.slice(0, limit).map((r) => ({ ...r, restoredFrom: r.restoredFrom ?? undefined, renamedFrom: r.renamedFrom ?? undefined })), more: list.length > limit };
     });
   }
 
@@ -800,7 +934,7 @@ export class Store {
       const row = this.existing(id);
       const found = this.db.prepare("SELECT * FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
       if (!found) throw new DocError(404, "There is no such revision");
-      return { revision: found.revision, author: found.author, kind: found.kind, at: found.at, bytes: await this.repo.show(found.sha, row.name) };
+      return { revision: found.revision, author: found.author, kind: found.kind, at: found.at, bytes: await this.repo.blobText(found.blob) };
     });
   }
 
@@ -819,14 +953,229 @@ export class Store {
       }
       const found = this.db.prepare("SELECT * FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
       if (!found) throw new DocError(404, "There is no such revision");
-      const bytes = await this.repo.show(found.sha, row.name);
+      const bytes = await this.repo.blobText(found.blob);
       const file = this.fileOf(row);
       if (file?.bytes.equals(bytes)) return { ...this.describe(row, file), changed: false };
       // A file that is only too big to be read (an outside change) is written over, as a save would; only no file at all is made again.
       const dir = file ? null : this.documentsDir();
-      const replace = !file && dir !== null && isPlainFile(this.inside, dir, row.name);
+      const replace = !file && dir !== null && isPlainFile(dir, row.name);
       return this.#write(row, bytes, { author, subject: `Restore ${row.name} to revision ${revision}`, restoredFrom: revision, create: !file && !replace });
     });
+  }
+
+  /**
+   * Gives the document another file name: `name`, as the person wrote it, which is a name of the same kind as a document's
+   * (ends in `.md`, no way in it, no dot to start). The document stays what it is: its id, its comments and its history go
+   * with it, and the rename is a revision of its own (same text, kind `rename`, with the name it had), so that the pages
+   * that have it open are told as of any revision, and the history says when. A name that is another document's, or a
+   * file's, is refused (409, as `create` says it). The same name changes nothing.
+   *
+   * The file is renamed first (files.js), then committed and told to the database, like a write. What was decided is kept in
+   * the database (`pending`) before the file is touched, so that a rename that was cut off in between is finished by the next
+   * look at the store (`resume`), not left as a file under a name that no document has, which would be taken in as a new one.
+   */
+  rename(id, { name, author = "user" }) {
+    const to = nameGiven(name);
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const file = this.fileOf(row);
+      if (!file) throw this.unreadable(row);
+      if (row.name === to) return { ...this.describe(row, file), changed: false };
+      const taken = this.db.prepare("SELECT id FROM documents WHERE name = ?").get(to);
+      if (taken) throw new DocError(409, `A document called ${to} exists already`, { exists: taken.id });
+      const dir = this.documentsDir();
+      if (!dir) throw this.unreadable(row);
+      // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for.
+      const folder = this.holds();
+      const was = this.statOf(dir, row.name);
+      const there = this.statOf(dir, to);
+      // A name the file system does not tell from the file's own (it differs in capitals, or in the form of a letter) is the file's own name there:
+      // no second name can be made for it, and a rename of a name onto itself does nothing on some of them. Only another name in between does it.
+      if (was && there && was.dev === there.dev && was.ino === there.ino && was.nlink === 1n) {
+        throw new DocError(409, `This file system does not tell ${to} from ${row.name} (they differ only in capitals or in the form of a letter), so the file cannot be renamed to it directly: rename it to another name first, then to ${to}`, { code: "same_name" });
+      }
+      const pending = { op: "rename", id: row.id, from: row.name, to, author, folder, file: was?.isFile() ? idOf(was) : null };
+      this.setMeta("pending", JSON.stringify(pending));
+      await this.#carryRename(pending);
+      const now = this.row(row.id);
+      const looked = dir && lookAtDocument(this.files, dir, to);
+      return { ...this.describe(now, looked || file), changed: true };
+    });
+  }
+
+  /**
+   * Deletes the document: its file (one that is gone is nothing to remove), its comments and its history from the page. It is a
+   * commit of its own (`Deleted`), so that rebuilding the index from the history does not bring it back, and the name is free
+   * again; the commits it had stay in the store's repository, which nothing here reads them from. The pages that have it open are
+   * told that it is gone (`onRevision` with `deleted`). Returns the ids of the comments it had, for what waits on them.
+   * Refused (409) where the name is something that is not the document's file now (a link, a folder, a file with a second name), and
+   * where the documents folder is not the one the store holds to (`pinned`). Cut off after the file is gone it is finished by the next
+   * look at the store, as a rename is (`resume`): the file is taken away once, which `pending` says (`done`).
+   */
+  delete(id, { author = "user" } = {}) {
+    return this.locked(async () => {
+      await this.recover();
+      const row = this.existing(id);
+      const comments = this.db.prepare("SELECT c.id FROM comments c JOIN threads t ON t.id = c.thread_id WHERE t.doc_id = ? ORDER BY c.rowid").all(row.id).map((c) => c.id);
+      // In the folder the store holds to, and that one only; it is kept with the decision, with the file it is for. No folder is no file to take away.
+      const dir = this.documentsDir();
+      const folder = dir ? this.holds() : null;
+      const there = dir ? this.statOf(dir, row.name) : null;
+      const pending = { op: "delete", id: row.id, name: row.name, author, folder, file: there?.isFile() ? idOf(there) : null, done: false };
+      this.setMeta("pending", JSON.stringify(pending));
+      await this.#carryDelete(pending);
+      return { comments };
+    });
+  }
+
+  /** What was decided and is not finished is forgotten: it is done, or it cannot be. */
+  clearPending() {
+    this.db.prepare("DELETE FROM meta WHERE key = 'pending'").run();
+  }
+
+  /**
+   * Finishes a rename or a deletion (`op`) that a stop cut off, as the database says it was decided. Under the lock, in recovery. What
+   * cannot be finished on the disk (a name that is not there, or taken now) is dropped; what git or the database refuses is not: it is
+   * tried again with the next look, and says why while it fails.
+   */
+  async resume(op) {
+    const raw = this.meta("pending");
+    if (!raw) return;
+    let pending;
+    try {
+      pending = JSON.parse(raw);
+    } catch {
+      return this.clearPending();
+    }
+    if (pending?.op !== op) return;
+    // A decision with no folder in it (a rename needs one; a deletion without a folder had none to take the file from) was not made by this code, and
+    // cannot be finished safely: what is not known to be the folder it was meant for is not acted in.
+    if (op === "rename" ? !isId(pending.folder) : pending.folder !== null && !isId(pending.folder)) return this.clearPending();
+    try {
+      await (op === "rename" ? this.#carryRename(pending, true) : this.#carryDelete(pending, true));
+    } catch (e) {
+      if (this.meta("pending") !== null) throw e;
+    }
+  }
+
+  /**
+   * The rename that `pending` says (`{ id, from, to, author, folder, file }`) carried out from wherever it is: the file has one of its two
+   * names, or both (cut off between the two halves of a rename: it is one file with two names then), and the commit is made. Under the lock.
+   * `folder` is the documents folder the rename was decided in and `file` the file (`{ dev, ino }`): it is carried out in that folder only, and
+   * the old name of a file that has both is taken away only for that file, only while recovering, and only when it really has two names.
+   * A refusal on the disk (the new name is taken, the file is not a plain file) leaves things as they were, and is thrown as one. Any
+   * other failure of the disk step leaves what was decided for the next look at the disk, which is `recovering` when it is that one: a
+   * second failure drops it, so that a disk that cannot be written does not keep the store from being used.
+   */
+  async #carryRename({ id, from, to, author, folder, file }, recovering = false) {
+    const row = this.row(id);
+    // Done already (its commit was made, and the database is told: replayed, or by the transaction), or the document is gone.
+    if (!row || row.revision === 0 || row.name === to) return this.clearPending();
+    const dir = this.documentsDir();
+    if (!dir) {
+      this.clearPending();
+      throw new DocError(404, "There is no such document");
+    }
+    try {
+      this.holds(folder);
+    } catch (e) {
+      this.clearPending();
+      throw e;
+    }
+    const [old, now] = [this.statOf(dir, from), this.statOf(dir, to)];
+    // The step the disk is still waiting for, if there is one.
+    let step = null;
+    if (old?.isFile() && !now) step = () => renameDocument(this.files, dir, from, to, { expect: folder });
+    // Cut off between the two halves: the old name is taken away. Not when it is the same file under two spellings of one name (a file system that does
+    // not tell them apart: there is one name, and it is the only one), and not on a first try, where a second name is something that is in the way.
+    else if (recovering && old?.isFile() && now?.isFile() && old.dev === now.dev && old.ino === now.ino && old.nlink > 1n && sameId(old, file)) {
+      step = () => removeDocument(this.files, dir, from, { shared: true, expect: folder });
+    }
+    // Else the file has the new name already, or there is nothing to rename: neither name is a file, or the new one is another file's.
+    else if (!(now?.isFile() && !old)) step = () => {
+      throw new Refused(old ? "taken" : "gone", { taken: Boolean(old), gone: !old });
+    };
+    try {
+      step?.();
+    } catch (e) {
+      // Only what says that the disk is as it was ends the rename: any other failure leaves what was decided, and the next look at the disk finishes it.
+      if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
+      if (!(e instanceof Refused)) throw e;
+      if (e.moved) throw new DocError(409, REPLACED, { code: "folder_replaced" });
+      if (e.taken) throw new DocError(409, `A file called ${to} is in the way`, { exists: null });
+      // The portal says `conflict` for a file that changed and for a folder that is not the one asked for alike: which it was is a look away.
+      if (!e.gone) this.holds(folder);
+      throw e.gone ? new DocError(404, "There is no such document") : new DocError(409, `${from} is not the document's file now (a link, a folder or a file with another name, or it changed meanwhile): it was not renamed`);
+    }
+    this.fault("rename");
+    // The text is the revision's own. The file's key goes with it only while the file still is that text: what was written to it since (the agent's
+    // edit, in the time since the last look) is not in the revision, and a key taken now would hide it from the next look, which takes it in as a
+    // revision of its own when the key is none.
+    const after = readDocument(this.files, dir, to);
+    const key = after && blobId(after.bytes) === row.blob ? after.key : null;
+    await this.commit(`Rename ${from} to ${to}`, [{ id, name: to, blob: row.blob, revision: row.revision + 1, author, renamedFrom: from }], new Map([[id, key]]), { remove: [from] });
+    this.clearPending();
+  }
+
+  /**
+   * The deletion that `pending` says (`{ id, author, folder, file, done }`) carried out from wherever it is: the file removed, if it still is there,
+   * and the commit. Under the lock. `recovering` as for a rename. The file is taken away in the folder the deletion was decided in only, and once:
+   * `done` says it was (it is kept as soon as it is), and then only the commit is left, in whatever state the folder is in by then. A file at the name
+   * that is not the one it was decided for (made since the other was taken away, when recovering) is left where it is.
+   */
+  async #carryDelete(pending, recovering = false) {
+    const { id, author, folder, file } = pending;
+    const row = this.row(id);
+    if (!row) return this.clearPending();
+    if (!pending.done) {
+      const dir = this.documentsDir();
+      if (!dir) {
+        // No folder to take the file from is nothing to remove; a link or a file called `documents` is something that is in the way, and the document stays.
+        const blocked = this.blockedDocuments();
+        if (blocked) {
+          this.clearPending();
+          throw blocked;
+        }
+      } else if (folder) {
+        try {
+          this.holds(folder);
+        } catch (e) {
+          this.clearPending();
+          throw e;
+        }
+        const there = this.statOf(dir, row.name);
+        if (there?.isFile() && !sameId(there, file)) {
+          // Not the file that was decided on: another one is at the name. Recovery leaves it (the other was taken away before the stop); a first try
+          // that finds it was beaten to the name by someone, and says so.
+          if (!recovering) {
+            this.clearPending();
+            throw new DocError(409, `${row.name} is not the document's file now (it was replaced meanwhile): it was not deleted`);
+          }
+        } else {
+          try {
+            removeDocument(this.files, dir, row.name, { expect: folder });
+          } catch (e) {
+            if (e instanceof Refused || e?.code === "failed" || recovering) this.clearPending();
+            if (e instanceof Refused) {
+              if (e.moved) throw new DocError(409, REPLACED, { code: "folder_replaced" });
+              // The portal says `invalid` for a name that is something else and for a folder it turns away (closed to the agent) alike: which it was is a look away.
+              this.holds(folder);
+              throw new DocError(409, `${row.name} is not the document's file now (a link, a folder or a file with another name): it was not deleted`);
+            }
+            throw e;
+          }
+        }
+        // The file is gone, which is told before anything else can fail: it is not taken away a second time, whatever is at the name by then.
+        pending.done = true;
+        this.setMeta("pending", JSON.stringify(pending));
+      }
+    }
+    this.fault("delete");
+    // Never committed (its first revision was lost): there is no history to say it is gone.
+    if (row.revision === 0) this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
+    else await this.commit(`Delete ${row.name}`, [{ id, name: row.name, revision: row.revision + 1, author, deleted: true }], new Map());
+    this.clearPending();
   }
 
   /** A document's text as text, or nothing when its bytes are not UTF-8 (they would be written back as other bytes). */
@@ -837,10 +1186,10 @@ export class Store {
 
   /** The text of one revision of a document, from the history: nothing when there is no such revision or it is not text. */
   async textAt(row, revision) {
-    const found = this.db.prepare("SELECT sha FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
+    const found = this.db.prepare("SELECT blob FROM revisions WHERE doc_id = ? AND revision = ?").get(row.id, revision);
     if (!found) return null;
     try {
-      return this.text(await this.repo.show(found.sha, row.name));
+      return this.text(await this.repo.blobText(found.blob));
     } catch (e) {
       if (e instanceof GitError) return null;
       throw e;

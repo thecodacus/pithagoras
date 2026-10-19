@@ -10,7 +10,7 @@ import express from 'express';
 import docsServer from '../server.js';
 import { DocError, explained } from '../errors.js';
 import { GitError } from '../git.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /**
@@ -56,12 +56,13 @@ async function portal(chats: Record<string, string>, options: Options = {}) {
     log: (line: string) => logged.push(line),
     router,
     http: { json: express.json },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => false },
     dataDir: () => DATA,
     chats: {
       list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(chats[id]),
+      inFolder: (folder: string) => Object.keys(chats).filter((id) => ((() => { try { return realpathSync(chats[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
       async tell(id: string, data: unknown) {
         told.push(id);
@@ -213,43 +214,23 @@ test('the whole documents folder deleted while a document is open is made again 
   }
 });
 
-test('a documents folder made again is given the chat folder\'s mode and owner through the folder itself: a link put in its place meanwhile gets nothing', { skip: !unprivileged }, async () => {
-  // What the agent could do with the sandbox on, where the portal runs as root and the chat folder is the agent's to write in:
-  // put a link to something else where `documents` is being made, between one step and the next.
-  const victim = path.join(realpathSync(scratch('docs-hard-victim-')), 'victim.txt');
-  writeFileSync(victim, 'not a document');
-  chmodSync(victim, 0o600);
-  const swap: { at: string | null; to: (dir: string) => void } = { at: null, to: () => {} };
-  const { docs, folder, url } = await withDocument('docs-hard-swap-', PLAN, { faults: { after: (step) => { if (step === swap.at) swap.to(path.join(folder, 'documents')); } } });
+test('a documents folder made again has the chat folder\'s mode, and a file called documents is refused as that', async () => {
+  // The race between making the folder and giving it its mode (a link put in its place) is the portal's own `files.makeFolder`
+  // to hold: tested with it, in core/server/test/workspace-files.test.mjs.
+  const { docs, folder, url } = await withDocument('docs-hard-swap-');
   const documents = path.join(folder, 'documents');
   chmodSync(folder, 0o775);
   try {
-    // Between the folder being made and being opened: it is a link when it is opened, and is refused.
     rmSync(documents, { recursive: true });
-    swap.at = 'documents';
-    swap.to = (dir) => { rmSync(dir, { recursive: true }); symlinkSync(victim, dir); };
-    const refused = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
-    assert.equal(refused.status, 409, JSON.stringify(refused.body));
-    assert.equal(refused.body.error, 'documents in this folder is a link');
-    assert.equal(statSync(victim).mode & 0o777, 0o600, 'what the link leads to keeps its mode');
-    assert.equal(readFileSync(victim, 'utf8'), 'not a document');
-    // Between the folder being opened and its mode being set: the mode goes to the folder that was opened, not to what is there now.
-    rmSync(documents);
-    swap.at = 'documents-open';
-    swap.to = (dir) => { rmSync(dir, { recursive: true }); symlinkSync(victim, dir); };
-    const made = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
-    assert.equal(made.status, 409, JSON.stringify(made.body));
-    assert.equal(statSync(victim).mode & 0o777, 0o600, 'what the link leads to keeps its mode');
-    // The document is not written through the link either: it is a link still, and leads to what it did.
-    assert.ok(lstatSync(documents).isSymbolicLink());
-    assert.equal(readFileSync(victim, 'utf8'), 'not a document');
-    // And without anyone in the way, the folder has the chat folder's mode.
-    swap.at = null;
+    writeFileSync(documents, 'a file');
+    const blocked = await docs.call('PUT', url, { markdown: `${PLAN}\nMore.\n`, base: 1 });
+    assert.equal(blocked.status, 409, JSON.stringify(blocked.body));
+    assert.equal(blocked.body.error, 'documents in this folder is not a folder');
+    assert.equal(readFileSync(documents, 'utf8'), 'a file');
     rmSync(documents);
     assert.equal((await docs.call('PUT', url, { markdown: `${PLAN}\nMore, more.\n`, base: 1 })).status, 200);
     assert.equal(statSync(documents).mode & 0o777, 0o775);
   } finally {
-    swap.at = null;
     await docs.close();
   }
 });

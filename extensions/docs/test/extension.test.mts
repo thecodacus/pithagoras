@@ -8,7 +8,7 @@ import ts from 'typescript';
 import { ensureDependencies, missingDependencies } from '../deps.js';
 import { SECRET_WARNING } from '../secret.js';
 import docsServer from '../server.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /** The portal's data folder for the stores. */
@@ -26,13 +26,14 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     log: (line: string) => logged.push(line),
     router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
     http: { json: () => () => {} },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => false },
     // The portal's data folder for the stores: one for the file, the stores are told apart by their folders' ids.
     dataDir: () => DATA,
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
+      inFolder: (folder: string) => Object.keys(folders).filter((id) => ((() => { try { return realpathSync(folders[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
     },
   }, {
     // What it needs to run is there: the test does not install anything.
@@ -137,7 +138,7 @@ test('a document is read by its folder\'s id and its own, and nothing else is', 
   for (const name of ['plan.md', '../secret.md', 'link.md', 'alias.md', 'hard.md', 'big.md', '.', '', 'documents/plan.md', 'plan.md\0', '0123456789abcdef']) {
     const refused = await docs.read(folder.id, name);
     assert.equal(refused.status, 404, name);
-    assert.deepEqual(refused.body, { error: 'There is no such document' }, name);
+    assert.deepEqual(refused.body, name === '0123456789abcdef' ? { error: 'There is no such document', code: 'deleted' } : { error: 'There is no such document' }, name);
   }
   // A folder is only one a chat works in: an id the portal does not list, or a path, is no folder.
   const id = idOf(folder, 'plan.md');
@@ -205,7 +206,7 @@ test('a pipe named like a document is no document, and asking for one does not h
   // A document whose file is swapped for a pipe after it was listed is asked for as well.
   const asking = `
     import docsServer from ${JSON.stringify(new URL('../server.js', import.meta.url).href)};
-    import { resolveInside } from ${JSON.stringify(new URL('../../../core/server/src/workspace-files.ts', import.meta.url).href)};
+    import { folderFiles } from ${JSON.stringify(new URL('../../../core/server/src/folder-files.ts', import.meta.url).href)};
     import { execFileSync } from 'node:child_process';
     import { realpathSync, rmSync } from 'node:fs';
     const routes = new Map();
@@ -214,10 +215,10 @@ test('a pipe named like a document is no document, and asking for one does not h
       log: () => {},
       router: { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') },
       http: { json: () => () => {} },
-      files: { inside: resolveInside },
+      files: folderFiles,
       sandbox: { on: () => false },
       dataDir: () => process.env.DATA,
-      chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
+      chats: { list: () => [{ id: 'a', title: 'A' }], inFolder: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
     }, { dependencies: async () => true });
     const ask = async (route, params) => { const answer = {}; const res = { status: (code) => ((answer.status = code), res), json: (body) => (answer.body = body) }; await routes.get('GET ' + route)({ params, query: {} }, res); return answer; };
     const [folder] = (await ask('/folders', {})).body.folders;

@@ -5,16 +5,16 @@ import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
-import { agentOf, defaultAgent } from "./agents.js";
+import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getSession, listSessions, setServerHalfOffers, type SessionRow } from "./db.js";
+import { getSession, listSessions, sessionsByWorkspace, setServerHalfOffers, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
-import { baseDir, folderPath, listDir, makeFolder, openDownload, readText, removeEntry, renameEntry, resolveInside, saveNewFile, unsavedAt, writeText } from "./workspace-files.js";
-import { mediaTypeAt } from "./output-files.js";
+import { folderFiles } from "./folder-files.js";
+import { baseDir, setAgentAccess, type AgentAccess } from "./workspace-files.js";
 import { sendFile } from "./api/files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
@@ -49,6 +49,39 @@ import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithag
 
 // What a server half is given is the public contract, @pithagoras/extension-api/server: the portal implements it here.
 export type { Chat, ServerPortal } from "@pithagoras/extension-api/server";
+export { folderFiles };
+
+/**
+ * Who the agents of some chats are, for what `files.*` is asked with `likeParent`: the user and groups the sandbox runs each as (`asAgent`,
+ * exec.ts), for the agent the sandbox runs the chat by: from the workspace stored for the chat, as sandbox/tools.ts has it, never from the path the
+ * folder leads to now, which an agent can lead elsewhere with a link (into another agent's home, say). Nothing while the sandbox is off: the agent
+ * is the portal's own user then. A chat that is not known throws, which is a refusal. Whether the sandbox is on and who an agent is are a few
+ * processes (`getent`) and a listing asks for each file: they are kept for a second. That is of the sandbox and its agents, not of any folder.
+ */
+let sandboxIsOn = { at: 0, on: false };
+const agentAccess = new Map<string, { at: number; access: AgentAccess }>();
+setAgentAccess((chats) => {
+  const now = Date.now();
+  if (now - sandboxIsOn.at > 1000) sandboxIsOn = { at: now, on: sandboxOn() };
+  if (!sandboxIsOn.on) return undefined;
+  const found = new Map<number, AgentAccess>();
+  // The agents are read once for all the chats named, not for each: a call may name many.
+  const agents = listAgents();
+  let first: ReturnType<typeof defaultAgent> | undefined;
+  for (const id of chats) {
+    const row = getSession(id);
+    if (!row) throw new Error("No such chat");
+    const agent = agentOf(row.workspace, agents) ?? (first ??= defaultAgent());
+    let known = agentAccess.get(agent.id);
+    if (!known || now - known.at > 1000) {
+      const who = identityOf(agent, sandboxSupport());
+      known = { at: now, access: { uid: who.uid, groups: [who.gid, who.shared] } };
+      agentAccess.set(agent.id, known);
+    }
+    found.set(known.access.uid, known.access);
+  }
+  return [...found.values()];
+});
 
 interface Running {
   half: ServerHalf;
@@ -246,6 +279,25 @@ function portalFor(ext: Running): ServerPortal {
         return row && chatOf(row);
       },
       list: () => listSessions().map(chatOf),
+      inFolder: (where) => {
+        // One session of every kind for each agent that has some that work in `where`. What an agent can reach is the same from each of its sessions: the
+        // sandbox runs a session as the agent its stored workspace belongs to (`agentOf`, else the first agent), whatever the path is that leads to `where`.
+        // So the stored workspaces (one query, a row for each: an agent can make many that are links to one folder) are looked at once each, and one that
+        // leads there is resolved (as `folder` does for a chat) only while its agent has none yet.
+        const agents = listAgents();
+        const first = defaultAgent();
+        const found = new Map<string, Chat>();
+        for (const row of sessionsByWorkspace()) {
+          const key = (agentOf(row.workspace, agents) ?? first)?.id ?? "";
+          if (found.has(key)) continue;
+          try {
+            if (baseDir(row.workspace) === where) found.set(key, chatOf(row));
+          } catch {
+            // Its folder is gone: it works in none.
+          }
+        }
+        return [...found.values()];
+      },
       folder,
       send: (chatId, data) => {
         const text = wire(name, data);
@@ -543,35 +595,6 @@ export function chatEvent(chatId: string, event: Record<string, unknown>): void 
     for (const handler of ext.events) guarded(ext.half.name, "hearing a chat's event", () => handler(chatId, event));
   }
 }
-
-/**
- * `portal.files`: a chat's folder read and changed by the portal's own code
- * (workspace-files.ts), for every server half. The agent writes in that
- * folder, links included, and a server half runs in the portal's process with
- * the portal's rights: see "A chat's folder" in the guide.
- */
-export const folderFiles: ServerPortal["files"] = {
-  inside: (base, rel) => resolveInside(base, rel),
-  list: (base, rel) => listDir(base, rel),
-  read: (base, rel) => readText(base, rel),
-  write: (base, rel, content, options = {}) => writeText(base, rel, content, options.expected, options.create === true),
-  rename: (base, rel, name) => renameEntry(base, rel, name),
-  unsaved: (base, rel) => unsavedAt(base, rel),
-  remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true),
-  makeFolder: (base, rel, name) => makeFolder(base, rel, name),
-  folder: (base, rel) => folderPath(base, rel),
-  open: (base, rel) => {
-    const opened = openDownload(base, rel);
-    try {
-      const mimeType = mediaTypeAt(opened.fd);
-      return mimeType ? { ...opened, mimeType } : opened;
-    } catch (e) {
-      closeSync(opened.fd);
-      throw e;
-    }
-  },
-  create: (base, rel, name, data) => saveNewFile(base, rel, name, data),
-};
 
 /** Whether a server half is keeping this chat's pi. */
 export function extensionHolds(chatId: string): boolean {

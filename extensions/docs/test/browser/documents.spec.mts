@@ -443,7 +443,7 @@ test('the list opens one stream for all folders, and lets go of it when a docume
   await page.waitForTimeout(200);
   expect(state.asked).toBe(0);
 
-  await listOf(page).first().getByRole('button').click();
+  await listOf(page).first().getByRole('button', { name: /The plan/ }).click();
   await expect(page.getByRole('heading', { name: 'The plan', level: 1 })).toBeVisible();
   expect(await openStreams(page)).toEqual([]);
   await page.getByRole('button', { name: /All documents/ }).click();

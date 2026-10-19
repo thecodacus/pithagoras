@@ -1,6 +1,6 @@
 import type { Response } from "express";
 import type { ServerPortal } from "@pithagoras/extension-api/server";
-import { agentDocker } from "./agent";
+import { agentDocker, type AgentUser } from "./agent";
 import { composeRunner } from "./compose";
 import { dockerFor } from "./docker";
 import { DockerError } from "./engine";
@@ -34,7 +34,20 @@ export default function docker(portal: ServerPortal) {
   const onHost = hostPaths();
   const runner = composeRunner(portal.extension, (image) => own.images.ensure(image), onHost);
   const agent = agentDocker({ owner: portal.extension, runner, onHost, inside: portal.files.inside });
-  portal.chats.extend((pi, chat) => registerTools(pi, () => agent(portal.chats.folder(chat.id))));
+  // With the sandbox on, the chat's agent is a user of its own, and what Docker does with its folder is done as it.
+  async function agentUser(chatId: string): Promise<AgentUser | undefined> {
+    if (!portal.sandbox.on()) return undefined;
+    const ran = await portal.sandbox.run(chatId, ["sh", "-c", "id -u; id -g; id -G"]);
+    const [uid, gid, groups = ""] = ran.stdout.toString("utf8").trim().split("\n");
+    if (ran.code !== 0 || !/^\d+$/.test(uid ?? "") || !/^\d+$/.test(gid ?? "")) throw new DockerError(`Who the chat's agent is could not be told: ${ran.stderr || `exit ${ran.code}`}`);
+    return {
+      uid: Number(uid),
+      gid: Number(gid),
+      groups: groups.split(/\s+/).filter(Boolean).map(Number).filter((g) => g !== Number(gid)),
+      run: (argv) => portal.sandbox.run(chatId, argv),
+    };
+  }
+  portal.chats.extend((pi, chat) => registerTools(pi, () => agent(portal.chats.folder(chat.id), () => agentUser(chat.id))));
 
   const route = (work: (req: { params: Record<string, string>; query: Record<string, unknown> }, res: Response) => Promise<unknown>) => (req: any, res: Response) =>
     void work(req, res).catch((e) => fail(res, e));

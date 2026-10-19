@@ -690,6 +690,7 @@ restart the portal.
 | `http.send(req, res, file, options?)` | [Sends a file](#sending-a-file) opened by `files.open` as the portal sends its own: a version, the part a player asks for, or to be saved |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status }` |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
+| `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each agent that has some there (what an agent can reach is the same from each of its sessions; none is removed, and a stored path can be a link an agent made) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
 | `chats.on("started" \| "stopped" \| "deleted", fn)` | A chat's pi started or stopped; the chat was deleted |
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
@@ -701,7 +702,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `write`, `create`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `create`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `identity`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `folders.list()`, `folders.allowed(path)`, `folders.on("removed", fn)` | [The folders the agents work in](#the-folders-the-agents-work-in), and when the portal deletes one |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
@@ -717,9 +718,22 @@ portal.router.get("/chats/:id/files", (req, res) => {
 });
 // A body is read only where a route asks for it.
 portal.router.post("/chats/:id/notes", portal.http.json(), (req, res) => { /* req.body */ });
-// So a route can take a file as it comes, of any size.
-portal.router.post("/chats/:id/upload", (req, res) => req.pipe(createWriteStream(target)).on("finish", () => res.json({ ok: true })));
+// A route that takes a file reads the body itself, and saves it with portal.files (not req.pipe into a path built from the
+// folder and a name: that follows a link the agent left there).
+portal.router.post("/chats/:id/upload", async (req, res) => {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    if ((size += chunk.length) > 1024 * 1024) return res.status(413).json({ error: "At most 1 MB" });
+    chunks.push(chunk);
+  }
+  const folder = portal.chats.folder(req.params.id);
+  res.json(portal.files.write(folder, String(req.query.name), Buffer.concat(chunks), { create: true }));
+});
 ```
+A file that may be bigger than 1 MB, and has to be streamed to disk, has no call
+in `portal.files` yet; do not build its path yourself, see
+[A chat's folder](#a-chat-s-folder).
 
 Routes are written from the package's own root. From the browser half,
 `portal.api.url("/chats/a/files")` is their address and `portal.api.json` asks
@@ -782,10 +796,44 @@ easy to get wrong in a way that is a hole, not a bug:
   as a user of its own. A file the agent cannot read, the portal can, and so
   can a server half that is led to it.
 - **A check and an open are two steps.** Between them the agent can put a link
-  where the file was. A file is opened without following a link in its last
-  place (`O_NOFOLLOW`), and what is sent is read from what was opened, never by
-  opening the path again. A pipe left there does not hold the server, and a
-  device is not read.
+  where the file was, or where a folder on the way to it was, and the portal,
+  which may be root, would then read, make or remove a file where the link leads.
+  A file is opened without following a link in its last place (`O_NOFOLLOW`), and
+  what is sent is read from what was opened, never by opening the path again. The
+  folder it is in is held open too, walked down from the chat's folder one part at
+  a time and never through a link, and the file is read, made and put in place in
+  that folder, whatever happens to the path meanwhile. That holds on Linux, where a
+  held folder can be named as `/proc/self/fd/<n>` (and a folder the portal may
+  search but not read still works: it is walked through with `O_PATH`, and only
+  its sync is left out); where there is no `/proc`
+  (macOS) a folder on the way can still be swapped between the check and the
+  call, and so the portal gives nothing it makes away there (below). A pipe left
+  there does not hold the server, and a device is not read.
+- **The agent can rename things.** With the [sandbox](/guide/sandbox) on, a folder or file the agent may not
+  enter is root's alone (`root:root`, mode 0700 or 0600), and the sandbox closes a subtree only by its top folder:
+  what is inside keeps the group's rights. The agent writes in its chat's folder, and a rename there needs only the
+  right to write in that folder, so it can rename that folder to the name of one your half reads as root on its
+  behalf (`documents`), or move that file into it, and your half would hand it what it could not read itself. Where
+  your half keeps something under a name the agent can choose, pass `likeParent: true` and the ids of the chats whose
+  agents work in the folder as `chats` (`folder`, `identity`, `list`, `read`, `readBytes`, `open`, `write`,
+  `makeFolder`, `removeFile`, `renameFile`, `sweepTemp`): the folder, and the file in it, must be something every one of those
+  agents could use itself. That is told as the kernel would tell it for the user and the groups the sandbox runs
+  each as (its own and the sandbox group), from the owner, group and mode of what is held: the owner's bits if the
+  agent's user owns it, else the group's if the group is one of the agent's, else everyone's. Who owns it says
+  nothing (a project is root's too). Every folder of the path from `/` down to the folder must be one the agents may
+  search, and none may be a link (a path that is a link now was swapped). What is read from a folder (`folder`,
+  `list`, `read`, `readBytes`, `open`) needs the agents to read and search it, what is changed in it (`write`,
+  `makeFolder`, `removeFile`, `renameFile`, `sweepTemp`) to write in it and search it, a folder that is held to (`identity`) both,
+  and a file that is read (or replaced) to be readable by them; in a sticky folder (mode 1777) what is taken away,
+  renamed or replaced must be their own. Otherwise the call is refused (`invalid`). It is checked on the folders as
+  they are held, so it cannot be swapped in between. The agents are the ones of `chats`, not found from the folder's
+  path, which the agent can lead into another agent's home with a link: the sandbox runs a chat's agent by the
+  workspace stored for it, and so does this. Name every session that works in the folder (`chats.inFolder(folder)`: not
+  the tasks of `chats.list()` alone, since the tools are in a routine run's, a conversation's and a heartbeat's pi too) and,
+  for a call made for an agent, the session it comes from, always, whatever its own folder leads to by then. No chat
+  named, or one that is not known, is a refusal while the sandbox is on. With the sandbox off the agent is the portal's own user, and nothing is refused. POSIX ACLs are not read
+  (Node cannot, and the sandbox sets none): only the mode bits are asked, so an ACL a person put on a folder or file
+  of a chat is not seen.
 - **A save is put in place whole.** It is written beside the file and renamed
   over it, so a full disk leaves the file as it was, not empty. It keeps the
   file's mode and its owner, so a file the portal saved as root is still the
@@ -797,6 +845,40 @@ easy to get wrong in a way that is a hole, not a bug:
   not committed, commits no remote has, stashes) is refused (`unsaved`, with
   what it holds) unless `discard` says so. `unsaved(base, rel)` asks first, for
   a question that names it.
+- **A file of your own that you delete or rename goes by `removeFile` and
+  `renameFile`, not by `remove` and `rename`.** Those two take one plain file and
+  nothing else (a link or a folder is `invalid`, where `remove` takes the link or
+  all of the folder), and are done in the folder as it is held, not by its path:
+  the file goes from the folder that was checked, whatever its path leads to by
+  then. `removeFile` is an `unlink` of the name, which never follows a link (what
+  is swapped onto the name goes, and what it leads to stays) and never removes a
+  folder (`EISDIR`: nothing is lost, where a recursive remove by path takes the
+  folder and all in it). `renameFile` makes the new name a second name of the file
+  (a hard link) and then takes the old one away: the system refuses the link in
+  the call itself if something has the new name (`exists`, whatever the agent made
+  there since the look), where `rename` puts the file over it; a name swapped for
+  something else between the look and the call is `conflict`, and nothing is
+  renamed. A crash between the two halves leaves one file with two names, never
+  none. If the old name cannot be taken away, the new one is given up again,
+  but never when it is the file's only name (a folder took the old name just
+  before): the file is not deleted for that, and the rename stands. A new name
+  that the file system does not tell from the old one (only capitals, or the
+  form of a letter, differ: macOS, Windows, a casefold folder) is the old name
+  itself, so it is `exists`. Where hard links cannot be made (a file system
+  without them, or `protected_hardlinks` for a file that is not the portal's own)
+  it is a rename after a look, with a short gap for a file that is made at the
+  new name in between. `direct` and `alone` are options of both, as of `open`, and so are `likeParent` and `chats`
+  (the folder must be one the agents could write in).
+  `expect: { dev, ino }` is one of both as well: the folder the file is in must
+  be that one, by its device and inode (what `stat` says of the folder, as numbers,
+  text or bigint), or the call is `conflict` and touches nothing. A half that
+  deletes or renames in a folder it decided on earlier keeps the identity of that
+  folder and passes it: the check is made on the descriptor of the folder the
+  call works in, so another folder swapped onto the path meanwhile (one the agent
+  may not write in, which the portal, as root, could) is never changed.
+- **A save lasts.** After the rename the folder is synced too, so a crash
+  right after leaves the new file, not the old one. An upload and a file the
+  portal makes are synced the same way.
 - **Limits:** a file over 1 MB is not read or saved as text, and a folder with
   more than 2,000 entries is listed in part (`truncated`), cut before each is
   looked at, so a huge folder does not hold the thread every chat is served on.
@@ -822,6 +904,88 @@ portal.router.put("/chats/:id/file", portal.http.json(), (req, res) => {
 What reads a whole folder, such as an archive, takes it from `files.folder`,
 checked; a download is sent from the descriptor `files.open` gives. Files'
 server half (`extensions/files/src/server.ts`) is a complete example.
+
+**Bytes, and telling a file changed.** `read` gives text, and says "binary"
+for a file with null bytes. For a file that is not text, or must come back
+exactly as it was, `readBytes` gives a `Buffer`, and `write` takes one (a file
+is still at most 1 MB). Both, and `open`, tell `change` and `mtime` as they
+were when the file was opened; `write` answers with those of the file it wrote.
+`change` is a text to keep and compare for equality, nothing more: it differs
+when the file was written in place (its times) and when another file was put
+there by a rename (its inode), so a page of notes can tell "unchanged" from
+"changed" without reading the file. `head` reads only the start of a file
+(`head: 0` none at all, for its `change`), and `open` keeps a descriptor that
+reads the file as it was opened, whatever is put in its place after.
+
+```js
+const stamp = portal.files.readBytes(folder, "notes.md", { head: 0 }).change;   // no bytes read
+if (stamp !== saved.change) {
+  const { bytes, change } = portal.files.readBytes(folder, "notes.md");
+}
+```
+
+For a file that is to be exactly what its name says, `direct` and `alone` are
+options of `open` and `readBytes` (`direct` of `write` and `folder` too).
+`direct` refuses a name that a link led somewhere else (even to another file in
+the folder, which `inside` follows without a word), or that is a way, not a
+name; a half that keeps its files in a folder of its own name in the chat's
+folder asks `folder(base, "documents", { direct: true })` and is told when that
+is a link. `alone` refuses a file with a second name. A refusal is `invalid`.
+
+**What the portal makes is the agent's to edit.** A file that `write` makes
+(not one it replaces), a folder that `makeFolder` makes and a file that is
+uploaded have the mode, the owner and the group of the folder they are made in
+(a file 0644, and group-writable where the folder is), and a folder is given
+that through itself, never by its path, so that a link put in its place by the
+agent meanwhile gets nothing. A new folder is made closed to everyone but the portal
+and is given its mode and owner only if it is still the one that was made: `mkdir`
+and the open of the new folder are two calls by its name, and an agent that writes
+in the folder can swap another folder of it onto that name in between, so one that
+holds anything, or is on another file system, is left alone and the name is
+`exists`. The owner and the mode are the held folder's own,
+read from its descriptor, and a file or a folder is given away only once it is
+known to be in the chat's folder (Linux), so that a folder the agent swapped for
+a link cannot make the portal, as root, hand the agent a file anywhere else. With
+the sandbox on, the portal is root and the agent another user: what the portal made as
+root would not be the agent's to change otherwise. Where the portal may not give
+a file away (it is not root and the folder is someone else's), it stays its own,
+in the group it can: it is group-writable only if that group is the folder's. A
+portal on a system without `/proc` gives nothing away.
+
+**Which folder it is.** A half that holds to a folder (Documents deletes and renames only in the folder it
+holds to) needs to tell it from another that was put at the same path. `files.identity(base, rel)` is the folder's
+device and inode as text (`{ dev, ino }`), read from the folder as it is held, so that it is the folder the checks
+were made on and not what its path leads to by then. Two folders never have the same pair at once, a folder that
+is moved keeps it and one that is deleted and made again does not; a number can be given to the next folder
+made, so it says that a folder is the one it was while it exists, not for ever. It takes `direct` and
+`likeParent` and `chats`: a folder the agent could not use is not given an identity, so a half that holds to what it is
+given never holds to one the sandbox closed to the agent. Pass the identity as `expect` to `removeFile` and
+`renameFile`.
+
+**Temporary files.** A save writes `.<name>.<12 hex>.tmp` beside the file until
+it is renamed. One that was cut off stays. `sweepTemp(base, rel)` removes those
+older than a minute (`olderThanMs` to change that) and says which: a save of
+the portal's or of another half that is under way has such a file too, and the
+age is what keeps it. Do not match the names and remove them yourself.
+
+A refusal for the system's own reasons is `failed`, and says which on the error:
+`e.errno` is `ENOSPC`, `EACCES`, `EROFS` and so on, and `e.cause` the error
+itself, for a server half that words a full disk differently from a missing right.
+
+[Documents](/guide/documents) is built on these: its files are read with
+`readBytes`, written with `write` (`create` for a new document, `direct`) and
+told changed by `change`; its folder is found with `folder`, made with
+`makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`; a
+document is deleted with `removeFile` and renamed with `renameFile`
+(`direct`, `alone`, `likeParent` with `chats`, and `expect` for the documents folder it keeps the identity of, which it
+takes with `identity`).
+
+**Watching a chat's folder** is not in `portal.files`. A watch reads nothing and
+changes nothing, so it has none of the dangers above: it only tells that
+something happened, and a half that then looks does so through `portal.files`.
+What a watch needs is the extension's own (when a folder made again counts as
+another, what to fall back on when the system cannot watch), so use `fs.watch`
+on the folder `portal.files.folder` gave you, and look when it says so.
 
 What a server half makes for the person, a picture say, is kept with
 `files.create(base, rel, name, bytes)`: a new file in the folder `rel`, written

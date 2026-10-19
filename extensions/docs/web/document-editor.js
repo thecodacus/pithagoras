@@ -6,7 +6,10 @@
  * on its passages (comments.js). The same text can be written as Markdown in
  * a plain box instead of in the editor (source.js): the editor stays what the
  * saving, the changes from outside and the comments are done on, and the box
- * takes its place for as long as it is chosen.
+ * takes its place for as long as it is chosen. The document can be renamed (its
+ * file: a revision of its own, which a page that has it open takes as any other)
+ * and deleted from the bar; a document deleted from elsewhere keeps its text on
+ * the page, to be copied or saved as a new document.
  *
  * It is laid out as a word processor is: a bar with the document's name, where
  * it stands and what can be done with it (the list of its comments, its history,
@@ -21,6 +24,7 @@ import { MAX_QUOTE } from "./anchor.js";
 import { comments, MARGIN_ROOM, PENDING } from "./comments.js";
 import { createLive } from "./live.js";
 import { asksAgent } from "./mention.js";
+import { renaming, wasDeleted } from "./rename.js";
 import { createSaver } from "./saver.js";
 import { fit, keepMode, readMode, replaceText } from "./source.js";
 import { ICONS, toolbar } from "./toolbar.js";
@@ -86,6 +90,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
   const h = React.createElement;
   const { Comments, Popover, SidePanel } = comments(portal, { when });
   const Toolbar = toolbar(portal);
+  const { RenameForm } = renaming(portal);
 
   const Icon = ({ name }) =>
     h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, className: "pd-icon" }, h("path", { d: ICONS[name] }));
@@ -100,14 +105,24 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       badge ? h("span", { className: "pd-count", "aria-hidden": true }, badge) : null,
     );
 
-  /** A menu that opens from a button of the bar, and closes with a choice, Escape or a click elsewhere. */
-  function Menu({ icon, label, items, disabled }) {
+  /**
+   * A menu that opens from a button of the bar, and closes with a choice, Escape (the focus goes back to the button) or a click elsewhere. Its
+   * first entry has the focus when it opens, and the arrow keys go through the entries. `iconOnly`: the button has no words (its label is its name).
+   */
+  function Menu({ icon, label, items, disabled, iconOnly = false, buttonRef }) {
     const [open, setOpen] = useState(false);
     const box = useRef(null);
+    const own = useRef(null);
+    const button = buttonRef ?? own;
     useEffect(() => {
       if (!open) return;
+      box.current?.querySelector('[role="menuitem"]')?.focus();
       const away = (e) => !box.current?.contains(e.target) && setOpen(false);
-      const key = (e) => e.key === "Escape" && setOpen(false);
+      const key = (e) => {
+        if (e.key !== "Escape") return;
+        setOpen(false);
+        button.current?.focus();
+      };
       document.addEventListener("mousedown", away);
       document.addEventListener("keydown", key);
       return () => {
@@ -115,14 +130,22 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         document.removeEventListener("keydown", key);
       };
     }, [open]);
+    const onListKey = (e) => {
+      const entries = [...(box.current?.querySelectorAll('[role="menuitem"]') ?? [])];
+      const at = entries.indexOf(document.activeElement);
+      const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: entries.length - 1 }[e.key];
+      if (to === undefined || !entries.length) return;
+      e.preventDefault();
+      entries[(to + entries.length) % entries.length].focus();
+    };
     return h(
       "div",
       { className: "pd-menu", ref: box },
-      h(BarButton, { icon, label, expanded: open, disabled, onClick: () => setOpen((on) => !on) }),
+      h(BarButton, { icon, label, expanded: open, disabled, buttonRef: button, onClick: () => setOpen((on) => !on) }, iconOnly ? "" : undefined),
       open &&
         h(
           "div",
-          { className: "pd-menu-list", role: "menu" },
+          { className: "pd-menu-list", role: "menu", onKeyDown: onListKey },
           items.map((item) =>
             item.href
               ? h("a", { key: item.key, role: "menuitem", href: item.href, download: item.download ?? "", className: "pd-menu-item", onClick: () => setOpen(false) }, h(Icon, { name: item.icon }), item.label)
@@ -168,6 +191,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
   /** What a revision was besides who made it: a save is nothing more. */
   function whatOf(revision) {
     if (revision.kind === "restore") return t("Restored from revision {n}", { n: revision.restoredFrom });
+    if (revision.kind === "rename") return t("Renamed from {name}", { name: revision.renamedFrom });
     if (revision.kind === "create") return t("Created");
     if (revision.kind === "adopted") return t("Existing file");
     return "";
@@ -276,7 +300,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
    * comes. Not over a person who is working in the text when the call begins (it has the focus, or something unsaved): they keep
    * their text, and the agent's change comes in when it is done, as any change from elsewhere does.
    */
-  function Editing({ folder, id, doc, edit, onBack, onExpand, draft }) {
+  function Editing({ folder, id, doc, edit, onBack, onOpen, onExpand, draft }) {
     const host = useRef(null);
     // The editor and its saver, once the editor is drawn.
     const parts = useRef(null);
@@ -296,6 +320,21 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     const [broken, setBroken] = useState(null);
     const [notice, setNotice] = useState(null);
     const [problem, setProblem] = useState(null);
+    // The file's name as it is now (a rename here or from elsewhere changes it); the one this page asked for, until the change comes back to
+    // it (it is not told of its own rename as of another's); the one a load found (what the notice names); whether the form that changes it is open.
+    const [name, setName] = useState(doc.name);
+    const nameNow = useRef(doc.name);
+    // The title the list shows: the first heading, or the file's name where there is none (so a rename can change it).
+    const [title, setTitle] = useState(doc.title);
+    const askedName = useRef(null);
+    const renamedTo = useRef(null);
+    const [renaming, setRenaming] = useState(false);
+    // The document was deleted, here or from elsewhere: its text stays on the page, and nothing more is sent for it.
+    const [vanished, setVanished] = useState(false);
+    const vanishedNow = useRef(false);
+    // What went wrong with a rename or a deletion that is not said under the form, and with saving the text as a new document.
+    const [actionProblem, setActionProblem] = useState(null);
+    const moreButton = useRef(null);
     const [busy, setBusy] = useState(false);
     // The call whose draft the person chose not to watch, or that began while they were working in the text: the text is shown.
     const [unwatched, setUnwatched] = useState(null);
@@ -390,9 +429,20 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           // The same threads as before are left as they are, so that a save every second does not draw them again.
           if (!gone && mine === latest) setThreads((now) => (now.loaded && !now.error && JSON.stringify(now.items) === JSON.stringify(body.threads) ? now : { items: body.threads, loaded: true, error: null }));
         } catch (error) {
+          // The document is not there any more: the page keeps its text, and says so. Only when the server says so (see wasDeleted).
+          if (wasDeleted(error)) markVanished();
           // The threads that were shown stay; only a page that has none yet says why.
           if (!gone && mine === latest) setThreads((now) => ({ ...now, error }));
         }
+      };
+      /** The document was deleted: the page keeps what it holds, and sends nothing for it from here (the text could not be saved, and is the person's to keep). */
+      const markVanished = () => {
+        if (gone || vanishedNow.current) return;
+        vanishedNow.current = true;
+        setVanished(true);
+        clearTimeout(retry);
+        stream?.close();
+        parts.current?.saver.dispose();
       };
       // The editor, or what takes its place for the saver and for what changes from outside: the box, while the text is written as Markdown.
       let proxy = null;
@@ -400,15 +450,22 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       const saver = createSaver({
         read,
         send: (markdown, base) =>
-          portal.api.json(url, { method: "PUT", body: JSON.stringify({ markdown, base }), keepalive: leaving }).then((answer) => {
-            // The server puts the passages of the comments in step with each revision when it is asked for them: after each save, so that each
-            // step is a small one and a passage is not lost in a big one.
-            if (commented.current) void refresh.current();
-            filed.current = markdown;
-            // The file was gone (deleted, or renamed) and the save made it again: the person is told, since the document is not where it was.
-            if (answer.recreated) setNotice({ kind: "recreated", revision: answer.revision });
-            return answer;
-          }),
+          // A document that is gone is not written to: that would be a 404 again and again, or (it is a new file) a document nobody asked for.
+          (vanishedNow.current ? Promise.reject(Object.assign(new Error(t("This document was deleted. Your text is kept here and is not saved.")), { status: 404 })) : portal.api.json(url, { method: "PUT", body: JSON.stringify({ markdown, base }), keepalive: leaving }))
+            .catch((e) => {
+              // The document is gone: a save is how a page that was not told (its stream was down) finds out.
+              if (wasDeleted(e)) markVanished();
+              throw e;
+            })
+            .then((answer) => {
+              // The server puts the passages of the comments in step with each revision when it is asked for them: after each save, so that each
+              // step is a small one and a passage is not lost in a big one.
+              if (commented.current) void refresh.current();
+              filed.current = markdown;
+              // The file was gone (deleted, or renamed) and the save made it again: the person is told, since the document is not where it was.
+              if (answer.recreated) setNotice({ kind: "recreated", revision: answer.revision });
+              return answer;
+            }),
         onMerged: (answer, sent) => {
           // The file is what the server made of the save and the later revision.
           filed.current = answer.markdown;
@@ -416,15 +473,17 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         },
         onState: (state) => {
           // Kept while it cannot be saved, and let go once it is, also when the page is gone by then.
-          if (state.status === "conflict" || state.status === "error") keepDraft(folder, id, { base: state.base, markdown: read() });
+          if (vanishedNow.current) {
+            // Nothing to keep it for: the document it is a draft of is gone.
+          } else if (state.status === "conflict" || state.status === "error") keepDraft(folder, id, { base: state.base, markdown: read() });
           else if (state.status === "saved") dropDraft(folder, id);
           setView(state);
         },
       });
-      const save = () => void saver.flush();
+      const save = () => void (!vanishedNow.current && saver.flush());
       const hide = () => {
         leaving = true;
-        if (!editor) return;
+        if (!editor || vanishedNow.current) return;
         if (saver.unsaved()) keepDraft(folder, id, { base: saver.state().base, markdown: read() });
         save();
       };
@@ -434,7 +493,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
       // (a request that outlives the page is small); text that autosave is on its way with, and that fits, does not.
       const ask = (e) => {
         const { status, base } = saver.state();
-        if (status === "conflict" || status === "error" || (editor && saver.unsaved() && new TextEncoder().encode(JSON.stringify({ markdown: read(), base })).length > KEEPALIVE_BYTES)) e.preventDefault();
+        // Text that cannot be saved because its document is gone is asked about too: it is on this page only.
+        if (vanishedNow.current ? editor && saver.unsaved() : status === "conflict" || status === "error" || (editor && saver.unsaved() && new TextEncoder().encode(JSON.stringify({ markdown: read(), base })).length > KEEPALIVE_BYTES)) e.preventDefault();
       };
       const key = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -547,17 +607,40 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           saver,
           revision: doc.revision,
           load: () =>
-            portal.api.json(url).then((body) => {
-              filed.current = body.markdown;
-              return body;
-            }),
+            portal.api.json(url).then(
+              (body) => {
+                filed.current = body.markdown;
+                // A rename is a revision like any other, and brings the name with it.
+                if (body.name !== nameNow.current) {
+                  nameNow.current = body.name;
+                  renamedTo.current = body.name;
+                  setName(body.name);
+                  setTitle(body.title);
+                }
+                return body;
+              },
+              (e) => {
+                if (wasDeleted(e)) markVanished();
+                throw e;
+              },
+            ),
           notify: ({ kind, revision, author }) => {
+            // What a load found renamed is told once, whatever came of the text: its own rename is no news, another window's is told as such.
+            const to = renamedTo.current;
+            renamedTo.current = null;
+            const own = to !== null && askedName.current === to;
+            if (own) askedName.current = null;
             if (kind === "conflict") return;
+            if (to !== null) {
+              if (!own) setNotice({ kind: "renamed", name: to, revision });
+              return;
+            }
             setNotice({ kind, revision, author });
             // What changed meanwhile may have moved the passages of the comments.
             void refresh.current();
           },
         });
+        parts.current.live = live;
         // Told where the document stands as it opens, which is how a change between its load and now is found, and after each revision.
         const listen = () => {
           const source = new EventSource(`${url}/events`);
@@ -572,6 +655,8 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           });
           // The comments changed (the agent wrote one, or another window did): asked for again.
           source.addEventListener("threads", () => void refresh.current());
+          // The document was deleted: nothing more comes of it, and what is on the page is the person's.
+          source.addEventListener("deleted", markVanished);
           // A stream that is back may have missed such a message.
           source.onopen = () => {
             if (connected) void refresh.current();
@@ -581,7 +666,12 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           // says where the document stands, so nothing that happened meanwhile is missed. (The browser would not ask again for one a proxy refused.)
           source.addEventListener("error", () => {
             source.close();
-            if (!gone) retry = setTimeout(listen, Math.min(2000 * 2 ** failed++, 30_000));
+            if (gone || vanishedNow.current) return;
+            retry = setTimeout(() => {
+              // A document deleted while the stream was down has no stream to come back to: asking for its comments finds that out.
+              void refresh.current();
+              if (!gone && !vanishedNow.current) listen();
+            }, Math.min(2000 * 2 ** failed++, 30_000));
           });
         };
         if (typeof EventSource !== "undefined") listen();
@@ -602,8 +692,12 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           frozen = proxy.markdown();
           // Leaving the page is not a reason to lose text: it is saved now, and kept until it is. Kept here too, not only when
           // the saver's state changes: text typed after a conflict changed no state, and has no other way to be kept.
-          if (saver.unsaved()) keepDraft(folder, id, { base: saver.state().base, markdown: frozen });
-          void saver.flush();
+          // Not for a document that is gone (deleted here, or from elsewhere): there is nothing to save it to or to keep it for.
+          if (vanishedNow.current) saver.dispose();
+          else {
+            if (saver.unsaved()) keepDraft(folder, id, { base: saver.state().base, markdown: frozen });
+            void saver.flush();
+          }
           void editor.destroy();
         } else saver.dispose();
         parts.current = null;
@@ -649,9 +743,78 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     /** Where on the screen the passage of thread `thread` is, a rectangle for each line of it (none where it is not marked). */
     const rectsOf = (thread) => [...(host.current?.querySelectorAll(`[data-pd-thread="${CSS.escape(thread)}"]`) ?? [])].flatMap((el) => [...el.getClientRects()]).filter((r) => r.width > 0 || r.height > 0);
 
-    /** Back to the list, once what was typed is saved: with text that cannot be, the page stays and says why. */
+    /** Back to the list, once what was typed is saved: with text that cannot be, the page stays and says why. A document that is gone has nothing to save it to. */
     const leave = async () => {
-      if (!parts.current || (await parts.current.saver.flush())) onBack();
+      if (vanishedNow.current || !parts.current || (await parts.current.saver.flush())) onBack();
+    };
+
+    /**
+     * Gives the document's file another name. The text is saved first (the rename is a revision of the text as it is saved), then the server
+     * renames it, and the page takes the revision that made as it takes any other (live.js), so that it goes on from there with what it has
+     * typed since. A refusal (the name is taken, it is not a document's) is thrown, for the form to say under its field.
+     */
+    const rename = async (next) => {
+      const p = parts.current;
+      if (p && !(await p.saver.flush())) throw new Error(t("Your changes could not be saved, so the document was not renamed."));
+      askedName.current = next;
+      let answer;
+      try {
+        answer = await portal.api.json(`${url}/rename`, { method: "POST", body: JSON.stringify({ name: next }) });
+      } catch (e) {
+        askedName.current = null;
+        throw e;
+      }
+      setRenaming(false);
+      moreButton.current?.focus();
+      // The name as the server made of it (it is trimmed and written in the normal form), which is what the change comes back with.
+      askedName.current = answer.name;
+      if (answer.changed) void p?.live?.seen({ revision: answer.revision, author: "user" });
+      else askedName.current = null;
+    };
+
+    /** Deletes the document, after the portal's question (which Settings → This browser can switch off); the page goes back to the list. */
+    const removeDocument = async () => {
+      const ok = await ui.confirm({
+        title: t("Delete “{title}”?", { title }),
+        message: t("This deletes the file {name}, the comments on it and its history. It cannot be undone.", { name }),
+        confirmLabel: t("Delete"),
+        danger: true,
+        deletes: true,
+      });
+      if (!ok) return;
+      setBusy(true);
+      setActionProblem(null);
+      try {
+        await portal.api.json(url, { method: "DELETE" });
+      } catch (e) {
+        // Gone already (another window did it): that is what was asked.
+        if (!wasDeleted(e)) {
+          setBusy(false);
+          return setActionProblem(t("The document could not be deleted: {error}", { error: e.message }));
+        }
+      }
+      // From here nothing of the page is sent or kept: the text was deleted with the document, as the person chose.
+      vanishedNow.current = true;
+      parts.current?.saver.dispose();
+      dropDraft(folder, id);
+      onBack();
+    };
+
+    /** The text a deleted document left on the page, made a document of its own (the same scope), and opened. */
+    const saveAsNew = async () => {
+      const p = parts.current;
+      if (!p) return;
+      setActionProblem(null);
+      try {
+        const made = await portal.api.json(portal.api.url(`/folders/${encodeURIComponent(folder)}/documents`), {
+          method: "POST",
+          body: JSON.stringify({ title: doc.title.slice(0, 200), markdown: p.editor.markdown(), scope: doc.scope, ...(doc.scope === "chat" ? { chat: doc.chat } : {}) }),
+        });
+        dropDraft(folder, id);
+        (onOpen ?? onBack)({ folder, id: made.id });
+      } catch (e) {
+        setActionProblem(t("The text could not be saved as a new document: {error}", { error: e.message }));
+      }
     };
 
     const takeTheirs = async () => {
@@ -925,6 +1088,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
     // What the agent is writing is shown as it comes while the person has nothing unsaved, unless they chose the saved text.
     const watching = edited !== null && status === "saved" && unwatched !== draft.call;
     const label = { saved: t("Saved"), dirty: t("Unsaved changes"), saving: t("Saving…"), conflict: t("Not saved"), error: t("Not saved") }[status];
+    const stateText = `${label} · ${t("Revision {n}", { n: base })}`;
     const openCount = threads.items.filter((x) => x.status === "open").length;
     /**
      * The text is written in the other way: in the editor, or as Markdown in a box. What is in the one goes to the other (nothing is lost, and
@@ -1140,13 +1304,16 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         "div",
         { className: "pd-titlebar" },
         h("button", { type: "button", className: "pd-back", onClick: leave }, `← ${t("All documents")}`),
+        // Where the document stands is in the name's place, at its end: what it says (and in what language, and how wide the face) changes while it is
+        // typed in, and a bar whose row wraps by it moves its buttons between the press and the release of a click. The room of the name is what the
+        // bar's row is counted by, and is the same for every text; a text that does not fit is cut, with the whole of it in the tooltip.
         h(
           "div",
           { className: "pd-docname" },
           h(Icon, { name: "file" }),
-          h("div", null, h("strong", { className: "pd-doctitle" }, doc.title), h("span", { className: "pd-meta" }, `documents/${doc.name}`)),
+          h("div", null, h("strong", { className: "pd-doctitle" }, title), h("span", { className: "pd-meta" }, `documents/${name}`)),
+          h("span", { className: "pd-state", "data-status": status, "aria-live": "polite", title: stateText }, stateText),
         ),
-        h("span", { className: "pd-state", "data-status": status, "aria-live": "polite" }, `${label} · ${t("Revision {n}", { n: base })}`),
         h(
           "div",
           { className: "pd-bar-end" },
@@ -1167,13 +1334,38 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
             label: t("Download"),
             disabled: !ready,
             items: [
-              { key: "md", icon: "file", label: t("Markdown (.md)"), href: `${url}/download`, download: doc.name },
+              { key: "md", icon: "file", label: t("Markdown (.md)"), href: `${url}/download`, download: name },
               { key: "pdf", icon: "printer", label: t("PDF (print)"), onClick: print },
+            ],
+          }),
+          h(Menu, {
+            icon: "more",
+            label: t("Document actions"),
+            iconOnly: true,
+            disabled: !ready || vanished || busy,
+            buttonRef: moreButton,
+            items: [
+              { key: "rename", icon: "pencil", label: t("Rename"), onClick: () => setRenaming(true) },
+              { key: "delete", icon: "trash", label: t("Delete"), onClick: () => void removeDocument() },
             ],
           }),
           onExpand && h(BarButton, { icon: "expand", label: t("Open on its own page"), onClick: async () => (!parts.current || (await parts.current.saver.flush())) && onExpand() }, t("Full page")),
         ),
       ),
+      renaming && h(RenameForm, { name, onSubmit: rename, onCancel: () => (setRenaming(false), moreButton.current?.focus()) }),
+      vanished &&
+        h(
+          "div",
+          { className: "pd-conflict", role: "alert" },
+          h("p", null, t("This document was deleted. Your text is kept here and is not saved.")),
+          h(
+            "div",
+            { className: "pd-actions" },
+            h("button", { type: "button", className: ui.classes.primarySmall, onClick: () => void saveAsNew() }, t("Save as a new document")),
+            h("button", { type: "button", className: ui.classes.button, onClick: onBack }, t("Close")),
+          ),
+        ),
+      actionProblem && h(ui.ErrorBanner, { onClose: () => setActionProblem(null) }, actionProblem),
       // Nothing of the formatting is of use in the Markdown, where it is written out: the toolbar is not there.
       !plain && h(Toolbar, { format, disabled: !ready || watching || Boolean(old), onCommand: (name, arg) => parts.current?.editor.command(name, arg), onComment: () => void startComment(), onFocusText: () => parts.current?.editor.focus() }),
       conflict &&
@@ -1189,7 +1381,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
           ),
           h("details", null, h("summary", null, t("Show the other version")), conflict.markdown.trim() ? h("div", { className: "pd-body" }, h(ui.Markdown, null, conflict.markdown)) : h("p", { className: "pd-meta" }, t("This document is empty."))),
         ),
-      status === "error" && h(ui.ErrorBanner, null, h("span", null, t("Could not save: {error}", { error })), " ", h("button", { type: "button", className: ui.classes.ghost, onClick: () => void parts.current.saver.flush() }, t("Try again"))),
+      status === "error" && !vanished && h(ui.ErrorBanner, null, h("span", null, t("Could not save: {error}", { error })), " ", h("button", { type: "button", className: ui.classes.ghost, onClick: () => void parts.current.saver.flush() }, t("Try again"))),
       problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("Could not restore: {error}", { error: problem })),
       commentProblem && h(ui.ErrorBanner, { onClose: () => setCommentProblem(null) }, t("Could not comment: {error}", { error: commentProblem })),
       askProblem && h(ui.WarnBanner, { onClose: () => setAskProblem(null) }, t("Could not open a chat to ask the agent in: {error}", { error: askProblem })),
@@ -1215,6 +1407,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
               updated: () => (notice.author === "agent" ? t("The agent changed this document. It is now at revision {n}.", { n: notice.revision }) : t("This document was changed from elsewhere. It is now at revision {n}.", { n: notice.revision })),
               merged: () => t("The document changed meanwhile and is now at revision {n}. Its changes were merged into your text.", { n: notice.revision }),
               recreated: () => t("This document's file had been deleted or renamed. It was made again from your text, and is now at revision {n}.", { n: notice.revision }),
+              renamed: () => t("This document was renamed to {name}.", { name: notice.name }),
             }[notice.kind](),
           ),
           h("button", { type: "button", className: ui.classes.ghost, onClick: () => setNotice(null) }, t("Close")),
@@ -1319,7 +1512,7 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
   }
 
   /** A document of a folder, for reading and writing. Without the editor (it could not be loaded) it is read as the portal draws Markdown. */
-  return function DocumentEditor({ folder, id, onBack, onExpand, draft = null }) {
+  return function DocumentEditor({ folder, id, onBack, onOpen, onExpand, draft = null }) {
     const { body, error, retry } = useAnswer(documentUrl(folder, id));
     const [edit, setEdit] = useState(null);
     const [failed, setFailed] = useState(null);
@@ -1346,6 +1539,6 @@ export function documentEditor(portal, { documentUrl, when, useAnswer, activeCha
         body.markdown.trim() ? h("div", { className: "pd-body" }, h(ui.Markdown, null, body.markdown)) : h(ui.Empty, null, t("This document is empty.")),
       );
     }
-    return h("article", { className: "pd-document" }, h(Editing, { folder, id, doc: body, edit, onBack, onExpand, draft }));
+    return h("article", { className: "pd-document" }, h(Editing, { folder, id, doc: body, edit, onBack, onOpen, onExpand, draft }));
   };
 }

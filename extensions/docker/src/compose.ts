@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { statSync } from "node:fs";
 import { OWNER_LABEL } from "./docker";
 import { checked, logs, request, socketPath } from "./engine";
 
@@ -16,12 +17,13 @@ export type Ran = { code: number; stdout: string; stderr: string };
 
 /**
  * Runs `docker compose <args>` with `folder` (a path on Docker's machine) as the folder it works in, with `input` as
- * what it reads (`-f -`), and stops it when `signal` is aborted.
+ * what it reads (`-f -`), and stops it when `signal` is aborted. `as` is the user it runs as, with its groups: the
+ * chat's agent, where it runs as a user of its own, so that compose reads the folder as the agent may.
  */
-export type Runner = (args: string[], options: { folder: string; input?: string; signal?: AbortSignal }) => Promise<Ran>;
+export type Runner = (args: string[], options: { folder: string; input?: string; signal?: AbortSignal; as?: { uid: number; gid: number; groups: number[] } }) => Promise<Ran>;
 
 export function composeRunner(own: string, ensure: (image: string) => Promise<void>, onHost: (where: string) => Promise<string>): Runner {
-  return async (args, { folder, input, signal }) => {
+  return async (args, { folder, input, signal, as }) => {
     // A call stopped before this step, or while the image downloads, runs nothing more.
     signal?.throwIfAborted();
     await ensure(RUNNER_IMAGE);
@@ -31,10 +33,15 @@ export function composeRunner(own: string, ensure: (image: string) => Promise<vo
       Image: RUNNER_IMAGE,
       // What it reads goes in by the environment: a container's input needs a connection held open to give it.
       Cmd: input === undefined ? ["docker", "compose", ...args] : ["sh", "-c", 'printf %s "$COMPOSE_INPUT" | docker compose "$@"', "compose", ...args],
-      Env: input === undefined ? [] : [`COMPOSE_INPUT=${input}`],
+      Env: [...(input === undefined ? [] : [`COMPOSE_INPUT=${input}`]), ...(as ? ["HOME=/tmp"] : [])],
       WorkingDir: folder,
       Labels: { [OWNER_LABEL]: own },
-      HostConfig: { Binds: [`${socket}:/var/run/docker.sock`, `${folder}:${folder}:ro`] },
+      // As another user, with the group the socket is Docker's to, for compose to reach Docker; its home is not that user's.
+      ...(as ? { User: `${as.uid}:${as.gid}` } : {}),
+      HostConfig: {
+        Binds: [`${socket}:/var/run/docker.sock`, `${folder}:${folder}:ro`],
+        ...(as ? { GroupAdd: [...as.groups, statSync(socketPath()).gid].map(String) } : {}),
+      },
     });
     const kill = () => void request("POST", `/containers/${Id}/kill`).catch(() => {});
     signal?.addEventListener("abort", kill, { once: true });

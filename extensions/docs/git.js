@@ -168,6 +168,15 @@ export class Repo {
     return (await this.run(["cat-file", "blob", `${sha}:${name}`])).stdout;
   }
 
+  /**
+   * The text of the blob `id`, as the index of the revisions names it. A revision is told by its blob, not by the name its document had
+   * in that commit: a document that was renamed has had more than one.
+   */
+  async blobText(id) {
+    if (!/^[0-9a-f]{40}$/.test(id)) throw new GitError(`${id} is not the id of a text`);
+    return (await this.run(["cat-file", "blob", id])).stdout;
+  }
+
   /** Stores `bytes` as a blob: its id, checked against the one computed here. */
   async storeBlob(bytes) {
     const id = await this.text(["hash-object", "-w", "--no-filters", "--stdin"], { input: bytes });
@@ -177,15 +186,17 @@ export class Repo {
 
   /**
    * One commit on the branch, from `parent` (nothing for the first), that sets
-   * each `{ name, blob }` in `entries` and leaves the other documents as they
-   * were. Moves the branch only if it is still at `parent`. Returns the commit.
+   * each `{ name, blob }` in `entries` (a document that is gone has no blob: its
+   * name is taken out) and leaves the other documents as they were. Moves the
+   * branch only if it is still at `parent`. Returns the commit.
    */
   async commitEntries(parent, entries, message) {
     // The index is the repository's own and holds only registered documents; it is read from the parent each time,
     // so one a failure left half-written does not carry over.
     if (parent) await this.run(["read-tree", parent]);
     else await this.run(["read-tree", "--empty"]);
-    const info = entries.map(({ name, blob }) => `100644 ${blob}\t${name}\0`).join("");
+    // Mode 0 with no object is how `--index-info` says "take this path out".
+    const info = entries.map(({ name, blob }) => (blob ? `100644 ${blob}\t${name}\0` : `0 ${"0".repeat(40)}\t${name}\0`)).join("");
     await this.run(["update-index", "-z", "--add", "--index-info"], { input: info });
     const tree = await this.text(["write-tree"]);
     const commit = await this.text(["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-F", "-"], { input: message });
@@ -204,7 +215,7 @@ export class Repo {
 }
 
 /** The trailers a revision is told by, in a commit message. `Doc-Name` is there to rebuild the index without the database. */
-const KEYS = ["Doc-Id", "Doc-Name", "Revision", "Author", "Restored-From"];
+const KEYS = ["Doc-Id", "Doc-Name", "Revision", "Author", "Restored-From", "Renamed-From", "Deleted"];
 
 /** A commit's message: a subject, and one group of trailers per document it changes. */
 export function messageFor(subject, groups) {
@@ -212,11 +223,14 @@ export function messageFor(subject, groups) {
   for (const group of groups) {
     lines.push(`Doc-Id: ${group.id}`, `Doc-Name: ${group.name}`, `Revision: ${group.revision}`, `Author: ${group.author}`);
     if (group.restoredFrom) lines.push(`Restored-From: ${group.restoredFrom}`);
+    // A rename says what the document was called, and a deletion that it is gone: it has no text to tell by, and rebuilding the index from the history must not bring it back.
+    if (group.renamedFrom) lines.push(`Renamed-From: ${group.renamedFrom}`);
+    if (group.deleted) lines.push("Deleted: yes");
   }
   return `${lines.join("\n")}\n`;
 }
 
-/** The groups of trailers in a message the store wrote: `[{ id, name, revision, author, restoredFrom }]`. Other lines are not trailers. */
+/** The groups of trailers in a message the store wrote: `[{ id, name, revision, author, restoredFrom, renamedFrom, deleted }]`. Other lines are not trailers. */
 export function parseTrailers(message) {
   const groups = [];
   for (const line of message.split("\n")) {
@@ -232,6 +246,8 @@ export function parseTrailers(message) {
     else if (key === "Revision") group.revision = Number(value);
     else if (key === "Author") group.author = value;
     else if (key === "Restored-From") group.restoredFrom = Number(value);
+    else if (key === "Renamed-From") group.renamedFrom = value || undefined;
+    else if (key === "Deleted") group.deleted = value === "yes" ? true : undefined;
   }
   return groups.filter((g) => /^[0-9a-f]{16}$/.test(g.id) && Number.isInteger(g.revision) && g.revision > 0 && g.name && g.author);
 }

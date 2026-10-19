@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import express from 'express';
 import docsServer from '../server.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /**
@@ -30,12 +30,13 @@ async function portal(chats: Record<string, string>, faults?: { after(step: stri
     log: (line: string) => logged.push(line),
     router,
     http: { json: express.json },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => false },
     dataDir: () => DATA,
     chats: {
       list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(chats[id]),
+      inFolder: (folder: string) => Object.keys(chats).filter((id) => ((() => { try { return realpathSync(chats[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
     },
   }, { dependencies: async () => true, pollMs: 0, faults }) as () => Promise<void>;

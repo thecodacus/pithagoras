@@ -10,6 +10,7 @@
  * outside a chat has no chat's pi to ask. A document is asked for by the id
  * the listing gives it, never by its file's name.
  */
+import { renaming, wasDeleted } from "./rename.js";
 import { ICONS } from "./toolbar.js";
 import { uploads } from "./upload.js";
 import { WRITING_TOOLS, isDocumentId, sameCall, sameCalls, shownNew } from "./writing.js";
@@ -195,6 +196,21 @@ export default function (portal) {
     Quote: "Zitat",
     "Insert table": "Tabelle einfügen",
     "Horizontal line": "Horizontale Linie",
+    Rename: "Umbenennen",
+    "Rename {name}": "{name} umbenennen",
+    "Delete {name}": "{name} löschen",
+    "New file name for {name}": "Neuer Dateiname für {name}",
+    "This renames the file. The title is the document's first heading: change it in the text.": "Das benennt die Datei um. Der Titel ist die erste Überschrift des Dokuments: Ändere ihn im Text.",
+    "The document could not be deleted: {error}": "Das Dokument konnte nicht gelöscht werden: {error}",
+    "Delete “{title}”?": "„{title}“ löschen?",
+    "This deletes the file {name}, the comments on it and its history. It cannot be undone.": "Das löscht die Datei {name}, die Kommentare dazu und den Verlauf. Das lässt sich nicht rückgängig machen.",
+    "Document actions": "Aktionen für das Dokument",
+    "Your changes could not be saved, so the document was not renamed.": "Deine Änderungen konnten nicht gespeichert werden, deshalb wurde das Dokument nicht umbenannt.",
+    "This document was renamed to {name}.": "Dieses Dokument wurde in {name} umbenannt.",
+    "Renamed from {name}": "Umbenannt von {name}",
+    "This document was deleted. Your text is kept here and is not saved.": "Dieses Dokument wurde gelöscht. Dein Text bleibt hier erhalten und ist nicht gespeichert.",
+    "Save as a new document": "Als neues Dokument speichern",
+    "The text could not be saved as a new document: {error}": "Der Text konnte nicht als neues Dokument gespeichert werden: {error}",
   });
 
   // What the agent is writing in a document, from the chat's calls as this page has them (writing.js): drawn in the panel as it
@@ -257,6 +273,8 @@ export default function (portal) {
   function useListed(path) {
     const [state, setState] = useState({ body: null, error: null });
     const [asked, setAsked] = useState(0);
+    // Asks for the list again where it is, with what is shown staying until the answer comes: after the person changed something in it.
+    const reloading = React.useRef(() => {});
     useEffect(() => {
       let gone = false;
       let stream = null;
@@ -295,6 +313,7 @@ export default function (portal) {
       };
       setState({ body: null, error: null });
       void load();
+      reloading.current = () => void load();
       const listen = () => {
         const source = new EventSource(portal.api.url("/folders/events"));
         stream = source;
@@ -323,34 +342,126 @@ export default function (portal) {
         stream?.close();
       };
     }, [path, asked]);
-    return { ...state, retry: () => setAsked((n) => n + 1) };
+    return { ...state, retry: () => setAsked((n) => n + 1), reload: () => reloading.current() };
   }
+
+  const Svg = ({ name }) => h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true }, h("path", { d: ICONS[name] }));
+  const { RenameForm } = renaming(portal);
 
   /** A document in a list: its title, and its file, when it changed and what its comments wait for. */
   const DocumentButton = ({ doc, onOpen }) =>
     h(
       "button",
-      { type: "button", onClick: onOpen },
+      { type: "button", className: "pd-open", onClick: onOpen },
       h("span", { className: "pd-title" }, doc.title),
       h("span", { className: "pd-meta" }, [doc.name, doc.otherChat && (doc.chatTitle ? t("From the chat {chat}", { chat: doc.chatTitle }) : t("From another chat")), t("Changed {date}", { date: when(doc.modified) }), doc.openThreads > 0 && (doc.openThreads === 1 ? t("1 open comment") : t("{n} open comments", { n: doc.openThreads })), doc.answeredThreads > 0 && t("{n} answered by the agent", { n: doc.answeredThreads })].filter(Boolean).join(" · ")),
     );
 
+  /**
+   * A document in a list, with what can be done with it: renamed (a form takes the row's place) and deleted (after the portal's question,
+   * which Settings → This browser can switch off). The two buttons are out of the way until the row is pointed at or has the focus, and are
+   * always there where there is nothing to point with. `folder` is the folder's id, `changed()` asks for the list again, and `gone()` says
+   * that this row was deleted (the list puts the focus where it was).
+   */
+  function DocumentRow({ folder, doc, onOpen, changed, gone }) {
+    const [renaming, setRenaming] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [problem, setProblem] = useState(null);
+    const renameButton = React.useRef(null);
+    // Where the form was closed, the focus goes back to the button that opened it.
+    const refocus = React.useRef(false);
+    useEffect(() => {
+      if (renaming || !refocus.current) return;
+      refocus.current = false;
+      renameButton.current?.focus();
+    }, [renaming]);
+    const url = documentUrl(folder, doc.id);
+    const close = () => {
+      refocus.current = true;
+      setRenaming(false);
+    };
+    const rename = async (name) => {
+      setProblem(null);
+      await portal.api.json(`${url}/rename`, { method: "POST", body: JSON.stringify({ name }) });
+      close();
+      changed();
+    };
+    const remove = async () => {
+      if (busy) return;
+      const ok = await ui.confirm({
+        title: t("Delete “{title}”?", { title: doc.title }),
+        message: t("This deletes the file {name}, the comments on it and its history. It cannot be undone.", { name: doc.name }),
+        confirmLabel: t("Delete"),
+        danger: true,
+        deletes: true,
+      });
+      if (!ok) return;
+      setBusy(true);
+      setProblem(null);
+      try {
+        await portal.api.json(url, { method: "DELETE" });
+        gone();
+        changed();
+      } catch (e) {
+        // Deleted already (another window): it is gone from the list too.
+        if (wasDeleted(e)) changed();
+        else setProblem(e.message);
+      } finally {
+        setBusy(false);
+      }
+    };
+    return h(
+      "li",
+      { className: "pd-row" },
+      renaming
+        ? h(RenameForm, { name: doc.name, compact: true, onSubmit: rename, onCancel: close })
+        : h(
+            React.Fragment,
+            null,
+            h(DocumentButton, { doc, onOpen }),
+            h(
+              "div",
+              { className: "pd-row-actions" },
+              h("button", { type: "button", ref: renameButton, className: "pd-row-action", title: t("Rename {name}", { name: doc.name }), "aria-label": t("Rename {name}", { name: doc.name }), onClick: () => setRenaming(true) }, h(Svg, { name: "pencil" })),
+              // Off by aria-disabled, not disabled: while the question is open the focus goes back to this button, and a disabled one keeps none.
+              h("button", { type: "button", className: "pd-row-action pd-row-danger", "aria-disabled": busy, "aria-busy": busy, title: t("Delete {name}", { name: doc.name }), "aria-label": t("Delete {name}", { name: doc.name }), onClick: () => void remove() }, h(Svg, { name: "trash" })),
+            ),
+          ),
+      problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("The document could not be deleted: {error}", { error: problem })),
+    );
+  }
+
+  /** The list's `ul`, and where the focus goes when one of its documents is deleted: to the one that took its place, or the last. */
+  function useKeepFocus(count) {
+    const list = React.useRef(null);
+    const at = React.useRef(null);
+    useEffect(() => {
+      if (at.current === null) return;
+      const rows = list.current?.querySelectorAll(".pd-open");
+      const next = rows?.[Math.min(at.current, rows.length - 1)];
+      at.current = null;
+      next?.focus();
+    }, [count]);
+    return { list, gone: (index) => () => void (at.current = index) };
+  }
+
   function FolderList({ onOpen }) {
-    const { body, error, retry } = useListed("/folders");
+    const { body, error, retry, reload } = useListed("/folders");
     if (error) return h(ui.LoadFailed, { error, onRetry: retry });
     if (!body) return h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") });
     // A folder whose documents could not be opened is said, with the reason: left out without a word it reads as one with none.
     const problems = (body.problems ?? []).map((problem) => h(ui.ErrorBanner, { key: `problem-${problem.id}` }, t("The documents in {folder} could not be opened: {error}", { folder: problem.path, error: problem.error })));
     if (!body.folders.length) return problems.length ? problems : h(ui.Empty, null, t("No folder has documents yet. A document is a Markdown file in a folder called documents, in the folder a chat works in."));
-    return [...problems, ...body.folders.map((folder) => h(FolderSection, { key: folder.id, folder, onOpen }))];
+    return [...problems, ...body.folders.map((folder) => h(FolderSection, { key: folder.id, folder, onOpen, reload }))];
   }
 
   /**
    * One folder's documents on the page, with Markdown files to be uploaded into it (the button, or dropped on it). One file
    * uploaded on its own is opened; with others, or with what could not be taken, the list stays to say so.
    */
-  function FolderSection({ folder, onOpen }) {
+  function FolderSection({ folder, onOpen, reload }) {
     const upload = useUpload(folder.id, (made, problems) => made.length === 1 && !problems.length && onOpen({ folder: folder.id, id: made[0].id }));
+    const keep = useKeepFocus(folder.documents.length);
     return h(
       "section",
       { className: "pd-folder pd-dropzone", "aria-labelledby": `pd-folder-${folder.id}`, ...upload.zone },
@@ -358,8 +469,8 @@ export default function (portal) {
       h(UploadProblems, { upload }),
       h(
         "ul",
-        { className: "pd-list" },
-        folder.documents.map((doc) => h("li", { key: doc.id }, h(DocumentButton, { doc, onOpen: () => onOpen({ folder: folder.id, id: doc.id }) }))),
+        { className: "pd-list", ref: keep.list },
+        folder.documents.map((doc, index) => h(DocumentRow, { key: doc.id, folder: folder.id, doc, onOpen: () => onOpen({ folder: folder.id, id: doc.id }), changed: reload, gone: keep.gone(index) })),
       ),
       h(DropHint, { upload }),
     );
@@ -459,7 +570,7 @@ export default function (portal) {
     // The document open on the page, or the list of them all.
     const [open, setOpen] = useState(linked);
     // A document open is the whole page, as a word processor's is: its sheet on the desk, and nothing of the list above it.
-    if (open) return h("div", { className: "pd-page pd-full" }, h(DocumentEditor, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null) }));
+    if (open) return h("div", { className: "pd-page pd-full" }, h(DocumentEditor, { ...open, key: `${open.folder}/${open.id}`, onBack: () => setOpen(null), onOpen: setOpen }));
     return h(
       "div",
       { className: "pd-page" },
@@ -474,11 +585,12 @@ export default function (portal) {
    * history. What is beside it is kept current as the page's list is.
    */
   function ChatDocuments({ chat, onOpen }) {
-    const { body, error, retry } = useListed(`/chats/${encodeURIComponent(chat.id)}/documents`);
+    const { body, error, retry, reload } = useListed(`/chats/${encodeURIComponent(chat.id)}/documents`);
     const [title, setTitle] = useState("");
     const [making, setMaking] = useState(false);
     const [problem, setProblem] = useState(null);
     const upload = useUpload(body?.folder.id, (made, problems) => made.length === 1 && !problems.length && onOpen({ folder: body.folder.id, id: made[0].id }));
+    const keep = useKeepFocus(body?.documents.length ?? 0);
     if (error) return h(ui.LoadFailed, { error, onRetry: retry });
     if (!body) return h(ui.RowsSkeleton, { rows: 3, label: t("Loading…") });
     const create = async () => {
@@ -507,7 +619,7 @@ export default function (portal) {
       problem && h(ui.ErrorBanner, { onClose: () => setProblem(null) }, t("The document could not be made: {error}", { error: problem })),
       h(UploadProblems, { upload }),
       body.documents.length
-        ? h("ul", { className: "pd-list" }, body.documents.map((doc) => h("li", { key: doc.id }, h(DocumentButton, { doc, onOpen: () => onOpen({ folder: body.folder.id, id: doc.id }) }))))
+        ? h("ul", { className: "pd-list", ref: keep.list }, body.documents.map((doc, index) => h(DocumentRow, { key: doc.id, folder: body.folder.id, doc, onOpen: () => onOpen({ folder: body.folder.id, id: doc.id }), changed: reload, gone: keep.gone(index) })))
         : h(ui.Empty, null, t("No documents in {folder} yet. Make one here, upload a Markdown file, or ask the agent to.", { folder: body.folder.name })),
       h(DropHint, { upload }),
     );
@@ -590,7 +702,7 @@ export default function (portal) {
       "div",
       { className: "pd-page pd-panel" },
       open?.id && folder
-        ? h(DocumentEditor, { folder, id: open.id, key: `${folder}/${open.id}`, draft, onBack: back, onExpand: () => portal.navigate(`/x/${portal.extension}/documents?${new URLSearchParams({ folder, doc: open.id })}`) })
+        ? h(DocumentEditor, { folder, id: open.id, key: `${folder}/${open.id}`, draft, onBack: back, onOpen: (next) => setOpen(next), onExpand: () => portal.navigate(`/x/${portal.extension}/documents?${new URLSearchParams({ folder, doc: open.id })}`) })
         : open?.id && !chatFolder.failed
           ? h(ui.RowsSkeleton, { rows: 4, label: t("Loading…") })
           : call && open?.writing && !open.id

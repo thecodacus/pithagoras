@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, utimesSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import express from 'express';
 import docsServer from '../server.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /**
@@ -40,12 +40,13 @@ async function portal(folders: Record<string, string>, options: { onStep?: (step
     log: (line: string) => logged.push(line),
     router,
     http: { json: express.json },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => options.sandbox ?? false },
     dataDir: () => options.data ?? DATA,
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
+      inFolder: (folder: string) => Object.keys(folders).filter((id) => ((() => { try { return realpathSync(folders[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
     },
   }, {
     dependencies: async () => true,
@@ -196,7 +197,8 @@ test('a document is named by its id: a path, a name or ../ in its place is refus
       for (const [method, suffix, body] of [['GET', '', undefined], ['PUT', '', { markdown: 'overwritten', base: 1 }], ['GET', '/history', undefined], ['GET', '/revisions/1', undefined], ['POST', '/restore', { revision: 1 }]] as const) {
         const answer = await docs.call(method, `/folders/${f}/documents/${id}${suffix}`, body);
         assert.equal(answer.status, 404, `${method} ${id}${suffix}`);
-        assert.deepEqual(answer.body, { error: 'There is no such document' });
+        // An id the store knows the form of, and has no document for, says so with `deleted` (what the page takes for a deletion); any other is only not found.
+        assert.deepEqual(answer.body, id === '0123456789abcdef' ? { error: 'There is no such document', code: 'deleted' } : { error: 'There is no such document' });
       }
     }
     assert.equal(readFileSync(path.join(folder, 'secret.md'), 'utf8'), '# Secret');
@@ -283,11 +285,17 @@ test('what a crash leaves (a temporary file, a stale index.lock) is cleared, and
   try {
     const temp = path.join(folder, 'documents', '.plan.md.0123456789ab.tmp');
     writeFileSync(temp, 'half a document');
+    // Left a while ago: a save of Files' that is under this moment writes such a file too, and is not removed (below).
+    utimesSync(temp, new Date(Date.now() - 120_000), new Date(Date.now() - 120_000));
+    const inFlight = path.join(folder, 'documents', '.other.md.fedcba987654.tmp');
+    writeFileSync(inFlight, 'a save that is under way');
     writeFileSync(path.join(storeOf(folder), 'git', 'index.lock'), '');
     // Not the store's: kept.
     writeFileSync(path.join(folder, 'documents', '.notes.tmp'), 'the agent\'s');
     assert.equal((await docs.call('PUT', url, { markdown: '# Plan\n\nTwo.\n', base: 1 })).body.revision, 2);
     assert.equal(existsSync(temp), false);
+    assert.equal(existsSync(inFlight), true, 'a temporary file that is not old is a save under way, and is left');
+    rmSync(inFlight);
     assert.equal(existsSync(path.join(storeOf(folder), 'git', 'index.lock')), false);
     assert.equal(existsSync(path.join(folder, 'documents', '.notes.tmp')), true);
 
@@ -417,7 +425,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
     import { chownSync, chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
     import path from 'node:path';
     import docsServer from ${JSON.stringify(new URL('../server.js', import.meta.url).href)};
-    import { resolveInside } from ${JSON.stringify(new URL('../../../core/server/src/workspace-files.ts', import.meta.url).href)};
+    import { folderFiles } from ${JSON.stringify(new URL('../../../core/server/src/folder-files.ts', import.meta.url).href)};
     const root = mkdtempSync(path.join(process.env.WHERE, 'docs-owner-'));
     try {
       const folder = path.join(root, 'project');
@@ -433,8 +441,8 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       const data = path.join(root, 'data');
       mkdirSync(data, { mode: 0o700 });
       const router = express.Router();
-      const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: { inside: resolveInside }, sandbox: { on: () => true }, dataDir: () => data,
-        chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => folder } }, { dependencies: async () => true });
+      const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: folderFiles, sandbox: { on: () => true }, dataDir: () => data,
+        chats: { list: () => [{ id: 'a', title: 'A' }], inFolder: () => [{ id: 'a', title: 'A' }], folder: () => folder } }, { dependencies: async () => true });
       const app = express(); app.use(router);
       const server = app.listen(0, '127.0.0.1'); await new Promise((r) => server.once('listening', r));
       const base = 'http://127.0.0.1:' + server.address().port;
@@ -520,6 +528,56 @@ test('a store that fails to open does not keep its database open on every reques
     assert.ok(open() - before < 10, `${open() - before} descriptors more after 20 requests`);
   } finally {
     await again.close();
+  }
+});
+
+/** More folders than the portal's listing keeps (2,000, folders before files), so that no file of the documents folder is in it. */
+function pastTheListing(dir: string) {
+  for (let i = 0; i <= 2000; i++) mkdirSync(path.join(dir, `pictures-${String(i).padStart(4, '0')}`));
+}
+
+test('a document is checked for an outside change by its name, so that a folder with more entries than a listing keeps does not hide it', async () => {
+  const { folder, docs, url } = await withDocument('docs-store-many-');
+  try {
+    const dir = path.join(folder, 'documents');
+    pastTheListing(dir);
+    // The agent rewrites it; the person, who was shown revision 1, saves.
+    writeFileSync(path.join(dir, 'plan.md'), '# Plan\n\nThe agent\'s, in a folder full of pictures.\n');
+    const stale = await docs.call('PUT', url, { markdown: '# Plan\n\nThe person\'s, on revision 1.\n', base: 1 });
+    assert.equal(stale.status, 409, JSON.stringify(stale.body));
+    assert.equal(stale.body.revision, 2);
+    assert.equal(stale.body.markdown, '# Plan\n\nThe agent\'s, in a folder full of pictures.\n');
+    assert.equal(readFileSync(path.join(dir, 'plan.md'), 'utf8'), '# Plan\n\nThe agent\'s, in a folder full of pictures.\n', 'the agent\'s text is not written over');
+    // Taken into the history as the agent's, so that it is not lost.
+    assert.equal(commits(folder), 2);
+    const history = (await docs.call('GET', `${url}/history`)).body;
+    assert.deepEqual(history.revisions.map((r: any) => [r.revision, r.author]), [[2, 'external'], [1, 'user']]);
+  } finally {
+    await docs.close();
+  }
+});
+
+test('a folder too big to be listed whole does not say that a document was never kept: its row stays until its file is seen to be gone', async () => {
+  const folder = folderWith('docs-store-many-gone-', { 'documents/.keep': '' });
+  const docs = await portal({ a: folder });
+  try {
+    const f = folderIdOf(folder);
+    // A new document whose commit never came: its row has no revision yet, and its file is taken in under its id.
+    docs.fault('write');
+    assert.equal((await docs.call('POST', `/folders/${f}/documents`, { title: 'Notes', markdown: '# Notes\n' })).status, 500);
+    const file = path.join(folder, 'documents', 'notes.md');
+    rmSync(file);
+    pastTheListing(path.join(folder, 'documents'));
+    await docs.call('GET', '/folders');
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(path.join(storeOf(folder), 'docs.sqlite'), { readonly: true });
+    try {
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM documents WHERE name = 'notes.md'").get().n, 1, 'the row is kept');
+    } finally {
+      db.close();
+    }
+  } finally {
+    await docs.close();
   }
 });
 

@@ -55,6 +55,8 @@ export interface Unsaved {
  * changed since it was read (`conflict`), a name that is taken (`exists`),
  * too large (`too_large`), the system refusing (`failed`), and a folder that
  * holds git work nothing else has (`unsaved`, with `unsaved` on the error).
+ * For `failed`, `errno` on the error is the system's own code (`ENOSPC`,
+ * `EACCES`, `EROFS`…) and `cause` the error it gave.
  */
 /** A folder the agents work in: see `folders`. */
 export interface AgentFolder {
@@ -71,9 +73,78 @@ export interface AgentFolder {
  * its first bytes say it is where it is a picture (PNG, JPEG, GIF, WebP) or a
  * clip a browser plays (WebM, MP4), whatever it is called; absent for any other.
  */
-export type OpenedFile = { fd: number; size: number; name: string; mimeType?: string };
+export type OpenedFile = { fd: number; size: number; name: string; mtime: number; change: string; mimeType?: string };
 
 export type FileRefusal = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
+
+/** What opens a file for `files.open` and `files.readBytes`, beyond the checks every path gets. */
+export interface FileOpenOptions {
+  /**
+   * `rel` must be a name in `base` itself, reached through no link: refused (`invalid`) when following links led it
+   * anywhere else, even to another file in the folder. For a file that is to be only what its name says.
+   */
+  direct?: boolean;
+  /** A file with a second name (a hard link, which may be outside the folder) is refused (`invalid`). */
+  alone?: boolean;
+  /** As for `FolderUse.likeParent`, and the file as well: one the agents could not read themselves is refused. */
+  likeParent?: boolean;
+  /** The chats whose agents work in the folder: see `FolderUse.chats`. */
+  chats?: readonly string[];
+}
+
+/**
+ * For what the portal reads or writes as root in a folder that an agent can write next to and so rename things into.
+ * The sandbox closes a folder the agent may not enter to root alone (`root:root` mode 0700, a file 0600), and the agent
+ * can rename it to the name of a folder the portal reads on its behalf (`documents`), or move such a file into it: then
+ * the portal hands the agent what it could not read itself. And it closes a subtree by its top folder only: what is
+ * inside keeps the rights the wider rule gave it, so a folder below a closed one is as closed as that one.
+ *
+ * With `likeParent` the folder, and a file in it, are told as the kernel would for the agents themselves, for the user
+ * and the groups the sandbox runs each as: the owner's bits if the agent's user owns it, else the group's if the group
+ * is one of the agent's (its own, or the sandbox group), else everyone's. Who owns a folder says nothing (a project is
+ * root's, with the sandbox's group set on it, and the closed folder in it is root's too). Every folder of the path from
+ * `/` down to the folder must be one they may search, as the kernel needs for a path, the folder itself, as it is held,
+ * one they may read and search for what is read from it (`list`, `read`, `readBytes`, `open`, `folder`), write in and search
+ * for what is changed in it (`write`, `makeFolder`, `removeFile`, `renameFile`, `sweepTemp`), or both for a folder that is held to
+ * (`identity`), and a file one they may read. In a sticky folder (mode 1777) what is taken away, renamed or replaced must
+ * be one of their own, as for the kernel. Refused (`invalid`) otherwise. Where the sandbox is off the agent is the
+ * portal's own user, and nothing is refused. POSIX ACLs are not read: the mode bits are what is asked, and the
+ * sandbox sets no ACL.
+ */
+export interface FolderUse {
+  likeParent?: boolean;
+  /**
+   * The chats whose agents work in the folder (their ids): every one of them must be able to use it, as what is read in it for one is
+   * handed to the others. Those that `chats.inFolder` gives (sessions of every kind, not the tasks of `chats.list` alone), and the session
+   * that makes the call, which a call made for an agent always names: where its folder leads is not for it to decide. The agent is not taken from the folder's path, which a link can lead into another
+   * agent's home: the sandbox runs a chat's agent by the workspace stored for that chat, and so does this. With `likeParent`
+   * and the sandbox on, none named, or one that is not known, is a refusal.
+   */
+  chats?: readonly string[];
+}
+
+/** What `removeFile` and `renameFile` take beyond `FileOpenOptions`. */
+export interface FileChangeOptions extends FileOpenOptions {
+  /**
+   * The folder the file is in must be this one, by its device and inode as `stat` gives them (numbers, text or bigint): another
+   * folder at that path, one swapped in since the caller looked, is refused (`conflict`) before anything is touched. It is told
+   * from the descriptor of the folder the call then works in, so the folder that was checked is the folder that is changed.
+   */
+  expect?: { dev: string | number | bigint; ino: string | number | bigint };
+}
+
+/**
+ * A file read, with what tells it changed. `change` is an opaque text that differs whenever the file was written
+ * (in place: its times; or put in place by a rename: its inode), so a caller that keeps it can tell a changed
+ * file from an unchanged one without reading it; compare it for equality only.
+ */
+export interface FileBytes {
+  bytes: Buffer;
+  /** The whole file's size, also when only its start was read. */
+  size: number;
+  mtime: number;
+  change: string;
+}
 
 export interface GitStepOptions {
   /** What the step reads on its standard input. */
@@ -175,11 +246,21 @@ export interface ServerPortal {
      * `download`, a file name, any file is sent to be saved. Closes the file
      * once sent, or at once when the response is gone already.
      */
-    send(req: Request, res: Response, file: OpenedFile, options?: { cache?: string; download?: string }): void;
+    send(req: Request, res: Response, file: Pick<OpenedFile, "fd" | "size" | "name" | "mimeType">, options?: { cache?: string; download?: string }): void;
   };
   chats: {
     get(id: string): Chat | undefined;
     list(): Chat[];
+    /**
+     * The sessions that work in a folder, of every kind: the tasks `list` gives, and also routine runs, conversations on the Agent page
+     * and in channels, and heartbeats, which `list` leaves out and which have the package's tools in their pi as the tasks do. Those
+     * whose workspace, stored for them and resolved as `folder` resolves it, is `folder` (a path from `folder(id)`). One session for each
+     * agent that has some there, not each session or each stored path: sessions are never removed (a routine that makes a fresh session
+     * for each run keeps every one), a stored path can be a link and an agent can make many of them, and what an agent can reach is the
+     * same from each of its sessions (the sandbox runs a session as the agent its stored workspace belongs to), so one stands for them all. For what is read
+     * or changed in a folder for every agent that works in it (`files.*` with `likeParent`: see `FolderUse.chats`).
+     */
+    inFolder(folder: string): Chat[];
     /**
      * The folder a chat's pi works in, on this disk: where a server half reads
      * and keeps what belongs to that chat. Throws when the chat is gone or its
@@ -241,9 +322,11 @@ export interface ServerPortal {
    * what the portal does for itself, for every server half to do the same.
    * The agent writes in that folder, links included, and the portal may run
    * with more rights than the agent does. So a path is checked as text and
-   * again where every link along it leads, a file is opened without following
-   * a link in its last place and used through what was opened, and a save is
-   * put in place whole. `base` is a folder from `chats.folder`; `rel` a path
+   * again where every link along it leads, the folder a file is in is held open
+   * (walked down from `base` without following a link, on Linux) and the file
+   * is made, opened and put in place in that folder, not in whatever the path
+   * leads to by then, a file is opened without following a link in its last
+   * place and used through what was opened, and a save is put in place whole. `base` is a folder from `chats.folder`; `rel` a path
    * in it, as the page sent it. What is refused throws an error with a `code`
    * (see FileRefusal). Use these rather than `fs` on a chat's folder: see
    * "A chat's folder" in the guide.
@@ -252,31 +335,93 @@ export interface ServerPortal {
     /** `rel` inside `base`, checked: throws for `..`, an absolute path, or a link that leads out. */
     inside(base: string, rel: string): string;
     /** What is directly in a folder, folders first; `.git` is left out. At most 2,000 entries, and `truncated` says when there were more. */
-    list(base: string, rel: string): { path: string; entries: FileEntry[]; truncated: boolean };
+    list(base: string, rel: string, options?: FolderUse): { path: string; entries: FileEntry[]; truncated: boolean };
     /** A file's text, or that it has none to show. */
-    read(base: string, rel: string): FileContent;
+    read(base: string, rel: string, options?: FolderUse): FileContent;
     /**
-     * Saves a file's text, at most 1 MB, through a file beside it put in place by a rename, keeping its mode and
-     * its owner. With `expected`, the modification time it was read at, a file changed since is refused
-     * (`conflict`); with `create`, one that is there already (`exists`).
+     * A file's bytes as they are, at most 1 MB (`too_large`), with its `change`. With `head`, only that many bytes
+     * from the start are read (0: none, to ask for `change` alone).
      */
-    write(base: string, rel: string, content: string, options?: { expected?: number; create?: boolean }): { size: number; mtime: number };
+    readBytes(base: string, rel: string, options?: FileOpenOptions & { head?: number }): FileBytes;
+    /**
+     * Saves a file's text or bytes, at most 1 MB, through a file beside it put in place by a rename (and the folder
+     * synced after, so it lasts through a crash), keeping its mode and its owner. With `expected`, the modification
+     * time it was read at, a file changed since is refused (`conflict`); with `create`, one that is there already
+     * (`exists`). The answer is the written file's own, with its `change`. With `direct`, `rel` must be a name in
+     * `base` itself, reached through no link (see FileOpenOptions). A file that is made, not replaced, has the
+     * folder's owner and group and is writable for the folder's group where the folder is, so that the agent, which
+     * may be another user than the portal, can go on editing it. Where the portal may not give a file away it stays
+     * in the portal's group, and is not writable for that group.
+     */
+    write(
+      base: string,
+      rel: string,
+      content: string | Uint8Array,
+      options?: FolderUse & { expected?: number; create?: boolean; direct?: boolean },
+    ): { size: number; mtime: number; change: string };
     /** Another name in the same folder, never over something there; a link is renamed as the link. The new path, from `base`. */
     rename(base: string, rel: string, name: string): string;
     /** What removing `rel` would lose that nothing else has, or null for nothing. */
     unsaved(base: string, rel: string): Promise<Unsaved | null>;
     /** Removes a file, or a folder and all in it, a link as the link. A folder holding git work only it has is refused (`unsaved`) unless `discard`. */
     remove(base: string, rel: string, options?: { discard?: boolean }): Promise<void>;
-    /** A new folder `name` in the folder `rel`; its path, from `base`. */
-    makeFolder(base: string, rel: string, name: string): string;
-    /** The checked path of a folder in `base`, for what reads the whole of it (an archive). */
-    folder(base: string, rel: string): string;
     /**
-     * A plain file opened once, for sending: read from `fd`, not from the path
-     * again. The caller closes it. `mimeType` says what it is by its bytes, for
-     * a picture or a clip; what it may be is the caller's to decide.
+     * Takes away one plain file, and nothing else: a link or a folder is refused (`invalid`), where `remove` takes the link
+     * or all of the folder. For a server half that deletes a file of its own that the agent can change as it runs: the
+     * folder it is in is held open and the name is taken from it, so the file goes from the folder that was checked
+     * whatever its path leads to by then, and what is swapped onto the name meanwhile is never followed (a link goes as the
+     * link) or taken as a folder (it stays, with all in it). `direct` and `alone` as for `open`; with `likeParent` the folder
+     * `base` must be one the agent could use (`invalid` otherwise, see `FolderUse`). `missing` for a file that is not
+     * there. `expect`: the folder must be that one (`conflict` otherwise).
      */
-    open(base: string, rel: string): OpenedFile;
+    removeFile(base: string, rel: string, options?: FileChangeOptions): void;
+    /**
+     * Another name for one plain file in the folder it is in, never over something there, and a link or a folder is
+     * refused (`invalid`). The folder is held as for `removeFile`, and the new name is made as a second name of the file
+     * (a hard link, which the system refuses in the call itself for a name that is taken: `exists`, whatever an agent
+     * made there since the look) before the old one is removed, so a crash between leaves the file with both names, never
+     * with none; its owner, mode and content stay, and its `change` does not. A name the agent swapped for another thing
+     * meanwhile is `conflict`, and nothing is renamed. If the old name cannot be removed the new one is given up again, but
+     * never when it is the file's only name (a folder took the old name), where the rename stands. A name the file system does
+     * not tell from the old one (capitals, or the form of a letter, on macOS, Windows or a casefold folder) is the old name
+     * itself: `exists`. Where hard links are not possible it is a rename after a look. `direct` and `alone` as for `open`,
+     * `likeParent` and `expect` as for `removeFile`; the new path, from `base`.
+     */
+    renameFile(base: string, rel: string, name: string, options?: FileChangeOptions): string;
+    /**
+     * A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. With `likeParent`
+     * (and `chats`) the folder it is made in must be one the agents could write in and reach, else it is refused (`invalid`) and nothing is made.
+     */
+    makeFolder(base: string, rel: string, name: string, options?: FolderUse): string;
+    /**
+     * The checked path of a folder in `base`, for what reads the whole of it (an archive). With `direct`, a folder
+     * that is a name in `base` itself and no link (`invalid` otherwise), for a half that keeps something in a
+     * folder of that name.
+     */
+    folder(base: string, rel: string, options?: FolderUse & { direct?: boolean }): string;
+    /**
+     * Which folder `rel` is, on this system: its device and inode as text, read from the folder as it is held, so that it is
+     * the folder the checks were made on and not what its path leads to by then. No two folders have the same pair at once, a
+     * folder that is moved keeps it and one that is deleted and made again does not: for a server half that holds to a folder
+     * and must tell it from another at the same path. A number can be given to the next folder made, so it says that a
+     * folder is the one it was while it exists, not for ever. `direct` and `likeParent` as for `folder`; with `likeParent` the
+     * folder that is given an identity is the one that passed (a closed folder is `invalid`, also when it was swapped in
+     * between a look at the path and this call).
+     */
+    identity(base: string, rel: string, options?: FolderUse & { direct?: boolean }): { dev: string; ino: string };
+    /**
+     * Removes the temporary files that saves in the folder `rel` left behind when they were cut off, and returns
+     * their names. Only those older than `olderThanMs` (by default a minute): a save of the portal's own or of
+     * another half that is under way has such a file for a moment, and it is not removed under it.
+     */
+    sweepTemp(base: string, rel: string, options?: FolderUse & { olderThanMs?: number }): string[];
+    /**
+     * A plain file opened once, to read or send: read from `fd`, not from the path again, and with its `mtime` and
+     * `change` as they were when it was opened. A file kept open this way is the file the name had then, whatever
+     * is put in its place after. `mimeType` says what it is by its first bytes, for a picture or a clip; what it may
+     * be is the caller's to decide. The caller closes it.
+     */
+    open(base: string, rel: string, options?: FileOpenOptions): OpenedFile;
     /**
      * Keeps `data` as a new file called `name` in the folder `rel`: what a
      * server half makes for the person, a picture say. Written beside its place

@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import express from 'express';
 import docsServer from '../server.js';
 import { asksAgent } from '../web/mention.js';
-import { resolveInside } from '../../../core/server/src/workspace-files.ts';
+import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
 
 /**
@@ -80,12 +80,13 @@ async function portal(chats: Record<string, string>, options: Options = {}) {
     log: (line: string) => logged.push(line),
     router,
     http: { json: express.json },
-    files: { inside: resolveInside },
+    files: folderFiles,
     sandbox: { on: () => false },
     dataDir: () => DATA,
     chats: {
       list: () => state.order.map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(chats[id]),
+      inFolder: (folder: string) => state.order.filter((id) => ((() => { try { return realpathSync(chats[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
       // As the portal's: the chat's pi is started if it was let go, and the package's extension is rung on its bus.
       async tell(id: string, data: unknown) {

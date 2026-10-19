@@ -16,6 +16,8 @@
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/download           the document's file, as an attachment
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id                    one document's Markdown, and its revision
  *   PUT  /api/x/pithagoras-docs/folders/:folder/documents/:id                    saves it { markdown, base }: 409 when base is not its revision and its changes meet the later ones
+ *   POST /api/x/pithagoras-docs/folders/:folder/documents/:id/rename              gives its file another name { name }, which is a revision of its own (409 for a name that is taken)
+ *   DELETE /api/x/pithagoras-docs/folders/:folder/documents/:id                  deletes the document: its file, its comments and its history on the page
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/events             a stream of its revisions as they are made (server-sent events)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/history            its revisions, newest first (?before=, ?limit=)
  *   GET  /api/x/pithagoras-docs/folders/:folder/documents/:id/revisions/:revision  the text of one of them
@@ -39,7 +41,9 @@
  * message is where the document stands, so that a page that was away (a
  * reconnect, or a change between its load and its stream) finds out at once,
  * whatever it missed. A message says which revision, who made it and when; the
- * text is asked for from the document's own route. A change to the document's
+ * text (and the name, which a rename is a revision for) is asked for from the
+ * document's own route. A document that is deleted is told as `deleted`, once, and
+ * the page keeps its text: nothing more is said of it, and a request for it is a 404. A change to the document's
  * comments is told too (`threads`, with when), and the threads are asked for
  * from their own route. While a stream is open the
  * folder is looked at every couple of seconds for what changed outside the
@@ -73,11 +77,12 @@ import { lstatSync, watch } from "node:fs";
 import path from "node:path";
 import { ensureDependencies } from "./deps.js";
 import { explained } from "./errors.js";
+import { forChats } from "./files.js";
 import { LEGACY_STORE, placeStore } from "./place.js";
 import { hearPings, wakeMessage } from "./ping.js";
 import { SECRET, SECRET_WARNING } from "./secret.js";
 import { frontMatterEnd } from "./src/frame.js";
-import { DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
+import { callingChat, DocError, DOCUMENTS, isDocumentId, Store } from "./store.js";
 import { documentTools } from "./tools.js";
 import { asksAgent } from "./web/mention.js";
 
@@ -413,17 +418,57 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   }
 
   /**
+   * The sessions that work in a folder now (their ids): the agents of all of them must be able to use what the portal reads or writes there for them
+   * (`likeParent` of `files.*`), which takes no agent from the folder's path. Of every kind, not the tasks alone: the tools are in a routine run's, an
+   * Agent-page conversation's and a heartbeat's pi as in a task's. And `caller`, the session an agent's call is made for, which is always one of them,
+   * whatever its own folder leads to now.
+   */
+  function chatsIn(folder, caller = callingChat.getStore()) {
+    const ids = new Set(portal.chats.inFolder(folder).map((chat) => chat.id));
+    if (caller) ids.add(caller);
+    return [...ids];
+  }
+
+  /**
    * A folder's `documents` folder, or nothing when it has none. Only a folder
    * of that name itself: a link called `documents` leads to another folder of
-   * the project, which is not the documents' to be listed or written.
+   * the project, which is not the documents' to be listed or written. And not one
+   * the sandbox closed to the agents of its chats (`likeParent`), or one that is
+   * reached through such a folder: the agent can rename such a folder to this name,
+   * and the portal would list and watch it as root. `chats` are the ids of those
+   * sessions, or looked up.
    */
-  function documentsOf(folder) {
+  function documentsOf(folder, chats = chatsIn(folder)) {
     try {
-      const dir = portal.files.inside(folder, DOCUMENTS);
-      // `inside` follows links: one that was followed comes back under another path.
-      return dir === path.join(folder, DOCUMENTS) && lstatSync(dir).isDirectory() ? dir : null;
+      return portal.files.folder(folder, DOCUMENTS, { direct: true, likeParent: true, chats });
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Whether `folder` itself is one the agents of `chats` may not look into: the walk to it, and the folder, as they would have it. Asked before anything in the
+   * folder is looked at as the portal (root), so that what is there (a store of an earlier version, say) is not told to an agent that cannot see it.
+   */
+  function unreachableTo(folder, chats) {
+    try {
+      portal.files.folder(folder, "", { likeParent: true, chats });
+      return false;
+    } catch (e) {
+      return e?.code === "invalid";
+    }
+  }
+
+  /**
+   * Whether the agents of `chats` are refused the documents folder of `folder`: it is a folder that is there and not theirs to use, or the folder it is in is not
+   * theirs to look into (then it is not told which: it is the same answer whatever is there).
+   */
+  function closedTo(folder, chats) {
+    if (unreachableTo(folder, chats)) return true;
+    try {
+      return lstatSync(path.join(folder, DOCUMENTS)).isDirectory() && documentsOf(folder, chats) === null;
+    } catch {
+      return false;
     }
   }
 
@@ -528,14 +573,14 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       }
     }
     const id = idOf(folder);
-    if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document");
+    if (!make && !hasStore(id, folder)) throw new DocError(404, "There is no such document", { code: "deleted" });
     const opening = (async () => {
       if (!Database) {
         if (!(await ready)) throw new DocError(503, "The documents store's packages are not installed yet");
         Database = (await import("better-sqlite3")).default;
       }
-      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), inside: portal.files.inside, Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
-      return Store.open(folder, { dir, inside: portal.files.inside, Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
+      const dir = await placed(() => placeStore({ data: data(), id, folder, documents: documentsOf(folder), files: forChats(portal.files, chatsIn(folder)), Database, sandbox: portal.sandbox.on(), faults, log: (line) => portal.log(line) }));
+      return Store.open(folder, { dir, files: portal.files, chats: () => chatsIn(folder), Database, faults, gitTimeoutMs, onRevision: (change) => live.publish(folder, change), onThreads: (change) => live.publish(folder, { ...change, threads: true }) });
     })();
     stores.set(folder, opening);
     return opening;
@@ -559,7 +604,9 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
       documentTools(pi, chat, {
         folder: () => portal.chats.folder(chat.id),
         store: storeFor,
-        hasDocuments: (folder) => documentsOf(folder) !== null,
+        hasDocuments: (folder, caller) => documentsOf(folder, chatsIn(folder, caller)) !== null,
+        closed: (folder, caller) => closedTo(folder, chatsIn(folder, caller)),
+        unreachable: (folder, caller) => unreachableTo(folder, chatsIn(folder, caller)),
         folderId: idOf,
         titleOf,
         headed,
@@ -1085,6 +1132,21 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.json({ ...doc, ...warn(markdown) });
   }));
 
+  portal.router.post("/folders/:folder/documents/:id/rename", small, route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    res.json(await (await storeFor(folder.path)).rename(id, { name: req.body?.name }));
+  }));
+
+  portal.router.delete("/folders/:folder/documents/:id", route(async (req, res) => {
+    const folder = folderOf(req);
+    const id = documentOf(req);
+    const { comments } = await (await storeFor(folder.path)).delete(id);
+    // A comment that was waiting to ask the agent has nothing to ask about any more.
+    for (const comment of comments) unwake(folder, comment);
+    res.json({ deleted: true });
+  }));
+
   portal.router.get("/folders/:folder/documents/:id/events", route(async (req, res) => {
     const folder = folderOf(req);
     const id = documentOf(req);
@@ -1111,11 +1173,17 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     // A page that lost the stream asks again after this long, with its last id: the first message tells it where things stand, so it is not needed.
     res.write("retry: 2000\n\n");
-    const write = ({ revision, author, at, threads }) =>
-      // A change to the comments is no revision: it has no id, which a reconnecting page would take for the last one it saw.
-      res.write(threads ? `event: threads\ndata: ${JSON.stringify({ at })}\n\n` : `id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`);
+    const write = ({ revision, author, at, threads, deleted }) =>
+      // A change to the comments is no revision: it has no id, which a reconnecting page would take for the last one it saw. Nor is a deletion.
+      res.write(
+        deleted
+          ? `event: deleted\ndata: ${JSON.stringify({ at })}\n\n`
+          : threads
+            ? `event: threads\ndata: ${JSON.stringify({ at })}\n\n`
+            : `id: ${revision}\nevent: revision\ndata: ${JSON.stringify({ revision, author, at })}\n\n`,
+      );
     write(now);
-    for (const change of queued) if (change.threads || change.revision > now.revision) write(change);
+    for (const change of queued) if (change.threads || change.deleted || change.revision > now.revision) write(change);
     send = write;
     const ping = setInterval(() => res.write(": ping\n\n"), pingMs);
     ping.unref?.();

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Ran, Runner } from "./compose";
 import { OWNER_LABEL } from "./docker";
@@ -16,6 +16,12 @@ import { checked, DockerError, logs as written, request } from "./engine";
  * where it mounts a folder outside the chat's, runs privileged, with added capabilities or with the machine's devices,
  * shares the machine's network, processes or IPC, drops its confinement, or uses a network or a volume the project did
  * not make. What compose would do before that (build an image, run a program of its own) is refused from the file.
+ *
+ * With the sandbox on, the agent runs as a user of its own, and a container that ran as root would read and change
+ * in the folders it mounts what that user may not. So then everything Docker does with the chat's folder is done as
+ * the agent (AgentUser): compose runs as it, every container runs as it, with its groups and no way to gain more,
+ * and a folder to mount that is not there is made by it, not by Docker as root. An image that needs root inside its
+ * container does not work then.
  */
 
 export const FOLDER_LABEL = "pithagoras.folder";
@@ -41,7 +47,7 @@ type Inspected = {
   Id: string;
   Name: string;
   State?: { Status?: string };
-  Config?: { Tty?: boolean; Labels?: Labels };
+  Config?: { Tty?: boolean; Labels?: Labels; User?: string };
   HostConfig?: {
     Privileged?: boolean;
     CapAdd?: string[] | null;
@@ -54,6 +60,7 @@ type Inspected = {
     UsernsMode?: string;
     CgroupnsMode?: string;
     SecurityOpt?: string[] | null;
+    GroupAdd?: string[] | null;
     MaskedPaths?: string[] | null;
     ReadonlyPaths?: string[] | null;
     VolumesFrom?: string[] | null;
@@ -64,9 +71,34 @@ type Inspected = {
 
 /** compose's normalized project, as much of it as is looked at here. */
 type Project = {
-  services?: Record<string, { labels?: Record<string, string>; provider?: unknown; build?: { network?: string; privileged?: boolean; entitlements?: string[]; labels?: Record<string, string> } }>;
+  services?: Record<
+    string,
+    {
+      labels?: Record<string, string>;
+      provider?: unknown;
+      build?: { network?: string; privileged?: boolean; entitlements?: string[]; labels?: Record<string, string> };
+      user?: string;
+      group_add?: (string | number)[];
+      security_opt?: string[];
+      volumes?: { type: string; source?: string }[];
+      post_start?: Hook[];
+      pre_stop?: Hook[];
+    }
+  >;
   models?: Record<string, unknown>;
 } & Partial<Record<"networks" | "volumes" | "secrets" | "configs", Record<string, { external?: boolean; driver?: string; driver_opts?: Record<string, string>; labels?: Record<string, string> } | null>>>;
+
+/** A command compose runs in a service's container as it starts or stops it, as whom it says. */
+type Hook = { user?: string; privileged?: boolean };
+
+/** The chat's agent, where it runs as a user of its own (the sandbox on): who it is, and a command run as it. */
+export interface AgentUser {
+  uid: number;
+  gid: number;
+  /** Its other groups: the ones it writes the folders it shares through. */
+  groups: number[];
+  run(argv: string[]): Promise<{ code: number | null; stderr: string }>;
+}
 
 const filters = (labels: string[]) => encodeURIComponent(JSON.stringify({ label: labels }));
 const nameOf = (raw: { Names?: string[]; Name?: string }) => (raw.Names?.[0] ?? raw.Name ?? "").replace(/^\//, "");
@@ -114,8 +146,11 @@ export function agentDocker({ owner, runner, onHost, inside }: AgentOptions) {
     return stdout;
   }
 
-  /** What a chat in `folder` may do. `folder` is the chat's folder, from `portal.chats.folder`. */
-  return function forFolder(folder: string) {
+  /**
+   * What a chat in `folder` may do. `folder` is the chat's folder, from `portal.chats.folder`; `user` its agent, where
+   * it runs as a user of its own.
+   */
+  return function forFolder(folder: string, user?: () => Promise<AgentUser | undefined>) {
     const labels = { [OWNER_LABEL]: owner, [FOLDER_LABEL]: folder };
     const ours = Object.entries(labels).map(([key, value]) => `${key}=${value}`);
 
@@ -145,11 +180,20 @@ export function agentDocker({ owner, runner, onHost, inside }: AgentOptions) {
     }
 
     /** What is refused in the project before compose does anything with it: what it would build or run itself. */
-    function refusedInFile(project: Project): string[] {
+    function refusedInFile(project: Project, as: AgentUser | undefined): string[] {
       const out: string[] = [];
       if (Object.keys(project.models ?? {}).length) out.push("models: not run here");
       for (const [name, service] of Object.entries(project.services ?? {})) {
         if (service.provider) out.push(`${name}: a provider service runs a program of compose's own, which is not done here`);
+        // A hook runs as its service's user unless it says another: with the sandbox on, that is the agent.
+        if (as) {
+          for (const kind of ["post_start", "pre_stop"] as const) {
+            for (const hook of service[kind] ?? []) {
+              if (hook.user) out.push(`${name}: its ${kind} runs as ${hook.user}, and with the sandbox on everything runs as the agent`);
+              if (hook.privileged) out.push(`${name}: its ${kind} runs privileged`);
+            }
+          }
+        }
         if (service.build?.network === "host") out.push(`${name}: is built on the machine's network`);
         if (service.build?.privileged) out.push(`${name}: is built privileged`);
         if (service.build?.entitlements?.length) out.push(`${name}: is built with ${service.build.entitlements.join(", ")}`);
@@ -174,8 +218,33 @@ export function agentDocker({ owner, runner, onHost, inside }: AgentOptions) {
       for (const kind of ["networks", "volumes"] as const) for (const item of Object.values(project[kind] ?? {})) if (item) item.labels = { ...item.labels, ...labels };
     }
 
+    /** With the sandbox on, each service runs as the agent, with its groups, and cannot gain more: whatever its file says. */
+    function asTheAgent(project: Project, as: AgentUser): void {
+      for (const service of Object.values(project.services ?? {})) {
+        service.user = `${as.uid}:${as.gid}`;
+        service.group_add = as.groups.map(String);
+        service.security_opt = [...new Set([...(service.security_opt ?? []), "no-new-privileges:true"])];
+      }
+    }
+
+    /** A folder of the chat's to mount that is not there yet, made by the agent: Docker would make it as root. */
+    async function makeMounts(project: Project, hostFolder: string, as: AgentUser): Promise<void> {
+      for (const service of Object.values(project.services ?? {})) {
+        for (const mount of service.volumes ?? []) {
+          if (mount.type !== "bind" || !mount.source) continue;
+          const rel = path.posix.relative(hostFolder, mount.source);
+          // One outside the folder is refused once compose has made the container.
+          if (rel === ".." || rel.startsWith("../") || path.posix.isAbsolute(rel)) continue;
+          const local = path.join(folder, ...rel.split("/").filter(Boolean));
+          if (existsSync(local)) continue;
+          const ran = await as.run(["mkdir", "-p", "--", local]);
+          if (ran.code !== 0) throw new DockerError(`${rel || "."} could not be made for a container to mount: ${ran.stderr || `exit ${ran.code}`}`);
+        }
+      }
+    }
+
     /** What is refused in what compose made: read back from Docker, which is what would run. */
-    async function refusedInMade(project: string, hostFolder: string, made: Inspected[]): Promise<string[]> {
+    async function refusedInMade(project: string, hostFolder: string, made: Inspected[], as: AgentUser | undefined): Promise<string[]> {
       const out: string[] = [];
       const own = new Set(made.flatMap((c) => [c.Id, nameOf(c)]));
       const volumes = new Map<string, Promise<{ Driver?: string; Options?: Record<string, string> | null; Labels?: Labels }>>();
@@ -200,7 +269,18 @@ export function agentDocker({ owner, runner, onHost, inside }: AgentOptions) {
           if (mode === "host") say(`shares the machine's ${what}`);
           else if (mode?.startsWith("container:") && !own.has(mode.slice("container:".length))) say(`shares the ${what} of ${mode.slice("container:".length)}, which is not this project's`);
         }
-        for (const option of host.SecurityOpt ?? []) if (!/^no-new-privileges([:=]true)?$/.test(option)) say(`is run with ${option}`);
+        // Docker turns SELinux's labels off by itself for a container that is privileged or shares the machine's processes or IPC, each said above.
+        const unlabelled = host.Privileged || host.PidMode === "host" || host.IpcMode === "host";
+        for (const option of host.SecurityOpt ?? []) {
+          if (!/^no-new-privileges([:=]true)?$/.test(option) && !(unlabelled && option === "label=disable")) say(`is run with ${option}`);
+        }
+        if (as) {
+          const agent = `${as.uid}:${as.gid}`;
+          if (c.Config?.User !== agent) say(`runs as ${c.Config?.User || "root"}, not as the agent (${agent})`);
+          const extra = (host.GroupAdd ?? []).filter((g) => !as.groups.map(String).includes(g));
+          if (extra.length) say(`is given the groups ${extra.join(", ")}`);
+          if (!(host.SecurityOpt ?? []).some((option) => /^no-new-privileges([:=]true)?$/.test(option))) say("can gain privileges (no-new-privileges is not set)");
+        }
         // `systempaths=unconfined` does not reach Docker as an option: compose sends these lists empty instead.
         if (host.MaskedPaths?.length === 0) say("is run with the kernel's files under /proc unmasked");
         if (host.ReadonlyPaths?.length === 0) say("is run with the kernel's files under /proc writable");
@@ -259,6 +339,9 @@ export function agentDocker({ owner, runner, onHost, inside }: AgentOptions) {
       const hostFolder = await onHost(folder);
       const hostFile = path.posix.join(hostFolder, ...rel.split(path.sep));
       const project = projectName(folder, rel);
+      const as = await user?.();
+      // compose, too, reads the chat's folder (the file, what an image is built from) as the agent.
+      const who = as ? { uid: as.uid, gid: as.gid, groups: as.groups } : undefined;
       return queued(project, async () => {
         const fromDockerfile = {
           services: {
@@ -270,26 +353,30 @@ export function agentDocker({ owner, runner, onHost, inside }: AgentOptions) {
           },
         };
         const read = await ok(
-          runner(["-p", project, "-f", composeFile ? hostFile : "-", "config", "--format", "json"], { folder: hostFolder, input: composeFile ? undefined : JSON.stringify(fromDockerfile), signal }),
+          runner(["-p", project, "-f", composeFile ? hostFile : "-", "config", "--format", "json"], { folder: hostFolder, input: composeFile ? undefined : JSON.stringify(fromDockerfile), signal, as: who }),
           `read ${rel}`,
         );
         const config = JSON.parse(read) as Project;
-        const refused = refusedInFile(config);
+        const refused = refusedInFile(config, as);
         if (refused.length) throw new DockerError(`Refused, and nothing was made:\n- ${refused.join("\n- ")}`, 403);
         label(config);
+        if (as) {
+          asTheAgent(config, as);
+          await makeMounts(config, hostFolder, as);
+        }
         const input = JSON.stringify(config);
         const asRead = ["-p", project, "--project-directory", path.posix.dirname(hostFile), "-f", "-"];
-        await ok(runner([...asRead, "up", "--no-start", "--build", "--remove-orphans"], { folder: hostFolder, input, signal }), `make ${rel}'s containers`);
+        await ok(runner([...asRead, "up", "--no-start", "--build", "--remove-orphans"], { folder: hostFolder, input, signal, as: who }), `make ${rel}'s containers`);
 
         const listed = await checked<Listed[]>("GET", `/containers/json?all=1&filters=${filters([`${PROJECT_LABEL}=${project}`])}`);
         const made = await Promise.all(listed.map((c) => checked<Inspected>("GET", `/containers/${c.Id}/json`)));
-        const wrong = await refusedInMade(project, hostFolder, made);
+        const wrong = await refusedInMade(project, hostFolder, made, as);
         if (wrong.length) {
           // What was made for this run and not started goes.
           for (const c of made) if (c.State?.Status === "created") await request("DELETE", `/containers/${c.Id}?force=true`).catch(() => {});
           throw new DockerError(`Refused, and none of it was started:\n- ${wrong.join("\n- ")}`, 403);
         }
-        await ok(runner([...asRead, "up", "--detach", "--no-recreate", "--no-build"], { folder: hostFolder, input, signal }), `start ${rel}'s containers`);
+        await ok(runner([...asRead, "up", "--detach", "--no-recreate", "--no-build"], { folder: hostFolder, input, signal, as: who }), `start ${rel}'s containers`);
         return { project, containers: (await list()).filter((c) => c.project === project) };
       });
     }

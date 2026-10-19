@@ -65,6 +65,12 @@ The most specific rule decides.
 | Read-only | read it and run what is in it, not change it | readable and runnable by everyone, writable only by root |
 | Read & write | everything | owned by the group `pi-sandbox`, writable by it; new files keep the group |
 
+What you make in [Files](/guide/files) (a new file, an upload, a new folder) or
+what the portal saves into a project follows the same rule: it gets the owner and
+group of the folder it is made in, and is writable by that group where the folder is.
+Under a read & write rule that is `pi-sandbox`, so the agent can edit it; in an
+agent's own folder it is that agent's. It is not left to root, as it was.
+
 A path no rule names keeps the permissions it has. For most of the system that
 means readable and not changeable. The agents' homes and their `HOME` folders
 are not rules: each belongs to its own agent, as above.

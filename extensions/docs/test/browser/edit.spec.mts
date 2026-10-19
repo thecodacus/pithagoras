@@ -1381,3 +1381,48 @@ test('the bar keeps the room for the name of the document at a window of 1060 pi
   await page.setViewportSize({ width: 1700, height: 800 });
   await expect(modeSwitch(page).locator('.pd-modelabel').first()).toBeVisible();
 });
+
+/**
+ * What the bar says of the text, in each language, as the page would: the four states with the revision after them (a revision of one digit and of
+ * two). A wide face (DejaVu Sans, where nothing else is installed) is stood for by letter spacing, which makes the text of any face wider.
+ */
+const SAYS = {
+  en: ['Saved', 'Saving…', 'Unsaved changes', 'Not saved'],
+  de: ['Gespeichert', 'Wird gespeichert…', 'Nicht gespeicherte Änderungen', 'Nicht gespeichert'],
+};
+for (const [language, labels] of Object.entries(SAYS)) {
+  test(`[${language}] the bar keeps its height whatever it says of the text, at every window from 1060 to 1600 pixels with the sidebar open and a face that is wider than the usual: a bar that wraps moves its buttons between the press and the release of a click`, async ({ page }) => {
+    await page.addInitScript((lang) => {
+      localStorage.setItem('pithagoras.language', lang);
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = '*, *::before, *::after { letter-spacing: 0.6px !important; }';
+        document.head.append(style);
+      });
+    }, language);
+    const store = new Store();
+    await open(page, store);
+    await expect(editorOf(page)).toContainText('Ship it on Friday.');
+    // A text that does not fit is cut, and has the whole of it in its tooltip.
+    await expect(state(page)).toHaveAttribute('title', `${labels[0]} · Revision 3`);
+    const texts = labels.flatMap((label) => [`${label} · Revision 3`, `${label} · Revision 12`]);
+    const moving: string[] = [];
+    for (let width = 1060; width <= 1600; width += 50) {
+      await page.setViewportSize({ width, height: 800 });
+      // What the bar says changes while it is typed in, and with it the room it needs: each of the texts is told here, as the page would.
+      const heights = await page.locator('.pd-titlebar').evaluate((bar, told) => {
+        const say = bar.querySelector('.pd-state') as HTMLElement;
+        const own = say.textContent;
+        const found: Record<string, number> = {};
+        for (const text of told) {
+          say.textContent = text;
+          found[text] = Math.round(bar.getBoundingClientRect().height);
+        }
+        say.textContent = own;
+        return found;
+      }, texts);
+      if (new Set(Object.values(heights)).size !== 1) moving.push(`${width}px: ${JSON.stringify(heights)}`);
+    }
+    expect(moving).toEqual([]);
+  });
+}

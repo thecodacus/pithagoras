@@ -16,7 +16,8 @@
  *     overwritten by an agent that read an older text
  *   - an edit is quoted text and its replacement, all of them or none
  *   - it makes a new document, never one in place of another, and cannot
- *     delete, restore or rewrite the history
+ *     rename or delete a document (that is the person's, on the page), restore
+ *     or rewrite the history
  *   - it does not write a secret into a document: the history would keep it
  *   - a comment is the agent's, never the person's, and it answers a comment by
  *     changing only the passage the comment is on, and saying in the thread what
@@ -36,13 +37,16 @@
  */
 import { DocError } from "./errors.js";
 import { secretsIn } from "./secret.js";
-import { DOCUMENTS, isDocumentId, MAX_BODY, MAX_COMMENTS } from "./store.js";
+import { callingChat, DOCUMENTS, isDocumentId, MAX_BODY, MAX_COMMENTS } from "./store.js";
 import { MAX_QUOTE } from "./web/anchor.js";
 
 /** The most that one doc_edit changes: more is a rewrite, and a new revision of its own is the clearer way. */
 const MAX_EDITS = 50;
 /** How much of a document one doc_read returns before it says where to read on. */
 const READ_CHARS = 60_000;
+
+/** What the agent is told of a documents folder it may not use. */
+const CLOSED = "the documents folder of this project is closed to this chat's agent, so it is not used";
 
 class Refusal extends Error {
   constructor(code, message) {
@@ -152,7 +156,8 @@ function describeThreads(threads, text, which) {
  * Registers the tools in a chat's pi. `deps` is what the server half has: the
  * chat's folder (`folder()`, which throws when it is gone), the folder's
  * store (`store(folder, { make })`), whether it has a documents folder yet
- * (`hasDocuments`), the id the page knows a folder by (`folderId`), a
+ * (`hasDocuments(folder, chat)`, `closed(folder, chat)`: whether it is one this chat's agent may not use, and `unreachable(folder, chat)`: whether the folder
+ * itself is one it may not look into), the id the page knows a folder by (`folderId`), a
  * document's title from the start of its text (`titleOf`, `headBytes`), the
  * Markdown a new document called by a title starts with (`headed`) and the
  * portal's log.
@@ -165,6 +170,15 @@ export function documentTools(pi, chat, deps) {
     } catch {
       throw new Refusal("not_found", "This chat's folder is gone");
     }
+  }
+
+  /**
+   * The folder's store, but not for a chat whose agent may not look into the folder: it is refused before the store (and what the portal, as root, would look
+   * at in the folder to find or move one) is touched, with the same words whatever is in the folder.
+   */
+  async function storeOf(folder, options) {
+    if (deps.unreachable(folder, chat.id)) throw new Refusal("closed", CLOSED);
+    return deps.store(folder, options);
   }
 
   /** What a chat sees of a folder's documents: the project's, and the chat's own. */
@@ -181,7 +195,8 @@ export function documentTools(pi, chat, deps) {
         return new Refusal("refused", "the documents store of this folder cannot be used just now. Tell the person: the Documents page says what is wrong and how to mend it. Do not try to repair it yourself");
       }
       // The comments' refusals say what they are: a thread that is not there, a quote that is not in the text, a comment too long.
-      if (e.extra?.code && e.extra.code !== "revision_mismatch") return new Refusal(e.extra.code, e.message);
+      // (A document that is not there says `deleted` to the page, which tells it from the portal's own 404; to the agent it is `not_found` as it was.)
+      if (e.extra?.code && e.extra.code !== "revision_mismatch" && e.extra.code !== "deleted") return new Refusal(e.extra.code, e.message);
       if (e.status === 404) return new Refusal("not_found", e.message);
       if (e.status === 413) return new Refusal("too_large", "a document can be at most 1 MB");
       if (e.extra?.exists !== undefined) return new Refusal("exists", e.message);
@@ -192,10 +207,13 @@ export function documentTools(pi, chat, deps) {
     return new Error("The documents store could not do that");
   }
 
-  /** The tool's work, with what it throws made into what the agent reads. */
+  /**
+   * The tool's work, with what it throws made into what the agent reads. It is done as this chat's: what the store does for it, the agent of this
+   * chat must be able to use the folder for (`callingChat`), whatever chats the folder's own list has.
+   */
   const guarded = (work) => async (_callId, params) => {
     try {
-      return await work(params ?? {});
+      return await callingChat.run(chat.id, () => work(params ?? {}));
     } catch (e) {
       throw failed(e);
     }
@@ -204,7 +222,7 @@ export function documentTools(pi, chat, deps) {
   /** A document the chat sees, by its id, with the store it is in: or `not_found`. */
   async function documentOf(id) {
     if (!isDocumentId(id)) throw new Refusal("not_found", "There is no document with that id. Ids come from doc_list and doc_create");
-    const store = await deps.store(folderOf());
+    const store = await storeOf(folderOf());
     const doc = await store.read(id);
     if (!sees(doc)) throw new Refusal("not_found", "There is no document with that id. Ids come from doc_list and doc_create");
     return { store, doc };
@@ -227,7 +245,10 @@ export function documentTools(pi, chat, deps) {
     execute: guarded(async ({ scope = "all" }) => {
       if (!["chat", "project", "all"].includes(scope)) throw new Refusal("invalid", "scope is chat, project or all");
       const folder = folderOf();
-      const listed = deps.hasDocuments(folder) ? await (await deps.store(folder, { make: true })).list(deps.headBytes) : [];
+      const there = deps.hasDocuments(folder, chat.id);
+      // A documents folder this chat's agent may not use is said, not taken for none: "No documents yet" would be untrue, and would send the agent to doc_create.
+      if (!there && deps.closed(folder, chat.id)) throw new Refusal("closed", CLOSED);
+      const listed = there ? await (await storeOf(folder, { make: true })).list(deps.headBytes) : [];
       const documents = listed
         .filter((doc) => sees(doc) && (scope === "all" || doc.scope === scope))
         .map(({ head, ...doc }) => ({ ...doc, path: pathOf(doc.name), title: deps.titleOf(head, doc.name) }))
@@ -315,7 +336,7 @@ export function documentTools(pi, chat, deps) {
       if (scope !== "project" && scope !== "chat") throw new Refusal("invalid", "scope is project or chat");
       markdown = deps.headed(markdown ?? "", title);
       if (secretsIn(markdown).length) throw new Refusal("secret", "The text looks like it holds a secret (a private key or a token). A document keeps every revision: leave it out");
-      const store = await deps.store(folderOf(), { make: true });
+      const store = await storeOf(folderOf(), { make: true });
       const doc = await store.create({ title, markdown, scope, chat: scope === "chat" ? chat.id : null, author: "agent", exclusive: true });
       const shown = deps.titleOf(Buffer.from(markdown, "utf8"), doc.name);
       return text(`Created "${shown}" (id ${doc.id}, ${pathOf(doc.name)}, revision ${doc.revision}, ${kind(doc)} document).`, about("create", doc, shown));
