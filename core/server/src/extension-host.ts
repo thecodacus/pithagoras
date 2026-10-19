@@ -13,7 +13,9 @@ import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
-import { baseDir, folderPath, listDir, makeFolder, openDownload, readText, removeEntry, renameEntry, resolveInside, unsavedAt, writeText } from "./workspace-files.js";
+import { baseDir, folderPath, listDir, makeFolder, openDownload, openPicture, readText, removeEntry, renameEntry, resolveInside, saveNewFile, unsavedAt, writeText } from "./workspace-files.js";
+import { openVideo } from "./video-files.js";
+import { sendFile } from "./api/files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
@@ -190,6 +192,9 @@ function portalFor(ext: Running): ServerPortal {
         ext.upgrade = handler;
       },
       endWithLogin: watchStream,
+      // A file of no type said is sent as bytes, to be saved: it is drawn by nothing.
+      send: (req, res, file, options = {}) =>
+        sendFile(req, res, { ...file, mimeType: file.mimeType ?? "application/octet-stream" }, options.cache ?? "private, no-cache", options.download ?? (file.mimeType ? undefined : file.name)),
     },
     chats: {
       get: (id) => {
@@ -510,7 +515,9 @@ export const folderFiles: ServerPortal["files"] = {
   remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true),
   makeFolder: (base, rel, name) => makeFolder(base, rel, name),
   folder: (base, rel) => folderPath(base, rel),
-  open: (base, rel) => openDownload(base, rel),
+  open: ((base: string, rel: string, options?: { as: "picture" | "video" }) =>
+    options?.as === "picture" ? openPicture(base, rel) : options?.as === "video" ? openVideo(base, rel) : openDownload(base, rel)) as ServerPortal["files"]["open"],
+  create: (base, rel, name, data) => saveNewFile(base, rel, name, data),
 };
 
 /** Whether a server half is keeping this chat's pi. */

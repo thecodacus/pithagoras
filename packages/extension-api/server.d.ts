@@ -7,7 +7,7 @@
  */
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import type { Router, json, raw, text } from "express";
+import type { Request, Response, Router, json, raw, text } from "express";
 
 /** A chat, as an extension's server half is told of it. */
 export interface Chat {
@@ -56,6 +56,10 @@ export interface Unsaved {
  * too large (`too_large`), the system refusing (`failed`), and a folder that
  * holds git work nothing else has (`unsaved`, with `unsaved` on the error).
  */
+/** A file opened by `files.open`, to read from `fd` and send. With `as`, what its bytes say it is. */
+export type OpenedFile = { fd: number; size: number; name: string };
+export type OpenedMedia = OpenedFile & { mimeType: string };
+
 export type FileRefusal = "invalid" | "missing" | "conflict" | "exists" | "too_large" | "failed" | "unsaved";
 
 export interface GitStepOptions {
@@ -124,6 +128,15 @@ export interface ServerPortal {
      * stops the watching, for a response that ended by itself.
      */
     endWithLogin(end: () => void): () => void;
+    /**
+     * Sends a file opened by `files.open` as the portal sends its own: with
+     * its type, a policy that keeps it from running anything, a version a
+     * browser revalidates (304), and the part a player asks for (`Range`).
+     * `cache` is the Cache-Control (default `private, no-cache`); with
+     * `download`, a file name, it is sent to be saved and never shown. Closes
+     * the file once sent, or at once when the response is gone already.
+     */
+    send(req: Request, res: Response, file: OpenedFile & { mimeType?: string }, options?: { cache?: string; download?: string }): void;
   };
   chats: {
     get(id: string): Chat | undefined;
@@ -211,7 +224,20 @@ export interface ServerPortal {
     /** The checked path of a folder in `base`, for what reads the whole of it (an archive). */
     folder(base: string, rel: string): string;
     /** A plain file opened once, for sending: read from `fd`, not from the path again. The caller closes it. */
-    open(base: string, rel: string): { fd: number; size: number; name: string };
+    open(base: string, rel: string): OpenedFile;
+    /**
+     * A picture (PNG, JPEG, GIF or WebP, at most 25 MB) or a clip the portal
+     * plays, by its bytes and not its name, opened as `open` opens a file, with
+     * the type its bytes say. Anything else is refused (`invalid`, `too_large`).
+     */
+    open(base: string, rel: string, options: { as: "picture" | "video" }): OpenedMedia;
+    /**
+     * Keeps `data` as a new file called `name` in the folder `rel`: what a
+     * server half makes for the person, a picture say. Written beside its place
+     * and put there whole, never over something that is there: a name that is
+     * taken gets a number ("cat (2).png"). Returns its path, from `base`.
+     */
+    create(base: string, rel: string, name: string, data: Buffer): string;
   };
   git: {
     /**
