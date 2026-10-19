@@ -1037,6 +1037,10 @@ watch the folder that is there now (`watch.current()` says whether the folder at
 its place is still the one watched). A system that cannot watch (too many
 watches, a file system that has none) is `failed`, with its code in `errno`, and
 what to fall back on, looking at the folder every so often, is the extension's own.
+A watch keeps the folder, and the one it is in, open (two descriptors) until it
+ends or you call `close()`: a file system such as ext4 gives a folder made at the
+place of one just removed the same inode number, and only a folder that is still
+open cannot have it, so `current()` and `gone` tell them apart.
 
 ```js
 const watch = portal.files.watch(folder, "documents", ({ gone }) => {
