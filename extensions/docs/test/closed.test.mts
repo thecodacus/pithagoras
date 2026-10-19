@@ -446,7 +446,8 @@ test('[root] the agents of every chat that works in the folder are asked, not on
   });
   chmodSync(w.dir, 0o2770);
   for (const name of readdirSync(w.dir)) chmodSync(path.join(w.dir, name), 0o660);
-  const both = await portal({ a: w.folder, b: w.folder });
+  // (The second chat's stored workspace is another spelling of the same folder: the portal gives one session for each stored workspace.)
+  const both = await portal({ a: w.folder, b: `${w.folder}/.` });
   try {
     const listed = await both.agent('a')('doc_list', {});
     isClosed(listed);
