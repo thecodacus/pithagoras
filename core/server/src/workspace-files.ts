@@ -16,7 +16,6 @@ import {
   readdirSync,
   realpathSync,
   renameSync,
-  rmSync,
   statSync,
   unlinkSync,
   watch as watchPath,
@@ -834,7 +833,7 @@ export function writeText(
       return { size: Number(after.size), mtime: mtimeOf(after), change: changeOf(after) };
     } catch (e) {
       if (fd !== undefined) closeSync(fd);
-      rmSync(held.at(tempName), { force: true });
+      dropTemp(held.at(tempName));
       throw writeFailure(e);
     }
   } finally {
@@ -1469,6 +1468,19 @@ export function numbered(name: string, n: number): string {
 }
 
 /**
+ * Takes the temporary file of a write or an upload away, by `unlink`, which never removes a folder: the agent can swap
+ * the file for a folder, and a failing removal must not hide the error that led here or keep the caller from closing
+ * what it holds. Whatever is not a file there any more is left alone.
+ */
+function dropTemp(temp: string): void {
+  try {
+    unlinkSync(temp);
+  } catch {
+    // Gone already, or no longer ours.
+  }
+}
+
+/**
  * Where an uploaded file goes: a temporary file beside its place, and the call
  * that puts it there once all of it has arrived.
  *
@@ -1500,13 +1512,13 @@ export function uploadTarget(
   } catch (e) {
     if (fd !== undefined) {
       closeSync(fd);
-      rmSync(temp, { force: true });
+      dropTemp(temp);
     }
     held.close();
     throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
   }
   const abandon = () => {
-    rmSync(temp, { force: true });
+    dropTemp(temp);
     held.close();
   };
   const finish = () => {
@@ -1529,11 +1541,11 @@ export function uploadTarget(
             syncFolder(held);
             return path.relative(base, path.join(parent, numberedName));
           }
-          rmSync(temp, { force: true });
+          dropTemp(temp);
           throw ioFailure(e, "The file could not be uploaded", "Nothing was changed.");
         }
       }
-      rmSync(temp, { force: true });
+      dropTemp(temp);
       throw new FileError("exists", `Too many files called "${clean}" here`);
     } finally {
       held.close();

@@ -62,6 +62,29 @@ test('a sender that goes away mid-file is an interrupted upload, and what came i
   done();
 });
 
+test('an upload that fails after the agent swapped its temporary file for a folder tells its own error and keeps no folder open', { skip: !existsSync('/proc/self/fd') }, async () => {
+  const { base, dir, done } = setup();
+  const open = () => readdirSync('/proc/self/fd').length;
+  const before = open();
+  for (let i = 0; i < 20; i++) {
+    const body = (async function* () {
+      yield Buffer.from('half of a file');
+      // The agent takes the temporary file away and makes a folder of that name, before the sender goes.
+      const temp = path.join(dir, readdirSync(dir).find((n) => n.endsWith('.upload')));
+      rmSync(temp);
+      mkdirSync(temp);
+      throw Object.assign(new Error('aborted'), { code: 'ECONNRESET' });
+    })();
+    let got;
+    try { await uploadStream(base, '', 'cut.bin', body); } catch (e) { got = e; }
+    assert.ok(got instanceof FileError, `round ${i}: ${got && got.message}`);
+    assert.deepEqual([got.code, got.message], ['failed', UPLOAD_INTERRUPTED]);
+    rmSync(path.join(dir, readdirSync(dir).find((n) => n.endsWith('.upload'))), { recursive: true });
+  }
+  assert.ok(open() <= before + 2, `descriptors: ${before} before, ${open()} after`);
+  done();
+});
+
 test('a stream cannot be sent out of the folder, by path or by name', async () => {
   const { base, dir, outside, done } = setup();
   symlinkSync(outside, path.join(dir, 'escape'));
