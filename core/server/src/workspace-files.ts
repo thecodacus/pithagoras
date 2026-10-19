@@ -985,7 +985,7 @@ export async function removeEntry(base: string, rel: unknown, discard = false): 
       if (e.code === "ENOENT") return undefined;
       throw e;
     });
-    if (st) await removeIn(held, name, st.isDirectory());
+    if (st) await removeIn(held.at(name), st.isDirectory());
   } catch (e) {
     throw ioFailure(e, "It could not be deleted", "Nothing more was changed.");
   } finally {
@@ -997,16 +997,25 @@ export async function removeEntry(base: string, rel: unknown, discard = false): 
 const CHANGED_WHILE_REMOVED = "It changed while it was deleted, and what it is now was left";
 
 /**
- * Removes `name` in the held folder: `folder` says whether it was a folder (not a link to one) when it was looked at.
- * A folder is opened from the held one without following a link (as holdFolder walks), emptied through its own
- * descriptor, one name at a time and each the same way, and then its name is taken away; anything else goes by
- * `unlink`, which never follows a link. So what goes is what is in the folder that was checked, whatever an agent swaps
- * in on the way: a link put where a folder was goes as the link it is, and what it leads to stays; a folder put where
- * a file was is left. Off the thread for each name, not by rmSync: a folder with many files is seconds on the thread
- * that serves every chat. A name that has gone since it was listed is what was asked for.
+ * How deep a folder is gone into to delete it: each folder on the way is held open while what is in it goes, so an agent's folder a million
+ * deep would take as many of the portal's descriptors. Beyond what a path could reach before (PATH_MAX, 4096 bytes, is about 2048 folders of
+ * one letter), it is refused.
  */
-async function removeIn(held: Held, name: string, folder: boolean): Promise<void> {
-  const place = held.at(name);
+const MAX_REMOVE_DEPTH = 2048;
+
+/** How many names in a folder are taken away at once: as fs.rm takes them, without putting every one on the thread in one go. */
+const UNLINKS_AT_ONCE = 64;
+
+/**
+ * Removes what is at `place`, a name in a held folder (see holdFolder): `folder` says whether it was a folder (not a link to one) when it
+ * was looked at. A folder that is empty goes by `rmdir`; one that is not is opened without following a link (as holdFolder walks), emptied
+ * through its own descriptor, each folder in it the same way, and then goes. Anything else goes by `unlink`. Neither follows a link, so
+ * what goes is what is in the folder that was checked, whatever an agent swaps in on the way: a link put where a folder was goes as the
+ * link it is, and what it leads to stays; a folder put where a file was is left. The names are the bytes the system has, not text, so a
+ * name that is not UTF-8 goes too. Off the thread, not by rmSync: a folder with many files is seconds on the thread that serves every
+ * chat. A name that has gone since it was listed is what was asked for.
+ */
+async function removeIn(place: string | Buffer, folder: boolean, depth = 0): Promise<void> {
   if (!folder) {
     try {
       await unlink(place);
@@ -1021,28 +1030,59 @@ async function removeIn(held: Held, name: string, folder: boolean): Promise<void
     }
     return;
   }
+  // An empty folder goes at once, and needs no right to read it, as fs.rm has it.
+  try {
+    await rmdir(place);
+    return;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return;
+    // A link or a file took the folder's name since it was looked at.
+    if (code === "ENOTDIR") return removeIn(place, false);
+    if (code !== "ENOTEMPTY" && code !== "EEXIST") throw e;
+  }
+  if (depth >= MAX_REMOVE_DEPTH) throw new FileError("failed", `It is more than ${MAX_REMOVE_DEPTH} folders deep, which is not deleted from here`);
   let fd: number;
   try {
     fd = openSync(place, OPEN_FOLDER);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return;
-    // A link or a file took the folder's name since it was looked at (a link is ENOTDIR too: O_DIRECTORY is looked at before O_NOFOLLOW).
-    if (code === "ELOOP" || code === "ENOTDIR") return removeIn(held, name, false);
+    // A link (O_DIRECTORY is looked at before O_NOFOLLOW, so it is ENOTDIR too) or a file took its name since.
+    if (code === "ELOOP" || code === "ENOTDIR") return removeIn(place, false);
     throw e;
   }
-  const inner = heldOf(fd, place);
   try {
-    const entries = await readdir(inner.here, { withFileTypes: true });
-    // What is not a folder goes all at once, as fs.rm takes it; the folders one at a time, so that only one is held open at each depth.
+    // The folder as a path for the names in it: by its descriptor where descriptors can be named, else by the path (see holdFolder).
+    const here = Buffer.from(namesDescriptors() ? named(fd) : place);
+    const inside = (name: Buffer) => Buffer.concat([here, Buffer.from("/"), name]);
+    let entries;
+    try {
+      entries = await readdir(here, { withFileTypes: true, encoding: "buffer" });
+    } catch (e) {
+      // Taken away since it was opened: what was asked for.
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw e;
+    }
     // Every name is done with before the folder's descriptor is closed: its number names this folder only while it is open.
-    const failed = (await Promise.allSettled(entries.filter((entry) => !entry.isDirectory()).map((entry) => removeIn(inner, entry.name, false)))).find(
-      (outcome) => outcome.status === "rejected",
-    );
-    if (failed) throw failed.reason;
-    for (const entry of entries) if (entry.isDirectory()) await removeIn(inner, entry.name, true);
+    const files = entries.filter((entry) => !entry.isDirectory());
+    let next = 0;
+    let failed: unknown;
+    const unlinking = async () => {
+      while (next < files.length) {
+        try {
+          await removeIn(inside(files[next++].name), false);
+        } catch (e) {
+          failed ??= e;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(UNLINKS_AT_ONCE, files.length) }, unlinking));
+    if (failed) throw failed;
+    // The folders one at a time, so that only one is held open at each depth.
+    for (const entry of entries) if (entry.isDirectory()) await removeIn(inside(entry.name), true, depth + 1);
   } finally {
-    inner.close();
+    closeSync(fd);
   }
   try {
     await rmdir(place);

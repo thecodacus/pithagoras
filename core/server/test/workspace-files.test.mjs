@@ -1033,6 +1033,49 @@ test('a folder in what is deleted swapped for a link as it is reached: the link 
   done();
 });
 
+test('a delete takes what fs.rm took: a name that is not UTF-8, an empty folder the portal may not read, and a folder that went while it was deleted', { skip: process.platform === 'darwin' && 'APFS takes no name that is not UTF-8' }, async () => {
+  const { dir, base, done } = setup();
+  const tree = path.join(dir, 'tree');
+  mkdirSync(path.join(tree, 'a'), { recursive: true });
+  mkdirSync(path.join(tree, 'b'));
+  writeFileSync(path.join(tree, 'a', 'one.txt'), 'x');
+  writeFileSync(path.join(tree, 'b', 'two.txt'), 'x');
+  // "café" in Latin-1, as a zip made on Windows leaves it: bytes that are not UTF-8.
+  writeFileSync(Buffer.concat([Buffer.from(`${tree}/`), Buffer.from([0x63, 0x61, 0x66, 0xe9])]), 'x');
+  mkdirSync(path.join(tree, 'locked'));
+  chmodSync(path.join(tree, 'locked'), 0o000);
+  // A folder that is taken away by someone else after it is opened and before it is listed: the second listing, of a or b.
+  const real = fs.promises.readdir;
+  let listings = 0;
+  fs.promises.readdir = async (where, options) => {
+    if (++listings === 2) rmSync(realpathSync(where), { recursive: true });
+    return real(where, options);
+  };
+  syncBuiltinESMExports();
+  try {
+    await removeEntry(base, 'tree', true);
+  } finally {
+    fs.promises.readdir = real;
+    syncBuiltinESMExports();
+  }
+  assert.ok(listings >= 2, 'a folder went while it was deleted');
+  assert.ok(!existsSync(tree), 'and all of it went');
+  done();
+});
+
+test('a folder deeper than a delete goes is refused, and what the portal held on the way is let go', { skip: process.platform !== 'linux' && 'where a folder is held by its path, the length of the path stops it first' }, async () => {
+  const { dir, base, top } = setup();
+  // Made a folder at a time from the one before, as an agent can: no path is long enough to name the deepest.
+  execFileSync(process.execPath, ['-e', `const fs = require('fs'); process.chdir(${JSON.stringify(dir)}); fs.mkdirSync('deep'); process.chdir('deep'); for (let i = 0; i < 2100; i++) { fs.mkdirSync('d'); process.chdir('d'); } fs.writeFileSync('f', 'x');`]);
+  try {
+    assert.equal(await codeOf(() => removeEntry(base, 'deep', true)), 'failed');
+    assert.ok(existsSync(path.join(dir, 'deep')), 'what is too deep is left');
+    assert.match(await removeEntry(base, 'deep', true).catch((e) => e.message), /more than 2048 folders deep/);
+  } finally {
+    execFileSync('rm', ['-rf', top]);
+  }
+});
+
 test('a rename is done in the folder that was checked: refused when a link took its place before it is held, and in the folder that is held after', () => {
   for (const [point, outcome] of [[FIRST, 'invalid'], [{ names: ['renameSync'], when: () => true }, 'none']]) {
     const { aside, outside, base, swap, done } = swappable();
