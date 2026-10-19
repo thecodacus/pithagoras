@@ -56,6 +56,16 @@ export interface Unsaved {
  * too large (`too_large`), the system refusing (`failed`), and a folder that
  * holds git work nothing else has (`unsaved`, with `unsaved` on the error).
  */
+/** A folder the agents work in: see `folders`. */
+export interface AgentFolder {
+  path: string;
+  /** Its agent's name for an agent's home, else its place under the workspace root. */
+  name: string;
+  kind: "agent" | "project" | "chat";
+  /** The first agent's home, which the sidebar calls Home. */
+  home?: true;
+}
+
 /** A file opened by `files.open`, to read from `fd` and send. With `as`, what its bytes say it is. */
 export type OpenedFile = { fd: number; size: number; name: string };
 export type OpenedMedia = OpenedFile & { mimeType: string };
@@ -100,6 +110,19 @@ export interface ServerPortal {
    * does with it. Those that build on it start after it, and are stopped before it and started again whenever it is.
    */
   provide(factory: (consumer: { name: string }) => unknown): void;
+  /**
+   * The folders the agents work in, each by its real path: what a server half
+   * that keeps something for what the agents made there (a gallery) looks
+   * through, and hears of when one goes.
+   */
+  folders: {
+    /** Every agent's home, every project, and every folder a chat of any kind works in, each once, with what the person calls it. One that is gone is not listed. */
+    list(): AgentFolder[];
+    /** Whether a folder, by its real path, is one the agents may work in: an agent's home, or one inside the workspace root. Only from one of these is what the agents made there to be served. */
+    allowed(folder: string): boolean;
+    /** The portal deleted one: a project with its folder, or an agent with its home. `folder` is where it really was, as `list` named it. */
+    on(event: "removed", handler: (folder: string) => void): void;
+  };
   tools: {
     /**
      * Says which of the tools its pi extension registers (`chats.extend`) it

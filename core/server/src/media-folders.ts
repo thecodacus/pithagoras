@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { agentsRoot, listAgents } from "./agents.js";
+import { listAgents } from "./agents.js";
+import { folderAllowed } from "./agent-folders.js";
 import { getDb, getSession } from "./db.js";
 import { listProjects } from "./projects.js";
-import { isUnderText, isWithinText, pathBelow, realPath } from "./within.js";
+import { isUnderText } from "./within.js";
 import { workspaceRoot } from "./workspaces.js";
 import { FileError, baseDir } from "./workspace-files.js";
 
@@ -30,6 +31,8 @@ export interface MediaRow {
   path: string;
 }
 
+export { folderAllowed, folderLabel } from "./agent-folders.js";
+
 export const newId = (): string => randomBytes(6).toString("hex");
 
 /** The chat of a file is not there any more. */
@@ -39,15 +42,6 @@ export class ChatGone extends FileError {
   }
 }
 
-/** What a folder is called to the person: its agent for an agent's home, else its place under the workspace root (a project's name, or the way to a folder in one). `home` marks the first agent's home. */
-export function folderLabel(folder: string): { name: string; home: boolean } {
-  const agents = listAgents();
-  const agent = agents.find((a) => realPath(a.home) === folder);
-  // Named after its agent, as the sidebar names it. The first agent's home stays the one that is Home.
-  if (agent) return { name: agent.name, home: agent === agents[0] };
-  const inRoot = pathBelow(realPath(workspaceRoot()) ?? workspaceRoot(), folder);
-  return { name: inRoot || path.basename(folder), home: false };
-}
 
 /**
  * The folder of a chat, real; the reason it is not there otherwise. What a pass
@@ -81,19 +75,6 @@ export function folderOf(sessionId: string): string | undefined {
   }
 }
 
-/**
- * Whether a folder, real, is one a file may be found in or served from: the
- * home of an agent, a folder made for one in `agents/` (that of an agent that was
- * deleted with its folder kept stays one, with its files, for the agent
- * made under the same name to take up again) or inside the workspace root, as
- * a chat's folder has to be. Asked once for all the folders a pass looks at.
- */
-export function folderAllowed(): (real: string) => boolean {
-  const homes = new Set(listAgents().map((a) => realPath(a.home)));
-  const made = realPath(agentsRoot());
-  const root = realPath(workspaceRoot());
-  return (real) => homes.has(real) || (made !== null && path.dirname(real) === made) || (root !== null && isWithinText(root, real));
-}
 
 /** The real folder a file that was found is in, the same for all of a pass; the reason it cannot be used otherwise. */
 export function foundFolder(folder: string, folders: Map<string, string | FileError>, what: string): string {

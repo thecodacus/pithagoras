@@ -19,6 +19,7 @@ import { sendFile } from "./api/files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
+import { folderAllowed, listFolders } from "./agent-folders.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -68,6 +69,13 @@ interface Running {
   sig: string;
   /** The tools its pi extension registers now, where that follows its settings (`tools.offer`). */
   offers?: () => OfferedTool[];
+  /** What it is told when the portal deletes a folder the agents work in (`folders.on("removed")`). */
+  removed: ((folder: string) => void)[];
+}
+
+/** The portal deleted a folder the agents worked in, `folder` being where it really was: each server half is told. */
+export function folderRemoved(folder: string): void {
+  for (const ext of running.values()) for (const told of ext.removed) guarded(ext.half.name, "hearing of a folder that was removed", () => told(folder));
 }
 
 /** A tool a server half says it offers now: see `tools.offer`. */
@@ -193,6 +201,14 @@ function portalFor(ext: Running): ServerPortal {
       if (typeof factory !== "function") throw new TypeError("provide takes a function: (consumer) => what that consumer is given");
       ext.provider = factory;
     },
+    folders: {
+      list: () => listFolders(),
+      allowed: (folder) => folderAllowed()(folder),
+      on(event, handler) {
+        if (event !== "removed") throw new TypeError(`There is no folder event "${String(event)}": there is "removed"`);
+        ext.removed.push(handler);
+      },
+    },
     tools: {
       offer(names) {
         if (typeof names !== "function") throw new TypeError("offer takes a function: () => the tools offered now");
@@ -286,7 +302,7 @@ async function stop(ext: Running): Promise<void> {
 }
 
 async function start(half: ServerHalf, sig: string, uses: Set<string>): Promise<void> {
-  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig };
+  const ext: Running = { half, router: express.Router(), stops: [], opens: [], life: new EventEmitter(), events: [], factories: [], holds: new Map(), apis: new Map(), uses, sig, removed: [] };
   try {
     // By its revision: the same file changed is another module, and the one already loaded is not served again.
     const stopper = await within(

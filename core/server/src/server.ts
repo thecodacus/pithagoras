@@ -67,7 +67,7 @@ import {
   updateSession,
 } from "./db.js";
 import { checkWorkspace, workspaceRoot } from "./workspaces.js";
-import { insideReal, isWithinText } from "./within.js";
+import { insideReal, isWithinText, realPath } from "./within.js";
 import { agentHome, agentHomePath } from "./agent-home.js";
 import { dataFolder } from "./data-dir.js";
 import { resolveChannelSession } from "./agent.js";
@@ -91,7 +91,7 @@ import { sweep } from "./login-streams.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter, noteLoadedExtensions, syncExtensionServers } from "./api/extensions.js";
 import { installDefaultExtensions, stopInstallingDefaults } from "./default-extensions.js";
-import { extensionRoutes, openingFor, stopServerHalves } from "./extension-host.js";
+import { extensionRoutes, folderRemoved, openingFor, stopServerHalves } from "./extension-host.js";
 import { channelsRouter } from "./api/channels.js";
 import { removeRoutines, routinesIn, routinesRouter, switchOffRoutines } from "./api/routines.js";
 import { filesRouter } from "./api/files.js";
@@ -844,10 +844,13 @@ app.delete("/api/projects/:name", async (req, res) => {
       if (late.some((r) => routineSupervisor.isRunning(r.slug))) {
         return res.status(409).json({ error: "A routine started running in this project meanwhile. Wait for it to finish, or stop it." });
       }
+      // Where it really is, while it is there to say: what the server halves were told of it is that.
+      const gone = realPath(project.path) ?? project.path;
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
       // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
       forgetPicturesIn(project.path);
       forgetVideosIn(project.path);
+      folderRemoved(gone);
       clearProjectTools(project.name);
       clearProjectAgent(project.name);
       const switchedOff = switchOffRoutines([...routines, ...late]);
@@ -900,6 +903,7 @@ app.delete("/api/agents/:id", async (req, res) => {
       for (const chat of chats) await sessions.discard(chat.id);
       // The jobs they started go with them, in a folder that is kept as well: nothing would be left to list or stop them.
       const jobsStopped = await stopJobsIn(agent.home);
+      const home = realPath(agent.home) ?? agent.home;
       deleteAgent(agent.id, { deleteFolder: req.query.folder === "delete" });
       // What it said about tools: an agent made later under the same name starts from the default.
       clearAgentTools(agent.id);
@@ -909,6 +913,7 @@ app.delete("/api/agents/:id", async (req, res) => {
       if (req.query.folder === "delete") {
         forgetPicturesIn(agent.home);
         forgetVideosIn(agent.home);
+        folderRemoved(home);
       }
       deleteNotesOf(agent.id);
       // With its folder they have nowhere left to run, and an agent made under the
