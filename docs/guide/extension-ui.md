@@ -277,7 +277,7 @@ prefix of your own: the stylesheet is the page's.
 | | |
 | --- | --- |
 | `Markdown` | Markdown as the conversation draws it |
-| `Select`, `Switch`, `SwitchRow`, `Segments`, `Field` | Controls and their labels |
+| `Select`, `Switch`, `SwitchRow`, `Segments`, `Field` | Controls and their labels. `Switch` is for what takes effect at once; a choice in a form that is acted on later ("Amend", "Draft") is a plain `<input type="checkbox">`, which the portal draws in its own look on every page, as it does its own forms' |
 | `Menu` | A button that opens a list of choices, drawn over the page, with the keys of a menu (arrows, Home, End, Enter, Escape, which gives the focus back). `<ui.Menu label="Download" items={[{ key: "md", label: "Markdown", href, download: "note.md" }, { key: "x", label: "Other", onSelect }]}>…</ui.Menu>`: its children are what the button holds, `className` styles it, `buttonRef` is a ref to it (to give the focus back), `placement` is `"below"` (above where there is no room) or `"beside"`; a choice is a button (`onSelect`) or a link (`href`, `download`) and may have an `icon` |
 | `IconButton`, `TextButton` | A small button with an icon in it, named by its `label`; a labelled button for a bar of small controls (`primary`, `danger`) |
 | `PageHeader`, `Stat`, `Section`, `CollapsibleSection` | The card at the top of a page, and sections under it |
