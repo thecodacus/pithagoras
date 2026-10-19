@@ -14,6 +14,8 @@ import { watchStream } from "../login-streams.js";
 
 /** A page that does not read what it is sent is let go of rather than held in memory. */
 const MOST_UNREAD = 8 * 1024 * 1024;
+/** The longest name a page gives its ask. */
+const MAX_TOKEN = 64;
 
 export function pushesRouter(): Router {
   const router = express.Router();
@@ -39,10 +41,12 @@ export function pushesRouter(): Router {
     });
   });
 
-  /** The extension and topic a request names, or a 400. */
-  const named = (body: unknown): { extension: string; topic: string } | undefined => {
-    const { extension, topic } = (body ?? {}) as { extension?: unknown; topic?: unknown };
-    return validName(extension) && validTopic(topic) ? { extension, topic } : undefined;
+  /** The extension and topic a request names, with the page's name for its ask if it gave one, or a 400. */
+  const named = (body: unknown): { extension: string; topic: string; token?: string } | undefined => {
+    const { extension, topic, token } = (body ?? {}) as { extension?: unknown; topic?: unknown; token?: unknown };
+    if (!validName(extension) || !validTopic(topic)) return undefined;
+    if (token === undefined) return { extension, topic };
+    return typeof token === "string" && token.length > 0 && token.length <= MAX_TOKEN ? { extension, topic, token } : undefined;
   };
 
   router.post("/pushes/:stream/listen", async (req, res) => {
@@ -50,7 +54,7 @@ export function pushesRouter(): Router {
     if (!asked) return void res.status(400).json({ error: "An extension and a topic are needed" });
     // Its handlers are its server half's: with none running nothing is decided, and the page asks again when it is.
     if (!isServing(asked.extension)) return void res.status(404).json({ error: `${asked.extension} has no server half running`, code: "not-running" });
-    const result = await listen(String(req.params.stream), asked.extension, asked.topic);
+    const result = await listen(String(req.params.stream), asked.extension, asked.topic, asked.token);
     switch (result) {
       case "listening":
         return void res.json({ ok: true });
@@ -68,7 +72,7 @@ export function pushesRouter(): Router {
   router.post("/pushes/:stream/leave", (req, res) => {
     const asked = named(req.body);
     if (!asked) return void res.status(400).json({ error: "An extension and a topic are needed" });
-    leave(String(req.params.stream), asked.extension, asked.topic);
+    leave(String(req.params.stream), asked.extension, asked.topic, asked.token);
     res.json({ ok: true });
   });
 

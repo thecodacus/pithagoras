@@ -68,7 +68,8 @@ const OTHER_MODULE = `
 const { default: express } = await import("express");
 const host = await import("../dist/extension-host.js");
 const { pushesRouter } = await import("../dist/api/pushes.js");
-const { openStreams } = await import("../dist/extension-push.js");
+const hub = await import("../dist/extension-push.js");
+const { openStreams } = hub;
 const { bindLogin, sweep } = await import("../dist/login-streams.js");
 
 let hash = "one";
@@ -133,8 +134,8 @@ async function page() {
     until,
     /** What the page has heard of pushes, in order, as `[topic, data]`. */
     heard: () => events.filter((e) => e.name === "push").map((e) => [e.data.extension === NOTES ? e.data.topic : `${e.data.extension}:${e.data.topic}`, e.data.data]),
-    listen: (topic, extension = NOTES) => post("listen", { extension, topic }),
-    leave: (topic, extension = NOTES) => post("leave", { extension, topic }),
+    listen: (topic, extension = NOTES, token) => post("listen", { extension, topic, token }),
+    leave: (topic, extension = NOTES, token) => post("leave", { extension, topic, token }),
     get closed() { return closed; },
     close: async () => {
       abort.abort();
@@ -242,6 +243,57 @@ test("what an extension started for a page is undone when the page leaves, when 
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(state.left, before + 3);
   assert.equal(openStreams(), 0);
+});
+
+test("a page that stops listening and begins again, whose requests come in the other order, keeps the listening it began", async () => {
+  const state = globalThis.pushed;
+  const { portal } = state;
+  const a = await page();
+  const asked = state.asked.length;
+  const left = state.left;
+  assert.equal((await a.listen("folder/site", NOTES, "1")).status, 200);
+  // The second ask is handled before the leave of the first: the listening is the new one, told where things stand again.
+  assert.equal((await a.listen("folder/site", NOTES, "2")).status, 200);
+  assert.equal(state.asked.length, asked + 2, "its handler decided again");
+  assert.equal(state.left, left + 1, "what the first listening started is undone");
+  assert.ok(state.listening.has("folder/site"), "and what the second started is going");
+  await a.until(() => a.heard().filter(([, data]) => data?.standing === "folder/site").length === 2, "told where things stand twice");
+  await a.leave("folder/site", NOTES, "1");
+  assert.equal(state.left, left + 1, "the leave of the first does not end the second");
+  portal.push("folder/site", "after the late leave");
+  await a.until(() => a.heard().some(([, data]) => data === "after the late leave"), "the page still hears the topic");
+  // The leave that is its own ends it.
+  await a.leave("folder/site", NOTES, "2");
+  assert.equal(state.left, left + 2);
+  portal.push("folder/site", "after leaving");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(a.heard().filter(([, data]) => data === "after leaving"), []);
+  // Without a name, as before: a leave ends the listening.
+  assert.equal((await a.listen("folder/docs")).status, 200);
+  assert.equal((await a.leave("folder/docs")).status, 200);
+  assert.ok(!state.listening.has("folder/docs"));
+  assert.equal((await a.listen("all", NOTES, "x".repeat(65))).status, 400, "a name is short");
+  assert.equal((await a.leave("all", NOTES, "")).status, 400);
+  await a.close();
+});
+
+test("what a handler starts after the time it has is undone as soon as it says so, for the page was let go of", async (t) => {
+  const quiet = t.mock.method(console, "error", () => {});
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const slow = { stopped: 0 };
+  let answer;
+  hub.addGate("pithagoras-slow", () => new Promise((resolve) => (answer = resolve)));
+  const opened = hub.openStream(() => {});
+  const asking = hub.listen(opened.id, "pithagoras-slow", "t");
+  t.mock.timers.tick(10_001);
+  assert.equal(await asking, "refused", "a handler that takes over ten seconds refuses");
+  answer(() => slow.stopped++);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(slow.stopped, 1, "its cleanup is called, though it came late");
+  opened.close();
+  hub.dropExtension("pithagoras-slow");
+  assert.equal(slow.stopped, 1, "once");
+  assert.equal(quiet.mock.callCount(), 1, "only the slowness is told");
 });
 
 test("a stream that is not open, and what is not a topic of a running extension, is turned away", async () => {

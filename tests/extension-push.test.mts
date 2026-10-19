@@ -49,6 +49,13 @@ beforeEach(() => {
 
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 const live = () => FakeSource.all.filter((s) => !s.closed);
+/** A topic that nobody listens to any more is left after the tick it was let go in: waited for, and what it sent. */
+const afterTick = async () => {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await settle();
+};
+/** The asks and leaves for a topic, without the page's name for each. */
+const named = (list: Post[]) => list.map((p) => ({ extension: p.body.extension, topic: p.body.topic }));
 /** The stream is open and says which it is. */
 async function ready(source: FakeSource, id = 's1') {
   source.emit('ready', { stream: id });
@@ -65,7 +72,8 @@ test('a topic is asked for on the page\'s one stream, and what is pushed to it i
   assert.equal(live()[0].url, '/api/pushes');
   await ready(live()[0]);
   assert.deepEqual(posts.map((p) => p.url), ['/api/pushes/s1/listen', '/api/pushes/s1/listen']);
-  assert.deepEqual(posts.map((p) => p.body), [{ extension: 'ext-a', topic: 'folders' }, { extension: 'ext-a', topic: 'doc/1' }]);
+  assert.deepEqual(named(posts), [{ extension: 'ext-a', topic: 'folders' }, { extension: 'ext-a', topic: 'doc/1' }]);
+  assert.notEqual(posts[0].body.token, posts[1].body.token, 'each ask has a name of its own');
   push(live()[0], 'ext-a', 'folders', { version: 'x' });
   push(live()[0], 'ext-b', 'folders', 'not ours');
   push(live()[0], 'ext-a', 'doc/2', 'not asked for');
@@ -74,6 +82,7 @@ test('a topic is asked for on the page\'s one stream, and what is pushed to it i
   assert.deepEqual(other, [7]);
   off();
   offOther();
+  await afterTick();
 });
 
 test('several listeners to one topic ask once, and the server is told only when the last has gone, which also lets the stream go', async () => {
@@ -82,12 +91,14 @@ test('several listeners to one topic ask once, and the server is told only when 
   await ready(live()[0]);
   assert.equal(posts.filter((p) => p.url.endsWith('/listen')).length, 1);
   off1();
-  await settle();
+  await afterTick();
   assert.equal(posts.filter((p) => p.url.endsWith('/leave')).length, 0);
   assert.equal(live().length, 1);
   off2();
-  await settle();
-  assert.deepEqual(posts.filter((p) => p.url.endsWith('/leave')).map((p) => p.body), [{ extension: 'ext-a', topic: 't' }]);
+  await afterTick();
+  const leaves = posts.filter((p) => p.url.endsWith('/leave'));
+  assert.deepEqual(named(leaves), [{ extension: 'ext-a', topic: 't' }]);
+  assert.equal(leaves[0].body.token, posts[0].body.token, 'it names the ask it ends');
   assert.equal(live().length, 0, 'no stream is kept for nobody');
 });
 
@@ -103,6 +114,7 @@ test('a handler that throws does not keep the others from hearing', async () => 
   quiet.mock.restore();
   off1();
   off2();
+  await afterTick();
 });
 
 test('a stream that drops is opened again after a wait, longer each time, and every topic is asked for again on the new one', async () => {
@@ -127,6 +139,7 @@ test('a stream that drops is opened again after a wait, longer each time, and ev
     mock.timers.tick(2000);
     assert.equal(live().length, 1);
     off();
+    mock.timers.tick(1);
   } finally {
     mock.timers.reset();
   }
@@ -167,6 +180,7 @@ test('a topic whose server half has stopped is asked for again until it is back;
     assert.equal(posts.filter((p) => p.body.topic === 'gone').length, 5);
     off();
     offNo();
+    mock.timers.tick(1);
   } finally {
     warned.mock.restore();
     mock.timers.reset();
@@ -181,12 +195,13 @@ test('an extension taken out of the page listens to nothing any more', async () 
   await ready(live()[0]);
   forgetPushes('ext-a');
   await settle();
-  assert.deepEqual(posts.filter((p) => p.url.endsWith('/leave')).map((p) => p.body), [{ extension: 'ext-a', topic: 't' }]);
+  assert.deepEqual(named(posts.filter((p) => p.url.endsWith('/leave'))), [{ extension: 'ext-a', topic: 't' }]);
   push(live()[0], 'ext-a', 't', 1);
   push(live()[0], 'ext-b', 't', 2);
   assert.deepEqual(heard, []);
   assert.deepEqual(keptOther, [2]);
   offOther();
+  await afterTick();
 });
 
 test('a stream the server let go of is opened anew, with every topic asked for on it', async () => {
@@ -199,4 +214,27 @@ test('a stream the server let go of is opened anew, with every topic asked for o
   await ready(live()[0], 's2');
   assert.deepEqual(posts.map((p) => p.url), ['/api/pushes/s1/listen', '/api/pushes/s2/listen']);
   off();
+  await afterTick();
+});
+
+test('a topic let go of and listened to again in the same tick is asked for anew, not left first: no leave can overtake the ask', async () => {
+  const first: unknown[] = [];
+  const second: unknown[] = [];
+  const off1 = listenTopic('ext-a', 'folders', (data) => first.push(data));
+  await ready(live()[0]);
+  assert.equal(posts.length, 1);
+  // A page that follows what is open does this on every change: its effect stops and begins again at once.
+  off1();
+  const off2 = listenTopic('ext-a', 'folders', (data) => second.push(data));
+  await afterTick();
+  assert.deepEqual(posts.map((p) => p.url), ['/api/pushes/s1/listen', '/api/pushes/s1/listen'], 'asked anew, so it is told where things stand');
+  assert.notEqual(posts[0].body.token, posts[1].body.token);
+  assert.equal(live().length, 1, 'the stream is kept');
+  push(live()[0], 'ext-a', 'folders', 'now');
+  assert.deepEqual([first, second], [[], ['now']], 'only the listener that is there hears it');
+  off2();
+  await afterTick();
+  const leaves = posts.filter((p) => p.url.endsWith('/leave'));
+  assert.equal(leaves.length, 1, 'left once, when nobody is left');
+  assert.equal(leaves[0].body.token, posts[1].body.token, 'naming the ask that is the listening');
 });

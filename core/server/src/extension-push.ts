@@ -45,6 +45,8 @@ interface Listening {
   ended: boolean;
   /** The decision, for a second ask for the same topic while the first is being decided. */
   decided: Promise<boolean>;
+  /** The page's name for this ask: a leave that names another one is for a listening that was already replaced. */
+  token?: string;
 }
 
 interface Stream {
@@ -119,11 +121,20 @@ const quietly = (extension: string, what: string, fn: () => void) => {
   }
 };
 
+const STOPPING = "stopping what it did for a page that listened";
+
 /** A listening is over: what its extension asked to be done then is done, once each (a handler that answers late is seen to as well). */
 function end(entry: Listening): void {
   entry.ended = true;
   entry.held = null;
-  for (const leave of entry.leave.splice(0)) quietly(entry.extension, "stopping what it did for a page that listened", leave);
+  for (const leave of entry.leave.splice(0)) quietly(entry.extension, STOPPING, leave);
+}
+
+/** What a handler gave back to be done when the page stops: kept for that, or done at once when the listening is over already. */
+function keepCleanup(entry: Listening, cleanup: unknown): void {
+  if (typeof cleanup !== "function") return;
+  if (entry.ended) quietly(entry.extension, STOPPING, cleanup as () => void);
+  else entry.leave.push(cleanup as () => void);
 }
 
 /** `work`, or false once it has taken longer than DECIDE_MS. */
@@ -142,15 +153,24 @@ export type Listened = "listening" | "refused" | "no-stream" | "too-many" | "los
  * The page on stream `id` asks to listen to `topic` of `extension`. The extension's handlers decide (none: any page
  * may, for the portal has one login and a topic is the extension's own to name); they are given a way to tell this page
  * alone, which is how it hears where things stand first. Whatever is pushed meanwhile follows once they have answered.
+ *
+ * The page names each ask (`token`). The same one asked again is the one listening, as it was. Another one is a page
+ * that stopped listening and began again, whose two requests came in the wrong order: it replaces the listening, which
+ * is ended, and the handlers are asked anew, so the page is told where things stand again.
  */
-export async function listen(id: string, extension: string, topic: string): Promise<Listened> {
+export async function listen(id: string, extension: string, topic: string, token?: string): Promise<Listened> {
   const stream = streams.get(id);
   if (!stream) return "no-stream";
   const key = keyOf(extension, topic);
   const known = stream.listening.get(key);
-  if (known) return (await known.decided) ? "listening" : "refused";
-  if (stream.listening.size >= MAX_LISTENING) return "too-many";
-  const entry: Listening = { extension, topic, held: [], leave: [], ended: false, decided: Promise.resolve(false) };
+  if (known && (token === undefined || token === known.token)) return (await known.decided) ? "listening" : "refused";
+  if (known) {
+    stream.listening.delete(key);
+    end(known);
+  } else if (stream.listening.size >= MAX_LISTENING) {
+    return "too-many";
+  }
+  const entry: Listening = { extension, topic, held: [], leave: [], ended: false, decided: Promise.resolve(false), token };
   const page: PageListener = {
     send(data) {
       const text = wire(extension, topic, data);
@@ -163,7 +183,10 @@ export async function listen(id: string, extension: string, topic: string): Prom
     for (const handler of gates.get(extension) ?? []) {
       let verdict: void | false | (() => void) | "late";
       try {
-        verdict = await inTime(Promise.resolve(handler(topic, page)));
+        const work = Promise.resolve(handler(topic, page));
+        verdict = await inTime(work);
+        // It may still answer, and what it then asks to be undone is: the listening is over by then, so at once.
+        if (verdict === "late") work.then((cleanup) => keepCleanup(entry, cleanup), () => {});
       } catch (e) {
         console.error(`[extension ${extension}] hearing a page listen to "${topic}" failed:`, e);
         verdict = false;
@@ -195,12 +218,16 @@ export async function listen(id: string, extension: string, topic: string): Prom
   return "listening";
 }
 
-/** The page on stream `id` listens to `topic` of `extension` no more. */
-export function leave(id: string, extension: string, topic: string): void {
+/**
+ * The page on stream `id` listens to `topic` of `extension` no more. With the `token` of the ask it ends, which a
+ * listening that replaced it is not: a leave that comes in after the page has begun again does not end the new one.
+ */
+export function leave(id: string, extension: string, topic: string, token?: string): void {
   const stream = streams.get(id);
   const key = keyOf(extension, topic);
   const entry = stream?.listening.get(key);
   if (!stream || !entry) return;
+  if (token !== undefined && entry.token !== undefined && token !== entry.token) return;
   stream.listening.delete(key);
   end(entry);
 }

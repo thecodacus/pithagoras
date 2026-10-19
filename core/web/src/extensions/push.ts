@@ -24,6 +24,8 @@ interface Topic {
   handlers: Set<Handler>;
   /** `idle`: to be asked for; `asking`: the server is deciding; `on`: it is heard; `refused`: it is not for this page. */
   state: "idle" | "asking" | "on" | "refused";
+  /** The name of the last ask: the server ends only the listening it was asked for under it. */
+  token?: string;
   failures: number;
   retry?: ReturnType<typeof setTimeout>;
 }
@@ -33,6 +35,7 @@ let source: EventSource | null = null;
 let stream: string | null = null;
 let reconnect: ReturnType<typeof setTimeout> | undefined;
 let failures = 0;
+let asks = 0;
 
 const keyOf = (extension: string, topic: string) => JSON.stringify([extension, topic]);
 const wait = (count: number) => Math.min(2000 * 2 ** count, 30_000);
@@ -121,14 +124,15 @@ function ask(topic: Topic): void {
   if (!stream || topic.state !== "idle") return;
   const on = stream;
   topic.state = "asking";
-  json(`/api/pushes/${on}/listen`, { method: "POST", body: JSON.stringify({ extension: topic.extension, topic: topic.topic }) }).then(
+  const token = (topic.token = String(++asks));
+  json(`/api/pushes/${on}/listen`, { method: "POST", body: JSON.stringify({ extension: topic.extension, topic: topic.topic, token }) }).then(
     () => {
-      if (stream !== on || topic.state !== "asking") return;
+      if (stream !== on || topic.state !== "asking" || topic.token !== token) return;
       topic.state = "on";
       topic.failures = 0;
     },
     (error: unknown) => {
-      if (stream !== on || topic.state !== "asking") return;
+      if (stream !== on || topic.state !== "asking" || topic.token !== token) return;
       const code = error instanceof ApiError ? error.body.code : undefined;
       if (code === "refused" || code === "too-many") {
         topic.state = "refused";
@@ -157,12 +161,19 @@ export function listenTopic(extension: string, topic: string, handler: Handler):
   let held = topics.get(key);
   if (!held) topics.set(key, (held = { extension, topic, handlers: new Set(), state: "idle", failures: 0 }));
   const mine = held;
+  // A topic that was let go of in this tick (see below) and is taken up again is asked for anew, without a leave first: the
+  // server replaces the old listening by the new ask, and the first to listen is told where things stand.
+  if (!mine.handlers.size) mine.state = "idle";
   mine.handlers.add(handler);
   connect();
   ask(mine);
   return () => {
     if (!mine.handlers.delete(handler) || mine.handlers.size) return;
-    if (topics.get(key) === mine) forget(mine);
+    // Not at once: a page that stops listening and begins again in the same tick (a list that follows what is open, asked
+    // anew) keeps the listening, and no leave races the listen that follows it.
+    setTimeout(() => {
+      if (!mine.handlers.size && topics.get(key) === mine) forget(mine);
+    }, 0);
   };
 }
 
@@ -171,7 +182,7 @@ function forget(topic: Topic): void {
   clearTimeout(topic.retry);
   topics.delete(keyOf(topic.extension, topic.topic));
   if (stream && (topic.state === "on" || topic.state === "asking")) {
-    json(`/api/pushes/${stream}/leave`, { method: "POST", body: JSON.stringify({ extension: topic.extension, topic: topic.topic }) }).catch(() => {});
+    json(`/api/pushes/${stream}/leave`, { method: "POST", body: JSON.stringify({ extension: topic.extension, topic: topic.topic, token: topic.token }) }).catch(() => {});
   }
   if (!topics.size) disconnect();
 }
