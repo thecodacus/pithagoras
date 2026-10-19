@@ -563,6 +563,68 @@ test('what is open to the agent is used as ever: its own, its group\'s, and ever
   done();
 });
 
+test('removeEntry and renameEntry ask what the kernel would of the agents: every folder of the path, a sticky folder, and the chats named', { skip: !root }, async () => {
+  const top = scratch('wswalk-above-');
+  chmodSync(top, 0o755);
+  // A project the agent may use, below a folder that is root\'s alone: the kernel needs search on each folder of a path.
+  const outer = path.join(top, 'outer');
+  const proj = path.join(outer, 'proj');
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(path.join(proj, 'f.txt'), 'f');
+  // And a shared folder with a sticky bit, where each user takes away and renames only its own.
+  const open = path.join(top, 'open');
+  const shared = path.join(open, 'shared');
+  mkdirSync(shared, { recursive: true });
+  writeFileSync(path.join(shared, 'mine.txt'), 'mine');
+  writeFileSync(path.join(shared, 'mine2.txt'), 'mine');
+  writeFileSync(path.join(shared, 'theirs.txt'), 'theirs');
+  chmodSync(open, 0o755);
+  chmodSync(shared, 0o1777);
+  chownSync(path.join(shared, 'mine.txt'), AGENT, AGENT);
+  chownSync(path.join(shared, 'mine2.txt'), AGENT, AGENT);
+  for (const where of [proj, path.join(proj, 'f.txt')]) chownSync(where, AGENT, AGENT);
+  chmodSync(outer, 0o700);
+  const known = (chats) => {
+    // As the portal\'s own: the agent of each chat named, none for no chat, and an error for a chat it does not know.
+    if (chats.some((chat) => chat !== 'a')) throw new Error('no such chat');
+    return chats.length ? [{ uid: AGENT, groups: [AGENT] }] : [];
+  };
+  setAgentAccess(known);
+  try {
+    const LIKE = { likeParent: true, chats: CHATS };
+    // Through a folder the agents may not search: closed, however open the folder itself is.
+    assert.equal(await codeOf(() => removeEntry(baseDir(proj), 'f.txt', true, LIKE)), 'invalid');
+    assert.equal(await codeOf(() => renameEntry(baseDir(proj), 'f.txt', 'g.txt', LIKE)), 'invalid');
+    assert.equal(await codeOf(() => listDir(baseDir(proj), '', LIKE)), 'invalid');
+    assert.deepEqual(names(proj), ['f.txt'], 'nothing was touched');
+    // The same without the option is as ever, and with the folder opened it is used.
+    assert.deepEqual(listDir(baseDir(proj), '').entries.map((entry) => entry.name), ['f.txt']);
+    chmodSync(outer, 0o711);
+    assert.equal(renameEntry(baseDir(proj), 'f.txt', 'g.txt', LIKE), 'g.txt');
+    // A sticky folder: what is another user\'s stays, what is the agents\' own goes and is renamed.
+    const base = baseDir(shared);
+    assert.equal(await codeOf(() => removeEntry(base, 'theirs.txt', true, LIKE)), 'invalid');
+    assert.equal(await codeOf(() => renameEntry(base, 'theirs.txt', 'other.txt', LIKE)), 'invalid');
+    assert.equal(await codeOf(() => removeFile(base, 'theirs.txt', LIKE)), 'invalid');
+    assert.ok(existsSync(path.join(shared, 'theirs.txt')));
+    assert.equal(renameEntry(base, 'mine.txt', 'renamed.txt', LIKE), 'renamed.txt');
+    await removeEntry(base, 'mine2.txt', true, LIKE);
+    assert.deepEqual(names(shared), ['renamed.txt', 'theirs.txt']);
+    // Without the option the portal acts as it always did, in a sticky folder too.
+    await removeEntry(base, 'theirs.txt', true);
+    assert.deepEqual(names(shared), ['renamed.txt']);
+    // The chats are named: none is a refusal while the sandbox is on, and so is one the portal does not know.
+    for (const options of [{ likeParent: true }, { likeParent: true, chats: [] }, { likeParent: true, chats: ['nobody'] }]) {
+      assert.equal(await codeOf(() => removeEntry(base, 'renamed.txt', true, options)), 'invalid', JSON.stringify(options));
+      assert.equal(await codeOf(() => renameEntry(base, 'renamed.txt', 'x.txt', options)), 'invalid', JSON.stringify(options));
+    }
+    assert.deepEqual(names(shared), ['renamed.txt']);
+  } finally {
+    setAgentAccess(() => undefined);
+    rmSync(top, { recursive: true, force: true });
+  }
+});
+
 test('the portal\'s own user sees nothing closed that it made or owns: what is its own is used', async () => {
   // As a plain user the sandbox is off, no agent is told of and the folders are all the portal\'s own, so nothing is refused.
   const { base, documents, done } = closable();

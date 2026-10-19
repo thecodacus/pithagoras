@@ -293,7 +293,8 @@ test("what a handler starts after the time it has is undone as soon as it says s
   opened.close();
   hub.dropExtension("pithagoras-slow");
   assert.equal(slow.stopped, 1, "once");
-  assert.equal(quiet.mock.callCount(), 1, "only the slowness is told");
+  // (Node itself may say, through the same console, that mock timers are experimental.)
+  assert.equal(quiet.mock.calls.filter((call) => String(call.arguments[0]).startsWith("[extension")).length, 1, "only the slowness is told");
 });
 
 test("a stream that is not open, and what is not a topic of a running extension, is turned away", async () => {
