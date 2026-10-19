@@ -41,9 +41,12 @@ What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 server's tools count however they are called: through the adapter's `mcp` tool,
 under their own names (`jira_get_issue`) where its tools are direct, and through
 the `tools` tool where they are lazy. An issue comment or a mail body a server
-hands back is whoever wrote it. A server you run yourself can be counted as your
-own, and its output is then neither wrapped nor checked; the browser is always
-outside content, whoever runs it. The agent's own tools, a subagent's answer and
+hands back is whoever wrote it, and so is what a server from a config other than
+the portal's hands back, or one whose tools are named without the server. A
+server you run yourself can be counted as your own, and its output is then
+neither wrapped nor checked; the portal's own memory server, Understory, is
+counted so until you say otherwise, as what it holds are the agent's own notes.
+The browser is always outside content, whoever runs it. The agent's own tools, a subagent's answer and
 a routine's are not wrapped.
 
 A [code mode](/guide/extensions#code-mode) script calls tools one at a time

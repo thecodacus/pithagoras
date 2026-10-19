@@ -39,7 +39,7 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
-import { contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, portalBrowserOn, questionWaitMs, voiceSpeaks } from "../db.js";
+import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, portalBrowserOn, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE } from "../features.js";
@@ -471,6 +471,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let switchedOff: () => ReadonlySet<string> = () => new Set(opts.toolsOff ?? []);
     // The files a tool declares it is approved for, from its definition once the session has it: see declaredFiles.
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
+    // Whether the MCP adapter registered a tool, from what the session knows of it once there is one: see untrustedResult.
+    let fromAdapter: (name: string) => boolean = () => false;
     const gateway = new ToolsGateway(opts.lazySets);
     // Whether the model has the tool is settled when pi loads it and by the tool switches: the rule says
     // so only while it has — and it is the portal's, not an extension's of the same name that pi keeps.
@@ -514,6 +516,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             () => switchedOff(),
             () => gateway.owns(),
             (name) => filesOf(name),
+            (name) => fromAdapter(name),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tools-gateway", factory: gateway.extension },
@@ -643,6 +646,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
+    fromAdapter = (name) => {
+      const tool = (session.getAllTools?.() ?? []).find((one: any) => one?.name === name);
+      return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });
+    };
     toolVoiceLines = () => {
       const lines = new Set<string>();
       for (const name of session.getActiveToolNames()) {

@@ -52,15 +52,15 @@ export const PORTAL_BROWSER_TOOLS = [
  * The longest match wins, or a server called `browser` would claim the tools
  * of one called `browser_staging`.
  *
- * The prefix is the server's name with its hyphens as underscores, which is how
- * the adapter writes it: `brave-search` registers `brave_search_brave_web_search`.
+ * The prefix is the server's name with its hyphens and dots as underscores, which
+ * is how the adapter writes it: `brave-search` registers `brave_search_brave_web_search`.
  * What is returned is the name as configured.
  */
 export function mcpServerOf(name: string, servers: Iterable<string>): string | undefined {
   let best: string | undefined;
   let bestLength = -1;
   for (const server of servers) {
-    const prefix = server.replace(/-/g, "_");
+    const prefix = server.replace(/[-.]/g, "_");
     if (!name.startsWith(`${prefix}_`)) continue;
     if (prefix.length > bestLength) {
       best = server;
