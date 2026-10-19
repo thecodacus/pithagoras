@@ -18,6 +18,7 @@ export interface FakeContainer {
   out: string;
   err: string;
   /** As Docker's inspect has them, for a test that says. */
+  User?: string;
   HostConfig?: Record<string, unknown>;
   Mounts?: Record<string, unknown>[];
   Networks?: Record<string, unknown>;
@@ -113,7 +114,7 @@ export async function fakeDocker() {
       if ((m = /^\/containers\/([^/]+)\/json$/.exec(p))) {
         const c = find(m[1]);
         return c
-          ? send(200, { Id: c.Id, Name: `/${c.Name}`, Config: { Image: c.Image, Tty: c.Tty, Labels: c.Labels }, State: { Status: c.State, Running: c.State === "running" }, HostConfig: c.HostConfig ?? {}, Mounts: c.Mounts ?? [], NetworkSettings: { Networks: c.Networks ?? {} } })
+          ? send(200, { Id: c.Id, Name: `/${c.Name}`, Config: { Image: c.Image, Tty: c.Tty, Labels: c.Labels, ...(c.User !== undefined ? { User: c.User } : {}) }, State: { Status: c.State, Running: c.State === "running" }, HostConfig: c.HostConfig ?? {}, Mounts: c.Mounts ?? [], NetworkSettings: { Networks: c.Networks ?? {} } })
           : send(404, { message: `No such container: ${m[1]}` });
       }
       if ((m = /^\/containers\/([^/]+)\/(start|stop)$/.exec(p))) {

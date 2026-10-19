@@ -27,7 +27,8 @@ export function registerTools(pi: any, docker: () => AgentDocker): void {
     "Build and start containers from a Dockerfile or a compose file in this chat's folder. `file` is its path in the folder; a .yml or .yaml file is a compose file, any other a Dockerfile. " +
       "Images are pulled and built as needed and the containers run in the background; running the same file again brings them up to date. " +
       "A Dockerfile's container may be given `ports` (\"8080:80\", the machine's port first) and `environment`; a compose file says its own. " +
-      "Folders mounted into a container must be in this chat's folder. Refused: privileged containers, added capabilities, the machine's devices, and sharing the machine's network, processes or IPC.",
+      "Folders mounted into a container must be in this chat's folder. Refused: privileged containers, added capabilities, the machine's devices, and sharing the machine's network, processes or IPC. " +
+      "Where you run as a user of your own (the sandbox), every container and the build run as you too, whatever the file says: an image that needs root inside its container does not work then.",
     object(
       {
         file: { type: "string", description: "The Dockerfile or compose file, as a path in this chat's folder." },

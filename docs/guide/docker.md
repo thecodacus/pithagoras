@@ -104,6 +104,28 @@ And a container reaches whatever the machine reaches. The limits above keep it
 in the chat's folder; they do not keep it off the network.
 :::
 
+### With the sandbox on
+
+With the [sandbox](/guide/sandbox) on, the agent runs as a user of its own,
+and a container that ran as root would read and change, in the folders it
+mounts, what that user may not. So then everything Docker does with the chat's
+folder is done as the agent:
+
+- every container runs as the agent's user, with its groups, whatever the file
+  says (`user`, `group_add`), and cannot gain privileges (`no-new-privileges`);
+  a `post_start` or `pre_stop` hook that runs as another user, or privileged, is
+  refused;
+- compose runs as the agent too, so a file, an `env_file` and what an image is
+  built from are read only where the agent may read: a build that would take
+  in a folder closed to the agent fails;
+- a folder to mount that is not there yet is made by the agent, not by Docker
+  as root.
+
+What a container writes in the chat's folder is then the agent's, to change or
+delete. An image that needs root inside its container (some databases and web
+servers) does not work this way: use a variant made to run as any user, or run
+it with the sandbox off.
+
 Two things the limits do not cover. A link in the chat's folder that is
 changed between the check and the start could still lead a mount elsewhere.
 And with the [sandbox](/guide/sandbox) off, the agent runs as the portal's own

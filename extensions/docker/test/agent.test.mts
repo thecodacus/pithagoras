@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fakeDocker, type FakeContainer } from "./fake-docker.ts";
@@ -32,7 +32,7 @@ function inside(base: string, rel: string): string {
   return real;
 }
 
-type Call = { args: string[]; input?: string; folder: string };
+type Call = { args: string[]; input?: string; folder: string; as?: { uid: number; gid: number; groups: number[] } };
 /**
  * compose, as the real one does it to the daemon: `config` reads the file (here, what the test says it says, or the
  * project it was given), `up --no-start` makes each service's container (with what the test says Docker made of it),
@@ -40,8 +40,8 @@ type Call = { args: string[]; input?: string; folder: string };
  */
 function compose(says: { config?: unknown; made?: Record<string, Partial<FakeContainer>> } = {}) {
   const calls: Call[] = [];
-  const runner = async (args: string[], options: { folder: string; input?: string }) => {
-    calls.push({ args, input: options.input, folder: options.folder });
+  const runner = async (args: string[], options: { folder: string; input?: string; as?: unknown }) => {
+    calls.push({ args, input: options.input, folder: options.folder, ...(options.as ? { as: options.as as Call["as"] } : {}) });
     const project = args[args.indexOf("-p") + 1];
     if (args.includes("config")) {
       const read = options.input ? JSON.parse(options.input) : (says.config as any);
@@ -63,6 +63,9 @@ function compose(says: { config?: unknown; made?: Record<string, Partial<FakeCon
           Id: `${project}-${service}-id`, Name: name, Image: spec.image ?? `${project}-${service}`, State: "created", Tty: false, out: "", err: "",
           Labels: { ...spec.labels, "com.docker.compose.project": project, "com.docker.compose.service": service, "com.docker.compose.depends_on": Object.keys(spec.depends_on ?? {}).map((d) => `${d}:service_started:false`).join(",") },
           Networks: { [`${project}_default`]: {} },
+          // As Docker makes them of what the service says.
+          ...(spec.user ? { User: spec.user } : {}),
+          HostConfig: { ...(spec.group_add ? { GroupAdd: spec.group_add.map(String) } : {}), ...(spec.security_opt ? { SecurityOpt: spec.security_opt } : {}) },
           ...says.made?.[service],
         });
       }
@@ -185,7 +188,8 @@ test("what Docker made is read back and refused before any of it starts, where i
       web: {
         HostConfig: {
           Privileged: true, CapAdd: ["SYS_ADMIN"], Devices: [{ PathOnHost: "/dev/sda" }], NetworkMode: "host", PidMode: "container:someone", IpcMode: `container:${project}-db-id`,
-          SecurityOpt: ["no-new-privileges:true", "seccomp=unconfined"], VolumesFrom: ["someone:ro"],
+          // label=disable as Docker adds it to a privileged container: not the file's, and not said.
+          SecurityOpt: ["no-new-privileges:true", "seccomp=unconfined", "label=disable"], VolumesFrom: ["someone:ro"],
           // As compose sends `systempaths=unconfined`.
           MaskedPaths: [], ReadonlyPaths: [],
         },
@@ -201,6 +205,8 @@ test("what Docker made is read back and refused before any of it starts, where i
         ],
         Networks: { [`${project}_default`]: {}, lan: {} },
       },
+      // One the file asked for, on a container that is not privileged: said.
+      db: { HostConfig: { SecurityOpt: ["label=disable"] } },
     },
   });
   await assert.rejects(agentFor(runner)(folder).run("compose.yaml"), (e: Error) => {
@@ -221,12 +227,61 @@ test("what Docker made is read back and refused before any of it starts, where i
       "web: mounts out/x, which leads outside this chat's folder",
       "web: uses the volume theirs, which this project did not make",
       "web: joins the network lan, which this project did not make",
+      "db: is run with label=disable",
     ]);
     return true;
   });
   assert.equal(calls.length, 2, "never started");
   assert.equal(docker.containers.some((c) => c.Labels["com.docker.compose.project"] === project), false, "what was made for it is gone");
   docker.volumes.length = 0;
+  docker.networks.length = 0;
+});
+
+test("with the sandbox on, compose and every container run as the agent, with its groups and no way to gain more, and a folder to mount is made by the agent", async () => {
+  const folder = folderFor();
+  writeFileSync(path.join(folder, "compose.yaml"), "services: {}\n");
+  mkdirSync(path.join(folder, "site"));
+  const asked: string[][] = [];
+  const agentUser = { uid: 10100, gid: 10100, groups: [10010], run: async (argv: string[]) => (asked.push(argv), { code: 0, stderr: "" }) };
+  const { calls, runner } = compose({
+    config: {
+      services: {
+        web: {
+          image: "nginx", user: "root", group_add: ["0"], security_opt: ["no-new-privileges"],
+          volumes: [{ type: "bind", source: path.join(folder, "data") }, { type: "bind", source: path.join(folder, "site") }, { type: "volume", source: "cache" }],
+        },
+      },
+    },
+  });
+  const agent = agentFor(runner)(folder, async () => agentUser);
+  const ran = await agent.run("compose.yaml");
+  assert.deepEqual(ran.containers.map((c) => c.state), ["running"]);
+  // compose itself, each time, as the agent.
+  assert.deepEqual(calls.map((c) => c.as), [{ uid: 10100, gid: 10100, groups: [10010] }, { uid: 10100, gid: 10100, groups: [10010] }, { uid: 10100, gid: 10100, groups: [10010] }]);
+  // Whatever the file said.
+  const web = JSON.parse(calls[1].input!).services.web;
+  assert.deepEqual([web.user, web.group_add, web.security_opt], ["10100:10100", ["10010"], ["no-new-privileges", "no-new-privileges:true"]]);
+  // Only the folder that is not there, by the agent.
+  assert.deepEqual(asked, [["mkdir", "-p", "--", path.join(folder, "data")]]);
+  await agent.remove(ran.project);
+
+  // A hook that runs as another user is refused from the file.
+  const hooked = compose({ config: { services: { web: { image: "nginx", post_start: [{ command: "id", user: "root" }], pre_stop: [{ command: "id", privileged: true }] } } } });
+  await assert.rejects(agentFor(hooked.runner)(folder, async () => agentUser).run("compose.yaml"), (e: Error) => {
+    assert.match(e.message, /web: its post_start runs as root, and with the sandbox on everything runs as the agent/);
+    assert.match(e.message, /web: its pre_stop runs privileged/);
+    return true;
+  });
+  // What Docker made is held to it too.
+  const otherwise = compose({ config: { services: { web: { image: "nginx" } } }, made: { web: { User: "0", HostConfig: { GroupAdd: ["10010", "0"], SecurityOpt: [] } } } });
+  await assert.rejects(agentFor(otherwise.runner)(folder, async () => agentUser).run("compose.yaml"), (e: Error) => {
+    assert.deepEqual(e.message.split("\n- ").slice(1), ["web: runs as 0, not as the agent (10100:10100)", "web: is given the groups 0", "web: can gain privileges (no-new-privileges is not set)"]);
+    return true;
+  });
+  // A folder the agent may not make is said.
+  const refusing = { ...agentUser, run: async () => ({ code: 1, stderr: "mkdir: cannot create directory: Permission denied" }) };
+  const plain = compose({ config: { services: { web: { image: "nginx", volumes: [{ type: "bind", source: path.join(folder, "locked", "x") }] } } } });
+  await assert.rejects(agentFor(plain.runner)(folder, async () => refusing).run("compose.yaml"), /locked\/x could not be made for a container to mount: mkdir: cannot create directory: Permission denied/);
   docker.networks.length = 0;
 });
 
@@ -319,6 +374,12 @@ test("compose runs in Docker's command-line image, a container of this extension
   await runner(["-f", "-", "config"], { folder, input: '{"a":"$$b"}' });
   assert.deepEqual(made!.made!.Cmd, ["sh", "-c", 'printf %s "$COMPOSE_INPUT" | docker compose "$@"', "compose", "-f", "-", "config"]);
   assert.deepEqual(made!.made!.Env, ['COMPOSE_INPUT={"a":"$$b"}']);
+
+  // As the chat's agent: its user and groups, with the group Docker's socket is reached by, and a home it may write.
+  await runner(["config"], { folder, as: { uid: 10100, gid: 10100, groups: [10010] } });
+  assert.equal(made!.made!.User, "10100:10100");
+  assert.deepEqual((made!.made!.HostConfig as any).GroupAdd, ["10010", String(statSync(docker.socket).gid)]);
+  assert.deepEqual(made!.made!.Env, ["HOME=/tmp"]);
   docker.runs.onStart = undefined;
 });
 
