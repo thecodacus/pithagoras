@@ -410,6 +410,65 @@ test('a sentence being dictated when another chat is opened is not sent to that 
   expect(asked.filter(path => path.includes('/other/'))).toEqual([]);
 });
 
+test('Smart Turn ends a finished turn sooner than the silence that would end it otherwise', async ({ page }) => {
+  const failures: string[] = [];
+  page.on('pageerror', e => failures.push(e.message));
+  // Five seconds of silence end the turn either way: the plain rule's, and Smart Turn's longest pause. The page plays
+  // the sample's first 2.5 s, "And so my fellow Americans", which ends at 2.3 s: a turn sent before 7.3 s is one the
+  // model ended. The model answers within a second of the pause; the rest is room for a machine that is busy.
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, vad: { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 5000 }, smartTurn: { enabled: true, checkMs: 200, threshold: 0.5, fallbackMs: 5000 } } }));
+  await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  const model = page.waitForResponse('**/voice-assets/smart-turn-v3.2-cpu.onnx');
+  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'A test voice turn.' } }));
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await model;
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+  // Downloaded; a moment more and its worker has it loaded before the speech starts.
+  await page.waitForTimeout(1500);
+  const injected = Date.now();
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByTestId('sent')).not.toHaveText('0', { timeout: 20000 });
+  expect(Date.now() - injected).toBeLessThan(6500);
+  expect(failures).toEqual([]);
+});
+
+test('without its model, or switched off, Smart Turn leaves turns to the silence as before', async ({ page }) => {
+  const failures: string[] = [];
+  page.on('pageerror', e => failures.push(e.message));
+  await page.route('**/test-speech.wav', route => route.fulfill({ body: sample, contentType: 'audio/wav' }));
+  await page.route('**/voice/transcribe', route => route.fulfill({ json: { text: 'A test voice turn.' } }));
+  // The model cannot be fetched: the turn is still sent.
+  let fetched = 0;
+  await page.route('**/voice-assets/smart-turn-v3.2-cpu.onnx', route => { fetched++; return route.fulfill({ status: 404, body: '' }); });
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.goto('/tests/voice.html');
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByTestId('sent')).not.toHaveText('0', { timeout: 20000 });
+  expect(fetched).toBe(1);
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  // Switched off, it is not fetched at all, nor is it for dictation.
+  await page.unroute('**/api/voice');
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true, smartTurn: { enabled: false, checkMs: 200, threshold: 0.5, fallbackMs: 2000 } } }));
+  await page.reload();
+  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
+  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByTestId('sent')).not.toHaveText('0', { timeout: 20000 });
+  await page.getByRole('button', { name: 'End voice mode' }).click();
+  await page.unroute('**/api/voice');
+  await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
+  await page.reload();
+  await page.getByRole('button', { name: 'Dictate a message' }).click();
+  await expect(page.getByRole('button', { name: 'Stop dictating' })).toBeVisible({ timeout: 25000 });
+  await page.getByRole('button', { name: 'Inject speech' }).click();
+  await expect(page.getByText('Hearing you')).toBeVisible({ timeout: 15000 });
+  expect(fetched).toBe(1);
+  expect(failures).toEqual([]);
+});
+
 test('a refused microphone says how to allow it, in dictation and in voice mode, not the browser\'s "Permission denied"', async ({ page }) => {
   await page.route('**/api/voice', route => route.fulfill({ json: { enabled: true } }));
   await page.goto('/tests/voice.html');

@@ -12,20 +12,21 @@ Start with the controls below. A manual Compose setup and a native audio.cpp uni
 
 Enable **Voice** under **Settings → Add-ons** to talk to any open session.
 Click the **microphone icon** beside Send once, then speak naturally. The browser
-uses Silero V5 to detect speech and submits your turn after about one second of
-silence. Whisper's transcript becomes a normal session message, and streaming
-assistant text is spoken with **BreezeBlue/Breeze-TTS-2**.
+uses Silero V5 to detect speech, and [Smart Turn](#end-of-turn) to tell a finished
+sentence from a pause in the middle of one: a finished turn is submitted about half
+a second after you stop, a pause mid-sentence is waited for. Whisper's transcript
+becomes a normal session message, and streaming assistant text is spoken with
+**BreezeBlue/Breeze-TTS-2**.
 
 The microphone stays open while the session works and speaks. Start talking to
 interrupt: after roughly 256 ms of detected speech, playback and queued audio
 stop, the current session response is aborted, and your new turn takes over.
-Short noises are filtered out. Turn detection is based on speech and silence,
-not semantic prediction of sentence completion. Echo cancellation and noise
-suppression are requested from the browser; headphones work best when speaker
-audio is still picked up by your microphone.
+Short noises are filtered out. Echo cancellation and noise suppression are
+requested from the browser; headphones work best when speaker audio is still
+picked up by your microphone.
 
-VAD runs locally in your browser. Its pinned model and WebAssembly runtime are
-served by Pithagoras, with no CDN dependency or extra GPU allocation.
+VAD and Smart Turn run locally in your browser. Their pinned models and WebAssembly
+runtime are served by Pithagoras, with no CDN dependency or extra GPU allocation.
 Whisper receives rolling snapshots while you speak (roughly every two seconds),
 and a fresh snapshot after about 200 ms of silence. The voice screen shows the
 latest partial transcript. At turn end, Pithagoras reuses a result only when it
@@ -73,6 +74,42 @@ Leaving the session also releases these resources. Ending voice does not stop
 an already accepted agent task. Existing transcript history is never read aloud
 on activation. Status text shows listening, speech detection, transcription,
 and playback; errors remain visible in the voice screen.
+
+## End of turn
+
+Silero hears speech and silence, but a silence does not say whether you are done:
+"What time is it?" and "I'd like to book a flight to…" are followed by the same
+quiet. Waiting a fixed second answers every turn a second late, and still cuts off
+a pause that lasts a little longer.
+
+Voice mode therefore asks [Smart Turn v3.2](https://github.com/pipecat-ai/smart-turn)
+(Pipecat's open model, BSD 2-Clause) once you have been quiet for 400 ms. It listens
+to the whole turn so far, the last 8 seconds of it, and gives the probability that
+it is complete. At 0.5 or more the turn ends at once; below that, listening goes
+on, and the next pause asks again with everything said by then. Two seconds of
+silence end the turn whatever the model said, so it is always sent.
+
+The model is 8 MB. It is fetched when voice mode starts, not before, and runs in
+a worker of its own so that the orb keeps moving: a check takes about 250 ms on a
+laptop CPU. Until it is loaded, and if it cannot be, the turn ends after the
+**End-of-turn silence** as before. Dictation and push-to-talk do not use it.
+
+**Settings → Add-ons → Voice → Speech detection** has it on by default, with the
+pause before checking, the threshold and the longest pause. Measured on 80 English
+recordings from Smart Turn's held-out test set, a finished turn was answered after
+a median 704 ms instead of 1024 ms, and a turn left unfinished was ended by a
+1.2 to 1.8 s pause in 5 of 40 cases instead of 39 of 40. The price is a short
+pause between two sentences of one turn, which can sound finished: one ended the
+turn in 5 of the 80. A shorter pause before checking answers sooner and ends more
+of those (300 ms: 608 ms and 14; 200 ms: 512 ms and 21). These times count the
+250 ms a check took in Chromium on an Apple M1; a slower CPU adds its difference.
+Smart Turn supports 23 languages.
+
+**Ask again while the pause lasts**, off by default, asks the model again each
+time the pause grows by the pause before checking, while its last answer was that
+you would go on. On 80 recordings from the same set it ended no finished turn sooner (the first
+check had already caught every one) and cut off one more unfinished one, so it is
+for voices or languages where the first check often misses a finished turn.
 
 ## Pictures, tool cards and controls
 
@@ -702,13 +739,15 @@ docker compose -f docker-compose.voice.yml --profile voice stop whisper breeze
 
 ```sh
 npm run build
-node --import tsx --test tests/voice.test.mts tests/voice-numbers.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts
+node --import tsx --test tests/voice.test.mts tests/voice-numbers.test.mts tests/hands-free.test.mts tests/live-transcription.test.mts tests/speech-pipeline.test.mts tests/voice-first.test.mts tests/smart-turn.test.mts
 npx playwright test
 ```
 
 The tests run local simulated services to check multipart requests, session
 validation, opt-in behavior, WAV output and speech chunking. They do not test
-model inference or microphone hardware.
+microphone hardware. `tests/smart-turn.test.mts` does run models: it checks Smart
+Turn's input against the reference implementation (`tests/fixtures/smart-turn`),
+and runs recorded speech through Silero and the turn decision as voice mode does.
 
 Runtime references: [Breeze](https://github.com/breezeblue-ai/breeze-tts),
 [Whisper.cpp server](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server).

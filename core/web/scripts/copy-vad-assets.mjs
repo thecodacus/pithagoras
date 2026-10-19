@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { mkdir, copyFile } from 'node:fs/promises';
+import { downloadSmartTurn } from './smart-turn-model.mjs';
 const require = createRequire(import.meta.url);
 const vad = dirname(require.resolve('@ricky0123/vad-web'));
 const ort = dirname(require.resolve('onnxruntime-web/wasm'));
@@ -12,6 +13,7 @@ for (const [base, files] of [
 ]) {
   for (const file of files) await copyFile(resolve(base, file), resolve(output, file));
 }
+await downloadSmartTurn(output);
 // The licences of those files travel with them. Not copying them breaks the build,
 // so a missing notice cannot ship unseen.
 await copyFile(resolve(import.meta.dirname, '../../../THIRD_PARTY_NOTICES.md'), resolve(output, 'THIRD_PARTY_NOTICES.md'));

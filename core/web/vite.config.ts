@@ -1,9 +1,15 @@
 import { createReadStream } from "node:fs";
 import { resolve } from "node:path";
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  resolve: {
+    // ONNX Runtime's default ES build bundles its WebAssembly as an asset of its own: a second copy of the 14 MB file
+    // voice-assets already serves. This build loads it from there, as the one Silero runs on does. Smart Turn's
+    // worker is what imports it (src/smart-turn-model.ts).
+    conditions: ["onnxruntime-web-use-extern-wasm", ...defaultClientConditions],
+  },
   build: {
     rollupOptions: {
       output: {
@@ -24,7 +30,7 @@ export default defineConfig({
     configureServer(server) {
       // ORT dynamically imports its runtime. Serve these generated files as
       // static assets in development, just as the production server does.
-      const assets = new Set(["ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm", "silero_vad_v5.onnx", "vad.worklet.bundle.min.js"]);
+      const assets = new Set(["ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm", "silero_vad_v5.onnx", "smart-turn-v3.2-cpu.onnx", "vad.worklet.bundle.min.js"]);
       server.middlewares.use((req, res, next) => {
         const path = new URL(req.url || "/", "http://localhost").pathname;
         const name = path.slice("/voice-assets/".length);

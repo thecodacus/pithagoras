@@ -190,6 +190,42 @@ test('speech detection settings save and restore defaults',async({page})=>{
  await expect(silence).toHaveValue('1000');
 });
 
+test('Smart Turn is on until it is switched off, and its timing saves and resets with speech detection',async({page})=>{
+ let config:any={enabled:true,whisperUrl:'http://localhost:8188/inference',breezeUrl:'http://localhost:7862/v1/audio/speech',instruction:'Clear speech',voice:'design',runtime:'audio-cpp'};
+ await page.route('**/api/voice/presets',r=>r.fulfill({json:[]}));
+ await page.route('**/api/voice/install',r=>r.fulfill({json:{available:true,state:'running',busy:false}}));
+ await page.route('**/api/voice',async r=>{if(r.request().method()==='PUT')config=r.request().postDataJSON();await r.fulfill({json:config});});
+ await page.goto('/tests/voice-addon.html');
+ await page.locator('summary').filter({hasText:'Speech detection'}).click();
+ const on=page.getByRole('checkbox',{name:/Smart Turn/});
+ const check=page.getByRole('slider',{name:/Pause before checking/});
+ await expect(on).toBeChecked();
+ await expect(check).toHaveValue('400');
+ const again=page.getByRole('checkbox',{name:/Ask again while the pause lasts/});
+ await expect(again).not.toBeChecked();
+ await expect(page.getByRole('slider',{name:/Finished-turn threshold/})).toHaveValue('0.5');
+ await expect(page.getByRole('slider',{name:/Longest pause/})).toHaveValue('2000');
+ await check.fill('300');
+ await again.check();
+ await page.getByRole('button',{name:'Save voice settings'}).click();
+ await expect.poll(()=>config.smartTurn).toEqual({enabled:true,checkMs:300,recheck:true,threshold:0.5,fallbackMs:2000});
+ await on.uncheck();
+ await expect(check).toBeHidden();
+ await page.getByRole('button',{name:'Save voice settings'}).click();
+ await expect.poll(()=>config.smartTurn?.enabled).toBe(false);
+ await page.reload();await page.locator('summary').filter({hasText:'Speech detection'}).click();
+ await expect(on).not.toBeChecked();
+ await page.getByRole('button',{name:'Reset speech detection'}).click();
+ await expect(on).toBeChecked();
+ await expect(check).toHaveValue('400');
+ await expect(again).not.toBeChecked();
+ // Without speech synthesis there is no voice mode, and nothing for it to time.
+ config={...config,runtime:'none',breezeUrl:''};
+ await page.reload();await page.locator('summary').filter({hasText:'Speech detection'}).click();
+ await expect(page.getByRole('slider',{name:/End-of-turn silence/})).toBeVisible();
+ await expect(on).toBeHidden();
+});
+
 test('speaking instructions show the built-in text, save an edit and reset to the built-in text',async({page})=>{
  const builtIn='Built-in speaking instructions for this test.';
  let config:any={enabled:true,whisperUrl:'http://localhost:8188/inference',breezeUrl:'http://localhost:7862/v1/audio/speech',instruction:'Clear speech',voice:'design',runtime:'audio-cpp'};

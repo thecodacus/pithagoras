@@ -2,7 +2,7 @@ import { VoiceLibrary, kokoroVoiceOptions } from './VoiceLibrary';
 import { VoiceEngines } from './VoiceEngines';
 import { Select } from "./Select";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_VAD, api, type AvailableModel, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
+import { DEFAULT_SMART_TURN, DEFAULT_VAD, api, type AvailableModel, type VoiceInstallStatus, type VoiceConfig, type VoiceHardware } from "../api";
 import { INPUT_LANGUAGES, CHATTERBOX_LANGUAGES } from "../../../server/src/voice-languages";
 import { sameChoice, type VoiceChoice } from "../../../server/src/voice-engines";
 import { NUMBER_PACK_LANGUAGES } from "../../../server/src/voice-numbers";
@@ -121,6 +121,7 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
   const chatterbox = config.runtime === "chatterbox";
   // Kokoro speaks with voices of its own, not the library's.
   const kokoro = config.runtime === "kokoro";
+  const smartTurn = { ...DEFAULT_SMART_TURN, ...config.smartTurn };
   const languages = chatterbox ? INPUT_LANGUAGES.filter(([code]) => CHATTERBOX_LANGUAGES.includes(code)) : INPUT_LANGUAGES;
   // Switching runtime must not leave a language the runtime will refuse on save.
   const setRuntime = (runtime: VoiceConfig["runtime"]) => update(runtime === "chatterbox" && !CHATTERBOX_LANGUAGES.includes(config.language ?? "auto")
@@ -190,7 +191,24 @@ export function VoiceAddon({ onError }: { onError: (message: string) => void }) 
           <input type="range" className="mt-2 w-full accent-current" min={min} max={max} step={step} value={config.vad?.[key] ?? DEFAULT_VAD[key]} onChange={e => update({ vad: { ...DEFAULT_VAD, ...config.vad, [key]: Number(e.target.value) } })} />
           <span className="mt-1 block text-fg-faint">{t(help)}</span>
         </label>)}
-        <button type="button" className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={() => update({vad: {...DEFAULT_VAD}})}>{t("Reset speech detection")}</button>
+        {!listening && <div className="space-y-4 border-t border-line pt-4">
+          <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" checked={smartTurn.enabled} onChange={e => update({ smartTurn: { ...smartTurn, enabled: e.target.checked } })} />
+            <span>{t("Smart Turn: end the turn when it sounds finished")}<span className="mt-1 block text-fg-faint">{t("After a short pause, a small model in your browser listens to what you said and ends your turn at once if it sounds finished. A pause in the middle of a sentence waits for more. Voice mode only: dictation keeps the silence above, and so does voice mode while the model (8 MB, loaded when voice mode starts) is not there.")}</span></span>
+          </label>
+          {smartTurn.enabled && ([
+            ['checkMs', msg('Pause before checking'), 100, 1000, 50, 'ms', msg('How long you are quiet before the model is asked.')],
+            ['threshold', msg('Finished-turn threshold'), 0.1, 0.9, 0.05, '', msg('How sure the model must be that you are done. Higher values wait for the longest pause more often.')],
+            ['fallbackMs', msg('Longest pause'), 1000, 5000, 100, 'ms', msg('A silence this long always ends the turn, even when the model expects more.')],
+          ] as const).map(([key, label, min, max, step, unit, help]) => <label key={key} className="block text-xs text-fg-muted">
+            <span className="flex justify-between gap-3"><span>{t(label)}</span><span className="tabular-nums text-accent">{smartTurn[key]} {unit}</span></span>
+            <input type="range" className="mt-2 w-full accent-current" min={min} max={max} step={step} value={smartTurn[key]} onChange={e => update({ smartTurn: { ...smartTurn, [key]: Number(e.target.value) } })} />
+            <span className="mt-1 block text-fg-faint">{t(help)}</span>
+          </label>)}
+          {smartTurn.enabled && <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" checked={smartTurn.recheck} onChange={e => update({ smartTurn: { ...smartTurn, recheck: e.target.checked } })} />
+            <span>{t("Ask again while the pause lasts")}<span className="mt-1 block text-fg-faint">{t("When the model expects more, ask it again each time the pause grows by the pause before checking, instead of waiting for the longest pause. Ends finished turns sooner, and ends more turns in which you were only thinking.")}</span></span>
+          </label>}
+        </div>}
+        <button type="button" className="rounded-lg border border-line px-3 py-1.5 text-xs" onClick={() => update({vad: {...DEFAULT_VAD}, smartTurn: {...DEFAULT_SMART_TURN}})}>{t("Reset speech detection")}</button>
       </div>
     </details>
     <details className="group rounded-xl border border-line p-4">
