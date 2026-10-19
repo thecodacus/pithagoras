@@ -1003,7 +1003,7 @@ test('a folder on the way swapped for a link while git is asked about a delete: 
   done();
 });
 
-test('a delete goes on in the folder that was checked once it is held: the folder a link put in its place leads to stays', async () => {
+test('a delete goes on in the folder that was checked once it is held: the folder a link put in its place leads to stays', { skip: process.platform !== 'linux' && 'a folder is held by its path where descriptors cannot be named' }, async () => {
   const { sub, aside, outside, base, swap, done } = swappable();
   mkdirSync(path.join(sub, 'victim', 'deeper'), { recursive: true });
   writeFileSync(path.join(sub, 'victim', 'deeper', 'a.txt'), 'ours');
@@ -1097,7 +1097,9 @@ test('a folder deeper than a delete goes is refused, and what the portal held on
 });
 
 test('a rename is done in the folder that was checked: refused when a link took its place before it is held, and in the folder that is held after', () => {
-  for (const [point, outcome] of [[FIRST, 'invalid'], [{ names: ['renameSync'], when: () => true }, 'none']]) {
+  // Once it is held, only where a folder is held by its descriptor: elsewhere by its path.
+  const points = [[FIRST, 'invalid'], ...(process.platform === 'linux' ? [[{ names: ['renameSync'], when: () => true }, 'none']] : [])];
+  for (const [point, outcome] of points) {
     const { aside, outside, base, swap, done } = swappable();
     let got;
     assert.ok(swappedAt(point, swap, () => { got = code(() => renameEntry(base, 'sub/doc.md', 'doc.old')); }));

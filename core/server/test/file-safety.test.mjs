@@ -235,8 +235,11 @@ test("deleting a folder from the files panel does not hold the server up while t
     setImmediate(turn);
   };
   setImmediate(turn);
-  await removeEntry(dir, "tree", true);
-  removing = false;
+  try {
+    await removeEntry(dir, "tree", true);
+  } finally {
+    removing = false;
+  }
   assert.ok(!existsSync(path.join(dir, "tree")));
   assert.ok(partway, "the loop turned while the tree was partway gone");
 });
