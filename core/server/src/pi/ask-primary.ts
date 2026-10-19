@@ -34,7 +34,7 @@ export function askPrimaryTool(sessionId: string) {
         action: Type.Optional(
           Type.String({
             description:
-              "For permission to do one exact thing: the shell command verbatim, or the path to write; for a call naming several files (paths) each one's path, one per line, in call order; " +
+              "For permission to do one exact thing: the shell command verbatim, or the path to write; for edit_image each picture's path, one per line, in call order; " +
               "for other tools the refusal says what to write. Approval covers exactly this, once. Omit when asking for a decision",
           })
         ),
