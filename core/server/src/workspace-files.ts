@@ -999,7 +999,7 @@ const CHANGED_WHILE_REMOVED = "It changed while it was deleted, and what it is n
 /**
  * How deep a folder is gone into to delete it: each folder on the way is held open while what is in it goes, so an agent's folder a million
  * deep would take as many of the portal's descriptors. Beyond what a path could reach before (PATH_MAX, 4096 bytes, is about 2048 folders of
- * one letter), it is refused.
+ * one letter) the delete stops, with what it took on the way gone, as a delete that fails partway is.
  */
 const MAX_REMOVE_DEPTH = 2048;
 
@@ -1041,7 +1041,7 @@ async function removeIn(place: string | Buffer, folder: boolean, depth = 0): Pro
     if (code === "ENOTDIR") return removeIn(place, false);
     if (code !== "ENOTEMPTY" && code !== "EEXIST") throw e;
   }
-  if (depth >= MAX_REMOVE_DEPTH) throw new FileError("failed", `It is more than ${MAX_REMOVE_DEPTH} folders deep, which is not deleted from here`);
+  if (depth >= MAX_REMOVE_DEPTH) throw new FileError("failed", `It is more than ${MAX_REMOVE_DEPTH} folders deep, and what is deeper is not deleted from here`);
   let fd: number;
   try {
     fd = openSync(place, OPEN_FOLDER);
@@ -1060,9 +1060,13 @@ async function removeIn(place: string | Buffer, folder: boolean, depth = 0): Pro
     try {
       entries = await readdir(here, { withFileTypes: true, encoding: "buffer" });
     } catch (e) {
-      // Taken away since it was opened: what was asked for.
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw e;
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      // Taken away since it was opened: what was asked for. Not so a name in it that went while the listing looked at it (on a file
+      // system that does not say what each name is, which Node then looks at one by one): the folder is still there.
+      const now = lstatSync(place, { bigint: true, throwIfNoEntry: false });
+      const held = fstatSync(fd, { bigint: true });
+      if (now?.dev === held.dev && now.ino === held.ino) throw new FileError("conflict", CHANGED_WHILE_REMOVED);
+      return;
     }
     // Every name is done with before the folder's descriptor is closed: its number names this folder only while it is open.
     const files = entries.filter((entry) => !entry.isDirectory());

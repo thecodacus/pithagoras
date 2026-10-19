@@ -1063,6 +1063,26 @@ test('a delete takes what fs.rm took: a name that is not UTF-8, an empty folder 
   done();
 });
 
+test('a listing that fails for a name in the folder, with the folder still there, is a conflict: the delete never says it is done when it is not', async () => {
+  const { dir, base, done } = setup();
+  mkdirSync(path.join(dir, 'tree'));
+  writeFileSync(path.join(dir, 'tree', 'a.txt'), 'x');
+  // As Node fails a listing on a file system that does not say what each name is, when a name goes before it is looked at.
+  const real = fs.promises.readdir;
+  fs.promises.readdir = async () => { throw Object.assign(new Error('a name went'), { code: 'ENOENT' }); };
+  syncBuiltinESMExports();
+  let got;
+  try {
+    got = await codeOf(() => removeEntry(base, 'tree', true));
+  } finally {
+    fs.promises.readdir = real;
+    syncBuiltinESMExports();
+  }
+  assert.equal(got, 'conflict');
+  assert.deepEqual(names(path.join(dir, 'tree')), ['a.txt']);
+  done();
+});
+
 test('a folder deeper than a delete goes is refused, and what the portal held on the way is let go', { skip: process.platform !== 'linux' && 'where a folder is held by its path, the length of the path stops it first' }, async () => {
   const { dir, base, top } = setup();
   // Made a folder at a time from the one before, as an agent can: no path is long enough to name the deepest.
@@ -1070,7 +1090,7 @@ test('a folder deeper than a delete goes is refused, and what the portal held on
   try {
     assert.equal(await codeOf(() => removeEntry(base, 'deep', true)), 'failed');
     assert.ok(existsSync(path.join(dir, 'deep')), 'what is too deep is left');
-    assert.match(await removeEntry(base, 'deep', true).catch((e) => e.message), /more than 2048 folders deep/);
+    assert.match(await removeEntry(base, 'deep', true).catch((e) => e.message), /more than 2048 folders deep, and what is deeper is not deleted/);
   } finally {
     execFileSync('rm', ['-rf', top]);
   }

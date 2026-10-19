@@ -220,13 +220,25 @@ test("instructions that fail to save halfway are as they were", { skip: !hasPrli
 
 test("deleting a folder from the files panel does not hold the server up while the tree goes", async () => {
   const dir = fresh("files-rm");
-  mkdirSync(path.join(dir, "tree", "a", "b"), { recursive: true });
-  for (let i = 0; i < 50; i++) writeFileSync(path.join(dir, "tree", "a", "b", `f${i}`), "x");
-  const removing = removeEntry(dir, "tree", true);
-  // rmSync would have finished before the call returned.
-  assert.ok(existsSync(path.join(dir, "tree")), "the removal runs off the thread");
-  await removing;
+  for (let d = 0; d < 20; d++) {
+    mkdirSync(path.join(dir, "tree", `d${d}`, "b"), { recursive: true });
+    for (let i = 0; i < 50; i++) writeFileSync(path.join(dir, "tree", `d${d}`, "b", `f${i}`), "x");
+  }
+  // The thread is free while the tree goes: the loop turns while it is partway gone. A removal on the thread (rmSync) is all there or all
+  // gone at every turn.
+  const samples = Array.from({ length: 20 }, (_, d) => path.join(dir, "tree", `d${d}`, "b", "f0"));
+  let partway = false;
+  let removing = true;
+  const turn = () => {
+    if (!removing) return;
+    if (existsSync(path.join(dir, "tree")) && samples.some((file) => !existsSync(file))) partway = true;
+    setImmediate(turn);
+  };
+  setImmediate(turn);
+  await removeEntry(dir, "tree", true);
+  removing = false;
   assert.ok(!existsSync(path.join(dir, "tree")));
+  assert.ok(partway, "the loop turned while the tree was partway gone");
 });
 
 test("a project folder is out of the way at once and removed after, and a stop in between is cleaned up", async () => {
