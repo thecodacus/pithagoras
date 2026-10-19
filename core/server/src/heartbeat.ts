@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { nanoid } from "nanoid";
 import { createSession, getDb, getSession, type SessionRow } from "./db.js";
 import { AgentError, getAgent, listAgents, type Agent } from "./agents.js";
@@ -8,6 +6,7 @@ import { EXECUTOR_KIND } from "./executor-kind.js";
 import { sessions } from "./session-manager.js";
 import { NOTE_TOOL } from "./pi/heartbeat-names.js";
 import { WATCH_FILE } from "./pi/context-files.js";
+import { baseDir, readBytes } from "./workspace-files.js";
 
 /**
  * An agent looking around on its own.
@@ -39,10 +38,21 @@ const INTERRUPTED = "Interrupted by a restart";
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-/** What the agent is asked to watch, or "" when there is nothing. */
-export function watchList(agent: Agent): string {
+/**
+ * What the agent is asked to watch, or "" when there is nothing.
+ *
+ * Read from a descriptor, never through a link: the agent can leave one as
+ * WATCH.md in its home, and the portal, which may be root, would read what it
+ * leads to. For a look (`chat`, the session it happens in) it is read as that
+ * session's agent could read it (see AgentUse in workspace-files.ts), since
+ * the text goes into the look's prompt: a file closed to the agent is nothing
+ * to watch. Without one it is the agent's page asking, for the person, who is
+ * shown the file as it is (see agentFileStatus).
+ */
+export function watchList(agent: Agent, chat?: string): string {
   try {
-    return readFileSync(path.join(agent.home, WATCH_FILE), "utf8").trim();
+    const as = chat ? { likeParent: true, chats: [chat] } : {};
+    return readBytes(baseDir(agent.home), WATCH_FILE, { direct: true, ...as }).bytes.toString("utf8").trim();
   } catch {
     return "";
   }
@@ -185,7 +195,9 @@ class HeartbeatSupervisor {
       status("Looks need the host executor: in a container nothing holds them to reading");
       return getAgent(agent.id)!;
     }
-    const watch = watchList(agent);
+    // Made before WATCH.md is read: it is read as the agent the session runs as (see watchList).
+    const session = sessionFor(agent);
+    const watch = watchList(agent, session.id);
     if (!watch) {
       status(`Nothing to watch: ${WATCH_FILE} is empty`);
       return getAgent(agent.id)!;
@@ -195,7 +207,6 @@ class HeartbeatSupervisor {
     status("Looking");
     const before = countNotes(agent.id);
     try {
-      const session = sessionFor(agent);
       // Stop pressed in the look's chat ends it like any other, and would read
       // as one that found nothing.
       let stopped = false;
