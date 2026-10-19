@@ -126,7 +126,8 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, wo
       const note = card.status === 'running' ? (took >= 3000 ? elapsed(took) : '') : card.outcome;
       const className = `voice-tool-float flies-${card.slot % 2 ? 'right' : 'left'} flight-lane-${Math.floor(card.slot / 2)} is-${card.status}${card.leaving ? ' is-leaving' : ''}`;
       // A picture being made, made or not made is the preview the chat shows, as a tile in the place of the mark; another extension's tool of that name, which ends with no picture, has the mark.
-      const own = tile?.(viewOf(card));
+      // The portal's own picture call has the portal's preview, as it has its card in the chat.
+      const own = card.look ? undefined : tile?.(viewOf(card));
       const portalTile = !own && card.look && (card.status !== 'done' || card.picture);
       const body = <>
         {own ? <div className="voice-tool-tile">{own}</div> : portalTile ? <ImagePreview compact state={card.status === 'running' ? 'making' : card.picture ? 'done' : 'failed'} edit={card.look!.edit} src={card.picture && api.pictureUrl(sessionId, card.picture, card.pictureSeq)} ratio={card.look!.ratio} />

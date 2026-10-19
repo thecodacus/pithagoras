@@ -807,8 +807,8 @@ test("a rule for a folder does not reach out of it through ..", () => {
   assert.equal(write(site, "/srv/site/../site-old/x"), false);
   assert.equal(write([rule("docs/*")], "docs/../../etc/passwd"), false);
   assert.equal(write([rule("*")], "../outside"), false, "even a rule for everything stops at a path that leaves");
-  assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: ["shared/../../x.png"] }), false);
-  assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: ["shared/a.png"] }), true);
+  assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: ["shared/../../x.png"] }, undefined, undefined, ["path", "paths"]), false);
+  assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: ["shared/a.png"] }, undefined, undefined, ["path", "paths"]), true);
 });
 
 test("a rule for a folder is matched where a path leads: a link in the folder that leads out does not carry the rule with it", () => {
@@ -840,8 +840,8 @@ test("a rule for a folder is matched where a path leads: a link in the folder th
   assert.equal(write([rule("notes/*")], "notes/a.md", site), true);
   assert.equal(write([rule("out/*")], "out/pwn.txt", site), false);
   assert.equal(write([rule("inner/*")], "inner/a.txt", site), false, "it does not name real/");
-  assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: [`shared/a.png`] }), true, "no link, or no folder to look in");
-  assert.equal(ruleAllows([{ ...rule(`${site}/*`), tool: "edit_image" }], "colleague", "edit_image", { paths: [`${site}/inner/a.png`, `${site}/out/b.png`] }, undefined, site), false, "one picture of the list leads out");
+  assert.equal(ruleAllows([{ ...rule("shared/*"), tool: "edit_image" }], "colleague", "edit_image", { paths: [`shared/a.png`] }, undefined, undefined, ["path", "paths"]), true, "no link, or no folder to look in");
+  assert.equal(ruleAllows([{ ...rule(`${site}/*`), tool: "edit_image" }], "colleague", "edit_image", { paths: [`${site}/inner/a.png`, `${site}/out/b.png`] }, undefined, site, ["path", "paths"]), false, "one picture of the list leads out");
 
   // The folders the portal gives out may be reached through a link themselves (a disk linked in): that is not a link in a project.
   const linkedRoot = path.join(base, "via");

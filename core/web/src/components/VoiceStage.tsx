@@ -527,7 +527,8 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       </ErrorBoundary>
     ))}
     <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} tile={(view) => {
-      const entry = toolEntries.find((e) => e.tool === view.name && e.tile);
+      // The entry that draws the call's card in the chat, as ToolView finds it: its tile, or none.
+      const entry = toolEntries.find((e) => e.tool === view.name);
       if (!entry?.tile) return undefined;
       const Tile = entry.tile;
       return <ErrorBoundary resetKey={`${entry.key}:${view.callId}`} fallback={() => null}><Tile call={view} chat={chat} /></ErrorBoundary>;

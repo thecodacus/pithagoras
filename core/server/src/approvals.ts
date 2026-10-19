@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { addGrant, addToolRule } from "./db.js";
+import { addGrant, addToolRule, approvalFilesOf } from "./db.js";
 import { debugLog } from "./logs.js";
 import { literalPattern, rulePatterns } from "./pi/guard.js";
 import { runsAsPrimary } from "./pi/runs-as-primary.js";
@@ -11,7 +11,8 @@ import type { QuestionRow } from "./questions.js";
  * `asking` is the conversation that asked, which a one-off approval is bound to.
  * What was approved is the question's `action`, matched against the call the way
  * the guard names it (see callSubject and rulePatterns there): for most tools the
- * command or the path, and for edit_image the paths of its pictures.
+ * command or the path, and for a tool that declares its files (edit_image's
+ * pictures) the path of each.
  */
 export function recordApproval(question: QuestionRow, asking: { id: string } | undefined, approves: boolean, always: boolean): void {
   const tool = question.action_tool || "bash";
@@ -36,7 +37,7 @@ export function recordApproval(question: QuestionRow, asking: { id: string } | u
   // written by hand, and is revoked the same way. What was shown is what is
   // permitted, to the letter: a `*` in a command is a star, not a wildcard.
   if (always && question.action) {
-    for (const pattern of rulePatterns(tool, question.action)) {
+    for (const pattern of rulePatterns(question.action, approvalFilesOf(tool) !== undefined)) {
       addToolRule({
         id: nanoid(10),
         // Whatever their role becomes: a rule naming a person applies to them (see ruleApplies).

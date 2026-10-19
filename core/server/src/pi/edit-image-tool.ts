@@ -135,6 +135,8 @@ export class EditImageTool {
       name: EDIT_IMAGE_TOOL,
       label: "edit image",
       description: (several ? SEVERAL_PICTURES : ONE_PICTURE) + BEFORE_YOU_CALL,
+      // What a person approves is the pictures, each of them: the prompt is no part of it. Both names, for the tool takes either.
+      approvalFiles: ["path", "paths"],
       parameters: Type.Object(
         several
           ? {

@@ -26,7 +26,7 @@ import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptT
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
-import { guardExtension } from "./guard.js";
+import { declaredFiles, guardExtension } from "./guard.js";
 import { CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
@@ -469,6 +469,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     const settingsManager = pi.SettingsManager.create(opts.cwd, pi.getAgentDir());
     // What the conversation has switched off: the client's, once there is one.
     let switchedOff: () => ReadonlySet<string> = () => new Set(opts.toolsOff ?? []);
+    // The files a tool declares it is approved for, from its definition once the session has it: see declaredFiles.
+    let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
     const gateway = new ToolsGateway(opts.lazySets);
     // Whether the model has the tool is settled when pi loads it and by the tool switches: the rule says
     // so only while it has — and it is the portal's, not an extension's of the same name that pi keeps.
@@ -511,6 +513,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             [path.join(pi.getAgentDir(), "skills"), ...(builtinSkills ? [builtinSkills] : [])],
             () => switchedOff(),
             () => gateway.owns(),
+            (name) => filesOf(name),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tools-gateway", factory: gateway.extension },
@@ -532,7 +535,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // Only where it means something: a conversation with the primary user has
       // nobody to escalate to, and the tool would just be noise.
       if (opts.sessionId && opts.role && opts.role !== "primary") {
-        factories.push({ name: "ask-primary", factory: askPrimaryTool(opts.sessionId) });
+        factories.push({ name: "ask-primary", factory: askPrimaryTool(opts.sessionId, (name) => filesOf(name)) });
       }
       // Only when there is somewhere for it to go — a tool that always fails is
       // worse than no tool, and the model will keep trying it.
@@ -639,6 +642,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(model ? { model } : {}),
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
+    filesOf = (name) => declaredFiles(session.getToolDefinition(name));
     toolVoiceLines = () => {
       const lines = new Set<string>();
       for (const name of session.getActiveToolNames()) {
@@ -1632,6 +1636,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(isInline(tool.sourceInfo) ? { inline: true as const } : {}),
       ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
       ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
+      ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }

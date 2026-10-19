@@ -20,7 +20,7 @@ import { fail, say } from "./tool-result.js";
  * the recipient nor the route, which is the property worth keeping: a session
  * serving someone else must not be able to choose who hears from it.
  */
-export function askPrimaryTool(sessionId: string) {
+export function askPrimaryTool(sessionId: string, filesOf: (toolName: string) => readonly string[] | undefined = () => undefined) {
   return (pi: any): void => {
     pi.registerTool({
       name: "ask_primary",
@@ -34,7 +34,7 @@ export function askPrimaryTool(sessionId: string) {
         action: Type.Optional(
           Type.String({
             description:
-              "For permission to do one exact thing: the shell command verbatim, or the path to write; for edit_image each picture's path, one per line, in call order; " +
+              "For permission to do one exact thing: the shell command verbatim, or the path to write; for a tool that takes files, each file's path, one per line, in call order; " +
               "for other tools the refusal says what to write. Approval covers exactly this, once. Omit when asking for a decision",
           })
         ),
@@ -61,7 +61,7 @@ export function askPrimaryTool(sessionId: string) {
         // conversation has read something untrusted: asked anyway, they would be
         // told that something could be done once, and it could not.
         const wanted = typeof p.actionTool === "string" ? p.actionTool : "bash";
-        const never = typeof p.action === "string" && p.action.trim() ? approvalCannotHelp(wanted, p.action.trim(), session.workspace, sessionId) : undefined;
+        const never = typeof p.action === "string" && p.action.trim() ? approvalCannotHelp(wanted, p.action.trim(), session.workspace, sessionId, filesOf(wanted)) : undefined;
         if (never) {
           return fail(
             `That cannot be approved: ${never}. Not even the primary user can allow it for somebody else, ` +

@@ -385,13 +385,13 @@ seconds), the picture once it is there, or why it is not. Given the file, it
 shows it and opens the viewer when clicked:
 
 ```js
-function PictureCall({ call }) {
+function PictureCall({ call, compact }) {
   const picture = call.files?.find((f) => f.kind === "picture");
   const state = call.status === "running" ? "making" : picture ? "done" : "failed";
   const elapsed = call.since && Math.floor((Date.now() - call.since) / 1000);
-  return h(portal.ui.ImagePreview, { state, file: picture, title: String(call.input.prompt ?? ""), elapsed, reason: call.interrupted ? "Interrupted" : call.output });
+  return h(portal.ui.ImagePreview, { state, file: picture, title: String(call.input.prompt ?? ""), elapsed, reason: call.interrupted ? "Interrupted" : call.output, compact });
 }
-portal.slots.register("chat.tool", { id: "picture", tool: "make_picture", component: PictureCall, tile: (props) => h(PictureCall, props) });
+portal.slots.register("chat.tool", { id: "picture", tool: "make_picture", component: PictureCall, tile: (props) => h(PictureCall, { ...props, compact: true }) });
 ```
 
 `tile` is drawn small on the call's card in voice mode, in place of the mark
@@ -829,10 +829,11 @@ beside its place and put there whole, never over one that is there. A name
 that is taken gets a number, `cat (2).png`, and the path it was given is
 returned.
 
-`files.open(base, rel, { as: "picture" })` opens only a picture (PNG, JPEG,
-GIF or WebP, at most 25 MB), and `{ as: "video" }` only a clip the portal
-plays, each by its bytes rather than its name, with the type its bytes say
-(`mimeType`). Anything else is refused (`invalid`, `too_large`).
+`files.open(base, rel)` also says what the file is by its first bytes rather
+than its name: `mimeType` is set for a picture (PNG, JPEG, GIF, WebP) or a
+clip a browser plays (WebM, MP4), and absent for anything else. What a package
+takes is its own to decide: a gallery refuses a file that has no `image/` type,
+and a picture larger than it shows.
 
 #### Sending a file
 
@@ -842,12 +843,16 @@ from running anything in the page, a version the browser revalidates (304), and
 the part a player asks for (`Range`), so a long clip starts at once and can be
 moved around in. `cache` is the `Cache-Control` (`private, no-cache` unless
 said); with `download`, a file name, the file is sent to be saved and never
-shown, and so is a file opened with no `as`. The file is closed once sent.
+shown, and so is a file that is no picture or clip. The file is closed once sent.
 
 ```js
 portal.router.get("/chats/:id/picture", (req, res) => {
   try {
-    const file = portal.files.open(portal.chats.folder(req.params.id), String(req.query.path), { as: "picture" });
+    const file = portal.files.open(portal.chats.folder(req.params.id), String(req.query.path));
+    if (!file.mimeType?.startsWith("image/")) {
+      fs.closeSync(file.fd);
+      return res.status(400).json({ error: "That is not a picture" });
+    }
     portal.http.send(req, res, file, { cache: "private, max-age=3600" });
   } catch (e) {
     res.status(e.code === "missing" ? 404 : 400).json({ error: e.message, code: e.code });
@@ -967,11 +972,18 @@ chat whose pi runs in the portal's own process (the host executor, where
 pi.registerTool({ name: "docker_run", /* … */ offByDefault: true });
 ```
 
-A tool whose arguments name files in a list, `paths`, is approved by the
-guard for each of them, whatever the tool is called: a rule for a folder
-allows the call when it allows every file of the list, and the action asked
-for is each file's path, one to a line. A list is never matched on its JSON,
-where a rule for a word would have been met by another argument.
+A tool that works on files the person approves (edit_image's pictures) says
+which of its parameters hold them, as `approvalFiles`: names of parameters it
+declares as text or a list of text. The guard then approves a call for each of
+those files and for nothing else of it: a rule for a folder allows the call
+when it allows every file, and the action asked for is each file's path, one
+to a line. Every other tool is approved on its command, its path or its
+arguments whole, whatever a call of it carries, and a command, a tool server's
+tools and the `tools` tool never are on files.
+
+```js
+pi.registerTool({ name: "merge_pdfs", parameters: { type: "object", properties: { inputs: { type: "array", items: { type: "string" } }, title: { type: "string" } } }, approvalFiles: ["inputs"], /* … */ });
+```
 
 #### Tools that follow the settings
 

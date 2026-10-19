@@ -43,6 +43,8 @@ export interface PiTool {
   cached?: true;
   /** Registered with `offByDefault: true`: off in every chat until somebody switches it on. */
   offByDefault?: true;
+  /** The parameters that hold the files it is approved for, as its definition declares them (see declaredFiles in guard.ts). */
+  approvalFiles?: string[];
   /** False when this conversation has it switched off. */
   enabled: boolean;
   /** Whether it is on by default, so the page can say where a chat disagrees. */
