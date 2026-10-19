@@ -27,20 +27,15 @@ It comes with the portal: open **Settings → Extensions → Discover** and
 install it under **Comes with Pithagoras**. Like any extension, you can switch
 it off or remove it under **Installed** ([Extensions](/guide/extensions)).
 
-The extension has npm packages of its own. The image comes with them, and
-`npm run build` builds its editor along with the portal. The build installs
-the packages it needs first if they are missing, or if they are not the
-versions the extension's lock file names.
+The extension has npm packages of its own only to build its editor. The image
+comes with the built editor, and `npm run build` builds it along with the
+portal: the build installs the packages it needs first if they are missing, or
+if they are not the versions the extension's lock file names. At run time the
+extension needs no package: the database driver is the portal's own
+(`portal.sqlite`), and nothing is installed when the portal starts.
 
-A checkout that was not built since its last change (one run by systemd, for
-example) may not have the packages the extension needs to run, or have other
-versions of them. When the portal starts, the extension then installs them
-with npm in the background (it needs npm and a network). The portal's log says
-when the install starts and when it ends, or why it failed. A failed install is
-tried again at the next start. A request waits for the install to end, and
-after a failed one the page says that the store's packages are not installed
-yet. This installs what the extension needs to run, not what builds its editor:
-a checkout still needs `npm run build`, or documents are shown read-only
+A checkout that was not built since its last change may not have the editor:
+it still needs `npm run build`, or documents are shown read-only
 ([History](#history)).
 
 The history is kept with git, which the image has. A portal run from a
@@ -275,7 +270,6 @@ the portal's own words, in English. The usual ones are these:
 
 | The page says | Why, and what to do |
 | --- | --- |
-| The documents store's packages are not installed yet | The extension installs what it needs to run in the background when the portal starts ([Installing it](#installing-it)); it needs npm and a network. The install failed (the portal's log says why); the page says this for every folder until the portal starts again and tries again. |
 | The portal is not allowed to read this folder's documents folder (permission denied) | The user the portal runs as cannot enter or list `documents`. Give it the right to (`chmod`, or the folder's owner). A document of that folder that is open gets the same reason when it is read or saved, not "There is no such document". |
 | git could not be found on the portal's PATH: … | The history is kept with git ([Installing it](#installing-it)). Install it, or put it on the portal's `PATH` (a portal that was started before has to be restarted). Nothing was changed. |
 | The history of the documents could not be used: git … | git could not read or write the folder's history. It names the store's folder. If the history is damaged (a crash, a disk that failed), remove the `git` folder in the store: the history starts again from the files as they are, every document at revision 1 and marked as an existing file, and the documents and their comments stay (except those of a document whose file is gone: it is forgotten with its comments). The damaged history is gone with it: keep a copy first to look into it. A full disk, a read-only file system and a missing right are not this: git saying so is reported as one of those (the next rows and the list below), and the history is not to be removed for it. |
@@ -1126,8 +1120,7 @@ A refusal reaches the agent as an error that starts with its reason
 `thread_resolved`, `thread_orphaned`, `comment_not_found`, `comment_not_yours`,
 `too_many` or `refused`, for
 anything else the store will not do: the folder is full, `documents` is a link,
-the store's packages are not installed yet, the portal may not write in the
-folder, git is missing or the history is damaged, a document's file is past
+the portal may not write in the folder, git is missing or the history is damaged, a document's file is past
 1 MB), so that it can put it right or tell you.
 
 These checks are in the tools. The agent can still change a document's file
@@ -1300,12 +1293,13 @@ half does nothing for it: the tool saves when it runs, as before.
 **What a page listens to** are two kinds of topic of the portal's push channel
 (`portal.push`, `portal.onListen`: see the extension guide), and there is no
 stream of Documents' own. `folders` says `{ version }` whenever the list changes.
-`doc/<folder>/<document>` says `{ revision, author, at }` for each revision and
-`{ threads: true, at }` when the comments changed; the first thing a page hears on
-either is where things stand (marked `first`), so that a page that was away finds
-out at once. A page may listen to a document only if a chat works in its folder now
-and the folder's store has the document; anything else is refused and hears
-nothing. The folder is looked at every couple of seconds for changes made outside
+`doc/<folder>/<document>` says `{ revision, author, at }` for each revision,
+`{ threads: true, at }` when the comments changed and `{ deleted: true, at }` when
+the document is deleted; the first thing a page hears on either is where things
+stand (marked `first`), so that a page that was away finds out at once (a document
+that is gone by then says `{ deleted: true, first: true, at }`, and there is nothing
+more to hear). A page may listen to a document only if a chat works in its folder
+now; anything else is refused and hears nothing. The folder is looked at every couple of seconds for changes made outside
 the page, while some page listens, and the portal stops all of it with the
 extension.
 
@@ -1329,7 +1323,7 @@ what is wrong (`errors.js`), and anything else is logged and answered with
 
 **Options.** The server half takes a second argument, for tests: `faults` (breaks a
 write after a step), `gitTimeoutMs`, `pollMs`, `wakeMs` and `wakeLimitMs` (the times in
-the table above). Its packages (the database driver) are installed by the portal before it starts.
+the table above). Its database driver is the portal's own (`portal.sqlite`), so there is nothing to install for it.
 
 **Tests.** They are beside the code, in `extensions/docs/test/`. Each file runs
 alone, with `node --import tsx --test extensions/docs/test/<name>.test.mts`:

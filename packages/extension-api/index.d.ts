@@ -675,8 +675,11 @@ export interface Portal {
     /**
      * What the package's server half pushes to `topic` (`portal.push(topic, data)`), on any page: one with no chat
      * open as well. The server half decides who may listen (`onListen`) and tells the page where things stand as it
-     * begins to, so a handler hears that first, then each change. A page that loses its connection asks again by
-     * itself, and is told where things stand again; a topic the server refuses is not heard. Returns the unsubscribe.
+     * begins to, so the first handler hears that first, then each change. Handlers of one topic in a page share one
+     * listening: one that comes while others listen hears only what comes after (ask for where things stand yourself),
+     * and one that comes as the last stopped, in the same tick, is the first again and is told. A page that loses its
+     * connection asks again by itself, and is told where things stand again; a topic the server refuses is not heard.
+     * Returns the unsubscribe.
      */
     on(topic: string, handler: (data: unknown) => void): () => void;
   };
