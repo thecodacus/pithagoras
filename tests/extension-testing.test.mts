@@ -44,7 +44,7 @@ test('chats.followUp puts the message in the conversation as the package\'s own,
   }
 });
 
-test('chats.inFolder gives a session of every kind that works in a folder, one for each stored workspace, chats.list the tasks alone, and the folder is resolved as it is asked', async () => {
+test('chats.inFolder gives a session of every kind that works in a folder, one for each agent, chats.list the tasks alone, and the folder is resolved as it is asked', async () => {
   const mine = scratch();
   const other = scratch();
   const elsewhere: Record<string, string> = {};
@@ -57,7 +57,8 @@ test('chats.inFolder gives a session of every kind that works in a folder, one f
   try {
     const { chats } = mock.portal;
     assert.deepEqual(chats.list().map((chat) => chat.id), ['t', 'o'], 'the tasks');
-    // One session for each stored workspace: t and r were made for the same, o for another that folderOf makes lead here.
+    // One session for each agent, which is a stored workspace of its own unless `agentOf` says: t and r were made for the same, o for another that
+    // folderOf makes lead here.
     assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id).sort(), ['o', 't']);
     elsewhere.o = other;
     assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id), ['t']);
@@ -74,6 +75,23 @@ test('chats.inFolder gives a session of every kind that works in a folder, one f
     assert.deepEqual(plain.portal.chats.inFolder(mine).map((chat) => chat.id), ['a']);
   } finally {
     await plain.stop();
+  }
+  // Two workspaces that lead to the same folder are two agents, or one when `agentOf` says they run as the same.
+  const linked = `${mine}/.`;
+  const two = await mockPortal({ extension: 'ext-a', chats: { a: mine, b: linked, c: linked } });
+  const same = await mockPortal({ extension: 'ext-a', chats: { a: mine, b: linked, c: linked }, agentOf: (id) => (id === 'c' ? 'one' : id === 'b' ? 'one' : 'two') });
+  try {
+    assert.deepEqual(two.portal.chats.inFolder(mine).map((chat) => chat.id), ['a', 'b']);
+    assert.deepEqual(same.portal.chats.inFolder(mine).map((chat) => chat.id), ['a', 'b'], 'b and c run as one agent: one of them');
+    const third = await mockPortal({ extension: 'ext-a', chats: { a: mine, b: linked }, agentOf: () => 'the same' });
+    try {
+      assert.deepEqual(third.portal.chats.inFolder(mine).map((chat) => chat.id), ['a'], 'one agent in two workspaces: one session');
+    } finally {
+      await third.stop();
+    }
+  } finally {
+    await two.stop();
+    await same.stop();
   }
 });
 

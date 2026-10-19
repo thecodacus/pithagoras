@@ -71,8 +71,8 @@ function racing(before: Record<string, () => void> = {}): typeof folderFiles {
  * stored workspace now, for a session of any kind. `kinds`: a session is a task unless it is said what else it is. `folderOf`: where a session's
  * folder leads now, where a test makes it lead somewhere else.
  */
-async function portal(chats: Record<string, string>, files: typeof folderFiles = folderFiles, opts: { kinds?: Record<string, string>; folderOf?: (id: string) => string } = {}) {
-  const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats, dataDir: DATA, files, kinds: opts.kinds, folderOf: opts.folderOf });
+async function portal(chats: Record<string, string>, files: typeof folderFiles = folderFiles, opts: { kinds?: Record<string, string>; folderOf?: (id: string) => string; sandbox?: boolean } = {}) {
+  const mock = await mockPortal({ extension: 'pithagoras-docs', executor: 'host', chats, dataDir: DATA, files, kinds: opts.kinds, folderOf: opts.folderOf, sandbox: opts.sandbox });
   await mock.start(docsServer, { pollMs: 0 });
   const { call } = await mock.serve();
   /** What the agent of a chat gets when it calls a tool: its text and details, or the refusal it reads. */
@@ -530,7 +530,7 @@ for (const real of flavours) {
   test(`[${named(real)}] the folder a tool names is the same one the sessions are listed for: a path that leads somewhere else the next time it is resolved does not take the caller out of the agents that are asked`, async () => {
     const { A, B, home, dir, own } = twoAgents(real, 'docs-closed-twice-');
     setAgentAccess(runAs({ tb: B, ta: A }));
-    let first = true;
+    let first = false;
     // A task chat of A, whose folder leads into B's home the first time it is resolved (what the tool does) and to its own after (what listing the sessions of the folder does).
     const docs = await portal({ tb: home, ta: own }, folderFiles, { folderOf: (id) => (id === 'ta' ? (first ? ((first = false), home) : own) : home) });
     try {
@@ -579,35 +579,57 @@ for (const real of flavours) {
     }
   });
 
-  test(`[${named(real)}] a session whose agent may not write in the folder it leads to makes no documents folder there, and what it is told does not say whether there is one`, async () => {
-    // Two homes of B, one with a `documents` folder and one without, each reached by a routine run of A through a link: the portal, which is root, could
-    // make the folder in the one that has none, and a look at what stands there tells A what it cannot look at itself.
-    const told: string[][] = [];
-    for (const documents of [true, false]) {
-      const { A, top, home } = twoAgents(real, `docs-closed-${documents ? 'has' : 'hasnot'}-`, { documents });
+  test(`[${named(real)}] a session whose agent may not look into the folder it leads to makes nothing there and learns nothing of what is there: the same words for nothing, a documents folder, a link, a file and a store of an earlier version`, async () => {
+    // B's home, which A cannot search, reached by a routine run of A through a link. The portal, which is root, could make a `documents` folder in it, and a look
+    // at what stands there (at `documents`, or at a store of an earlier version) would tell A what it cannot look at itself. Each variant of what is there is
+    // run with every tool, and every answer is to be the one of the first.
+    const variants: [string, boolean, (home: string, top: string) => void][] = [
+      ['nothing', false, () => {}],
+      ['a documents folder', true, () => {}],
+      ['a link', false, (home, top) => symlinkSync(top, path.join(home, 'documents'))],
+      ['a file', false, (home) => writeFileSync(path.join(home, 'documents'), 'not a folder')],
+      ['a store of an earlier version', false, (home) => mkdirSync(path.join(home, '.pithagoras-docs'))],
+    ];
+    const told: Record<string, string[]> = {};
+    for (const [name, documents, make] of variants) {
+      const { A, top, home } = twoAgents(real, `docs-closed-${name.replace(/\W+/g, '-')}-`, { documents });
+      make(home, top);
       const link = path.join(top, 'leads-there');
       symlinkSync(home, link);
       setAgentAccess(runAs({ r1: A }));
-      const docs = await portal({ r1: link }, folderFiles, { kinds: { r1: 'routine' } });
+      const before = readdirSync(home);
+      // With the sandbox on, as it is where the check exists: a store of an earlier version is refused with a message of its own there.
+      const docs = await portal({ r1: link }, folderFiles, { kinds: { r1: 'routine' }, sandbox: true });
       try {
         const agent = docs.agent('r1');
-        const listed = await agent('doc_list', {});
-        isClosed(listed);
-        const made = await agent('doc_create', { title: 'Theirs' });
-        assert.equal(made.ok, false, JSON.stringify(made));
-        // Nothing was made in B's home, whichever it was.
-        assert.deepEqual(readdirSync(home), documents ? ['documents'] : [], `documents ${documents ? 'was' : 'was not'} there, and is as it was`);
-        if (documents) assert.deepEqual(readdirSync(path.join(home, 'documents')), []);
-        for (const [what, result] of [['create', made], ['list', listed]] as const) {
-          const known = result as { ok: false; error: string };
-          assert.match(known.error, /closed to/, what);
-        }
-        told.push([(listed as any).error, (made as any).error]);
+        const answers = [await agent('doc_list', {}), await agent('doc_create', { title: 'Theirs' }), await agent('doc_read', { id: '0123456789abcdef' })];
+        for (const [n, answer] of answers.entries()) assert.equal(answer.ok, false, `${name}, tool ${n}: ${JSON.stringify(answer)}`);
+        // Nothing was made in B's home, whatever was there.
+        assert.deepEqual(readdirSync(home), before, `${name}: B's home is as it was`);
+        if (name === 'a documents folder') assert.deepEqual(readdirSync(path.join(home, 'documents')), []);
+        for (const answer of answers) assert.match((answer as { error: string }).error, /closed to/, name);
+        told[name] = answers.map((answer) => (answer as { error: string }).error);
       } finally {
         await docs.close();
       }
+      if (name === 'a store of an earlier version') continue;
+      // What the store says is the same too, where it is asked for the person (no caller: every session of the folder is asked, and A's is one): B has a task chat in
+      // its home, and a routine run of A has it as a stored folder. What stands at `documents` is not told by the store either, to any of them.
+      const both = await portal({ tb: home, r1: link }, folderFiles, { kinds: { r1: 'routine' }, sandbox: true });
+      try {
+        const made = await both.call('POST', `/folders/${folderIdOf(home)}/documents`, { title: 'Theirs', markdown: '# Theirs\n' });
+        assert.equal(made.status, 409, `${name}: ${JSON.stringify(made.body)}`);
+        assert.match(made.body.error, /closed to/, name);
+        assert.deepEqual(readdirSync(home), before, `${name}: B's home is as it was, for the person's create too`);
+        told[`${name}, by the page`] = [made.body.error];
+      } finally {
+        await both.close();
+      }
     }
-    assert.deepEqual(told[0], told[1], 'what the agent is told is the same, whether or not there is a documents folder in the folder it may not look into');
+    for (const [name, answers] of Object.entries(told)) {
+      if (name.endsWith(', by the page')) assert.deepEqual(answers, told['nothing, by the page'], `what the store says is the same where there is ${name.replace(', by the page', '')} as where there is nothing`);
+      else assert.deepEqual(answers, told.nothing, `what the agent is told is the same where there is ${name} as where there is nothing`);
+    }
   });
 
   for (const kind of ['routine', 'agent', 'heartbeat']) {

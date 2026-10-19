@@ -445,8 +445,8 @@ holds. The agent is the one the sandbox runs each session of the folder as, by t
 workspace stored for it, so a link the agent puts where that path was does not
 change who is asked. The sessions are all of them that work in the folder (tasks, and
 also routine runs, conversations on the Agent page and heartbeats, which have the
-document tools too; one for each workspace stored for them, as the sessions made for one are run as the same
-agent and are never removed), and for what an agent's own tool does, the session that calls
+document tools too; one for each agent that has some there, as what an agent can reach is the same from each of
+its sessions, which are never removed, and a stored path can be a link), and for what an agent's own tool does, the session that calls
 it, always: if the folder has sessions of more than one agent, all of them must be
 able to use it, which also means that one that leads its stored path into another
 agent's folder stops that folder's documents for everyone until it is put back. A project is root's too, so who owns a folder says nothing,
@@ -458,7 +458,8 @@ read is not read: its files are not listed as documents or taken in, `doc_read` 
 the page do not give them, and the store never holds to it (the page says "documents
 in this folder is closed to the agent", and `doc_list` says it is closed, not that there are no documents).
 A `documents` folder is not made in a folder the agent could not write in either, and what is said of a folder
-the agent could not even look into is the same whatever stands there. To hold to a folder, to write in it and to
+the agent could not even look into is the same whatever stands there (nothing, a `documents` folder, a link or a file of that
+name, or a store of an earlier version): the portal refuses the folder before it looks at anything in it. To hold to a folder, to write in it and to
 delete or rename in it, the agent must also be allowed to write there; a folder the
 agent can only read (a read-only project) is read and not changed in. In a sticky
 folder (mode 1777) only what is the agent's own is deleted, renamed or replaced, as

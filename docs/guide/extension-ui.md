@@ -695,7 +695,7 @@ restart the portal.
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status }` |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
-| `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each workspace stored that leads there (the sessions made for one are run as the same agent, and none is removed) |
+| `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each agent that has some there (what an agent can reach is the same from each of its sessions; none is removed, and a stored path can be a link an agent made) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
 | `chats.on("started" \| "stopped" \| "deleted", fn)` | A chat's pi started or stopped; the chat was deleted |
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
@@ -1702,7 +1702,7 @@ What your half relies on for its safety is the portal's own, not made up: `porta
 way an extension needs: a chat's pi (`mock.pi(chat)`) keeps the tools and messages it is given, `chats.followUp` answers as
 the portal's does (it resolves `true` once the message is handed to pi, `false` when `executor` is not `"host"`, and a pi that
 refuses the message shows as a `portal_failed` event, which `chats.onEvent` hears), and the options `tell`, `followUp` and
-`sendThrows` steer what a chat's pi answers. `chats.inFolder` gives one session of every kind for each stored workspace that leads to the folder asked for, `chats.list` the tasks alone; `kinds` says which
+`sendThrows` steer what a chat's pi answers. `chats.inFolder` gives one session of every kind for each agent that has some in the folder asked for (`agentOf` names the agent of a chat; each stored workspace is an agent of its own without it), `chats.list` the tasks alone; `kinds` says which
 chats are not tasks (by id), and `folderOf` where a chat's folder leads now, for a test that sends a session's folder somewhere else.
 
 It stands on the portal's source, so it needs a checkout of the portal: `mockPortal()` finds `core/server` beside the

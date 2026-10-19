@@ -69,10 +69,11 @@ setAgentAccess((chats) => {
   const found = new Map<number, AgentAccess>();
   // The agents are read once for all the chats named, not for each: a call may name many.
   const agents = listAgents();
+  let first: ReturnType<typeof defaultAgent> | undefined;
   for (const id of chats) {
     const row = getSession(id);
     if (!row) throw new Error("No such chat");
-    const agent = agentOf(row.workspace, agents) ?? defaultAgent();
+    const agent = agentOf(row.workspace, agents) ?? (first ??= defaultAgent());
     let known = agentAccess.get(agent.id);
     if (!known || now - known.at > 1000) {
       const who = identityOf(agent, sandboxSupport());
@@ -245,16 +246,23 @@ function portalFor(ext: Running): ServerPortal {
       },
       list: () => listSessions().map(chatOf),
       inFolder: (where) => {
-        // Each workspace stored is resolved once, as `folder` does for a chat: one session of every kind for each that leads to `where`.
-        const found: Chat[] = [];
+        // One session of every kind for each agent that has some that work in `where`. What an agent can reach is the same from each of its sessions: the
+        // sandbox runs a session as the agent its stored workspace belongs to (`agentOf`, else the first agent), whatever the path is that leads to `where`.
+        // So the stored workspaces (one query, a row for each: an agent can make many that are links to one folder) are looked at once each, and one that
+        // leads there is resolved (as `folder` does for a chat) only while its agent has none yet.
+        const agents = listAgents();
+        const first = defaultAgent();
+        const found = new Map<string, Chat>();
         for (const row of sessionsByWorkspace()) {
+          const key = (agentOf(row.workspace, agents) ?? first)?.id ?? "";
+          if (found.has(key)) continue;
           try {
-            if (baseDir(row.workspace) === where) found.push(chatOf(row));
+            if (baseDir(row.workspace) === where) found.set(key, chatOf(row));
           } catch {
             // Its folder is gone: it works in none.
           }
         }
-        return found;
+        return [...found.values()];
       },
       folder,
       send: (chatId, data) => {

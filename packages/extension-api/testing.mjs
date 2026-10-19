@@ -132,6 +132,7 @@ function fakePi(extension, chat, factories, mock) {
  * @param {object} [options.extensions]  what `portal.extensions.use(name)` gives, by name
  * @param {(chat: string, data: unknown) => Promise<boolean | void> | boolean | void} [options.tell]   called before `chats.tell` starts the chat's pi and rings its bell: false says the chat cannot be reached, a throw fails, anything else goes on; it may hold the answer
  * @param {Record<string, string>} [options.kinds]   what kind of session a chat is, by id, read as it is asked ("task" unless said; `chats.list` gives the tasks alone, `chats.inFolder` every kind)
+ * @param {(chat: string) => string} [options.agentOf]   which agent a chat runs as, as a name: `chats.inFolder` gives one session for each agent (each stored workspace is an agent of its own without this)
  * @param {(chat: string) => string} [options.folderOf]   where a chat's folder leads now, for a test that makes it lead somewhere else
  * @param {(chat: string, message: object) => Promise<boolean | void> | boolean | void} [options.followUp]   the same for `chats.followUp`, which starts the chat's pi and has it say the message
  */
@@ -242,19 +243,20 @@ export async function mockPortal(options = {}) {
       get: chatOf,
       // The tasks, as the portal lists them: a session of another kind (`kinds`) works in its folder all the same.
       list: () => (listed ?? [...chats.keys()]).filter((id) => chats.has(id) && (options.kinds?.[id] ?? "task") === "task").map(chatOf),
-      // One session of every kind for each stored workspace that leads to `where` (resolved now, as `folder` does): the agent of each is the same
-      // whichever session of a workspace is asked for.
+      // One session of every kind for each agent that has some that work in `where` (resolved now, as `folder` does): what an agent can reach is the
+      // same from each of its sessions. The agent of a chat is `options.agentOf(id)`; without it each stored workspace is an agent of its own.
       inFolder: (where) => {
         const seen = new Set();
         const found = [];
         for (const [id, chat] of chats) {
-          if (seen.has(chat.folder)) continue;
+          const agent = options.agentOf?.(id) ?? chat.folder;
+          if (seen.has(agent)) continue;
           try {
             if (folderOf(id) !== where) continue;
           } catch {
             continue;
           }
-          seen.add(chat.folder);
+          seen.add(agent);
           found.push(chatOf(id));
         }
         return found;
