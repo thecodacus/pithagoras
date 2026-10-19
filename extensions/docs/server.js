@@ -446,6 +446,23 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
     }
   }
 
+  /**
+   * Whether the agents of `chats` are refused the documents folder of `folder`: it is a folder that is there and not theirs to use, or the folder it is in is not
+   * theirs to look into (then it is not told which: it is the same answer whatever is there).
+   */
+  function closedTo(folder, chats) {
+    try {
+      portal.files.folder(folder, "", { likeParent: true, chats });
+    } catch (e) {
+      return e?.code === "invalid";
+    }
+    try {
+      return lstatSync(path.join(folder, DOCUMENTS)).isDirectory() && documentsOf(folder, chats) === null;
+    } catch {
+      return false;
+    }
+  }
+
   /** Where the stores are kept: a folder of the portal's own, made when first asked for. */
   let dataFolder;
   const data = () => (dataFolder ??= portal.dataDir());
@@ -579,6 +596,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         folder: () => portal.chats.folder(chat.id),
         store: storeFor,
         hasDocuments: (folder, caller) => documentsOf(folder, chatsIn(folder, caller)) !== null,
+        closed: (folder, caller) => closedTo(folder, chatsIn(folder, caller)),
         folderId: idOf,
         titleOf,
         headed,

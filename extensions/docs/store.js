@@ -366,8 +366,17 @@ export class Store {
     }
   }
 
-  /** What stands where the documents folder is, when it is not one: a refusal (a link, a folder that is turned away, or something that is not a folder), or nothing where there is no such place at all. */
+  /**
+   * What stands where the documents folder is, when it is not one: a refusal (a link, a folder that is turned away, or something that is not a folder), or
+   * nothing where there is no such place at all. What is there is told only where the agents could look: in a folder they cannot search it is not theirs to
+   * know whether there is anything, so the answer is the same refusal whatever stands there.
+   */
   blockedDocuments() {
+    try {
+      this.files.folder(this.folder, "", { likeParent: true });
+    } catch (e) {
+      if (e?.code === "invalid") return new DocError(409, CLOSED, { code: "folder_closed" });
+    }
     try {
       const stat = lstatSync(path.join(this.folder, DOCUMENTS));
       if (stat.isSymbolicLink()) return new DocError(409, "documents in this folder is a link");
@@ -391,8 +400,11 @@ export class Store {
       return found;
     }
     try {
-      this.files.makeFolder(this.folder, "", DOCUMENTS);
+      this.files.makeFolder(this.folder, "", DOCUMENTS, { likeParent: true });
     } catch (e) {
+      // The agents could not make it themselves (the folder is closed to them, or they may not write in it): nothing was made, and what is said is what is
+      // said of a folder that is closed to them.
+      if (e?.code === "invalid") throw this.blockedDocuments() ?? new DocError(409, CLOSED, { code: "folder_closed" });
       // Made meanwhile, or something else is called that: which it is decides what is said.
       if (e?.code !== "exists") throw e;
     }

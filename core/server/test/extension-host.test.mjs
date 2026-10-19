@@ -434,7 +434,7 @@ test("with the sandbox on, the agent files.* ask for is the chat's own, from the
     assert.equal(read(["second-own"]), "none");
     assert.equal(asked(["routine-led"]), "invalid", "a session that is not a task is its own agent\'s too");
     assert.equal(read(["routine-led"]), "invalid");
-    assert.deepEqual(portal.chats.inFolder(workspace).map((chat) => chat.id).sort(), ["led", "routine-led", "second-own"], "the sessions of every kind that work in the folder");
+    assert.deepEqual(portal.chats.inFolder(workspace).map((chat) => chat.id).sort(), ["led", "second-own"], "one session for each workspace stored that leads to the folder: the task and the routine run share one");
     assert.ok(!portal.chats.list().some((chat) => chat.id === "routine-led"), "which the list of tasks leaves out");
     assert.equal(asked(["led", "second-own"]), "invalid", "every chat\'s agent must be able to");
     assert.equal(read(["led", "second-own"]), "invalid");
@@ -444,6 +444,40 @@ test("with the sandbox on, the agent files.* ask for is the chat's own, from the
     // Without the option the portal reads it as ever, for the page.
     assert.equal(portal.files.readBytes(documents, "plan.md", { direct: true }).bytes.toString(), "# second\'s own");
     assert.ok(shared > 0);
+  } finally {
+    saveSandboxPolicy({ ...policy, enabled: false });
+  }
+});
+
+test("with the sandbox on, a folder with a thousand sessions is checked as fast as one with a few: the agents asked are those of the stored workspaces, not one lookup for each session", { skip: noSandbox }, async () => {
+  const exists = (kind, name) => spawnSync("getent", [kind, name]).status === 0;
+  if (!exists("group", "pi-sandbox")) execFileSync("groupadd", ["--gid", "10010", "pi-sandbox"]);
+  if (!exists("passwd", "pi-tools")) execFileSync("useradd", ["--uid", "10002", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "pi-tools"]);
+  const shared = Number(execFileSync("getent", ["group", "pi-sandbox"], { encoding: "utf8" }).split(":")[2]);
+  await host.syncServerHalves([write(MODULE)]);
+  const { portal } = seen();
+  const { parsePolicy, saveSandboxPolicy, defaultRules } = await import("../dist/sandbox/policy.js");
+  const policy = parsePolicy({ enabled: true, rules: defaultRules(), trusted: [] });
+  saveSandboxPolicy(policy);
+  const project = path.join(process.env.WORKSPACE_ROOT, "many-sessions");
+  const documents = path.join(project, "documents");
+  mkdirSync(documents, { recursive: true });
+  reachable(project);
+  for (const where of [project, documents]) execFileSync("sh", ["-c", `chown 0:${shared} ${where} && chmod 2775 ${where}`]);
+  // One task chat, and a routine that made a fresh session for each of a thousand runs in the project: none is pruned.
+  createSession({ id: "many-task", title: "Task", workspace: project, executor: "host" });
+  for (let n = 0; n < 1000; n++) createSession({ id: `many-run-${n}`, title: `Run ${n}`, workspace: project, executor: "host", kind: "routine", routine_slug: "many" });
+  try {
+    const chats = portal.chats.inFolder(portal.chats.folder("many-task")).map((chat) => chat.id);
+    assert.ok(chats.length <= 2, `${chats.length} sessions are named for one stored workspace`);
+    const call = () => portal.files.folder(project, "documents", { direct: true, likeParent: true, chats });
+    assert.equal(call(), documents);
+    // What a listing does is dozens of these, and the portal waits for each (they are synchronous): their processor time, not the wall clock which a busy machine stretches.
+    const before = process.cpuUsage();
+    for (let n = 0; n < 40; n++) call();
+    const used = process.cpuUsage(before);
+    const ms = (used.user + used.system) / 1000;
+    assert.ok(ms < 1000, `forty checks took ${Math.round(ms)} ms of processor time`);
   } finally {
     saveSandboxPolicy({ ...policy, enabled: false });
   }
@@ -461,9 +495,15 @@ test("chats.inFolder gives the sessions of every kind whose stored workspace lea
   for (const [id, workspace, kind] of [["if-task", folder, "task"], ["if-agent", folder, "agent"], ["if-routine", folder, "routine"], ["if-heartbeat", link, "heartbeat"], ["if-other", elsewhere, "routine"]]) {
     createSession({ id, title: id, workspace, executor: "host", kind, ...(kind === "routine" ? { routine_slug: "r" } : {}) });
   }
-  assert.deepEqual(portal.chats.inFolder(portal.chats.folder("if-task")).map((chat) => chat.id).sort(), ["if-agent", "if-heartbeat", "if-routine", "if-task"]);
+  // One session for each workspace stored that leads there (the sessions made for one are run as the same agent): the first of them, by id.
+  assert.deepEqual(portal.chats.inFolder(portal.chats.folder("if-task")).map((chat) => chat.id).sort(), ["if-agent", "if-heartbeat"]);
   assert.deepEqual(portal.chats.inFolder(portal.chats.folder("if-other")).map((chat) => chat.id), ["if-other"]);
   assert.deepEqual(portal.chats.inFolder(path.join(process.env.WORKSPACE_ROOT, "nobody-here")), []);
+  // Sessions are not pruned: a routine that makes a fresh session for each run keeps every one. A thousand of them in a folder are not a thousand agents to ask.
+  for (let n = 0; n < 1000; n++) createSession({ id: `fresh-${n}`, title: `Run ${n}`, workspace: folder, executor: "host", kind: "routine", routine_slug: "r" });
+  const many = portal.chats.inFolder(folder);
+  assert.ok(many.length <= 2, `${many.length} sessions stand for the workspaces that lead to the folder`);
+  assert.deepEqual(portal.chats.inFolder(folder).map((chat) => chat.workspace).sort(), [folder, link].sort());
   const listed = portal.chats.list().map((chat) => chat.id);
   assert.ok(listed.includes("if-task") && !listed.includes("if-agent") && !listed.includes("if-routine") && !listed.includes("if-heartbeat"));
 });

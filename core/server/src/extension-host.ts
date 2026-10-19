@@ -5,9 +5,9 @@ import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
-import { agentOf, defaultAgent } from "./agents.js";
+import { agentOf, defaultAgent, listAgents } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { allWorkspaces, getSession, listSessions, sessionsAt, type SessionRow } from "./db.js";
+import { getSession, listSessions, sessionsByWorkspace, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
@@ -63,10 +63,12 @@ setAgentAccess((chats) => {
   if (now - sandboxIsOn.at > 1000) sandboxIsOn = { at: now, on: sandboxOn() };
   if (!sandboxIsOn.on) return undefined;
   const found = new Map<number, AgentAccess>();
+  // The agents are read once for all the chats named, not for each: a call may name many.
+  const agents = listAgents();
   for (const id of chats) {
     const row = getSession(id);
     if (!row) throw new Error("No such chat");
-    const agent = agentOf(row.workspace) ?? defaultAgent();
+    const agent = agentOf(row.workspace, agents) ?? defaultAgent();
     let known = agentAccess.get(agent.id);
     if (!known || now - known.at > 1000) {
       const who = identityOf(agent, sandboxSupport());
@@ -229,16 +231,14 @@ function portalFor(ext: Running): ServerPortal {
       },
       list: () => listSessions().map(chatOf),
       inFolder: (where) => {
-        // Each workspace stored is resolved once, as `folder` does for a chat; the sessions of every kind that were made for one that leads to `where`.
+        // Each workspace stored is resolved once, as `folder` does for a chat: one session of every kind for each that leads to `where`.
         const found: Chat[] = [];
-        for (const workspace of allWorkspaces()) {
-          let there: string;
+        for (const row of sessionsByWorkspace()) {
           try {
-            there = baseDir(workspace);
+            if (baseDir(row.workspace) === where) found.push(chatOf(row));
           } catch {
-            continue;
+            // Its folder is gone: it works in none.
           }
-          if (there === where) found.push(...sessionsAt(workspace).map(chatOf));
         }
         return found;
       },

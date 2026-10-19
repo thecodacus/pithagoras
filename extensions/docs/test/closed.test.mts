@@ -38,6 +38,13 @@ after(() => setAgentAccess(() => undefined));
 /** As the portal tells it: the agents of the chats named, and none for none (which refuses): a call that does not say whose chats work in the folder is refused. */
 const agentsOf = (real: boolean) => (chats: readonly string[]) => (chats.length ? [THE_AGENT(real)] : []);
 
+/** What the agent is told by doc_list of a documents folder it may not use: that it is closed, not that there are no documents. */
+const CLOSED_TO_IT = /^closed: the documents folder of this project is closed to this chat's agent/;
+const isClosed = (listed: Result) => {
+  assert.equal(listed.ok, false, JSON.stringify(listed));
+  assert.match((listed as any).error, CLOSED_TO_IT);
+};
+
 const SECRET = '# Secret\n\nThe sandbox kept this from the agent.\n';
 const SECRET_PLAN = '# Plan\n\nThe sandbox kept this from the agent, too.\n';
 const SECRETS = /sandbox kept this/;
@@ -245,9 +252,7 @@ for (const real of flavours) {
       assert.deepEqual(await pinOf(folder), own);
       // The folder above is closed (the none rule): nothing in the project is the agent's to reach, whatever the folders below say.
       chmodSync(outer, 0o700);
-      const listed = await docs.agent('a')('doc_list', {});
-      assert.ok(listed.ok, JSON.stringify(listed));
-      assert.match((listed as any).text, /^No documents yet/);
+      isClosed(await docs.agent('a')('doc_list', {}));
       assert.doesNotMatch(JSON.stringify((await docs.call('GET', '/folders')).body), /Plan|plan/);
       assert.equal((await docs.agent('a')('doc_read', { id: made.body.id })).ok, false, 'not read for the agent');
       const read = await docs.call('GET', url);
@@ -278,8 +283,7 @@ for (const real of flavours) {
     const docs = await portal({ a: s.folder });
     try {
       const listed = await docs.agent('a')('doc_list', {});
-      assert.ok(listed.ok, JSON.stringify(listed));
-      assert.match((listed as any).text, /^No documents yet/);
+      isClosed(listed);
       assert.doesNotMatch(JSON.stringify(listed), /Secret|sandbox kept/);
       // The person's page: nothing of it is listed either.
       const page = await docs.call('GET', '/folders');
@@ -330,7 +334,7 @@ for (const real of flavours) {
     try {
       // The first look at the folder after the update is the agent's, with the closed folder in place.
       const listed = await docs.agent('a')('doc_list', {});
-      assert.ok(listed.ok, JSON.stringify(listed));
+      isClosed(listed);
       assert.doesNotMatch(JSON.stringify(listed), /Secret|sandbox kept/);
       assert.equal(await pinOf(w.folder), null, 'the closed folder is not held to');
       // And the person's deletion, which would act in the folder held to, finds none: it is refused, and the file of that name in the closed folder stays.
@@ -441,9 +445,8 @@ for (const real of flavours) {
       assert.equal(read.ok, false, 'the document is not read from the closed folder');
       assert.doesNotMatch(JSON.stringify(read), SECRETS);
       const listed = await agent('doc_list', {});
-      assert.ok(listed.ok, JSON.stringify(listed));
+      isClosed(listed);
       assert.doesNotMatch(JSON.stringify(listed), /Secret|sandbox kept|secret\.md/);
-      assert.match((listed as any).text, /^No documents yet/);
       // The person's page: not read, not listed, not taken in.
       const page = await w.docs.call('GET', w.url);
       assert.equal(page.status, 409, JSON.stringify(page.body));
@@ -480,7 +483,7 @@ test('[root] the agents of every chat that works in the folder are asked, not on
   const both = await portal({ a: w.folder, b: w.folder });
   try {
     const listed = await both.agent('a')('doc_list', {});
-    assert.match((listed as any).text, /^No documents yet/, 'the other chat\'s agent could not use the folder, and what is read for one is handed to the other');
+    isClosed(listed);
     assert.deepEqual(asked.at(-1)?.sort(), ['a', 'b'], 'the chats of the folder are named, each of them');
     assert.equal((await both.call('GET', w.url)).status, 409);
     assert.equal((await both.call('DELETE', w.url)).status, 409);
@@ -501,15 +504,15 @@ test('[root] the agents of every chat that works in the folder are asked, not on
  * Two agents, as the sandbox runs them: A, and B, whose home is closed to every other agent (`root:` B's group 2770 as root; as another user, 0770 for a group
  * that B is in and A is not), with a `documents` folder in it. The sessions of A can lead into it by a link in a stored folder.
  */
-function twoAgents(real: boolean, prefix: string) {
+function twoAgents(real: boolean, prefix: string, { documents = true } = {}) {
   const A = THE_AGENT(real);
   const B = real ? { uid: AGENT + 1, groups: [AGENT + 1] } : { uid: 61236, groups: [61236, process.getgid!()] };
   const top = realpathSync(scratch(prefix));
   chmodSync(top, 0o755);
   const home = path.join(top, 'home-b');
   const dir = path.join(home, 'documents');
-  mkdirSync(dir, { recursive: true });
-  for (const where of [home, dir]) {
+  mkdirSync(documents ? dir : home, { recursive: true });
+  for (const where of documents ? [home, dir] : [home]) {
     if (real) chownSync(where, 0, AGENT + 1);
     chmodSync(where, real ? 0o2770 : 0o770);
   }
@@ -545,8 +548,7 @@ for (const real of flavours) {
       kinds.r1 = 'routine';
       const routine = docs.agent('r1');
       const listed = await routine('doc_list', {});
-      assert.ok(listed.ok, JSON.stringify(listed));
-      assert.match((listed as any).text, /^No documents yet/);
+      isClosed(listed);
       assert.doesNotMatch(JSON.stringify(listed), /Mine/);
       const read = await routine('doc_read', { id: (made as any).details.id });
       assert.equal(read.ok, false);
@@ -569,7 +571,7 @@ for (const real of flavours) {
       assert.ok(made.ok, JSON.stringify(made));
       first = true;
       const listed = await docs.agent('ta')('doc_list', {});
-      assert.ok(listed.ok, JSON.stringify(listed));
+      isClosed(listed);
       assert.equal(first, false, 'the swap was made: the tool resolved the folder');
       assert.doesNotMatch(JSON.stringify(listed), /Mine/);
       first = true;
@@ -607,6 +609,37 @@ for (const real of flavours) {
     } finally {
       await docs.close();
     }
+  });
+
+  test(`[${named(real)}] a session whose agent may not write in the folder it leads to makes no documents folder there, and what it is told does not say whether there is one`, async () => {
+    // Two homes of B, one with a `documents` folder and one without, each reached by a routine run of A through a link: the portal, which is root, could
+    // make the folder in the one that has none, and a look at what stands there tells A what it cannot look at itself.
+    const told: string[][] = [];
+    for (const documents of [true, false]) {
+      const { A, top, home } = twoAgents(real, `docs-closed-${documents ? 'has' : 'hasnot'}-`, { documents });
+      const link = path.join(top, 'leads-there');
+      symlinkSync(home, link);
+      setAgentAccess(runAs({ r1: A }));
+      const docs = await portal({ r1: link }, folderFiles, { kinds: { r1: 'routine' } });
+      try {
+        const agent = docs.agent('r1');
+        const listed = await agent('doc_list', {});
+        isClosed(listed);
+        const made = await agent('doc_create', { title: 'Theirs' });
+        assert.equal(made.ok, false, JSON.stringify(made));
+        // Nothing was made in B's home, whichever it was.
+        assert.deepEqual(readdirSync(home), documents ? ['documents'] : [], `documents ${documents ? 'was' : 'was not'} there, and is as it was`);
+        if (documents) assert.deepEqual(readdirSync(path.join(home, 'documents')), []);
+        for (const [what, result] of [['create', made], ['list', listed]] as const) {
+          const known = result as { ok: false; error: string };
+          assert.match(known.error, /closed to/, what);
+        }
+        told.push([(listed as any).error, (made as any).error]);
+      } finally {
+        await docs.close();
+      }
+    }
+    assert.deepEqual(told[0], told[1], 'what the agent is told is the same, whether or not there is a documents folder in the folder it may not look into');
   });
 
   for (const kind of ['routine', 'agent', 'heartbeat']) {

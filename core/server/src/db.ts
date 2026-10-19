@@ -829,14 +829,13 @@ export function listSessions(): SessionRow[] {
     .all() as SessionRow[];
 }
 
-/** The workspaces sessions of every kind (tasks, routine runs, Agent-page and channel conversations, heartbeats) were made for, each once, as stored. */
-export function allWorkspaces(): string[] {
-  return (getDb().prepare("SELECT DISTINCT workspace FROM sessions").all() as { workspace: string }[]).map((r) => r.workspace);
-}
-
-/** The sessions of every kind whose stored workspace is `workspace`. */
-export function sessionsAt(workspace: string): SessionRow[] {
-  return getDb().prepare("SELECT * FROM sessions WHERE workspace = ?").all(workspace) as SessionRow[];
+/**
+ * One session of every kind (tasks, routine runs, Agent-page and channel conversations, heartbeats) for each workspace they were made for, as stored.
+ * Sessions are not pruned (a routine that makes a fresh session for each run keeps every one), but what an agent can reach depends on the workspace
+ * and not on the session, so one of them stands for the rest. One query, and a row for each workspace, not for each session.
+ */
+export function sessionsByWorkspace(): SessionRow[] {
+  return getDb().prepare("SELECT s.* FROM sessions s JOIN (SELECT MIN(id) AS id FROM sessions GROUP BY workspace) m ON s.id = m.id").all() as SessionRow[];
 }
 
 /**
