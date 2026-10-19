@@ -28,7 +28,7 @@ writeFileSync(path.join(agentDir, "models.json"), JSON.stringify(model.models())
 const { SdkPiClient, agentsFilesFor, extraContextFiles, ownFiles } = await import("../dist/pi/sdk-client.js");
 const { loadProjectContextFiles } = await import("@earendil-works/pi-coding-agent");
 const { setAgentAccess } = await import("../dist/workspace-files.js");
-const { createSession, getDb, getSession } = await import("../dist/db.js");
+const { createSession, getDb, getSession, setProjectAgent } = await import("../dist/db.js");
 const { createAgent, getAgent } = await import("../dist/agents.js");
 const { heartbeat, watchList, WATCH_FILE } = await import("../dist/heartbeat.js");
 
@@ -47,6 +47,16 @@ const folder = (name) => {
   return dir;
 };
 const names = (files) => files.map((f) => path.basename(f.path));
+/** A project, linked to `agent`: its chats carry that agent's files, read from the agent's home. */
+const linkedProject = (name, agent) => {
+  const dir = path.join(process.env.WORKSPACE_ROOT, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "AGENTS.md"), "Answer in German.\n");
+  setProjectAgent(name, { agent: agent.id, understoryOff: false });
+  return dir;
+};
+/** Where the agent's access is told on a folder's descriptor, named as /proc/self/fd/<n>: Linux. */
+const LINUX_ONLY = process.platform !== "linux" && "what the agent may read is told on the folder's descriptor, which is named as /proc/self/fd/<n> on Linux only";
 
 let chats = 0;
 const open = (cwd, sessionId) => {
@@ -79,6 +89,15 @@ test("a link left in place of one of the agent's files is not handed to it, nor 
   symlinkSync(path.join(dir, "SOUL.md"), path.join(dir, "PrimaryUser.md"));
   assert.deepEqual(extraContextFiles(dir, "primary").map((f) => [path.basename(f.path), f.content]), [["SOUL.md", "# Nova\n"]]);
   assert.match(ownFiles(dir, "primary")[0], /^SOUL\.md in your working directory are yours/);
+});
+
+test("a chat in a project linked to an agent is not handed what a link in that agent's home leads to either", () => {
+  const vega = createAgent({ name: "Vega" });
+  writeFileSync(path.join(vega.home, "SOUL.md"), "# Vega\n");
+  symlinkSync(path.join(outside, "secret.env"), path.join(vega.home, "MEMORY.md"));
+  const dir = linkedProject("with-vega", vega);
+  assert.deepEqual(extraContextFiles(dir, "primary").map((f) => [f.path, f.content]), [[path.join(vega.home, "SOUL.md"), "# Vega\n"]]);
+  assert.match(ownFiles(dir, "primary")[0], /^SOUL\.md of the agent this project works with are yours/);
 });
 
 test("pi's AGENTS.md or CLAUDE.md is dropped where it is a link, the others are handed on as they read now, and the one in pi's own folder stays as pi read it", () => {
@@ -137,11 +156,11 @@ test("WATCH.md that is a link is nothing to watch, for a look or for the agent's
   }
 });
 
-test("what the sandbox closed to the agent is not read for it: not its own files, not pi's, not WATCH.md, and nothing for a chat not named; what it can read is", { skip: process.platform !== "linux" && "what the agent may read is told on the folder's descriptor, which is named as /proc/self/fd/<n> on Linux only" }, async () => {
+test("what the sandbox closed to the agent is not read for it: not its own files, not pi's, not WATCH.md, and nothing for a chat not named; what it can read is", { skip: LINUX_ONLY }, async () => {
   // The agent is another user than the one the files are the portal's for: everyone, to them.
   const AGENT = { uid: 61234, groups: [61234] };
   // As the portal's own says it: a chat it does not know is a refusal, and naming none names no agent.
-  setAgentAccess((ids) => ids.map((id) => {
+  setAgentAccess((chats) => chats.map((id) => {
     if (!getSession(id)) throw new Error("No such chat");
     return AGENT;
   }));
@@ -186,6 +205,43 @@ test("what the sandbox closed to the agent is not read for it: not its own files
     assert.equal(watchList(watcher, lookOf(watcher)), "The open PRs on the repo.");
   } finally {
     chmodSync(agentDir, 0o755);
+    setAgentAccess(() => undefined);
+  }
+});
+
+test("a chat in a project linked to an agent reads that agent's files as the agent whose home they are in, and the project's AGENTS.md as the agent it runs as", { skip: LINUX_ONLY }, () => {
+  const lyra = createAgent({ name: "Lyra" });
+  // The agent the project's chats run as, which the sandbox keeps out of every other agent's home.
+  const CHATS_AGENT = { uid: 61234, groups: [61234] };
+  // The linked agent: its home is its group's, with nothing for anyone else, as the sandbox has it.
+  const LYRA = { uid: 61236, groups: [process.getgid()] };
+  setAgentAccess((chats, agents) => [
+    ...chats.map((id) => {
+      if (!getSession(id)) throw new Error("No such chat");
+      return CHATS_AGENT;
+    }),
+    ...agents.map((id) => {
+      if (id !== lyra.id) throw new Error("No such agent");
+      return LYRA;
+    }),
+  ]);
+  try {
+    chmodSync(lyra.home, 0o750);
+    for (const name of ["SOUL.md", "PrimaryUser.md"]) {
+      writeFileSync(path.join(lyra.home, name), `# ${name} of Lyra\n`);
+      chmodSync(path.join(lyra.home, name), 0o640);
+    }
+    // Closed to Lyra too: a file the sandbox kept from every agent, moved in under the name of one the portal reads.
+    writeFileSync(path.join(lyra.home, "MEMORY.md"), "Closed to every agent.\n");
+    chmodSync(path.join(lyra.home, "MEMORY.md"), 0o600);
+    const dir = linkedProject("with-lyra", lyra);
+    createSession({ id: "with-lyra", title: "with-lyra", workspace: dir, executor: "host" });
+
+    assert.deepEqual(names(extraContextFiles(dir, "primary", "with-lyra")), ["SOUL.md", "PrimaryUser.md"]);
+    assert.match(ownFiles(dir, "primary", "with-lyra")[0], /^SOUL\.md, PrimaryUser\.md of the agent this project works with are yours/);
+    const handed = agentsFilesFor(loadProjectContextFiles({ cwd: dir, agentDir }), agentDir, "with-lyra");
+    assert.equal(handed.find((f) => f.path === path.join(dir, "AGENTS.md"))?.content, "Answer in German.\n");
+  } finally {
     setAgentAccess(() => undefined);
   }
 });

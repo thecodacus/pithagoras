@@ -18,7 +18,8 @@ import { crossModelThinkingExtension } from "./cross-model-thinking.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-mcp-rules.js";
 import { browserTools } from "../browser/tools.js";
 import { bundledPath } from "../bundled.js";
-import { baseDir, readBytes } from "../workspace-files.js";
+import { type AgentUse, baseDir, readBytes } from "../workspace-files.js";
+import { agentOf } from "../agents.js";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -116,22 +117,39 @@ const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
  * A file of the agent's in the folder `from`, as text, or nothing.
  *
  * Read from a descriptor opened without following a link, and only where the
- * agent of `chat` could read it itself (see AgentUse in workspace-files.ts).
+ * agents `as` names could read it themselves (see AgentUse in workspace-files.ts).
  * With the sandbox on the portal reads as root, and the agent can leave a link
  * in its home in place of MEMORY.md that leads to another agent's files or to
  * the portal's own: what it leads to would be handed to the agent as its own.
  * A file that is not there, is a link or is closed to the agent is nothing, as
- * an unreadable one always was: the session should still start. No chat named,
+ * an unreadable one always was: the session should still start. Nobody named,
  * with the sandbox on, is a refusal, as it is there. With `head` 0 nothing is
  * read: what is answered is only that there is one.
  */
-function readOwn(from: string, name: string, chat: string | undefined, head?: number): string | undefined {
+function readOwn(from: string, name: string, as: AgentUse, head?: number): string | undefined {
   try {
-    return readBytes(baseDir(from), name, { direct: true, likeParent: true, chats: chat ? [chat] : [], head }).bytes.toString("utf8");
+    return readBytes(baseDir(from), name, { direct: true, likeParent: true, ...as, head }).bytes.toString("utf8");
   } catch {
     return undefined;
   }
 }
+
+/** A file read for the chat `chat`: as its agent, as the sandbox runs it. */
+const forChat = (chat: string | undefined): AgentUse => ({ chats: chat ? [chat] : [] });
+
+/**
+ * Whom the agent's files in `from` are read as for the chat `chat`, working in
+ * `cwd`: the chat's agent, where they are in the chat's folder. A chat in a
+ * project linked to an agent reads them in that agent's home, which the
+ * sandbox closes to every other agent, the one the project's chats run as
+ * among them: there they are read as the agent whose home it is, which is the
+ * one that can leave a link or a file there.
+ */
+const readerOf = (cwd: string, from: string, chat: string | undefined): AgentUse => {
+  if (from === cwd) return forChat(chat);
+  const owner = agentOf(from);
+  return { agents: owner ? [owner.id] : [] };
+};
 
 /**
  * Files pi should treat as context on top of the ones it finds itself.
@@ -140,14 +158,15 @@ function readOwn(from: string, name: string, chat: string | undefined, head?: nu
  * agent's home directory gets its character, its user and its memory without
  * anything being generated. Who may see which of them is settled in
  * context-files.ts, which the guard reads as well. Read for the chat `chat`
- * (see readOwn).
+ * (see readerOf).
  */
 export function extraContextFiles(cwd: string, role?: string, chat?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
   const from = filesIn(cwd);
   if (!from) return out;
+  const as = readerOf(cwd, from, chat);
   for (const name of filesFor(cwd, role)) {
-    const content = readOwn(from, name, chat);
+    const content = readOwn(from, name, as);
     if (content !== undefined) out.push({ path: path.join(from, name), content });
   }
   return out;
@@ -169,7 +188,7 @@ export function agentsFilesFor(files: { path: string; content: string }[], agent
   const portals = path.resolve(agentDir);
   return files.flatMap((file) => {
     if (path.dirname(file.path) === portals) return [file];
-    const content = readOwn(path.dirname(file.path), path.basename(file.path), chat);
+    const content = readOwn(path.dirname(file.path), path.basename(file.path), forChat(chat));
     // Without a byte order mark, as pi hands on what it read.
     return content === undefined ? [] : [{ ...file, content: content.replace(/^\uFEFF/, "") }];
   });
@@ -187,7 +206,8 @@ export function ownFiles(cwd: string, role?: string, chat?: string): string[] {
   const from = filesIn(cwd);
   if (!from) return [];
   // The ones that are handed over: a link, or a file closed to the agent, is not named either.
-  const present = filesFor(cwd, role).filter((name) => readOwn(from, name, chat, 0) !== undefined);
+  const as = readerOf(cwd, from, chat);
+  const present = filesFor(cwd, role).filter((name) => readOwn(from, name, as, 0) !== undefined);
   // In a project the files are not in the working directory: they are the agent's the project works with.
   const where = from === cwd ? "in your working directory" : "of the agent this project works with";
   return present.length
