@@ -37,8 +37,14 @@ that warning, so it is said while any of them is on, whichever of the others are
 switched off, and by the `tools` tool while they are lazy.
 
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
-`git clone` and the like), the tools of an MCP server, and the browser. The
-agent's own tools, a subagent's answer and a routine's are not.
+`git clone` and the like), the tools of an MCP server, and the browser. A
+server's tools count however they are called: through the adapter's `mcp` tool,
+under their own names (`jira_get_issue`) where its tools are direct, and through
+the `tools` tool where they are lazy. An issue comment or a mail body a server
+hands back is whoever wrote it. A server you run yourself can be counted as your
+own, and its output is then neither wrapped nor checked; the browser is always
+outside content, whoever runs it. The agent's own tools, a subagent's answer and
+a routine's are not wrapped.
 
 A [code mode](/guide/extensions#code-mode) script calls tools one at a time
 through the same guard, so each of its calls is checked by the rules below as the
@@ -108,13 +114,13 @@ problem are refused:
 
 | Rule | Why |
 | --- | --- |
-| `pipe-to-shell` | Downloading something and running it unseen |
+| `pipe-to-shell` | Downloading something and running it unseen: a pipe into a shell, or into `python`, `perl`, `ruby`, `node` or `php` given nothing to run but what comes in (`curl … \| python3`, and not `\| python3 -m json.tool`), and a shell, `source` or `eval` handed a download (`bash <(curl …)`, `sh -c "$(curl …)"`) |
 | `write-to-path` | A file on `PATH` runs later, without anyone asking |
-| `upload` | `curl`/`wget` carrying data out: a body (`-d`, `-F`, `-T`, alone or folded into a group like `-sd`; `--data*`, `--form`, `--json`, `--post-data`, `--post-file`, `--body-*`) or a `POST`, `PUT` or `PATCH` |
-| `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens |
+| `upload` | Data carried out: `curl`/`wget` with a body (`-d`, `-F`, `-T`, alone or folded into a group like `-sd`; `--data*`, `--form`, `--json`, `--post-data`, `--post-file`, `--body-*`) or a `POST`, `PUT` or `PATCH`; `scp` or `rsync` to another machine; a pipe or a file into `nc`, `socat`, `telnet` or `ssh`; mail sent (`mail`, `sendmail`, `mutt -s`, `himalaya … send`); httpie with a body; `gh gist create` and a write through `gh api`; a copy to an S3, GCS or rclone remote; a script's own `requests.post` or `fetch` with a body |
+| `read-credentials` | `auth.json`, `.env`, `.ssh/`, tokens, also among the files a tool declares it takes |
 | `publish` | `git push` is not undoable from here, also with git's options before it (`git -C repo push`, `git -c k=v push`) |
-| `persist` | Scheduling outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file |
-| `delegate` | A `subagent` runs its own pi, which has no guard, so a tainted session may not start one |
+| `persist` | What outlives the conversation: a routine, `cron`, a systemd unit, a shell start-up file, and a change to what the agent loads as its own (`AGENTS.md`, `CLAUDE.md`, its context files, `WATCH.md`, `.pi/`, `.agents/`, `.mcp.json`; see [what a colleague may do](/people/roles#what-a-colleague-may-do)), by a tool or by a command that writes there (a redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`, a download's `-o`, a clone) |
+| `delegate` | A `subagent` runs its own pi, which has no guard, and a routine runs in a session of its own, without this conversation's rules, so a tainted session may start neither |
 
 Enforcement is **tainted-only** on purpose. A session writing code in a
 repository never meets any of this; the rules apply exactly where the risk

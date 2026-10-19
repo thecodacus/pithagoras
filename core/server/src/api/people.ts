@@ -100,9 +100,8 @@ export function peopleRouter(): Router {
       return res.status(400).json({ error: "Tool must be a tool name, e.g. bash" });
     }
     // A rule for these would look like it worked and never apply: the guard keeps them from everybody who is not
-    // the primary user, whatever is allowed, as they would run with the primary user's rights. A heartbeat's
-    // rules are its own.
-    const asPrimary = role === "heartbeat" ? undefined : runsAsPrimary(tool);
+    // the primary user, a heartbeat included, whatever is allowed, as they would run with the primary user's rights.
+    const asPrimary = runsAsPrimary(tool);
     if (asPrimary) {
       return res.status(400).json({ error: `A rule cannot allow ${tool}: ${asPrimary}` });
     }

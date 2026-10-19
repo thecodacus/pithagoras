@@ -30,8 +30,11 @@ test("every name on the list is held, in every folder a conversation or a look r
     // Without a folder to hold it to, by name in every folder.
     for (const entry of LOADED_IN_FOLDERS) assert.equal(refused(guardAs(role), "write", writtenIn("/anywhere", entry)), true, `${role} ${entry.name} with no folder`);
   }
-  // The primary user's agent writes them, and so does an agent looking around for it.
-  for (const role of ["primary", "heartbeat"]) for (const entry of LOADED_IN_FOLDERS) assert.equal(allowed(guardAs(role, conversation), "write", writtenIn(conversation, entry)), true, `${role} ${entry.name}`);
+  // The primary user's agent writes them. A heartbeat is held to them as well: it looks around on its own, on what it reads.
+  for (const entry of LOADED_IN_FOLDERS) {
+    assert.equal(allowed(guardAs("primary", conversation), "write", writtenIn(conversation, entry)), true, `primary ${entry.name}`);
+    assert.equal(refused(guardAs("heartbeat", conversation), "write", writtenIn(conversation, entry)), true, `heartbeat ${entry.name}`);
+  }
 });
 
 test("what the rule is for goes through: notes, the shared file, and names that only look like these", () => {

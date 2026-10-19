@@ -756,10 +756,10 @@ function migrate(d: Database.Database): void {
   if (ruleCols.length && !ruleCols.includes("person_key")) {
     d.exec("ALTER TABLE tool_rules ADD COLUMN person_key TEXT");
   }
-  // A rule for a tool that runs as the primary user never applies now, and the API refuses to make one. Those an older
-  // version made would stay listed as working: dropped, but for a heartbeat's own.
+  // A rule for a tool that runs as the primary user never applies now, a heartbeat's included, and the API refuses to
+  // make one. Those an older version made would stay listed as working: dropped.
   const asPrimary = Object.keys(RUNS_AS_PRIMARY);
-  d.prepare(`DELETE FROM tool_rules WHERE role != 'heartbeat' AND tool IN (${asPrimary.map(() => "?").join(", ")})`).run(...asPrimary);
+  d.prepare(`DELETE FROM tool_rules WHERE tool IN (${asPrimary.map(() => "?").join(", ")})`).run(...asPrimary);
   const questionCols = (d.prepare("PRAGMA table_info(questions)").all() as { name: string }[]).map(
     (c) => c.name
   );
@@ -3151,6 +3151,24 @@ export function browserAllowlist(): string[] {
 
 export function setBrowserAllowlist(domains: string): void {
   putSetting("browser_allowlist", domains.trim());
+}
+
+/**
+ * The MCP servers whose tools' output the person counts as their own and not outside content, by the names they are
+ * configured under: the guard neither wraps nor scans it (see untrustedResult in pi/guard.ts). Every other server's is
+ * somebody else's words, and so is the browser's, trusted or not. Read at each result, so a change holds at once.
+ */
+export function trustedMcpServers(): Set<string> {
+  try {
+    const names = JSON.parse(getSetting("guard_trusted_mcp_servers") ?? "[]");
+    return new Set(Array.isArray(names) ? names.filter((name): name is string => typeof name === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function setTrustedMcpServers(names: readonly string[]): void {
+  putSetting("guard_trusted_mcp_servers", JSON.stringify([...new Set(names.map((name) => name.trim()).filter(Boolean))]));
 }
 
 /**

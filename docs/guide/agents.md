@@ -87,7 +87,11 @@ and no browser. To let it run a command, add it under **Commands it may run**,
 for example `gh pr list*`. A command runs only as written there, with `*` where
 it varies, and a pipe, a redirect or a second command makes it something else.
 Those commands are for every agent's heartbeat, and show in **People** as
-rules for every agent's heartbeat. A rule for all roles applies to it too.
+rules for every agent's heartbeat. A rule for all roles applies to it too. A
+look runs on its own, on what it reads, which can be anybody's words, so what is
+allowed for it never reaches a place secrets are kept, a write to what is loaded
+as the agent's own (its context files, `WATCH.md`, `AGENTS.md`, `.pi/`,
+`.mcp.json`), or a subagent or a routine, which would run with your rights.
 
 What it notices lands in **Activity** as notes; the tab and the agent's card
 show how many are unread. A note marked urgent also goes to the

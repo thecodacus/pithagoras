@@ -116,7 +116,10 @@ When an agent [looks around on its own](/guide/agents#its-heartbeat) nobody is
 speaking, and it runs as a role that is not for people: `heartbeat`. It
 may read files and leave notes, and nothing else: no commands, no edits, no
 messages. What you [allow anyway](/people/rules) for it is a rule for the role,
-listed in People as for every agent's heartbeat.
+listed in People as for every agent's heartbeat. It reads what its `WATCH.md`
+names wherever that is, and your notes, but a rule for it reaches no more than
+one for a colleague does: no place secrets are kept, nothing loaded as the
+agent's own, and no subagent or routine.
 
 ## What each can see
 

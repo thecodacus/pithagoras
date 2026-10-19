@@ -117,7 +117,7 @@ test("a database at the schema before this one is checked and backed up, brought
   const file = path.join(dir, "portal.db");
   copyFileSync(new URL("./fixtures/portal-v2.db", import.meta.url), file);
   // Rules the release before this one let a person make for the tools that run as the primary user, which no rule opens now:
-  // one for a role, one for a person, one for a heartbeat (its own), and one that is nothing of the kind.
+  // one for a role, one for a person, one for a heartbeat, and one that is nothing of the kind.
   const before = new Database(file);
   const rule = before.prepare("INSERT INTO tool_rules (id, role, tool, pattern, note, person_key) VALUES (?, ?, ?, ?, '', ?)");
   rule.run("r1", "colleague", "subagent", "{*", null);
@@ -157,7 +157,7 @@ test("a database at the schema before this one is checked and backed up, brought
   assert.deepEqual(d.prepare("SELECT id, source_id FROM images ORDER BY id").all(), [{ id: "img1", source_id: null }, { id: "img2", source_id: "img1" }]);
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM events WHERE session_id = 'chat1'").get().n, 4);
   assert.equal(d.prepare("SELECT COUNT(*) AS n FROM voice_presets").get().n, 1);
-  assert.deepEqual(d.prepare("SELECT id FROM tool_rules ORDER BY id").all(), [{ id: "r3" }, { id: "r4" }], "what never applies is not left listed as a rule that does");
+  assert.deepEqual(d.prepare("SELECT id FROM tool_rules ORDER BY id").all(), [{ id: "r4" }], "what never applies is not left listed as a rule that does");
   assert.deepEqual(d.prepare("SELECT id, home FROM agents").all(), [{ id: "home", home: "/data/home" }], "the agent's folder is a neutral one");
   d.close();
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { inlineBrowserScreenshot } from "./browser-screenshot.js";
 import { cleanBrowserSnapshot, isBrowserSnapshot } from "./browser-snapshot-format.js";
 import { bareRef } from "../browser/ref.js";
-import { listToolRules, mcpView, recordAudit, trustResult, trustedResults, useGrant, type McpView, type ToolRule } from "../db.js";
+import { listToolRules, mcpView, recordAudit, trustResult, trustedMcpServers, trustedResults, useGrant, type McpView, type ToolRule } from "../db.js";
 import { injectionSignals, type Signal } from "./injection.js";
 import { PORTAL_BROWSER_TOOLS, mcpServerOf } from "../tool-policy.js";
 import { isWithinText, pathBelow, realPath, realPathAhead } from "../within.js";
@@ -53,11 +53,36 @@ const UNTRUSTED_COMMAND = /\b(himalaya|mutt|neomutt|notmuch|offlineimap|mbsync|c
  * read through a command, an MCP server the portal does not control, and the
  * browser, which reads pages anyone can write. The agent's own tools, a
  * subagent's answer and a routine's included, do not mark the conversation.
+ *
+ * A server's tools are its words however they are called: through the adapter's
+ * `mcp` tool, or under their own names (`jira_get_issue`), which the adapter
+ * registers where a server's tools are direct and the tools gateway runs where
+ * they are lazy. An issue comment or a mail body a server hands back is whoever
+ * wrote it. A server the person counts as their own (trustedMcpServers) is not
+ * outside content, by any of those ways; the browser always is, whoever runs it.
  */
 function untrustedResult(toolName: string, input: Record<string, unknown>): boolean {
   if (toolName === "bash") return UNTRUSTED_COMMAND.test(cmd(input));
   if (browserCall(toolName, input).isBrowser) return true;
-  return /^mcp(_|$)/.test(toolName);
+  // A script runs any tool of any server, and says which only as it runs.
+  if (/^mcp_/.test(toolName)) return true;
+  const trusted = (server: string | undefined) => server !== undefined && trustedMcpServers().has(server);
+  const mcp = mcpView();
+  if (toolName === "mcp") return !trusted(proxiedServer(input, mcp.servers));
+  return mcp.serverTool(toolName) && !trusted(mcpServerOf(toolName, mcp.servers));
+}
+
+/**
+ * The server whose tool an `mcp` call runs, as configured: the one it names, or the one the tool's name is of.
+ * Undefined for a call that runs no tool (a search or a list, which hands back what every server says of itself),
+ * and for a tool of no server that is configured.
+ */
+function proxiedServer(input: Record<string, unknown>, servers: readonly string[]): string | undefined {
+  const same = (name: string) => name.trim().replace(/[-.]/g, "_");
+  const asked = typeof input.tool === "string" ? same(input.tool) : "";
+  if (!asked) return undefined;
+  if (typeof input.server === "string" && input.server.trim()) return servers.find((server) => same(server) === same(input.server as string));
+  return mcpServerOf(asked, servers);
 }
 
 /**
@@ -124,11 +149,17 @@ export function switchedOffVia(
   return undefined;
 }
 
+/** What a rule is told of where a call is made: the folder the conversation works in, and the files the tool declares (see declaredFiles). */
+interface RuleContext {
+  workspace?: string;
+  files?: readonly string[];
+}
+
 interface Rule {
   name: string;
   why: string;
   /** True when this call is the dangerous shape. */
-  hit: (toolName: string, input: Record<string, unknown>) => boolean;
+  hit: (toolName: string, input: Record<string, unknown>, context: RuleContext) => boolean;
 }
 
 const cmd = (input: Record<string, unknown>) =>
@@ -157,10 +188,17 @@ const writesFiles = (command: string) => /(>|\b(?:cp|mv|install|tee)\b)/.test(co
  */
 const SECRET_NAMES = /(?:^|[/\s'"=*$.{])\.?(?:\w*[_-])?(?:token|(?:[\w-]*[_-])?credentials)(?:\.(?:json|txt|ya?ml))?(?=$|[\s'"*}])/i;
 
-/** Whether a call reads a place where secrets are kept: the command, or the path. */
-function readsCredentials(tool: string, input: Record<string, unknown>): boolean {
-  const where = tool === "bash" ? cmd(input) : target(input);
-  return /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|\.netrc)/i.test(where) || SECRET_NAMES.test(where);
+/** The values of the parameters a tool declares as its files (see declaredFiles): each path it is given. */
+const declaredValues = (input: Record<string, unknown>, files: readonly string[] | undefined): string[] =>
+  (files ?? []).flatMap((name) => {
+    const value = input[name];
+    return (Array.isArray(value) ? value : [value]).filter((one): one is string => typeof one === "string");
+  });
+
+/** Whether a call reads a place where secrets are kept: the command, or the path, and each file a tool declares (`files`). */
+function readsCredentials(tool: string, input: Record<string, unknown>, files?: readonly string[]): boolean {
+  const secret = (where: string) => /(auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.ssh\/|\.netrc)/i.test(where) || SECRET_NAMES.test(where);
+  return secret(tool === "bash" ? cmd(input) : target(input)) || declaredValues(input, files).some(secret);
 }
 
 /** The options git takes before the subcommand that read the next word as their value (the others, `--no-pager` or `-p`, stand alone). */
@@ -210,12 +248,207 @@ function sendsData(command: string): boolean {
   return /\bwget\b/.test(command) && (withBody.test(command) || withMethod.test(command));
 }
 
+/**
+ * A command's simple commands, rough as a shell is not parsed here: split at the pipes, `;`, `&&`, `||`, `&` and line
+ * breaks that are not quoted (a redirect's `&`, as in `2>&1`, is kept), each with its text, whether it takes the output
+ * of the one before through a pipe, and the name of what it runs, past `sudo`, `env`, `nohup`, `time`, `command`,
+ * `exec`, `nice` and assignments, with the words after it (quotes taken off).
+ */
+function simpleCommands(command: string): { text: string; piped: boolean; name: string; args: string[] }[] {
+  const parts: { text: string; piped: boolean }[] = [];
+  let current = "";
+  let piped = false;
+  let quote: string | undefined;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote) {
+      current += c;
+      if (c === quote) quote = undefined;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      current += c;
+    } else if (c === "\\" && i + 1 < command.length) {
+      current += c + command[++i];
+    } else if ((c === "&" && (command[i - 1] === ">" || command[i + 1] === ">")) || !"|;&\n".includes(c)) {
+      current += c;
+    } else {
+      parts.push({ text: current, piped });
+      current = "";
+      const doubled = (c === "|" || c === "&") && command[i + 1] === c;
+      if (doubled) i++;
+      piped = c === "|" && !doubled;
+    }
+  }
+  parts.push({ text: current, piped });
+  return parts.map(({ text, piped }) => {
+    const words = (text.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) ?? []).map((word) => word.replace(/^(["'])([\s\S]*)\1$/, "$2"));
+    let at = 0;
+    while (at < words.length) {
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[at])) at++;
+      else if (["sudo", "env", "nohup", "time", "command", "exec", "nice"].includes(path.basename(words[at]))) {
+        at++;
+        while (at < words.length && words[at].startsWith("-")) at++;
+      } else break;
+    }
+    return { text, piped, name: at < words.length ? path.basename(words[at]) : "", args: words.slice(at + 1) };
+  });
+}
+
+/** The words of a command that are not options. */
+const operands = (args: string[]) => args.filter((arg) => !arg.startsWith("-"));
+
+/** A place on another machine, as scp and rsync write it: `host:path`, `user@host:path`, `rsync://host/path`. */
+const REMOTE = /^(?:rsync:\/\/|(?:[^\s/@:]+@)?[^\s/:]+:(?!\/\/))/;
+
+/** The shells, and the interpreters that run what they read from their input when given nothing else to run. */
+const SHELLS = /^(?:ba|z|d|k|fi)?sh$/;
+const INTERPRETERS = /^(?:python[\d.]*|perl|ruby|node|nodejs|php|deno|bun)$/;
+
+/**
+ * What runs as a program from the network or from another command's output: a pipe into a shell, a pipe into an
+ * interpreter given nothing to run but its input (`| python3`, `| python3 -`, and not `| python3 -m json.tool`), and
+ * a shell, `source` or `eval` handed the output of a download (`sh -c "$(curl …)"`, `bash <(curl …)`).
+ */
+function runsPiped(command: string): boolean {
+  if (/(?:\b(?:ba|z|d|k)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(/.test(command)) return true;
+  if (/(?:\b(?:ba|z|d|k)?sh\s+-c|\beval)\s+["']?(?:\$\(|`)\s*(?:curl|wget)\b/.test(command)) return true;
+  return simpleCommands(command).some(
+    ({ piped, name, args }) => piped && (SHELLS.test(name) || (INTERPRETERS.test(name) && args.every((arg) => arg.startsWith("-")))),
+  );
+}
+
+/**
+ * What else carries data out of the box than curl and wget: copying to another machine (scp, rsync, sftp's `put`),
+ * piping or redirecting into a connection (nc, ncat, socat, telnet, ssh), sending mail, httpie with a body, a gist
+ * or a write to the GitHub API, copying to a cloud bucket, and a script's own request with a body.
+ */
+function sendsElsewhere(command: string): boolean {
+  if (/\b(?:requests|httpx|session)\.(?:post|put|patch)\s*\(|\burlopen\s*\([^)]*\bdata\s*=|\bfetch\s*\([^)]*\bmethod\s*:\s*["'`](?:POST|PUT|PATCH)/i.test(command)) return true;
+  return simpleCommands(command).some(({ text, piped, name, args }) => {
+    const words = operands(args);
+    const last = words[words.length - 1] ?? "";
+    switch (name) {
+      // A connection that is fed another command's output or a file.
+      case "nc":
+      case "ncat":
+      case "netcat":
+      case "socat":
+      case "telnet":
+      case "ssh":
+        return piped || /(?:^|\s)\d?<\s*[^<\s(]/.test(text);
+      case "scp":
+      case "rsync":
+        return REMOTE.test(last);
+      case "sftp":
+        return /\bput\b/.test(command);
+      case "mail":
+      case "mailx":
+      case "sendmail":
+      case "msmtp":
+      case "ssmtp":
+      case "swaks":
+        return true;
+      case "mutt":
+      case "neomutt":
+        return args.some((arg) => arg === "-s" || arg === "-a") || piped || /(?:^|\s)\d?<\s*[^<\s(]/.test(text);
+      case "himalaya":
+        return words.some((word) => ["send", "write", "reply", "forward"].includes(word));
+      case "http":
+      case "https":
+      case "xh":
+      case "xhs":
+        // A method with a body, a form, a body from a file or the input (`@file`, `< file`, a pipe), or a request item that is
+        // one: `key=value`, `key:=json`, `field@file` (and not `key==query`).
+        return (
+          args.some((arg) => /^(?:POST|PUT|PATCH)$/i.test(arg) || arg === "--form" || arg === "-f") ||
+          words.slice(1).some((word) => /^(?:@|[^\s=:@/]+(?:=(?!=)|:=|@))/.test(word)) ||
+          piped ||
+          /(?:^|\s)\d?<\s*[^<\s(]/.test(text)
+        );
+      case "gh":
+        return (words[0] === "gist" && words[1] === "create") ||
+          (words[0] === "api" && args.some((arg, i) => /^(?:-[fF]|--field|--raw-field|--input)$/.test(arg) || /^-[fF]./.test(arg) || ((arg === "-X" || arg === "--method") && /^(?:POST|PUT|PATCH)$/i.test(args[i + 1] ?? "")) || /^(?:-X|--method=)(?:POST|PUT|PATCH)$/i.test(arg)));
+      case "aws":
+        return words[0] === "s3" && ["cp", "mv", "sync"].includes(words[1]) && last.startsWith("s3://");
+      case "gsutil":
+        return words.some((word) => ["cp", "mv", "rsync"].includes(word)) && last.startsWith("gs://");
+      case "rclone":
+        return ["copy", "copyto", "sync", "move", "moveto"].includes(words[0]) && /^[^/\s:]+:/.test(last);
+      default:
+        return false;
+    }
+  });
+}
+
+/**
+ * The places a command writes to, as far as its words say: what follows a redirect, `tee`'s files, the last of what
+ * cp, install, ln and rsync are given (or their `-t`), all of mv's (a file moved away is changed too), the files of an
+ * edit in place (`sed -i`, `perl -i`), dd's `of=`, a download's file or folder (`curl -o`, `wget -O` or `-P`), the
+ * folder a clone, an unzip or an untar goes into.
+ */
+function shellWrites(command: string): string[] {
+  const places: string[] = [];
+  for (const { text, name, args } of simpleCommands(command)) {
+    for (const found of text.matchAll(/(?:^|[^<&\d])(?:\d|&)?>>?\|?\s*([^\s&<>|;]+)/g)) places.push(found[1].replace(/^["']|["']$/g, ""));
+    const words = operands(args);
+    const valueOf = (...flags: string[]) =>
+      args.flatMap((arg, i) => flags.flatMap((flag) => (arg === flag ? [args[i + 1] ?? ""] : flag.startsWith("--") && arg.startsWith(`${flag}=`) ? [arg.slice(flag.length + 1)] : !flag.startsWith("--") && arg.startsWith(flag) && arg.length > flag.length ? [arg.slice(flag.length)] : [])));
+    switch (name) {
+      case "tee":
+        places.push(...words);
+        break;
+      case "cp":
+      case "install":
+      case "ln":
+      case "rsync":
+        places.push(...valueOf("-t", "--target-directory"), words[words.length - 1] ?? "");
+        break;
+      case "mv":
+        places.push(...words, ...valueOf("-t", "--target-directory"));
+        break;
+      case "sed":
+      case "perl":
+      case "ruby":
+        if (args.some((arg) => /^-[A-Za-z]*i/.test(arg) || arg.startsWith("--in-place"))) places.push(...words);
+        break;
+      case "dd":
+        places.push(...args.filter((arg) => arg.startsWith("of=")).map((arg) => arg.slice(3)));
+        break;
+      case "curl":
+        places.push(...valueOf("-o", "--output"));
+        break;
+      case "wget":
+        places.push(...valueOf("-O", "--output-document", "-P", "--directory-prefix"));
+        break;
+      case "git":
+        if (words[0] === "clone" && words.length > 2) places.push(words[words.length - 1]);
+        break;
+      case "unzip":
+        places.push(...valueOf("-d"));
+        break;
+      case "tar":
+        places.push(...valueOf("-C", "--directory"));
+        break;
+    }
+  }
+  return places.filter(Boolean);
+}
+
+/**
+ * Whether a place a command writes to is one the portal, pi or the MCP adapter load as the agent's own: a file or a
+ * folder of LOADED_IN_FOLDERS by its name, wherever it is, or anything in loadedPlaces. Relative to the folder the
+ * command runs in, which is the conversation's.
+ */
+function loadedByName(place: string, workspace: string | undefined): boolean {
+  const resolved = place === "~" ? os.homedir() : place.startsWith("~/") ? path.join(os.homedir(), place.slice(2)) : path.resolve(workspace ?? "/", place);
+  return loadedAt(place) !== undefined || loadedAt(resolved) !== undefined || loadedPlaces().some((loaded) => isWithinText(path.resolve(loaded.path), resolved));
+}
+
 const RULES: Rule[] = [
   {
     name: "pipe-to-shell",
     why: "downloading something and running it unseen",
-    hit: (tool, input) =>
-      tool === "bash" && /\|\s*(sudo\s+)?(ba|z|d)?sh\b/.test(cmd(input)),
+    hit: (tool, input) => tool === "bash" && runsPiped(cmd(input)),
   },
   {
     name: "write-to-path",
@@ -230,12 +463,12 @@ const RULES: Rule[] = [
   {
     name: "upload",
     why: "sending data out of the box",
-    hit: (tool, input) => tool === "bash" && sendsData(cmd(input)),
+    hit: (tool, input) => tool === "bash" && (sendsData(cmd(input)) || sendsElsewhere(cmd(input))),
   },
   {
     name: "read-credentials",
     why: "reading secrets it was not asked about",
-    hit: readsCredentials,
+    hit: (tool, input, { files }) => readsCredentials(tool, input, files),
   },
   {
     name: "publish",
@@ -244,18 +477,19 @@ const RULES: Rule[] = [
   },
   {
     name: "persist",
-    why: "scheduling work outlives this conversation",
-    hit: (tool, input) =>
+    why: "scheduling work, or changing what the agent loads as its own instructions, tools or code, outlives this conversation",
+    hit: (tool, input, { workspace }) =>
       tool === "routine_create" ||
       tool === "routine_update" ||
-      ((tool === "write" || tool === "edit") && PERSIST_PATHS.test(target(input))) ||
+      ((tool === "write" || tool === "edit") && (PERSIST_PATHS.test(target(input)) || writesLoadedFile(target(input), workspace) !== undefined)) ||
       (tool === "bash" && (/\b(crontab|systemd-run|at\s+now)\b/.test(cmd(input)) ||
-        (PERSIST_PATHS.test(cmd(input)) && writesFiles(cmd(input))))),
+        (PERSIST_PATHS.test(cmd(input)) && writesFiles(cmd(input))) ||
+        shellWrites(cmd(input)).some((place) => loadedByName(place, workspace)))),
   },
   {
     name: "delegate",
-    why: "a subagent works without these rules, so what it is asked to do is not held to them",
-    hit: (tool) => tool === "subagent",
+    why: "a subagent or a routine works without this conversation's rules, so what it does is not held to them",
+    hit: (tool) => tool === "subagent" || tool === "routine_run",
   },
 ];
 
@@ -379,9 +613,12 @@ function viaMcp(toolName: string, input: Record<string, unknown>): { toolName: s
 }
 
 /** The rule that refuses this call after untrusted content: the call's own, or that of the tool an `mcp` call reaches. */
-function taintRule(toolName: string, input: Record<string, unknown>): Rule | undefined {
+function taintRule(toolName: string, input: Record<string, unknown>, context: RuleContext): Rule | undefined {
   const reached = viaMcp(toolName, input);
-  return RULES.find((rule) => rule.hit(toolName, input)) ?? (reached ? RULES.find((rule) => rule.hit(reached.toolName, reached.input)) : undefined);
+  return (
+    RULES.find((rule) => rule.hit(toolName, input, context)) ??
+    (reached ? RULES.find((rule) => rule.hit(reached.toolName, reached.input, { workspace: context.workspace })) : undefined)
+  );
 }
 
 /**
@@ -799,22 +1036,40 @@ function writesInstructions(places: string[], homes?: string[]): string | undefi
  * into a conversation as the agent's own words, for a write there is an
  * instruction to it: see writesInstructions.
  */
-export function unrunnable(toolName: string, input: Record<string, unknown>, workspace: string | undefined): string | undefined {
-  const asPrimary = runsAsPrimary(toolName);
-  if (asPrimary) return asPrimary;
-  if (readsCredentials(toolName, input)) return "it reads a place where secrets are kept";
-  if (toolName !== "bash") {
-    const asked = target(input);
-    if (!asked) return undefined;
-    if (workspace === undefined) return writesInstructions([path.resolve(asked)]);
-    const typed = askedPath(asked, workspace);
-    if (typed === undefined) return undefined;
-    // The folder of this conversation and every agent's home, as written and as they really are.
-    const homes = [workspace, ...listAgents().map((agent) => agent.home)].flatMap((home) => [path.resolve(home), realPath(home) ?? path.resolve(home)]);
-    return writesInstructions([typed, realPathAhead(typed)], homes);
-  }
+export function unrunnable(toolName: string, input: Record<string, unknown>, workspace: string | undefined, files?: readonly string[]): string | undefined {
+  const never = keptFromAll(toolName, input, workspace, files);
+  if (never || toolName !== "bash") return never;
   const command = cmd(input).toLowerCase();
   return PRIVATE_FILES.some((name) => command.includes(name.toLowerCase())) ? "it reads what is private to the primary user" : undefined;
+}
+
+/**
+ * What unrunnable holds for everybody who is not the primary user, a heartbeat included, which looks around for the
+ * primary user on its own and may read their notes: what runs with the primary user's rights, a place secrets are
+ * kept, and a write to what is loaded as the agent's own (the path a tool is given, and each file it declares).
+ */
+function keptFromAll(toolName: string, input: Record<string, unknown>, workspace: string | undefined, files?: readonly string[]): string | undefined {
+  const asPrimary = runsAsPrimary(toolName);
+  if (asPrimary) return asPrimary;
+  if (readsCredentials(toolName, input, files)) return "it reads a place where secrets are kept";
+  if (toolName === "bash") return undefined;
+  for (const asked of [target(input), ...declaredValues(input, files)]) {
+    const why = asked ? writesLoadedFile(asked, workspace) : undefined;
+    if (why) return why;
+  }
+  return undefined;
+}
+
+/**
+ * Why a tool that writes to `asked` would write to what is loaded as the agent's own (see writesInstructions), or
+ * undefined: held in the folder of this conversation and every agent's home, as written and as they really are.
+ */
+function writesLoadedFile(asked: string, workspace: string | undefined): string | undefined {
+  if (workspace === undefined) return writesInstructions([path.resolve(asked)]);
+  const typed = askedPath(asked, workspace);
+  if (typed === undefined) return undefined;
+  const homes = [workspace, ...listAgents().map((agent) => agent.home)].flatMap((home) => [path.resolve(home), realPath(home) ?? path.resolve(home)]);
+  return writesInstructions([typed, realPathAhead(typed)], homes);
 }
 
 /**
@@ -837,15 +1092,22 @@ function callOf(toolName: string, action: string): Record<string, unknown> {
 export function approvalCannotHelp(toolName: string, action: string, workspace: string | undefined, portalSessionId?: string, files?: readonly string[]): string | undefined {
   // A read is never asked for: where it is allowed it needs no approval, and an approval does not open the rest.
   if (PATH_READERS.has(toolName)) return "it is a read, which needs no approval where it is allowed and is held to the folder of this conversation where it is not";
-  // A tool that declares its files is asked for them, a line each: an approval of them is what lets it run.
-  if (files) return undefined;
+  // A tool that declares its files is asked for them, a line each: an approval of them is what lets it run, but for
+  // a file that is kept from everybody who is not the primary user.
+  if (files) {
+    for (const file of rulePatterns(action, true)) {
+      const never = unrunnable(toolName, { path: file }, workspace);
+      if (never) return never;
+    }
+    return undefined;
+  }
   const input = callOf(toolName, action);
   const reached = viaMcp(toolName, input);
   const never = unrunnable(toolName, input, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
   if (never) return never;
   // A conversation that has read something untrusted refuses a push, an upload, a subagent or a schedule after
   // an approval as it did before it, and an approval spent on one would be gone.
-  const rule = portalSessionId ? taintRuleFor(portalSessionId, toolName, input) : undefined;
+  const rule = portalSessionId ? taintRuleFor(portalSessionId, toolName, input, { workspace }) : undefined;
   return rule ? `a result this conversation read looks like a prompt injection, and what it asks for is ${rule.why}` : undefined;
 }
 
@@ -928,8 +1190,8 @@ export function trustFlagged(portalSessionId: string, id: string): void {
  * The rule that would refuse this call in a conversation that has read something
  * untrusted, when it has and the rules are enforced there; otherwise undefined.
  */
-function taintRuleFor(portalSessionId: string, toolName: string, input: Record<string, unknown>): Rule | undefined {
-  return taints.get(portalSessionId)?.holds() ? taintRule(toolName, input) : undefined;
+function taintRuleFor(portalSessionId: string, toolName: string, input: Record<string, unknown>, context: RuleContext): Rule | undefined {
+  return taints.get(portalSessionId)?.holds() ? taintRule(toolName, input, context) : undefined;
 }
 
 /**
@@ -1177,7 +1439,8 @@ export function guardExtension(
       }
       // The rule that refuses this call because the conversation has read something untrusted, if any.
       // It refuses whatever allows the call, so a one-off approval is not spent on it first: see below.
-      const heldByTaint = isTainted() && enforceTaint ? taintRule(event.toolName, event.input ?? {}) : undefined;
+      const context: RuleContext = { workspace, files };
+      const heldByTaint = isTainted() && enforceTaint ? taintRule(event.toolName, event.input ?? {}, context) : undefined;
       // A one-off approval, spent here. Checked last, after the standing rules,
       // because it is the expensive kind of permission: somebody was asked.
       const granted = () => {
@@ -1191,18 +1454,36 @@ export function guardExtension(
       // What may be read is not everything a role that can only read could ask
       // for: see unreadable. A heartbeat is the agent looking around for the
       // person it works for, with nobody else speaking, and reads what its
-      // WATCH.md names wherever that is. A rule or an approval opens a tool, not
-      // the secrets and private notes: checked before either is used, so that a
-      // one-off approval is not spent on a call that is refused after all.
-      if (role !== "primary" && role !== HEARTBEAT_ROLE) {
+      // WATCH.md names wherever that is, but for a place secrets are kept: it runs
+      // on its own, on what it reads, which can be anybody's words. A rule or an
+      // approval opens a tool, not the secrets and private notes, nor what would
+      // run with the primary user's rights: checked before either is used, so
+      // that a one-off approval is not spent on a call that is refused after all.
+      if (role !== "primary") {
+        const heartbeat = role === HEARTBEAT_ROLE;
         const reads = PATH_READERS.has(event.toolName);
         // What a server's tool is given through `mcp` is held to what is kept from this role as it is when it is called directly.
         const reached = viaMcp(event.toolName, event.input ?? {});
         const why = reads
-          ? unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
+          ? heartbeat
+            ? readsCredentials(event.toolName, event.input ?? {}) ? "it reads a place where secrets are kept" : undefined
+            : unreadable(event.toolName, event.input ?? {}, workspace, alsoReadable)
           : readOnly
             ? undefined
-            : unrunnable(event.toolName, event.input ?? {}, workspace) ?? (reached ? unrunnable(reached.toolName, reached.input, workspace) : undefined);
+            : (heartbeat ? keptFromAll : unrunnable)(event.toolName, event.input ?? {}, workspace, files) ??
+              (reached ? (heartbeat ? keptFromAll : unrunnable)(reached.toolName, reached.input, workspace) : undefined);
+        if (why && heartbeat) {
+          console.warn(`[guard ${sessionId}] blocked ${event.toolName}: heartbeat, ${why}`);
+          note("refused", `Not permitted for a heartbeat: ${why}`);
+          return {
+            block: true,
+            reason:
+              `Refused: ${why}. This is a heartbeat look, which runs on its own on what it reads, and what is ` +
+              `allowed for it does not reach secrets, what is loaded as your own instructions or tools, or what ` +
+              `would run with the primary user's rights. Leave a note saying what you could not do rather than ` +
+              `looking for another way to it.`,
+          };
+        }
         if (why) {
           console.warn(`[guard ${sessionId}] blocked ${event.toolName}: role ${role}, ${why}`);
           note("refused", `Not permitted for a ${role}: ${why}`);
@@ -1253,7 +1534,7 @@ export function guardExtension(
       }
 
       if (!isTainted()) return undefined;
-      const rule = heldByTaint ?? taintRule(event.toolName, event.input ?? {});
+      const rule = heldByTaint ?? taintRule(event.toolName, event.input ?? {}, context);
       if (!rule) return undefined;
 
       // Recorded even when it does not block: "this ran with the guard off" is

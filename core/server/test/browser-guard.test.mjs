@@ -608,8 +608,13 @@ test("a rule for writing opens no place where pi loads the agent's instructions 
         assert.equal(lastAudit().kind, "allowed-by-rule");
       }
     }
-    // The primary user's agent writes its own instructions, and so does an agent looking around for it.
-    for (const role of ["primary", "heartbeat"]) assert.equal(call(guardAs({ role, workspace }), "write", { path: "AGENTS.md", content: "x" }), undefined, role);
+    // The primary user's agent writes its own instructions. A heartbeat looks around on its own, on what it reads, which can be anybody's
+    // words, and a rule for its role does not open them either.
+    assert.equal(call(guardAs({ role: "primary", workspace }), "write", { path: "AGENTS.md", content: "x" }), undefined);
+    const heartbeat = call(guardAs({ role: "heartbeat", workspace }), "write", { path: "AGENTS.md", content: "x" });
+    assert.equal(refused(heartbeat), true);
+    assert.match(heartbeat.reason, /^Refused: it writes to a place that pi loads the agent's instructions and extensions from\. This is a heartbeat look/);
+    assert.match(lastAudit().reason, /^Not permitted for a heartbeat: it writes to a place that pi loads/);
     // Without a folder, by name and by the folders in the path.
     for (const where of ["docs/AGENTS.md", "x/.pi/extensions/e.ts"]) {
       assert.equal(refused(call(guardAs({ role: "colleague", key: "priya" }), "write", { path: where, content: "x" })), true, where);
@@ -673,9 +678,10 @@ test("a rule for writing opens nothing that is loaded as instructions into someb
         assert.equal(lastAudit().kind, "allowed-by-rule");
       }
     }
-    // The primary user, and the agent looking around for them, are not held to it.
-    for (const role of ["primary", "heartbeat"]) {
-      for (const where of ["WATCH.md", path.join(nova, "SOUL.md")]) assert.equal(call(guardAs({ role, workspace }), "write", { path: where, content: "x" }), undefined, `${role}: ${where}`);
+    // The primary user is not held to it; a heartbeat is, as it looks around on its own, on what it reads.
+    for (const where of ["WATCH.md", path.join(nova, "SOUL.md")]) {
+      assert.equal(call(guardAs({ role: "primary", workspace }), "write", { path: where, content: "x" }), undefined, `primary: ${where}`);
+      assert.equal(refused(call(guardAs({ role: "heartbeat", workspace }), "write", { path: where, content: "x" })), true, `heartbeat: ${where}`);
     }
     // Without a folder to hold it to, by name in every folder.
     for (const where of ["docs/WATCH.md", "/anywhere/soul.md"]) assert.equal(refused(call(guardAs({ role: "colleague", key: "priya" }), "write", { path: where, content: "x" })), true, where);
