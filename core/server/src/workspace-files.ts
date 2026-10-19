@@ -1033,7 +1033,14 @@ async function removeIn(held: Held, name: string, folder: boolean): Promise<void
   }
   const inner = heldOf(fd, place);
   try {
-    for (const entry of await readdir(inner.here, { withFileTypes: true })) await removeIn(inner, entry.name, entry.isDirectory());
+    const entries = await readdir(inner.here, { withFileTypes: true });
+    // What is not a folder goes all at once, as fs.rm takes it; the folders one at a time, so that only one is held open at each depth.
+    // Every name is done with before the folder's descriptor is closed: its number names this folder only while it is open.
+    const failed = (await Promise.allSettled(entries.filter((entry) => !entry.isDirectory()).map((entry) => removeIn(inner, entry.name, false)))).find(
+      (outcome) => outcome.status === "rejected",
+    );
+    if (failed) throw failed.reason;
+    for (const entry of entries) if (entry.isDirectory()) await removeIn(inner, entry.name, true);
   } finally {
     inner.close();
   }
@@ -1144,8 +1151,9 @@ function holdEntryFolder(base: string, dir: string, options: ChangeOptions): Hel
 }
 
 /**
- * Takes away one plain file: not a folder, and not a link, which is refused, not removed as a link. It does what
- * removeEntry cannot for a name that an agent can change as it runs, and so it is the one for the portal as root.
+ * Takes away one plain file: not a folder, and not a link, which is refused, not removed as a link. It is the one for a
+ * server half that deletes a file of its own that an agent can change as it runs: removeEntry takes whatever has the
+ * name by then, a folder and all in it.
  *
  * The folder is held (see holdFolder) and the name is taken from it by `unlink`, so the file goes from the folder that was
  * checked, whatever its path leads to by then. A look at the name comes first, for the refusal that says what is

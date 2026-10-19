@@ -71,6 +71,12 @@ group of the folder it is made in, and is writable by that group where the folde
 Under a read & write rule that is `pi-sandbox`, so the agent can edit it; in an
 agent's own folder it is that agent's. It is not left to root, as it was.
 
+The portal's own tools that read a file the agent names, as root, read it only
+where the agent could read it itself: `show_image`, `show_video`, `edit_image`,
+the frames `generate_video` starts and ends a clip with, and a picture or a clip
+a call gives that a channel sends on. A picture under a no-access rule is
+refused to the agent, as `cat` would refuse it; you still see it in Files.
+
 A path no rule names keeps the permissions it has. For most of the system that
 means readable and not changeable. The agents' homes and their `HOME` folders
 are not rules: each belongs to its own agent, as above.

@@ -844,7 +844,12 @@ easy to get wrong in a way that is a hole, not a bug:
   folder itself, and a folder holding git work that exists nowhere else (changes
   not committed, commits no remote has, stashes) is refused (`unsaved`, with
   what it holds) unless `discard` says so. `unsaved(base, rel)` asks first, for
-  a question that names it.
+  a question that names it. Both are done in the folder the entry is in as it is
+  held, not by its path, and `remove` holds it after git has answered: a folder
+  it deletes is opened from the one it is in without following a link and
+  emptied through what was opened, each folder in it the same way, so a link an
+  agent puts where a folder was, at any depth, goes as the link it is and what
+  it leads to stays.
 - **A file of your own that you delete or rename goes by `removeFile` and
   `renameFile`, not by `remove` and `rename`.** Those two take one plain file and
   nothing else (a link or a folder is `invalid`, where `remove` takes the link or

@@ -359,11 +359,18 @@ export interface ServerPortal {
       content: string | Uint8Array,
       options?: FolderUse & { expected?: number; create?: boolean; direct?: boolean },
     ): { size: number; mtime: number; change: string };
-    /** Another name in the same folder, never over something there; a link is renamed as the link. The new path, from `base`. */
+    /**
+     * Another name in the same folder, never over something there; a link is renamed as the link. Done in the folder as it is held, not by
+     * its path. The new path, from `base`.
+     */
     rename(base: string, rel: string, name: string): string;
     /** What removing `rel` would lose that nothing else has, or null for nothing. */
     unsaved(base: string, rel: string): Promise<Unsaved | null>;
-    /** Removes a file, or a folder and all in it, a link as the link. A folder holding git work only it has is refused (`unsaved`) unless `discard`. */
+    /**
+     * Removes a file, or a folder and all in it, a link as the link: in the folder as it is held once git has answered, and each folder in it
+     * through what was opened, so a link put where a folder was goes as the link. A folder holding git work only it has is refused
+     * (`unsaved`) unless `discard`; one that is turned into something else while it is removed is `conflict`.
+     */
     remove(base: string, rel: string, options?: { discard?: boolean }): Promise<void>;
     /**
      * Takes away one plain file, and nothing else: a link or a folder is refused (`invalid`), where `remove` takes the link
