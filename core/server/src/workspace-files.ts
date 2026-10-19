@@ -1719,6 +1719,10 @@ export interface FolderWatch {
  * later. When that folder is removed, renamed or replaced the watch ends by itself, after `onChange({ gone: true })`: ask
  * again for the folder that is there now. A system that cannot watch (too many watches, a file system that has
  * none) is `failed`, with its code; look at the folder every so often instead.
+ *
+ * The folder, and the one it is in, stay open for as long as the watch lives: a file system (ext4) gives a folder made at
+ * the place of one just removed the same inode number, which `current()` would take for the folder it was, unless the removed one
+ * is still open. Each watch takes two descriptors (one for the chat's own folder), given back by `close`.
  */
 export function watchFolder(
   base: string,
@@ -1728,20 +1732,34 @@ export function watchFolder(
 ): FolderWatch {
   const dir = folderPath(base, rel, options);
   const held = holdFolder(base, dir);
+  // The folder it is in is held and watched too, for the name: while the folder is open the system does not tell that it was removed
+  // (an open folder is not gone for it), but the folder it is in tells at once that the name was removed, moved or made again.
+  let parent: Held | undefined;
+  try {
+    if (dir !== base) parent = holdFolder(base, path.dirname(dir));
+  } catch (e) {
+    held.close();
+    throw e;
+  }
   const identityOf = (stat: BigIntStats | undefined) => (stat ? `${stat.dev}:${stat.ino}` : undefined);
   let identity: string | undefined;
-  let watcher: ReturnType<typeof watchPath>;
+  const watchers: ReturnType<typeof watchPath>[] = [];
   try {
     identity = identityOf(fstatSync(held.fd, { bigint: true }));
     // On the descriptor where there is one: the watch is on the folder that is held, whatever the path leads to by now.
-    watcher = watchPath(held.here, { persistent: false });
+    watchers.push(watchPath(held.here, { persistent: false }));
+    if (parent) watchers.push(watchPath(parent.here, { persistent: false }));
   } catch (e) {
-    throw ioFailure(e, "The folder could not be watched", "Nothing is watched.");
-  } finally {
+    for (const watcher of watchers) watcher.close();
+    parent?.close();
     held.close();
+    throw ioFailure(e, "The folder could not be watched", "Nothing is watched.");
   }
+  const [watcher, parentWatcher] = watchers;
   let ended = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // The folder stays open for as long as the watch lives, so that one made again at its place is another folder: a file system (ext4)
+  // gives a new folder the inode number of one just removed, and the place would look like the folder it was.
   const current = () => !ended && identityOf(lstatSync(dir, { bigint: true, throwIfNoEntry: false })) === identity;
   const tell = (change: FolderChange) => {
     try {
@@ -1753,7 +1771,9 @@ export function watchFolder(
   const close = () => {
     ended = true;
     clearTimeout(timer);
-    watcher.close();
+    for (const each of watchers) each.close();
+    parent?.close();
+    held.close();
   };
   const gone = () => {
     if (ended) return;
@@ -1769,5 +1789,13 @@ export function watchFolder(
     timer.unref?.();
   });
   watcher.on("error", gone);
+  if (parentWatcher) {
+    const name = path.basename(dir);
+    // Only what is done to the folder's own name: the rest of what the folder it is in holds is not this watch's.
+    parentWatcher.on("change", (_type, file) => {
+      if (!ended && String(file) === name && !current()) gone();
+    });
+    parentWatcher.on("error", gone);
+  }
   return { current, close };
 }

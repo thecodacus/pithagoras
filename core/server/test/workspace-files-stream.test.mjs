@@ -159,6 +159,21 @@ test('a watch ends by itself, saying so, when its folder is removed, renamed or 
   }
 });
 
+test('a folder removed and made again at once is not taken for the one that was watched, though a file system (ext4) gives it the same inode number', async () => {
+  // Several times: a file system that gives a new folder the number of the one removed does it when nothing keeps the old one.
+  for (let round = 0; round < 5; round++) {
+    const { base, sub, done } = setup();
+    const told = [];
+    const watch = watchFolder(base, 'sub', (change) => told.push(change), { debounceMs: 20 });
+    // Empty, as a folder removed after its last file: nothing else is said of it.
+    rmSync(sub, { recursive: true });
+    mkdirSync(sub);
+    await until(() => told.some((change) => change.gone), `round ${round}: told it is gone`);
+    assert.equal(watch.current(), false);
+    done();
+  }
+});
+
 test('a watch is on the folder that was checked: a link put in its place does not lead it elsewhere, and a folder behind a link is refused', async () => {
   const { base, sub, outside, done } = setup();
   const told = [];

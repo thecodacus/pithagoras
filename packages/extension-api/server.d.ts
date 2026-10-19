@@ -456,7 +456,8 @@ export interface ServerPortal {
      * what its path leads to later: a link put in its place does not lead it elsewhere. When the folder itself is
      * removed, renamed or replaced the watch ends by itself, after `onChange({ gone: true })`: watch the folder that is
      * there now. A system that cannot watch (too many watches, a file system that has none) is `failed`, with its code
-     * in `errno`: look at the folder every so often instead. `direct` as for `folder`.
+     * in `errno`: look at the folder every so often instead. `direct` as for `folder`. A watch keeps the folder and the one it is
+     * in open (two descriptors) until it ends or is closed.
      */
     watch(base: string, rel: string, onChange: (change: FolderChange) => void, options?: { direct?: boolean; debounceMs?: number }): FolderWatch;
     /**
