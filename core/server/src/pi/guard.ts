@@ -180,8 +180,7 @@ const target = (input: Record<string, unknown>) =>
 /** Directories on PATH: a file here is executed later, by something else. */
 const PATH_DIRS = /(^|[^\w/])(\/data\/bin|\/usr\/local\/bin|\/usr\/bin|\/usr\/local\/sbin)(?=\/|[\s'"]|$)/;
 
-const PERSIST_PATHS = /(?:\/etc\/(?:cron\.[a-z]+|systemd\/system)|(?:~|\/[^\s]+)\/\.config\/(?:autostart|systemd\/user)|(?:~|\/[^\s]+)\/\.(?:bashrc|bash_profile|zshrc|zprofile|profile))(?=\/|[\s'"]|$)/;
-const writesFiles = (command: string) => /(>|\b(?:cp|mv|install|tee)\b)/.test(command);
+const PERSIST_PATHS = /(?:\/etc\/(?:cron\.[a-z]+|systemd\/system)|(?:~|(?:\/[^\s/]+)+)\/\.config\/(?:autostart|systemd\/user)|(?:~|(?:\/[^\s/]+)+)\/\.(?:bashrc|bash_profile|zshrc|zprofile|profile))(?=\/|[\s'"]|$)/;
 
 /**
  * What a token or a credentials file is called, by its name and not by the
@@ -200,7 +199,8 @@ const declaredValues = (input: Record<string, unknown>, files: readonly string[]
   });
 
 /** Where secrets are kept, by a path's name: keys, tokens, and the folders tools keep their logins in. */
-const SECRET_PLACES = /auth\.json|\.secrets|\.env\b|id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:ssh|aws|docker|kube|gnupg)(?=\/|$|[\s'"*}])|\.config\/(?:gh|gcloud|hub)(?=\/|$|[\s'"*}])|\.netrc/i;
+const SECRET_PLACES =
+  /(?<![\w.-])(?:auth\.json|\.secrets(?=$|[\s'"*}/])|id_(?:rsa|dsa|ecdsa|ed25519)|\.(?:ssh|aws|kube|gnupg)(?=\/|$|[\s'"*}])|\.docker\/config\.json|\.config\/(?:gh|gcloud|hub)(?=\/|$|[\s'"*}])|\.netrc)|(?<![\w$])\.env(?:\.(?!(?:example|sample|template|dist|defaults?)\b)[\w-]+)*(?=$|[\s'"*}/;)])/i;
 
 /** Whether a call reads a place where secrets are kept: the command, or the path, and each file a tool declares (`files`). */
 function readsCredentials(tool: string, input: Record<string, unknown>, files?: readonly string[]): boolean {
@@ -220,19 +220,23 @@ const GIT_OPTIONS_WITH_VALUE = new Set(["-C", "-c", "--git-dir", "--work-tree", 
 /**
  * `git push`, with whatever git's own options stand between: `git -C repo push`,
  * `git -c color.ui=never push`, `git --git-dir=x --no-pager push`. A model writes
- * them whenever the repository is not its working folder. Read word by word and not
- * by one pattern: options before a subcommand can be told apart from it only by
- * knowing which of them take a value, and a pattern for that backtracks without end.
+ * them whenever the repository is not its working folder. Read by the commands of the
+ * line (see lexShell), so that a message or a document that names `git push` is not one.
  */
 function pushesGit(command: string): boolean {
-  for (const found of command.matchAll(/\bgit\b/g)) {
-    const words = command.slice(found.index + 3).match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) ?? [];
+  return lexShell(command, undefined).some(({ name, args }) => {
+    if (name !== "git") return false;
     let at = 0;
-    while (at < words.length && words[at].startsWith("-")) at += GIT_OPTIONS_WITH_VALUE.has(words[at]) ? 2 : 1;
-    if (at < words.length && /^push(?![\w-])/.test(words[at])) return true;
-  }
-  return false;
+    while (at < args.length && args[at].startsWith("-")) at += GIT_OPTIONS_WITH_VALUE.has(args[at]) ? 2 : 1;
+    return /^push(?![\w-])/.test(args[at] ?? "");
+  });
 }
+
+/** What schedules work by its command: `crontab` that installs or edits one (not `-l`), `systemd-run`, `at` and `batch`. */
+const schedules = (command: string): boolean =>
+  lexShell(command, undefined).some(
+    ({ name, args }) => (name === "crontab" && !args.some((arg) => /^-[A-Za-z]*[lr]/.test(arg))) || name === "systemd-run" || name === "at" || name === "batch",
+  );
 
 /** curl's short flags that take a value, which swallows the rest of their group: in `-ofile.tar` the `f` is no flag. */
 const CURL_VALUE_FLAGS = "oAbcCeEHKmQrtuUwxXyYzW";
@@ -744,9 +748,9 @@ const runsInput = (args: string[]) => args.every((arg) => arg === "-" || (arg.st
  * an interpreter or as the program itself (`curl -o i.sh … && sh i.sh`).
  */
 function runsPiped(command: string): boolean {
-  if (/(?:\b(?:ba|z|d|k)?sh|\bsource|(?:^|[\s;&|(])\.)\s+<\(/.test(command)) return true;
+  if (/(?:^|[\s;&|(])(?:(?:ba|z|d|k)?sh|source|\.)\s+<\(/.test(command)) return true;
   if (/(?:\b(?:ba|z|d|k)?sh(?:\s+-\w+)*\s+-[A-Za-z]*c[A-Za-z]*|\beval)\s+["']?(?:\$\(|`)\s*(?:curl|wget)\b/.test(command)) return true;
-  if (/<\s*<\(\s*(?:curl|wget)\b/.test(command)) return true;
+  if (/(?:^|[\s;&|(])(?:ba|z|d|k)?sh\b[^|;&\n]*<\s*<\(\s*(?:curl|wget)\b/.test(command)) return true;
   const fetched = new Set<string>();
   for (const one of lexShell(command, undefined)) {
     for (const file of downloadsOf(one)) fetched.add(path.normalize(file));
@@ -781,9 +785,10 @@ const RSYNC_VALUES = ["--exclude", "--include", "--filter", "--rsh", "--rsync-pa
 /** A script's own request with a body, in the code an interpreter runs. */
 const SCRIPT_SENDS = [
   /\b(?:requests|httpx|session)\.(?:post|put|patch)\s*\(/i,
-  /\bfetch\s*\([\s\S]*?\b(?:method\s*:\s*["'`](?:POST|PUT|PATCH)|body\s*:)/i,
+  /\bfetch\s*\((?:[^()]|\([^()]*\))*?\b(?:method\s*:\s*["'`](?:POST|PUT|PATCH)|body\s*:)/i,
   /\bRequest\s*\([^)]*\b(?:data\s*=|method\s*=\s*["'](?:POST|PUT|PATCH))/,
-  /\burlopen\s*\(\s*[^,()]+(?:\([^()]*\))?\s*,\s*(?!\w+\s*=)[^)\s]|\burlopen\s*\([^)]*\bdata\s*=/,
+  // The first argument ends on a mark, so a run of blanks can be read one way only.
+  /\burlopen\s*\(\s*[^,()\s](?:[^,()]*[^,()\s])?(?:\([^()]*\))?\s*,\s*(?!\w+\s*=)[^)\s]|\burlopen\s*\([^)]*\bdata\s*=/,
 ];
 
 /**
@@ -1029,11 +1034,14 @@ const RULES: Rule[] = [
   {
     name: "write-to-path",
     why: "a file on PATH runs later, without anyone asking for it",
-    hit: (tool, input) => {
+    hit: (tool, input, { workspace }) => {
       if (tool === "write" || tool === "edit") return PATH_DIRS.test(target(input) + "/");
       if (tool !== "bash") return false;
-      const c = cmd(input);
-      return PATH_DIRS.test(c) && /(>|>>|\bcp\b|\bmv\b|\binstall\b|\btee\b|-o\s|-O\s)/.test(c);
+      // Where the line writes to, by its words (see shellWrites): a script that only names /usr/bin in its shebang writes nowhere on PATH.
+      return shellWrites(cmd(input), workspace).some(({ place, dir }) => {
+        const named = homeOf(place);
+        return PATH_DIRS.test(`${path.isAbsolute(named) || dir === undefined ? named : path.resolve(dir, named)}/`);
+      });
     },
   },
   {
@@ -1059,8 +1067,7 @@ const RULES: Rule[] = [
       tool === "routine_update" ||
       ((tool === "write" || tool === "edit") &&
         (PERSIST_PATHS.test(target(input)) || STARTUP.test(homeOf(target(input))) || writesLoadedFile(target(input), workspace) !== undefined)) ||
-      (tool === "bash" && (/\b(crontab|systemd-run|at\s+now)\b/.test(cmd(input)) ||
-        (PERSIST_PATHS.test(cmd(input)) && writesFiles(cmd(input))) ||
+      (tool === "bash" && (schedules(cmd(input)) ||
         shellWritesStartup(cmd(input), workspace) ||
         shellWritesOwn(cmd(input), workspace) !== undefined)),
   },

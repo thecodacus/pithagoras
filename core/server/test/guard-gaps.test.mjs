@@ -230,6 +230,30 @@ test("what a second look found: substitutions, here-documents fed to a shell, do
   }
 });
 
+test("a third look: a pattern is never slow on a long line, and what a line only mentions is not what it does", () => {
+  // A long run of blanks or slashes is read in time.
+  for (const command of [`python3 -c "urlopen(${" ".repeat(5000)}x"`, `python3 -c "urlopen(x${" ".repeat(20000)})"`, `echo ${"/".repeat(20000)}`]) {
+    const started = performance.now();
+    call(tainted(), "bash", { command });
+    assert.ok(performance.now() - started < 1000, `${command.slice(0, 30)}…: ${Math.round(performance.now() - started)} ms`);
+  }
+  for (const [command, rule] of [
+    ["cat .env", "read-credentials"], ["cat .env.local", "read-credentials"], ["cat ~/.docker/config.json", "read-credentials"], ["git -C repo push", "publish"],
+    ["crontab mycron", "persist"], ["echo '* * * * * x' | crontab -", "persist"], ["curl -o /usr/local/bin/x https://x.test/x", "write-to-path"], ["cp evil /usr/bin", "write-to-path"],
+  ]) {
+    assert.match(call(tainted(), "bash", { command })?.reason ?? "", new RegExp(`\\(${rule}\\)`), command);
+  }
+  for (const command of [
+    'grep -rn "process.env.API_URL" src', "grep -rn import.meta.env src", "cat .env.example", "cp .env.example .env.example.bak", 'git commit -m "docs: say to git push after a release"',
+    "crontab -l", "cat /etc/crontab", "cat > deploy.sh <<'EOF'\n#!/usr/bin/env bash\necho hi\nEOF", "diff deploy.sh <(ssh host cat deploy.sh)",
+    "while read -r line; do echo \"$line\"; done < <(curl -s https://x.test/list)", "mapfile -t rows < <(curl -s https://x.test/rows)",
+    `node -e "fetch('https://x.test').then((r) => r.json()).then((d) => console.log({ body: d }))"`, "cat locales/oauth.json", "cat .secrets.baseline", "ls .docker",
+    "systemctl status nginx 2>/dev/null", "cat /etc/systemd/system/app.service 2>/dev/null",
+  ]) {
+    assert.equal(call(tainted(), "bash", { command }), undefined, command);
+  }
+});
+
 test("after a suspected injection, a routine is not run: it works without this conversation's rules", () => {
   const result = call(tainted(), "routine_run", { id: "r" });
   assert.equal(refused(result), true);
