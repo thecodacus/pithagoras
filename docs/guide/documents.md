@@ -433,18 +433,33 @@ removed, and a rename never replaces what is at the new name.
 
 The `documents` folder itself is the one the store **holds to**: the folder it made,
 or the first it saw there (its device and inode, kept in the store's database). The
-agent can move a folder it has no access to (the sandbox's closed folders belong to
-root) onto the name `documents`, with a file of the same name in it, and what the
-portal does in a folder it does with its own rights. So a delete and a rename are
-done only in the folder held to: it is checked on the folder the call holds, in the
-call itself (`expect`), not by a look at the path before. Another folder at the
-place is refused ("The documents folder here is not the folder these documents were
-kept in …", 409), with nothing changed. A folder that was replaced on purpose (a
-`git checkout` that removed it, a restore) is taken as the one when **you make a new
-document** in it: the page's **New document**, an upload or **Save as a new
-document**, not the agent's tool. The agent can read and write in the folder as before
-(its files are taken in as they are anywhere in `documents`); what it cannot do is
-get the portal to delete or rename in a folder that was not the documents folder.
+agent writes in the chat's folder, and a rename there needs only the right to write
+in that folder, so it can rename a folder it has no access to (the sandbox's closed
+folders are root's, mode 0700) onto the name `documents`, or move a closed file into
+it, and what the portal does in a folder, or reads from a file, it does with its own
+rights. So the portal asks, with the [sandbox](/guide/sandbox) on, whether the agent
+could use the folder, and the file, itself: as the kernel would tell it for the user
+and the groups the agent runs as, from the owner, group and mode of the folder as the
+portal holds it (a project is root's too, so who owns it says nothing). A folder, and a
+file in it, that the agent could not read is not read: its files are not listed as
+documents or taken in, `doc_read` and the page do not give them, and the store never
+holds to it (the page says "documents in this folder is closed to the agent"). To
+hold to a folder, to write in it and to delete or rename in it, the agent must also be
+allowed to write there; a folder the agent can only read (a read-only project) is read
+and not changed in. With the sandbox off the agent is the portal's own user, and
+nothing is closed to it.
+
+A delete and a rename are done only in the folder held to: it is checked on the folder
+the call holds, in the call itself (`expect`), not by a look at the path before.
+Another folder at the place is refused ("The documents folder here is not the folder
+these documents were kept in …", 409), with nothing changed. A folder that was
+replaced on purpose (a `git checkout` that removed it, a restore) is taken as the one
+when **you make a new document** in it (the page's **New document**, an upload or
+**Save as a new document**, not the agent's tool), if it is a folder the agent could
+use itself; the message says so, so make sure it is the folder you mean. The agent can
+read and write in the folder as before (its files are taken in as they are anywhere in
+`documents`); what it cannot do is get the portal to read, delete or rename in a folder
+or a file that is closed to it, or in a folder that was not the documents folder.
 
 **Cut off in the middle.** The portal writes down what it is about to do before
 it touches the file. If it stops after the file was renamed or removed and
@@ -630,9 +645,10 @@ the portal, when the browser tab is hidden or closed, and at Ctrl+S. Each save
 is one revision. A page that is being closed can send only a small request (the
 browsers allow 64 KiB): when the document is larger than about 60 KB and you
 closed the tab with text not yet saved, the browser asks first whether to leave.
-In the bar, beside the document's name, the page says where the
+In the bar, at the end of the document's name, the page says where the
 document stands: **Saved**, **Unsaved changes**, **Saving…** or **Not saved**,
-and the revision.
+and the revision. A window too narrow for all of it cuts the text (the whole of it
+is in the tooltip); the bar is as high in every state.
 
 Opening a document does not change it, and neither does clicking in the text
 and out again: nothing is saved until the text is different. The editor writes

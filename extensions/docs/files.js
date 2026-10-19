@@ -31,8 +31,11 @@ export class Refused extends Error {
   }
 }
 
-/** A file that is a document's: directly in the folder, through no link, with the one name. */
-const AS_DOCUMENT = { direct: true, alone: true };
+/**
+ * A file that is a document's: directly in the folder, through no link, with the one name, in a folder that is the agent's to have (the portal
+ * reads and writes it as root: a folder the sandbox closed to the agent, renamed to `documents`, is none), and a file the agent could read.
+ */
+const AS_DOCUMENT = { direct: true, alone: true, likeParent: true };
 
 /**
  * A document's file as `files.readBytes` reads it, or nothing when it is not a
@@ -89,7 +92,7 @@ export function isPlainFile(dir, name) {
 export function writeDocument(files, dir, name, bytes, { create = false } = {}) {
   if (!isDocumentName(name)) throw new Refused(`${name} is not a document's name in this folder`, { taken: true });
   try {
-    const written = files.write(dir, name, bytes, { create, direct: true });
+    const written = files.write(dir, name, bytes, { create, direct: true, likeParent: true });
     return { key: written.change, modified: new Date(written.mtime) };
   } catch (e) {
     switch (e?.code) {
@@ -119,7 +122,7 @@ export function writeDocument(files, dir, name, bytes, { create = false } = {}) 
 export function removeDocument(files, dir, name, { shared = false, expect } = {}) {
   if (!isDocumentName(name)) throw new Refused(`${name} is not a document's name in this folder`, { taken: true });
   try {
-    files.removeFile(dir, name, { direct: true, alone: !shared, ...(expect ? { expect } : {}) });
+    files.removeFile(dir, name, { direct: true, alone: !shared, likeParent: true, ...(expect ? { expect } : {}) });
     return true;
   } catch (e) {
     if (e?.code === "missing") return false;
@@ -137,7 +140,7 @@ export function removeDocument(files, dir, name, { shared = false, expect } = {}
 export function renameDocument(files, dir, from, to, { expect } = {}) {
   if (!isDocumentName(from) || !isAdoptable(to)) throw new Refused(`${isAdoptable(to) ? from : to} is not a document's name in this folder`);
   try {
-    files.renameFile(dir, from, to, { direct: true, alone: true, ...(expect ? { expect } : {}) });
+    files.renameFile(dir, from, to, { ...AS_DOCUMENT, ...(expect ? { expect } : {}) });
   } catch (e) {
     switch (e?.code) {
       case "exists":

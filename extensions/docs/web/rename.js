@@ -42,7 +42,9 @@ export function renaming(portal) {
       input.current?.select();
     }, []);
     // What the person wrote, as it is kept: trimmed, and without an `.md` of their own (the one that is added is the file's own, whatever case it is in).
-    const stem = value.trim().replace(/\.md$/i, "").trim();
+    // One `.md` only, and none from a field that was not changed: `plan.md.md` is opened as `plan.md` and a form left alone is not a rename to `plan.md`.
+    const written = value.trim();
+    const stem = written === stemOf(name) ? written : written.replace(/\.md$/i, "").trim();
     const submit = async (e) => {
       e.preventDefault();
       if (!stem || busy) return;

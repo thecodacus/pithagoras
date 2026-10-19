@@ -69,6 +69,26 @@ export interface FileOpenOptions {
   direct?: boolean;
   /** A file with a second name (a hard link, which may be outside the folder) is refused (`invalid`). */
   alone?: boolean;
+  /** As for `FolderUse.likeParent`, and the file as well: one the agent could not read itself is refused. */
+  likeParent?: boolean;
+}
+
+/**
+ * For what the portal reads or writes as root in a folder that an agent can write next to and so rename things into.
+ * The sandbox closes a folder the agent may not enter to root alone (`root:root` mode 0700, a file 0600), and the agent
+ * can rename it to the name of a folder the portal reads on its behalf (`documents`), or move such a file into it: then
+ * the portal hands the agent what it could not read itself. Who owns a folder says nothing about that (a project is
+ * root's, with the sandbox's group set on it, and the closed folder in it is root's too), so with `likeParent` the
+ * folder, and a file in it, are told as the kernel would for the agent itself, from the owner, group and mode of the
+ * folder as it is held, for the user and the groups the sandbox runs the agent as: the owner's bits if the agent's user
+ * owns it, else the group's if the group is one of the agent's (its own, or the sandbox group), else everyone's.
+ * What is read from the folder (`list`, `read`, `readBytes`, `open`, `folder`) needs the agent to read and search it, what
+ * is changed in it (`write`, `removeFile`, `renameFile`, `sweepTemp`) to write in it and search it, a folder that is held
+ * to (`identity`) both, and a file that is read, or replaced, to be readable by it. Refused (`invalid`) otherwise. Where
+ * the sandbox is off the agent is the portal's own user, and nothing is refused.
+ */
+export interface FolderUse {
+  likeParent?: boolean;
 }
 
 /** What `removeFile` and `renameFile` take beyond `FileOpenOptions`. */
@@ -229,9 +249,9 @@ export interface ServerPortal {
     /** `rel` inside `base`, checked: throws for `..`, an absolute path, or a link that leads out. */
     inside(base: string, rel: string): string;
     /** What is directly in a folder, folders first; `.git` is left out. At most 2,000 entries, and `truncated` says when there were more. */
-    list(base: string, rel: string): { path: string; entries: FileEntry[]; truncated: boolean };
+    list(base: string, rel: string, options?: FolderUse): { path: string; entries: FileEntry[]; truncated: boolean };
     /** A file's text, or that it has none to show. */
-    read(base: string, rel: string): FileContent;
+    read(base: string, rel: string, options?: FolderUse): FileContent;
     /**
      * A file's bytes as they are, at most 1 MB (`too_large`), with its `change`. With `head`, only that many bytes
      * from the start are read (0: none, to ask for `change` alone).
@@ -251,7 +271,7 @@ export interface ServerPortal {
       base: string,
       rel: string,
       content: string | Uint8Array,
-      options?: { expected?: number; create?: boolean; direct?: boolean },
+      options?: { expected?: number; create?: boolean; direct?: boolean; likeParent?: boolean },
     ): { size: number; mtime: number; change: string };
     /** Another name in the same folder, never over something there; a link is renamed as the link. The new path, from `base`. */
     rename(base: string, rel: string, name: string): string;
@@ -264,8 +284,9 @@ export interface ServerPortal {
      * or all of the folder. For a server half that deletes a file of its own that the agent can change as it runs: the
      * folder it is in is held open and the name is taken from it, so the file goes from the folder that was checked
      * whatever its path leads to by then, and what is swapped onto the name meanwhile is never followed (a link goes as the
-     * link) or taken as a folder (it stays, with all in it). `direct` and `alone` as for `open`. `missing` for a file that
-     * is not there. `expect`: the folder must be that one (`conflict` otherwise).
+     * link) or taken as a folder (it stays, with all in it). `direct` and `alone` as for `open`; with `likeParent` the folder
+     * `base` must be one the agent could use (`invalid` otherwise, see `FolderUse`). `missing` for a file that is not
+     * there. `expect`: the folder must be that one (`conflict` otherwise).
      */
     removeFile(base: string, rel: string, options?: FileChangeOptions): void;
     /**
@@ -278,7 +299,7 @@ export interface ServerPortal {
      * never when it is the file's only name (a folder took the old name), where the rename stands. A name the file system does
      * not tell from the old one (capitals, or the form of a letter, on macOS, Windows or a casefold folder) is the old name
      * itself: `exists`. Where hard links are not possible it is a rename after a look. `direct` and `alone` as for `open`,
-     * `expect` as for `removeFile`; the new path, from `base`.
+     * `likeParent` and `expect` as for `removeFile`; the new path, from `base`.
      */
     renameFile(base: string, rel: string, name: string, options?: FileChangeOptions): string;
     /** A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. */
@@ -288,13 +309,23 @@ export interface ServerPortal {
      * that is a name in `base` itself and no link (`invalid` otherwise), for a half that keeps something in a
      * folder of that name.
      */
-    folder(base: string, rel: string, options?: { direct?: boolean }): string;
+    folder(base: string, rel: string, options?: { direct?: boolean; likeParent?: boolean }): string;
+    /**
+     * Which folder `rel` is, on this system: its device and inode as text, read from the folder as it is held, so that it is
+     * the folder the checks were made on and not what its path leads to by then. No two folders have the same pair at once, a
+     * folder that is moved keeps it and one that is deleted and made again does not: for a server half that holds to a folder
+     * and must tell it from another at the same path. A number can be given to the next folder made, so it says that a
+     * folder is the one it was while it exists, not for ever. `direct` and `likeParent` as for `folder`; with `likeParent` the
+     * folder that is given an identity is the one that passed (a closed folder is `invalid`, also when it was swapped in
+     * between a look at the path and this call).
+     */
+    identity(base: string, rel: string, options?: { direct?: boolean; likeParent?: boolean }): { dev: string; ino: string };
     /**
      * Removes the temporary files that saves in the folder `rel` left behind when they were cut off, and returns
      * their names. Only those older than `olderThanMs` (by default a minute): a save of the portal's own or of
      * another half that is under way has such a file for a moment, and it is not removed under it.
      */
-    sweepTemp(base: string, rel: string, options?: { olderThanMs?: number }): string[];
+    sweepTemp(base: string, rel: string, options?: { olderThanMs?: number; likeParent?: boolean }): string[];
     /**
      * A plain file opened once, to read or send: read from `fd`, not from the path again, and with its `mtime` and
      * `change` as they were when it was opened. A file kept open this way is the file the name had then, whatever

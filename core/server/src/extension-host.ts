@@ -14,7 +14,7 @@ import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
 import { identityOf } from "./sandbox/identity.js";
 import { sandboxOn, sandboxSupport } from "./sandbox/policy.js";
 import { folderFiles } from "./folder-files.js";
-import { baseDir } from "./workspace-files.js";
+import { baseDir, setAgentAccess, type AgentAccess } from "./workspace-files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
@@ -48,6 +48,22 @@ import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithag
 // What a server half is given is the public contract, @pithagoras/extension-api/server: the portal implements it here.
 export type { Chat, ServerPortal } from "@pithagoras/extension-api/server";
 export { folderFiles };
+
+/**
+ * Who the agent is that works in a folder, for what `files.*` is asked with `likeParent`: the user and groups the sandbox runs it as
+ * (`asAgent`, exec.ts), for the agent the folder belongs to as `whoOf` has it. Nothing while the sandbox is off: the agent is the
+ * portal's own user then. Kept for a second per agent: the answer is a few processes (`getent`), and a listing asks for each file.
+ */
+const agentAccess = new Map<string, { at: number; access: AgentAccess | undefined }>();
+setAgentAccess((folder) => {
+  const agent = agentOf(folder) ?? defaultAgent();
+  const known = agentAccess.get(agent.id);
+  if (known && Date.now() - known.at < 1000) return known.access;
+  const who = sandboxOn() ? identityOf(agent, sandboxSupport()) : undefined;
+  const access = who && { uid: who.uid, groups: [who.gid, who.shared] };
+  agentAccess.set(agent.id, { at: Date.now(), access });
+  return access;
+});
 
 interface Running {
   half: ServerHalf;

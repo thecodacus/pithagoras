@@ -676,7 +676,7 @@ restart the portal.
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `readBytes`, `write`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `identity`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -782,6 +782,20 @@ easy to get wrong in a way that is a hole, not a bug:
   (macOS) a folder on the way can still be swapped between the check and the
   call, and so the portal gives nothing it makes away there (below). A pipe left
   there does not hold the server, and a device is not read.
+- **The agent can rename things.** With the [sandbox](/guide/sandbox) on, a folder or file the agent may not
+  enter is root's alone (`root:root`, mode 0700 or 0600). The agent writes in its chat's folder, and a rename
+  there needs only the right to write in that folder, so it can rename that folder to the name of one your half
+  reads as root on its behalf (`documents`), or move that file into it, and your half would hand it what it could
+  not read itself. Where your half keeps something under a name the agent can choose, pass `likeParent: true`
+  (`folder`, `identity`, `list`, `read`, `readBytes`, `open`, `write`, `removeFile`, `renameFile`, `sweepTemp`): the folder, and the
+  file in it, must be something the agent could use itself. That is told as the kernel would tell it for the user
+  and the groups the sandbox runs the agent as (its own and the sandbox group), from the owner, group and mode of
+  the folder as it is held: the owner's bits if the agent's user owns it, else the group's if the group is one of
+  the agent's, else everyone's. Who owns it says nothing (a project is root's too). What is read from a folder (`folder`, `list`, `read`, `readBytes`, `open`) needs
+  the agent to read and search it, what is changed in it (`write`, `removeFile`, `renameFile`, `sweepTemp`) to
+  write in it and search it, a folder that is held to (`identity`) both, and a file that is read (or replaced) to be
+  readable by it. Otherwise the call is refused (`invalid`). It is checked on the folder as it is held, so it
+  cannot be swapped in between. With the sandbox off the agent is the portal's own user, and nothing is refused.
 - **A save is put in place whole.** It is written beside the file and renamed
   over it, so a full disk leaves the file as it was, not empty. It keeps the
   file's mode and its owner, so a file the portal saved as root is still the
@@ -815,7 +829,8 @@ easy to get wrong in a way that is a hole, not a bug:
   itself, so it is `exists`. Where hard links cannot be made (a file system
   without them, or `protected_hardlinks` for a file that is not the portal's own)
   it is a rename after a look, with a short gap for a file that is made at the
-  new name in between. `direct` and `alone` are options of both, as of `open`.
+  new name in between. `direct` and `alone` are options of both, as of `open`, and so is `likeParent`
+  (the folder must be one the agent could write in).
   `expect: { dev, ino }` is one of both as well: the folder the file is in must
   be that one, by its device and inode (what `stat` says of the folder, as numbers,
   text or bigint), or the call is `conflict` and touches nothing. A half that
@@ -899,6 +914,16 @@ a file away (it is not root and the folder is someone else's), it stays its own,
 in the group it can: it is group-writable only if that group is the folder's. A
 portal on a system without `/proc` gives nothing away.
 
+**Which folder it is.** A half that holds to a folder (Documents deletes and renames only in the folder it
+holds to) needs to tell it from another that was put at the same path. `files.identity(base, rel)` is the folder's
+device and inode as text (`{ dev, ino }`), read from the folder as it is held, so that it is the folder the checks
+were made on and not what its path leads to by then. Two folders never have the same pair at once, a folder that
+is moved keeps it and one that is deleted and made again does not; a number can be given to the next folder
+made, so it says that a folder is the one it was while it exists, not for ever. It takes `direct` and
+`likeParent`: a folder the agent could not use is not given an identity, so a half that holds to what it is
+given never holds to one the sandbox closed to the agent. Pass the identity as `expect` to `removeFile` and
+`renameFile`.
+
 **Temporary files.** A save writes `.<name>.<12 hex>.tmp` beside the file until
 it is renamed. One that was cut off stays. `sweepTemp(base, rel)` removes those
 older than a minute (`olderThanMs` to change that) and says which: a save of
@@ -914,7 +939,8 @@ itself, for a server half that words a full disk differently from a missing righ
 told changed by `change`; its folder is found with `folder`, made with
 `makeFolder` and listed with `list`; its leftovers are swept with `sweepTemp`; a
 document is deleted with `removeFile` and renamed with `renameFile`
-(`direct`, `alone`, and `expect` for the documents folder it keeps the identity of).
+(`direct`, `alone`, `likeParent`, and `expect` for the documents folder it keeps the identity of, which it
+takes with `identity`).
 
 **Watching a chat's folder** is not in `portal.files`. A watch reads nothing and
 changes nothing, so it has none of the dangers above: it only tells that
