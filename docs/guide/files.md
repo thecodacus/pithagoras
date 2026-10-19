@@ -96,6 +96,15 @@ is kept there as a revision, marked as an outside change, and a page that has
 the document open is told of it; deleting or renaming such a file is dealt with
 as [Documents](/guide/documents#a-file-that-is-deleted-or-renamed) describes.
 
+## Changes made outside Files
+
+The folder you are looking at is watched while Files is open, so a file made, renamed or
+removed in it by anything shows within a moment: the terminal, a command the agent ran, a
+tool on the same machine. You do not have to leave the folder and come back. Only that
+folder is watched, not the ones inside it, and a path too long for the watch is left out.
+Where the system cannot watch a folder (too many watches, or a file system that has none),
+Files shows what the agent does as before, and the refresh button in the header looks again.
+
 ## Watching the agent
 
 Files follows the agent. When it reads a file, or writes or edits one, that file

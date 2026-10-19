@@ -16,6 +16,8 @@ export const msg = <T extends string>(text: T): T => text;
 /** A hook: the language in effect, drawing the component again when it changes. */
 export const useLanguage = () => portal.locale.use();
 
+/** Hears what the server half pushes to `topic`, and is told where things stand as it begins to; returns what stops it. */
+export const listenTo = (topic: string, handler: (data: unknown) => void) => portal.server.on(topic, handler);
 /** A question with two answers, asked over the page: resolves true for yes. */
 export const confirmDialog = (options: ConfirmOptions) => portal.ui.confirm(options);
 /** The browser's storage, which never throws. */

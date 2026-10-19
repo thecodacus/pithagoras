@@ -3,12 +3,13 @@ import { closeSync, createReadStream } from "node:fs";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import type { Request, RequestHandler, Response, Router } from "express";
-import type { ServerPortal } from "@pithagoras/extension-api/server";
+import type { FolderWatch, ServerPortal } from "@pithagoras/extension-api/server";
 
 /**
  * Files' server half: its routes at /api/x/pithagoras-files/chats/<chat>/…,
  * for listing, reading, downloading, saving, renaming and deleting what is in
- * the chat's folder, uploading a file into it, a new folder in it, and the whole of it as a .tar.gz.
+ * the chat's folder, uploading a file into it, a new folder in it, and the whole of it as a .tar.gz;
+ * and the folder a page has open, watched, so that a change made by anything shows (see `watchFolders`).
  *
  * What may be reached and how it is read and written is the portal's
  * (`portal.files`): the agent writes in that folder, links included, and these
@@ -43,6 +44,114 @@ const pathOf = (req: Request) => String(req.query.path ?? "");
 
 export default function files(portal: ServerPortal) {
   routes(portal.router, portal.http.json(), portal.files, (id) => portal.chats.folder(id));
+  watchFolders(portal);
+}
+
+/** The topic of a folder of a chat's, as the page names it: `dir/<chat>/<path in the chat's folder>`, both parts encoded (`folderTopic`, files-api.ts). */
+const FOLDER_TOPIC = /^dir\/([^/]+)\/(.*)$/s;
+
+/**
+ * The folder a page has open, watched for as long as one listens (`portal.files.watch`, `portal.onListen`): a page that
+ * listens to the topic of a folder is told, once a burst of changes is over, that something in it changed, whatever
+ * changed it (the Terminal, a command the agent ran, a person by hand), and looks at the folder again. It is told
+ * nothing else: the names are read through the routes, which have the checks.
+ *
+ * The watch is the portal's own, on the folder as it was opened, so a link put in its place does not lead it elsewhere. A folder
+ * that was removed, replaced, not there yet or cannot be watched is tried again every `retryMs`, and a page is told when
+ * it is watched again; a system that cannot watch at all leaves the page to its other ways (the agent's own reads and writes).
+ */
+export function watchFolders(portal: ServerPortal, retryMs = 2000): void {
+  interface Watched {
+    topic: string;
+    base: string;
+    rel: string;
+    count: number;
+    watch: FolderWatch | null;
+    timer: ReturnType<typeof setInterval> | null;
+  }
+  const open = new Map<string, Watched>();
+
+  /** Sets the watch on the folder as it is now. True if it is set; a path the portal refuses (out of the folder) is thrown. */
+  const set = (w: Watched): boolean => {
+    try {
+      w.watch = portal.files.watch(
+        w.base,
+        w.rel,
+        ({ gone }) => {
+          if (open.get(w.topic) !== w) return;
+          // The folder itself was removed or replaced: this watch is over, and the one that is there now is watched at once.
+          if (gone) {
+            w.watch = null;
+            try {
+              set(w);
+            } catch {
+              // Out of the chat's folder now (a link in the way): not watched.
+            }
+          }
+          portal.push(w.topic, { changed: true });
+        },
+        { debounceMs: 100 },
+      );
+      return true;
+    } catch (e) {
+      w.watch = null;
+      if ((e as { code?: unknown })?.code === "invalid") throw e;
+      // Missing for now, or not to be watched here: the next look at it tries again.
+      return false;
+    }
+  };
+
+  /** Watches again a folder that is not watched, or not the one that was; tells the page, which may have missed what happened meanwhile. */
+  const tryAgain = (w: Watched): void => {
+    if (w.watch?.current()) return;
+    w.watch?.close();
+    try {
+      if (set(w)) portal.push(w.topic, { changed: true });
+    } catch {
+      // Out of the chat's folder now (a link in the way): not watched.
+    }
+  };
+
+  portal.onListen((topic, page) => {
+    const named = FOLDER_TOPIC.exec(topic);
+    if (!named) return false;
+    let w = open.get(topic);
+    if (!w) {
+      let base: string;
+      let rel: string;
+      try {
+        base = portal.chats.folder(decodeURIComponent(named[1]));
+        rel = decodeURIComponent(named[2]);
+      } catch {
+        // A chat that is gone, or a topic that is not one of ours.
+        return false;
+      }
+      const made: Watched = { topic, base, rel, count: 0, watch: null, timer: null };
+      try {
+        set(made);
+      } catch {
+        // A path that leads out of the chat's folder is not for a page to watch.
+        return false;
+      }
+      made.timer = setInterval(() => tryAgain(made), retryMs);
+      made.timer.unref?.();
+      open.set(topic, made);
+      w = made;
+    }
+    const mine = w;
+    mine.count++;
+    // Where things stand: the page looks at the folder as it begins to listen, and again after a connection that dropped.
+    page.send({ first: true });
+    let left = false;
+    return () => {
+      if (left) return;
+      left = true;
+      if (--mine.count > 0) return;
+      if (mine.timer) clearInterval(mine.timer);
+      mine.watch?.close();
+      if (open.get(topic) === mine) open.delete(topic);
+    };
+  });
 }
 
 /** The routes, on `router` (the package's): `json` reads a body, `folderOf` is a chat's folder or throws. */

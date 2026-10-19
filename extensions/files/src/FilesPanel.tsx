@@ -21,11 +21,11 @@ import {
   LuTrash2,
   LuUpload,
 } from "react-icons/lu";
-import { api, type FileEntry, type Unsaved } from "./files-api";
+import { api, folderTopic, type FileEntry, type Unsaved } from "./files-api";
 import type { FileActivity } from "@pithagoras/extension-api";
 import { flushFileDraft, keepFileDraft, readFileDraft } from "./drafts";
 import { deleteAsking, unsavedNotes } from "./unsaved";
-import { bytesLabel, confirmDialog, folderPictures, isApiError, isEnter, isEscape, local, Markdown, t, tp, useLanguage, within } from "./portal";
+import { bytesLabel, confirmDialog, folderPictures, isApiError, isEnter, isEscape, listenTo, local, Markdown, t, tp, useLanguage, within } from "./portal";
 
 interface Open {
   path: string;
@@ -225,6 +225,13 @@ export const FilesPanel = memo(function FilesPanel({
   useEffect(() => {
     void loadDir(dir);
   }, [loadDir, dir]);
+
+  // What is made, written, renamed or removed in the folder on screen shows, whatever did it: the server half watches the folder
+  // while this listens and says so, where the agent's own reads and writes (below) miss the Terminal, a command it ran, a person by hand.
+  useEffect(() => {
+    const topic = folderTopic(sessionId, dir);
+    return topic ? listenTo(topic, () => void loadDir(dir)) : undefined;
+  }, [sessionId, dir, loadDir]);
 
   const loadFile = useCallback(
     (path: string, write = false) => {

@@ -35,6 +35,15 @@ export interface Unsaved {
 const own = (sessionId: string, route: string, path: string, more = "") =>
   portal.api.url(`/chats/${encodeURIComponent(sessionId)}/${route}?path=${encodeURIComponent(path)}${more}`);
 
+/**
+ * The topic of the server half that tells when something in the folder `dir` of a chat's changes (watchFolders, server.ts).
+ * Undefined where the path is too long for a topic: that folder is not watched, and shows what the agent does as before.
+ */
+export const folderTopic = (sessionId: string, dir: string): string | undefined => {
+  const topic = `dir/${encodeURIComponent(sessionId)}/${encodeURIComponent(dir)}`;
+  return topic.length <= 200 ? topic : undefined;
+};
+
 export const api = {
   listFiles: (sessionId: string, dir: string) => portal.api.json<{ path: string; entries: FileEntry[]; truncated: boolean }>(own(sessionId, "files", dir)),
   readFile: (sessionId: string, file: string) => portal.api.json<FileContent>(own(sessionId, "file", file)),
