@@ -37,7 +37,7 @@ export class Refused extends Error {
  * of their ids, or a function that gives it as each call is made.
  */
 export function forChats(files, chats) {
-  const optionsAt = { folder: 2, identity: 2, list: 2, read: 2, readBytes: 2, open: 2, sweepTemp: 2, removeFile: 2, write: 3, renameFile: 3 };
+  const optionsAt = { folder: 2, identity: 2, list: 2, read: 2, readBytes: 2, open: 2, sweepTemp: 2, removeFile: 2, write: 3, renameFile: 3, makeFolder: 3 };
   const bound = { ...files };
   for (const [name, at] of Object.entries(optionsAt)) {
     bound[name] = (...args) => {

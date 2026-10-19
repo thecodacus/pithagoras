@@ -1451,11 +1451,13 @@ function isFresh(fd: number, where: string, parent: { dev: number }): boolean {
  * It is made in the folder as it is held (see holdFolder), not in the place
  * its path leads to by the time of the call, and given away only once it is
  * known to be the one just made (see isFresh). Returns its path, from the chat's folder.
+ * With `likeParent` (see AgentUse) the folder it is made in must be one the agents could write in and reach, as for any change: otherwise it is refused
+ * (`invalid`) before anything is made, so the portal does not make, as root, what the agent could not.
  */
-export function makeFolder(base: string, dirRel: unknown, name: unknown): string {
+export function makeFolder(base: string, dirRel: unknown, name: unknown, options: AgentUse = {}): string {
   const clean = checkName(name);
   const parent = folderPath(base, dirRel);
-  const held = holdFolder(base, parent);
+  const held = holdFolder(base, parent, using(options, CHANGE_IN));
   const taken = () => new FileError("exists", `There is already something called "${clean}" here`);
   try {
     const target = held.at(clean);

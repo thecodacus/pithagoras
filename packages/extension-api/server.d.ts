@@ -115,7 +115,7 @@ export interface FileOpenOptions {
  * root's, with the sandbox's group set on it, and the closed folder in it is root's too). Every folder of the path from
  * `/` down to the folder must be one they may search, as the kernel needs for a path, the folder itself, as it is held,
  * one they may read and search for what is read from it (`list`, `read`, `readBytes`, `open`, `folder`), write in and search
- * for what is changed in it (`write`, `remove`, `rename`, `removeFile`, `renameFile`, `sweepTemp`), or both for a folder that is held to
+ * for what is changed in it (`write`, `makeFolder`, `remove`, `rename`, `removeFile`, `renameFile`, `sweepTemp`), or both for a folder that is held to
  * (`identity`), and a file one they may read. In a sticky folder (mode 1777) what is taken away, renamed or replaced must
  * be one of their own, as for the kernel. Refused (`invalid`) otherwise. Where the sandbox is off the agent is the
  * portal's own user, and nothing is refused. POSIX ACLs are not read: the mode bits are what is asked, and the
@@ -299,10 +299,12 @@ export interface ServerPortal {
     get(id: string): Chat | undefined;
     list(): Chat[];
     /**
-     * The sessions of every kind that work in a folder: the tasks `list` gives, and also routine runs, conversations on the Agent page
+     * The sessions that work in a folder, of every kind: the tasks `list` gives, and also routine runs, conversations on the Agent page
      * and in channels, and heartbeats, which `list` leaves out and which have the package's tools in their pi as the tasks do. Those
-     * whose workspace, stored for them and resolved as `folder` resolves it, is `folder` (a path from `folder(id)`). For what is read or
-     * changed in a folder for every agent that works in it (`files.*` with `likeParent`: see `FolderUse.chats`).
+     * whose workspace, stored for them and resolved as `folder` resolves it, is `folder` (a path from `folder(id)`). One session for each
+     * stored workspace that leads there, not each session: they are never removed (a routine that makes a fresh session for each run
+     * keeps every one), and the sessions made for one workspace are run as the same agent, so one stands for them all. For what is read
+     * or changed in a folder for every agent that works in it (`files.*` with `likeParent`: see `FolderUse.chats`).
      */
     inFolder(folder: string): Chat[];
     /**
@@ -437,8 +439,11 @@ export interface ServerPortal {
      * `likeParent` and `expect` as for `removeFile`; the new path, from `base`.
      */
     renameFile(base: string, rel: string, name: string, options?: FileChangeOptions): string;
-    /** A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. */
-    makeFolder(base: string, rel: string, name: string): string;
+    /**
+     * A new folder `name` in the folder `rel`, with the mode, owner and group of the folder it is in; its path, from `base`. With `likeParent`
+     * (and `chats`) the folder it is made in must be one the agents could write in and reach, else it is refused (`invalid`) and nothing is made.
+     */
+    makeFolder(base: string, rel: string, name: string, options?: FolderUse): string;
     /**
      * The checked path of a folder in `base`, for what reads the whole of it (an archive). With `direct`, a folder
      * that is a name in `base` itself and no link (`invalid` otherwise), for a half that keeps something in a

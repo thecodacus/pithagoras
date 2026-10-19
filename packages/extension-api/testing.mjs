@@ -242,17 +242,23 @@ export async function mockPortal(options = {}) {
       get: chatOf,
       // The tasks, as the portal lists them: a session of another kind (`kinds`) works in its folder all the same.
       list: () => (listed ?? [...chats.keys()]).filter((id) => chats.has(id) && (options.kinds?.[id] ?? "task") === "task").map(chatOf),
-      // The sessions of every kind whose folder, resolved now as `folder` does, is `where`.
-      inFolder: (where) =>
-        [...chats.keys()]
-          .filter((id) => {
-            try {
-              return folderOf(id) === where;
-            } catch {
-              return false;
-            }
-          })
-          .map(chatOf),
+      // One session of every kind for each stored workspace that leads to `where` (resolved now, as `folder` does): the agent of each is the same
+      // whichever session of a workspace is asked for.
+      inFolder: (where) => {
+        const seen = new Set();
+        const found = [];
+        for (const [id, chat] of chats) {
+          if (seen.has(chat.folder)) continue;
+          try {
+            if (folderOf(id) !== where) continue;
+          } catch {
+            continue;
+          }
+          seen.add(chat.folder);
+          found.push(chatOf(id));
+        }
+        return found;
+      },
       folder: (id) => folderOf(id),
       send: (chat, data) => void mock.sent.push({ chat, data }),
       onOpen: (handler) => void opens.push(handler),

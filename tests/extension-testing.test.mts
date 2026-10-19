@@ -44,7 +44,7 @@ test('chats.followUp puts the message in the conversation as the package\'s own,
   }
 });
 
-test('chats.inFolder gives the sessions of every kind that work in a folder, chats.list the tasks alone, and the folder is resolved as it is asked', async () => {
+test('chats.inFolder gives a session of every kind that works in a folder, one for each stored workspace, chats.list the tasks alone, and the folder is resolved as it is asked', async () => {
   const mine = scratch();
   const other = scratch();
   const elsewhere: Record<string, string> = {};
@@ -57,9 +57,10 @@ test('chats.inFolder gives the sessions of every kind that work in a folder, cha
   try {
     const { chats } = mock.portal;
     assert.deepEqual(chats.list().map((chat) => chat.id), ['t', 'o'], 'the tasks');
-    assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id).sort(), ['o', 'r', 't'], 'folderOf says where each leads: all of them here');
+    // One session for each stored workspace: t and r were made for the same, o for another that folderOf makes lead here.
+    assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id).sort(), ['o', 't']);
     elsewhere.o = other;
-    assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id).sort(), ['r', 't']);
+    assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id), ['t']);
     assert.deepEqual(chats.inFolder(other).map((chat) => chat.id), ['o']);
     assert.equal(chats.folder('o'), other);
     assert.throws(() => chats.folder('nobody'), /No such chat/);

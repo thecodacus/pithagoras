@@ -695,7 +695,7 @@ restart the portal.
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status }` |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
-| `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi |
+| `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each workspace stored that leads there (the sessions made for one are run as the same agent, and none is removed) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
 | `chats.on("started" \| "stopped" \| "deleted", fn)` | A chat's pi started or stopped; the chat was deleted |
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
@@ -844,14 +844,14 @@ easy to get wrong in a way that is a hole, not a bug:
   behalf (`documents`), or move that file into it, and your half would hand it what it could not read itself. Where
   your half keeps something under a name the agent can choose, pass `likeParent: true` and the ids of the chats whose
   agents work in the folder as `chats` (`folder`, `identity`, `list`, `read`, `readBytes`, `open`, `write`,
-  `remove`, `rename`, `removeFile`, `renameFile`, `sweepTemp`): the folder, and the file in it, must be something every one of those
+  `makeFolder`, `remove`, `rename`, `removeFile`, `renameFile`, `sweepTemp`): the folder, and the file in it, must be something every one of those
   agents could use itself. That is told as the kernel would tell it for the user and the groups the sandbox runs
   each as (its own and the sandbox group), from the owner, group and mode of what is held: the owner's bits if the
   agent's user owns it, else the group's if the group is one of the agent's, else everyone's. Who owns it says
   nothing (a project is root's too). Every folder of the path from `/` down to the folder must be one the agents may
   search, and none may be a link (a path that is a link now was swapped). What is read from a folder (`folder`,
   `list`, `read`, `readBytes`, `open`) needs the agents to read and search it, what is changed in it (`write`,
-  `remove`, `rename`, `removeFile`, `renameFile`, `sweepTemp`) to write in it and search it, a folder that is held to (`identity`) both,
+  `makeFolder`, `remove`, `rename`, `removeFile`, `renameFile`, `sweepTemp`) to write in it and search it, a folder that is held to (`identity`) both,
   and a file that is read (or replaced) to be readable by them; in a sticky folder (mode 1777) what is taken away,
   renamed or replaced must be their own. Otherwise the call is refused (`invalid`). It is checked on the folders as
   they are held, so it cannot be swapped in between. The agents are the ones of `chats`, not found from the folder's
@@ -1702,7 +1702,7 @@ What your half relies on for its safety is the portal's own, not made up: `porta
 way an extension needs: a chat's pi (`mock.pi(chat)`) keeps the tools and messages it is given, `chats.followUp` answers as
 the portal's does (it resolves `true` once the message is handed to pi, `false` when `executor` is not `"host"`, and a pi that
 refuses the message shows as a `portal_failed` event, which `chats.onEvent` hears), and the options `tell`, `followUp` and
-`sendThrows` steer what a chat's pi answers. `chats.inFolder` gives the sessions of every kind whose folder is the one asked for, `chats.list` the tasks alone; `kinds` says which
+`sendThrows` steer what a chat's pi answers. `chats.inFolder` gives one session of every kind for each stored workspace that leads to the folder asked for, `chats.list` the tasks alone; `kinds` says which
 chats are not tasks (by id), and `folderOf` where a chat's folder leads now, for a test that sends a session's folder somewhere else.
 
 It stands on the portal's source, so it needs a checkout of the portal: `mockPortal()` finds `core/server` beside the

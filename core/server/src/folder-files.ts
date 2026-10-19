@@ -41,7 +41,7 @@ export const folderFiles: ServerPortal["files"] = {
   remove: (base, rel, options = {}) => removeEntry(base, rel, options.discard === true, { direct: options.direct, likeParent: options.likeParent, chats: options.chats, expect: options.expect }),
   removeFile: (base, rel, options = {}) => removeFile(base, rel, options),
   renameFile: (base, rel, name, options = {}) => renameFile(base, rel, name, options),
-  makeFolder: (base, rel, name) => makeFolder(base, rel, name),
+  makeFolder: (base, rel, name, options = {}) => makeFolder(base, rel, name, options),
   folder: (base, rel, options = {}) => folderPath(base, rel, options),
   identity: (base, rel, options = {}) => folderIdentity(base, rel, options),
   hold: (base, rel, options = {}) => holdForReading(base, rel, options),

@@ -1747,6 +1747,7 @@ test('a folder the sandbox closed to the agent is not used under another name, w
   assert.equal(await codeOf(() => writeText(documents, 'secret.md', 'x', undefined, false, AT_DOCUMENTS)), 'invalid');
   assert.equal(await codeOf(() => removeFile(documents, 'secret.md', AS_DOCUMENT)), 'invalid');
   assert.equal(await codeOf(() => renameFile(documents, 'secret.md', 'other.md', AS_DOCUMENT)), 'invalid');
+  assert.equal(await codeOf(() => makeFolder(documents, '', 'made', LIKE)), 'invalid');
   assert.deepEqual(sweepTemp(documents, '', 0, LIKE), [], 'and nothing is swept in it');
   assert.deepEqual(names(documents), ['.plan.md.0123456789ab.tmp', 'secret.md'], 'nothing was made, removed or renamed in it');
   assert.equal(readFileSync(path.join(documents, 'secret.md'), 'utf8'), '# the sandbox kept this from the agent');
@@ -1796,6 +1797,7 @@ test('what the agent could use itself is used as ever: a folder of the sandbox\'
     () => writeText(documents, 'plan.md', 'x', undefined, false, AT_DOCUMENTS),
     () => removeFile(documents, 'plan.md', AS_DOCUMENT),
     () => renameFile(documents, 'plan.md', 'other.md', AS_DOCUMENT),
+    () => makeFolder(documents, '', 'sub', LIKE),
     () => folderIdentity(base, 'documents', AT_DOCUMENTS),
   ]) assert.equal(await codeOf(change), 'invalid');
   assert.deepEqual(names(documents), ['next.md', 'plan.md']);
@@ -1914,6 +1916,7 @@ test('portal.files passes likeParent on: list, read, readBytes, open, write, fol
   assert.equal(await codeOf(() => folderFiles.identity(base, 'documents', AT_DOCUMENTS)), 'invalid');
   assert.equal(await codeOf(() => folderFiles.removeFile(documents, 'secret.md', use)), 'invalid');
   assert.equal(await codeOf(() => folderFiles.renameFile(documents, 'secret.md', 'other.md', use)), 'invalid');
+  assert.equal(await codeOf(() => folderFiles.makeFolder(documents, '', 'made', LIKE)), 'invalid');
   assert.deepEqual(folderFiles.sweepTemp(documents, '', { olderThanMs: 0, ...LIKE }), []);
   assert.deepEqual(names(documents), ['secret.md']);
   done();
@@ -1952,7 +1955,7 @@ function nested() {
 }
 
 test('a folder below a closed folder is closed too, though every folder in it has the rights the wider rule gave it: base, and what is reached through it, for every call', async () => {
-  const { base, at, documents, reopen, done } = nested();
+  const { base, at, documents, proj, reopen, done } = nested();
   // The kernel refuses the agent every one of these: it cannot search the folder above. Whatever the folders below have.
   const refused = [
     () => folderPath(base, 'documents', AT_DOCUMENTS),
@@ -1965,10 +1968,13 @@ test('a folder below a closed folder is closed too, though every folder in it ha
     () => writeText(at, 'plan.md', 'x', undefined, false, { direct: true, ...LIKE }),
     () => removeFile(at, 'plan.md', AS_DOCUMENT),
     () => renameFile(at, 'plan.md', 'other.md', AS_DOCUMENT),
+    () => makeFolder(at, '', 'made', LIKE),
+    () => makeFolder(base, '', 'made', LIKE),
   ];
   for (const [n, call] of refused.entries()) assert.equal(await codeOf(call), 'invalid', `call ${n}`);
   assert.deepEqual(sweepTemp(at, '', 0, LIKE), []);
   assert.deepEqual(names(documents), ['plan.md'], 'nothing was made, removed or renamed');
+  assert.deepEqual(names(proj), ['documents', 'inner'], 'no folder was made where the agents could not reach');
   assert.equal(readFileSync(path.join(documents, 'plan.md'), 'utf8'), '# ours');
   // Without the option the portal reads it as ever: it is root.
   assert.equal(readBytes(at, 'plan.md', { direct: true }).bytes.toString(), '# ours');
@@ -1979,6 +1985,7 @@ test('a folder below a closed folder is closed too, though every folder in it ha
   assert.equal(readBytes(at, 'plan.md', AS_DOCUMENT).bytes.toString(), '# ours');
   assert.deepEqual(listDir(at, '', LIKE).entries.map((entry) => entry.name), ['plan.md']);
   assert.equal(writeText(at, 'new.md', 'x', undefined, true, { direct: true, ...LIKE }).size, 1);
+  assert.equal(makeFolder(base, '', 'made', LIKE), 'made', 'made where the agents could make it');
   done();
 });
 

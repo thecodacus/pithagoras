@@ -166,7 +166,7 @@ export function wakeMessage({ title, name, id, thread, comment }) {
  * Registers the tools in a chat's pi. `deps` is what the server half has: the
  * chat's folder (`folder()`, which throws when it is gone), the folder's
  * store (`store(folder, { make })`), whether it has a documents folder yet
- * (`hasDocuments(folder, chat)`), the id the page knows a folder by (`folderId`), a
+ * (`hasDocuments(folder, chat)`, and `closed(folder, chat)`: whether it is one this chat's agent may not use), the id the page knows a folder by (`folderId`), a
  * document's title from the start of its text (`titleOf`, `headBytes`), the
  * Markdown a new document called by a title starts with (`headed`) and the
  * portal's log.
@@ -245,7 +245,10 @@ export function documentTools(pi, chat, deps) {
     execute: guarded(async ({ scope = "all" }) => {
       if (!["chat", "project", "all"].includes(scope)) throw new Refusal("invalid", "scope is chat, project or all");
       const folder = folderOf();
-      const listed = deps.hasDocuments(folder, chat.id) ? await (await deps.store(folder, { make: true })).list(deps.headBytes) : [];
+      const there = deps.hasDocuments(folder, chat.id);
+      // A documents folder this chat's agent may not use is said, not taken for none: "No documents yet" would be untrue, and would send the agent to doc_create.
+      if (!there && deps.closed(folder, chat.id)) throw new Refusal("closed", "the documents folder of this project is closed to this chat's agent, so it is not used");
+      const listed = there ? await (await deps.store(folder, { make: true })).list(deps.headBytes) : [];
       const documents = listed
         .filter((doc) => sees(doc) && (scope === "all" || doc.scope === scope))
         .map(({ head, ...doc }) => ({ ...doc, path: pathOf(doc.name), title: deps.titleOf(head, doc.name) }))
