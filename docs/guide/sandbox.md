@@ -84,8 +84,9 @@ What the portal puts in the agent's prompt it reads the same way: the agent's
 look is asked. One that is a link is left out, wherever it leads, and so is one
 the agent could not read itself: a link the agent leaves in its home in place of
 `MEMORY.md` does not put another agent's files, or the portal's own, in its
-prompt. The `AGENTS.md` in pi's own folder (`/data/home/.pi/agent`) is yours,
-and is read as it is.
+prompt. In a project linked to an agent, that agent's files are read as the
+agent whose home they are in. The `AGENTS.md` in pi's own folder
+(`/data/home/.pi/agent`) is yours, and is read as it is.
 
 A path no rule names keeps the permissions it has. For most of the system that
 means readable and not changeable. The agents' homes and their `HOME` folders
