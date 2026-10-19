@@ -158,6 +158,8 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const picker = useRef<HTMLInputElement>(null);
   // The windows the installed extensions brought (the `voice.window` slot), by their entry's key: those still there.
   const windowEntries = useSlot("voice.window");
+  // The tools whose extension draws a tile of their own for a call's card here (`chat.tool`'s `tile`).
+  const toolEntries = useSlot("chat.tool");
   const [broughtOpen, setBroughtOpen] = useState<readonly string[]>([]);
   // Every one opened in this chat's voice mode: one kept loaded stays from then on.
   const [broughtOnce, setBroughtOnce] = useState<readonly string[]>([]);
@@ -524,7 +526,12 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
         <AutoOpener entry={entry} chat={chat} channel={channelFor(sessionId, entry.extension)} panels={panelsFor(entry.extension)} onGrow={() => openBrought(entry.key, { by: "work" })} />
       </ErrorBoundary>
     ))}
-    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} opens={(view) => { const entry = windowFor(view); return entry && titleOf(entry); }} words={(view) => {
+    <VoiceToolActivity events={toolEvents} sessionId={sessionId} folder={folder} onOpen={openCall} tile={(view) => {
+      const entry = toolEntries.find((e) => e.tool === view.name && e.tile);
+      if (!entry?.tile) return undefined;
+      const Tile = entry.tile;
+      return <ErrorBoundary resetKey={`${entry.key}:${view.callId}`} fallback={() => null}><Tile call={view} chat={chat} /></ErrorBoundary>;
+    }} opens={(view) => { const entry = windowFor(view); return entry && titleOf(entry); }} words={(view) => {
       const entry = windowFor(view);
       try {
         return entry?.describe?.(view, chat);

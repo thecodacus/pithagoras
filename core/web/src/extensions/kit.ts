@@ -17,6 +17,7 @@ import { tabKeys } from "../tab-keys";
 import { useFollowBottom } from "../use-follow-bottom";
 import { useNow } from "../use-now";
 import { ToolLink } from "./ToolView";
+import { CallImagePreview } from "./call-pictures";
 import type { Ui } from "@pithagoras/extension-api";
 export type { Ui } from "@pithagoras/extension-api";
 
@@ -52,6 +53,8 @@ export const ui: Ui = {
   lazy: lazyComponent,
   /** A link on a tool call's card, as the portal's own are drawn: for `chat.tool.action`. */
   ToolLink,
+  /** A picture being made, made or not made, as the conversation shows one a tool makes: opens the chat's viewer for a picture a call gave. */
+  ImagePreview: CallImagePreview,
   /** A question with two answers, asked over the page: resolves true for yes. */
   confirm: confirmDialog,
   /** The look of the portal's own fields and buttons, as class names for a `className`. */

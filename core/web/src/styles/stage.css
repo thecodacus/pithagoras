@@ -60,6 +60,7 @@
 .voice-tool-activity { position: absolute; z-index: 5; top: 72px; left: 24px; width: min(310px, calc(100% - 48px)); display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
 .voice-tool-float { display: flex; align-items: flex-start; gap: 10px; padding: 12px 15px; border: 1px solid #647a98; border-radius: 16px; background: #1d2c40; color: #e2e8f0; box-shadow: 0 12px 30px rgba(0,0,0,.12); backdrop-filter: blur(18px); }
 .voice-tool-float > svg { color: #75decf; flex-shrink: 0; margin-top: 2px; }
+.voice-tool-tile { flex-shrink: 0; }
 .voice-tool-float span { font-size: 12px; font-weight: 500; }
 .voice-tool-float p { margin: 3px 0 0; font-size: 11px; line-height: 1.5; color: #ccd8e9; overflow-wrap: anywhere; }
 

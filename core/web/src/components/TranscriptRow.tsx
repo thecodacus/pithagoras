@@ -416,7 +416,7 @@ export const TranscriptRow = memo(function TranscriptRow({
     return (
       <div data-key={item.id} className={`tool-row${enter}`}>
       {/* The card for it with the files the call gave, or what an extension draws for its own tool: see extensions/ToolView.tsx. */}
-      <ToolView item={item} chat={chat}>
+      <ToolView item={item} chat={chat} openPicture={act.openPicture}>
         <ToolCall item={item} chat={chat} onOpenAgent={agent ? () => act.openAgent(agent) : undefined} />
         <CallFiles item={item} sessionId={sessionId} onOpenPicture={act.openPicture} />
       </ToolView>

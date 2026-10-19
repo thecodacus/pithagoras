@@ -60,3 +60,30 @@ test('a tool with a card of its own draws its files its own way, told what each 
   await expect(page.locator('.chat-tool-head', { hasText: 'plot_sales' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'plots/sales.csv' })).toHaveCount(0);
 });
+
+/** One that draws the call's picture with the portal's preview, and says when the call started. */
+const PREVIEW = `export default function (portal) {
+  const h = portal.React.createElement;
+  portal.slots.register("chat.tool", {
+    id: "plots", tool: "plot_sales",
+    component: ({ call }) => h("div", { "data-testid": "my-card" },
+      h("p", { "data-testid": "since" }, typeof call.since),
+      h(portal.ui.ImagePreview, { state: "done", file: (call.files ?? []).find((f) => f.kind === "picture"), title: "Sales by month" })),
+  });
+}`;
+
+test('an extension\'s card shows a picture its call gave with the portal\'s preview, which opens the chat\'s viewer at it', async ({ page }) => {
+  await chat(page, [{ name: 'my-plots', version: '1.0.0', entry: '/api/extension-ui/my-plots/client.js?v=1' }], PREVIEW);
+  const card = page.getByTestId('my-card');
+  await expect(card.getByTestId('since')).toHaveText('number');
+  const picture = card.getByRole('img', { name: 'Sales by month' });
+  await expect(picture).toHaveAttribute('src', /^\/api\/sessions\/preview\/picture\?path=plots%2Fsales\.png&v=\d+$/);
+  await card.getByRole('button', { name: 'Sales by month' }).click();
+  const viewer = page.getByRole('dialog');
+  await expect(viewer).toBeVisible();
+  await expect(viewer).toContainText('Sales by month');
+  // Closed, it gives the focus back to the picture it was opened from.
+  await page.keyboard.press('Escape');
+  await expect(viewer).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Sales by month' })).toBeFocused();
+});

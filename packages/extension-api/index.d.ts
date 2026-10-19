@@ -72,6 +72,10 @@ export interface ToolCallView {
   output?: string;
   /** What it reported about itself beside its text: a tool result's `details`. */
   details?: unknown;
+  /** When it started running, in milliseconds as `Date.now()` counts them: for how long it has been going. */
+  since?: number;
+  /** Set when the run ended with the call still open: it never said how it came out. */
+  interrupted?: true;
   /**
    * The files it gave the person, once it ended: what its `details.files`
    * named, as the portal found them in the chat's folder by their bytes. `url`
@@ -91,6 +95,12 @@ export interface CallFile {
   /** The files it was made from, relative to the chat's folder. */
   from?: string[];
   url: string;
+  /**
+   * For a picture in a chat's conversation: opens the chat's picture viewer
+   * at it, with the conversation's other pictures to step through.
+   * `ui.ImagePreview` given the file does this when it is clicked.
+   */
+  open?(): void;
 }
 
 export interface SlotMap {
@@ -125,8 +135,17 @@ export interface SlotMap {
   "chat.overlay": { entry: {}; props: ChatProps };
   /** Above the message box: what is running, what waits. */
   "chat.composer.above": { entry: {}; props: ChatProps };
-  /** How a call of one tool is drawn in the conversation, in place of the portal's card for it. `card` is that card. */
-  "chat.tool": { entry: { tool: string }; props: ChatProps & { call: ToolCallView; card: ReactNode } };
+  /**
+   * How a call of one tool is drawn in the conversation, in place of the
+   * portal's card for it. `card` is that card.
+   *
+   * `tile`, where given, is drawn small on the call's card in voice mode, in
+   * place of the mark that says how it stands: a picture being made, say.
+   */
+  "chat.tool": {
+    entry: { tool: string; tile?: ComponentType<{ call: ToolCallView; chat: Chat }> };
+    props: ChatProps & { call: ToolCallView; card: ReactNode };
+  };
   /**
    * Something to do with a call of a tool, drawn on the portal's card for it
    * when it is opened, under what the call returned: "Open in the terminal".
@@ -392,6 +411,33 @@ export interface Ui {
   lazy<M extends Record<K, ComponentType<any>>, K extends keyof M>(load: () => Promise<M>, name: K): LazyExoticComponent<M[K]>;
   /** A link on a tool call's card, as the portal's own are drawn: for `chat.tool.action`. */
   ToolLink: ComponentType<{ icon?: ComponentType<{ "aria-hidden"?: boolean }>; onClick: () => void; children: ReactNode }>;
+  /**
+   * A picture as the conversation shows one a tool makes: the place it will
+   * be in while it is made (`making`, with how long it has taken), the picture
+   * once it is there (`done`), or why it is not (`failed`, `reason`). An edit
+   * shows its original (`before`) until the new one arrives over it. A clip
+   * (`kind: "video"`) shows its poster, or its first frame, with a mark that it
+   * plays. `file`, a picture a call gave, is the picture shown, and a click
+   * opens the chat's viewer at it; `onOpen` is a click otherwise. `compact` is
+   * the small tile voice mode's cards show, and `actions` what goes under it.
+   */
+  ImagePreview: ComponentType<{
+    state: "making" | "done" | "failed";
+    file?: CallFile;
+    kind?: "picture" | "video";
+    src?: string;
+    video?: string;
+    before?: string;
+    edit?: boolean;
+    ratio?: number;
+    title?: string;
+    detail?: string;
+    reason?: string;
+    elapsed?: number;
+    compact?: boolean;
+    onOpen?: () => void;
+    actions?: ReactNode;
+  }>;
   /** A question with two answers, asked over the page: resolves true for yes. */
   confirm(options: ConfirmOptions): Promise<boolean>;
   /** The look of the portal's own fields and buttons, as class names for a `className`. */

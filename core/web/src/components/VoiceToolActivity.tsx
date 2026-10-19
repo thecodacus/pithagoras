@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useNow } from '../use-now';
 import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSparkles } from 'react-icons/lu';
 import { api, type PortalEvent } from '../api';
@@ -8,7 +8,7 @@ import { GENERATED_PICTURE_MARK } from '../../../server/src/generated-picture';
 import { shownFiles } from '../../../server/src/file-outputs';
 import { msg, t } from "../i18n";
 import { ImagePreview } from './ImagePreview';
-import type { ToolCallView } from '@pithagoras/extension-api';
+import type { CallFile, ToolCallView } from '@pithagoras/extension-api';
 
 /** A card for one tool call, in one of four places around the orb. */
 type Card = ToolCall & {
@@ -19,7 +19,12 @@ type Card = ToolCall & {
   look?: PictureCall; picture?: string;
   /** The seq of the end that showed it: the picture window asks for the file by the same one, so that it is fetched once. */
   pictureSeq?: number;
+  /** The files its call gave, once it ended: for an extension's tile of it. */
+  files?: CallFile[];
 };
+
+/** Where the page fetches a file a call gave, by its kind: see file-outputs.ts. */
+const fileUrl = { picture: api.pictureUrl, video: api.videoUrl, file: api.fileUrl };
 
 /** How long a finished card stays: long enough to read its outcome, longer for a failure. */
 const STAYS = { done: 4500, failed: 7000 };
@@ -45,9 +50,11 @@ const TARGET: Record<ToolTarget, string> = {
  * in Files, a document's in Canvases: `opens` names it).
  * That is a role it takes on, not another element: see the card below.
  */
-export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, words }: {
+export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, words, tile }: {
   events: PortalEvent[]; sessionId: string; folder: string;
   onOpen: (call: ToolCall, view: ToolCallView) => void;
+  /** What an extension draws small for a call of its tool, in the place of the mark (its `chat.tool` entry's `tile`). */
+  tile?: (view: ToolCallView) => ReactNode;
   /** The title of a window an extension brought for a call, when one is for it. */
   opens?: (view: ToolCallView) => string | undefined;
   /** What that window says the card of a call says, when it says (`describe`). */
@@ -98,7 +105,8 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, wo
         // A card leads to the pictures once its call has given one (see file-outputs.ts): a call that makes one has none to open before that.
         const picture = shownFiles(p).find(file => file.kind === 'picture');
         const target = picture ? 'pictures' as const : undefined;
-        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}), ...(picture ? { picture: picture.path, pictureSeq: event.seq } : {}) } : c);
+        const files = shownFiles(p).map(file => ({ ...file, url: fileUrl[file.kind](sessionId, file.path, event.seq) }));
+        next = next.map(c => c === card ? { ...c, status, outcome: describeOutcome(c.start, p), ...(target ? { target } : {}), ...(picture ? { picture: picture.path, pictureSeq: event.seq } : {}), ...(files.length ? { files } : {}) } : c);
         later(STAYS[status], () => leave(card.id));
       } else if (event.type === 'agent_end' || (event.type === 'portal_status' && p.status !== 'running')) {
         // The run is over: a call that never reported its end is not still going.
@@ -106,7 +114,7 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, wo
       }
     }
     update(next);
-  }, [events, folder]);
+  }, [events, folder, sessionId]);
 
   // A running card counts its time, so it is only redrawn while one is.
   const now = useNow(shown.some(card => card.status === 'running'));
@@ -118,9 +126,10 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, wo
       const note = card.status === 'running' ? (took >= 3000 ? elapsed(took) : '') : card.outcome;
       const className = `voice-tool-float flies-${card.slot % 2 ? 'right' : 'left'} flight-lane-${Math.floor(card.slot / 2)} is-${card.status}${card.leaving ? ' is-leaving' : ''}`;
       // A picture being made, made or not made is the preview the chat shows, as a tile in the place of the mark; another extension's tool of that name, which ends with no picture, has the mark.
-      const tile = card.look && (card.status !== 'done' || card.picture);
+      const own = tile?.(viewOf(card));
+      const portalTile = !own && card.look && (card.status !== 'done' || card.picture);
       const body = <>
-        {tile ? <ImagePreview compact state={card.status === 'running' ? 'making' : card.picture ? 'done' : 'failed'} edit={card.look!.edit} src={card.picture && api.pictureUrl(sessionId, card.picture, card.pictureSeq)} ratio={card.look!.ratio} />
+        {own ? <div className="voice-tool-tile">{own}</div> : portalTile ? <ImagePreview compact state={card.status === 'running' ? 'making' : card.picture ? 'done' : 'failed'} edit={card.look!.edit} src={card.picture && api.pictureUrl(sessionId, card.picture, card.pictureSeq)} ratio={card.look!.ratio} />
           : card.status === 'failed' ? <LuCircleAlert aria-hidden="true" /> : card.status === 'done' ? <LuCheck aria-hidden="true" /> : took >= 3000 ? <LuLoaderCircle aria-hidden="true" className="animate-spin" /> : <LuSparkles aria-hidden="true" />}
         <div>
           <span>{card.label}</span>
@@ -148,5 +157,5 @@ export function VoiceToolActivity({ events, sessionId, folder, onOpen, opens, wo
 /** A card's call as an extension is told of it. */
 function viewOf(card: Card): ToolCallView {
   const { name, input } = unwrap(card.start);
-  return { name, callId: card.callId || undefined, status: card.status === 'failed' ? 'error' : card.status, input };
+  return { name, callId: card.callId || undefined, status: card.status === 'failed' ? 'error' : card.status, input, since: card.startedAt, ...(card.files ? { files: card.files } : {}) };
 }
