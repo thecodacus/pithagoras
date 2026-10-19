@@ -258,6 +258,7 @@ prefix of your own: the stylesheet is the page's.
 | `RowsSkeleton`, `SkeletonGroup` | Placeholders while something loads |
 | `ErrorBoundary`, `PartFailed` | A part that fails to draw, failing alone |
 | `StatusDot` | A chat's state as a dot |
+| `ToolLink`, `ImagePreview` | A link on a call's card; a picture as the conversation shows one a tool makes ([a tool's call](#a-tool-s-call)) |
 | `confirm(options)` | A question asked over the page; resolves true for yes |
 | `classes` | The look of the portal's fields and buttons as class names: `input`, `inputSmall`, `codeArea`, `button`, `primary`, `primarySmall`, `ghost` |
 | `copyText(text)` | Copies, over plain HTTP as well |
@@ -292,14 +293,14 @@ puts it before entries with a higher one, or none.
 | --- | --- | --- | --- |
 | `chat.panel` | Beside the conversation, docked, floated and sized like Files and Git | `title`, `icon?`, `header?`, `actions?`, `useButton?`, `name?` | `chat`, `channel`, `panels`, `close()`, `panel` |
 | `chat.header.action` | The chat's header, before the panels' buttons | | `chat`, `channel`, `panels` |
-| `chat.tool` | A call of one tool in the conversation, in place of the portal's card | `tool` (its name) | `chat`, `channel`, `panels`, `call`, `card` |
+| `chat.tool` | A call of one tool in the conversation, in place of the portal's card | `tool` (its name), `tile?` (drawn small on its card in voice mode) | `chat`, `channel`, `panels`, `call`, `card` |
 | `chat.tool.action` | On the portal's card of a call, under what it returned, when the card is opened | `tool?` (a name or a pattern; every call without it) | `call`, `cut`, `panels` |
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
 | `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
 | `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?`, `useShown?` | |
-| `settings.page` | Your package's page in Settings, above the fields the portal found for it | | |
+| `settings.page` | Your package's page in Settings, above the fields the portal found for it | `search`: what Settings' search finds on it, each `{ title, section?, words? }`, `section` being the heading it goes to | |
 
 `chat` is `{ id, title, workspace }`. `channel` reaches
 [your pi extension in that chat](#talking-to-your-pi-extension). `panels` is
@@ -366,13 +367,35 @@ function NoteCall({ call, panels, card }) {
 }
 ```
 
-`call` is `{ name, callId, status, input, output, details, files }`: what the
-tool was called with, what it has returned so far as text, its result's
-`details`, and the [files it gave](#files-a-tool-gives) once it ended, each
-`{ path, kind, title?, from?, url }`. `card` is the portal's own card for the
-call, with those files drawn under it, to return as it is or to draw beside
-something of your own. A card that leaves `card` out draws the files its own
-way, from `url`.
+`call` is `{ name, callId, status, input, output, details, files, since,
+interrupted }`: what the tool was called with, what it has returned so far as
+text, its result's `details`, and the [files it gave](#files-a-tool-gives) once
+it ended, each `{ path, kind, title?, from?, url }`. `since` is when it started
+running, as `Date.now()` counts, for how long it has taken; `interrupted` is set
+when the run ended with the call still open, which never said how it came out.
+`card` is the portal's own card for the call, with those files drawn under it,
+to return as it is or to draw beside something of your own. A card that leaves
+`card` out draws the files its own way, from `url`.
+
+A picture the call gave also has `open()`, which opens the chat's picture
+viewer at it, with the conversation's other pictures to step through.
+`ui.ImagePreview` draws a picture as the conversation draws one a tool makes:
+the place it will be in while it is made (`state: "making"`, with `elapsed`
+seconds), the picture once it is there, or why it is not. Given the file, it
+shows it and opens the viewer when clicked:
+
+```js
+function PictureCall({ call }) {
+  const picture = call.files?.find((f) => f.kind === "picture");
+  const state = call.status === "running" ? "making" : picture ? "done" : "failed";
+  const elapsed = call.since && Math.floor((Date.now() - call.since) / 1000);
+  return h(portal.ui.ImagePreview, { state, file: picture, title: String(call.input.prompt ?? ""), elapsed, reason: call.interrupted ? "Interrupted" : call.output });
+}
+portal.slots.register("chat.tool", { id: "picture", tool: "make_picture", component: PictureCall, tile: (props) => h(PictureCall, props) });
+```
+
+`tile` is drawn small on the call's card in voice mode, in place of the mark
+that says how it stands (`ui.ImagePreview` takes `compact` for that size).
 
 ### An action on a call's card
 
@@ -664,6 +687,7 @@ restart the portal.
 | `http.json()`, `http.raw()`, `http.text()` | Body parsers, for the routes that want one |
 | `http.upgrade(handler)` | WebSocket upgrades under the package's routes |
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
+| `http.send(req, res, file, options?)` | [Sends a file](#sending-a-file) opened by `files.open` as the portal sends its own: a version, the part a player asks for, or to be saved |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status }` |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
@@ -671,12 +695,14 @@ restart the portal.
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
 | `chats.tell(chatId, data)` | To the package's own pi extension in a chat (`pithagoras:v1:ui:receive`) |
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |
+| `tools.offer(fn)`, `chats.reload()` | [Tools that follow the settings](#tools-that-follow-the-settings): which of them it offers now, and the open chats given the change |
 | `chats.offers(chatId, tool)` | How the chat's model is offered a tool now: `"direct"`, `"lazy"` (through the `tools` tool) or nothing (switched off, out of reach, or the chat's pi not running here) |
 | `chats.hold(chatId)` | Keeps the chat's pi from being let go for being idle, or reloaded, while work goes on; returns what lets it go |
 | `sandbox.run(chatId, argv, options?)`, `sandbox.spawnAs(chatId)`, `sandbox.on()` | [Running things as the chat's agent](#running-things-as-the-chat-s-agent) |
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
-| `files.list`, `read`, `write`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `files.list`, `read`, `write`, `create`, `rename`, `unsaved`, `remove`, `makeFolder`, `folder`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
+| `folders.list()`, `folders.allowed(path)`, `folders.on("removed", fn)` | [The folders the agents work in](#the-folders-the-agents-work-in), and when the portal deletes one |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
 | `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
@@ -797,6 +823,53 @@ What reads a whole folder, such as an archive, takes it from `files.folder`,
 checked; a download is sent from the descriptor `files.open` gives. Files'
 server half (`extensions/files/src/server.ts`) is a complete example.
 
+What a server half makes for the person, a picture say, is kept with
+`files.create(base, rel, name, bytes)`: a new file in the folder `rel`, written
+beside its place and put there whole, never over one that is there. A name
+that is taken gets a number, `cat (2).png`, and the path it was given is
+returned.
+
+`files.open(base, rel, { as: "picture" })` opens only a picture (PNG, JPEG,
+GIF or WebP, at most 25 MB), and `{ as: "video" }` only a clip the portal
+plays, each by its bytes rather than its name, with the type its bytes say
+(`mimeType`). Anything else is refused (`invalid`, `too_large`).
+
+#### Sending a file
+
+`http.send(req, res, file, options)` sends what `files.open` opened as the
+portal sends its own pictures and clips: with its type, a policy that keeps it
+from running anything in the page, a version the browser revalidates (304), and
+the part a player asks for (`Range`), so a long clip starts at once and can be
+moved around in. `cache` is the `Cache-Control` (`private, no-cache` unless
+said); with `download`, a file name, the file is sent to be saved and never
+shown, and so is a file opened with no `as`. The file is closed once sent.
+
+```js
+portal.router.get("/chats/:id/picture", (req, res) => {
+  try {
+    const file = portal.files.open(portal.chats.folder(req.params.id), String(req.query.path), { as: "picture" });
+    portal.http.send(req, res, file, { cache: "private, max-age=3600" });
+  } catch (e) {
+    res.status(e.code === "missing" ? 404 : 400).json({ error: e.message, code: e.code });
+  }
+});
+```
+
+### The folders the agents work in
+
+`folders.list()` is every folder the agents work in, each once by its real
+path: every agent's home (`kind: "agent"`, named after its agent, `home` for
+the first, which the sidebar calls Home), every project (`kind: "project"`,
+named by its place under the workspace root), and every other folder a chat
+of any kind works in (`kind: "chat"`). A gallery of what the agents made looks
+through these. `folders.allowed(path)` says whether a folder, by its real
+path, is one of the kind they work in, the only kind to serve what they made
+from.
+
+`folders.on("removed", (folder) => …)` is told when the portal deletes one: a
+project with its folder, or an agent with its home. `folder` is where it really
+was, as `list` named it, for what was kept of it to go too.
+
 ### Telling the pages open on a chat
 
 ```js
@@ -892,6 +965,32 @@ chat whose pi runs in the portal's own process (the host executor, where
 
 ```js
 pi.registerTool({ name: "docker_run", /* … */ offByDefault: true });
+```
+
+A tool whose arguments name files in a list, `paths`, is approved by the
+guard for each of them, whatever the tool is called: a rule for a folder
+allows the call when it allows every file of the list, and the action asked
+for is each file's path, one to a line. A list is never matched on its JSON,
+where a rule for a word would have been met by another argument.
+
+#### Tools that follow the settings
+
+Where which tools there are follows the package's settings (image generation
+once somebody has said where pictures are made, say), the factory registers
+only those, and `tools.offer` says the same to the portal: Settings → Tools
+then lists them before any chat has reported them, and leaves out the ones it
+remembers that are not offered now. After a change, `chats.reload()` loads the
+idle chats again, for each to have the tools as they are now; one that is
+working is reloaded when it is done, as for a package switched on.
+
+```js
+const offered = () => (settings().endpoint ? [{ name: "make_picture", description: "Make a picture from a description." }] : []);
+portal.tools.offer(offered);
+portal.chats.extend((pi) => {
+  for (const tool of offered()) pi.registerTool({ ...definitions[tool.name] });
+});
+// Once the person has saved the settings:
+await portal.chats.reload();
 ```
 
 ### Files a tool gives
