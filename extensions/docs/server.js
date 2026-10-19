@@ -447,15 +447,24 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
   }
 
   /**
+   * Whether `folder` itself is one the agents of `chats` may not look into: the walk to it, and the folder, as they would have it. Asked before anything in the
+   * folder is looked at as the portal (root), so that what is there (a store of an earlier version, say) is not told to an agent that cannot see it.
+   */
+  function unreachableTo(folder, chats) {
+    try {
+      portal.files.folder(folder, "", { likeParent: true, chats });
+      return false;
+    } catch (e) {
+      return e?.code === "invalid";
+    }
+  }
+
+  /**
    * Whether the agents of `chats` are refused the documents folder of `folder`: it is a folder that is there and not theirs to use, or the folder it is in is not
    * theirs to look into (then it is not told which: it is the same answer whatever is there).
    */
   function closedTo(folder, chats) {
-    try {
-      portal.files.folder(folder, "", { likeParent: true, chats });
-    } catch (e) {
-      return e?.code === "invalid";
-    }
+    if (unreachableTo(folder, chats)) return true;
     try {
       return lstatSync(path.join(folder, DOCUMENTS)).isDirectory() && documentsOf(folder, chats) === null;
     } catch {
@@ -597,6 +606,7 @@ export default function (portal, { dependencies = ensureDependencies, faults, gi
         store: storeFor,
         hasDocuments: (folder, caller) => documentsOf(folder, chatsIn(folder, caller)) !== null,
         closed: (folder, caller) => closedTo(folder, chatsIn(folder, caller)),
+        unreachable: (folder, caller) => unreachableTo(folder, chatsIn(folder, caller)),
         folderId: idOf,
         titleOf,
         headed,

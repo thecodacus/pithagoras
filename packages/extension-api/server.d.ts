@@ -203,8 +203,9 @@ export interface ServerPortal {
      * The sessions that work in a folder, of every kind: the tasks `list` gives, and also routine runs, conversations on the Agent page
      * and in channels, and heartbeats, which `list` leaves out and which have the package's tools in their pi as the tasks do. Those
      * whose workspace, stored for them and resolved as `folder` resolves it, is `folder` (a path from `folder(id)`). One session for each
-     * stored workspace that leads there, not each session: they are never removed (a routine that makes a fresh session for each run
-     * keeps every one), and the sessions made for one workspace are run as the same agent, so one stands for them all. For what is read
+     * agent that has some there, not each session or each stored path: sessions are never removed (a routine that makes a fresh session
+     * for each run keeps every one), a stored path can be a link and an agent can make many of them, and what an agent can reach is the
+     * same from each of its sessions (the sandbox runs a session as the agent its stored workspace belongs to), so one stands for them all. For what is read
      * or changed in a folder for every agent that works in it (`files.*` with `likeParent`: see `FolderUse.chats`).
      */
     inFolder(folder: string): Chat[];

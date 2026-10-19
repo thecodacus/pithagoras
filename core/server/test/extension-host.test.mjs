@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { inProcessHome } from "./server-harness.mjs";
@@ -467,6 +467,13 @@ test("with the sandbox on, a folder with a thousand sessions is checked as fast 
   // One task chat, and a routine that made a fresh session for each of a thousand runs in the project: none is pruned.
   createSession({ id: "many-task", title: "Task", workspace: project, executor: "host" });
   for (let n = 0; n < 1000; n++) createSession({ id: `many-run-${n}`, title: `Run ${n}`, workspace: project, executor: "host", kind: "routine", routine_slug: "many" });
+  // And a thousand other stored paths that lead to it, links an agent can make in the workspace root (a routine\'s workspace is kept as it is written).
+  const links = path.join(process.env.WORKSPACE_ROOT, "many-sessions-links");
+  mkdirSync(links, { recursive: true });
+  for (let n = 0; n < 1000; n++) {
+    symlinkSync(project, path.join(links, `l${n}`));
+    createSession({ id: `many-link-${n}`, title: `Link ${n}`, workspace: path.join(links, `l${n}`), executor: "host", kind: "routine", routine_slug: "many" });
+  }
   try {
     const chats = portal.chats.inFolder(portal.chats.folder("many-task")).map((chat) => chat.id);
     assert.ok(chats.length <= 2, `${chats.length} sessions are named for one stored workspace`);
@@ -495,15 +502,25 @@ test("chats.inFolder gives the sessions of every kind whose stored workspace lea
   for (const [id, workspace, kind] of [["if-task", folder, "task"], ["if-agent", folder, "agent"], ["if-routine", folder, "routine"], ["if-heartbeat", link, "heartbeat"], ["if-other", elsewhere, "routine"]]) {
     createSession({ id, title: id, workspace, executor: "host", kind, ...(kind === "routine" ? { routine_slug: "r" } : {}) });
   }
-  // One session for each workspace stored that leads there (the sessions made for one are run as the same agent): the first of them, by id.
-  assert.deepEqual(portal.chats.inFolder(portal.chats.folder("if-task")).map((chat) => chat.id).sort(), ["if-agent", "if-heartbeat"]);
+  // One session for each agent that has some there (all of these are the first agent\'s: they are in the workspace root, none in an agent\'s home).
+  const first = portal.chats.inFolder(portal.chats.folder("if-task"));
+  assert.equal(first.length, 1, "the sessions made for these stored paths are run as one agent");
+  assert.ok(["if-task", "if-agent", "if-routine", "if-heartbeat"].includes(first[0].id));
   assert.deepEqual(portal.chats.inFolder(portal.chats.folder("if-other")).map((chat) => chat.id), ["if-other"]);
   assert.deepEqual(portal.chats.inFolder(path.join(process.env.WORKSPACE_ROOT, "nobody-here")), []);
   // Sessions are not pruned: a routine that makes a fresh session for each run keeps every one. A thousand of them in a folder are not a thousand agents to ask.
   for (let n = 0; n < 1000; n++) createSession({ id: `fresh-${n}`, title: `Run ${n}`, workspace: folder, executor: "host", kind: "routine", routine_slug: "r" });
   const many = portal.chats.inFolder(folder);
-  assert.ok(many.length <= 2, `${many.length} sessions stand for the workspaces that lead to the folder`);
-  assert.deepEqual(portal.chats.inFolder(folder).map((chat) => chat.workspace).sort(), [folder, link].sort());
+  assert.equal(many.length, 1, `${many.length} sessions stand for the agents of a thousand sessions of one stored workspace`);
+  // And an agent can make many stored paths that lead to one folder (links in the workspace root, each a routine\'s workspace): they are one agent still.
+  const links = path.join(process.env.WORKSPACE_ROOT, "many-links");
+  mkdirSync(links, { recursive: true });
+  for (let n = 0; n < 1000; n++) {
+    symlinkSync(folder, path.join(links, `l${n}`));
+    createSession({ id: `link-run-${n}`, title: `Link ${n}`, workspace: path.join(links, `l${n}`), executor: "host", kind: "routine", routine_slug: "r" });
+  }
+  const afterLinks = portal.chats.inFolder(folder);
+  assert.ok(afterLinks.length <= 2, `${afterLinks.length} sessions stand for the agents of a thousand stored paths that lead to one folder`);
   const listed = portal.chats.list().map((chat) => chat.id);
   assert.ok(listed.includes("if-task") && !listed.includes("if-agent") && !listed.includes("if-routine") && !listed.includes("if-heartbeat"));
 });
