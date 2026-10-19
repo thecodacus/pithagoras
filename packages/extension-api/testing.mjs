@@ -131,6 +131,8 @@ function fakePi(extension, chat, factories, mock) {
  * @param {object} [options.files]       `portal.files`, the portal's own by default
  * @param {object} [options.extensions]  what `portal.extensions.use(name)` gives, by name
  * @param {(chat: string, data: unknown) => Promise<boolean | void> | boolean | void} [options.tell]   called before `chats.tell` starts the chat's pi and rings its bell: false says the chat cannot be reached, a throw fails, anything else goes on; it may hold the answer
+ * @param {Record<string, string>} [options.kinds]   what kind of session a chat is, by id, read as it is asked ("task" unless said; `chats.list` gives the tasks alone, `chats.inFolder` every kind)
+ * @param {(chat: string) => string} [options.folderOf]   where a chat's folder leads now, for a test that makes it lead somewhere else
  * @param {(chat: string, message: object) => Promise<boolean | void> | boolean | void} [options.followUp]   the same for `chats.followUp`, which starts the chat's pi and has it say the message
  */
 export async function mockPortal(options = {}) {
@@ -172,6 +174,12 @@ export async function mockPortal(options = {}) {
   const chatOf = (id) => {
     const chat = chats.get(id);
     return chat && { id, title: chat.title, workspace: chat.folder, status: "idle" };
+  };
+  /** Where a chat's folder leads now: the folder it was made for, or what `options.folderOf` says. Throws when the chat is gone. */
+  const folderOf = (id) => {
+    const chat = chats.get(id);
+    if (!chat) throw new Error("No such chat");
+    return options.folderOf ? options.folderOf(id) : realpathSync(chat.folder);
   };
   mock.addChat = (id, folder, title = `Chat ${id}`) => void chats.set(id, { id, folder, title });
   for (const [id, given] of Object.entries(options.chats ?? {})) mock.addChat(id, typeof given === "string" ? given : given.folder, typeof given === "string" ? undefined : given.title);
@@ -232,12 +240,20 @@ export async function mockPortal(options = {}) {
     },
     chats: {
       get: chatOf,
-      list: () => (listed ?? [...chats.keys()]).filter((id) => chats.has(id)).map(chatOf),
-      folder(id) {
-        const chat = chats.get(id);
-        if (!chat) throw new Error("No such chat");
-        return realpathSync(chat.folder);
-      },
+      // The tasks, as the portal lists them: a session of another kind (`kinds`) works in its folder all the same.
+      list: () => (listed ?? [...chats.keys()]).filter((id) => chats.has(id) && (options.kinds?.[id] ?? "task") === "task").map(chatOf),
+      // The sessions of every kind whose folder, resolved now as `folder` does, is `where`.
+      inFolder: (where) =>
+        [...chats.keys()]
+          .filter((id) => {
+            try {
+              return folderOf(id) === where;
+            } catch {
+              return false;
+            }
+          })
+          .map(chatOf),
+      folder: (id) => folderOf(id),
       send: (chat, data) => void mock.sent.push({ chat, data }),
       onOpen: (handler) => void opens.push(handler),
       on: (event, handler) => void life[event].push(handler),

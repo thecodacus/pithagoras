@@ -441,10 +441,14 @@ it, and what the portal does in a folder, or reads from a file, it does with its
 rights. So the portal asks, with the [sandbox](/guide/sandbox) on, whether the agent
 could use the folder, and the file, itself: as the kernel would tell it for the user
 and the groups the agent runs as, from the owner, group and mode of what the portal
-holds. The agent is the one the sandbox runs each chat of the folder as, by the
-workspace stored for the chat, so a link the agent puts where that path was does not
-change who is asked; if the folder has chats of more than one agent, all of them
-must be able to use it. A project is root's too, so who owns a folder says nothing,
+holds. The agent is the one the sandbox runs each session of the folder as, by the
+workspace stored for it, so a link the agent puts where that path was does not
+change who is asked. The sessions are all of them that work in the folder (tasks, and
+also routine runs, conversations on the Agent page and heartbeats, which have the
+document tools too), and for what an agent's own tool does, the session that calls
+it, always: if the folder has sessions of more than one agent, all of them must be
+able to use it, which also means that one that leads its stored path into another
+agent's folder stops that folder's documents for everyone until it is put back. A project is root's too, so who owns a folder says nothing,
 and the sandbox closes a subtree only by its top folder (what is inside keeps the
 group's rights), so **every folder of the path** from `/` down to the documents
 folder must be searchable by the agent, as the kernel needs for it, and none of them

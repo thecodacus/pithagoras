@@ -46,6 +46,10 @@ export interface MockPortalOptions {
   executor?: string;
   /** Chats by id, with the folder each works in. */
   chats?: Record<string, string | { folder: string; title?: string }>;
+  /** What kind of session a chat is, by id, read as it is asked: a "task" unless said. `chats.list` gives the tasks alone, `chats.inFolder` every kind. */
+  kinds?: Record<string, string>;
+  /** Where a chat's folder leads now (`chats.folder`, `chats.inFolder`), for a test that makes it lead somewhere else than the folder it was made for. */
+  folderOf?: (chat: string) => string;
   /** `portal.dataDir()`; a folder of the mock's own by default. */
   dataDir?: string;
   /** `portal.sandbox.on()`. */

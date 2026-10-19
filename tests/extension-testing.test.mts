@@ -44,6 +44,38 @@ test('chats.followUp puts the message in the conversation as the package\'s own,
   }
 });
 
+test('chats.inFolder gives the sessions of every kind that work in a folder, chats.list the tasks alone, and the folder is resolved as it is asked', async () => {
+  const mine = scratch();
+  const other = scratch();
+  const elsewhere: Record<string, string> = {};
+  const mock = await mockPortal({
+    extension: 'ext-a',
+    chats: { t: mine, r: mine, o: other },
+    kinds: { r: 'routine' },
+    folderOf: (id) => elsewhere[id] ?? mine,
+  });
+  try {
+    const { chats } = mock.portal;
+    assert.deepEqual(chats.list().map((chat) => chat.id), ['t', 'o'], 'the tasks');
+    assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id).sort(), ['o', 'r', 't'], 'folderOf says where each leads: all of them here');
+    elsewhere.o = other;
+    assert.deepEqual(chats.inFolder(mine).map((chat) => chat.id).sort(), ['r', 't']);
+    assert.deepEqual(chats.inFolder(other).map((chat) => chat.id), ['o']);
+    assert.equal(chats.folder('o'), other);
+    assert.throws(() => chats.folder('nobody'), /No such chat/);
+    assert.deepEqual(chats.inFolder(path.join(mine, 'nope')), []);
+  } finally {
+    await mock.stop();
+  }
+  // Without folderOf a chat works in the folder it was made for.
+  const plain = await mockPortal({ extension: 'ext-a', chats: { a: mine, b: other } });
+  try {
+    assert.deepEqual(plain.portal.chats.inFolder(mine).map((chat) => chat.id), ['a']);
+  } finally {
+    await plain.stop();
+  }
+});
+
 test('a copy of the testing entry that has no portal beside it says so, rather than naming a package that is missing', async () => {
   const outside = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'extension-testing-'));
   try {

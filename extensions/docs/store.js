@@ -48,6 +48,7 @@
  * whenever they like; a thread goes with its only comment, and the person takes away a
  * whole thread they started while the agent has not commented in it.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { accessSync, closeSync, constants, lstatSync, openSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -60,6 +61,11 @@ import { carry, isWhole, locate, MAX_QUOTE, passage } from "./web/anchor.js";
 import { merge3 } from "./web/merge.js";
 
 export const DOCUMENTS = "documents";
+/**
+ * The session whose agent is making the call the store is doing something for (the agent's tools set it, see tools.js): its agent must be able to use the
+ * documents folder whatever the chats that work in the folder are, since where its own folder leads is not for the agent to decide.
+ */
+export const callingChat = new AsyncLocalStorage();
 /** As many documents as a folder lists: the store takes in no more than that. */
 export const MAX_DOCUMENTS = 1000;
 /** As many comment threads as one document has, and comments in one thread. */
@@ -334,9 +340,11 @@ export class Store {
 
   /** Runs `work` once everything before it in this folder is done: one write at a time, and no read in the middle of one. */
   locked(work) {
+    // Asked here, in the caller's own context: the work runs later.
+    const caller = callingChat.getStore();
     const next = this.queue.then(async () => {
       try {
-        this.actors = this.chats?.() ?? [];
+        this.actors = [...new Set([...(caller ? [caller] : []), ...(this.chats?.() ?? [])])];
         return await work();
       } catch (e) {
         throw explained(e, this.storeDir);

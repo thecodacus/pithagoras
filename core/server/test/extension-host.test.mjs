@@ -418,6 +418,8 @@ test("with the sandbox on, the agent files.* ask for is the chat's own, from the
     execFileSync("ln", ["-s", workspace, link]);
     createSession({ id: "led", title: "Led", workspace: link, executor: "host" });
     createSession({ id: "second-own", title: "Second\'s own", workspace: workspace, executor: "host" });
+    // A routine run of the first agent, with the same stored link: not a task, so `chats.list` does not give it, and the tools are in its pi all the same.
+    createSession({ id: "routine-led", title: "Routine", workspace: link, executor: "host", kind: "routine", routine_slug: "r" });
     assert.equal(portal.chats.folder("led"), workspace, "what the chat\'s folder is now: the second agent\'s home");
     const code = (fn) => { try { fn(); } catch (e) { return e.code ?? e.message; } return "none"; };
     const asked = (chats, rel = "documents") => code(() => portal.files.folder(workspace, rel, { direct: true, likeParent: true, chats }));
@@ -430,6 +432,10 @@ test("with the sandbox on, the agent files.* ask for is the chat's own, from the
     assert.equal(read(["led"]), "invalid");
     assert.equal(asked(["second-own"]), "none");
     assert.equal(read(["second-own"]), "none");
+    assert.equal(asked(["routine-led"]), "invalid", "a session that is not a task is its own agent\'s too");
+    assert.equal(read(["routine-led"]), "invalid");
+    assert.deepEqual(portal.chats.inFolder(workspace).map((chat) => chat.id).sort(), ["led", "routine-led", "second-own"], "the sessions of every kind that work in the folder");
+    assert.ok(!portal.chats.list().some((chat) => chat.id === "routine-led"), "which the list of tasks leaves out");
     assert.equal(asked(["led", "second-own"]), "invalid", "every chat\'s agent must be able to");
     assert.equal(read(["led", "second-own"]), "invalid");
     assert.equal(asked([]), "invalid", "no chat named: the agent is not taken from the path");
@@ -441,6 +447,25 @@ test("with the sandbox on, the agent files.* ask for is the chat's own, from the
   } finally {
     saveSandboxPolicy({ ...policy, enabled: false });
   }
+});
+
+test("chats.inFolder gives the sessions of every kind whose stored workspace leads to the folder, and chats.list the tasks alone", async () => {
+  await host.syncServerHalves([write(MODULE)]);
+  const { portal } = seen();
+  const folder = path.join(process.env.WORKSPACE_ROOT, "in-folder");
+  const elsewhere = path.join(process.env.WORKSPACE_ROOT, "elsewhere");
+  mkdirSync(folder, { recursive: true });
+  mkdirSync(elsewhere, { recursive: true });
+  const link = path.join(process.env.WORKSPACE_ROOT, "in-folder-link");
+  execFileSync("ln", ["-s", folder, link]);
+  for (const [id, workspace, kind] of [["if-task", folder, "task"], ["if-agent", folder, "agent"], ["if-routine", folder, "routine"], ["if-heartbeat", link, "heartbeat"], ["if-other", elsewhere, "routine"]]) {
+    createSession({ id, title: id, workspace, executor: "host", kind, ...(kind === "routine" ? { routine_slug: "r" } : {}) });
+  }
+  assert.deepEqual(portal.chats.inFolder(portal.chats.folder("if-task")).map((chat) => chat.id).sort(), ["if-agent", "if-heartbeat", "if-routine", "if-task"]);
+  assert.deepEqual(portal.chats.inFolder(portal.chats.folder("if-other")).map((chat) => chat.id), ["if-other"]);
+  assert.deepEqual(portal.chats.inFolder(path.join(process.env.WORKSPACE_ROOT, "nobody-here")), []);
+  const listed = portal.chats.list().map((chat) => chat.id);
+  assert.ok(listed.includes("if-task") && !listed.includes("if-agent") && !listed.includes("if-routine") && !listed.includes("if-heartbeat"));
 });
 
 test("a server half that fails to stop, or never finishes stopping or starting, holds up nothing else", async () => {
