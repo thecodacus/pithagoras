@@ -829,6 +829,16 @@ export function listSessions(): SessionRow[] {
     .all() as SessionRow[];
 }
 
+/** The workspaces sessions of every kind (tasks, routine runs, Agent-page and channel conversations, heartbeats) were made for, each once, as stored. */
+export function allWorkspaces(): string[] {
+  return (getDb().prepare("SELECT DISTINCT workspace FROM sessions").all() as { workspace: string }[]).map((r) => r.workspace);
+}
+
+/** The sessions of every kind whose stored workspace is `workspace`. */
+export function sessionsAt(workspace: string): SessionRow[] {
+  return getDb().prepare("SELECT * FROM sessions WHERE workspace = ?").all(workspace) as SessionRow[];
+}
+
 /**
  * The chats the sidebar lists: the tasks, and the conversations started on the
  * Agent page, which are chats with that agent like any other. Those that came

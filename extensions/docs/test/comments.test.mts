@@ -35,6 +35,7 @@ async function portal(folders: Record<string, string>, data = DATA) {
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
+      inFolder: (folder: string) => Object.keys(folders).filter((id) => ((() => { try { return realpathSync(folders[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
     },
   }, { dependencies: async () => true, pollMs: 40 }) as () => Promise<void>;
   const app = express();

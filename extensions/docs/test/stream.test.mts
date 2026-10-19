@@ -55,6 +55,7 @@ async function portal(folder: string | Record<string, string>, { pingMs, pollMs 
     chats: {
       list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => chats[id],
+      inFolder: (folder: string) => Object.keys(chats).filter((id) => chats[id] === folder).map((id) => ({ id, title: `Chat ${id}` })),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
     },
   }, { dependencies: async () => true, pingMs, pollMs }) as () => Promise<void>;

@@ -33,6 +33,7 @@ function server(folders: Record<string, string>, logged: string[] = []) {
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
+      inFolder: (folder: string) => Object.keys(folders).filter((id) => ((() => { try { return realpathSync(folders[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
     },
   }, {
     // What it needs to run is there: the test does not install anything.
@@ -217,7 +218,7 @@ test('a pipe named like a document is no document, and asking for one does not h
       files: folderFiles,
       sandbox: { on: () => false },
       dataDir: () => process.env.DATA,
-      chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
+      chats: { list: () => [{ id: 'a', title: 'A' }], inFolder: () => [{ id: 'a', title: 'A' }], folder: () => realpathSync(process.env.SITE) },
     }, { dependencies: async () => true });
     const ask = async (route, params) => { const answer = {}; const res = { status: (code) => ((answer.status = code), res), json: (body) => (answer.body = body) }; await routes.get('GET ' + route)({ params, query: {} }, res); return answer; };
     const [folder] = (await ask('/folders', {})).body.folders;

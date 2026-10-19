@@ -2,7 +2,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, chownSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -60,10 +60,16 @@ function racing(before: Record<string, () => void> = {}): typeof folderFiles {
   return wrapped as typeof folderFiles;
 }
 
-/** The server half for chats that work in these folders, with the agent's tools, and the person's routes. */
-async function portal(chats: Record<string, string>, files: typeof folderFiles = folderFiles) {
+/**
+ * The server half for sessions that work in these folders (by id: where each was made to work), with the agent's tools, and the person's routes. As the
+ * portal has them: `chats.list` gives the tasks alone, `chats.inFolder` the sessions of every kind that work in a folder, and `chats.folder` resolves a
+ * stored workspace now, for a session of any kind. `kinds`: a session is a task unless it is said what else it is. `folderOf`: where a session's
+ * folder leads now, where a test makes it lead somewhere else.
+ */
+async function portal(chats: Record<string, string>, files: typeof folderFiles = folderFiles, opts: { kinds?: Record<string, string>; folderOf?: (id: string) => string } = {}) {
   const router = express.Router();
   const factories: ((pi: unknown, chat: unknown) => void)[] = [];
+  const resolved = (id: string) => (opts.folderOf ? opts.folderOf(id) : realpathSync(chats[id]));
   const stop = docsServer({
     extension: 'pithagoras-docs',
     executor: 'host',
@@ -74,8 +80,9 @@ async function portal(chats: Record<string, string>, files: typeof folderFiles =
     sandbox: { on: () => false },
     dataDir: () => DATA,
     chats: {
-      list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
-      folder: (id: string) => realpathSync(chats[id]),
+      list: () => Object.keys(chats).filter((id) => (opts.kinds?.[id] ?? 'task') === 'task').map((id) => ({ id, title: `Chat ${id}` })),
+      inFolder: (folder: string) => Object.keys(chats).filter((id) => resolved(id) === folder).map((id) => ({ id, title: `Chat ${id}` })),
+      folder: (id: string) => resolved(id),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
     },
   }, { dependencies: async () => true }) as () => Promise<void>;
@@ -489,3 +496,137 @@ test('[root] the agents of every chat that works in the folder are asked, not on
     await alone.close();
   }
 });
+
+/**
+ * Two agents, as the sandbox runs them: A, and B, whose home is closed to every other agent (`root:` B's group 2770 as root; as another user, 0770 for a group
+ * that B is in and A is not), with a `documents` folder in it. The sessions of A can lead into it by a link in a stored folder.
+ */
+function twoAgents(real: boolean, prefix: string) {
+  const A = THE_AGENT(real);
+  const B = real ? { uid: AGENT + 1, groups: [AGENT + 1] } : { uid: 61236, groups: [61236, process.getgid!()] };
+  const top = realpathSync(scratch(prefix));
+  chmodSync(top, 0o755);
+  const home = path.join(top, 'home-b');
+  const dir = path.join(home, 'documents');
+  mkdirSync(dir, { recursive: true });
+  for (const where of [home, dir]) {
+    if (real) chownSync(where, 0, AGENT + 1);
+    chmodSync(where, real ? 0o2770 : 0o770);
+  }
+  const own = path.join(top, 'own-a');
+  mkdirSync(own);
+  chmodSync(own, real ? 0o2775 : 0o777);
+  if (real) chownSync(own, 0, SHARED);
+  return { A, B, top, home, dir, own };
+}
+/** What the portal says of sessions: the agents they are run as, and a refusal for one it does not know. */
+const runAs = (who: Record<string, { uid: number; groups: number[] }>) => (chats: readonly string[]) =>
+  chats.map((id) => {
+    if (!who[id]) throw new Error('No such chat');
+    return who[id];
+  });
+
+for (const real of flavours) {
+  test(`[${named(real)}] a session that is not a task, whose stored folder leads into another agent's home, is checked as its own agent: the document there is not listed, read or made, by it`, async () => {
+    const { A, B, top, home, dir } = twoAgents(real, 'docs-closed-routine-');
+    const link = path.join(top, 'leads-there');
+    symlinkSync(home, link);
+    setAgentAccess(runAs({ tb: B, r1: A }));
+    // B's own task chat works in its home. A routine run of A, which has a stored folder that is a link to it, comes after (the portal lists tasks only, and the
+    // run is none): once it is there, the folder is one that A's agent works in too, and every agent must be able to use it.
+    const chats: Record<string, string> = { tb: home };
+    const kinds: Record<string, string> = {};
+    const docs = await portal(chats, folderFiles, { kinds });
+    try {
+      const made = await docs.agent('tb')('doc_create', { title: 'Mine', markdown: '# Mine\n\nB\'s own.\n' });
+      assert.ok(made.ok, JSON.stringify(made));
+      assert.deepEqual(readdirSync(dir), ['mine.md'], 'the agent whose home it is uses it');
+      chats.r1 = link;
+      kinds.r1 = 'routine';
+      const routine = docs.agent('r1');
+      const listed = await routine('doc_list', {});
+      assert.ok(listed.ok, JSON.stringify(listed));
+      assert.match((listed as any).text, /^No documents yet/);
+      assert.doesNotMatch(JSON.stringify(listed), /Mine/);
+      const read = await routine('doc_read', { id: (made as any).details.id });
+      assert.equal(read.ok, false);
+      assert.doesNotMatch(JSON.stringify(read), /B's own/);
+      assert.equal((await routine('doc_create', { title: 'Theirs' })).ok, false, 'nor is a document made in it');
+      assert.deepEqual(readdirSync(dir), ['mine.md'], 'nothing was made');
+    } finally {
+      await docs.close();
+    }
+  });
+
+  test(`[${named(real)}] the folder a tool names is the same one the sessions are listed for: a path that leads somewhere else the next time it is resolved does not take the caller out of the agents that are asked`, async () => {
+    const { A, B, home, dir, own } = twoAgents(real, 'docs-closed-twice-');
+    setAgentAccess(runAs({ tb: B, ta: A }));
+    let first = true;
+    // A task chat of A, whose folder leads into B's home the first time it is resolved (what the tool does) and to its own after (what listing the sessions of the folder does).
+    const docs = await portal({ tb: home, ta: own }, folderFiles, { folderOf: (id) => (id === 'ta' ? (first ? ((first = false), home) : own) : home) });
+    try {
+      const made = await docs.agent('tb')('doc_create', { title: 'Mine', markdown: '# Mine\n\nB\'s own.\n' });
+      assert.ok(made.ok, JSON.stringify(made));
+      first = true;
+      const listed = await docs.agent('ta')('doc_list', {});
+      assert.ok(listed.ok, JSON.stringify(listed));
+      assert.equal(first, false, 'the swap was made: the tool resolved the folder');
+      assert.doesNotMatch(JSON.stringify(listed), /Mine/);
+      first = true;
+      const read = await docs.agent('ta')('doc_read', { id: (made as any).details.id });
+      assert.equal(read.ok, false);
+      assert.doesNotMatch(JSON.stringify(read), /B's own/);
+      first = true;
+      assert.equal((await docs.agent('ta')('doc_create', { title: 'Theirs' })).ok, false);
+      assert.deepEqual(readdirSync(dir), ['mine.md']);
+    } finally {
+      await docs.close();
+    }
+  });
+
+  test(`[${named(real)}] what the agent of a session that is not a task could not read is not taken in, though the task chat's agent could: what is read for one is handed to the others`, async () => {
+    const { A, B, top } = twoAgents(real, 'docs-closed-kinds-');
+    const folder = path.join(top, 'shared');
+    const dir = path.join(folder, 'documents');
+    mkdirSync(dir, { recursive: true });
+    for (const where of [folder, dir]) chmodSync(where, 0o777);
+    // A file only B can read (its own group's), in a folder both can use.
+    const file = path.join(dir, 'secret.md');
+    writeFileSync(file, SECRET);
+    if (real) chownSync(file, 0, AGENT + 1);
+    chmodSync(file, 0o640);
+    setAgentAccess(runAs({ tb: B, ra: A }));
+    // B has a task chat in the folder; A has a routine run there, which the list of tasks does not give.
+    const docs = await portal({ tb: folder, ra: folder }, folderFiles, { kinds: { ra: 'routine' } });
+    try {
+      const listed = await docs.call('GET', '/folders');
+      assert.equal(listed.status, 200, JSON.stringify(listed.body));
+      assert.doesNotMatch(JSON.stringify(listed.body), /secret|Secret/, 'the file is not taken in: the routine run\'s agent could not read it');
+      assert.doesNotMatch(JSON.stringify((await docs.call('GET', '/chats/tb/documents')).body), /secret|Secret/);
+      assert.equal(readFileSync(file, 'utf8'), SECRET);
+    } finally {
+      await docs.close();
+    }
+  });
+
+  for (const kind of ['routine', 'agent', 'heartbeat']) {
+    test(`[${named(real)}] a session of kind ${kind} alone in a folder, with no task chat in it, uses Documents as a task chat does: its agent is asked, and it can make, list and read a document`, async () => {
+      const w = scene(`docs-closed-${kind}-`, real, { documents: false });
+      setAgentAccess(runAs({ s: THE_AGENT(real) }));
+      const docs = await portal({ s: w.folder }, folderFiles, { kinds: { s: kind } });
+      try {
+        const agent = docs.agent('s');
+        const made = await agent('doc_create', { title: 'Plan', markdown: '# Plan\n\nOurs.\n' });
+        assert.ok(made.ok, JSON.stringify(made));
+        assert.equal(readFileSync(path.join(w.folder, 'documents', 'plan.md'), 'utf8'), '# Plan\n\nOurs.\n');
+        const listed = await agent('doc_list', {});
+        assert.ok(listed.ok, JSON.stringify(listed));
+        assert.match((listed as any).text, /"Plan"/);
+        assert.match(JSON.stringify(await agent('doc_read', { id: (made as any).details.id })), /Ours\./);
+        assert.deepEqual(await pinOf(w.folder), idOf(path.join(w.folder, 'documents')), 'the folder it made is the one held to');
+      } finally {
+        await docs.close();
+      }
+    });
+  }
+}

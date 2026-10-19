@@ -2001,29 +2001,40 @@ test('a folder below base that is closed closes what is under it, for a path tha
   done();
 });
 
-test('no folder on the way to base is followed as a link: one swapped for a link since base was made is refused, and nothing is read through it', async () => {
-  const { proj, at, reopen, done } = nested();
-  reopen();
-  assert.equal(readBytes(at, 'plan.md', AS_DOCUMENT).bytes.toString(), '# ours');
-  // The agent (which writes in the folder that holds it) puts a link where a folder above `base` was, to a copy of the folder that has other files.
-  const copy = `${proj}.copy`;
-  mkdirSync(path.join(copy, 'documents'), { recursive: true });
-  writeFileSync(path.join(copy, 'documents', 'plan.md'), '# theirs');
-  if (root) for (const where of [copy, path.join(copy, 'documents'), path.join(copy, 'documents', 'plan.md')]) chownSync(where, 0, SHARED);
-  chmodSync(copy, 0o777);
-  chmodSync(path.join(copy, 'documents'), 0o777);
-  chmodSync(path.join(copy, 'documents', 'plan.md'), 0o666);
-  renameSync(proj, `${proj}.aside`);
-  symlinkSync(copy, proj);
-  for (const call of [
-    () => readBytes(at, 'plan.md', AS_DOCUMENT),
-    () => listDir(at, '', LIKE),
-    () => writeText(at, 'x.md', 'x', undefined, true, { direct: true, ...LIKE }),
-    () => removeFile(at, 'plan.md', AS_DOCUMENT),
-  ]) assert.equal(await codeOf(call), 'invalid');
-  assert.equal(readFileSync(path.join(copy, 'documents', 'plan.md'), 'utf8'), '# theirs');
-  assert.deepEqual(names(path.join(copy, 'documents')), ['plan.md']);
-  done();
+test('no folder on the way to base is followed as a link: one swapped for a link after the path was checked, at the first open or on the way down, is refused, and nothing is read through it', async () => {
+  // The link is put in place inside the call, after `resolveInside` has looked at the path (which would refuse a link that was there before): what
+  // keeps it from being followed is the walk from `/`, one part at a time with O_NOFOLLOW. A walk that began at `base` would open `base` by its path.
+  const calls = [
+    (at) => readBytes(at, 'plan.md', AS_DOCUMENT),
+    (at) => listDir(at, '', LIKE),
+    (at) => writeText(at, 'x.md', 'x', undefined, true, { direct: true, ...LIKE }),
+    (at) => removeFile(at, 'plan.md', AS_DOCUMENT),
+  ];
+  for (const point of [FIRST, reaching('/proj')]) {
+    for (const [n, call] of calls.entries()) {
+      const { proj, at, reopen, done } = nested();
+      reopen();
+      assert.equal(readBytes(at, 'plan.md', AS_DOCUMENT).bytes.toString(), '# ours');
+      // The agent (which writes in the folder that holds it) puts a link where a folder above `base` was, to a copy of the folder that has other files.
+      const copy = `${proj}.copy`;
+      mkdirSync(path.join(copy, 'documents'), { recursive: true });
+      writeFileSync(path.join(copy, 'documents', 'plan.md'), '# theirs');
+      if (root) for (const where of [copy, path.join(copy, 'documents'), path.join(copy, 'documents', 'plan.md')]) chownSync(where, 0, SHARED);
+      chmodSync(copy, 0o777);
+      chmodSync(path.join(copy, 'documents'), 0o777);
+      chmodSync(path.join(copy, 'documents', 'plan.md'), 0o666);
+      const swap = () => {
+        renameSync(proj, `${proj}.aside`);
+        symlinkSync(copy, proj);
+      };
+      let got;
+      assert.ok(swappedAt(point, swap, () => { got = code(() => call(at)); }), `call ${n}: the link was put in place inside the call`);
+      assert.equal(got, 'invalid', `call ${n}`);
+      assert.equal(readFileSync(path.join(copy, 'documents', 'plan.md'), 'utf8'), '# theirs');
+      assert.deepEqual(names(path.join(copy, 'documents')), ['plan.md'], `call ${n}: nothing was made or removed through it`);
+      done();
+    }
+  }
 });
 
 test('the agents are the ones of the chats named, every one of which must be able to use the folder: no chat, an unknown chat, and one that cannot are refused', { skip: !root }, async () => {

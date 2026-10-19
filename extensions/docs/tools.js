@@ -37,7 +37,7 @@
  */
 import { DocError } from "./errors.js";
 import { secretsIn } from "./secret.js";
-import { DOCUMENTS, isDocumentId, MAX_BODY, MAX_COMMENTS } from "./store.js";
+import { callingChat, DOCUMENTS, isDocumentId, MAX_BODY, MAX_COMMENTS } from "./store.js";
 import { MAX_QUOTE } from "./web/anchor.js";
 
 /** The most that one doc_edit changes: more is a rewrite, and a new revision of its own is the clearer way. */
@@ -153,7 +153,7 @@ function describeThreads(threads, text, which) {
  * Registers the tools in a chat's pi. `deps` is what the server half has: the
  * chat's folder (`folder()`, which throws when it is gone), the folder's
  * store (`store(folder, { make })`), whether it has a documents folder yet
- * (`hasDocuments`), the id the page knows a folder by (`folderId`), a
+ * (`hasDocuments(folder, chat)`), the id the page knows a folder by (`folderId`), a
  * document's title from the start of its text (`titleOf`, `headBytes`), the
  * Markdown a new document called by a title starts with (`headed`) and the
  * portal's log.
@@ -194,10 +194,13 @@ export function documentTools(pi, chat, deps) {
     return new Error("The documents store could not do that");
   }
 
-  /** The tool's work, with what it throws made into what the agent reads. */
+  /**
+   * The tool's work, with what it throws made into what the agent reads. It is done as this chat's: what the store does for it, the agent of this
+   * chat must be able to use the folder for (`callingChat`), whatever chats the folder's own list has.
+   */
   const guarded = (work) => async (_callId, params) => {
     try {
-      return await work(params ?? {});
+      return await callingChat.run(chat.id, () => work(params ?? {}));
     } catch (e) {
       throw failed(e);
     }
@@ -229,7 +232,7 @@ export function documentTools(pi, chat, deps) {
     execute: guarded(async ({ scope = "all" }) => {
       if (!["chat", "project", "all"].includes(scope)) throw new Refusal("invalid", "scope is chat, project or all");
       const folder = folderOf();
-      const listed = deps.hasDocuments(folder) ? await (await deps.store(folder, { make: true })).list(deps.headBytes) : [];
+      const listed = deps.hasDocuments(folder, chat.id) ? await (await deps.store(folder, { make: true })).list(deps.headBytes) : [];
       const documents = listed
         .filter((doc) => sees(doc) && (scope === "all" || doc.scope === scope))
         .map(({ head, ...doc }) => ({ ...doc, path: pathOf(doc.name), title: deps.titleOf(head, doc.name) }))

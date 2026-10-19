@@ -86,6 +86,7 @@ async function portal(chats: Record<string, string>, options: Options = {}) {
     chats: {
       list: () => state.order.map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(chats[id]),
+      inFolder: (folder: string) => state.order.filter((id) => ((() => { try { return realpathSync(chats[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
       // As the portal's: the chat's pi is started if it was let go, and the package's extension is rung on its bus.
       async tell(id: string, data: unknown) {

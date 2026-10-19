@@ -46,6 +46,7 @@ async function portal(folders: Record<string, string>, options: { onStep?: (step
     chats: {
       list: () => Object.keys(folders).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(folders[id]),
+      inFolder: (folder: string) => Object.keys(folders).filter((id) => ((() => { try { return realpathSync(folders[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
     },
   }, {
     dependencies: async () => true,
@@ -441,7 +442,7 @@ test('with the sandbox on, a saved document keeps its owner, and a new one gets 
       mkdirSync(data, { mode: 0o700 });
       const router = express.Router();
       const stop = docsServer({ log: (line) => console.error(line), router, http: { json: express.json }, files: folderFiles, sandbox: { on: () => true }, dataDir: () => data,
-        chats: { list: () => [{ id: 'a', title: 'A' }], folder: () => folder } }, { dependencies: async () => true });
+        chats: { list: () => [{ id: 'a', title: 'A' }], inFolder: () => [{ id: 'a', title: 'A' }], folder: () => folder } }, { dependencies: async () => true });
       const app = express(); app.use(router);
       const server = app.listen(0, '127.0.0.1'); await new Promise((r) => server.once('listening', r));
       const base = 'http://127.0.0.1:' + server.address().port;

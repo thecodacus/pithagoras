@@ -666,6 +666,7 @@ restart the portal.
 | `http.endWithLogin(end)` | Ends a long response, such as a stream, when the login it was opened under ends (the password changed, single sign-on was set up anew), so what it showed is not shown to whoever signs in next. Returns what stops the watching, for a response that ended by itself |
 | `chats.get(id)`, `chats.list()` | A chat: `{ id, title, workspace, status }` |
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
+| `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
 | `chats.on("started" \| "stopped" \| "deleted", fn)` | A chat's pi started or stopped; the chat was deleted |
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
@@ -801,8 +802,10 @@ easy to get wrong in a way that is a hole, not a bug:
   renamed or replaced must be their own. Otherwise the call is refused (`invalid`). It is checked on the folders as
   they are held, so it cannot be swapped in between. The agents are the ones of `chats`, not found from the folder's
   path, which the agent can lead into another agent's home with a link: the sandbox runs a chat's agent by the
-  workspace stored for it, and so does this. No chat named, or one that is not known, is a refusal while the sandbox
-  is on. With the sandbox off the agent is the portal's own user, and nothing is refused. POSIX ACLs are not read
+  workspace stored for it, and so does this. Name every session that works in the folder (`chats.inFolder(folder)`: not
+  the tasks of `chats.list()` alone, since the tools are in a routine run's, a conversation's and a heartbeat's pi too) and,
+  for a call made for an agent, the session it comes from, always, whatever its own folder leads to by then. No chat
+  named, or one that is not known, is a refusal while the sandbox is on. With the sandbox off the agent is the portal's own user, and nothing is refused. POSIX ACLs are not read
   (Node cannot, and the sandbox sets none): only the mode bits are asked, so an ACL a person put on a folder or file
   of a chat is not seen.
 - **A save is put in place whole.** It is written beside the file and renamed

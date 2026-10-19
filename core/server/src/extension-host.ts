@@ -7,7 +7,7 @@ import semver from "semver";
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from "express";
 import { agentOf, defaultAgent } from "./agents.js";
 import { DATA_DIR } from "./data-dir.js";
-import { getSession, listSessions, type SessionRow } from "./db.js";
+import { allWorkspaces, getSession, listSessions, sessionsAt, type SessionRow } from "./db.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import type { ServerHalf } from "./extension-ui.js";
 import { asAgent, runAsAgent, sandboxEnv } from "./sandbox/exec.js";
@@ -228,6 +228,20 @@ function portalFor(ext: Running): ServerPortal {
         return row && chatOf(row);
       },
       list: () => listSessions().map(chatOf),
+      inFolder: (where) => {
+        // Each workspace stored is resolved once, as `folder` does for a chat; the sessions of every kind that were made for one that leads to `where`.
+        const found: Chat[] = [];
+        for (const workspace of allWorkspaces()) {
+          let there: string;
+          try {
+            there = baseDir(workspace);
+          } catch {
+            continue;
+          }
+          if (there === where) found.push(...sessionsAt(workspace).map(chatOf));
+        }
+        return found;
+      },
       folder,
       send: (chatId, data) => {
         const text = wire(name, data);

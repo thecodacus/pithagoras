@@ -97,8 +97,9 @@ export interface FileOpenOptions {
 export interface FolderUse {
   likeParent?: boolean;
   /**
-   * The chats whose agents work in the folder (their ids, from `chats.list`): every one of them must be able to use it, as what is
-   * read in it for one is handed to the others. The agent is not taken from the folder's path, which a link can lead into another
+   * The chats whose agents work in the folder (their ids): every one of them must be able to use it, as what is read in it for one is
+   * handed to the others. Those that `chats.inFolder` gives (sessions of every kind, not the tasks of `chats.list` alone), and the session
+   * that makes the call, which a call made for an agent always names: where its folder leads is not for it to decide. The agent is not taken from the folder's path, which a link can lead into another
    * agent's home: the sandbox runs a chat's agent by the workspace stored for that chat, and so does this. With `likeParent`
    * and the sandbox on, none named, or one that is not known, is a refusal.
    */
@@ -198,6 +199,13 @@ export interface ServerPortal {
   chats: {
     get(id: string): Chat | undefined;
     list(): Chat[];
+    /**
+     * The sessions of every kind that work in a folder: the tasks `list` gives, and also routine runs, conversations on the Agent page
+     * and in channels, and heartbeats, which `list` leaves out and which have the package's tools in their pi as the tasks do. Those
+     * whose workspace, stored for them and resolved as `folder` resolves it, is `folder` (a path from `folder(id)`). For what is read or
+     * changed in a folder for every agent that works in it (`files.*` with `likeParent`: see `FolderUse.chats`).
+     */
+    inFolder(folder: string): Chat[];
     /**
      * The folder a chat's pi works in, on this disk: where a server half reads
      * and keeps what belongs to that chat. Throws when the chat is gone or its

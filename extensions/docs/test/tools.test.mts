@@ -38,6 +38,7 @@ async function portal(chats: Record<string, string>, executor = 'host') {
     chats: {
       list: () => Object.keys(chats).map((id) => ({ id, title: `Chat ${id}` })),
       folder: (id: string) => realpathSync(chats[id]),
+      inFolder: (folder: string) => Object.keys(chats).filter((id) => ((() => { try { return realpathSync(chats[id]) === folder; } catch { return false; } })())).map((id) => ({ id, title: `Chat ${id}` })),
       extend: (factory: (pi: unknown, chat: unknown) => void) => void factories.push(factory),
     },
   }, { dependencies: async () => true }) as () => Promise<void>;
