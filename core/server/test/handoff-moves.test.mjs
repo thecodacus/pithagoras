@@ -102,6 +102,33 @@ test("a folder that is a link to one elsewhere stays, with the folder it leads t
   assert.deepEqual(readdirSync(elsewhere), []);
 });
 
+test("a link to a folder elsewhere that cannot be reached on a retry is refused, and what an earlier try moved of it waits", () => {
+  const data = path.join(home, "dangling", "data");
+  const elsewhere = path.join(home, "dangling", "clips");
+  put(path.join(elsewhere, "a.webm"), "a clip");
+  put(path.join(elsewhere, "b.webm"), "b clip");
+  mkdirSync(data, { recursive: true });
+  symlinkSync(elsewhere, path.join(data, "videos"));
+  const to = path.join(data, "handoff", "videos");
+  mkdirSync(path.dirname(to), { recursive: true });
+  const filling = path.join(path.dirname(to), ".videos.partial");
+  // The first try is stopped after it moved one clip.
+  assert.throws(() => refusing({ rename: (a) => (a.endsWith("b.webm") ? "ENOSPC" : undefined) }, () => moveFolderTo(path.join(data, "videos"), to)), /ENOSPC/);
+  assert.deepEqual(readdirSync(filling), ["a.webm"]);
+  // On the next, the folder the link leads to is not there yet (a disk that comes up late).
+  fs.renameSync(elsewhere, `${elsewhere}-away`);
+  assert.throws(() => moveFolderTo(path.join(data, "videos"), to), /cannot be reached/);
+  assert.equal(existsSync(to), false, "not put in place without the rest");
+  assert.deepEqual(readdirSync(filling), ["a.webm"]);
+  // Back: the rest is moved, and all of it put in place.
+  fs.renameSync(`${elsewhere}-away`, elsewhere);
+  moveFolderTo(path.join(data, "videos"), to);
+  assert.deepEqual(readdirSync(to).sort(), ["a.webm", "b.webm"]);
+  // A folder that never was there, with nothing moved of it, is nothing to move.
+  moveFolderTo(path.join(data, "nothing"), path.join(data, "handoff", "nothing"));
+  assert.equal(existsSync(path.join(data, "handoff", "nothing")), false);
+});
+
 test("a hand-off taken into a folder on another file system, by a start stopped as it removed it, is not taken a second time; one left again since waits its turn", () => {
   const into = path.join(home, "extension-data", "notes");
   mkdirSync(into, { recursive: true });

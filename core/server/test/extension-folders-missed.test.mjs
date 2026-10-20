@@ -77,6 +77,15 @@ test("a package that starts for the first time is told of no folder deleted befo
   await host.syncServerHalves([]);
 });
 
+test("a package the portal told from the start, as an upgrade tells the one that takes up what it left, is told on its first start of each folder deleted since", async () => {
+  const { putSetting } = await import("../dist/db.js");
+  putSetting("folders_told", JSON.stringify({ ...JSON.parse(getSetting("folders_told") ?? "{}"), taker: 0 }));
+  host.folderRemoved("/work/before-it-came");
+  await host.syncServerHalves([half("taker")]);
+  assert.ok(heard.taker.includes("/work/before-it-came"));
+  await host.syncServerHalves([]);
+});
+
 test("the folders deleted are kept, for the halves not running, the latest few hundred", async () => {
   await host.syncServerHalves([half("away")]);
   await host.syncServerHalves([]);

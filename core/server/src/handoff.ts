@@ -48,10 +48,16 @@ export function moveTo(from: string, to: string): void {
  * rename would move as a link, stays where it is, a link with the folder it leads to; what is in it is moved, each by
  * `moveTo`, into a folder beside `to` of a fixed name, which is put in place by one rename once all of it is there. A
  * try that stopped half way leaves that folder, and the next goes on filling it, even where `from` could be moved
- * whole by then (it is not mounted any more, say): what was moved before is in it.
+ * whole by then (it is not mounted any more, say): what was moved before is in it. A `from` that is not there is
+ * nothing to move, unless a try moved some of it before: then it is a folder out of reach for now (a link to a disk
+ * that is not there yet), and it is refused, for what was moved of it not to be put in place without the rest.
  */
 export function moveFolderTo(from: string, to: string): void {
   const filling = path.join(path.dirname(to), `.${path.basename(to)}.partial`);
+  if (!existsSync(from)) {
+    if (existsSync(filling)) throw Object.assign(new Error(`${from} cannot be reached, and what was moved of it waits in ${filling}`), { code: "ENOENT" });
+    return;
+  }
   if (!existsSync(filling) && !lstatSync(from).isSymbolicLink()) {
     try {
       renameSync(from, to);

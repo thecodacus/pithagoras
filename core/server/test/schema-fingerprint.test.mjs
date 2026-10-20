@@ -407,6 +407,8 @@ test("what the Media page kept is left for its extension, its files moved and th
   assert.equal(value("tools_lazy"), "<tool>web_fetch\npithagoras-media");
   assert.deepEqual(JSON.parse(value("tool_group_names")), { "pi-web-access": "Web", "pithagoras-media": "Pictures" });
   assert.deepEqual(JSON.parse(value("tools_seen")), SEEN.map((tool) => (tool.name === "web_fetch" ? tool : { ...tool, source: "pithagoras-media" })));
+  // Whenever the extension first starts, it is told of every folder deleted from the upgrade on, for what it takes up of one to go too.
+  assert.deepEqual(JSON.parse(value("folders_told")), { "pithagoras-media": 0 });
   d.close();
 
   // Left whole, closed to all but the portal.

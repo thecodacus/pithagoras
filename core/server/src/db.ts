@@ -520,15 +520,21 @@ function handOffMedia(d: Database.Database): void {
     const settings = { image_generation: settingIn(d, "image_generation") ?? null, video_generation: settingIn(d, "video_generation") ?? null };
     leaveHandoff("media", (dir) => {
       // What an earlier try moved is there already, and a file that is gone is gone: its row is left all the same, as the page would have kept it until it looked.
-      const move = (from: string, to: string, by = moveTo) => {
+      const move = (from: string, to: string) => {
         if (existsSync(to) || !existsSync(from)) return;
         mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
-        by(from, to);
+        moveTo(from, to);
+      };
+      // A folder mounted on its own, or a link to one elsewhere, stays where it is: what is in it is moved. One that is
+      // not there is moveFolderTo's to tell from one out of reach, of which an earlier try moved some.
+      const moveFolder = (from: string, to: string) => {
+        if (existsSync(to)) return;
+        mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
+        moveFolderTo(from, to);
       };
       for (const row of images) if (row.origin === "page") move(path.join(data, "images", row.path), path.join(dir, "files", "images", row.path));
-      // A folder mounted on its own, or a link to one elsewhere, stays where it is: what is in it is moved.
-      move(path.join(data, "videos"), path.join(dir, "files", "videos"), moveFolderTo);
-      for (const cache of ["image-thumbs", "video-posters", "video-copies"]) move(path.join(data, cache), path.join(dir, "cache", cache), moveFolderTo);
+      moveFolder(path.join(data, "videos"), path.join(dir, "files", "videos"));
+      for (const cache of ["image-thumbs", "video-posters", "video-copies"]) moveFolder(path.join(data, cache), path.join(dir, "cache", cache));
       // Written last, and anew on each try, from the rows as they are.
       writeFileAtomic(path.join(dir, "images.json"), JSON.stringify({ rows: images }), 0o600);
       writeFileAtomic(path.join(dir, "videos.json"), JSON.stringify({ rows: videos }), 0o600);
@@ -545,6 +551,24 @@ function handOffMedia(d: Database.Database): void {
   // Core filed its picture and video tools as one set of their own.
   setMoved(d, "<portal:media>", "pithagoras-media");
   mediaToolsSeenMoved(d);
+  mediaToldOfRemovals(d);
+}
+
+/**
+ * The extension takes up what was left whenever it first starts, which may be long after: it is told then of every
+ * folder deleted since (see folderRemoved in extension-host.ts), as a server half that was not running is, for what it
+ * takes up of a folder that went meanwhile to go too. A package seen for the first time is told of none, as what it
+ * keeps is of no folder deleted before; this one keeps what the portal kept before.
+ */
+function mediaToldOfRemovals(d: Database.Database): void {
+  let told: Record<string, number> = {};
+  try {
+    told = JSON.parse(settingIn(d, "folders_told") ?? "{}") ?? {};
+  } catch {
+    // Not JSON: the host reads it as nobody told yet, and so it is written anew.
+  }
+  if (told["pithagoras-media"] !== undefined) return;
+  d.prepare("INSERT INTO settings (key, value) VALUES ('folders_told', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify({ ...told, "pithagoras-media": 0 }));
 }
 
 /**
