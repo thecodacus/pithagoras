@@ -1,0 +1,92 @@
+/*
+ * Media's own stylesheet: what its parts need that the portal's Tailwind
+ * preset cannot say (the utilities it uses are made after this, see build.mjs).
+ * The rest of what it draws is the portal's own parts, with the portal's own look.
+ */
+
+/* ───────────────────── The Media page's gallery ─────────────────────
+ * web/MediaPage.tsx. Every tile is an ImagePreview — a picture, one
+ * being made, one that was not — made the same shape, so that a grid of them
+ * has no ragged edge and a picture arrives where its wait was.
+ *
+ * Hundreds of pictures stay cheap: a tile that is far off screen is not laid
+ * out or painted (content-visibility), and its picture is not fetched (the
+ * preview loads them lazily); the page itself asks for them 48 at a time.
+ */
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: .75rem; margin: 0; padding: 0; list-style: none; }
+.gallery-grid > li { min-width: 0; }
+.gallery-tile { position: relative; content-visibility: auto; contain-intrinsic-size: auto 13rem; }
+
+/* Square, whatever the picture's shape: what is made is shown whole when it is opened. */
+.gallery-tile .image-preview { --ratio: 1 !important; width: 100%; margin: 0; }
+.gallery-tile .image-preview-img { object-fit: cover; }
+.gallery-tile .image-preview.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: 1; }
+.gallery-tile .image-preview-failed { padding: 8px 10px; font-size: 11.5px; }
+.gallery-tile .image-preview-failed p { -webkit-line-clamp: 3; }
+/* A clip that was not made is as high as its message, and at least as high as a square tile is wide enough for. */
+.gallery-tile .image-preview.is-clip.is-failed:not(.is-compact) .image-preview-frame { aspect-ratio: auto; min-height: 9.5rem; }
+.gallery-tile .image-preview-caption { margin-top: 4px; }
+
+/* A clip a browser does not play, shown as the file it is: square as the others, its kind in words, and opened to be downloaded. */
+.gallery-type-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 100%; aspect-ratio: 1; padding: 8px; border: 1px dashed rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .4); color: rgb(var(--fg-muted)); text-align: center; cursor: pointer; transition: background .15s, border-color .15s; }
+.gallery-type-tile:hover { background: rgb(var(--raised) / .7); border-color: rgb(var(--fg-faint)); }
+.gallery-type-tile > svg { width: 28px; height: 28px; opacity: .7; }
+.gallery-type-tile b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: rgb(var(--fg)); }
+.gallery-type-tile small { font-size: 11px; line-height: 1.35; color: rgb(var(--fg-subtle)); }
+
+/* Under the picture: where it is from and when, quietly. */
+.gallery-meta { display: flex; align-items: center; gap: 5px; min-width: 0; margin: 1px 0 0; font-size: 11px; color: rgb(var(--fg-faint)); }
+.gallery-meta > svg { flex-shrink: 0; width: 11px; height: 11px; }
+.gallery-meta > span { flex: 1; min-width: 0; }
+.gallery-meta > time { flex-shrink: 0; }
+/* How long a clip plays, between where it is from and when. */
+.gallery-meta > span.gallery-length { flex: none; font-variant-numeric: tabular-nums; }
+
+/* The box on a picture's corner, which ticks it: it has a round place of its own, so that it is found on any picture and by a thumb, and the picture marked. A click on the picture itself opens it. */
+.gallery-check-hit { position: absolute; top: 4px; left: 4px; z-index: 5; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9999px; border: 1px solid rgb(var(--line)); background: rgb(var(--surface) / .88); cursor: pointer; transition: opacity .15s; }
+.gallery-check { width: 20px; height: 20px; margin: 0; cursor: pointer; accent-color: rgb(var(--accent)); }
+.gallery-tile.is-selected .image-preview-frame::after { content: ""; position: absolute; inset: 0; z-index: 4; border: 3px solid rgb(var(--accent)); border-radius: inherit; background: rgb(var(--accent) / .12); pointer-events: none; }
+/* Where a pointer can hover the boxes wait until the tile is pointed at or has focus, so that they do not cover every picture; once something is ticked, or the form is in Edit, they are all there. A touch screen has no hover, so there they always are, and bigger. */
+@media (hover: hover) and (pointer: fine) {
+  .gallery-grid:not(.is-choosing) .gallery-check-hit { opacity: 0; }
+  .gallery-grid:not(.is-choosing) .gallery-tile:is(:hover, :focus-within) .gallery-check-hit { opacity: 1; }
+}
+@media (pointer: coarse) {
+  .gallery-check-hit { top: 2px; left: 2px; width: 44px; height: 44px; }
+  .gallery-check { width: 26px; height: 26px; }
+}
+.gallery-check-hit:has(.gallery-check:focus-visible) { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+/* Choosing pictures for an edit: the place each has in the edit beside the box, and what cannot be taken any more drawn back. */
+.gallery-order { position: absolute; top: 14px; left: 46px; z-index: 5; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: rgb(var(--accent)); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 20px; text-align: center; pointer-events: none; }
+@media (pointer: coarse) { .gallery-order { top: 14px; left: 52px; } }
+.gallery-tile.is-locked .image-preview-frame { opacity: .45; }
+.gallery-tile.is-locked .gallery-check-hit, .gallery-tile.is-locked .gallery-check { cursor: not-allowed; }
+
+/* Stop and Dismiss, in the place the title has company. */
+.gallery-tile-action { flex-shrink: 0; padding: 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
+.gallery-tile-action:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
+
+/* In the viewer, over a stage that takes every touch: this scrolls by itself. */
+.gallery-details { touch-action: pan-y; overscroll-behavior: contain; }
+@media (prefers-reduced-motion: reduce) { .gallery-tile-action, .gallery-check-hit { transition: none; } }
+
+/* ───────────────────── Its cards in the chat ─────────────────────
+ * web/PictureCall.tsx and VideoCall.tsx: the portal's picture preview, whose
+ * classes are the portal's own, as are those of the call's details and of a
+ * clip's player.
+ */
+/* Beside what the picture is of: the way to the call it came from. */
+.picture-call-more { flex-shrink: 0; display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
+.picture-call-more:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
+.picture-call-more svg { width: 12px; height: 12px; transition: transform .3s var(--ease-out); }
+.picture-call-more[aria-expanded="true"] svg { transform: rotate(90deg); }
+/* In the middle of the column, as the chat's other pictures are, in every state: where the wait is, the picture comes, and a failure says so. */
+.picture-call > .image-preview { margin-inline: auto; }
+.picture-call .chat-tool-body { margin-left: 0; }
+.picture-call .chat-tool-body > .chat-tool-name { align-self: flex-start; max-width: 100%; color: rgb(var(--fg-subtle)); }
+@media (prefers-reduced-motion: reduce) { .picture-call-more, .picture-call-more svg { transition: none; } }
+
+/* A clip in the chat, played where the agent put it: as wide as a picture's frame at most, whole in its player. */
+.video-call-player { margin: 2px auto 4px; width: min(100%, 36rem); }
+.video-call .image-preview-caption { margin-top: 5px; }
