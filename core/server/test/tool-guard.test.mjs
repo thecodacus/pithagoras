@@ -129,6 +129,18 @@ test("where a tool that declares it reaches somewhere goes is held to the allowl
     assert.deepEqual([lastAudit().kind, lastAudit().reason], ["browsed", host]);
   }
   for (const host of ["elsewhere.test", "evil-example.com", "about:blank"]) assert.equal(refused(call(h, "ping_host", { host })), true, host);
+  // What only has the host in it is not a host: a script, data, a mail address, or a host before an `@`.
+  for (const address of [
+    "javascript:void(window.x=1)%2F%2F@www.example.com",
+    "javascript://www.example.com/%0Aalert(1)",
+    "data:,x@www.example.com",
+    "mailto:x@www.example.com",
+    "evil.test@www.example.com",
+    "user:pw@www.example.com",
+  ]) {
+    assert.equal(refused(call(h, "ping_host", { host: address })), true, address);
+    assert.equal(refused(call(h, "fetch_page", { url: "https://www.example.com/", mirrors: [address] })), true, address);
+  }
 
   // A call that names no address has nothing to check, and nothing is recorded.
   const before = lastId();

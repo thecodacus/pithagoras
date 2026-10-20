@@ -1290,15 +1290,23 @@ function browserCall(
 /**
  * The host an address names: a URL's, or the address itself where it is a host (`example.com`, `example.com:8080`),
  * which a URL without one is read as. Undefined where it names none.
+ *
+ * A URL whose scheme runs or holds its content where it is opened goes to no host, whatever it is written with:
+ * `javascript://example.com/%0A…` runs its script in the page that is open. And a host is read with nothing before an
+ * `@`, as what follows one is the host of a text that is no host: `javascript:…@example.com`, `mailto:x@example.com`.
  */
 function hostOf(address: string): string | undefined {
-  for (const url of [address, `http://${address}`]) {
+  for (const text of [address, `http://${address}`]) {
+    let url: URL;
     try {
-      const host = new URL(url).hostname;
-      if (host) return host.toLowerCase();
+      url = new URL(text);
     } catch {
       // Not this way: the next, or none.
+      continue;
     }
+    if (/^(?:javascript|data|blob|about|file|view-source):$/.test(url.protocol)) return undefined;
+    if (text !== address && (url.username || url.password)) return undefined;
+    if (url.hostname) return url.hostname.toLowerCase();
   }
   return undefined;
 }

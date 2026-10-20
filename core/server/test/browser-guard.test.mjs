@@ -268,7 +268,29 @@ test("the browser is behind the session's switch and its allowlist, whichever wa
     assert.match(result.reason, /not on the allowlist/);
     assert.match(lastAudit().reason, /^Outside the allowlist/);
   }
+  // A script runs in the page that is open, and a data: or a file: URL is no site: none of them goes to the host it is
+  // written with, by the portal's browser or a Playwright MCP's.
+  for (const url of [
+    "javascript:void(window.x=1)%2F%2F@www.example.com",
+    "javascript://www.example.com/%0Aalert(1)",
+    "data:,x@www.example.com",
+    "data://www.example.com/,x",
+    "file://www.example.com/etc/passwd",
+    "mailto:x@www.example.com",
+    "evil.test@www.example.com",
+    "about:blank",
+  ]) {
+    for (const tool of ["browser_navigate", "playwright_browser_navigate"]) {
+      const result = go(tool, { url });
+      assert.equal(refused(result), true, `${tool} ${url}`);
+      assert.match(result.reason, /not on the allowlist/);
+    }
+  }
   assert.equal(go("browser_navigate", {}), undefined, "no address, nothing to check");
+  // The portal's browser tools say their `url` is where they go and are named as a browser's: one row for the one place.
+  const before = lastAudit()?.id ?? 0;
+  assert.equal(go("browser_navigate", { url: "https://www.example.com/" }), undefined);
+  assert.deepEqual(listAudit(10).filter((row) => row.id > before).map((row) => [row.kind, row.reason]), [["browsed", "https://www.example.com/"]]);
 });
 
 test("the allowlist holds when the MCP proxy gets its arguments as JSON text, and a call it cannot read is refused", () => {
