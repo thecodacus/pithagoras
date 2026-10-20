@@ -84,8 +84,11 @@ import { useFlash } from "../use-flash";
  */
 const OWN_LAYOUT = new Set<Tab>(["extensions", "logs", "advanced"]);
 
-/** Either a fixed tab or one extension's own configuration page, by its package's name, as its address names it (/settings/x/<name>). */
-type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; name: string };
+/**
+ * Either a fixed tab or one extension's own configuration page: by its package's spec, which tells two installs of
+ * one package apart, or by its name, as its address names it (/settings/x/<name>).
+ */
+type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string } | { kind: "ext"; name: string };
 
 type TabDef = { id: Tab; label: string; icon: ReactNode; hint: string };
 
@@ -194,8 +197,6 @@ export const ConfigModal = memo(function ConfigModal({
   useEffect(() => {
     if (error) banner.current?.scrollIntoView({ block: "nearest" });
   }, [error]);
-  const section = nav.kind === "tab" ? nav.id : nav.name;
-  useEffect(() => setError(null), [section]);
 
   // A package has a page here when the portal found settings it reads, or when it brought a page of its own.
   const settingsPages = useSlot("settings.page");
@@ -206,8 +207,12 @@ export const ConfigModal = memo(function ConfigModal({
     // Only a head start for next time.
     local.set(RAIL_KEY, JSON.stringify(configurable.map((e) => ({ spec: e.spec, name: e.name }))));
   }, [exts.value]);
+  // Opened at its address, the page is that of the first package of the name.
   const activeExt =
-    nav.kind === "ext" ? extensions.find((e) => e.name === nav.name) : undefined;
+    nav.kind === "ext" ? extensions.find((e) => ("spec" in nav ? e.spec === nav.spec : e.name === nav.name)) : undefined;
+  // By the spec once it is known: a page opened at its address and then chosen in the rail is not drawn anew.
+  const section = nav.kind === "tab" ? nav.id : activeExt?.spec ?? ("spec" in nav ? nav.spec : nav.name);
+  useEffect(() => setError(null), [section]);
   // The extension pages rise in when they arrive late; drawn from what was
   // kept, they are simply there. Once in, a refresh does not replay it.
   // Not over names already drawn from the snapshot: they would rise a second time.
@@ -236,13 +241,13 @@ export const ConfigModal = memo(function ConfigModal({
     const own = extensions.flatMap((x) => {
       const { label } = railEntry(x.name, settingsPages);
       return [
-        { tab: "extensions", ext: x.name, title: label, words: `${x.name} ${x.description ?? ""} extension settings`, where: t("Extension settings") },
-        ...x.settings.map((st) => ({ tab: "extensions", ext: x.name, section: t("Settings"), title: humanKey(st.key), words: `${st.key} ${x.name}`, where: label })),
+        { tab: "extensions", ext: x.spec, title: label, words: `${x.name} ${x.description ?? ""} extension settings`, where: t("Extension settings") },
+        ...x.settings.map((st) => ({ tab: "extensions", ext: x.spec, section: t("Settings"), title: humanKey(st.key), words: `${st.key} ${x.name}`, where: label })),
         // What the extension's own page says is on it, in the words the page shows, and in English too.
         ...settingsPages.filter((page) => page.extension === x.name).flatMap((page) =>
           (page.search ?? []).map((found) => ({
             tab: "extensions",
-            ext: x.name,
+            ext: x.spec,
             title: translate(x.name, found.title),
             ...(found.section ? { section: translate(x.name, found.section) } : {}),
             words: `${found.words ?? ""} ${found.title} ${found.section ?? ""}`,
@@ -255,7 +260,7 @@ export const ConfigModal = memo(function ConfigModal({
   }, [extensions, settingsPages, lang]);
 
   const go = (entry: SettingEntry) => {
-    setNav(entry.ext ? { kind: "ext", name: entry.ext } : { kind: "tab", id: entry.tab as Tab });
+    setNav(entry.ext ? { kind: "ext", spec: entry.ext } : { kind: "tab", id: entry.tab as Tab });
     if (entry.section) setTarget({ section: entry.section, n: Date.now() });
   };
 
@@ -315,8 +320,8 @@ export const ConfigModal = memo(function ConfigModal({
                 <RailItem
                   key={e.spec}
                   {...railEntry(e.name, settingsPages)}
-                  active={nav.kind === "ext" && nav.name === e.name}
-                  onClick={() => setNav({ kind: "ext", name: e.name })}
+                  active={nav.kind === "ext" && ("spec" in nav ? nav.spec : activeExt?.spec) === e.spec}
+                  onClick={() => setNav({ kind: "ext", spec: e.spec })}
                 />
               ))}
             </RailGroup>
@@ -351,7 +356,7 @@ export const ConfigModal = memo(function ConfigModal({
           onRetry={exts.reload}
           onError={setError}
           onRefresh={loadExtensions}
-          onConfigure={(name) => setNav({ kind: "ext", name })}
+          onConfigure={(spec) => setNav({ kind: "ext", spec })}
         />
       )}
       {nav.kind === "tab" && nav.id === "shortcuts" && <KeyboardShortcuts />}
