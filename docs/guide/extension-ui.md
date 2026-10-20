@@ -270,6 +270,7 @@ prefix of your own: the stylesheet is the page's.
 | `asksBeforeDeleting()` | Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when it is true |
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
 | `useFollowBottom`, `useNow`, `tabKeys` | A box that follows its end; the time, each second; arrow keys for a row of tabs |
+| `useLeaveRef(how)` | A hook: the ref for the one element a part draws, so that when it goes a picture of it leaves as the portal's own do, `how` saying as what: `"dialog"`, `"menu"`, `"panel"`, `"row"`, `"message"`, `"page"`, or `"gone"` for something that no longer exists. It plays only while the person has [the animations](/guide/interface#animations) on. `how` may be a function, asked as the element goes, that says `null` for not this time |
 
 The portal's own utility classes (Tailwind) exist only for what the portal
 itself uses, so do not rely on one being there. Style your markup in your own
@@ -1138,7 +1139,11 @@ of a deleted chat's pictures so.
 
 `folders.on("removed", (folder) => …)` is told when the portal deletes one: a
 project with its folder, or an agent with its home. `folder` is where it really
-was, as `list` named it, for what was kept of it to go too.
+was, as `list` named it, for what was kept of it to go too. A server half that
+was not running then, because it was switched off, removed and installed again,
+or failed to start, is told when it next starts, once for each folder, as soon
+as its default export is done. One that starts for the first time is told of
+none deleted before: it kept nothing of them.
 
 ### Telling the pages open on a chat
 
@@ -1716,10 +1721,10 @@ the portal, and what gives the same to an extension:
 | A store of its own, a database and files the agents cannot reach, and native packages (better-sqlite3, sharp) | `dataDir()`, and the dependencies in its own `package.json` and lock |
 | What the portal kept of it before it was an extension | `portal.handoffs` |
 | Pictures and clips sent from its own folder, as the portal sends its own | `files.open(dataDir(), …)`, `http.send` |
-| A deleted chat's pictures kept as its folder's, named as the person calls the folder; a deleted project's gone with it | `chats.on("deleted")`, `folders.label`, `folders.on("removed")` |
+| A deleted chat's pictures kept as its folder's, named as the person calls the folder; a deleted project's gone with it, also one deleted while it was switched off | `chats.on("deleted")`, `folders.label`, `folders.on("removed")` |
 | A gallery whose filters are in its address, so that a link keeps them and Back goes through them | `portal.useLocation()`, `portal.navigate(path, { replace })` |
 | The portal's picture viewer, a dialog, and the buttons over a picture | `ui.ImageViewer`, `ui.Modal`, `ui.classes.viewerButton` and `iconButton` |
-| A viewer of its own over the whole page, styled with its utilities | `createPortal` into an element with its `data-extension` |
+| A viewer of its own over the whole page, styled with its utilities, leaving as the portal's dialogs do | `createPortal` into an element with its `data-extension`, `ui.useLeaveRef("dialog")` |
 | "Delete this document?" only for someone who wants to be asked | `ui.asksBeforeDeleting()` |
 | "Open in the agent terminal" on the card of a shell call | `chat.tool.action` |
 | A key in voice mode (T for the terminal) | `portal.shortcuts.register` |
