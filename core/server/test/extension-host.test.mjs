@@ -294,7 +294,7 @@ test("a server half has a folder of the portal's own in the data folder, closed 
   const data = path.join(path.resolve(process.env.DATA_DIR), "extension-data");
   assert.equal(existsSync(data), false, "not made until a package asks");
   const dir = portal.dataDir();
-  assert.equal(dir, path.join(data, "%40codacus%2Fnotes"), "its name as one part of a path");
+  assert.equal(dir, path.join(realpathSync(data), "%40codacus%2Fnotes"), "its name as one part of a path, where it really is");
   assert.equal(statSync(dir).mode & 0o777, 0o700);
   assert.equal(statSync(data).mode & 0o777, 0o700);
   assert.equal(portal.dataDir(), dir, "the same each time, and made once");
@@ -305,10 +305,57 @@ test("a server half has a folder of the portal's own in the data folder, closed 
     const file = path.join(pkg, "named.js");
     writeFileSync(file, `export default async function (portal) { globalThis.seenDir = portal.dataDir(); }\n`);
     await host.syncServerHalves([{ name, version: "1.0.0", file, rev: `named-${name}` }]);
-    assert.equal(path.dirname(globalThis.seenDir), data, name);
+    assert.equal(path.dirname(globalThis.seenDir), realpathSync(data), name);
     assert.ok(statSync(globalThis.seenDir).isDirectory(), name);
   }
+  // One reached through a link is named by where it is, as `files` take a base.
+  const elsewhere = path.join(home, "kept-elsewhere");
+  mkdirSync(elsewhere);
+  symlinkSync(elsewhere, path.join(data, "linked"));
+  await host.syncServerHalves([{ name: "linked", version: "1.0.0", file: path.join(pkg, "named.js"), rev: "named-linked" }]);
+  assert.equal(globalThis.seenDir, realpathSync(elsewhere));
   await host.syncServerHalves([write(MODULE)]);
+});
+
+test("what the portal left for an extension when an upgrade took something out of it, a server half takes into its own folder, whole, and has until it is done with it", async () => {
+  const { leaveHandoff } = await import("../dist/handoff.js");
+  const { portal } = seen();
+  const root = path.join(path.resolve(process.env.DATA_DIR), "handoff");
+  // Left by an upgrade that stopped half way: what it had moved stays in the folder it was filling, and the next try goes on with it.
+  const filling = path.join(root, ".notes.partial");
+  mkdirSync(filling, { recursive: true, mode: 0o700 });
+  mkdirSync(path.join(filling, "files"));
+  writeFileSync(path.join(filling, "files", "first.txt"), "moved before");
+  const fill = (dir) => {
+    assert.equal(dir, filling);
+    writeFileSync(path.join(dir, "files", "second.txt"), "moved now");
+    writeFileSync(path.join(dir, "rows.json"), '{"rows":[1]}');
+  };
+  assert.equal(leaveHandoff("notes", fill), "left");
+  const left = path.join(root, "notes");
+  assert.deepEqual(readdirSync(left).sort(), ["files", "rows.json"]);
+  assert.deepEqual(readdirSync(path.join(left, "files")).sort(), ["first.txt", "second.txt"]);
+  assert.equal(existsSync(filling), false, "put in place by its rename");
+  assert.equal(statSync(root).mode & 0o777, 0o700);
+  // Left already: an upgrade whose database rolled back after leaving it does not fill it again.
+  assert.equal(leaveHandoff("notes", () => assert.fail("filled again")), "there");
+
+  const taken = portal.handoffs.take("notes");
+  assert.equal(taken, path.join(portal.dataDir(), "handoff", "notes"));
+  assert.equal(existsSync(left), false, "moved, not copied");
+  assert.equal(readFileSync(path.join(taken, "files", "first.txt"), "utf8"), "moved before");
+  assert.equal(readFileSync(path.join(taken, "rows.json"), "utf8"), '{"rows":[1]}');
+  // A start that stopped half way through reading it finds it again, in its own folder.
+  assert.equal(portal.handoffs.take("notes"), taken);
+  portal.handoffs.done("notes");
+  assert.equal(existsSync(taken), false);
+  assert.equal(portal.handoffs.take("notes"), undefined, "nothing left: nothing to take");
+  assert.equal(existsSync(path.join(portal.dataDir(), "handoff", "notes")), false);
+  // A name is one part of a path, never a step out of the folder.
+  for (const name of ["..", ".notes.partial", "../notes", "Notes", "a/b", "", "x".repeat(65), undefined]) {
+    assert.throws(() => portal.handoffs.take(name), /is not a hand-off's name/, String(name));
+    assert.throws(() => portal.handoffs.done(name), /is not a hand-off's name/, String(name));
+  }
 });
 
 test("a server half changed is stopped and started anew, one gone is stopped, and one that fails says why", async () => {

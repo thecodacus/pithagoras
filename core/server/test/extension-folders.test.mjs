@@ -6,8 +6,9 @@ import { freePort, serverEnv, startServer, testHome } from "./server-harness.mjs
 
 /**
  * What a server half is told of the folders the agents work in (`portal.folders`): each of them, by its real path and
- * what the person calls it, which of them it may serve from, and when the portal deletes one. Against the whole server,
- * with one package installed whose server half keeps what it heard in its own folder.
+ * what the person calls it, which of them it may serve from, what the person calls one no list has any more, and when
+ * the portal deletes one. Against the whole server, with one package installed whose server half keeps what it heard
+ * in its own folder.
  */
 const home = testHome("extension-folders-");
 const pkg = path.join(home, "packages", "watcher");
@@ -20,6 +21,7 @@ import path from "node:path";
 export default function (portal) {
   portal.folders.on("removed", (folder) => appendFileSync(path.join(portal.dataDir(), "removed.txt"), folder + "\\n"));
   portal.router.get("/folders", (req, res) => res.json({ list: portal.folders.list(), allowed: portal.folders.allowed(String(req.query.check ?? "")) }));
+  portal.router.get("/label", (req, res) => res.json(portal.folders.label(String(req.query.folder))));
 }
 `,
 );
@@ -59,7 +61,7 @@ test("a server half is told of the folders the agents work in, and when the port
 
   const { list } = await folders();
   const named = (p) => list.find((f) => f.path === real(p));
-  // A project by its place under the workspace root, as the galleries have always named it.
+  // A project by its place under the workspace root.
   assert.deepEqual(named(project.body.path), { path: real(project.body.path), name: path.basename(project.body.path), kind: "project" });
   assert.deepEqual(named(agent.body.home), { path: real(agent.body.home), name: "Scout", kind: "agent" });
   assert.equal(named(path.join(home, "agent-home")).home, true, "the first agent's home is Home");
@@ -74,4 +76,25 @@ test("a server half is told of the folders the agents work in, and when the port
   assert.equal((await call("DELETE", `/api/agents/${kept.body.id}`)).status, 200);
   assert.equal((await call("DELETE", `/api/agents/${agent.body.id}?folder=delete`)).status, 200);
   assert.deepEqual(removed(), [projectFolder, agentHome]);
+});
+
+test("a server half is told what the person calls a folder, whether a list has it or not", async () => {
+  const project = await call("POST", "/api/projects", { name: "Orchard" });
+  assert.equal(project.status, 200, JSON.stringify(project.body));
+  const agent = await call("POST", "/api/agents", { name: "Picker" });
+  assert.equal(agent.status, 200, JSON.stringify(agent.body));
+  const label = async (folder) => (await call("GET", `/api/x/folder-watcher/label?folder=${encodeURIComponent(folder)}`)).body;
+  await folders();
+
+  const real = (p) => realpathSync(p);
+  const projectFolder = real(project.body.path);
+  assert.deepEqual(await label(projectFolder), { name: path.basename(project.body.path) });
+  assert.deepEqual(await label(real(agent.body.home)), { name: "Picker" });
+  assert.equal((await label(real(path.join(home, "agent-home")))).home, true, "the first agent's home is Home");
+  // A folder in a project, which no list has, by its place under the workspace root; one outside it by its last part.
+  assert.deepEqual(await label(path.join(projectFolder, "beds", "north")), { name: `${path.basename(project.body.path)}/beds/north` });
+  assert.deepEqual(await label("/somewhere/else"), { name: "else" });
+  // And one that went with its project is still named as it was.
+  assert.equal((await call("DELETE", `/api/projects/${project.body.name}?discard=1`)).status, 200);
+  assert.deepEqual(await label(projectFolder), { name: path.basename(project.body.path) });
 });

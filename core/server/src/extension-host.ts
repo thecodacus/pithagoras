@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { closeSync, mkdirSync } from "node:fs";
+import { closeSync, mkdirSync, realpathSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import semver from "semver";
@@ -19,7 +19,8 @@ import { sendFile } from "./api/files.js";
 import { watchStream } from "./login-streams.js";
 import { personsEnv } from "./background.js";
 import { gitAt } from "./git.js";
-import { folderAllowed, listFolders } from "./agent-folders.js";
+import { folderAllowed, folderLabel, listFolders } from "./agent-folders.js";
+import { handoffDone, takeHandoff } from "./handoff.js";
 import type { Chat, ChatLife as Life, Ran, ServerPortal, Upgrade } from "@pithagoras/extension-api/server";
 
 /**
@@ -225,6 +226,13 @@ function portalFor(ext: Running): ServerPortal {
     if (!row) throw new Error("No such chat");
     return baseDir(row.workspace);
   };
+  const dataDir = () => {
+    // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
+    const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // Where it really is, as `files` take a base: the data folder can be reached through a link.
+    return realpathSync(dir);
+  };
   return {
     version: 1,
     extension: name,
@@ -241,6 +249,14 @@ function portalFor(ext: Running): ServerPortal {
         if (event !== "removed") throw new TypeError(`There is no folder event "${String(event)}": there is "removed"`);
         ext.removed.push(handler);
       },
+      label: (folder) => {
+        const { name, home } = folderLabel(folder);
+        return { name, ...(home ? { home: true as const } : {}) };
+      },
+    },
+    handoffs: {
+      take: (what) => takeHandoff(what, dataDir()),
+      done: (what) => handoffDone(what, dataDir()),
     },
     tools: {
       offer(names) {
@@ -338,12 +354,7 @@ function portalFor(ext: Running): ServerPortal {
     },
     files: folderFiles,
     git: { at: gitAt },
-    dataDir: () => {
-      // One folder for each package, by its name written as one part of a path (a scoped name has a slash, and a dot name is no step up).
-      const dir = join(resolvePath(DATA_DIR), "extension-data", encodeURIComponent(name).replace(/^\./, "%2E"));
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      return dir;
-    },
+    dataDir,
   };
 }
 
