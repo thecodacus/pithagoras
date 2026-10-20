@@ -5,9 +5,9 @@ import { DATA_DIR } from "./data-dir.js";
 /**
  * What the portal leaves for an extension to take up, when something it did itself becomes an extension's: the upgrade
  * that takes it out of the portal leaves what it had (its records, its settings, its files) in a folder of the data
- * folder, under a name for what it was ("media"), and the extension that does it now takes that folder into its own
- * when it starts (`portal.handoffs`, see extension-host.ts), reads it, and says it is done. What nobody takes stays as
- * it was left: an extension can be installed long after the upgrade, or never.
+ * folder, under a name for what it was, and the extension that does it now takes that folder into its own when it
+ * starts (`portal.handoffs`, see extension-host.ts), reads it, and says it is done. What nobody takes stays as it was
+ * left: an extension can be installed long after the upgrade, or never.
  */
 
 /** Where what is left waits to be taken: a folder of the data folder, closed to all but the portal. */

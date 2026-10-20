@@ -206,8 +206,8 @@ export interface ServerPortal {
   /**
    * What an earlier version of the portal kept for something it did itself and an extension now does: when a
    * feature of the portal's own becomes an extension's, the upgrade leaves what it had (its records, its settings,
-   * its files) in the portal's data folder under a name for what it was ("media"), for whichever extension takes
-   * it up, and nothing of it is lost while none does.
+   * its files) in the portal's data folder under a name for what it was, for whichever extension takes it up, and
+   * nothing of it is lost while none does.
    */
   handoffs: {
     /**
