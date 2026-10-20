@@ -41,7 +41,7 @@ export function dockerFor(dataDir: string) {
   };
 
   const containerOwner = (id: string, labels: Record<string, string> | null | undefined) => labels?.[OWNER_LABEL] ?? adopted().containers[id] ?? "";
-  const info = (raw: Raw): ContainerInfo => ({ name: nameOf(raw), id: raw.Id, image: raw.Image, state: raw.State, status: raw.Status, owner: containerOwner(raw.Id, raw.Labels) });
+  const info = (raw: Raw): ContainerInfo => ({ name: nameOf(raw), id: raw.Id, image: raw.Image, state: raw.State, status: raw.Status, owner: containerOwner(raw.Id, raw.Labels), labels: raw.Labels ?? {} });
 
   /** Every container that is an extension's, by its label or as one taken over. */
   async function containers(): Promise<ContainerInfo[]> {
@@ -62,7 +62,9 @@ export function dockerFor(dataDir: string) {
     if (!found) return undefined;
     const all = await checked<Raw[]>("GET", `/containers/json?all=1&filters=${encodeURIComponent(JSON.stringify({ id: [found.Id] }))}`);
     const raw = all.find((c) => c.Id === found.Id);
-    return raw ? info(raw) : { name: found.Name.replace(/^\//, ""), id: found.Id, image: found.Config?.Image ?? "", state: found.State?.Status ?? "", status: "", owner: containerOwner(found.Id, found.Config?.Labels) };
+    return raw
+      ? info(raw)
+      : { name: found.Name.replace(/^\//, ""), id: found.Id, image: found.Config?.Image ?? "", state: found.State?.Status ?? "", status: "", owner: containerOwner(found.Id, found.Config?.Labels), labels: found.Config?.Labels ?? {} };
   }
 
   /** The container `name` is, for `who` to act on: refused where it is someone else's, or nobody's. Nothing where there is none. */
@@ -168,7 +170,9 @@ export function dockerFor(dataDir: string) {
         get,
         async create(name, spec) {
           if (!validName(name)) throw new DockerError(`"${name}" is not a name Docker takes`);
-          if (await own(who, name)) await act(name, "remove");
+          // By its id: one taken over is kept by its id, and let go of when it is removed.
+          const was = await own(who, name);
+          if (was) await act(was.Id, "remove");
           const labels = { ...((spec.Labels as Record<string, string> | undefined) ?? {}), [OWNER_LABEL]: who };
           await checked("POST", `/containers/create?name=${encodeURIComponent(name)}`, { ...spec, Labels: labels });
           return (await get(name))!;

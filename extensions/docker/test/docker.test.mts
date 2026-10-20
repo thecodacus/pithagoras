@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
@@ -27,6 +27,8 @@ test("an extension's containers carry its name, and it lists, starts, stops and 
   const made = await browser.containers.create("dk-chromium", { Image: "chromium:1", Labels: { keep: "this" } });
   assert.deepEqual([made.name, made.owner, made.state], ["dk-chromium", "pithagoras-browser", "created"]);
   assert.deepEqual(docker.containers.find((c) => c.Name === "dk-chromium")!.Labels, { keep: "this", [OWNER_LABEL]: "pithagoras-browser" }, "its own labels kept, its name added");
+  assert.deepEqual(made.labels, { keep: "this", [OWNER_LABEL]: "pithagoras-browser" }, "and it reads them back");
+  assert.deepEqual((await browser.containers.list())[0]?.labels, { keep: "this", [OWNER_LABEL]: "pithagoras-browser" });
   await voice.containers.create("dk-voice", { Image: "voice:1" });
   assert.deepEqual((await browser.containers.list()).map((c) => c.name), ["dk-chromium"]);
   await browser.containers.start("dk-chromium");
@@ -62,6 +64,10 @@ test("a container nobody's is no extension's until one takes it over, kept by it
   const after = dockerFor(dir).forExtension("pithagoras-browser");
   assert.deepEqual((await after.containers.list()).map((c) => c.name), ["pithagoras-browser"]);
   await after.containers.stop("pithagoras-browser");
+  // Made anew by the extension that took it over: the old one goes, and is let go of where it was kept.
+  await after.containers.create("pithagoras-browser", { Image: "chromium:2" });
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "adopted.json"), "utf8")).containers, {}, "the old id is not kept");
+  assert.equal((await after.containers.get("pithagoras-browser"))!.owner, "pithagoras-browser", "the new one is its own by its label");
   // Made again by somebody else under the same name: another container, and nobody's.
   await after.containers.remove("pithagoras-browser");
   docker.containers.push({ Id: "new0000000000", Name: "pithagoras-browser", Image: "chromium:new", State: "running", Labels: {}, Tty: false, out: "", err: "" });

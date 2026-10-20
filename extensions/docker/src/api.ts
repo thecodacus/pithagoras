@@ -24,6 +24,8 @@ export interface ContainerInfo {
   status: string;
   /** The extension it belongs to. */
   owner: string;
+  /** Its labels as it was made with them, the one that says whose it is among them: what an extension wrote there to know it by. */
+  labels: Record<string, string>;
 }
 
 /** A volume, and the extension it belongs to. */
