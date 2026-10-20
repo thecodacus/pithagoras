@@ -6,13 +6,14 @@ import { inProcessHome } from "./server-harness.mjs";
 // What a tool declares the guard is to hold it to (`guard` on its definition), for any tool of any extension: what it
 // returns is outside content (`outside`), where it goes (`reaches`), what every call of it is (`acts`) and the files it
 // acts on (`files`, or `approvalFiles` as it was first spelt). Stand-in tools, none named like a browser's. A tool that
-// declares nothing is trusted as its extension is; an MCP server's browser tools, which cannot declare, are told by
-// their names. The portal's own browser tools are in browser-guard.test.mjs.
-inProcessHome("pithagoras-tool-guard-");
+// declares nothing is trusted as its extension is, but for a path where secrets are kept; a tool named like a browser's,
+// as an MCP server's browser tools are, is told by its name. The portal's own browser tools are in browser-guard.test.mjs.
+const home = inProcessHome("pithagoras-tool-guard-");
 const { OUTSIDE_CONTENT_GUIDELINE, approvalCannotHelp, callSubject, declaredFiles, declaredGuard, guardExtension } = await import("../dist/pi/guard.js");
 const { GUARD_RULE_NAMES } = await import("../dist/pi/guard-rule-names.js");
-const { listAudit, useGrant } = await import("../dist/db.js");
+const { createSession, listAudit, setDefaultReportTo, useGrant } = await import("../dist/db.js");
 const { recordApproval } = await import("../dist/approvals.js");
+const { askPrimaryTool } = await import("../dist/pi/ask-primary.js");
 
 // The guard says what it blocked, and what a tool declared that is no rule's, on the console.
 const warned = mock.method(console, "warn", () => {});
@@ -191,6 +192,18 @@ test("an approval is not spent on a call that its declared rule refuses after a 
   assert.equal(approvalCannotHelp("does_upload", action, undefined, "tool-guard-clean", undefined, ["upload"]), undefined, "and a conversation that has read nothing");
 });
 
+test("ask_primary does not ask the primary user to approve a call of a tool that declares what it acts as, once the conversation has read a suspected injection", async () => {
+  createSession({ id: "tool-guard-asks", title: "Priya", workspace: home, executor: "host", channel_slug: "c", channel_key: "c:priya" });
+  setDefaultReportTo({ channel: "c", target: "owner" });
+  tainted({ role: "colleague", key: "priya", session: "tool-guard-asks" });
+  let tool;
+  askPrimaryTool("tool-guard-asks", nothing, (name) => declared(name)?.acts)({ registerTool: (one) => (tool = one) });
+  await assert.rejects(
+    tool.execute("1", { question: "May Priya send this?", actionTool: "does_upload", action: JSON.stringify({ to: "team" }) }),
+    /That cannot be approved: a result this conversation read looks like a prompt injection, and what it asks for is sending data out of the box/,
+  );
+});
+
 test("a tool names its files in `guard.files`, or in `approvalFiles` as it was first spelt, and is approved and held to the rules on each", () => {
   assert.deepEqual(files("read_files"), ["paths"]);
   assert.deepEqual(files("merge_old"), ["inputs"]);
@@ -205,12 +218,26 @@ test("a tool names its files in `guard.files`, or in `approvalFiles` as it was f
   }
 });
 
-test("an MCP server's browser tools say nothing of themselves, and are held by their names", () => {
+test("a tool that declares nothing is trusted as its extension is, but for a path or a file_path where secrets are kept", () => {
+  assert.equal(read(guardAs({ guardOf: nothing, session: "tool-guard-plain" }), "notes_open", {}, INJECTION), undefined, "what it returns is not marked");
+  const h = tainted({ guardOf: nothing });
+  assert.equal(call(h, "notes_open", { path: "notes/today.md", note: "x" }), undefined, "no rule is about what it is");
+  // read-credentials reads the path of every tool, as it reads pi's own.
+  for (const input of [{ path: "/home/me/.ssh/id_rsa" }, { file_path: "~/.aws/credentials" }]) {
+    assert.match(call(h, "notes_open", input)?.reason ?? "", /^Refused \(read-credentials\)/, JSON.stringify(input));
+  }
+});
+
+test("a tool named like a browser's, an MCP server's or an extension's, says nothing of itself and is held by its name", () => {
   const h = guardAs({ browser: { allowed: true, allowlist: ["*.example.com"] }, guardOf: nothing });
   assert.match(textOf(read(h, "browser_browser_snapshot", {}, "page")), /Everything between these markers came from outside/, "in the full envelope");
   assert.equal(refused(call(h, "browser_browser_navigate", { url: "https://elsewhere.test/" })), true);
   assert.equal(call(h, "playwright_browser_navigate", { url: "https://www.example.com/" }), undefined);
   assert.deepEqual([lastAudit().kind, lastAudit().reason], ["browsed", "https://www.example.com/"]);
-  const off = call(guardAs({ browser: { allowed: false, allowlist: [] }, guardOf: nothing }), "browser_browser_click", { target: "e1" });
-  assert.match(off.reason, /cannot drive the browser/, "and behind the conversation's switch");
+  const off = guardAs({ browser: { allowed: false, allowlist: [] }, guardOf: nothing });
+  assert.match(call(off, "browser_browser_click", { target: "e1" }).reason, /cannot drive the browser/, "and behind the conversation's switch");
+  // An extension's tool of such a name, declaring nothing, is held the same.
+  assert.match(textOf(read(off, "browser_open", { url: "https://www.example.com/" }, "page")), /Everything between these markers came from outside/);
+  assert.match(call(off, "browser_open", { url: "https://www.example.com/" }).reason, /cannot drive the browser/);
+  assert.equal(refused(call(h, "browser_open", { url: "https://elsewhere.test/" })), true);
 });

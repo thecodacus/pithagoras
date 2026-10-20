@@ -1397,8 +1397,9 @@ export function declaredFiles(definition: unknown): readonly string[] | undefine
 /**
  * What a tool's definition says the guard is to hold it to (`guard` on it), as the guard reads it at each call; its
  * files (`guard.files`) are read by declaredFiles. A tool that declares none is trusted as the extension that
- * registered it is: no rule is about it, and what it returns is not marked. A tool server's tools say nothing of
- * themselves, and are told by their server and their names.
+ * registered it is: what it returns is not marked, and the rules hold it only as they hold every tool, where its path
+ * names a place secrets are kept (read-credentials) and where its name is a browser's (browserCall). A tool server's
+ * tools say nothing of themselves, and are told by their server and their names.
  */
 export interface DeclaredGuard {
   /** What it returns is outside content: wrapped as data in the short envelope (pageEnvelope), flagged where it tries to instruct the agent, and a flag taints the conversation. */

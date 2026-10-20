@@ -1280,8 +1280,11 @@ A tool says what the [guard](/guide/security) is to hold it to in `guard` on
 its definition, read at each call, for a tool of `chats.extend` and of any
 package's pi extension alike, in a chat whose pi runs in the portal's own
 process. A tool that declares no `guard` is trusted as your extension is: what
-it returns is not marked as outside content, and no rule after a suspected
-prompt injection is about it.
+it returns is not marked as outside content, and of the rules after a suspected
+prompt injection only `read-credentials` holds it, as it holds every tool, where
+its `path` or `file_path` argument names a place secrets are kept. A name like a
+browser's holds a tool to the browser's rules, whether or not it declares
+anything (see below).
 
 - `outside: true`: what it returns is outside content, such as a page, a mail
   or a file somebody else wrote. It comes to the model wrapped as data, between
@@ -1326,12 +1329,14 @@ pi.registerTool({ name: "send_report", /* … */ guard: { acts: ["upload"] } });
 
 The declaration's type is `ToolGuard`, from `@pithagoras/extension-api/server`.
 An MCP server's tools declare nothing. What one returns is outside content
-unless its server is counted as your own in **Settings → Guard**, and one named
+unless its server is counted as your own in **Settings → Guard**. A tool named
 like a browser's (`browser` at the start or after `_` or `.`, and followed by
 `_` or `.`: `browser_navigate`, `playwright_browser_click`) is held to the
-browser's rules by its name: the conversation's switches for the browser, the
-list of sites for its `url`, and Audit. The portal's own browser tools declare
-`outside` and `reaches: ["url"]`, and have such names too.
+browser's rules by its name, a server's or an extension's, declared or not:
+what it returns is outside content, and a call is held to the conversation's
+switches for the browser, the list of sites for its `url`, and Audit. The
+portal's own browser tools declare `outside` and `reaches: ["url"]`, and have
+such names too.
 
 #### Tools that follow the settings
 

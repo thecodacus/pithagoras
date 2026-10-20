@@ -205,3 +205,23 @@ test("what a tool declares holds as pi runs it: its pages are outside content, w
   ({ results } = await run(chat()));
   assert.match(textOf(results[1]), /Refused \(upload\)/);
 });
+
+test("a colleague's chat is not offered an approval for a call of a tool that declares what it acts as, once it has read a suspected injection", async () => {
+  const { addToolRule, createSession, deleteToolRule, setDefaultReportTo } = await import("../dist/db.js");
+  createSession({ id: "wiring-asks", title: "Priya", workspace: process.env.WORKSPACE_ROOT, executor: "host", channel_slug: "c", channel_key: "c:priya" });
+  setDefaultReportTo({ channel: "c", target: "owner" });
+  // The server's tool is one a rule lets her chat call, and what it answers taints the chat.
+  addToolRule({ id: "wiring-mcp", role: "colleague", tool: "mcp", pattern: "*", note: "", person_key: null });
+  try {
+    script = [
+      { name: "mcp", args: {} },
+      { name: "ask_primary", args: { question: "May Priya send this?", actionTool: "share_note", action: JSON.stringify({ to: "team" }) } },
+    ];
+    const { results } = await run(chat(), { sessionId: "wiring-asks", role: "colleague", whoNow: () => ({ role: "colleague", key: "c:priya" }) });
+    assert.match(textOf(results[0]), /<<<untrusted:[0-9a-f]{16}>>> \(suspected prompt injection/);
+    assert.equal(results[1].isError, true);
+    assert.match(textOf(results[1]), /That cannot be approved: .*sending data out of the box/);
+  } finally {
+    deleteToolRule("wiring-mcp");
+  }
+});

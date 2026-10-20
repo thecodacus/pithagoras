@@ -182,8 +182,10 @@ export interface GitHandle {
  * What the guard holds a tool to, as its definition says it: `pi.registerTool({ name, …, guard: { … } })`. Read at
  * each call, for a tool of `chats.extend` and of any package's pi extension, in a chat whose pi runs in the portal's
  * own process. A tool that declares no `guard` is trusted as its extension is: what it returns is not marked as
- * outside content, and no rule after a suspected prompt injection is about it. See "What the guard holds a tool to"
- * in the guide.
+ * outside content, and of the rules after a suspected prompt injection only `read-credentials` holds it, as it holds
+ * every tool, where its `path` or `file_path` argument names a place secrets are kept. A name like a browser's
+ * (`browser_` at the start, or after `_` or `.`) holds a tool to the browser's rules, declared or not. See "What the
+ * guard holds a tool to" in the guide.
  */
 export interface ToolGuard {
   /**

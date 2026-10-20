@@ -43,13 +43,16 @@ have: `outside`, that what it returns is outside content; `reaches`, the
 parameters that hold an address the agent chose, each of which is held to the
 list of sites in **Settings → Guard** (empty is any site) and recorded in Audit;
 `acts`, the rules [below](#limiting-what-happens-next) that every call of it is
-the shape of; and `files`, the files a call works on. A tool that declares
-nothing is trusted as the extension that registered it is: what it returns is
-not wrapped, and no rule below is about it. An MCP server's tools declare
-nothing: what they return is wrapped unless the server is counted as your own,
-and one named like a browser's (`browser_navigate`, `playwright_browser_click`)
-is held to the browser's rules by its name: the conversation's switches for the
-browser, the list of sites for its `url`, and Audit.
+the shape of; and `files`, the files a call works on. An extension's tool that
+declares nothing is trusted as the extension that registered it is: what it
+returns is not wrapped, and of the rules below only `read-credentials` holds it,
+where its `path` or `file_path` argument names a place secrets are kept. An MCP
+server's tools declare nothing: what they return is wrapped unless the server
+is counted as your own. A tool named like a browser's (`browser_navigate`,
+`playwright_browser_click`) is held to the browser's rules by its name, whoever
+registered it and whether or not it declares anything: what it returns is
+wrapped, and a call is held to the conversation's switches for the browser, the
+list of sites for its `url`, and Audit.
 
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, the browser, and a tool
