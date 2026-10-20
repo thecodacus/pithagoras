@@ -191,7 +191,8 @@ test("stopping the webhook does not wait for the turn of a request that is still
   while (!asked.length) await sleep(5);
 
   controller.abort();
-  const stopped = await Promise.race([channel.stop().then(() => "stopped"), sleep(3000).then(() => "still waiting")]);
+  // Unref'd: once the channel has stopped, the 3 s left to it would hold the file open after its tests.
+  const stopped = await Promise.race([channel.stop().then(() => "stopped"), new Promise((resolve) => setTimeout(resolve, 3000, "still waiting").unref())]);
   assert.equal(stopped, "stopped", "the channel stops without waiting for the agent");
   const answer = await request;
   assert.equal(answer.status, 503, "the caller is told the channel is stopping");
