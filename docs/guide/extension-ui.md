@@ -294,6 +294,12 @@ your utilities to reach it:
 createPortal(<div data-extension={portal.extension} style={{ display: "contents" }}>{viewer}</div>, document.body);
 ```
 
+Inside your parts the same order holds: a utility your code uses comes after
+all of the portal's, so where a `ui.classes` string has it beside a variant for
+a wider screen (`h-10 sm:h-9`), yours wins over that variant on a button of
+yours with the class, at every width. Write such a size another way
+(`size-10`, `h-[2.5rem]`); the build finds class names in comments too.
+
 tailwindcss and postcss are then the extension's to install, beside esbuild.
 
 ## Slots
