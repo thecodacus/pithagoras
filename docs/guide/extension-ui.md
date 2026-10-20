@@ -843,7 +843,7 @@ extension can be installed long after the upgrade, or never, and what was left
 waits for it.
 
 `portal.handoffs.take(name)` moves what was left under `name` into the
-package's own folder, `<dataDir>/handoff/<name>`, and gives that folder's path;
+package's own folder, `<dataDir>/handoff-<name>`, and gives that folder's path;
 nothing when nothing was left. The first package that asks has it, whole. It
 stays there until `handoffs.done(name)` removes it, so a start that stopped
 half way through reading it (the portal stopped, a disk was full) is given it
