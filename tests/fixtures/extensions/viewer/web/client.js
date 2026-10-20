@@ -4,9 +4,12 @@
  * the portal's own tests the portal with it and needs none of the extensions
  * the portal ships, any of which can be removed.
  *
- *   chat.panel     "Viewer", a plain panel: the second of two beside the conversation, with the console's
+ *   chat.panel     "Viewer", the second of two beside the conversation, with the console's: black from edge to edge
+ *                  (`bleed`), with a Fullscreen of its own in its head; `window.viewerPanel` is its handle, once drawn
  *   voice.window   "Viewer" in the middle, that can be maximized and is kept loaded while minimized, with a frame of
- *                  its own in which Escape restores it; `window.viewerLoads` counts the frame's loads
+ *                  its own in which Escape restores it; `window.viewerLoads` counts the frame's loads. Its button in
+ *                  the toolbar is as a spec says with `window.viewerButton({ hidden, live, title })`, and
+ *                  `window.viewerButtonMounts` counts the times the hook that says so is mounted
  *   nav.page       "Viewer", listed while a spec says so with `window.viewerListed(true)`
  *
  * Plain JavaScript with the portal's React, as the Notes example is: nothing
@@ -18,13 +21,29 @@ export default function (portal) {
 
   const Icon = (props) => h("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, ...props }, h("rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }));
 
-  let listed = false;
-  const listeners = new Set();
-  window.viewerListed = (on) => {
-    listed = on;
-    for (const heard of listeners) heard();
+  /** Something a spec says from outside, and a hook that draws again when it does. */
+  const told = (first) => {
+    let value = first;
+    const listeners = new Set();
+    return {
+      set: (next) => {
+        value = next;
+        for (const heard of listeners) heard();
+      },
+      use: () => React.useSyncExternalStore((heard) => (listeners.add(heard), () => listeners.delete(heard)), () => value),
+    };
   };
-  const useListed = () => React.useSyncExternalStore((heard) => (listeners.add(heard), () => listeners.delete(heard)), () => listed);
+  const listed = told(false);
+  window.viewerListed = listed.set;
+  const button = told({});
+  window.viewerButton = button.set;
+  window.viewerButtonMounts = 0;
+  const useButton = () => {
+    React.useEffect(() => {
+      window.viewerButtonMounts++;
+    }, []);
+    return button.use();
+  };
 
   window.viewerLoads = 0;
 
@@ -56,11 +75,18 @@ export default function (portal) {
     id: "viewer",
     title: "Viewer",
     icon: Icon,
-    component: () => h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, overflow: "auto", padding: 12 } }, "In view."),
+    bleed: true,
+    component: function Pane({ panel }) {
+      React.useEffect(() => {
+        window.viewerPanel = panel;
+      }, [panel]);
+      return h("div", { className: "viewer-pane", style: { flex: 1, minHeight: 0, padding: 12, color: "#d1d8e3" } }, "In view.");
+    },
+    actions: ({ panel }) => h("button", { type: "button", onClick: () => panel.fullscreen(), className: "rounded px-1.5 py-0.5 text-[11px]" }, "Fullscreen"),
     useButton: () => ({ title: "What the viewer shows" }),
   });
 
-  portal.slots.register("voice.window", { id: "viewer", title: "Viewer", icon: Icon, place: "middle", maximizable: true, keepLoaded: true, component: Viewer });
+  portal.slots.register("voice.window", { id: "viewer", title: "Viewer", icon: Icon, place: "middle", maximizable: true, keepLoaded: true, useButton, component: Viewer });
 
-  portal.slots.register("nav.page", { id: "viewer", title: "Viewer", icon: Icon, useShown: useListed, component: () => h("p", null, "The viewer's page") });
+  portal.slots.register("nav.page", { id: "viewer", title: "Viewer", icon: Icon, useShown: listed.use, component: () => h("p", null, "The viewer's page") });
 }

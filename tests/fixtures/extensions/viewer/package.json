@@ -1,7 +1,7 @@
 {
   "name": "test-viewer",
   "version": "0.1.0",
-  "description": "The portal's tests' stand-in for an extension with a window in voice mode that can be maximized and stays loaded, and a page listed only while it says so, so that no spec of the portal's own needs one the portal ships",
+  "description": "The portal's tests' stand-in for an extension with a panel black from edge to edge that goes fullscreen, a window in voice mode that can be maximized and stays loaded and whose button it says how to draw, and a page listed only while it says so, so that no spec of the portal's own needs one the portal ships",
   "type": "module",
   "keywords": ["pi-package"],
   "pi": {},
