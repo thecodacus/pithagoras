@@ -227,9 +227,10 @@ edit meant to replace.
 
 ## Pictures the agent makes
 
-With the [Images add-on](/guide/features#image-generation) on, a `generate_image`
+With [image generation](/guide/features#image-generation) on, a `generate_image`
 or `edit_image` call is not shown as a tool line but as the picture itself, from
-the moment it is asked for:
+the moment it is asked for. These are [Media](/guide/media)'s cards, there while
+it is installed:
 
 - **While it is made**, a frame in the shape of the coming picture holds its
   place: the size the agent asked for, or, for an edit, the shape of the picture
@@ -260,9 +261,9 @@ the moment it is asked for:
 - **Opening a chat again** draws the pictures that were made at once, with no
   fade, in the shape asked for when the agent asked for one and otherwise
   taking their own as they load; one whose file is gone from the folder says so.
-- **A tool of the same name** that another extension brings, and which pi may
-  keep in the portal's place, is the plain tool line it always was, whatever
-  state it is in: only the portal's own calls are drawn as pictures.
+- **A tool of the same name** that another extension brings is drawn the same
+  way while Media is installed: a card goes by the tool's name, as every
+  extension's cards do, not by which extension the tool is from.
 
 The movement is one of the [animations](/guide/interface#animations): with them
 switched off, or when your system asks for reduced motion, the frame is the same
@@ -297,8 +298,8 @@ either, but as the video from the moment it is asked for. A video takes minutes,
   under **Details**, below the player.
 - **A video the agent shows** with `show_video` is a player under its tool line, in the middle of the conversation as a picture is. One
   whose file is gone from the folder says so.
-- **A tool of the same name** that another extension brings is the plain tool line it always was; only the portal's own calls
-  are drawn as videos.
+- **A tool of the same name** that another extension brings is drawn the same way while Media is installed: a card goes by
+  the tool's name, not by which extension the tool is from.
 
 [Voice mode](/guide/voice) has no window for videos, and while the agent has `generate_video` its voice instructions say so: a video
 is for the chat, and is made only when asked. Every video the agent makes this way is also in the [Media](/guide/media) page's gallery, from the moment it is saved.
@@ -319,9 +320,11 @@ A status that names one of the chat's slash commands runs it when clicked.
 ## Sidebar and the sessions page
 
 The sidebar opens with New, then the places — Sessions, Projects, Agents,
-Routines and [Audit](#audit), with Browser, Memory and Media added while the
-[browser](/guide/browser) is installed, [Understory](/guide/features#memory-understory)
-holds the agent's memory, or an [image endpoint](/guide/media) or a video endpoint is set up — then **Pinned**, then **Recents**. The button at its
+Routines and [Audit](#audit), with Browser and Memory added while the
+[browser](/guide/browser) is installed or [Understory](/guide/features#memory-understory)
+holds the agent's memory, and the pages of extensions in a group of their own,
+**Extensions**, before Audit ([Media](/guide/media)'s while an image endpoint or a
+video endpoint is set up) — then **Pinned**, then **Recents**. The button at its
 top edge folds it to a rail of icons. A chat's full path is not drawn in the list: the folders (below) name where it works, and the Files panel shows the path on request. Recents is capped at twelve; anything past that is reachable from
 the Sessions page, which lists everything with a search of its own.
 

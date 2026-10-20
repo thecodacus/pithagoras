@@ -137,7 +137,7 @@ not changed by this.
 ## Tools
 
 A project can have tools of its own: **Tools** on its row lists the tools the portal has
-seen registered, as a chat's tools control does (the picture and video tools together in one **Media** group), and what you switch there is what
+seen registered, as a chat's tools control does ([Media](/guide/media)'s picture and video tools together in its group, `pithagoras-media`), and what you switch there is what
 every chat in the project starts with. "The research project never goes online" and
 "the dev project always has the shell tools" are then said once, not at the start of
 every chat.

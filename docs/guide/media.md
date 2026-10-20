@@ -1,35 +1,45 @@
 # Media
 
-**Media** appears in the sidebar while [image generation](/guide/features#image-generation) or
+**Media** appears in the sidebar's **Extensions** group while [image generation](/guide/features#image-generation) or
 [editing](/guide/features#editing-a-picture) or [video generation](/guide/features#video-generation) is
 switched on and has an address. It is the page for making pictures and videos with those endpoints
 **without a chat**, and for looking through every picture and video made with them — here, and by the
 agent in its chats. Nothing on it needs a model or a conversation: the page asks the portal, the portal
 asks the endpoint you set up.
 
+Media is an extension, `pithagoras-media` from the portal's `extensions/media`,
+installed when a portal starts for the first time and listed under Settings →
+Extensions → Installed like any other: switch it off or remove it, and the page,
+its settings, the agent's picture and video tools (`show_image` among them) and
+their cards in the chat go. What it keeps, its gallery and the pictures and
+videos made on the page, stays in its folder of the data folder for when it is
+back. A portal that had Media before it was an extension handed what it kept
+over to it: see [Upgrading](/guide/upgrading#media-is-an-extension).
+
 The form at the top is for one kind at a time. Where both are made, **Make: A picture / A video** above
 it chooses which; it follows the gallery's filter (with only videos shown, the form for videos is open) until
 you choose, and keeps the words you typed in each. Where only one kind is made, that form is the only one.
 The gallery under it holds both kinds together, with a filter for **All**, **Pictures** or **Videos**.
 
-Both are set up in one place, **Settings → Agent → Media**: the **Image model** (with **Image generation** and
+Both are set up in one place, Media's page in Settings, **Settings → Extension settings → Media**
+(`/settings/x/pithagoras-media`): the **Image model** (with **Image generation** and
 **Image editing**, each with an address) and the **Video model** (**Video generation**, with an address), two sections that open
 and close, with their switches always in view. Those
 switches decide whether the feature exists: whether the page can make or change pictures and make videos, and
 whether the agent can have the `generate_image`, `edit_image`, `generate_video` and `show_video` tools at all
-(`show_image` is always there). Whether a
+(`show_image` comes with Media, and is there while Media is). Whether a
 chat's agent actually gets a tool is set where every tool is, in the tool lists (Settings → Agent → Tools, a
-project's Tools, the tools control of a chat), where the picture and video tools are one **Media** group. The page
+project's Tools, the tools control of a chat), where the picture and video tools are one group, `pithagoras-media`. The page
 does not depend on those lists: a tool switched off there leaves the page as it is.
 
-The page's address keeps what is shown (`/media?show=videos&origin=chat&kind=animated`), so a link keeps it and
-**Back** goes through it. `/images` and `/videos`, where each kind had a page, lead here with that kind shown.
+The page's address keeps what is shown (`/x/pithagoras-media/media?show=videos&origin=chat&kind=animated`), so a
+link keeps it and **Back** goes through it.
 
 ## Pictures
 
 The form for pictures has two modes, chosen with the switch above it: **Generate** and **Edit**. Both are
-always there. Making and changing a picture are set up apart, each with its own switch in **Settings → Agent →
-Media**, and a mode that is not set up is not hidden: it says *not set up*, and when you choose it the form says
+always there. Making and changing a picture are set up apart, each with its own switch in **Settings → Extension
+settings → Media**, and a mode that is not set up is not hidden: it says *not set up*, and when you choose it the form says
 it is switched off or has no address, with a link to the setting. The page opens in **Generate**, or in **Edit**
 where only editing is set up, and it still shows what is in the gallery whatever is set up.
 
@@ -76,14 +86,14 @@ Some settings are not in the OpenAI image format at all, and a server cannot be 
 fields. **stable-diffusion.cpp's server** takes them in its own way: as a JSON block inside the
 prompt, `<sd_cpp_extra_args>{…}</sd_cpp_extra_args>`, which it cuts out before it generates. The
 page can send them that way, and only if you say the endpoint is such a server: switch on
-**Stable Diffusion extra settings** in **Settings → Agent → Media** (off by default; one switch for
+**Stable Diffusion extra settings** in **Settings → Extension settings → Media** (off by default; one switch for
 generating and editing). Only stable-diffusion.cpp servers understand it, and any other endpoint would
 take the block as part of the description, so leave it off for those.
 
 **Off,** the form shows only the OpenAI fields above and **nothing of this kind is ever sent**: no
 block, not even for a value that was typed or kept earlier. Those values stay in the form's memory,
 and are not shown or sent. Under **Advanced** a quiet line tells where to switch the settings on, with
-a link to **Settings → Agent → Media**. The agent's tools never send these settings, on or off.
+a link to Media's page in Settings. The agent's tools never send these settings, on or off.
 
 **On,** the fields are plain fields of the form, right under the others in **Advanced**, in the same
 style and with no box or heading of their own, and the line about switching them on is gone. A short
@@ -112,7 +122,7 @@ that were being made; nothing is made of them.
 A picture has as long as the **Time limit** of the [image endpoint](/guide/features#the-endpoint)
 gives it: five minutes unless you set another, from 30 to 3600 seconds, the same for
 making and for changing a picture. When it runs out the frame says so, and the message
-names **Settings → Agent → Media**, where the limit is raised for a slow or local model.
+names **Media** in Settings, where the limit is raised for a slow or local model.
 
 Each picture can cost money at a hosted endpoint, as it does for the agent.
 
@@ -233,7 +243,7 @@ byte for byte.
 ::: warning Only a stable-diffusion.cpp server works
 Video generation works only with a [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
 server, through its native API (`/sdcpp/v1`), with a video model started on it. **An OpenAI-style `/v1` endpoint, or
-another video server, does not work.** The same note is under the address in **Settings → Agent → Media**.
+another video server, does not work.** The same note is under the address in Media's page in Settings.
 
 Through llama-swap the address is `http://host:port/upstream/<model>`, where `<model>` is the llama-swap name of
 the model that runs the stable-diffusion.cpp server: the portal adds `/sdcpp/v1/…` to it.
@@ -315,7 +325,7 @@ them.
 A video has as long as the **Time limit** of the [video endpoint](/guide/features#the-video-endpoint)
 gives it, from the request to the file, the wait in the server's queue included: **half an hour**
 unless you set another, from 30 to 14400 seconds. When it runs out the frame says so, and the
-message names **Settings → Agent → Media**, where the limit is raised for a slow or local model.
+message names **Media** in Settings, where the limit is raised for a slow or local model.
 
 Videos made on this page are kept until you delete them. Where you want a ceiling, the **Disk
 limit** of the video model in Settings is how many megabytes they may take together: at the limit
@@ -474,7 +484,7 @@ is, and so does going to **Edit**.
 
 ### Deleting
 
-A picture or a video is deleted with its file. For one the page made that is the portal's own
+A picture or a video is deleted with its file. For one the page made that is Media's own
 folder, and the question can be switched off in Settings like the others that delete. Pictures and videos
 selected together are asked about once.
 
@@ -488,7 +498,7 @@ folder is deleted the same way.
 ### What the gallery lists
 
 The page lists and serves pictures and videos only from the places the portal knows: its own folders,
-`images` and `videos`, under the portal's data folder, and the `generated-images` and `generated-videos` folders
+`images` and `videos`, in Media's folder of the portal's data folder, and the `generated-images` and `generated-videos` folders
 of the folders the agent works in — the home of every agent, the projects, and the folder of every chat. It
 never opens a path the page names — a picture or video is asked for by its id — and every file is
 opened with the checks a picture of a chat's folder has: a path inside the folder, no
@@ -600,8 +610,8 @@ unless you set another). See
 
 | | |
 | --- | --- |
-| Stored as | The files of the page's pictures in `images` under the portal's data folder, and the list in the portal's own database (`images`). Jobs are kept in memory. |
-| API | [`/api/images`](/reference/api#images) |
+| Stored as | In Media's folder of the portal's data folder, `extension-data/pithagoras-media`: the files of the page's pictures in `images`, their small copies in `image-thumbs`, and the list in Media's own database, `media.db` (`images`). Jobs are kept in memory. |
+| API | [`/api/x/pithagoras-media/images`](/reference/api#images) |
 
 ### Videos
 
@@ -639,8 +649,8 @@ reference videos and audio, LoRA and the other fields of the native API; they ar
 
 | | |
 | --- | --- |
-| Stored as | The files of the page's videos in `videos` under the portal's data folder, the posters in `video-posters`, and the list in the portal's own database (`videos`). Jobs are kept in memory. |
-| API | [`/api/videos`](/reference/api#videos) |
+| Stored as | In Media's folder of the portal's data folder, `extension-data/pithagoras-media`: the files of the page's videos in `videos`, the posters in `video-posters`, the playable copies in `video-copies`, and the list in Media's own database, `media.db` (`videos`). Jobs are kept in memory. |
+| API | [`/api/x/pithagoras-media/videos`](/reference/api#videos) |
 
 ## The agent
 
@@ -670,4 +680,4 @@ Both appear in the chat as a **player** under the tool line, with the tool's cal
 `generate_video` runs, a frame holds the place of the video (in the shape of the size asked for) and says how
 long it has taken. See [Sessions](/guide/sessions#videos-the-agent-makes). Like any tool that is not a plain
 read, they are refused in a conversation with a teammate unless a [tool rule](/people/rules) allows them. They sit
-in one **Media** group in the tool lists, with the picture tools.
+in Media's group in the tool lists, `pithagoras-media`, with the picture tools.

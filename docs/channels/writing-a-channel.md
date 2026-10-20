@@ -206,7 +206,7 @@ for. `text` may be empty when there are pictures.
 
 `meta.onPicture` is how pictures come back, and `meta.onVideo` clips. When a
 call of the agent's gives one ([any tool's](/guide/extension-ui#files-a-tool-gives):
-`show_image`, `generate_image`, an extension's), it is handed to you as
+[Media](/guide/media)'s `show_image` and `generate_image`, or another extension's), it is handed to you as
 `{ data, mimeType, name, title? }`, `data` in base64, at the moment it is given
 and whatever **Progress** and **Tool activity** say. A picture is a PNG, JPEG,
 GIF or WebP of at most 25 MB, a clip a WebM or MP4 of at most 100 MB, by their

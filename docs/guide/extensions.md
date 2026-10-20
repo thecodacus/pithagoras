@@ -25,8 +25,8 @@ is what there is to install, in three parts: **Comes with Pithagoras**, **Find
 packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
-(a pack of seven themes, the terminal, Git, Files, Canvases and [Documents](/guide/documents)), each installed from the portal's own
-folder with one click.
+(a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents) and
+[Docker for extensions](/guide/docker)), each installed from the portal's own folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and
@@ -52,7 +52,7 @@ started from then on have the package; open ones pick it up with `/reload`.
 ## What a portal starts with
 
 A fresh portal installs the extensions its own `extensions/defaults.json` names,
-once: today the [terminal](/guide/terminal), [Git](/guide/git), [Files](/guide/files), [Canvases](/guide/canvases) and the theme pack (Forest, Ocean,
+once: today the [terminal](/guide/terminal), [Git](/guide/git), [Files](/guide/files), [Canvases](/guide/canvases), [Media](/guide/media) and the theme pack (Forest, Ocean,
 Rose, Amber, Mono, Dusk and Warm, chosen under Settings → This browser → Colours). They are ordinary packages from then on: listed under **Installed**,
 switched off or removed like any other, and one you removed is not put back
 when the portal starts again. To use your own in place of one of them, remove
@@ -211,8 +211,8 @@ Tools are grouped by what installed them, so a package can be switched off in
 one go. An MCP server is its own group rather than a share of the adapter that
 attached it — three servers used to arrive as one pile of forty tools called
 `pi-mcp-adapter`, and nobody thinks of them that way.
-The portal's own picture tools, `show_image`, `generate_image` and `edit_image`,
-and the video tools, `generate_video` and `show_video`, are together in one **Media** group,
+[Media](/guide/media)'s picture tools, `show_image`, `generate_image` and `edit_image`,
+and its video tools, `generate_video` and `show_video`, are together in its group, `pithagoras-media`,
 whichever of them is on offer.
 
 ::: tip The browser is one of them
@@ -335,8 +335,8 @@ it is needed: it is not in the model's list, and the model finds it through a si
 below). The portal marks no other tool and no other set on its own, so a portal behaves as it always did until
 you choose.
 
-**Settings → Tools** has a **lazy** button on the header of each group (a package, the browser, the
-**Media** group, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
+**Settings → Tools** has a **lazy** button on the header of each group (a package, such as
+`pithagoras-media`, the browser, an MCP server) and one beside each tool. Marking a group makes every tool of it lazy,
 including tools that turn up in it later; marking a tool makes that one lazy. Taking the mark away offers
 the tool one by one again. The button of a tool that is switched off by default is greyed out, and so is a
 group's while every tool in it is off: a tool that is off is not offered to the model, lazy or not, so

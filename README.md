@@ -60,10 +60,10 @@ Browsers install the portal as an app (PWA) only over HTTPS or on `localhost`.
 - **Voice mode** — local speech-to-text and text-to-speech in a managed container, pictures
   both ways, push-to-talk.
 - **Add-ons** — the agent's own browser, and opt-in features: a subagent tool, Understory
-  memory with a Memory page, image generation and editing through an endpoint you choose,
-  and video generation through a stable-diffusion.cpp server, with one Media page to make pictures
-  and short videos without a chat (from a description, or from a picture), a gallery of both, and a
-  player for the videos.
+  memory with a Memory page, and, from the Media extension the portal installs, image generation
+  and editing through an endpoint you choose and video generation through a stable-diffusion.cpp
+  server, with one Media page to make pictures and short videos without a chat (from a description,
+  or from a picture), a gallery of both, and a player for the videos.
 - **Channels and people** — reach the agent from Telegram, Slack, Discord, Signal or a webhook, with
   roles, approvals and an audit log.
 - **Routines** — scheduled runs that report to a channel.
@@ -112,9 +112,10 @@ The rest is in [Configuration](https://thecodacus.github.io/pithagoras/reference
 ## Settings
 
 **Settings** (bottom of the sidebar) is the web equivalent of pi's slash commands:
-**Providers** and **Defaults** for models, **Tools**, **Media**, **Skills**, **MCP** and
+**Providers** and **Defaults** for models, **Tools**, **Skills**, **MCP** and
 **Extensions** for the agent, **Channels** and **People**, and **This browser**, **Add-ons**, **Shortcuts**,
-**About** and **Advanced** for the portal. What a chat uses lives on the pills under its
+**About** and **Advanced** for the portal, with a page for each extension that has settings, such as
+**Media**. What a chat uses lives on the pills under its
 composer. Defaults you set apply to **newly started** sessions only.
 
 ## Sessions and workspaces

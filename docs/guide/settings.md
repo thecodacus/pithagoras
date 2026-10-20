@@ -7,11 +7,13 @@ German. Navigation runs down the left edge, in four groups:
 | Group | Pages |
 | --- | --- |
 | **Models** | **Providers** — where models come from, see [Models and providers](/guide/models); **Defaults** — model, effort and context for new chats |
-| **Agent** | **Tools**, **Media**, **Skills**, **MCP**, **Extensions** |
+| **Agent** | **Tools**, **Skills**, **MCP**, **Extensions** |
 | **Reach** | **Channels**, **People** |
 | **Portal** | **This browser**, **Authentication**, **Add-ons**, **Shortcuts**, **Logs**, **About** (with **Update** and **Restart**), **Advanced** |
 
-Plus a page for every extension that exposes configuration.
+Plus a page for every extension that exposes configuration, under **Extension
+settings**: [Media](/guide/media)'s is **Media**, at
+`/settings/x/pithagoras-media`.
 
 The dialog takes the room the screen has: nearly all of a laptop's, and three
 quarters of the width of a wider one. Every page uses that width. Lists
@@ -79,7 +81,8 @@ that, a session asking for a local model silently started on pi's fallback.
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see
 [MCP servers](/guide/mcp).
 
-**Media** has two sections, **Image model** and **Video model**. Each has its **switches** at the top, always in view,
+**Media**, under **Extension settings**, is the page of the [Media](/guide/media)
+extension. It has two sections, **Image model** and **Video model**. Each has its **switches** at the top, always in view,
 and under them a heading with a line under it, which opens and closes the section with a click; what opens is directly
 under the heading. The line says what the section is for
 while it is open, and the address and model while it is closed. A model that is not set up starts open, to show its
@@ -90,7 +93,7 @@ typed in it and not saved stays open, and the search of Settings opens the secti
 switches for **Image generation** and **Image editing** (always in view), and **Several pictures per edit** and **Stable Diffusion extra settings** (under **More options**). The image endpoint is in the section; **Editing endpoint**, a group of its own that opens and closes, holds the address, key, model and maximum size for editing, which are empty when editing uses the image endpoint. See
 [Opt-in features](/guide/features#image-generation). The first two switch the feature on or off as a whole: the
 [Media page](/guide/media) and the existence of the tools. Whether a chat's agent gets the tools,
-`show_image`, `generate_image` and `edit_image`, is set only in the Tools list, where they are together in one **Media** group, with the video tools. **Stable Diffusion extra settings** (off by default) is
+`show_image`, `generate_image` and `edit_image`, is set only in the Tools list, where they are together in Media's group, `pithagoras-media`, with the video tools. **Stable Diffusion extra settings** (off by default) is
 for an endpoint that is a stable-diffusion.cpp server: it lets the Media page offer and send the settings only that server
 reads, see [Media](/guide/media#stable-diffusion-settings). The tools do not use it.
 
@@ -98,7 +101,7 @@ reads, see [Media](/guide/media#stable-diffusion-settings). The tools do not use
 limit, the disk limit, and the switch for **Video generation**, see
 [Opt-in features](/guide/features#video-generation). The switch turns the feature on or off as a whole: the
 [Media page](/guide/media) and the existence of the tools. Whether a chat's agent gets the tools, `generate_video` and
-`show_video`, is set only in the Tools list, in the same **Media** group.
+`show_video`, is set only in the Tools list, in the same group.
 
 ## Channels
 
