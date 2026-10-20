@@ -5,9 +5,10 @@ import path from 'node:path';
 import { setPortal } from '../src/server/host.ts';
 import { forgetPicturesIn, keepChatPictures, listPictures, recordChatPicture } from '../src/server/image-gallery.ts';
 import { closeStore, getDb, openStore } from '../src/server/store.ts';
-import { forgetVideosIn, keepChatVideos, recordChatVideo } from '../src/server/video-gallery.ts';
+import { forgetVideosIn, keepChatVideos, listVideos, recordChatVideo } from '../src/server/video-gallery.ts';
 import { folderFiles } from '../../../core/server/src/folder-files.ts';
 import { scratch } from '../../../tests/helpers.mts';
+import { WEBM } from './video-fixtures.mts';
 
 /**
  * What becomes of the pictures and clips of a chat that goes, and of a folder the portal deletes: a chat's stay as
@@ -124,6 +125,20 @@ test('the pictures of a chat that went while Media did not hear of it are kept a
     chats.delete('c');
     const kept = listPictures().pictures.find((p) => p.id === id)!;
     assert.deepEqual([kept.origin, kept.chat, kept.folder, kept.prompt], ['folder', null, { name: path.basename(project), home: false }, 'made a.png']);
+  } finally {
+    closeStore();
+  }
+});
+
+test('the clips of a chat that went while Media did not hear of it are kept as its folder\'s when the gallery is looked at', () => {
+  const { project, chats } = media();
+  try {
+    writeFileSync(path.join(project, 'generated-videos', 'v.webm'), WEBM);
+    recordChatVideo({ sessionId: 'c', path: 'generated-videos/v.webm', kind: 'generated', prompt: 'waves', params: {}, bytes: WEBM.length });
+    const id = idOf(videos(), 'v.webm');
+    chats.delete('c');
+    const kept = listVideos().videos.find((v) => v.id === id)!;
+    assert.deepEqual([kept.origin, kept.chat, kept.folder, kept.prompt], ['folder', null, { name: path.basename(project), home: false }, 'waves']);
   } finally {
     closeStore();
   }
