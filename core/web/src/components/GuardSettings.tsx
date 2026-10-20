@@ -365,10 +365,12 @@ function AllowlistEditor({ initial, onSaved, onError }: { initial: string; onSav
   }, [initial]);
 
   const save = async () => {
+    const sent = text;
     setSaving(true);
     try {
-      const { allowlist } = await api.setGuardAllowlist(text);
-      setText(allowlist);
+      const { allowlist } = await api.setGuardAllowlist(sent);
+      // As the server keeps it, unless more was typed while it was saved: that stays, to be saved next.
+      setText((now) => (now === sent ? allowlist : now));
       setFrom(allowlist);
       onSaved(allowlist);
     } catch (e) {

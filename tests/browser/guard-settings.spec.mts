@@ -113,6 +113,29 @@ test('a list the server refuses is said, and what was typed stays to be saved ag
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
 });
 
+test('what is typed in the list while it is being saved stays, to be saved after it', async ({ page }) => {
+  const { dialog } = await portal(page);
+  // The save answered only once something more has been typed.
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await page.route('**/api/guard/allowlist', async (route) => {
+    const { domains } = route.request().postDataJSON() as { domains: string };
+    await held;
+    await route.fulfill({ json: { allowlist: domains.trim() } });
+  });
+  const list = dialog.getByRole('textbox', { name: "Sites the agent's tools may reach" });
+  const save = dialog.getByRole('button', { name: 'Save', exact: true });
+  await list.fill('github.com\ndocs.test\n');
+  await save.click();
+  await expect(save).toBeDisabled();
+  await list.focus();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('news.test');
+  release();
+  await expect(save).toBeEnabled();
+  await expect(list).toHaveValue('github.com\ndocs.test\nnews.test');
+});
+
 test('a list typed and not saved is asked about before Settings closes, and one saved is not', async ({ page }) => {
   const { dialog } = await portal(page);
   const list = dialog.getByRole('textbox', { name: "Sites the agent's tools may reach" });
