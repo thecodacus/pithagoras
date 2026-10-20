@@ -11,7 +11,6 @@ import { stableSubagents, subagents, type Subagent } from "../subagents";
 import { useBackground } from "../use-background";
 import { useWorkPanels } from "../use-work-panels";
 import { useFollowBottom } from "../use-follow-bottom";
-import { latestBrowserActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
 import { DictationButton, DictationStrip } from "./Dictation";
 import { insertAtCaret } from "../dictation";
@@ -20,7 +19,7 @@ import { createPortal } from "react-dom";
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DiagramPlugin } from "streamdown";
 import { followPointer } from "../pointer-drag";
-import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuGlobe, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
+import { LuGripVertical, LuMenu, LuBot, LuArrowDown, LuSquare, LuArrowUp, LuPaperclip, LuPuzzle, LuX } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type PromptOptions, type Session } from "../api";
 import { pending, refetchImage, sortFiles, uploadedNote, type Attachment } from "../attachments";
 import { activity, buildTranscript, keepItems, type Item, type SentImage } from "../transcript";
@@ -72,7 +71,7 @@ const ASIDE: Record<Dock, string> = {
   float: "absolute z-20 rounded-xl border border-line bg-surface shadow-pop",
 };
 
-type OwnPanel = "browser" | "agents";
+type OwnPanel = "agents";
 /** A panel an extension brought (the `chat.panel` slot), by its entry's key: `x:<extension>/<id>`. */
 type ExtensionPanel = `x:${string}`;
 /** The panels that sit beside the conversation, each in a place of its own. */
@@ -80,7 +79,6 @@ type AsidePanel = OwnPanel | ExtensionPanel;
 const isOwn = (kind: AsidePanel): kind is OwnPanel => !kind.startsWith("x:");
 /** What each of the portal's own panels is called: in its header, and on its close button. */
 const PANEL: Record<OwnPanel, { label: string; close: string }> = {
-  browser: { label: msg("Browser"), close: msg("Close the browser") },
   agents: { label: msg("Subagents"), close: msg("Close the subagents") },
 };
 
@@ -112,8 +110,8 @@ const moveInto = (parent: HTMLElement, box: HTMLElement) => {
  * place it is in: carried elsewhere, it is the same panel — Files keeps an
  * edit not saved, a list its scroll — rather than one made anew there.
  *
- * A box taken off the page and put back loses what the page held for it: the
- * browser's page loads again, and a list is scrolled back to its top. So
+ * A box taken off the page and put back loses what the page held for it: a
+ * frame's page loads again, and a list is scrolled back to its top. So
  * before the place it is in goes, it steps out into `park`, and on into its
  * next place, with moveBefore — which moves it without taking it off. A
  * browser without moveBefore takes it off and puts it back as before. Made
@@ -127,7 +125,7 @@ function panelBoxes(park: { readonly current: HTMLElement | null }, pressed: { r
     let el = boxes[kind];
     if (!el) {
       el = boxes[kind] = document.createElement("div");
-      el.className = `flex min-h-0 min-w-0 flex-1 flex-col${kind === "browser" ? " bg-black" : ""}`;
+      el.className = "flex min-h-0 min-w-0 flex-1 flex-col";
       // On the page, not in React: what is in the box is drawn from elsewhere
       // in the chat (a portal), and its events never reach the window it is in.
       el.addEventListener("pointerdown", () => pressed.current(kind), true);
@@ -270,10 +268,6 @@ export function Chat({
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
-  // Whether there is a browser to watch, and whether you are watching it. Asked
-  // once — the answer only changes when somebody installs or removes one.
-  const [browserUp, setBrowserUp] = useState(false);
-  const [watching, setWatching] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const openAgent = (id: string) => {
@@ -382,7 +376,7 @@ export function Chat({
           setOpenedFrom(key);
           panelControl.current.open(name, opened);
         },
-        // Its own box, as the browser's is: the panel beside it stays where it is, and closed, the box leaves the page, and fullscreen with it.
+        // Its own box: the panel beside it stays where it is, and closed, the box leaves the page, and fullscreen with it.
         // Not open, there is no box on the page to show; and a browser refuses it but for something the person did.
         fullscreen: () => {
           const box = boxes.box(`x:${key}`);
@@ -402,10 +396,10 @@ export function Chat({
   const toggleExtensionPanel = useStable((key: string, open: boolean) => (open ? void closeExtensionPanel(key) : showExtensionPanel(key, true)));
   useWorkPanels(
     {
-      browser: !voiceMode && watching, agents: !voiceMode && agentsOpen,
+      agents: !voiceMode && agentsOpen,
       ...Object.fromEntries(extensionPanels.map((key) => [`x:${key}`, !voiceMode])),
     },
-    panel => { if (panel === "browser") setWatching(false); else if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); },
+    panel => { if (panel === "agents") setAgentsOpen(false); else if (panel.startsWith("x:")) showExtensionPanel(panel.slice(2), false); },
     // A third panel closes another one instead of one an extension says holds
     // something that would be lost (an edit not saved), and of one that has
     // just opened the third.
@@ -415,7 +409,7 @@ export function Chat({
     ],
   );
   // Beside the conversation, top to bottom in this order.
-  const asidePanels = [watching && "browser", agentsOpen && "agents", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
+  const asidePanels = [agentsOpen && "agents", ...extensionPanels.map((key) => `x:${key}`)].filter(Boolean) as AsidePanel[];
 
   // Kept across reloads: a width you dragged is a preference, and losing it on
   // every refresh makes the handle feel decorative. Where each panel goes, the
@@ -1050,8 +1044,6 @@ export function Chat({
   // What it is doing, and for how long. The clock ticks only while something is
   // running, so an idle session re-renders no more than it used to.
   const phase = useMemo(() => (running ? activity(events) : null), [running, events]);
-  // Scans of every event, for the voice view: with the box's text in this component, they would run for each key typed.
-  const browserActivity = useMemo(() => latestBrowserActivity(events), [events]);
   // Beside the conversation: subagents, jobs left running, extension statuses.
   // The same entry for a subagent whose own events have not changed: an open
   // panel draws its transcript again only when there is more of it, not on
@@ -1196,16 +1188,6 @@ export function Chat({
     caret.current = null;
     changeInput(`${trigger}${c.name} `);
   };
-
-  useEffect(() => {
-    // Only offered where it would work: an iframe needs a secure context, and
-    // over plain HTTP the client inside it refuses to start.
-    if (!window.isSecureContext) return;
-    api
-      .browser()
-      .then((b) => setBrowserUp(b.install.container === "running"))
-      .catch(() => setBrowserUp(false));
-  }, []);
 
   useLayoutEffect(() => {
     // Stay at the end while the agent writes — unless you scrolled up to read,
@@ -1572,7 +1554,6 @@ export function Chat({
   }, [voiceMode, dictation.stop]);
 
   const closeOwn: Record<OwnPanel, () => void> = {
-    browser: () => setWatching(false),
     agents: () => setAgentsOpen(false),
   };
   const closePanel = (kind: AsidePanel) => (isOwn(kind) ? closeOwn[kind]() : void closeExtensionPanel(kind.slice(2)));
@@ -1597,7 +1578,7 @@ export function Chat({
     if (!entry) return null;
     const Body = entry.component;
     return (
-      // From edge to edge (`bleed`): black, as the browser's box is, and what it draws fills it rather than scrolls in it.
+      // From edge to edge (`bleed`): black, and what it draws fills it rather than scrolls in it.
       <div className={`flex min-h-0 flex-1 flex-col ${entry.bleed ? "overflow-hidden bg-black" : "overflow-auto bg-surface"}`} data-extension={entry.extension}>
         <ErrorBoundary resetKey={`${entry.key}:${session.id}`} fallback={(error) => <div className="p-4"><PartFailed error={error} /></div>}>
           <Body key={session.id} {...panelProps(entry)} />
@@ -1630,12 +1611,10 @@ export function Chat({
   const panelKey = (key: string) => (panelEntries.some((entry) => entry.key === key) ? key : panelEntries.find((entry) => entry.name === key)?.key);
   const panelControl = useRef<ChatPanels>({ isOpen: () => false, open: () => {}, close: () => {} });
   panelControl.current = {
-    isOpen: (key) =>
-      key === "browser" ? watching : key === "agents" ? agentsOpen : extensionPanels.includes(panelKey(key) ?? key),
+    isOpen: (key) => (key === "agents" ? agentsOpen : extensionPanels.includes(panelKey(key) ?? key)),
     open: (key, params) => {
       const given = (params ?? {}) as { id?: unknown };
-      if (key === "browser") setWatching(true);
-      else if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
+      if (key === "agents") typeof given.id === "string" ? openAgent(given.id) : setAgentsOpen(true);
       else {
         const found = panelKey(key);
         if (!found) throw new Error(`There is no panel called "${key}"`);
@@ -1679,17 +1658,6 @@ export function Chat({
         {extensionHead(kind, "header") ?? <span className="text-[11px] text-fg-subtle">{panelName(kind).label}</span>}
         <div className="ml-auto flex items-center gap-0.5">
           {extensionHead(kind, "actions")}
-          {kind === "browser" && (
-            <button
-              // The browser's own box is what goes fullscreen, not the place
-              // it shares: the panel beside it stays where it is,
-              // and closed, the box leaves the page, and fullscreen with it.
-              onClick={() => boxes.box("browser").requestFullscreen?.()}
-              className="rounded px-1.5 py-0.5 text-[11px] text-fg-faint transition hover:text-fg"
-            >
-              {t("Fullscreen")}
-            </button>
-          )}
           <button
             onClick={() => closePanel(kind)}
             title={t("Collapse")}
@@ -1700,14 +1668,6 @@ export function Chat({
           </button>
         </div>
       </div>
-      {kind === "browser" && (
-        <iframe
-          src="/browser-ui/"
-          title={t("The agent's browser")}
-          className="fx-power min-h-0 flex-1 border-0"
-          allow="clipboard-read; clipboard-write; fullscreen"
-        />
-      )}
       {kind === "agents" && (
         <div className="min-h-0 flex-1 bg-surface">
           <SubagentPanel sessionId={session.id} agents={agents} items={items} selected={selectedAgent} onSelect={setSelectedAgent} />
@@ -1868,16 +1828,6 @@ export function Chat({
               live={agents.some((a) => a.status === "running")}
             >
               <LuBot />
-            </PanelToggle>
-          )}
-          {browserUp && (
-            <PanelToggle
-              open={watching}
-              onClick={() => setWatching((v) => !v)}
-              label={t("Browser")}
-              title={watching ? t("Hide the browser") : t("Watch the browser the agent is driving")}
-            >
-              <LuGlobe />
             </PanelToggle>
           )}
           {panelEntries.map((entry) => (
@@ -2264,7 +2214,7 @@ export function Chat({
                 <LuPaperclip aria-hidden className="h-4 w-4" />
               </button>
               <DictationButton dictation={dictation} />
-              <VoiceControl folder={session.workspace} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={browserActivity} toolEvents={events} />
+              <VoiceControl folder={session.workspace} key={session.id} sessionId={session.id} items={items} running={running} work={phase} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} toolEvents={events} />
               {/* Mid-run, Stop stays while a message is written: it is the
                   moment the agent is seen going the wrong way, and whether to
                   steer it or stop it is still open. */}

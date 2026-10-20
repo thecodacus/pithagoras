@@ -746,7 +746,6 @@ export const api = {
     json<{ ok: true }>(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
   people: () => json<{ people: Person[] }>("/api/people"),
-  browser: () => json<BrowserStatus>("/api/browser"),
   features: () => json<Features>("/api/features"),
   /** The subagent tool alone: nothing of Understory or Docker asked for. */
   subagentFeature: () => json<{ subagent: SubagentFeature }>("/api/features/subagent"),
@@ -1515,7 +1514,6 @@ export interface AuditEntry {
   session_id: string | null;
 }
 
-/** The agent's browser, and who may drive it. */
 export type SubagentMode = "interrupt" | "background";
 
 /** The subagent tool the portal ships, off until switched on. */
@@ -1664,42 +1662,6 @@ export interface MemoryValidation {
 export interface Features {
   subagent: SubagentFeature;
   understory: UnderstoryFeature;
-}
-
-export interface BrowserStatus {
-  running: boolean;
-  /** Running with no password on its web UI. */
-  unprotected: boolean;
-  /** The MCP server wiring the agent to this browser, if any. */
-  connectedAs: string | null;
-  /** How and whether a browser can run here at all. */
-  install: {
-    available: boolean;
-    /** "external": a browser the deployment runs itself, which the portal only looks at. */
-    mode?: "docker" | "local" | "external";
-    image: boolean;
-    container: "absent" | "stopped" | "running" | "unavailable";
-    binary?: string | null;
-    headless?: boolean;
-    pulling: { active: boolean; line: string; error?: string };
-  };
-  config: { user: string; hasPassword: boolean };
-  version: string | null;
-  pages: { title: string; url: string }[];
-  uiPort: string;
-  /** Does that port answer other machines? The page links to it only then. */
-  uiExposed: boolean;
-  /** A container made before the port was kept to one address: it answers every machine until it is installed again. */
-  uiOutdated: boolean;
-  /** Whether the browser tools glide a cursor to what they act on. */
-  cursor: boolean;
-  /** Is the browser wired up at all, whether or not it is running right now? */
-  configured: boolean;
-  /** Does a conversation that has never said anything about it get the browser? */
-  byDefault: boolean;
-  /** Only the conversations that disagree with that — see "Who may drive it". */
-  sessions: { id: string; title: string; kind: string; allowed: boolean }[];
-  routines: { slug: string; name: string }[];
 }
 
 /** A skill an agent wrote for itself, in its home's skills folder. */

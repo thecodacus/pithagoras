@@ -22,6 +22,14 @@ function set(next: Known): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Nothing known: as the extension is loaded, which the portal does again when its server half comes or goes, with
+ * the module it already has. What the server half that went said is no answer of the one there now.
+ */
+export function forget(): void {
+  known = { state: null, failed: false };
+}
+
 /** What the Browser page or its page in Settings read: everything else follows it. */
 export function publish(state: BrowserState): void {
   set({ state, failed: false });

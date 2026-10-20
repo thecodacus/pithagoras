@@ -2,7 +2,7 @@
  * The portal as an installed app. It opens when the server is out of reach —
  * and then says so, as it does in a tab — from the last page the server gave
  * and the built files that page loads. Nothing the agent does is cached: /api
- * and the browser view always go to the server. Pages, and the scripts not
+ * always goes to the server. Pages, and the scripts not
  * named by their content, are asked for fresh first, so a deploy is there on
  * the next load rather than the one after.
  */
@@ -159,7 +159,7 @@ function freshFirst(event, request, key, store) {
 
 /** Live, or served by the server alone: never from here. */
 const passThrough = (url) =>
-  url.pathname.startsWith("/api/") || url.pathname.startsWith("/browser-ui") || url.pathname.startsWith("/voice-assets/");
+  url.pathname.startsWith("/api/") || url.pathname.startsWith("/voice-assets/");
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;

@@ -1,9 +1,8 @@
 /**
  * Where the windows go in voice mode: one in the middle, one at the side.
  *
- * The browser is always the middle one, since that is what its shape suits.
  * A window an extension brought (`x:<extension>/<id>`) that says where it
- * goes (`place`) is placed next, at the side or in the middle, and in the
+ * goes (`place`) is placed first, at the side or in the middle, and in the
  * other place when that one is taken: the terminal's asks for the side. The
  * conversation and pictures fill whichever is left, the side first — beside a
  * full orb, which moves over for it — and the middle when the side is taken,
@@ -11,18 +10,18 @@
  * them. At most two are open at once (see use-work-panels.ts), so there is
  * always a place.
  */
-export type VoiceWindow = "browser" | "pictures" | "conversation" | `x:${string}`;
+export type VoiceWindow = "pictures" | "conversation" | `x:${string}`;
 
 export function placeWindows(
   open: Partial<Record<VoiceWindow, boolean>>,
   /** Where a window an extension brought goes when it has the choice (its entry's `place`). */
   wants: Partial<Record<VoiceWindow, "side" | "middle">> = {},
 ): { main?: VoiceWindow; side?: VoiceWindow } {
-  let main: VoiceWindow | undefined = open.browser ? "browser" : undefined;
+  let main: VoiceWindow | undefined;
   let side: VoiceWindow | undefined;
   const brought = (Object.keys(open) as VoiceWindow[]).filter((window) => window.startsWith("x:") && open[window]);
-  // One that says where it goes is placed as the browser is, before those that take whatever is left;
-  // where its place is taken, it has the other.
+  // One that says where it goes is placed before those that take whatever is left; where its place is taken, it has
+  // the other.
   for (const window of brought) {
     const want = wants[window];
     if (!want) continue;
