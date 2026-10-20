@@ -27,7 +27,7 @@ fs.rmSync = (p, options) => {
   return real.rmSync(p, options);
 };
 syncBuiltinESMExports();
-const { moveFolderTo, moveTo } = await import("../dist/handoff.js");
+const { handoffDone, handoffRoot, moveFolderTo, moveTo, takeHandoff } = await import("../dist/handoff.js");
 
 /** `fn` with `refusals` in force. */
 function refusing(refusals, fn) {
@@ -100,4 +100,39 @@ test("a folder that is a link to one elsewhere stays, with the folder it leads t
   assert.equal(readFileSync(path.join(to, "a.webm"), "utf8"), "a clip");
   assert.equal(lstatSync(path.join(data, "videos")).isSymbolicLink(), true);
   assert.deepEqual(readdirSync(elsewhere), []);
+});
+
+test("a hand-off taken into a folder on another file system, by a start stopped as it removed it, is not taken a second time; one left again since waits its turn", () => {
+  const into = path.join(home, "extension-data", "notes");
+  mkdirSync(into, { recursive: true });
+  const root = handoffRoot();
+  const leave = (rows) => {
+    put(path.join(root, "notes", "rows.json"), rows);
+    put(path.join(root, "notes", "files", "a.txt"), "a file");
+  };
+  leave("[1]");
+  const taken = path.join(into, "handoff-notes");
+  // Another file system: a rename into it is refused. And the start is stopped as it removes what it copied.
+  const across = (a, b) => (b === taken && path.dirname(a) === root ? "EXDEV" : undefined);
+  const stopped = (p) => (path.dirname(p) === root ? "ESTOPPED" : undefined);
+  assert.throws(() => refusing({ rename: across, rm: stopped }, () => takeHandoff("notes", into)), /ESTOPPED/);
+  assert.equal(readFileSync(path.join(taken, "rows.json"), "utf8"), "[1]", "copied whole before it was removed");
+
+  // The next start has it, and what is left of it where it was goes.
+  assert.equal(takeHandoff("notes", into), taken);
+  assert.deepEqual(readdirSync(root), []);
+  handoffDone("notes", into);
+  assert.equal(takeHandoff("notes", into), undefined, "taken once");
+
+  // Taken and not done with, when an upgrade from a version the person went back to leaves one again: that one waits.
+  leave("[1]");
+  assert.equal(takeHandoff("notes", into), taken);
+  leave("[1,2]");
+  assert.equal(takeHandoff("notes", into), taken);
+  assert.equal(readFileSync(path.join(taken, "rows.json"), "utf8"), "[1]");
+  assert.equal(readFileSync(path.join(root, "notes", "rows.json"), "utf8"), "[1,2]", "left as it was");
+  handoffDone("notes", into);
+  assert.equal(takeHandoff("notes", into), taken);
+  assert.equal(readFileSync(path.join(taken, "rows.json"), "utf8"), "[1,2]");
+  assert.equal(readFileSync(path.join(taken, "files", "a.txt"), "utf8"), "a file");
 });

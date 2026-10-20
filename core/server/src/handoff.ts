@@ -13,7 +13,7 @@ import { DATA_DIR } from "./data-dir.js";
 /** Where what is left waits to be taken: a folder of the data folder, closed to all but the portal. */
 export const handoffRoot = (): string => path.join(path.resolve(DATA_DIR), "handoff");
 
-/** What a hand-off may be called: one part of a path, and never one that begins with a dot, as a step up or a folder still being filled does. */
+/** What a hand-off may be called: one part of a path, and never one that begins with a dot, as a step up, a folder still being filled and one being taken do. */
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 /** `name`, where a hand-off may be called that; a refusal otherwise. */
@@ -94,13 +94,25 @@ const takenIn = (into: string, name: string): string => path.join(into, `handoff
 /**
  * What was left under `name`, moved into `into` (`<into>/handoff-<name>`), and its path; nothing when nothing was. One
  * taken before is where it was put, until `handoffDone`.
+ *
+ * It is first moved aside, under a fixed name beside where it was left, and from there into `into`: where `into` is on
+ * another file system, it is copied, and removed after, and a start that stopped while it was removed leaves the rest
+ * of it there, never where a hand-off is left, so it is not taken a second time. A hand-off left again since, by an
+ * upgrade from an older version that the person went back to, is where it was left, and is taken once this one is done.
  */
 export function takeHandoff(name: string, into: string): string | undefined {
   const taken = takenIn(into, name);
-  if (existsSync(taken)) return taken;
-  const left = path.join(handoffRoot(), name);
-  if (!existsSync(left)) return undefined;
-  moveTo(left, taken);
+  const moving = path.join(handoffRoot(), `.${name}.taking`);
+  if (existsSync(taken)) {
+    rmSync(moving, { recursive: true, force: true });
+    return taken;
+  }
+  if (!existsSync(moving)) {
+    const left = path.join(handoffRoot(), name);
+    if (!existsSync(left)) return undefined;
+    renameSync(left, moving);
+  }
+  moveTo(moving, taken);
   return taken;
 }
 
