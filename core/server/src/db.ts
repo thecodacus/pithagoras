@@ -3,7 +3,7 @@ import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } 
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { UNDERSTORY } from "./features.js";
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
-import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
@@ -2012,13 +2012,12 @@ export function adoptBrowserGrants(d: Database.Database = getDb(), fresh: string
   // server has cached some of its tools and not others, and a pinned version
   // that is bumped adds names — so the posture has to reach whatever turns up
   // later, not only what was there on the first day. What was carried over and
-  // since changed by the operator is not touched again.
-  const names =
-    state === "pending"
-      ? knownTools()
-          .map((t) => t.name)
-          .filter((name) => browserTool(name, servers, browsers))
-      : fresh.filter((name) => browserTool(name, servers, browsers));
+  // since changed by the operator is not touched again. A tool that says it
+  // drives a browser is told by what is remembered of it, the new ones included.
+  const known = knownTools();
+  const declared = new Set(known.filter((t) => t.drivesBrowser).map((t) => t.name));
+  const browser = (name: string) => browserTool(name, servers, browsers, declared.has(name));
+  const names = state === "pending" ? known.map((t) => t.name).filter(browser) : fresh.filter(browser);
   if (!names.length) return;
 
   setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
@@ -2095,15 +2094,15 @@ export function browserAllowedWith(session: SessionRow, policy: BrowserPolicy, e
   return policy.names.some((name) => toolEnabled(name, defaults, own));
 }
 
-/** The browser's tools, as far as any session has registered them. */
+/** The browser's tools, as far as any session has registered them: a browser server's, and those that say they drive a browser. */
 export function seenBrowserTools(): string[] {
   // Asked for by every routine's tools, so kept until the MCP file or the settings (what was seen) are written.
   const stamp = `${fileStamp(mcpConfigPath())}|${settingsWrites}`;
   if (lastBrowserTools?.stamp === stamp) return lastBrowserTools.names;
   const { servers, browsers } = serversAndBrowsers();
   const names = knownTools()
-    .map((t) => t.name)
-    .filter((name) => browserTool(name, servers, browsers));
+    .filter((t) => browserTool(t.name, servers, browsers, t.drivesBrowser === true))
+    .map((t) => t.name);
   lastBrowserTools = { stamp, names };
   return names;
 }
@@ -2618,7 +2617,7 @@ export function lazyAllowed(
   // Never in what the model is offered, so a mark would keep nothing out of the prompt: it is code mode's description that carries it.
   if (tool.scriptsOnly) return false;
   if (tool.cached || adapterTool({ source: tool.source, package: tool.package })) return false;
-  if (!noServerOf(tool.name) && mcpServerOf(tool.name, servers) !== undefined) return false;
+  if (!noServerOf(tool) && mcpServerOf(tool.name, servers) !== undefined) return false;
   if (PI_BUILT_IN_TOOLS.includes(tool.name)) return false;
   // Code mode is the way to make many calls in one: reached through another tool it would be one more step to it, and the
   // box the lists show it in has no set of its own on the server to mark.
@@ -2731,6 +2730,8 @@ export interface KnownTool {
   offByDefault?: true;
   /** The parameters that hold the files it is approved for, as its definition declares them: what an approval of it is written as, answered when no chat of it is running. */
   approvalFiles?: string[];
+  /** Said by the tool: it drives a web browser, so it is one of the browser's tools wherever they are counted, answered when no chat of it is running. */
+  drivesBrowser?: true;
 }
 
 /** The parameters that hold the files a tool is approved for, as it last declared them: see declaredFiles in guard.ts. */
@@ -2739,7 +2740,7 @@ export function approvalFilesOf(toolName: string): string[] | undefined {
 }
 
 /** A tool a session reported, as it is remembered. */
-export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[] }): KnownTool => ({
+export const remembered = (t: { name: string; source: string; description?: string; package?: string; inline?: true; scriptsOnly?: true; offByDefault?: true; approvalFiles?: string[]; drivesBrowser?: true }): KnownTool => ({
   name: t.name,
   source: t.source,
   description: t.description,
@@ -2748,6 +2749,7 @@ export const remembered = (t: { name: string; source: string; description?: stri
   ...(t.scriptsOnly ? { scriptsOnly: true } : {}),
   ...(t.offByDefault ? { offByDefault: true } : {}),
   ...(t.approvalFiles?.length ? { approvalFiles: t.approvalFiles } : {}),
+  ...(t.drivesBrowser ? { drivesBrowser: true } : {}),
 });
 
 /**
@@ -2805,6 +2807,7 @@ export function knownTools(): KnownTool[] {
         ...(typeof t.inline === "boolean" ? { inline: t.inline } : {}),
         ...(t.scriptsOnly === true ? { scriptsOnly: true } : {}),
         ...(Array.isArray(t.approvalFiles) && t.approvalFiles.length && t.approvalFiles.every((n: unknown) => typeof n === "string") ? { approvalFiles: t.approvalFiles as string[] } : {}),
+        ...(t.drivesBrowser === true ? { drivesBrowser: true } : {}),
       }));
   } catch {
     return [];
@@ -2905,8 +2908,8 @@ export function forgetPackageTools(spec: string): void {
  * `before` is the servers as they were, because a tool is told to a server by
  * its name (`browser_staging_click` is not the tool of `browser`) and that
  * needs the longer name to still be there; `after` is what is left. The
- * portal's own browser tools and the adapter's own are the ones a server's
- * name can claim without being its, and they stay. The defaults and exceptions
+ * adapter's own tools and those of the portal's inline extensions are the ones
+ * a server's name can claim without being its, and they stay. The defaults and exceptions
  * somebody set for the tools are kept, as for any tool that is not loaded: a
  * server that comes back gets them back.
  */
@@ -2919,7 +2922,7 @@ export function mcpServersRemoved(before: string[], after: string[]): void {
   const all = knownTools();
   const kept = all.filter((t) => {
     // A server's name is also the start of other tools' names: `web` and pi-web-access's `web_search`.
-    if (!adapterTool(t) || noServerOf(t.name)) return true;
+    if (!adapterTool(t) || noServerOf(t)) return true;
     const server = mcpServerOf(t.name, before);
     return server === undefined || !removed.includes(server);
   });
@@ -2944,8 +2947,14 @@ function setRemovedMcpServers(names: string[]): void {
 
 const ADAPTER_LABEL = "pi-mcp-adapter";
 
-/** The tools that carry no server's name: the adapter's own and the portal's browser tools, which a server's name can start without them being its. */
-const noServerOf = (name: string): boolean => (PORTAL_BROWSER_TOOLS as readonly string[]).includes(name) || name === "mcp" || name === "mcp_script" || name === "mcpScript";
+/**
+ * The tools that are no server's, though a server's name can start theirs: the adapter's own, by their names, and
+ * every tool the portal's inline extensions register (its own, and each server half's under its package's name),
+ * which no MCP server brings. Told by what is known of the tool, not by a list of names: a package's `browser_open`
+ * is not the tool of a server called `browser`.
+ */
+const noServerOf = (tool: { name: string; inline?: boolean }): boolean =>
+  tool.inline === true || tool.name === "mcp" || tool.name === "mcp_script" || tool.name === "mcpScript";
 
 /** Does the MCP adapter register this tool? By its package where it is recorded, by the label it is filed under where it is not. */
 export function adapterTool(t: Pick<KnownTool, "source" | "package">): boolean {
@@ -3022,10 +3031,10 @@ function readMcpView(): McpView {
     ...(t.description ? { description: t.description } : {}),
   }));
   const offers = (tool: Pick<KnownTool, "name" | "source" | "package">) =>
-    adapterTool(tool) && !noServerOf(tool.name) ? offer(tool.name) : undefined;
+    adapterTool(tool) && !noServerOf(tool) ? offer(tool.name) : undefined;
   const directly = mcpDirect(config, cache);
   const direct = (tool: Pick<KnownTool, "name" | "source" | "package">) =>
-    adapterTool(tool) && !noServerOf(tool.name) ? directly(tool.name) : undefined;
+    adapterTool(tool) && !noServerOf(tool) ? directly(tool.name) : undefined;
   let reachable: Set<string> | undefined;
   const serverTool = (name: string) => {
     if (!reachable) {
@@ -3063,24 +3072,28 @@ onMcpWritten((before) => {
 });
 
 /**
- * The tools of these that the MCP adapter no longer registers, by name: what a
- * chat's pi is told to have off on top of its switches, so that one still
- * holding such a tool from before the configuration changed cannot use it.
- * Told by what the portal remembers of each, which is what says it is the
- * adapter's; a name it has never seen is not judged — unless a server the
- * portal removed claims it: removing a server forgets its tools, and a chat
- * still running with it would otherwise go on using the tools of a server that
- * is gone, where one merely switched off would have them off.
+ * The tools of these, as a chat reported them, and of those the portal
+ * remembers, that the MCP adapter no longer registers, by name: what a chat's
+ * pi is told to have off on top of its switches, so that one still holding
+ * such a tool from before the configuration changed cannot use it. Told by
+ * what the portal remembers of each, which is what says it is the adapter's;
+ * a name it has never seen is not judged — unless a server the portal removed
+ * claims it and the chat's report does not make it one of no server's
+ * (noServerOf): removing a server forgets its tools, and a chat still running
+ * with it would otherwise go on using the tools of a server that is gone,
+ * where one merely switched off would have them off.
  */
-export function withdrawnMcpTools(names: Iterable<string> = [], view: McpView = mcpView()): string[] {
+export function withdrawnMcpTools(reported: Iterable<{ name: string; inline?: boolean }> = [], view: McpView = mcpView()): string[] {
   const known = view.known();
   const { servers, gone } = view;
+  const asReported = new Map<string, { name: string; inline?: boolean }>();
+  for (const tool of reported) if (!asReported.has(tool.name)) asReported.set(tool.name, tool);
   const withdrawn = new Set<string>();
-  for (const name of new Set([...names, ...known.keys()])) {
+  for (const name of new Set([...asReported.keys(), ...known.keys()])) {
     const tool = known.get(name);
     if (tool) {
       if (view.offers(tool) === "withdrawn") withdrawn.add(name);
-    } else if (gone.length && !noServerOf(name) && gone.includes(mcpServerOf(name, [...servers, ...gone]) ?? "")) {
+    } else if (gone.length && !noServerOf(asReported.get(name) ?? { name }) && gone.includes(mcpServerOf(name, [...servers, ...gone]) ?? "")) {
       withdrawn.add(name);
     }
   }
@@ -3140,15 +3153,15 @@ export function rememberTools(reported: KnownTool[]): string[] {
   // since removed: its tools are the adapter's, and would be written straight back.
   // Only the servers the portal removed count: the adapter also loads some from
   // a project's own files, which are not in the portal's mcp.json and are no
-  // removed server's. The adapter's own tools and the portal's browser tools
-  // are no server's.
+  // removed server's. The adapter's own tools and those of the portal's inline
+  // extensions are no server's.
   const configured = readMcpFile();
   const gone = removedMcpServers().filter((name) => !Object.hasOwn(configured.config.mcpServers, name));
   const noServer = (t: KnownTool) =>
     gone.length > 0 &&
     !configured.error &&
     adapterTool(t) &&
-    !noServerOf(t.name) &&
+    !noServerOf(t) &&
     // Told apart from the configured servers too: `notes` removed leaves `notes_staging_read` to the server that is still there.
     gone.includes(mcpServerOf(t.name, [...Object.keys(configured.config.mcpServers), ...gone]) ?? "");
   const tools = reported.filter(
@@ -3179,6 +3192,8 @@ export function rememberTools(reported: KnownTool[]): string[] {
       ...(tool.scriptsOnly ? { scriptsOnly: true } : {}),
       // As its latest report says: a tool that stopped declaring its files is approved whole again.
       ...(tool.approvalFiles?.length ? { approvalFiles: tool.approvalFiles } : {}),
+      // Likewise: one that stopped saying it drives a browser is counted by its name and its server again.
+      ...(tool.drivesBrowser ? { drivesBrowser: true } : {}),
     });
   }
   const sorted = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

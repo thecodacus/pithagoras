@@ -2697,8 +2697,9 @@ class SessionManager extends EventEmitter {
    * them — but a chat that loaded one before the configuration changed still
    * has it, and the configuration is what has the last word over it.
    */
-  piOff(sessionId: string, names: string[] = [], view: McpView = mcpView(), homes?: AgentHome[]): string[] {
-    return [...new Set([...this.offFor(sessionId, names, view.known().keys(), homes), ...withdrawnMcpTools(names, view)])].sort();
+  piOff(sessionId: string, reported: Pick<PiTool, "name" | "inline">[] = [], view: McpView = mcpView(), homes?: AgentHome[]): string[] {
+    const names = reported.map((t) => t.name);
+    return [...new Set([...this.offFor(sessionId, names, view.known().keys(), homes), ...withdrawnMcpTools(reported, view)])].sort();
   }
 
   /**
@@ -2819,7 +2820,7 @@ class SessionManager extends EventEmitter {
     // in every chat, and one that is switched back on in the chat needs one.
     setSessionTools(sessionId, exceptionsFor(heldOffUnshown(wantedOff, shown, held), toolDefaultsForSession(session), answered, held));
     const off = this.offFor(sessionId, listed.map((t) => t.name), view.known().keys());
-    const piOff = this.piOff(sessionId, reported.map((t) => t.name), view);
+    const piOff = this.piOff(sessionId, reported, view);
     await client?.setToolsOff?.(piOff, this.piLazy(piOff));
     return off;
   }
@@ -2853,7 +2854,7 @@ class SessionManager extends EventEmitter {
         // page showing the opposite of what the database now holds.
         try {
           const listed = client.getTools ? await client.getTools() : [];
-          const off = this.piOff(sessionId, listed.map((t) => t.name), view, homes);
+          const off = this.piOff(sessionId, listed, view, homes);
           await client.setToolsOff?.(off, this.piLazy(off));
           return true;
         } catch (e) {

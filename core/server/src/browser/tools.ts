@@ -208,8 +208,14 @@ export const BROWSER_UNTRUSTED_GUIDELINE =
 export function browserTools(sessionId: string) {
   return (pi: any): void => {
     // One tab, one action at a time: a click and a typed word in parallel race each other. Every tool says that a page is data: see BROWSER_UNTRUSTED_GUIDELINE.
+    // And that it drives a browser, which the guard holds it to as the browser's (drivesBrowser in pi/guard.ts).
     const tool = (definition: Record<string, unknown> & { promptGuidelines?: string[] }) =>
-      pi.registerTool({ executionMode: "sequential", ...definition, promptGuidelines: [...(definition.promptGuidelines ?? []), BROWSER_UNTRUSTED_GUIDELINE] });
+      pi.registerTool({
+        executionMode: "sequential",
+        ...definition,
+        promptGuidelines: [...(definition.promptGuidelines ?? []), BROWSER_UNTRUSTED_GUIDELINE],
+        drivesBrowser: true,
+      });
 
     tool({
       name: "browser_navigate",

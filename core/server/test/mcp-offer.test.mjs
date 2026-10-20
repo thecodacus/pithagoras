@@ -99,6 +99,8 @@ test("the guard refuses it before anything could allow it, and an MCP script whi
 });
 
 const names = (list) => list.map((t) => t.name).sort();
+/** Tools as a chat reports them, by name alone. */
+const named = (...list) => list.map((name) => ({ name }));
 test("what the configuration says no to is not listed, is off in pi, and what comes from the cache is marked", async () => {
   cacheFile(cache);
   mcpFile({ mcpServers: { jira: { command: "j", directTools: true, excludeTools: ["create_issue"] }, "brave-search": { command: "b", disabled: true } } });
@@ -160,23 +162,25 @@ test("a server that was removed has its tools off in a chat still running with i
   // As Features does when Understory is switched off: the file written without the panel's routes.
   writeMcpFile({ mcpServers: { jira: { command: "j" } } });
   assert.equal(told, 2, "the running chats are told after every write");
-  assert.deepEqual(withdrawnMcpTools(["notes_read", "jira_search", "mcp", "bash"]), ["notes_read"]);
+  assert.deepEqual(withdrawnMcpTools(named("notes_read", "jira_search", "mcp", "bash")), ["notes_read"]);
+  // A tool of the portal's inline extensions is no server's, whatever its name starts with: a server half's, say.
+  assert.deepEqual(withdrawnMcpTools([{ name: "notes_read" }, { name: "notes_board", inline: true }]), ["notes_read"]);
   writeMcpFile({ mcpServers: { jira: { command: "j" }, notes: { command: "n" } } });
-  assert.deepEqual(withdrawnMcpTools(["notes_read"]), [], "configured again");
+  assert.deepEqual(withdrawnMcpTools(named("notes_read")), [], "configured again");
   stop();
 });
 
 test("a configuration that cannot be read is taken as it last could be", () => {
   mcpFile({ mcpServers: { jira: { command: "j", disabled: true } } });
-  assert.deepEqual(withdrawnMcpTools(["jira_search"]), ["jira_create_issue", "jira_search"]);
+  assert.deepEqual(withdrawnMcpTools(named("jira_search")), ["jira_create_issue", "jira_search"]);
   writeFileSync(path.join(agent, "mcp.json"), "{ not json");
-  assert.deepEqual(withdrawnMcpTools(["jira_search"]), ["jira_create_issue", "jira_search"], "a typo hands nothing back");
+  assert.deepEqual(withdrawnMcpTools(named("jira_search")), ["jira_create_issue", "jira_search"], "a typo hands nothing back");
   // Fixed by a write that leaves a server out: the servers it had are the ones it last could be read with.
   mcpFile({ mcpServers: { jira: { command: "j" }, notes: { command: "n" } } });
   withdrawnMcpTools();
   writeFileSync(path.join(agent, "mcp.json"), "{ not json either");
   writeMcpFile({ mcpServers: { jira: { command: "j" } } });
-  assert.deepEqual(withdrawnMcpTools(["notes_read"]), ["notes_read"], "the server left out is one that was removed");
+  assert.deepEqual(withdrawnMcpTools(named("notes_read")), ["notes_read"], "the server left out is one that was removed");
 });
 
 test("a server's tools from the cache go with the adapter's package, whatever it was installed from", () => {

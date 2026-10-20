@@ -34,7 +34,13 @@ The browser's tools read a page after nearly every click, so their results carry
 a shorter envelope: the same random closing id, with the warning above said once
 in the agent's instructions instead of on every result. Every browser tool carries
 that warning, so it is said while any of them is on, whichever of the others are
-switched off, and by the `tools` tool while they are lazy.
+switched off, and by the `tools` tool while they are lazy. Which tools those are
+is said by each tool: one that drives a browser declares it (`drivesBrowser`, as
+the portal's own browser tools do and an [extension's](/guide/extension-ui#tools-that-share-the-server-half-s-state)
+may), and is then held to the browser's rules whatever it is called: the
+allowlist in **Settings → Guard**, the conversation's switches, and a record in
+Audit of each address. A Playwright MCP server's tools say nothing of
+themselves, and are told by their names.
 
 What is wrapped: mail and the web read through a command (`curl`, `wget`, `ssh`,
 `git clone` and the like), the tools of an MCP server, and the browser. A
@@ -46,7 +52,7 @@ the portal's hands back, or one whose tools are named without the server. A
 server you run yourself can be counted as your own, and its output is then
 neither wrapped nor checked; the portal's own memory server, Understory, is
 counted so until you say otherwise, as what it holds are the agent's own notes.
-The browser is always outside content, whoever runs it. The agent's own tools, a subagent's answer and
+The browser is always outside content, whoever runs it, and so is a tool that says it drives one. The agent's own tools, a subagent's answer and
 a routine's are not wrapped.
 
 A [code mode](/guide/extensions#code-mode) script calls tools one at a time

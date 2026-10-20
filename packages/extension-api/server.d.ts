@@ -169,6 +169,27 @@ export interface GitHandle {
   gh(args: string[], options?: GitStepOptions): Promise<GitRan>;
 }
 
+/**
+ * What a tool's definition says to the portal, beside what pi reads of it: `pi.registerTool({ name, …, drivesBrowser: true })`.
+ * Read for a tool of `chats.extend` and of any package's pi extension, in a chat whose pi runs in the portal's own process.
+ * See "Tools that share the server half's state" in the guide.
+ */
+export interface ToolDeclarations {
+  /** Off in every chat until somebody switches it on, from the first time the portal sees it. */
+  offByDefault?: true;
+  /** The names of its parameters that hold files (text, or a list of text): a call is approved for each of those files, and for nothing else of it. */
+  approvalFiles?: string[];
+  /** What a spoken turn is told while the tool is on, once however many tools say the same. */
+  voiceGuidelines?: string[];
+  /**
+   * It drives a web browser, and the guard holds it to the browser's rules whatever it is called: refused in a
+   * conversation that may not drive a browser, the `url` of a call held to the allowlist, and each address recorded in
+   * Audit. What it returns is outside content, in a short envelope without the paragraph that says a page is data and
+   * never instructions, which the tool says once in its `promptGuidelines`. It is counted with the browser's tools.
+   */
+  drivesBrowser?: true;
+}
+
 export interface ServerPortal {
   /** Of this interface: raised when something an extension relies on changes. */
   version: 1;
@@ -316,8 +337,9 @@ export interface ServerPortal {
      * pi as it starts, so its tools hold what this module holds. Only where pi
      * runs in the portal's own process. A tool registered with
      * `offByDefault: true` is off in every chat until somebody switches it on,
-     * and one with `approvalFiles` (names of its parameters that hold files)
-     * is approved for those files, each on its own.
+     * one with `approvalFiles` (names of its parameters that hold files)
+     * is approved for those files, each on its own, and one with
+     * `drivesBrowser: true` is held to the browser's rules: see ToolDeclarations.
      */
     extend(factory: (pi: any, chat: Chat) => void): void;
     /**

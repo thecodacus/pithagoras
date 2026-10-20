@@ -19,7 +19,7 @@ import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptT
 import type { ImageContent } from "../prompt-images.js";
 import { routineTools } from "./routine-tools.js";
 import { reportTool, reportToFor } from "./report-tool.js";
-import { declaredFiles, guardExtension } from "./guard.js";
+import { declaredFiles, drivesBrowser, guardExtension } from "./guard.js";
 import { CODEMODE_TOOLS, codemodeExtension } from "./codemode.js";
 import { findSessionFile } from "./session-file.js";
 import { CONTEXT_FILES, SHARED_FILES } from "./context-files.js";
@@ -520,6 +520,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     let filesOf: (name: string) => readonly string[] | undefined = () => undefined;
     // Whether the MCP adapter registered a tool, from what the session knows of it once there is one: see untrustedResult.
     let fromAdapter: (name: string) => boolean = () => false;
+    // Whether a tool says it drives a web browser, from its definition once the session has it: see drivesBrowser.
+    let drives: (name: string) => boolean = () => false;
     const gateway = new ToolsGateway(opts.lazySets);
     // What the tools that are on ask to be told in a spoken turn, whoever registered them: `voiceGuidelines` on a
     // tool, as pi's own promptGuidelines are for every turn. Asked once the session is there (below).
@@ -551,6 +553,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             () => gateway.owns(),
             (name) => filesOf(name),
             (name) => fromAdapter(name),
+            (name) => drives(name),
           ) },
         // Offered only while the conversation has a lazy tool: see applyToolsOff.
         { name: "tools-gateway", factory: gateway.extension },
@@ -672,6 +675,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
     });
     filesOf = (name) => declaredFiles(session.getToolDefinition(name));
+    drives = (name) => drivesBrowser(session.getToolDefinition(name));
     fromAdapter = (name) => {
       const tool = (session.getAllTools?.() ?? []).find((one: any) => one?.name === name);
       return tool !== undefined && adapterTool({ source: sourceLabel(tool.sourceInfo), package: packageOf(tool.sourceInfo) });
@@ -1667,6 +1671,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ...(forScripts(tool) ? { scriptsOnly: true as const } : {}),
       ...(this.offByDefault(String(tool.name)) ? { offByDefault: true as const } : {}),
       ...((files) => (files ? { approvalFiles: [...files] } : {}))(declaredFiles(this.session.getToolDefinition(String(tool.name)))),
+      ...(drivesBrowser(this.session.getToolDefinition(String(tool.name))) ? { drivesBrowser: true as const } : {}),
       enabled: !this.switchedOff.has(String(tool.name)),
     }));
   }
