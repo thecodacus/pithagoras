@@ -314,6 +314,7 @@ const STAND_IN = {
   page_read: { name: "page_read", drivesBrowser: true },
   page_click: { name: "page_click", drivesBrowser: true },
   shop_browser_click: { name: "shop_browser_click", drivesBrowser: true },
+  shop_browser_take_screenshot: { name: "shop_browser_take_screenshot", drivesBrowser: true },
 };
 const standInDrives = (name) => drivesBrowser(STAND_IN[name]);
 
@@ -369,6 +370,36 @@ test("a ref is made plain only for a tool that does not say it drives a browser:
   const unsaid = { target: "[ref=e3]" };
   call(guardAs({ drives: () => false }), "shop_browser_click", unsaid);
   assert.equal(unsaid.target, "e3", "the same name said by nothing is a server's");
+});
+
+test("a screenshot is made to come back in the result only for a Playwright MCP's, not for a tool that says it drives a browser", () => {
+  const h = guardAs({ drives: standInDrives });
+  const mcp = { filename: "page.jpg" };
+  call(h, "browser_browser_take_screenshot", mcp);
+  assert.deepEqual(mcp, { type: "jpeg" });
+  const own = { filename: "page.jpg" };
+  call(h, "shop_browser_take_screenshot", own);
+  assert.deepEqual(own, { filename: "page.jpg" }, "its arguments reach it as they were written");
+});
+
+test("the address a browser tool called by its name is held to is its own `url`: an `args` beside it hides nothing, and is not read", () => {
+  const on = { allowed: true, allowlist: ["*.example.com"] };
+  for (const [name, drives] of [
+    ["browser_navigate", portalDrives],
+    ["page_open", standInDrives],
+    ["browser_browser_navigate", portalDrives],
+    ["playwright_browser_navigate", portalDrives],
+  ]) {
+    for (const args of [{}, { url: "https://www.example.com/" }, "{}"]) {
+      const result = call(guardAs({ browser: on, drives }), name, { url: "https://elsewhere.test/", args });
+      assert.equal(refused(result), true, `${name} ${JSON.stringify(args)}`);
+      assert.match(result.reason, /not on the browser allowlist/);
+      assert.deepEqual([lastAudit().kind, lastAudit().tool, lastAudit().reason], ["refused", name, "Outside the browser allowlist: https://elsewhere.test/"]);
+    }
+  }
+  // An `args` of the tool's own that is not JSON is the tool's to read: only the proxy's is the gate's.
+  assert.equal(call(guardAs({ browser: on, drives: standInDrives }), "page_open", { url: "https://www.example.com/", args: "--fresh" }), undefined);
+  assert.deepEqual([lastAudit().kind, lastAudit().tool, lastAudit().reason], ["browsed", "page_open", "https://www.example.com/"]);
 });
 
 test("a call that is not the primary user's is refused unless it is a read or a rule says so", () => {

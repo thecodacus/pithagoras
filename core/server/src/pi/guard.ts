@@ -1175,7 +1175,7 @@ function normaliseTarget(input: unknown): void {
   if (Array.isArray(o.fields)) for (const field of o.fields) normaliseTarget(field);
   // The MCP proxy takes its arguments as a JSON string as well, and the string
   // is written back as one. One that does not parse is left as it is: the
-  // browser gate has already refused the call (see browserCall).
+  // browser gate refuses such a call of the proxy (see browserCall).
   if (typeof o.args === "string") {
     const parsed = parseArgs(o.args);
     if (parsed) {
@@ -1236,9 +1236,9 @@ export const GUARD_RULES: readonly { name: string; why: string }[] = RULES.map((
  * can act as the agent anywhere it has a login. That is a capability, not a
  * read — it is off unless somebody turned it on.
  *
- * `unreadable` is a browser call whose arguments came as a string that is not
- * JSON: the adapter would parse them itself, and the gate cannot say where the
- * call goes, so it does not let it through.
+ * `unreadable` is a call through the proxy whose arguments came as a string
+ * that is not JSON: the adapter would parse them itself, and the gate cannot say
+ * where the call goes, so it does not let it through.
  */
 function browserCall(
   toolName: string,
@@ -1258,8 +1258,10 @@ function browserCall(
     );
   if (!direct && !viaProxy) return { isBrowser: false };
 
-  // The URL, wherever this shape happens to put it.
-  const args = typeof input.args === "string" ? parseArgs(input.args) : ((input.args ?? input) as Record<string, unknown>);
+  // The URL, where this shape puts it: in the proxy's arguments, and in the
+  // call's own for a tool called by its name. An `args` beside the `url` of
+  // such a call is not where it goes, and is not read as if it were.
+  const args = viaProxy ? (typeof input.args === "string" ? parseArgs(input.args) : ((input.args ?? input) as Record<string, unknown>)) : input;
   if (!args) return { isBrowser: true, unreadable: true };
   const url = typeof args.url === "string" ? args.url : undefined;
   return { isBrowser: true, url };
@@ -2071,11 +2073,13 @@ export function guardExtension(
       const declared = drives(event.toolName);
       const asBrowser = browserCall(event.toolName, event.input ?? {}, declared);
       if (asBrowser.isBrowser) {
-        inlineBrowserScreenshot(event.toolName, event.input);
         // Mutated in place — that is how pi takes an argument change. Only for
         // a Playwright MCP's: a tool that says it drives a browser, as the
         // portal's own do, reads its arguments its own way.
-        if (!declared) normaliseTarget(event.input);
+        if (!declared) {
+          inlineBrowserScreenshot(event.toolName, event.input);
+          normaliseTarget(event.input);
+        }
         const browser = browserNow();
         if (!browser.allowed) {
           note("refused", "The browser is not enabled for this session");
