@@ -1,5 +1,5 @@
 import type { BrowserContext, Locator, Page } from "playwright-core";
-import { browserCursorOn } from "../db.js";
+import { setting } from "./store";
 
 /**
  * The agent's cursor: an arrow drawn over the page, which the browser tools
@@ -14,6 +14,9 @@ import { browserCursorOn } from "../db.js";
  * which element it last went for, which tells it when that was the wrong one.
  * Switched off on the Browser page, nothing moves and the actions do not wait for it.
  */
+
+/** On unless switched off on the Browser page: off, nothing moves and the actions do not wait for it. */
+const cursorOn = () => setting("cursor") !== false;
 
 interface Cursor {
   move(x: number, y: number): Promise<void>;
@@ -391,7 +394,7 @@ async function glide(page: Page, x: number, y: number, text: string): Promise<vo
  * action would; its box is measured from the top of the page, frames and all.
  */
 export async function pointAt(page: Page, locator: Locator, verb: string, detail?: string): Promise<void> {
-  if (!browserCursorOn()) return gone(page);
+  if (!cursorOn()) return gone(page);
   if (!(await ready(page))) return;
   await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
   const box = await locator.boundingBox().catch(() => null);
@@ -402,14 +405,14 @@ export async function pointAt(page: Page, locator: Locator, verb: string, detail
 
 /** Glides to a point in the viewport, as for a scroll at the middle of the page. */
 export async function pointTo(page: Page, x: number, y: number, text: string): Promise<void> {
-  if (!browserCursorOn()) return gone(page);
+  if (!cursorOn()) return gone(page);
   if (!(await ready(page))) return;
   await glide(page, x, y, text);
 }
 
 /** A press where the cursor is: a click, or a key. */
 export async function press(page: Page, text?: string): Promise<void> {
-  if (!browserCursorOn()) return gone(page);
+  if (!cursorOn()) return gone(page);
   await page
     .evaluate((t) => {
       const c = (window as unknown as Win).__agentCursor;
@@ -422,6 +425,6 @@ export async function press(page: Page, text?: string): Promise<void> {
 
 /** The caret beside the cursor while text goes in. */
 export async function typing(page: Page, on: boolean): Promise<void> {
-  if (!browserCursorOn()) return;
+  if (!cursorOn()) return;
   await page.evaluate((v) => (window as unknown as Win).__agentCursor?.typing(v), on).catch(() => {});
 }

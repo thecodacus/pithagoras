@@ -1120,8 +1120,8 @@ const MARKER = /<<<\/?untrusted:[0-9a-f]{0,32}>>>/gi;
 export const deface = (text: string) => text.replace(MARKER, "[marker removed]");
 
 /**
- * The same envelope for what a tool that declares outside content returns (`outside`, see declaredGuard), as the
- * portal's own browser tools do, without the paragraph: a page is read after every click, and the paragraph was most
+ * The same envelope for what a tool that declares outside content returns (`outside`, see declaredGuard), as a
+ * browser's tools do, without the paragraph: a page is read after every click, and the paragraph was most
  * of the cost of reading a three-line diff. It is said once instead, in the system prompt while any such tool is on
  * (OUTSIDE_CONTENT_GUIDELINE); the random id, which is what stops a page closing the block itself, stays on every result.
  */
@@ -1174,7 +1174,7 @@ const READ_ONLY = new Set(["read", "grep", "find", "ls", "ask_primary", NOTE_TOO
  * `target` is current; `ref` was its name until @playwright/mcp changed the
  * signature, and a model that learned the old one keeps sending it. Both are
  * accepted here rather than failing on a difference of spelling. Refs are
- * read as the portal's own browser tools read them (see bareRef).
+ * read as a ref is written in a snapshot, decoration and all (see bareRef).
  */
 function normaliseTarget(input: unknown): void {
   if (!input || typeof input !== "object") return;
@@ -1251,12 +1251,12 @@ export const GUARD_RULES: readonly { name: string; why: string }[] = RULES.map((
  * Driving the agent's browser, in either of the two shapes the MCP adapter
  * offers: a directly registered tool named for its server, or the proxy tool
  * carrying the same thing as an argument. Told by the name, which is all an MCP
- * server's tools say of themselves; the portal's own browser tools have such
- * names too.
+ * server's tools say of themselves; a package's browser tools that declare what
+ * the guard holds them to have such names too.
  *
  * The browser is signed into the agent's own accounts, so a session holding it
- * can act as the agent anywhere it has a login. That is a capability, not a
- * read — it is off unless somebody turned it on.
+ * can act as the agent anywhere it has a login: what it reads is outside
+ * content, and where it goes is held to the allowlist.
  *
  * `unreadable` is a call through the proxy whose arguments came as a string
  * that is not JSON: the adapter would parse them itself, and the gate cannot say
@@ -1955,14 +1955,10 @@ export function guardExtension(
    */
   exemptNow: () => ReadonlySet<string> = () => new Set(),
   /**
-   * Whether this session may drive the browser, read at each call rather than
-   * fixed at launch — turning it on should work now, not after a restart
-   * nobody knows to perform.
+   * The sites the agent's tools may reach (Settings → Guard), read at each call rather than fixed at launch — a
+   * change should hold now, not after a restart nobody knows to perform. Empty is any site.
    */
-  browserNow: () => { allowed: boolean; allowlist: string[] } = () => ({
-    allowed: false,
-    allowlist: [],
-  }),
+  allowlistNow: () => string[] = () => [],
   /**
    * The folder this conversation works in, which what somebody who is not the
    * primary user may read is held to. Without it only the names of the files
@@ -2144,34 +2140,21 @@ export function guardExtension(
         };
       }
 
-      // The browser is gated on the session, not on who is speaking: the agent
-      // has its own accounts and uses them as itself, including when it is
-      // helping somebody else. And where a call goes is held to the allowlist,
-      // whoever is speaking: a browser call's address, and each address in the
-      // parameters a tool declares hold one (`reaches`), read from the call's
-      // own arguments.
+      // Where a call goes is held to the allowlist, whoever is speaking: a
+      // browser call's address, and each address in the parameters a tool
+      // declares hold one (`reaches`), read from the call's own arguments.
+      // Whether this conversation may drive a browser at all is its tools'
+      // switches: a tool switched off here is not called (see switchedOffVia).
       const asBrowser = browserCall(event.toolName, event.input ?? {});
       const addresses = [...new Set([...(asBrowser.url ? [asBrowser.url] : []), ...declaredValues(event.input ?? {}, declared?.reaches)])];
       if (asBrowser.isBrowser || addresses.length) {
-        const browser = browserNow();
         if (asBrowser.isBrowser) {
           // Mutated in place — that is how pi takes an argument change. Only
           // for a tool that declares nothing of itself, a Playwright MCP's: one
-          // that declares what the guard holds it to, as the portal's own
-          // browser tools do, reads its arguments its own way.
+          // that declares what the guard holds it to reads its arguments its own way.
           if (!declared) {
             inlineBrowserScreenshot(event.toolName, event.input);
             normaliseTarget(event.input);
-          }
-          if (!browser.allowed) {
-            note("refused", "The browser is not enabled for this session");
-            return {
-              block: true,
-              reason:
-                "Refused: this session cannot drive the browser. It is enabled per session and " +
-                "per routine, and nobody has enabled it here. Say so rather than looking for " +
-                "another way to reach the page.",
-            };
           }
           if (asBrowser.unreadable) {
             note("refused", "The arguments of a browser call could not be read");
@@ -2183,7 +2166,8 @@ export function guardExtension(
             };
           }
         }
-        const away = addresses.find((address) => !hostAllowed(address, browser.allowlist));
+        const allowlist = allowlistNow();
+        const away = addresses.find((address) => !hostAllowed(address, allowlist));
         if (away) {
           note("refused", `Outside the allowlist: ${away}`);
           return {

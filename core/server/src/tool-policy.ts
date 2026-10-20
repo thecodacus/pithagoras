@@ -13,32 +13,13 @@
  */
 
 /**
- * The MCP the portal attaches the agent's browser as.
+ * The name the portal gave the MCP it attached the agent's browser as.
  *
  * Its tools arrive named `browser_<whatever>`, and they are switched here like
  * any other server's: having the browser is having its tools, and there is no
- * second switch for it. The globe beside the composer only shows or hides the
- * view of the browser the agent is driving.
+ * second switch for it.
  */
 export const BROWSER_MCP = "browser";
-
-/**
- * The portal's own browser tools (browser/tools.ts): browser tools by name,
- * whatever MCP servers there are, since they come from no server.
- */
-export const PORTAL_BROWSER_TOOLS = [
-  "browser_navigate",
-  "browser_back",
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_select",
-  "browser_key",
-  "browser_scroll",
-  "browser_find",
-  "browser_get_text",
-  "browser_screenshot",
-] as const;
 
 /**
  * Which MCP server a tool came through, if any.
@@ -68,28 +49,6 @@ export function mcpServerOf(name: string, servers: Iterable<string>): string | u
     }
   }
   return best;
-}
-
-/**
- * Does this tool come from the agent's browser?
- *
- * `browsers` is the servers that are the browser, which the caller works out
- * from what they connect to; it defaults to the name the portal writes.
- *
- * Asked through mcpServerOf rather than by prefix, because the prefix is
- * ambiguous: a server called `browser_staging` names a tool
- * `browser_staging_click`, which starts with `browser_` and is not the
- * browser's. Whether a conversation may drive the signed-in Chromium hangs on
- * this answer, so it is the careful one.
- */
-export function browserTool(
-  name: string,
-  servers: Iterable<string>,
-  browsers: string[] = [BROWSER_MCP]
-): boolean {
-  if ((PORTAL_BROWSER_TOOLS as readonly string[]).includes(name)) return true;
-  const server = mcpServerOf(name, servers);
-  return server !== undefined && browsers.includes(server);
 }
 
 

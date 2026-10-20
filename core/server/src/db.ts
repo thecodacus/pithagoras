@@ -3,9 +3,9 @@ import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } 
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { UNDERSTORY } from "./features.js";
 import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
-import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
-import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
+import { dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig } from "./api/mcp.js";
 import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -15,7 +15,6 @@ import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
 import { writeFileAtomic } from "./atomic-write.js";
 import { leaveHandoff, moveFolderTo, moveTo } from "./handoff.js";
-import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
 import { SCHEMA_VERSION, dbFile } from "./schema-version.js";
@@ -75,8 +74,6 @@ export interface SessionRow {
   role: "primary" | "colleague" | "guest" | "unknown";
   /** Who last spoke here, surviving a restart that empties the in-memory map. */
   last_person_key: string | null;
-  /** May this session drive the agent's browser? Off unless turned on. */
-  browser: number;
   /** Tools switched off for this conversation, newline separated. */
   tools_off: string;
   /** And switched on against a default that has them off. */
@@ -593,6 +590,110 @@ function mediaToolsSeenMoved(d: Database.Database): void {
 const settingIn = (d: Database.Database, key: string): string | undefined =>
   (d.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value;
 
+/** The settings the portal kept for its browser, which are the Browser extension's now. */
+const BROWSER_SETTINGS = ["browser_user", "browser_password", "browser_port", "browser_https_port", "browser_cursor", "browser_tools"];
+
+/** The tools the portal's browser registered, which the Browser extension registers under the same names. */
+const BROWSER_TOOLS = [
+  "browser_navigate",
+  "browser_back",
+  "browser_snapshot",
+  "browser_click",
+  "browser_type",
+  "browser_select",
+  "browser_key",
+  "browser_scroll",
+  "browser_find",
+  "browser_get_text",
+  "browser_screenshot",
+];
+
+/** The tools the tools lists remember (`tools_seen`), as they are stored; nothing where that cannot be read. */
+function toolsSeenIn(d: Database.Database): { name?: unknown; source?: unknown; inline?: unknown }[] {
+  try {
+    const seen = JSON.parse(settingIn(d, "tools_seen") ?? "[]");
+    return Array.isArray(seen) ? seen : [];
+  } catch {
+    // Not JSON: knownTools reads it as nothing remembered.
+    return [];
+  }
+}
+
+/** One of the portal's browser tools as the tools lists remember it: filed under its own set, inline. */
+const portalBrowserTool = (tool: { name?: unknown; source?: unknown; inline?: unknown }) =>
+  typeof tool?.name === "string" && BROWSER_TOOLS.includes(tool.name) && tool.source === "browser" && tool.inline !== false;
+
+/**
+ * The agent's browser is an extension's now (extensions/browser), with settings of its own. What the portal kept for
+ * it is left for it in the data folder (see handoff.ts), and the extension takes it up when it starts, which may be
+ * long after this, or never: the browser's six settings as they were stored, its password among them, which the
+ * container was made with, and the profile of the machine's own Chrome where it ran one, which is moved, not copied.
+ * The settings go once it is left, and a try that fails keeps them for the next start. The container and its profile
+ * volume stay where they are: the extension takes them over by their names. The allowlist stays, as the guard's.
+ * The database was backed up before this ran (db-upgrade.ts); docs/guide/upgrading.md says how to go back.
+ */
+function handOffBrowser(d: Database.Database): void {
+  const profile = path.join(path.resolve(DATA_DIR), "browser-profile");
+  const settings = Object.fromEntries(BROWSER_SETTINGS.map((key) => [key, settingIn(d, key) ?? null]));
+  if (Object.values(settings).every((value) => value === null) && !existsSync(profile) && !toolsSeenIn(d).some(portalBrowserTool)) return;
+  try {
+    leaveHandoff("browser", (dir) => {
+      // A folder mounted on its own, or a link to one elsewhere, stays where it is: what is in it is moved.
+      if (!existsSync(path.join(dir, "profile"))) moveFolderTo(profile, path.join(dir, "profile"));
+      // Written last, and anew on each try, from the settings as they are.
+      writeFileAtomic(path.join(dir, "settings.json"), JSON.stringify(settings), 0o600);
+      writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "browser", schema: 8, made: new Date().toISOString() }), 0o600);
+    });
+  } catch (e) {
+    console.warn(`[portal] what the browser kept could not be left for its extension, and is kept for the next start: ${(e as Error).message}`);
+    return;
+  }
+  d.prepare(`DELETE FROM settings WHERE key IN (${BROWSER_SETTINGS.map(() => "?").join(", ")})`).run(...BROWSER_SETTINGS);
+  // Core filed its browser tools as the set "browser"; the extension's are filed under its package.
+  setMoved(d, "browser", "pithagoras-browser");
+  // As the tools lists remember them: a chat says which tools it has when it next loads, and that would put them
+  // right; until then they would be listed in a box nothing fills any more.
+  const seen = toolsSeenIn(d);
+  if (seen.some(portalBrowserTool)) {
+    d.prepare("UPDATE settings SET value = ? WHERE key = 'tools_seen'").run(JSON.stringify(seen.map((tool) => (portalBrowserTool(tool) ? { ...tool, source: "pithagoras-browser", inline: true } : tool))));
+  }
+}
+
+/**
+ * Who may drive the browser was a switch of its own beside the tools' (`sessions.browser`, `routines.browser`, and
+ * the carrying over of it as the portal's browser tools were first seen: `browser_tools_adopted`). It is the tools'
+ * switches now, as for any tool: what each routine and chat had is written into its tools, once, as the database is
+ * brought to schema 8. The columns stay, unread.
+ *
+ * A routine's switch answered for each browser tool its lists did not name, on or off: those are named now, as it
+ * said. A chat's grant was carried into the tools as they were first seen, which made them off by default and on in
+ * the chats that had it: what was still to be carried, where the portal waited for them, is carried now.
+ */
+function browserGrantsToSwitches(d: Database.Database): void {
+  const routines = d.prepare("SELECT slug, browser, tools_off, tools_on FROM routines").all() as { slug: string; browser: number; tools_off: string; tools_on: string }[];
+  const putRoutine = d.prepare("UPDATE routines SET tools_off = ?, tools_on = ? WHERE slug = ?");
+  for (const routine of routines) {
+    const off = parseToolsOff(routine.tools_off);
+    const on = parseToolsOff(routine.tools_on);
+    const unnamed = BROWSER_TOOLS.filter((name) => !off.includes(name) && !on.includes(name));
+    if (!unnamed.length) continue;
+    (routine.browser === 1 ? on : off).push(...unnamed);
+    putRoutine.run(clean(off).join("\n"), clean(on).join("\n"), routine.slug);
+  }
+  // Unmarked in a database no portal that carried grants has opened: one with no chat had nothing to carry, one with chats waited.
+  const adopted = settingIn(d, "browser_tools_adopted") ?? (d.prepare("SELECT 1 FROM sessions LIMIT 1").get() ? "pending" : "1");
+  if (adopted === "1") return;
+  const seen = new Set(toolsSeenIn(d).map((tool) => tool?.name));
+  const unseen = BROWSER_TOOLS.filter((name) => !seen.has(name));
+  if (!unseen.length) return;
+  d.prepare("INSERT INTO settings (key, value) VALUES ('tools_off_default', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(
+    clean([...parseToolsOff(settingIn(d, "tools_off_default")), ...unseen]).join("\n"),
+  );
+  const granted = d.prepare("SELECT id, tools_on FROM sessions WHERE browser = 1 AND kind != 'routine'").all() as { id: string; tools_on: string }[];
+  const putChat = d.prepare("UPDATE sessions SET tools_on = ? WHERE id = ?");
+  for (const chat of granted) putChat.run(clean([...parseToolsOff(chat.tools_on), ...unseen]).join("\n"), chat.id);
+}
+
 /**
  * A set of the portal's own tools that are an extension's now, whose are filed
  * under its package's name: a lazy mark on the set, and a name somebody gave
@@ -640,6 +741,8 @@ function migrate(d: Database.Database): void {
   if (!names.includes("pi_session_file")) {
     d.exec("ALTER TABLE sessions ADD COLUMN pi_session_file TEXT");
   }
+  // Whether a chat could drive the browser, until schema 8 wrote it into the chat's tools (see
+  // browserGrantsToSwitches). Kept, unread.
   if (!names.includes("browser")) {
     d.exec("ALTER TABLE sessions ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
   }
@@ -730,6 +833,7 @@ function migrate(d: Database.Database): void {
   }
   writeOutCanvases(d);
   handOffMedia(d);
+  handOffBrowser(d);
   if ((d.pragma("user_version", { simple: true }) as number) < 6) filesOnOldCalls(d);
   const agentCols = (d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name);
   for (const col of ["voice", "quiet_start", "quiet_end", "last_heartbeat", "heartbeat_status"]) {
@@ -767,13 +871,13 @@ function migrate(d: Database.Database): void {
     const runs = d.prepare("SELECT count(*) AS n FROM sessions WHERE kind = 'routine'").get() as { n: number };
     if (runs.n) d.prepare("UPDATE sessions SET workspace = ? WHERE kind = 'routine'").run(agentHome());
   }
+  // Who may drive the browser, as a routine's switch, until schema 8 wrote it into the routine's tools (see
+  // browserGrantsToSwitches). Kept, unread, as the sessions' column above is.
   if (routineCols.length && !routineCols.includes("browser")) {
     d.exec("ALTER TABLE routines ADD COLUMN browser INTEGER NOT NULL DEFAULT 0");
   }
   // A routine's exceptions to what its agent and project leave, as a chat keeps
-  // them. The `browser` column above stays: it answers for the browser's tools
-  // where these say nothing about them (see routineTools).
-  // Each on its own, as for sessions: a database with one of them is given the other.
+  // them. Each on its own, as for sessions: a database with one of them is given the other.
   for (const col of ["tools_off", "tools_on"]) {
     if (routineCols.length && !routineCols.includes(col)) d.exec(`ALTER TABLE routines ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
   }
@@ -828,8 +932,8 @@ function migrate(d: Database.Database): void {
     d.exec("ALTER TABLE notes ADD COLUMN pending_delivery INTEGER NOT NULL DEFAULT 0");
   }
   seedCodemodeOff(d);
-  // Last, because it reads the settings the tables above have to exist for.
-  adoptBrowserGrants(d);
+  // Last, because it reads the tables and settings above.
+  if ((d.pragma("user_version", { simple: true }) as number) < 8) browserGrantsToSwitches(d);
 }
 
 /**
@@ -1963,109 +2067,12 @@ export function forgetRoutineExemptions(routineId: string): void {
 }
 
 /**
- * Carry the old per-session browser grant into the tool switches.
- *
- * The browser used to be opt-in per conversation, stored in `sessions.browser`
- * and off by default. It is an MCP server now, and a server's tools are on
- * unless something says otherwise — which on an upgrade would hand every
- * conversation that ever existed a browser signed into real accounts, because
- * nobody had said otherwise about a switch that did not exist yet.
- *
- * So the posture is carried over rather than replaced: the browser's tools go
- * into the defaults as off, and the conversations that had the grant get it
- * back as their own exception. A new install is unaffected and starts the way
- * any other server does. Run once, because after it the operator's own choices
- * are the ones in there.
- *
- * It cannot run when the database opens. Which tools are the browser's is only
- * known once a session has registered them, and on the first start after an
- * upgrade none has: the catalogue is a key this build introduced. So the first
- * call only decides whether there is a posture to carry — an install with
- * conversations in it — and marks it `pending`. It runs again from
- * `rememberTools()` and does the carrying the moment the browser's tools
- * appear. Until then `browserAllowed()` goes on reading the old column. After
- * it, a browser tool that shows up later is carried the same way.
- */
-export function adoptBrowserGrants(d: Database.Database = getDb(), fresh: string[] = []): void {
-  const flag = d
-    .prepare("SELECT value FROM settings WHERE key = 'browser_tools_adopted'")
-    .get() as { value: string } | undefined;
-  if (flag?.value === "1") return;
-  const mark = (value: string) =>
-    d
-      .prepare(
-        "INSERT INTO settings (key, value) VALUES ('browser_tools_adopted', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-      )
-      .run(value);
-
-  let state = flag?.value;
-  if (!state) {
-    // Nobody has ever had a conversation: nothing was granted, nothing to keep.
-    if (!d.prepare("SELECT 1 FROM sessions LIMIT 1").get()) return void mark("1");
-    mark((state = "pending"));
-  }
-
-  const servers = mcpServerNames();
-  const browsers = browserServers();
-  // Waiting: every browser tool seen so far. Carrying: only the ones that are
-  // new. The catalogue is what one session happened to have registered — a lazy
-  // server has cached some of its tools and not others, and a pinned version
-  // that is bumped adds names — so the posture has to reach whatever turns up
-  // later, not only what was there on the first day. What was carried over and
-  // since changed by the operator is not touched again.
-  const names =
-    state === "pending"
-      ? knownTools()
-          .map((t) => t.name)
-          .filter((name) => browserTool(name, servers, browsers))
-      : fresh.filter((name) => browserTool(name, servers, browsers));
-  if (!names.length) return;
-
-  setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...names])]);
-  const granted = d
-    .prepare("SELECT id FROM sessions WHERE browser = 1 AND kind != 'routine'")
-    .all() as { id: string }[];
-  for (const { id } of granted) {
-    const tools = sessionTools(id);
-    setSessionTools(id, { off: tools.off, on: [...new Set([...tools.on, ...names])] });
-  }
-  mark("carry");
-}
-
-/** Is there a grant still waiting for the browser's tools to be seen? */
-function browserAdoptionPending(): boolean {
-  return getSetting("browser_tools_adopted") === "pending";
-}
-
-/**
- * Does this session get the browser? Routines answer for their own runs.
- *
- * For an ordinary conversation this is not stored any more: the browser is an
- * MCP server like any other, so its tools are switched in the tools list, and
- * having the browser is having its tools. A second place recording the same
- * answer could only ever disagree with the first.
- *
- * The `sessions.browser` column is what that second place was. It is still
- * read, and not to be dropped: here while no browser tool has been seen (see
- * `browserColumnDecides`, which a container deployment always is), by
- * `adoptBrowserGrants` to carry the grants over, and where the conversations
- * that differ from the default are listed (see chatsDifferingWith).
- */
-export function browserAllowed(session: SessionRow): boolean {
-  return toolsOnWith(session, browserPolicy());
-}
-
-/**
  * What the answer for some tools is worked out from apart from the conversation
- * asked about: the tools (the browser's, as far as they have been seen), the
- * defaults, and whether the old column decides. A pass over many conversations
- * asks for it once. Each of them used to read the MCP file three times and the
- * settings table twice.
+ * asked about: the tools, and the defaults. A pass over many conversations asks
+ * for it once.
  */
 export interface ToolsPolicy {
   names: string[];
-  /** With none of its tools seen: whether the old column is what answers. */
-  columnDecides: boolean;
   defaultsOff: string[];
   /** What a place starts with, by agent, project and routine, worked out the first time a conversation there is asked about. */
   projects: Map<string, string[]>;
@@ -2073,29 +2080,16 @@ export interface ToolsPolicy {
   homes?: AgentHome[];
 }
 
-/** The browser's: its tools as far as they have been seen, and with none seen, whether its old column answers. */
-export function browserPolicy(): ToolsPolicy {
-  const names = seenBrowserTools();
-  return { names, columnDecides: names.length ? false : browserColumnDecides(), defaultsOff: toolDefaultsOff(), projects: new Map() };
-}
-
-/**
- * The same for any tools, by name, whether or not a session has registered them: a tool nobody switched off is on.
- * There are names, so the old column never answers.
- */
+/** The policy of some tools, by name, whether or not a session has registered them: a tool nobody switched off is on. */
 function toolPolicy(names: string[]): ToolsPolicy {
-  return { names: [...new Set(names)], columnDecides: false, defaultsOff: toolDefaultsOff(), projects: new Map() };
+  return { names: [...new Set(names)], defaultsOff: toolDefaultsOff(), projects: new Map() };
 }
 
-/** Whether any of the policy's tools is on for a session (`browserAllowed` for the browser's); `exceptions` are the conversation's own, where the caller has them already. */
-export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_slug" | "workspace" | "browser">, policy: ToolsPolicy, exceptions?: SessionTools): boolean {
+/** Whether any of the policy's tools is on for a session; `exceptions` are the conversation's own, where the caller has them already. */
+export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_slug" | "workspace">, policy: ToolsPolicy, exceptions?: SessionTools): boolean {
   const routine = routineOf(session);
-  if (routine) {
-    const row = getDb().prepare("SELECT browser FROM routines WHERE slug = ?").get(routine) as { browser: number } | undefined;
-    // A routine that is gone gets nothing; with no browser tool seen, its old switch is all there is to go by.
-    if (!row) return false;
-    if (!policy.names.length) return row.browser === 1;
-  } else if (!policy.names.length) return session.browser === 1 || !policy.columnDecides;
+  // A routine that is gone gets nothing.
+  if (routine && !getDb().prepare("SELECT 1 FROM routines WHERE slug = ?").get(routine)) return false;
   // Every layer under the conversation's own: its agent, its project, its routine.
   // By what decides it, not by folder: the chats in one project's subfolders share it.
   const homes = (policy.homes ??= agentHomes());
@@ -2104,75 +2098,6 @@ export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_s
   if (!defaults) policy.projects.set(key, (defaults = toolDefaultsFor(session.workspace, routine, undefined, policy.defaultsOff, homes)));
   const own = exceptions ?? sessionTools(session.id);
   return policy.names.some((name) => toolEnabled(name, defaults, own));
-}
-
-/** The browser's tools, as far as any session has registered them. */
-export function seenBrowserTools(): string[] {
-  // Asked for by every routine's tools, so kept until the MCP file or the settings (what was seen) are written.
-  const stamp = `${fileStamp(mcpConfigPath())}|${settingsWrites}`;
-  if (lastBrowserTools?.stamp === stamp) return lastBrowserTools.names;
-  const { servers, browsers } = serversAndBrowsers();
-  const names = knownTools()
-    .map((t) => t.name)
-    .filter((name) => browserTool(name, servers, browsers));
-  lastBrowserTools = { stamp, names };
-  return names;
-}
-
-let lastBrowserTools: { stamp: string; names: string[] } | undefined;
-
-/**
- * With no browser tool seen there is no switch to read, and three situations
- * look the same from here:
- *
- * - A container deployment, where pi is reached over RPC and never reports its
- *   registry. The old per-session grant is still the only answer anyone has.
- * - An upgrade still waiting for the browser's tools to appear, so the grants
- *   can be carried over. The old column stands until they do.
- * - No server that is the browser at all: nothing here to switch, so the column.
- *
- * Anything else is a browser server configured and not yet registered by any
- * session — a fresh install whose first conversation is still starting, or a
- * lazy server whose tools pi has not cached yet. Nobody has said anything about
- * it, which is what a default is for, so it is on, as any other server is.
- */
-function browserColumnDecides(): boolean {
-  if (EXECUTOR_KIND === "container") return true;
-  if (browserAdoptionPending()) return true;
-  return !browserConfigured();
-}
-
-/**
- * Whether the portal's own browser tools are connected: "1" on, "0" switched
- * off, and unset where nobody has decided — an install from before them, which
- * adoptPortalBrowser moves over once.
- */
-export function portalBrowserState(): "on" | "off" | "unset" {
-  const value = getSetting("browser_tools");
-  return value === "1" ? "on" : value === "0" ? "off" : "unset";
-}
-
-export const portalBrowserOn = () => portalBrowserState() === "on";
-
-export function setPortalBrowser(on: boolean): void {
-  putSetting("browser_tools", on ? "1" : "0");
-}
-
-/**
- * Whether the browser tools show their cursor: on unless switched off on the
- * Browser page ("0"). Off, nothing moves and the actions do not wait for it.
- */
-export function browserCursorOn(): boolean {
-  return getSetting("browser_cursor") !== "0";
-}
-
-export function setBrowserCursor(on: boolean): void {
-  putSetting("browser_cursor", on ? "1" : "0");
-}
-
-/** Whether the agent has a browser at all: the portal's tools, or an MCP server pointed at it. */
-export function browserConfigured(): boolean {
-  return portalBrowserOn() || browserServers().length > 0;
 }
 
 /**
@@ -2192,28 +2117,24 @@ export interface ToolsDiffer {
 /** Where these tools are not what the default says (see ToolsDiffer). None named: none is on anywhere. */
 export function toolExceptions(names: string[]): ToolsDiffer {
   if (!names.length) return { byDefault: false, chats: [], routines: [] };
-  return toolsDifferWith(toolPolicy(names));
-}
-
-/** Where the policy's tools are not what the default says, the policy asked for once. */
-export function toolsDifferWith(policy: ToolsPolicy): ToolsDiffer {
-  const byDefault = toolsByDefaultWith(policy);
+  const policy = toolPolicy(names);
+  const off = new Set(policy.defaultsOff);
+  const byDefault = policy.names.some((name) => !off.has(name));
   return { byDefault, chats: chatsDifferingWith(policy, byDefault), routines: routinesDifferingWith(policy) };
 }
 
 /**
  * The conversations whose answer for the policy's tools is not `byDefault`.
  *
- * Every one that says anything about tools, and every one that holds the old
- * browser grant, is asked — not those whose switches happen to mention the word
- * `browser`, which is not what a server is called when it is called something
- * else, and misses the column where that is still the only record.
+ * Every one that says anything about tools is asked — not those whose switches
+ * happen to mention one of the names, which misses the ones that differ through
+ * their project or their agent.
  */
 function chatsDifferingWith(policy: ToolsPolicy, byDefault: boolean): SessionRow[] {
   const rows = getDb()
     .prepare(
       `SELECT * FROM sessions
-       WHERE COALESCE(tools_off, '') != '' OR COALESCE(tools_on, '') != '' OR browser = 1
+       WHERE COALESCE(tools_off, '') != '' OR COALESCE(tools_on, '') != ''
        ORDER BY updated_at DESC`
     )
     .all() as SessionRow[];
@@ -2242,30 +2163,21 @@ function chatsDifferingWith(policy: ToolsPolicy, byDefault: boolean): SessionRow
 }
 
 /**
- * The routines whose own lists and switch give their runs another answer for the policy's tools than a routine that
- * sets nothing would have in the same place: a run as it starts, with what its agent and its project say, and nothing
- * of a chat's own. Each with its runs' answer.
+ * The routines whose own lists give their runs another answer for the policy's tools than a routine that says
+ * nothing would have in the same place: a run as it starts, with what its agent and its project say, and nothing of a
+ * chat's own. Each with its runs' answer.
  */
 function routinesDifferingWith(policy: ToolsPolicy): { slug: string; name: string; allowed: boolean }[] {
   const rows = getDb().prepare("SELECT slug, name, workspace FROM routines ORDER BY name COLLATE NOCASE").all() as { slug: string; name: string; workspace: string | null }[];
   const homes = (policy.homes ??= agentHomes());
-  // A new routine's lists and switch: see routineTools for what its switch answers for.
-  const unsaid = routineLayer({ tools_off: "", tools_on: "", browser: 0 });
   return rows.flatMap((row) => {
     // Where its runs work: its project's folder, or Home.
     const workspace = row.workspace ?? agentHomePath();
-    const allowed = toolsOnWith({ id: "", kind: "routine", routine_slug: row.slug, workspace, browser: 0 }, policy, { off: [], on: [] });
-    const unsaidOff = defaultsFor(toolDefaultsFor(workspace, null, undefined, policy.defaultsOff, homes), unsaid);
+    const allowed = toolsOnWith({ id: "", kind: "routine", routine_slug: row.slug, workspace }, policy, { off: [], on: [] });
+    const unsaidOff = toolDefaultsFor(workspace, null, undefined, policy.defaultsOff, homes);
     const otherwise = policy.names.some((name) => toolEnabled(name, unsaidOff, { off: [], on: [] }));
     return allowed === otherwise ? [] : [{ slug: row.slug, name: row.name, allowed }];
   });
-}
-
-/** Whether any of the policy's tools is on for a conversation that has never said anything about them. */
-function toolsByDefaultWith(policy: ToolsPolicy): boolean {
-  if (!policy.names.length) return !policy.columnDecides;
-  const off = new Set(policy.defaultsOff);
-  return policy.names.some((name) => !off.has(name));
 }
 
 /**
@@ -2458,50 +2370,12 @@ export function agentHomes(): AgentHome[] {
 /**
  * What a routine says about tools, as exceptions to what its agent and project
  * leave: the same two lists a chat keeps.
- *
- * Its old **Browser** switch (the `browser` column) answers for every browser
- * tool its lists do not name: off unless it is on, as it always was for a
- * routine. It is read here, as the lists are, rather than written into them
- * ahead of time: a tool that comes to count as the browser's later — a server
- * pointed at the browser, a catalogue that could not be read for a while — is
- * then held to it as well, with nothing to copy and nothing to miss. The
- * routine's page writes down what it showed of each browser tool, so what was
- * switched there is the lists' to answer.
  */
-export function routineTools(slug: string, browser: string[] = seenBrowserTools()): SessionTools {
-  const row = getDb().prepare("SELECT tools_off, tools_on, browser FROM routines WHERE slug = ?").get(slug) as
-    | { tools_off: string; tools_on: string; browser: number }
-    | undefined;
-  return row ? routineLayer(row, browser) : { off: [], on: [] };
-}
-
-/** A routine's lists and switch, as the layer they are for its runs: see routineTools. */
-function routineLayer(row: { tools_off: string; tools_on: string; browser: number }, browser: string[] = seenBrowserTools()): SessionTools {
-  const own = { off: parseToolsOff(row.tools_off), on: parseToolsOff(row.tools_on) };
-  const unnamed = browser.filter((name) => !own.off.includes(name) && !own.on.includes(name));
-  return row.browser === 1 ? { off: own.off, on: [...own.on, ...unnamed] } : { off: [...own.off, ...unnamed], on: own.on };
-}
-
-/** Only the switch: what the browser tools a routine's lists do not name follow. */
-export function setRoutineBrowserSwitch(slug: string, on: boolean): void {
-  getDb().prepare("UPDATE routines SET browser = ? WHERE slug = ?").run(on ? 1 : 0, slug);
-}
-
-/**
- * The routine's Browser switch, as the API still takes it: every browser tool
- * taken out of its lists, so that all of them follow the switch.
- */
-export function setRoutineBrowser(slug: string, on: boolean): void {
-  const names = new Set(seenBrowserTools());
+export function routineTools(slug: string): SessionTools {
   const row = getDb().prepare("SELECT tools_off, tools_on FROM routines WHERE slug = ?").get(slug) as
     | { tools_off: string; tools_on: string }
     | undefined;
-  if (!row) return;
-  setRoutineBrowserSwitch(slug, on);
-  setRoutineTools(slug, {
-    off: parseToolsOff(row.tools_off).filter((name) => !names.has(name)),
-    on: parseToolsOff(row.tools_on).filter((name) => !names.has(name)),
-  });
+  return { off: parseToolsOff(row?.tools_off), on: parseToolsOff(row?.tools_on) };
 }
 
 export function setRoutineTools(slug: string, tools: SessionTools): SessionTools {
@@ -2932,8 +2806,7 @@ function listedPackages(): Set<string> | undefined {
  * loaded.
  *
  * An MCP server's tools are kept although the adapter registers them: the
- * server is configured apart from the package and comes back with it, and a
- * browser tool seen as new again would be given the browser's old default.
+ * server is configured apart from the package and comes back with it.
  */
 export function forgetPackageTools(spec: string): void {
   const listed = listedPackages();
@@ -3250,17 +3123,14 @@ export function rememberTools(reported: KnownTool[]): string[] {
   putSetting("tools_seen", JSON.stringify(sorted));
   const off = tools.filter((t) => t.offByDefault && fresh.includes(t.name)).map((t) => t.name);
   if (off.length) setToolDefaultsOff([...new Set([...toolDefaultsOff(), ...off])]);
-  // The first moment the browser's tools can be told apart from the rest, and
-  // every moment a new one turns up.
-  adoptBrowserGrants(getDb(), fresh);
   const lazy = lazyToolNames();
   return fresh.filter((name) => lazy.has(name) || off.includes(name));
 }
 
 /**
- * Domains the browser may be pointed at, as globs. Empty means no restriction —
- * the on/off switch is the gate, and a list nobody filled in should not quietly
- * block everything.
+ * The sites the agent's tools may reach, as globs (Settings → Guard). Empty
+ * means no restriction — the tools' switches are the gate, and a list nobody
+ * filled in should not quietly block everything.
  */
 export function browserAllowlist(): string[] {
   const raw = getSetting("browser_allowlist") ?? "";

@@ -1,4 +1,4 @@
-import { status } from "./browser-service.js";
+import { status } from "./service";
 
 /**
  * Somebody has to be watching, or the browser stops rendering.
@@ -99,7 +99,8 @@ async function tick(): Promise<void> {
   // Only the container runtime needs this. A local Chrome is presented by a
   // real desktop, which never stops drawing.
   const state = await status();
-  if (state.mode === "local" || state.container !== "running") return;
+  // Asked while the half stopped: it watches nothing now.
+  if (!timer || state.mode === "local" || state.container !== "running") return;
   try {
     connect();
   } catch {
@@ -107,10 +108,17 @@ async function tick(): Promise<void> {
   }
 }
 
-/** Started once, with the portal. Does nothing until the browser is installed. */
+/** Started with the server half. Does nothing until the browser is installed. */
 export function watchBrowserFrames(): void {
   if (timer) return;
   timer = setInterval(() => void tick().catch(() => {}), POLL_MS);
   timer.unref();
   void tick().catch(() => {});
+}
+
+/** Stopped with the server half: its stream closed, and nothing started again until it is. */
+export function stopWatchingFrames(): void {
+  clearInterval(timer);
+  timer = undefined;
+  disconnect();
 }

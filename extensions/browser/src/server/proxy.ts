@@ -1,11 +1,9 @@
 import http from "node:http";
 import https from "node:https";
 import type { Duplex } from "node:stream";
-import type { Express } from "express";
-import { requireAuth } from "./auth.js";
-import { refuse } from "./upgrades.js";
-import { config } from "./extensions/browser-service.js";
-import { viewerConnected, viewerDisconnected } from "./extensions/browser-frames.js";
+import type { Request, Response } from "express";
+import { config } from "./service";
+import { viewerConnected, viewerDisconnected } from "./frames";
 
 /**
  * The agent's browser, served through the portal.
@@ -20,14 +18,17 @@ import { viewerConnected, viewerDisconnected } from "./extensions/browser-frames
  * And it removes a second credential and a second certificate: the portal
  * decides who you are, so it holds the browser's password rather than asking
  * you for it again. That only holds if it decides before it proxies: both
- * halves refuse what carries no login, since the browser's own password is
- * added on the way and its container would never ask.
+ * halves are under /api/x, which the portal answers only with its login, since
+ * the browser's own password is added on the way and its container would never ask.
+ *
+ * It is at /api/x/pithagoras-browser/ui/, with the slash: the browser's page
+ * loads what it needs (./assets/…) and opens its stream from where it is.
  */
 
 const UPSTREAM_HOST = process.env.BROWSER_HOST || "127.0.0.1";
 const upstreamPort = () => Number(config().httpsPort);
-/** Where the portal serves the browser's UI, its page and its streams. */
-export const BROWSER_UI = "/browser-ui";
+/** Where in Browser's routes the browser's UI is, its page and its streams. */
+const UI = /^\/ui(?=$|[/?])/i;
 
 const auth = () => {
   const { user, password } = config();
@@ -37,9 +38,9 @@ const auth = () => {
 /** Self-signed upstream on loopback: verifying it would mean pinning our own cert. */
 const agent = new https.Agent({ rejectUnauthorized: false });
 
-/** Where on the browser's own server an address of the portal's /browser-ui is. */
+/** Where on the browser's own server an address under /ui is. */
 function upstreamPath(url: string): string {
-  const rest = url.slice(BROWSER_UI.length);
+  const rest = url.replace(UI, "");
   return rest.startsWith("/") ? rest : `/${rest}`;
 }
 
@@ -65,48 +66,53 @@ function answered(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
   return { ...headers, "content-security-policy": own ? `${own}, ${FRAME_ANCESTORS}` : FRAME_ANCESTORS };
 }
 
-/**
- * The route half. Registered with the other routes, before the SPA fallback —
- * that fallback answers everything outside /api, so a proxy mounted after it
- * quietly served the portal's own index.html instead.
- */
-export function mountBrowserProxy(app: Express): void {
-  app.use(BROWSER_UI, requireAuth, (req, res) => {
-    const proxied = https.request(
-      {
-        host: UPSTREAM_HOST,
-        port: upstreamPort(),
-        // Express strips the mount path from req.url, so it is already relative.
-        path: req.url || "/",
-        method: req.method,
-        headers: forwarded(req.headers),
-        agent,
-      },
-      (upstream) => {
-        res.writeHead(upstream.statusCode ?? 502, answered(upstream.headers));
-        upstream.pipe(res);
-      }
-    );
-    proxied.on("error", (e) => {
-      if (!res.headersSent) res.status(502);
-      res.end(`The browser is not answering: ${e.message}`);
-    });
-    req.pipe(proxied);
+/** The route half, for every method under /ui (`portal.router.use("/ui", …)`). */
+export function proxyUi(req: Request, res: Response): void {
+  const proxied = https.request(
+    {
+      host: UPSTREAM_HOST,
+      port: upstreamPort(),
+      // Express strips the mount path from req.url, so it is already relative.
+      path: req.url || "/",
+      method: req.method,
+      headers: forwarded(req.headers),
+      agent,
+    },
+    (upstream) => {
+      res.writeHead(upstream.statusCode ?? 502, answered(upstream.headers));
+      upstream.pipe(res);
+    }
+  );
+  proxied.on("error", (e) => {
+    if (!res.headersSent) res.status(502);
+    res.end(`The browser is not answering: ${e.message}`);
   });
-
+  req.pipe(proxied);
 }
 
 /**
- * The stream half, which needs the server rather than the app: one of the
- * portal's own upgrades (see attachUpgrades), handed a stream under
- * /browser-ui once its login and the page it comes from have been checked.
- * Express never sees an upgrade, so without this the page loads and then sits blank.
+ * An answer to a connection that is not going to become a stream, then closed.
+ * Not left open for the client to close: one that never does would hold the
+ * portal's end, and a descriptor, for as long as the portal runs.
  */
-export function browserUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
+function refuse(socket: Duplex, status: number, message: string): void {
+  socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  const giveUp = setTimeout(() => socket.destroy(), 5_000);
+  giveUp.unref();
+  socket.once("close", () => clearTimeout(giveUp));
+}
+
+/**
+ * The stream half (`portal.http.upgrade`), handed a stream under Browser's
+ * routes once its login and the page it comes from have been checked. Express
+ * never sees an upgrade, so without this the page loads and then sits blank.
+ * Only the streams under /ui are the browser's.
+ */
+export function uiUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {
+  if (!UI.test(req.url ?? "")) return refuse(socket, 404, "Not Found");
   const proxied = https.request({
     host: UPSTREAM_HOST,
     port: upstreamPort(),
-    // attachUpgrades hands it only a stream under its path, which has one.
     path: upstreamPath(req.url!),
     method: "GET",
     headers: forwarded(req.headers),

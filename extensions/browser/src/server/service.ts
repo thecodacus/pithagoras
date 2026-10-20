@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { isIPv4 } from "node:net";
-import { browserCdp } from "../api/mcp.js";
-import { getSetting, putSetting } from "../db.js";
-import { containerAction, containerState, dockerAvailable, ensureImage, imagePresent, request, type PullState } from "./docker.js";
-import * as local from "./browser-local.js";
+import type { PullState } from "../../../docker/src/api";
+import { browserVersion } from "./cdp";
+import { docker, portal } from "./host";
+import * as local from "./local";
+import { putSettings, setting, type Settings } from "./store";
 
 /**
  * The agent's browser, as something the portal installs rather than something
@@ -14,6 +15,10 @@ import * as local from "./browser-local.js";
  * there, and — for a while — could not start the portal without setting its
  * password. Installed from the UI instead: nothing exists until somebody asks,
  * and removing it leaves no trace but the profile.
+ *
+ * Docker runs the container (`pithagoras-docker`, which Browser requires), and what Browser may do with it is what
+ * Docker lets any extension do with its own. The container and the profile volume the portal made before Browser was
+ * an extension carry no extension's name, and are taken over by their names (`adoptKept`), never made again.
  */
 
 export const IMAGE = "lscr.io/linuxserver/chromium:latest";
@@ -41,23 +46,20 @@ export interface BrowserConfig {
  */
 export function config(): BrowserConfig {
   return {
-    user: getSetting("browser_user") || process.env.BROWSER_USER || "agent",
-    password: getSetting("browser_password") || process.env.BROWSER_PASSWORD || "",
-    port: getSetting("browser_port") || process.env.BROWSER_PORT || "3010",
-    httpsPort: getSetting("browser_https_port") || process.env.BROWSER_HTTPS_PORT || "3011",
+    user: setting("user") || process.env.BROWSER_USER || "agent",
+    password: setting("password") || process.env.BROWSER_PASSWORD || "",
+    port: setting("port") || process.env.BROWSER_PORT || "3010",
+    httpsPort: setting("httpsPort") || process.env.BROWSER_HTTPS_PORT || "3011",
   };
 }
 
 export function saveConfig(patch: Partial<BrowserConfig>): BrowserConfig {
-  const map: Record<keyof BrowserConfig, string> = {
-    user: "browser_user",
-    password: "browser_password",
-    port: "browser_port",
-    httpsPort: "browser_https_port",
-  };
-  for (const [k, v] of Object.entries(patch)) {
-    if (typeof v === "string" && v) putSetting(map[k as keyof BrowserConfig], v);
+  const said: Settings = {};
+  for (const k of ["user", "password", "port", "httpsPort"] as const) {
+    const v = patch[k];
+    if (typeof v === "string" && v) said[k] = v;
   }
+  putSettings(said);
   return config();
 }
 
@@ -92,10 +94,10 @@ const isLoopback = (address: string) => address.startsWith("127.");
  * one it knows the address of, so it keeps the link it always had.
  */
 export async function uiState(): Promise<{ exposed: boolean; outdated: boolean }> {
-  if (process.env.BROWSER_EXTERNAL === "true" || !dockerAvailable()) return { exposed: true, outdated: false };
-  const found = await request<{ Config?: { Labels?: Record<string, string> } }>("GET", `/containers/${CONTAINER}/json`).catch(() => null);
-  if (found?.status !== 200) return { exposed: !isLoopback(uiBind()), outdated: false };
-  const bound = found.body?.Config?.Labels?.[BIND_LABEL];
+  if (process.env.BROWSER_EXTERNAL === "true" || !(await docker().available())) return { exposed: true, outdated: false };
+  const found = await docker().containers.get(CONTAINER).catch(() => undefined);
+  if (!found) return { exposed: !isLoopback(uiBind()), outdated: false };
+  const bound = found.labels[BIND_LABEL];
   return { exposed: !isLoopback(bound ?? "0.0.0.0"), outdated: bound === undefined };
 }
 
@@ -113,15 +115,12 @@ export const pullState = () => pulling;
  */
 export async function status() {
   if (process.env.BROWSER_EXTERNAL === 'true') {
-    let running = false;
-    try {
-      const response = await fetch(`${browserCdp()}/json/version`, {signal: AbortSignal.timeout(4000)});
-      running = response.ok && typeof (await response.json() as {Browser?:string}).Browser === 'string';
-    } catch { /* An externally managed browser can be stopped independently. */ }
+    // An externally managed browser can be stopped independently.
+    const running = (await browserVersion()) !== null;
     return {available:false, mode:'external' as const, image:true, container:running ? 'running' as const : 'stopped' as const, pulling};
   }
-  if (!dockerAvailable()) {
-    const l = local.status();
+  if (!(await docker().available())) {
+    const l = await local.status();
     return {
       available: l.available,
       mode: "local" as const,
@@ -136,12 +135,12 @@ export async function status() {
       pulling,
     };
   }
-  const [image, state] = await Promise.all([imagePresent(IMAGE), containerState(CONTAINER)]);
+  const [image, found] = await Promise.all([docker().images.present(IMAGE), docker().containers.get(CONTAINER)]);
   return {
     available: true,
     mode: "docker" as const,
     image,
-    container: (!state.exists ? "absent" : state.running ? "running" : "stopped") as
+    container: (!found ? "absent" : found.state === "running" ? "running" : "stopped") as
       | "absent"
       | "stopped"
       | "running",
@@ -220,8 +219,18 @@ export const ALREADY_INSTALLING = 'The browser is already being installed';
 let installing = false;
 export const installInFlight = () => installing;
 
-export async function install(): Promise<void> {
+/** Refused for a browser the portal does not run (`BROWSER_EXTERNAL=true`): it is started, stopped and removed where it runs. */
+function managedHere(): void {
   if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
+}
+
+/** Docker's answer that there is no such container or volume, which is no failure where nothing has to be there. */
+function absent(e: unknown): void {
+  if ((e as { status?: number }).status !== 404) throw e;
+}
+
+export async function install(): Promise<void> {
+  managedHere();
   if (installing) throw new Error(ALREADY_INSTALLING);
   installing = true;
   try {
@@ -234,7 +243,7 @@ export async function install(): Promise<void> {
 async function installNow(): Promise<void> {
   // Nothing to install without Docker: the local runner uses a browser that is
   // already there, so installing is just starting it.
-  if (!dockerAvailable()) return local.start();
+  if (!(await docker().available())) return local.start();
 
   const cfg = config();
   if (!cfg.password) {
@@ -243,49 +252,64 @@ async function installNow(): Promise<void> {
     throw new Error("Set a password before installing — it guards a browser holding live logins");
   }
 
-  await ensureImage(IMAGE, (state) => (pulling = state));
+  const d = docker();
+  await d.images.ensure(IMAGE, (state) => (pulling = state));
 
-  await request("POST", `/volumes/create`, { Name: VOLUME });
-
-  const existing = await containerState(CONTAINER);
-  if (existing.exists) await remove();
-
-  const created = await request<{ Id?: string; message?: string }>(
-    "POST",
-    `/containers/create?name=${CONTAINER}`,
-    spec(cfg)
-  );
-  if (created.status >= 400) throw new Error(created.body?.message || `Create failed (${created.status})`);
-  await start();
+  // The profile the portal made before, or compose before it, is taken over rather than made anew: it holds the logins.
+  await d.volumes.adopt(VOLUME).catch(async (e) => {
+    absent(e);
+    await d.volumes.create(VOLUME);
+  });
+  // And a container made before, so that it can be replaced: Docker replaces only what is Browser's.
+  await d.containers.adopt(CONTAINER).catch(absent);
+  await d.containers.create(CONTAINER, spec(cfg));
+  await d.containers.start(CONTAINER);
 }
 
 export async function start(): Promise<void> {
-  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
-  if (!dockerAvailable()) return local.start();
-  await containerAction(CONTAINER, "start");
+  managedHere();
+  if (!(await docker().available())) return local.start();
+  await docker().containers.start(CONTAINER);
 }
 
 export async function stop(): Promise<void> {
-  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
-  if (!dockerAvailable()) return local.stop();
-  await containerAction(CONTAINER, "stop");
+  managedHere();
+  if (!(await docker().available())) return local.stop();
+  await docker().containers.stop(CONTAINER);
 }
 
 /** Removes the container. The profile volume is left alone — that is the logins. */
 export async function remove(): Promise<void> {
-  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
-  if (!dockerAvailable()) return local.stop();
-  await containerAction(CONTAINER, "remove");
+  managedHere();
+  if (!(await docker().available())) return local.stop();
+  await docker().containers.remove(CONTAINER);
 }
 
-/** Forgets the logins as well. Separate on purpose, and not undoable. */
+/** Forgets the logins as well. Separate on purpose, and not undoable. A local Chrome's profile is kept: this is the container's. */
 export async function forgetProfile(): Promise<void> {
-  if (process.env.BROWSER_EXTERNAL === 'true') throw new Error('This browser is managed outside the portal');
-  await remove();
-  const res = await request<{ message?: string }>("DELETE", `/volumes/${VOLUME}`);
-  if (res.status >= 400 && res.status !== 404) {
-    throw new Error(res.body?.message || `Could not remove the profile (${res.status})`);
-  }
+  managedHere();
+  if (!(await docker().available())) return local.stop();
+  await docker().containers.remove(CONTAINER);
+  // One that is gone already is gone.
+  await docker().volumes.remove(VOLUME);
+}
+
+/**
+ * Takes over the container and the profile volume the portal made before Browser was an extension, by their names, so
+ * that Browser may start, stop and remove them as its own: as the half starts, every time, so that a record of them
+ * Docker lost is made again. Nothing is made, made again or started: a container made before goes on as it is, until
+ * somebody removes it and installs again. One that is not there is not taken over, and one that is another
+ * extension's is not Browser's to take, which the portal's log says.
+ */
+export async function adoptKept(): Promise<void> {
+  const d = docker();
+  if (!(await d.available())) return;
+  const take = (what: string, adopt: () => Promise<unknown>) =>
+    adopt().catch((e) => {
+      if ((e as { status?: number }).status !== 404) portal().log(`could not take over ${what}: ${(e as Error).message}`);
+    });
+  await take(`the browser's profile, the volume ${VOLUME}`, () => d.volumes.adopt(VOLUME));
+  await take(`the browser's container ${CONTAINER}`, () => d.containers.adopt(CONTAINER));
 }
 
 export const suggestPassword = () => randomBytes(12).toString("hex");

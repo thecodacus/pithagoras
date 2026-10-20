@@ -1,5 +1,5 @@
 import express, { type Router } from "express";
-import { forgetRoutineExemptions, getDb, getDefaultReportTo, listRoutineSessions, routineExemptions, setDefaultReportTo, setRoutineBrowser, setRoutineExemptions } from "../db.js";
+import { forgetRoutineExemptions, getDb, getDefaultReportTo, listRoutineSessions, routineExemptions, setDefaultReportTo, setRoutineExemptions } from "../db.js";
 import { GUARD_RULE_NAMES } from "../pi/guard-rule-names.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { unscopeKey } from "../agent.js";
@@ -31,7 +31,6 @@ const toApi = (row: RoutineRow) => ({
   guard: row.guard === 1,
   /** The guard's rules its runs are exempt from, by name: set on the Guard page. */
   exempt: [...routineExemptions(row.slug)],
-  browser: row.browser === 1,
   /** Where its runs happen: null for Home, else a project's directory. */
   workspace: row.workspace ?? null,
   /** Why that place cannot be used now, such as a project that was deleted; null when it can. */
@@ -151,8 +150,7 @@ function reportTargets() {
   return out;
 }
 
-/** `toolsChanged` is told when a routine's tools changed here, so its runs that are going are told at once. */
-export function routinesRouter(toolsChanged: (slug: string) => void = () => {}): Router {
+export function routinesRouter(): Router {
   const router = express.Router();
 
   /** Destinations a routine can report to, and the portal-wide default. */
@@ -271,12 +269,6 @@ export function routinesRouter(toolsChanged: (slug: string) => void = () => {}):
     // rules one by one are the Guard page's.
     if (req.body?.guard === true) setRoutineExemptions(row.id, []);
     else if (req.body?.guard === false && routineExemptions(row.slug).size === 0) setRoutineExemptions(row.id, GUARD_RULE_NAMES);
-    // Its tools' lists as well, which are what a run goes by: the switch alone would answer 200 and change nothing.
-    if (typeof req.body?.browser === "boolean") {
-      const slug = rowById(row.id)!.slug;
-      setRoutineBrowser(slug, req.body.browser);
-      toolsChanged(slug);
-    }
     res.json(toApi(rowById(row.id)!));
   });
 

@@ -1,10 +1,9 @@
-import { Type } from "typebox";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { BROWSER_CDP } from "../api/mcp.js";
-import { oneOf } from "../pi/tool-schema.js";
-import { bareRef, REF_TOKEN } from "./ref.js";
-import { pointAt, pointTo, press, typing } from "./cursor.js";
-import { diffViews, findNodes, findRef, pinned, renderView, sectionText, textPage, type AxChild, type View, type Viewport } from "./view.js";
+import { cdpUrl } from "./cdp";
+import { bareRef, REF_TOKEN } from "./ref";
+import { pointAt, pointTo, press, typing } from "./cursor";
+import { boolean, number, object, oneOf, string } from "./schema";
+import { diffViews, findNodes, findRef, pinned, renderView, sectionText, textPage, type AxChild, type View, type Viewport } from "./view";
 
 /**
  * The agent's browser tools: the portal's own, on the same Chromium the
@@ -22,8 +21,9 @@ let connecting: Promise<Browser> | null = null;
 
 async function connect(): Promise<Browser> {
   if (browser?.isConnected()) return browser;
+  const at = cdpUrl();
   connecting ??= chromium
-    .connectOverCDP(BROWSER_CDP, { timeout: 10_000 })
+    .connectOverCDP(at, { timeout: 10_000 })
     .then((b) => {
       browser = b;
       b.on("disconnected", () => {
@@ -32,7 +32,7 @@ async function connect(): Promise<Browser> {
       return b;
     })
     .catch((e: Error) => {
-      throw new Error(`The browser is not reachable at ${BROWSER_CDP} (${e.message.split("\n")[0]}). Is it running? See Settings → Browser.`);
+      throw new Error(`The browser is not reachable at ${at} (${e.message.split("\n")[0]}). Is it running? See the Browser page.`);
     })
     .finally(() => {
       connecting = null;
@@ -55,8 +55,20 @@ const seen = new Map<string, Seen>();
  * stopped for being idle — it goes on in its own tab when it is started again,
  * and without the record it would be handed whichever tab is newest.
  */
-export function forgetBrowserSession(sessionId: string): boolean {
-  return seen.delete(sessionId);
+export function forgetChat(chatId: string): boolean {
+  return seen.delete(chatId);
+}
+
+/**
+ * Lets go of the browser, as the half stops: the connection to it is dropped, and the tabs the agents work in stay
+ * open in it, as the browser does, for a start after this to find (closing a browser connected over CDP only
+ * disconnects). What each chat was shown went with the connection: a chat goes on in the newest tab.
+ */
+export async function disconnect(): Promise<void> {
+  seen.clear();
+  const open = browser;
+  browser = null;
+  await open?.close();
 }
 
 /** The tab a chat works in: the one it last used, else the most recent. */
@@ -177,7 +189,7 @@ export function keyCombo(raw: string): string {
  * when one of them is switched off.
  */
 
-const REF = Type.String({ description: "Element ref from the latest view or browser_find, e.g. e12 (f1e5 inside a frame)" });
+const REF = string("Element ref from the latest view or browser_find, e.g. e12 (f1e5 inside a frame)");
 
 /** The view's format, said once, on the tool that shows it. */
 const VIEW_FORMAT =
@@ -193,11 +205,11 @@ export const ACTIONS_RULE =
 /** Where a ref comes from and what a gone one means: on every tool that gives or takes refs. */
 export const REFS_RULE = "Browser refs come from browser_snapshot or browser_find; never guess one. A ref whose element is gone is refused: take a fresh browser_snapshot.";
 
-/** An ExtensionFactory — see pi's InlineExtension. */
+/** The tools of the chat `sessionId`, registered in its pi (`portal.chats.extend`). */
 export function browserTools(sessionId: string) {
   return (pi: any): void => {
     // One tab, one action at a time: a click and a typed word in parallel race each other. Every tool declares that
-    // what it reads is outside content, and that its `url` is an address the agent chose (see declaredGuard in pi/guard.ts).
+    // what it reads is outside content, and that its `url` is an address the agent chose (ToolGuard of the extension API).
     const tool = (definition: Record<string, unknown>) =>
       pi.registerTool({ executionMode: "sequential", ...definition, guard: { outside: true, reaches: ["url"] } });
 
@@ -208,8 +220,8 @@ export function browserTools(sessionId: string) {
         "Open a URL in the current tab. To follow a link on the page, use browser_click. " +
         "Answers with the new page's view; fails with the browser's error if it does not load.",
       promptSnippet: "Open a URL in the browser",
-      parameters: Type.Object({
-        url: Type.String({ description: "Full URL with scheme, e.g. https://example.com/page" }),
+      parameters: object({
+        url: string("Full URL with scheme, e.g. https://example.com/page"),
       }),
       async execute(_id: string, p: { url: string }) {
         const page = await pageFor(sessionId);
@@ -224,7 +236,7 @@ export function browserTools(sessionId: string) {
       label: "Back",
       description: "Go back one page in the current tab and show it. Fails when there is no page to go back to.",
       promptSnippet: "Go back to the previous page",
-      parameters: Type.Object({}),
+      parameters: object({}),
       async execute() {
         const page = await pageFor(sessionId);
         await page.goBack({ waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -239,9 +251,9 @@ export function browserTools(sessionId: string) {
       description: "Show the current tab's viewport (plus a margin) as text, with a ref for each element. " + VIEW_FORMAT,
       promptSnippet: "See what is on screen, as text with refs",
       promptGuidelines: [ACTIONS_RULE, REFS_RULE],
-      parameters: Type.Object({
-        mode: Type.Optional(oneOf(["a11y", "index"], "a11y (default): everything in view, with text. index: only controls; shorter, for forms and navigating")),
-      }),
+      parameters: object({
+        mode: oneOf(["a11y", "index"], "a11y (default): everything in view, with text. index: only controls; shorter, for forms and navigating"),
+      }, ["mode"]),
       async execute(_id: string, p: { mode?: "a11y" | "index" }) {
         return show(sessionId, await pageFor(sessionId), { mode: p.mode });
       },
@@ -253,10 +265,10 @@ export function browserTools(sessionId: string) {
       description: "Click an element by its ref: link, button, checkbox, tab, menu item. Refs only, not CSS selectors or text.",
       promptSnippet: "Click an element by its ref",
       promptGuidelines: [ACTIONS_RULE, REFS_RULE],
-      parameters: Type.Object({
+      parameters: object({
         ref: REF,
-        double: Type.Optional(Type.Boolean({ description: "Double-click; default false" })),
-      }),
+        double: boolean("Double-click; default false"),
+      }, ["double"]),
       async execute(_id: string, p: { ref: string; double?: boolean }) {
         return act(sessionId, `Clicked ${cleanRef(p.ref)}`, async (page) => {
           const { locator } = await element(page, p.ref);
@@ -273,11 +285,11 @@ export function browserTools(sessionId: string) {
       description: "Replace the text of a field or editable area by its ref; submit presses Enter after. Dropdowns: browser_select; single keys: browser_key.",
       promptSnippet: "Fill in a text field by its ref",
       promptGuidelines: [ACTIONS_RULE, REFS_RULE],
-      parameters: Type.Object({
+      parameters: object({
         ref: REF,
-        text: Type.String({ description: "The field's whole new text" }),
-        submit: Type.Optional(Type.Boolean({ description: "Press Enter after; default false" })),
-      }),
+        text: string("The field's whole new text"),
+        submit: boolean("Press Enter after; default false"),
+      }, ["submit"]),
       async execute(_id: string, p: { ref: string; text: string; submit?: boolean }) {
         return act(sessionId, `Typed into ${cleanRef(p.ref)}`, async (page) => {
           const { locator } = await element(page, p.ref);
@@ -302,9 +314,9 @@ export function browserTools(sessionId: string) {
         "For one built from buttons and lists, open it and use browser_click.",
       promptSnippet: "Choose an option in a dropdown",
       promptGuidelines: [ACTIONS_RULE, REFS_RULE],
-      parameters: Type.Object({
+      parameters: object({
         ref: REF,
-        option: Type.String({ description: "Option text exactly as shown" }),
+        option: string("Option text exactly as shown"),
       }),
       async execute(_id: string, p: { ref: string; option: string }) {
         return act(sessionId, `Chose "${p.option}" in ${cleanRef(p.ref)}`, async (page) => {
@@ -321,8 +333,8 @@ export function browserTools(sessionId: string) {
       description: "Press a key or combination in the page: submit, close a dialog, move through a list, a shortcut. Text into a field: browser_type.",
       promptSnippet: "Press a key or a shortcut",
       promptGuidelines: [ACTIONS_RULE],
-      parameters: Type.Object({
-        key: Type.String({ description: "Key or keys joined with +, e.g. Enter, Escape, shift+Tab, ctrl+a" }),
+      parameters: object({
+        key: string("Key or keys joined with +, e.g. Enter, Escape, shift+Tab, ctrl+a"),
       }),
       async execute(_id: string, p: { key: string }) {
         const combo = keyCombo(p.key);
@@ -338,11 +350,11 @@ export function browserTools(sessionId: string) {
         "What stayed pinned (a sticky sidebar) is named, not repeated. Says when already at the top or bottom.",
       promptSnippet: "See the next screen down or up",
       promptGuidelines: [REFS_RULE],
-      parameters: Type.Object({
-        direction: Type.Optional(oneOf(["down", "up"], "Default down")),
-        screens: Type.Optional(Type.Number({ description: "Default 1, at most 10; 0.5 is half a screen" })),
-        ref: Type.Optional(Type.String({ description: "Element to scroll into view instead" })),
-      }),
+      parameters: object({
+        direction: oneOf(["down", "up"], "Default down"),
+        screens: number("Default 1, at most 10; 0.5 is half a screen"),
+        ref: string("Element to scroll into view instead"),
+      }, ["direction", "screens", "ref"]),
       async execute(_id: string, p: { direction?: "down" | "up"; screens?: number; ref?: string }) {
         const page = await pageFor(sessionId);
         const before = seen.get(sessionId);
@@ -376,8 +388,8 @@ export function browserTools(sessionId: string) {
         "Up to 15 matches, nearest first, each a view line with its ref and where it is (in view, or pixels above/below); act on one directly.",
       promptSnippet: "Find an element anywhere on the page by its words",
       promptGuidelines: ["Use browser_find to reach something off screen that you can name, instead of scrolling through the page to look for it.", REFS_RULE],
-      parameters: Type.Object({
-        query: Type.String({ description: "Words to match, e.g. add to cart" }),
+      parameters: object({
+        query: string("Words to match, e.g. add to cart"),
       }),
       async execute(_id: string, p: { query: string }) {
         const page = await pageFor(sessionId);
@@ -395,11 +407,11 @@ export function browserTools(sessionId: string) {
         "Plain text: headings #, list items -, table cells |; long text comes in pages of max_chars, each ending with the offset to continue from.",
       promptSnippet: "Read a section's full text by its ref",
       promptGuidelines: ["Use browser_get_text to read long text on a page, rather than scrolling through it or taking screenshots of it.", REFS_RULE],
-      parameters: Type.Object({
-        ref: Type.String({ description: "Section ref, e.g. e40" }),
-        offset: Type.Optional(Type.Number({ description: "From the previous page; default 0" })),
-        max_chars: Type.Optional(Type.Number({ description: "Default 2000, 200 to 8000" })),
-      }),
+      parameters: object({
+        ref: string("Section ref, e.g. e40"),
+        offset: number("From the previous page; default 0"),
+        max_chars: number("Default 2000, 200 to 8000"),
+      }, ["offset", "max_chars"]),
       async execute(_id: string, p: { ref: string; offset?: number; max_chars?: number }) {
         const ref = cleanRef(p.ref);
         const page = await pageFor(sessionId);
@@ -418,9 +430,9 @@ export function browserTools(sessionId: string) {
         "it points at your last action's target, so if it is elsewhere, that action hit the wrong element.",
       promptSnippet: "A picture of the screen, for layout and images",
       promptGuidelines: ["Use browser_screenshot only when layout, images or a canvas matter; browser_snapshot and browser_get_text are cheaper to read.", REFS_RULE],
-      parameters: Type.Object({
-        ref: Type.Optional(Type.String({ description: "One element to capture; the whole screen if omitted" })),
-      }),
+      parameters: object({
+        ref: string("One element to capture; the whole screen if omitted"),
+      }, ["ref"]),
       async execute(_id: string, p: { ref?: string }) {
         const page = await pageFor(sessionId);
         const target = p.ref ? (await element(page, p.ref)).locator : null;
@@ -431,4 +443,11 @@ export function browserTools(sessionId: string) {
       },
     });
   };
+}
+
+/** What Settings → Tools is told of them (`portal.tools.offer`): each one's name and description. */
+export function offeredTools(): { name: string; description: string }[] {
+  const tools: { name: string; description: string }[] = [];
+  browserTools("")({ registerTool: ({ name, description }: { name: string; description: string }) => tools.push({ name, description }) });
+  return tools;
 }

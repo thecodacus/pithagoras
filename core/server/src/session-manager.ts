@@ -26,7 +26,6 @@ import { neutralise } from "./channels/framing.js";
 import { textOf } from "./pi/entries.js";
 import { removeSessionFiles } from "./session-files.js";
 import { dropImages, forLog, forPi, loadImages, removeImages, storedIn, type Attached } from "./prompt-images.js";
-import { forgetBrowserSession } from "./browser/tools.js";
 import { BACKGROUND_SUPPORTED, listJobs, startedWhen, type BackgroundJob } from "./background.js";
 import { forgetSession as forgetLlamaProxy } from "./llama-progress.js";
 import { chatEvent, chatLife, extensionHolds, serversSettled, setChatBridge } from "./extension-host.js";
@@ -68,7 +67,6 @@ import {
   markOrphanedSessionsInterrupted,
   openDetachedSubagents,
   openSubagentsIn,
-  browserAllowed,
   sessionTools,
   setSessionTools,
   toolDefaultsForSession,
@@ -1177,14 +1175,10 @@ class SessionManager extends EventEmitter {
       // A routine run gets the report tool instead: it is the one kind of
       // session with nobody on the other end to read what it found.
       routineSlug: session.kind === "routine" ? session.routine_slug : undefined,
-      // A routine may be exempted from taint rules, read per call as browserNow is; nothing else can be.
+      // A routine may be exempted from taint rules, read per call as the allowlist is; nothing else can be.
       exemptNow: () => (session.kind === "routine" ? routineExemptions(session.routine_slug) : new Set<string>()),
-      // Re-read per call: the row is what the UI toggles, and a session that
-      // has to be restarted to notice is a switch that looks broken.
-      browserNow: () => {
-        const row = getSession(sessionId) ?? session;
-        return { allowed: browserAllowed(row), allowlist: browserAllowlist() };
-      },
+      // Re-read per call: a list that has to wait for a restart to hold is a setting that looks broken.
+      allowlistNow: browserAllowlist,
       // The session's settled role picks the context files; the live one gates
       // each tool call, so a group conversation follows whoever is speaking.
       role: session.role,
@@ -3005,13 +2999,11 @@ class SessionManager extends EventEmitter {
   /**
    * The run a chat was started for is over, and the portal stopped its pi for
    * good: a routine run in a session of its own. The server halves are told it
-   * is finished, and what the portal's browser kept for the chat goes with it.
-   * A person who goes on with the chat starts its pi again, and it is told
-   * `started` as any chat is.
+   * is finished, and let go of what they kept for its run. A person who goes
+   * on with the chat starts its pi again, and it is told `started` as any chat is.
    */
   finished(sessionId: string): void {
     chatLife("finished", sessionId);
-    forgetBrowserSession(sessionId);
   }
 
   /**
@@ -3085,7 +3077,6 @@ class SessionManager extends EventEmitter {
     // A prompt can have started a launch while the abort was being waited for.
     await this.settleStart(sessionId);
     await this.stop(sessionId);
-    forgetBrowserSession(sessionId);
     // Nothing of it asks the progress proxy any more.
     forgetLlamaProxy(sessionId);
   }

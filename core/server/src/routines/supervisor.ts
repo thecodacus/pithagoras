@@ -28,8 +28,6 @@ export interface RoutineRow {
   fresh_session: number;
   /** 0 turns off the injection guard's blocking rules for this routine's runs. */
   guard: number;
-  /** 1 lets this routine's runs drive the agent's browser. */
-  browser: number;
   /** Where its runs happen: null for Home, else a project's directory. */
   workspace: string | null;
   /**

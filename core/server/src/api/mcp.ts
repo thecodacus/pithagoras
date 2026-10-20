@@ -168,42 +168,25 @@ export function dropMcpCache(names: string[]): void {
   }
 }
 
-/** Where the agent's browser listens for the debugging protocol, read from the environment as it is now. */
-export const browserCdp = () => process.env.BROWSER_CDP_URL || "http://127.0.0.1:9222";
-/** The same, as it was when the portal started: what the tools and the servers configured for it go by. */
-export const BROWSER_CDP = browserCdp();
-
-/** The servers of a configuration that attach to our browser, whatever they are called. */
+/** The servers of a configuration that attach to a browser that is already running, whatever they are called. */
 function connectedIn(config: McpFile): string[] {
   const names: string[] = [];
   for (const [name, entry] of Object.entries(config.mcpServers ?? {})) {
     // An entry that is not an object (`"old": null`) is no server that attaches to anything.
     const args = entry && typeof entry === "object" ? (entry as { args?: unknown }).args : undefined;
-    if (Array.isArray(args) && args.includes("--cdp-endpoint") && args.includes(BROWSER_CDP)) {
-      names.push(name);
-    }
+    if (Array.isArray(args) && args.includes("--cdp-endpoint")) names.push(name);
   }
   return names;
-}
-
-/** The servers configured to attach to our browser, whatever they are called. */
-function connectedServers(): string[] {
-  return connectedIn(readMcpFile().config);
-}
-
-/** Is some MCP server pointed at our browser, whatever it is called? */
-export function findConnection(): string | null {
-  return connectedServers()[0] ?? null;
 }
 
 /**
  * Which servers are the agent's browser.
  *
  * Found by what they connect to, not by a name: `--cdp-endpoint` is what makes
- * a Playwright server the browser rather than a throwaway Chromium, and an
- * entry written by hand or by an older portal may be called anything. The one
- * the portal writes is called `browser`, and one that is called that counts
- * too — it is the name the rest of the portal has always looked for.
+ * a Playwright server a browser the agent is signed into, at whatever address,
+ * rather than a throwaway Chromium, and an entry written by hand or by an older
+ * portal may be called anything. One called `browser` counts too — it is the
+ * name the portal wrote, and has always looked for.
  */
 export function browserServers(): string[] {
   return serversAndBrowsers().browsers;

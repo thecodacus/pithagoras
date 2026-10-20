@@ -7,7 +7,6 @@ import { agentSkillsDir, skillsLine } from "../agent-skills.js";
 import { agentFilesAt, agentFor, understoryAt } from "../project-agent.js";
 import { crossModelThinkingExtension } from "./cross-model-thinking.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-mcp-rules.js";
-import { browserTools } from "../browser/tools.js";
 import { bundledPath } from "../bundled.js";
 import { type AgentUse, baseDir, readBytes } from "../workspace-files.js";
 import { agentOf } from "../agents.js";
@@ -32,7 +31,7 @@ import { proxyBaseUrl } from "../llama-progress.js";
 import { bridgeSubagents, SUBAGENT_INPUT, SUBAGENT_STOP, type Bridge } from "../subagent-protocol.js";
 import { bridgeExtensionUi, UI_RECEIVE } from "../extension-ui.js";
 import { hostExtensions } from "../extension-host.js";
-import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, portalBrowserOn, questionWaitMs, voiceSpeaks } from "../db.js";
+import { adapterTool, contextWindowFor, getSkipThinkingProviders, getVoiceInstructions, getVoiceModel, questionWaitMs, voiceSpeaks } from "../db.js";
 import { configStamp, isLlamaProvider } from "../providers.js";
 import { rereadConfig } from "./model-runtime.js";
 import { UNDERSTORY_RULE } from "../features.js";
@@ -225,10 +224,9 @@ function framing(): string[] {
   // Nor the line naming the agent's own files: which there are can change
   // under an open chat (Understory switched on takes MEMORY.md away), so it is
   // asked for each time the prompt is built — see ownFiles.
-  // The portal's own browser tools carry their rules as promptGuidelines, which pi
-  // includes only while they are active; these are for a Playwright MCP someone attached by hand,
-  // so they are said only where there is such a server.
-  const lines: string[] = !portalBrowserOn() && hasPlaywrightBrowser() ? [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE] : [];
+  // These are a Playwright MCP's rules, so they are said only where such a server is attached: a package's
+  // browser tools carry their own as promptGuidelines, which pi includes only while they are active.
+  const lines: string[] = hasPlaywrightBrowser() ? [BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE] : [];
   // The bracketed-ref trap that used to need a line here is handled in the
   // guard now, which normalises the argument for every session whether it
   // reads this or not. Nothing to say, so nothing spent saying it.
@@ -489,8 +487,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     sessionId?: string;
     /** The taint rules a run may act against after it read something untrusted, read at each call — see guardExtension. */
     exemptNow?: () => ReadonlySet<string>;
-    /** Read at each tool call, so a change takes effect without a restart. */
-    browserNow?: () => { allowed: boolean; allowlist: string[] };
+    /** The sites the agent's tools may reach, read at each tool call, so a change takes effect without a restart. */
+    allowlistNow?: () => string[];
     /** What this chat's subagents run on, asked when one starts: see subagent-protocol.ts. */
     subagentModel?: () => string | undefined;
     /** The agent whose heartbeat this is: gives it the note tool. See heartbeat.ts. */
@@ -548,7 +546,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             opts.whoNow ?? (() => ({ role: "primary" })),
             opts.sessionId,
             opts.exemptNow ?? (() => new Set()),
-            opts.browserNow ?? (() => ({ allowed: false, allowlist: [] })),
+            opts.allowlistNow ?? (() => []),
             opts.cwd,
             [path.join(pi.getAgentDir(), "skills"), ...(builtinSkills ? [builtinSkills] : [])],
             () => switchedOff(),
@@ -574,10 +572,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       // worse than no tool, and the model will keep trying it.
       if (opts.routineSlug !== undefined && reportToFor(opts.routineSlug)) {
         factories.push({ name: "report", factory: reportTool(opts.routineSlug ?? null) });
-      }
-      // The browser, as the portal's own tools; the guard decides per call whether this chat may drive it.
-      if (opts.sessionId && portalBrowserOn()) {
-        factories.push({ name: "browser", factory: browserTools(opts.sessionId) });
       }
       if (codemode) factories.push(codemode);
       // A heartbeat's way of saying what it found: it can do nothing else.

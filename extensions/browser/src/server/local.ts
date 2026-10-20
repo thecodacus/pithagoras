@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { DATA_DIR } from "../data-dir.js";
+import { browserVersion } from "./cdp";
+import { portal } from "./host";
 
 /**
  * The same browser, without a container.
@@ -12,7 +13,9 @@ import { DATA_DIR } from "../data-dir.js";
  * if it is not, this says so rather than pretending.
  *
  * The profile lives on the data volume exactly as the container's does, so the
- * agent's logins survive restarts either way.
+ * agent's logins survive restarts either way: in Browser's own folder there
+ * (`profile`), where the portal's from before Browser was an extension is moved
+ * as it is taken up (handoff.ts).
  */
 
 const CANDIDATES = [
@@ -25,7 +28,7 @@ const CANDIDATES = [
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
 ].filter(Boolean) as string[];
 
-const PROFILE = path.resolve(DATA_DIR, "browser-profile");
+const profile = () => path.join(portal().dataDir(), "profile");
 
 /** The first candidate that exists, resolving bare names against PATH. */
 export function findBinary(): string | null {
@@ -44,30 +47,36 @@ export function findBinary(): string | null {
 
 let child: ChildProcess | null = null;
 
-export const running = () => Boolean(child && child.exitCode === null);
+/**
+ * The Chrome this started, or one that answers on the debugging port: a half
+ * started again (Docker's update restarts it) has no handle on the Chrome it
+ * started before, which goes on, and a second one on the same profile and port
+ * would not come up.
+ */
+export const running = async () => Boolean(child && child.exitCode === null) || (await browserVersion()) !== null;
 
-export function status() {
+export async function status() {
   const binary = findBinary();
   return {
     available: Boolean(binary),
     binary,
-    running: running(),
+    running: await running(),
     // Headful when there is a display to put it on, which is the case worth
     // having: a headless browser is frequently refused by sign-in pages, and
     // signing in is the entire point of this.
     headless: !process.env.DISPLAY,
-    profile: PROFILE,
+    profile: profile(),
   };
 }
 
-export function start(): void {
-  if (running()) return;
+export async function start(): Promise<void> {
+  if (await running()) return;
   const binary = findBinary();
   if (!binary) throw new Error("No Chrome or Chromium found on this machine");
 
-  mkdirSync(PROFILE, { recursive: true });
+  mkdirSync(profile(), { recursive: true });
   const args = [
-    `--user-data-dir=${PROFILE}`,
+    `--user-data-dir=${profile()}`,
     // Bound to loopback by default, and left that way: the port is
     // unauthenticated and whoever reaches it owns every account signed in.
     "--remote-debugging-port=9222",
