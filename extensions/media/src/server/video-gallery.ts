@@ -212,7 +212,15 @@ function shownAll(rows: Row[]): GalleryVideo[] {
   return rows.map((row) => shown(row, look(row, folders)));
 }
 
-const rowOf = (id: string): Row | undefined => getDb().prepare("SELECT * FROM videos WHERE id = ?").get(id) as Row | undefined;
+const rowById = (id: string): Row | undefined => getDb().prepare("SELECT * FROM videos WHERE id = ?").get(id) as Row | undefined;
+
+/** A clip of the list by its id: one of a chat that Media was not told is gone is kept as its folder's first, as rowOf of the pictures has it. */
+function rowOf(id: string): Row | undefined {
+  const row = rowById(id);
+  if (!row?.session_id || portal().chats.get(row.session_id)) return row;
+  keepChatVideos(row.session_id);
+  return rowById(id);
+}
 
 /** Where a clip's file is, as a folder the portal knows and a path inside it; the reason it is not anywhere that can be served otherwise. */
 const locate = (row: Row, folders: Map<string, string | Error> = new Map()) => locateRow(row, { own: videosDir(), generated: GENERATED_VIDEOS_DIR, what: WHAT }, folders);
@@ -638,8 +646,10 @@ export async function openListedPoster(id: string): Promise<(Awaited<ReturnType<
  * cannot be reached is not: the file may well be in it, so this says so and leaves the clip in the list.
  */
 export async function deleteVideo(id: string): Promise<void> {
+  if (!rowById(id)) throw new FileError("missing", "There is no such video");
   const row = rowOf(id);
-  if (!row) throw new FileError("missing", "There is no such video");
+  // Its chat went while Media was not told, with no folder to keep it in: it went from the list, and nothing is left of it to delete.
+  if (!row) return;
   const missing = (e: unknown) => refusalOf(e) === "missing";
   let at: { base: string; rel: string } | undefined;
   try {
