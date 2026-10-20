@@ -509,11 +509,16 @@ export function forgetVideosIn(dir: string): number {
 
 /**
  * Keeps the clips of a chat that was deleted as clips of its folder, as keepChatPictures does the pictures: the
- * folder is the one the chat had when each was recorded. Those that cannot be kept go, with their posters and copies.
+ * folder is the one the chat had when each was recorded, where it really is now. Those that cannot be kept go, with
+ * their posters and copies.
  */
 export function keepChatVideos(sessionId: string): void {
   const d = getDb();
-  d.prepare("UPDATE OR IGNORE videos SET origin = 'folder', folder = chat_folder, chat_folder = NULL, session_id = NULL WHERE session_id = ? AND chat_folder IS NOT NULL").run(sessionId);
+  for (const { chat_folder } of d.prepare("SELECT DISTINCT chat_folder FROM videos WHERE session_id = ? AND chat_folder IS NOT NULL").all(sessionId) as { chat_folder: string }[]) {
+    // A folder that cannot be reached is not one to keep clips of: there is nothing to find them in.
+    const real = realFolderOf(chat_folder);
+    if (real) d.prepare("UPDATE OR IGNORE videos SET origin = 'folder', folder = ?, chat_folder = NULL, session_id = NULL WHERE session_id = ? AND chat_folder = ?").run(real, sessionId, chat_folder);
+  }
   const left = (d.prepare("SELECT id FROM videos WHERE session_id = ?").all(sessionId) as { id: string }[]).map((row) => row.id);
   if (left.length) forget(left);
 }

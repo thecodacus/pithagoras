@@ -122,17 +122,18 @@ test('the tools follow the settings: offered and registered alike, with their vo
 
 test('a chat that goes keeps its pictures in its folder, and a folder that goes takes them', async () => {
   const data = realpathSync(scratch('media-half-'));
+  const project = realpathSync(scratch('media-project-'));
   const p = await start(data);
   try {
     const add = getDb().prepare("INSERT INTO images (id, origin, session_id, path, kind, created_at, chat_folder) VALUES (?, 'chat', ?, ?, 'generated', 1, ?)");
-    add.run('000000000001', 'gone', 'generated-images/a.png', '/w/project');
+    add.run('000000000001', 'gone', 'generated-images/a.png', project);
     add.run('000000000002', 'other', 'generated-images/b.png', '/w/elsewhere');
-    getDb().prepare("INSERT INTO videos (id, origin, session_id, path, kind, created_at, chat_folder) VALUES ('000000000003', 'chat', 'gone', 'generated-videos/v.webm', 'generated', 1, '/w/project')").run();
+    getDb().prepare("INSERT INTO videos (id, origin, session_id, path, kind, created_at, chat_folder) VALUES ('000000000003', 'chat', 'gone', 'generated-videos/v.webm', 'generated', 1, ?)").run(project);
     p.life.emit('deleted', 'gone');
     const where = (table: string) => getDb().prepare(`SELECT id, origin, folder FROM ${table} ORDER BY id`).all();
-    assert.deepEqual(where('images'), [{ id: '000000000001', origin: 'folder', folder: '/w/project' }, { id: '000000000002', origin: 'chat', folder: null }]);
-    assert.deepEqual(where('videos'), [{ id: '000000000003', origin: 'folder', folder: '/w/project' }]);
-    p.removed('/w/project');
+    assert.deepEqual(where('images'), [{ id: '000000000001', origin: 'folder', folder: project }, { id: '000000000002', origin: 'chat', folder: null }]);
+    assert.deepEqual(where('videos'), [{ id: '000000000003', origin: 'folder', folder: project }]);
+    p.removed(project);
     assert.deepEqual(where('images'), [{ id: '000000000002', origin: 'chat', folder: null }]);
     assert.deepEqual(where('videos'), []);
   } finally {

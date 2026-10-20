@@ -484,13 +484,18 @@ export function forgetPicturesIn(dir: string): number {
  * Keeps the pictures of a chat that was deleted as pictures of its folder, with
  * what they were asked for: the files stay in the chat's folder, which is not the
  * chat's to take away. The folder is the one the chat had when each was recorded,
- * as the chat cannot be asked for it once it is gone. Those that cannot be kept
- * (no folder was known, or the same file is a picture of that folder already) go,
- * and what was made of them no longer names them.
+ * as the chat cannot be asked for it once it is gone, where it really is now. Those
+ * that cannot be kept (no folder was known, it cannot be reached, or the same file
+ * is a picture of that folder already) go, and what was made of them no longer
+ * names them.
  */
 export function keepChatPictures(sessionId: string): void {
   const d = getDb();
-  d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = chat_folder, chat_folder = NULL, session_id = NULL WHERE session_id = ? AND chat_folder IS NOT NULL").run(sessionId);
+  for (const { chat_folder } of d.prepare("SELECT DISTINCT chat_folder FROM images WHERE session_id = ? AND chat_folder IS NOT NULL").all(sessionId) as { chat_folder: string }[]) {
+    // A folder that cannot be reached is not one to keep pictures of: there is nothing to find them in.
+    const real = realFolderOf(chat_folder);
+    if (real) d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = ?, chat_folder = NULL, session_id = NULL WHERE session_id = ? AND chat_folder = ?").run(real, sessionId, chat_folder);
+  }
   const left = (d.prepare("SELECT id FROM images WHERE session_id = ?").all(sessionId) as { id: string }[]).map((row) => row.id);
   if (left.length) forget(left);
 }
