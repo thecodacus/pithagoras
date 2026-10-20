@@ -6,7 +6,7 @@ import { boolean, number, object, oneOf, string } from "./schema";
 import { diffViews, findNodes, findRef, pinned, renderView, sectionText, textPage, type AxChild, type View, type Viewport } from "./view";
 
 /**
- * The agent's browser tools: the portal's own, on the same Chromium the
+ * The agent's browser tools: Browser's own, on the same Chromium the
  * Playwright MCP drove, over its debugging port.
  *
  * Every response is sized for a local model, which reads each token before it

@@ -48,8 +48,8 @@ export function findBinary(): string | null {
 let child: ChildProcess | null = null;
 
 /**
- * The Chrome this started, or one that answers on the debugging port: a half
- * started again (Docker's update restarts it) has no handle on the Chrome it
+ * The Chrome this started, or one that answers on the debugging port: a
+ * portal started again, or Browser updated, has no handle on the Chrome
  * started before, which goes on, and a second one on the same profile and port
  * would not come up.
  */

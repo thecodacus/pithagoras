@@ -206,7 +206,7 @@ export function ownFiles(cwd: string, role?: string, chat?: string): string[] {
 }
 
 /**
- * Whether a Playwright MCP server is attached to the browser. A file that cannot be read or parsed says
+ * Whether a Playwright MCP server is attached to a running browser (see browserServers). A file that cannot be read or parsed says
  * there is none: this runs while the options of the resource loader are made, and a failure there leaves
  * the chat without the loader, and with it without every extension of the portal's, the guard among them.
  */

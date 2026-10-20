@@ -79,7 +79,7 @@ export function uiBind(): string {
   if (isIPv4(wanted)) return wanted;
   if (!badBinds.has(wanted)) {
     badBinds.add(wanted);
-    console.warn(`[portal] BROWSER_BIND=${wanted} is not an IPv4 address, so the browser's UI stays on ${LOOPBACK}`);
+    portal().log(`BROWSER_BIND=${wanted} is not an IPv4 address, so the browser's UI stays on ${LOOPBACK}`);
   }
   return LOOPBACK;
 }
