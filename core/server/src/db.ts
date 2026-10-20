@@ -2050,16 +2050,17 @@ function browserAdoptionPending(): boolean {
  * `adoptBrowserGrants` to carry the grants over, and by `browserExceptions`.
  */
 export function browserAllowed(session: SessionRow): boolean {
-  return browserAllowedWith(session, browserPolicy());
+  return toolsOnWith(session, browserPolicy());
 }
 
 /**
- * What the answer is worked out from apart from the conversation asked about:
- * the browser's tools as far as they have been seen, the defaults, and whether
- * the old column decides. A pass over many conversations asks for it once. Each
- * of them used to read the MCP file three times and the settings table twice.
+ * What the answer for some tools is worked out from apart from the conversation
+ * asked about: the tools (the browser's, as far as they have been seen), the
+ * defaults, and whether the old column decides. A pass over many conversations
+ * asks for it once. Each of them used to read the MCP file three times and the
+ * settings table twice.
  */
-export interface BrowserPolicy {
+export interface ToolsPolicy {
   names: string[];
   /** With none of its tools seen: whether the old column is what answers. */
   columnDecides: boolean;
@@ -2070,7 +2071,8 @@ export interface BrowserPolicy {
   homes?: AgentHome[];
 }
 
-export function browserPolicy(): BrowserPolicy {
+/** The browser's: its tools as far as they have been seen, and with none seen, whether its old column answers. */
+export function browserPolicy(): ToolsPolicy {
   const names = seenBrowserTools();
   return { names, columnDecides: names.length ? false : browserColumnDecides(), defaultsOff: toolDefaultsOff(), projects: new Map() };
 }
@@ -2079,12 +2081,12 @@ export function browserPolicy(): BrowserPolicy {
  * The same for any tools, by name, whether or not a session has registered them: a tool nobody switched off is on.
  * There are names, so the old column never answers.
  */
-function toolPolicy(names: string[]): BrowserPolicy {
+function toolPolicy(names: string[]): ToolsPolicy {
   return { names: [...new Set(names)], columnDecides: false, defaultsOff: toolDefaultsOff(), projects: new Map() };
 }
 
-/** `browserAllowed`, against a policy asked for once; `exceptions` are the conversation's own, where the caller has them already. */
-export function browserAllowedWith(session: Pick<SessionRow, "id" | "kind" | "routine_slug" | "workspace" | "browser">, policy: BrowserPolicy, exceptions?: SessionTools): boolean {
+/** Whether any of the policy's tools is on for a session (`browserAllowed` for the browser's); `exceptions` are the conversation's own, where the caller has them already. */
+export function toolsOnWith(session: Pick<SessionRow, "id" | "kind" | "routine_slug" | "workspace" | "browser">, policy: ToolsPolicy, exceptions?: SessionTools): boolean {
   const routine = routineOf(session);
   if (routine) {
     const row = getDb().prepare("SELECT browser FROM routines WHERE slug = ?").get(routine) as { browser: number } | undefined;
@@ -2181,20 +2183,21 @@ export function browserConfigured(): boolean {
  */
 export function browserExceptions(): SessionRow[] {
   const policy = browserPolicy();
-  return chatsDifferingWith(policy, browserByDefaultWith(policy));
+  return chatsDifferingWith(policy, toolsByDefaultWith(policy));
 }
 
 /**
  * Where some tools are not what the default says: whether a conversation that has never said anything about them
- * has any of them on, and the chats and the routines whose runs have them otherwise. For the Browser page's "Who may
- * drive it" and an extension's `portal.tools.exceptions`.
+ * has any of them on, the chats that have them otherwise, and the routines whose own settings give their runs
+ * another answer than a routine that sets nothing would have, each with that answer. What `portal.tools.exceptions`
+ * answers.
  */
 export interface ToolsDiffer {
   byDefault: boolean;
-  /** Newest first. */
+  /** Newest first. Each has the other answer to `byDefault`. */
   chats: SessionRow[];
   /** By name. */
-  routines: { slug: string; name: string }[];
+  routines: { slug: string; name: string; allowed: boolean }[];
 }
 
 /** Where these tools are not what the default says (see ToolsDiffer). None named: none is on anywhere. */
@@ -2204,13 +2207,13 @@ export function toolExceptions(names: string[]): ToolsDiffer {
 }
 
 /** Where the policy's tools are not what the default says, the policy asked for once. */
-export function toolsDifferWith(policy: BrowserPolicy): ToolsDiffer {
-  const byDefault = browserByDefaultWith(policy);
-  return { byDefault, chats: chatsDifferingWith(policy, byDefault), routines: routinesDifferingWith(policy, byDefault) };
+export function toolsDifferWith(policy: ToolsPolicy): ToolsDiffer {
+  const byDefault = toolsByDefaultWith(policy);
+  return { byDefault, chats: chatsDifferingWith(policy, byDefault), routines: routinesDifferingWith(policy) };
 }
 
 /** The conversations whose answer for the policy's tools is not `byDefault`: see browserExceptions. */
-function chatsDifferingWith(policy: BrowserPolicy, byDefault: boolean): SessionRow[] {
+function chatsDifferingWith(policy: ToolsPolicy, byDefault: boolean): SessionRow[] {
   const rows = getDb()
     .prepare(
       `SELECT * FROM sessions
@@ -2238,27 +2241,37 @@ function chatsDifferingWith(policy: BrowserPolicy, byDefault: boolean): SessionR
   }
   // The policy once for all of them, and what each says about tools from the row that was read.
   return rows.filter(
-    (row) => browserAllowedWith(row, policy, { off: parseToolsOff(row.tools_off), on: parseToolsOff(row.tools_on) }) !== byDefault
+    (row) => toolsOnWith(row, policy, { off: parseToolsOff(row.tools_off), on: parseToolsOff(row.tools_on) }) !== byDefault
   );
 }
 
 /**
- * The routines whose runs' answer for the policy's tools is not `byDefault`: a run as it starts, with what its agent,
- * its project and the routine itself say, and nothing of a chat's own.
+ * The routines whose own lists and switch give their runs another answer for the policy's tools than a routine that
+ * sets nothing would have in the same place: a run as it starts, with what its agent and its project say, and nothing
+ * of a chat's own. Each with its runs' answer.
  */
-function routinesDifferingWith(policy: BrowserPolicy, byDefault: boolean): { slug: string; name: string }[] {
+function routinesDifferingWith(policy: ToolsPolicy): { slug: string; name: string; allowed: boolean }[] {
   const rows = getDb().prepare("SELECT slug, name, workspace FROM routines ORDER BY name COLLATE NOCASE").all() as { slug: string; name: string; workspace: string | null }[];
-  // Where its runs work: its project's folder, or Home.
-  const run = (row: (typeof rows)[number]) => ({ id: "", kind: "routine" as const, routine_slug: row.slug, workspace: row.workspace ?? agentHomePath(), browser: 0 });
-  return rows.filter((row) => browserAllowedWith(run(row), policy, { off: [], on: [] }) !== byDefault).map(({ slug, name }) => ({ slug, name }));
+  const homes = (policy.homes ??= agentHomes());
+  // A new routine's lists and switch: see routineTools for what its switch answers for.
+  const unsaid = routineLayer({ tools_off: "", tools_on: "", browser: 0 });
+  return rows.flatMap((row) => {
+    // Where its runs work: its project's folder, or Home.
+    const workspace = row.workspace ?? agentHomePath();
+    const allowed = toolsOnWith({ id: "", kind: "routine", routine_slug: row.slug, workspace, browser: 0 }, policy, { off: [], on: [] });
+    const unsaidOff = defaultsFor(toolDefaultsFor(workspace, null, undefined, policy.defaultsOff, homes), unsaid);
+    const otherwise = policy.names.some((name) => toolEnabled(name, unsaidOff, { off: [], on: [] }));
+    return allowed === otherwise ? [] : [{ slug: row.slug, name: row.name, allowed }];
+  });
 }
 
 /** Is the browser on for a conversation that has never said anything about it? */
 export function browserByDefault(): boolean {
-  return browserByDefaultWith(browserPolicy());
+  return toolsByDefaultWith(browserPolicy());
 }
 
-function browserByDefaultWith(policy: BrowserPolicy): boolean {
+/** Whether any of the policy's tools is on for a conversation that has never said anything about them. */
+function toolsByDefaultWith(policy: ToolsPolicy): boolean {
   if (!policy.names.length) return !policy.columnDecides;
   const off = new Set(policy.defaultsOff);
   return policy.names.some((name) => !off.has(name));
@@ -2468,7 +2481,11 @@ export function routineTools(slug: string, browser: string[] = seenBrowserTools(
   const row = getDb().prepare("SELECT tools_off, tools_on, browser FROM routines WHERE slug = ?").get(slug) as
     | { tools_off: string; tools_on: string; browser: number }
     | undefined;
-  if (!row) return { off: [], on: [] };
+  return row ? routineLayer(row, browser) : { off: [], on: [] };
+}
+
+/** A routine's lists and switch, as the layer they are for its runs: see routineTools. */
+function routineLayer(row: { tools_off: string; tools_on: string; browser: number }, browser: string[] = seenBrowserTools()): SessionTools {
   const own = { off: parseToolsOff(row.tools_off), on: parseToolsOff(row.tools_on) };
   const unnamed = browser.filter((name) => !own.off.includes(name) && !own.on.includes(name));
   return row.browser === 1 ? { off: own.off, on: [...own.on, ...unnamed] } : { off: [...own.off, ...unnamed], on: own.on };

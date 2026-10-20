@@ -270,11 +270,13 @@ export interface ServerPortal {
     /**
      * Where these tools are not what the default says, as the portal works it out now: `byDefault`, whether a chat
      * that has never said anything about them has any of them on; the chats that have them otherwise, by their own
-     * switches or by their agent's or project's (newest first); and the routines whose runs have them otherwise (by
-     * name). Each one listed is the opposite of `byDefault`. For a page that says who may use them, as the Browser
-     * page's "Who may drive it" does.
+     * switches or by their agent's or project's (newest first), each the opposite of `byDefault`; and the routines
+     * whose own switches give their runs another answer than a routine that sets nothing would have in the same place
+     * (by name), each with its runs' answer (`allowed`). A routine that sets nothing has a tool that drives a browser
+     * off until its Browser switch is on, and every other tool as a chat in its place has it. For a page that says
+     * who may use them.
      */
-    exceptions(names: string[]): { byDefault: boolean; chats: { id: string; title: string; kind: ChatKind }[]; routines: { slug: string; name: string }[] };
+    exceptions(names: string[]): { byDefault: boolean; chats: { id: string; title: string; kind: ChatKind }[]; routines: { slug: string; name: string; allowed: boolean }[] };
   };
   extensions: {
     /**

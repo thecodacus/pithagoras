@@ -288,9 +288,8 @@ function Shell({
       // Whether one is wired up, not whether anyone has been given it: the
       // browser is on by default now, so "somebody has it" is not a sign that
       // the add-on is there, and a tool name lingering in the catalogue would
-      // keep the nav after the add-on was removed. A routine given it where the
-      // default does not have it still counts, as it always has.
-      .then((b) => setHasBrowser(b.running || b.configured || b.routines.some((r) => r.allowed)))
+      // keep the nav after the add-on was removed.
+      .then((b) => setHasBrowser(b.running || b.configured || b.routines.length > 0))
       .catch(() => setHasBrowser(false));
   }, []);
 

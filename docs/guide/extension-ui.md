@@ -1321,14 +1321,18 @@ what the default says. `tools.exceptions(names)` answers for those tools, by
 name, as the switches have them now: `byDefault`, whether a chat that has
 never said anything about them has any of them on; `chats`, those that have
 them otherwise, by their own switches or by their agent's or project's, newest
-first, each `{ id, title, kind }`; and `routines`, those whose runs have them
-otherwise, by name, each `{ slug, name }`. Each one listed is the opposite of
-`byDefault`. The switches themselves stay in Settings → Tools and beside each
-chat's composer.
+first, each `{ id, title, kind }` and each the opposite of `byDefault`; and
+`routines`, those whose own switches give their runs another answer than a
+routine that sets nothing would have in the same place, by name, each
+`{ slug, name, allowed }` with the answer its runs have. A routine that sets
+nothing has a tool that drives a browser off until its **Browser** switch is
+on, and every other tool as a chat in its place has it. The switches
+themselves stay in Settings → Tools, beside each chat's composer and on each
+routine's page.
 
 ```js
 portal.router.get("/who", (_req, res) => res.json(portal.tools.exceptions(["page_open", "page_read"])));
-// { byDefault: true, chats: [{ id: "a1", title: "Shopping", kind: "task" }], routines: [{ slug: "nightly", name: "Nightly" }] }
+// { byDefault: true, chats: [{ id: "a1", title: "Shopping", kind: "task" }], routines: [{ slug: "nightly", name: "Nightly", allowed: true }] }
 ```
 
 ### Files a tool gives

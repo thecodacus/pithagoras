@@ -205,12 +205,13 @@ export function browserRouter(): Router {
       // optional, and the portal works without it.
     }
 
-    // The conversations and routines that disagree with the default, not every
-    // one that may drive it: the browser is on unless switched off, so "all of
-    // them" is the answer almost always and it tells nobody anything. As any
-    // tools' exceptions are worked out (portal.tools.exceptions), with the
-    // browser's own policy: where none of its tools has been seen, its old
-    // column still answers.
+    // The conversations that disagree with the default, not every one that may
+    // drive it: the browser is on unless switched off, so "all of them" is the
+    // answer almost always and it tells nobody anything. And the routines whose
+    // own switch or tools give their runs the browser, which a routine's runs do
+    // not have until it does. As any tools' exceptions are worked out
+    // (portal.tools.exceptions), with the browser's own policy: where none of
+    // its tools has been seen, its old column still answers.
     const { byDefault, chats: sessions, routines } = toolsDifferWith(browserPolicy());
 
     const ui = await service.uiState();
@@ -246,7 +247,7 @@ export function browserRouter(): Router {
         // They are the ones that differ from the default, so this is the other answer: not worked out again for each.
         allowed: !byDefault,
       })),
-      routines: routines.map((r) => ({ ...r, allowed: !byDefault })),
+      routines,
     });
   });
 

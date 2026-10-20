@@ -34,12 +34,18 @@ db.setSessionTools("paint-off", { off: ["paint"], on: [] });
 // A project that switches the browser off for its chats, which say nothing themselves.
 chat("in-alpha", project);
 db.setProjectTools("alpha", { off: BROWSER, on: [] });
-const routine = (slug, browser, toolsOff = "") =>
-  db.getDb().prepare("INSERT INTO routines (id, slug, name, browser, tools_off) VALUES (?, ?, ?, ?, ?)").run(`id-${slug}`, slug, `Routine ${slug}`, browser, toolsOff);
-// A routine's old Browser switch answers for the browser's tools its lists do not name.
-routine("drives", 1);
-routine("stays-off", 0);
-routine("no-paint", 0, "paint");
+const routine = (slug, { browser = 0, off = "", on = "", workspace = null } = {}) =>
+  db
+    .getDb()
+    .prepare("INSERT INTO routines (id, slug, name, browser, tools_off, tools_on, workspace) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(`id-${slug}`, slug, `Routine ${slug}`, browser, off, on, workspace);
+// A routine's old Browser switch answers for the browser's tools its lists do not name, and is off for a new one.
+routine("drives", { browser: 1 });
+routine("stays-off");
+routine("no-paint", { off: "paint" });
+// Each switches paint on: in Home, where it is on already, and in alpha.
+routine("home-paint", { on: "paint" });
+routine("alpha-paint", { on: "paint", workspace: project });
 
 const ids = (rows) => rows.map((row) => row.id).sort();
 const slugs = (rows) => rows.map((row) => row.slug).sort();
@@ -55,19 +61,31 @@ test("the browser's tools differ where the Browser page has always said they do,
   assert.deepEqual(ids(db.toolExceptions(BROWSER).chats), ["browser-off", "in-alpha"]);
 });
 
-test("a routine differs where its runs have the tools otherwise: by its old switch for the browser's, and by its lists", () => {
-  // On by default: the routines that keep the browser off, as each does until its switch is on.
-  assert.deepEqual(slugs(db.toolExceptions(BROWSER).routines), ["no-paint", "stays-off"]);
-  db.setToolDefaultsOff(BROWSER);
-  // Off by default: the one that has it.
-  const off = db.toolExceptions(BROWSER);
-  assert.equal(off.byDefault, false);
-  assert.deepEqual(slugs(off.routines), ["drives"]);
-  assert.deepEqual(off.routines.find((r) => r.slug === "drives"), { slug: "drives", name: "Routine drives" });
+test("a routine is listed where its own switch or lists give its runs another answer than a routine that sets nothing, with that answer", () => {
+  // A routine that sets nothing has the browser's tools off, whatever a chat has by default: the one whose switch is
+  // on is listed, by default on and by default off, and the one that sets nothing is not.
+  for (const off of [[], BROWSER]) {
+    db.setToolDefaultsOff(off);
+    const asked = db.toolExceptions(BROWSER);
+    assert.equal(asked.byDefault, off.length === 0);
+    assert.deepEqual(asked.routines, [{ slug: "drives", name: "Routine drives", allowed: true }], `default off: ${off.join(", ")}`);
+  }
   db.setToolDefaultsOff([]);
-  // Any tool, by its lists.
-  const paint = db.toolExceptions(["paint"]);
-  assert.deepEqual([paint.byDefault, ids(paint.chats), slugs(paint.routines)], [true, ["paint-off"], ["no-paint"]]);
+  // Any tool, by the routine's lists, against what its place has: paint is on in Home, and off in alpha.
+  db.setProjectTools("alpha", { off: [...BROWSER, "paint"], on: [] });
+  try {
+    const paint = db.toolExceptions(["paint"]);
+    assert.equal(paint.byDefault, true);
+    assert.deepEqual(ids(paint.chats), ["in-alpha", "paint-off"]);
+    assert.deepEqual(paint.routines, [
+      { slug: "alpha-paint", name: "Routine alpha-paint", allowed: true },
+      { slug: "no-paint", name: "Routine no-paint", allowed: false },
+    ]);
+  } finally {
+    db.setProjectTools("alpha", { off: BROWSER, on: [] });
+  }
+  // With alpha saying nothing of paint, the routine there switches it on where it is on already.
+  assert.deepEqual(db.toolExceptions(["paint"]).routines, [{ slug: "no-paint", name: "Routine no-paint", allowed: false }]);
   // None named is on nowhere, whatever the browser's old column says.
   assert.deepEqual(db.toolExceptions([]), { byDefault: false, chats: [], routines: [] });
 });
@@ -82,14 +100,14 @@ test("a server half asks for any tools by name, and is told the chats and routin
   assert.deepEqual(portal.tools.exceptions(["paint"]), {
     byDefault: true,
     chats: [{ id: "paint-off", title: "Chat paint-off", kind: "task" }],
-    routines: [{ slug: "no-paint", name: "Routine no-paint" }],
+    routines: [{ slug: "no-paint", name: "Routine no-paint", allowed: false }],
   });
   assert.deepEqual(portal.tools.exceptions([]), { byDefault: false, chats: [], routines: [] });
   assert.throws(() => portal.tools.exceptions("paint"), /exceptions takes a list of tool names/);
   assert.throws(() => portal.tools.exceptions([1]), /exceptions takes a list of tool names/);
 });
 
-test("the Browser page is told the same, each one listed with the other answer", async () => {
+test("the Browser page is told the same: each chat with the other answer, and the routines its old list had, with theirs", async () => {
   const app = express();
   app.use("/api", browserRouter());
   const server = app.listen(0, "127.0.0.1");
@@ -100,10 +118,10 @@ test("the Browser page is told the same, each one listed with the other answer",
     assert.equal(page.byDefault, true);
     assert.deepEqual(page.sessions.map((s) => s.id).sort(), ids(asked.chats));
     assert.ok(page.sessions.every((s) => s.allowed === false));
-    assert.deepEqual(page.routines, [
-      { slug: "no-paint", name: "Routine no-paint", allowed: false },
-      { slug: "stays-off", name: "Routine stays-off", allowed: false },
-    ]);
+    assert.deepEqual(page.routines, [{ slug: "drives", name: "Routine drives", allowed: true }]);
+    // The routines the page listed before it asked as any tools are asked: those whose switch is on.
+    const before = db.getDb().prepare("SELECT slug FROM routines WHERE browser = 1").all();
+    assert.deepEqual(slugs(page.routines), slugs(before));
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
