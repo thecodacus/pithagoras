@@ -185,6 +185,22 @@ export class Repo {
   }
 
   /**
+   * Stores each of `texts` as a blob, all in one run (fast-import): their ids, each checked against the one computed here. A run
+   * of its own for each is what took seconds over a folder of documents taken in at once.
+   */
+  async storeBlobs(texts) {
+    if (!texts.length) return [];
+    const blobs = texts.flatMap((bytes, i) => [Buffer.from(`blob\nmark :${i + 1}\ndata ${bytes.length}\n`), bytes, Buffer.from("\n")]);
+    // Each one's id, in the order given; and `done`, without which a stream cut short would be taken for a shorter one.
+    const asked = Buffer.from(`${texts.map((_, i) => `get-mark :${i + 1}\n`).join("")}done\n`);
+    const ids = (await this.text(["fast-import", "--quiet", "--done"], { input: Buffer.concat([...blobs, asked]) })).split("\n");
+    texts.forEach((bytes, i) => {
+      if (ids[i] !== blobId(bytes)) throw new GitError(`git stored ${ids[i]} for a text whose id is ${blobId(bytes)}`);
+    });
+    return ids;
+  }
+
+  /**
    * One commit on the branch, from `parent` (nothing for the first), that sets
    * each `{ name, blob }` in `entries` (a document that is gone has no blob: its
    * name is taken out) and leaves the other documents as they were. Moves the

@@ -76,6 +76,11 @@ export const MAX_BODY = 4096;
 const SCHEMA = 1;
 /** How many commits go by between two looks at whether git wants to pack the history. */
 const GC_EVERY = 100;
+/**
+ * How many bytes of the texts a take-in finds are handed to git in one run: a run for each document takes seconds over a folder
+ * of them, and one for all would hold every text (up to `MAX_DOCUMENTS` of `MAX_BYTES`) at once.
+ */
+const TAKE_IN_BYTES = 16 * 1024 * 1024;
 
 export const isDocumentId = (id) => typeof id === "string" && /^[0-9a-f]{16}$/.test(id);
 
@@ -615,6 +620,16 @@ export class Store {
     // A link is not a document, whatever it leads to.
     for (const entry of listing.entries) if (entry.type === "file" && !entry.link && isDocumentName(entry.name)) names.add(entry.name);
     const changed = [];
+    // The texts to store, a batch at a time.
+    const texts = [];
+    let pending = 0;
+    const store = async (bytes) => {
+      texts.push(bytes);
+      pending += bytes.length;
+      if (pending < TAKE_IN_BYTES) return;
+      await this.repo.storeBlobs(texts.splice(0));
+      pending = 0;
+    };
     const byName = new Set();
     for (const row of rows) {
       byName.add(row.name);
@@ -635,7 +650,7 @@ export class Store {
       if (blob === row.blob) this.db.prepare("UPDATE documents SET stat = ? WHERE id = ?").run(file.key, row.id);
       else {
         // Written from the bytes read here: git is never given the file's path to open again.
-        await this.repo.storeBlob(file.bytes);
+        await store(file.bytes);
         changed.push({ id: row.id, name: row.name, blob, revision: row.revision + 1, key: file.key });
       }
     }
@@ -648,11 +663,12 @@ export class Store {
       if (!file) continue;
       const id = randomBytes(8).toString("hex");
       this.db.prepare("INSERT INTO documents (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, name, now, now);
-      await this.repo.storeBlob(file.bytes);
+      await store(file.bytes);
       changed.push({ id, name, blob: blobId(file.bytes), revision: 1, key: file.key });
       room--;
     }
     if (!changed.length) return;
+    await this.repo.storeBlobs(texts);
     const groups = changed.map((c) => ({ ...c, author: "external" }));
     const subject = groups.length === 1 ? `${groups[0].revision === 1 ? "Take in" : "Recover"} ${groups[0].name}` : `Take in or recover ${groups.length} documents`;
     await this.commit(subject, groups, new Map(groups.map((g) => [g.id, g.key])));
