@@ -165,11 +165,18 @@ the upgrade, which raises the schema to 7, moves it out of the portal into
   `image-thumbs/`, `video-posters/` and `video-copies/` (`cache/`).
 
 It then drops the `images` and `videos` tables and the two settings from its
-database. The files are moved, not copied, so the hand-off needs no room of
-its own. The pictures sent with the chats' messages, in a folder for each chat
-in `images/`, stay where they were: that is all `images/` holds now. A start on
-which the hand-off cannot be finished keeps the tables and the settings, says
-so in the log, and goes on with it on the next start.
+database. The files are moved by renaming them, so the hand-off needs no room
+of its own. A folder of the data folder that is mounted on its own or reached
+through a link, such as a `videos/` on a disk of its own, stays where it is (a
+link with the folder it leads to), and what is in it is moved. Where that
+folder is on another file system than the data folder, as one mounted on its
+own is, what is in it is copied into the data folder and then removed where it
+was: the data folder needs room for all of it, and keeps it from then on, in
+Media's folder once Media has taken it up. The pictures sent with the chats'
+messages, in a folder for each chat in `images/`, stay where they were: that is
+all `images/` holds now. A start on which the hand-off cannot be finished keeps
+the tables and the settings, says so in the log, and goes on with it on the
+next start.
 
 Media takes it up when it starts: it moves the hand-off into its own folder and
 everything into its place there, with the same ids and file names, and says in
@@ -191,14 +198,22 @@ still need an `ffmpeg`, found as before (`FFMPEG_PATH`).
 The backup the upgrade made in `backups/` (`portal-v6-….db` from the version
 before) has the gallery's rows and the settings as they were, but not Media's
 files. Put the backup back as under [Going back](#going-back), then, before you
-start the older version, move the files back to where it looks for them. In
-the data folder, with the portal stopped:
+start the older version, move the files back to where it looks for them, and
+take what is left of the hand-off, and Media's store, out of the way of a later
+upgrade. In the data folder, with the portal stopped:
 
 ```sh
 cd /path/to/data
-for d in images videos image-thumbs video-posters video-copies; do
-  mkdir -p "$d" && mv extension-data/pithagoras-media/"$d"/* "$d"/
+for from in extension-data/pithagoras-media handoff/media handoff/.media.*; do
+  [ -d "$from" ] || continue
+  for d in images videos image-thumbs video-posters video-copies; do
+    mkdir -p "$d"
+    find "$from" -type f \( -path "*/$d/*" -o -path "*/.$d.partial/*" \) \
+      ! -path "*.copy/*" ! -name "*.copy" -exec mv {} "$d"/ \;
+  done
 done
+rm -rf handoff/media handoff/.media.*
+mv extension-data/pithagoras-media "backups/pithagoras-media-$(date +%Y%m%d-%H%M%S)"
 ```
 
 In a container, the volume is found as for [a damaged database](#a-damaged-database):
@@ -207,20 +222,52 @@ In a container, the volume is found as for [a damaged database](#a-damaged-datab
 docker stop pithagoras
 DATA=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' pithagoras)
 
-docker run --rm -v "$DATA:/data" alpine sh -c \
-  'cd /data && for d in images videos image-thumbs video-posters video-copies; do mkdir -p "$d" && mv extension-data/pithagoras-media/"$d"/* "$d"/; done'
+docker run --rm -v "$DATA:/data" alpine sh -c '
+cd /data
+for from in extension-data/pithagoras-media handoff/media handoff/.media.*; do
+  [ -d "$from" ] || continue
+  for d in images videos image-thumbs video-posters video-copies; do
+    mkdir -p "$d"
+    find "$from" -type f \( -path "*/$d/*" -o -path "*/.$d.partial/*" \) \
+      ! -path "*.copy/*" ! -name "*.copy" -exec mv {} "$d"/ \;
+  done
+done
+rm -rf handoff/media handoff/.media.*
+mv extension-data/pithagoras-media "backups/pithagoras-media-$(date +%Y%m%d-%H%M%S)"'
 ```
 
-Where Media has nothing in one of these folders, `mv` says there is no such
-file, which does no harm. Where Media never took the hand-off up, the files are
-in `handoff/media` instead: move what is in its `files/images` and
-`files/videos` to `images/` and `videos/`, and what is in each folder of its
-`cache` to the folder of the same name, in the same way.
+The files are taken from wherever they are by then: from Media's folder once
+Media has taken the hand-off up, and from the hand-off in it, `handoff-media`,
+while Media has not finished reading it; from `handoff/media` where Media never
+took it up; and from the hidden folders beside it that a start which stopped
+half way leaves, such as `handoff/.media.partial` where the upgrade did not
+finish leaving it (the log said that what the Media page kept is kept for the
+next start). A copy that was cut off half way, named with `.copy` at the end,
+is left out: what it was a copy of is still where it came from. Where Media was
+never installed, the last `mv` says there is no such file, which does no harm.
 
-What Media made after the upgrade is not in the backup. The older version finds
-the agent's pictures and clips of that time again in the chats' folders, as
-found ones, without what they were asked for, and does not list the ones made
-on the page, whose files are left in `images/` and `videos/`.
+What is left of the hand-off is removed: the backup has its rows and its
+settings. Left in place, `handoff/media` would be taken by the next upgrade for
+one it had left already: that upgrade would drop the tables and the settings
+without leaving what the older version has by then, and Media would take up the
+old rows and settings in place of what the older version added and changed.
+
+Media's store is set aside in `backups/`, as `pithagoras-media-<date>-<time>`,
+where nothing reads it; delete it once you are sure you do not want it. Left in
+place, Media would start on it again after a later upgrade: it would keep its
+own settings over the ones changed in the older version, and drop from its
+gallery the pictures made on its page, whose files are no longer in its folder.
+
+A later upgrade then hands over what the older version has by then, as the
+first one did, and Media takes it up into a new store: the older version's rows
+and settings, those from before the first upgrade and those made or changed
+since, with their files. What Media did between the upgrade and going back is
+not in the backup, and is not taken up again. The agent's pictures and clips of
+that time are found again in the chats' folders, by the older version and by
+Media after a later upgrade, as found ones, without what they were asked for.
+The pictures and clips made on Media's page then are listed by neither: their
+files are kept, but no row names them. Settings changed on Media's page then
+give way to the older version's.
 
 ## Upgrading from the first release
 
@@ -262,6 +309,6 @@ Run a release rather than `latest`, so that going back is changing one value. Ea
    - Portainer: set `PITHAGORAS_VERSION` to the release before.
    - Built from source: `docker tag pithagoras-portal:previous pithagoras-portal:latest`, then `docker compose up -d --no-build portal`.
 
-Going back to a version from before Media was an extension also needs Media's files moved back before step 3: see [Media is an extension](#going-back-to-a-version-before-it).
+Going back to a version from before Media was an extension also needs Media's files moved back, and what is left of its hand-off and its store out of the way, before step 3: see [Media is an extension](#going-back-to-a-version-before-it).
 
 From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.

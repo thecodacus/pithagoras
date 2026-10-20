@@ -373,7 +373,7 @@ Inside `/data`:
 | --- | --- |
 | `/data/portal.db` | Sessions, event log, channels, agents, routines, settings |
 | `/data/portal.sock` | Held while the portal runs, so a second one cannot start on this data |
-| `/data/backups` | The copies of the database made before an [upgrade](/guide/upgrading) |
+| `/data/backups` | The copies of the database made before an [upgrade](/guide/upgrading), and Media's store where it was set aside to go back to a version before Media was an extension (see [Upgrading](/guide/upgrading#going-back-to-a-version-before-it)) |
 | `/data/sessions/<id>` | Per-session working area, and pi's file of the chat's conversation: it is what the agent remembers. Do not clear it |
 | `/data/home` | `HOME` for pi — `~/.pi/agent`, its settings, skills and packages |
 | `/data/channels` | Installed third-party channel packages |
