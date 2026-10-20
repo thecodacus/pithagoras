@@ -12,6 +12,8 @@ import { isWithinText } from "./within.js";
 import { baseDir, fitBytes, makeFolder, saveNewFile } from "./workspace-files.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
+import { writeFileAtomic } from "./atomic-write.js";
+import { leaveHandoff, moveTo } from "./handoff.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
@@ -385,55 +387,6 @@ function schema(db: Database.Database): void {
       PRIMARY KEY (session_id, id)
     );
 
-    -- The pictures of the Media page: the ones it made itself, which are files
-    -- in the portal's own images folder, the ones the agent made in a chat with
-    -- generate_image or edit_image, which are files in that chat's folder and
-    -- are listed here as they are made, and those found lying in a folder the
-    -- tools write into that nobody listed (see image-gallery.ts). A row names
-    -- the file, never holds it; one whose file is gone is dropped when the
-    -- page next looks, and a chat's stay with its folder when the chat goes,
-    -- as pictures found there. "path" is a file name in
-    -- the images folder for the page's, and a path from the folder for the
-    -- agent's: from the chat's, or, for one that was found, from "folder", the
-    -- real path of the folder it was found in. "params" is what the request
-    -- was made with, as JSON.
-    CREATE TABLE IF NOT EXISTS images (
-      id TEXT PRIMARY KEY,
-      origin TEXT NOT NULL,
-      session_id TEXT,
-      folder TEXT,
-      path TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT NOT NULL DEFAULT '',
-      params TEXT NOT NULL DEFAULT '{}',
-      source_id TEXT,
-      bytes INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_images_created ON images(created_at DESC, id DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_images_chat_file ON images(session_id, path) WHERE session_id IS NOT NULL;
-
-    -- The clips of the Media page, as the pictures are listed above: the ones it
-    -- made itself, which are files in the portal's own videos folder, the ones the
-    -- agent made in a chat with generate_video, which are files in that chat's
-    -- folder, and those found lying in a folder the tool writes into that nobody
-    -- listed (see video-gallery.ts). A row names the file, never holds it.
-    CREATE TABLE IF NOT EXISTS videos (
-      id TEXT PRIMARY KEY,
-      origin TEXT NOT NULL,
-      session_id TEXT,
-      folder TEXT,
-      path TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      prompt TEXT NOT NULL DEFAULT '',
-      params TEXT NOT NULL DEFAULT '{}',
-      bytes INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at DESC, id DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_chat_file ON videos(session_id, path) WHERE session_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_videos_folder_file ON videos(folder, path) WHERE folder IS NOT NULL;
-
     -- The voices saved in the settings, for speech to be told to sound like (see voice-presets.ts).
     CREATE TABLE IF NOT EXISTS voice_presets (
       id TEXT PRIMARY KEY,
@@ -503,7 +456,8 @@ function schema(db: Database.Database): void {
  */
 function writeOutCanvases(d: Database.Database): void {
   if (!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'canvases'").get()) return;
-  canvasSetMoved(d);
+  // Core filed its canvas tools as the set "canvases".
+  setMoved(d, "canvases", "pithagoras-canvas");
   const rows = d.prepare("SELECT c.id, c.title, c.content, s.workspace FROM canvases c LEFT JOIN sessions s ON s.id = c.session_id").all() as { id: string; title: string; content: string; workspace: string | null }[];
   const gone = d.prepare("DELETE FROM canvases WHERE id = ?");
   const folderOf = (workspace: string | null) => {
@@ -530,21 +484,103 @@ function writeOutCanvases(d: Database.Database): void {
 }
 
 /**
- * Core filed its canvas tools as the set "canvases"; the extension's are filed
- * under its package's name. A lazy mark on the set, and a name somebody gave
+ * Pictures and videos are an extension's now (extensions/media), with a store of
+ * its own. What the Media page kept here is left for it in the data folder, as
+ * it was (see handoff.ts), and the extension takes it up when it starts, which
+ * may be long after this, or never: its rows, each with the folder of its chat
+ * as it was then, its two settings, the page's own pictures and clips, and the
+ * thumbnails, posters and playable copies it made, which are named by a row's
+ * id and its file's size and time. The files are moved, not copied. The page's
+ * pictures are only the files its rows name in the portal's images folder,
+ * which also holds a folder of each chat's pictures sent with its messages:
+ * those stay. The tables and settings go once it is left, and a try that fails
+ * keeps them for the next start. The database was backed up before this ran
+ * (db-upgrade.ts); docs/guide/upgrading.md says how the files are put back to
+ * go back.
+ */
+function handOffMedia(d: Database.Database): void {
+  if (!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'images'").get()) return;
+  const data = path.resolve(DATA_DIR);
+  try {
+    // A chat's folder, where it can be reached: the extension keeps the pictures of a chat that is deleted as pictures of that folder.
+    const real = (workspace: string) => {
+      try {
+        return baseDir(workspace);
+      } catch {
+        return null;
+      }
+    };
+    const rows = (table: string) =>
+      (d.prepare(`SELECT t.*, s.workspace FROM ${table} t LEFT JOIN sessions s ON s.id = t.session_id`).all() as ({ origin: string; path: string; workspace: string | null } & Record<string, unknown>)[])
+        .map(({ workspace, ...row }) => ({ ...row, chat: workspace === null ? null : { workspace, real: real(workspace) } }));
+    const images = rows("images");
+    // The clips came after the first release, and a database no build since has opened has none.
+    const videos = d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'videos'").get() ? rows("videos") : [];
+    const settings = { image_generation: settingIn(d, "image_generation") ?? null, video_generation: settingIn(d, "video_generation") ?? null };
+    leaveHandoff("media", (dir) => {
+      // What an earlier try moved is there already, and a file that is gone is gone: its row is left all the same, as the page would have kept it until it looked.
+      const move = (from: string, to: string) => {
+        if (existsSync(to) || !existsSync(from)) return;
+        mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
+        moveTo(from, to);
+      };
+      for (const row of images) if (row.origin === "page") move(path.join(data, "images", row.path), path.join(dir, "files", "images", row.path));
+      move(path.join(data, "videos"), path.join(dir, "files", "videos"));
+      for (const cache of ["image-thumbs", "video-posters", "video-copies"]) move(path.join(data, cache), path.join(dir, "cache", cache));
+      // Written last, and anew on each try, from the rows as they are.
+      writeFileAtomic(path.join(dir, "images.json"), JSON.stringify({ rows: images }), 0o600);
+      writeFileAtomic(path.join(dir, "videos.json"), JSON.stringify({ rows: videos }), 0o600);
+      writeFileAtomic(path.join(dir, "settings.json"), JSON.stringify(settings), 0o600);
+      writeFileAtomic(path.join(dir, "handoff.json"), JSON.stringify({ format: 1, name: "media", schema: 7, made: new Date().toISOString() }), 0o600);
+    });
+  } catch (e) {
+    console.warn(`[portal] what the Media page kept could not be left for its extension, and is kept for the next start: ${(e as Error).message}`);
+    return;
+  }
+  d.prepare("DELETE FROM settings WHERE key IN ('image_generation', 'video_generation')").run();
+  d.exec("DROP TABLE images");
+  d.exec("DROP TABLE IF EXISTS videos");
+  // Core filed its picture and video tools as one set of their own.
+  setMoved(d, "<portal:media>", "pithagoras-media");
+  mediaToolsSeenMoved(d);
+}
+
+/**
+ * The portal's picture and video tools as the tools lists remember them, each under a name of its own, filed under
+ * the extension's package as its tools are. A chat says which tools it has when it next loads, and that would put
+ * them right; until then they would be listed in boxes nothing fills any more, and a lazy mark on the set would not
+ * reach them. An extension's tool of one of these names, which a chat reported as not inline, stays where it is.
+ */
+function mediaToolsSeenMoved(d: Database.Database): void {
+  const sources: Record<string, string> = { show_image: "pictures", generate_image: "image-generation", edit_image: "image-editing", generate_video: "video-generation", show_video: "videos" };
+  try {
+    const seen = JSON.parse(settingIn(d, "tools_seen") ?? "[]");
+    const portals = (tool: any) => typeof tool?.name === "string" && sources[tool.name] === tool.source && tool.inline !== false;
+    if (!Array.isArray(seen) || !seen.some(portals)) return;
+    d.prepare("UPDATE settings SET value = ? WHERE key = 'tools_seen'").run(JSON.stringify(seen.map((tool) => (portals(tool) ? { ...tool, source: "pithagoras-media", inline: true } : tool))));
+  } catch {
+    // Not JSON: knownTools reads it as nothing remembered, and so it stays.
+  }
+}
+
+/** A setting as it is stored, for a step of the upgrade, which runs on the database before getDb gives it out. */
+const settingIn = (d: Database.Database, key: string): string | undefined =>
+  (d.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value;
+
+/**
+ * A set of the portal's own tools that are an extension's now, whose are filed
+ * under its package's name: a lazy mark on the set, and a name somebody gave
  * its box, go with them.
  */
-function canvasSetMoved(d: Database.Database): void {
-  const OLD = "canvases", NEW = "pithagoras-canvas";
-  const setting = (key: string) => (d.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined)?.value;
+function setMoved(d: Database.Database, from: string, to: string): void {
   const put = d.prepare("UPDATE settings SET value = ? WHERE key = ?");
-  const marks = parseToolsOff(setting("tools_lazy"));
-  if (marks.includes(OLD)) put.run([...new Set(marks.map((mark) => (mark === OLD ? NEW : mark)))].sort().join("\n"), "tools_lazy");
+  const marks = parseToolsOff(settingIn(d, "tools_lazy"));
+  if (marks.includes(from)) put.run([...new Set(marks.map((mark) => (mark === from ? to : mark)))].sort().join("\n"), "tools_lazy");
   try {
-    const names = JSON.parse(setting("tool_group_names") ?? "{}");
-    if (names && typeof names === "object" && OLD in names && !(NEW in names)) {
-      names[NEW] = names[OLD];
-      delete names[OLD];
+    const names = JSON.parse(settingIn(d, "tool_group_names") ?? "{}");
+    if (names && typeof names === "object" && from in names && !(to in names)) {
+      names[to] = names[from];
+      delete names[from];
       put.run(JSON.stringify(names), "tool_group_names");
     }
   } catch {
@@ -667,6 +703,7 @@ function migrate(d: Database.Database): void {
     d.exec("UPDATE people SET renamed = 1 WHERE notes != ''");
   }
   writeOutCanvases(d);
+  handOffMedia(d);
   if ((d.pragma("user_version", { simple: true }) as number) < 6) filesOnOldCalls(d);
   const agentCols = (d.prepare("PRAGMA table_info(agents)").all() as { name: string }[]).map((c) => c.name);
   for (const col of ["voice", "quiet_start", "quiet_end", "last_heartbeat", "heartbeat_status"]) {
@@ -715,13 +752,6 @@ function migrate(d: Database.Database): void {
     if (routineCols.length && !routineCols.includes(col)) d.exec(`ALTER TABLE routines ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
   }
   d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_slug ON routines(slug)");
-  // Where a picture that was found in a folder lies (see image-gallery.ts). The
-  // gallery was first kept without it, and CREATE TABLE above leaves such a table as it is.
-  const imageCols = (d.prepare("PRAGMA table_info(images)").all() as { name: string }[]).map((c) => c.name);
-  if (imageCols.length && !imageCols.includes("folder")) d.exec("ALTER TABLE images ADD COLUMN folder TEXT");
-  d.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_images_folder_file ON images(folder, path) WHERE folder IS NOT NULL");
-  // What was made of a picture, looked for whenever a picture is forgotten: without it each of them is a pass over the whole gallery.
-  d.exec("CREATE INDEX IF NOT EXISTS idx_images_source ON images(source_id) WHERE source_id IS NOT NULL");
   d.exec("CREATE INDEX IF NOT EXISTS idx_notes_pending ON notes(session_id, consumed_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_grants_open ON grants(session_id, tool, used_at)");
   d.exec("CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC)");
