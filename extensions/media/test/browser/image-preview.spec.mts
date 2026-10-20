@@ -326,6 +326,26 @@ test.describe('in the chat', () => {
     await expect(preview(page, 'A river at noon')).toHaveClass(/is-making/);
   });
 
+  test('a call of a picture tool through the tools tool, as a lazy one is made, is the preview a direct one is', async ({ page }) => {
+    await open(page);
+    const lazy = (toolCallId: string, args: unknown) =>
+      page.evaluate(([id, call]) => (window as any).emit('tool_execution_start', (window as any).startPayload(id, 'tools', call)), [toolCallId, { action: 'call', ...(args as object) }] as const);
+    await lazy('lazy-made', { name: 'generate_image', args: { prompt: 'A lighthouse at night', size: '1024x1536' } });
+    // The gateway takes the arguments as the JSON text of an object as well.
+    await lazy('lazy-text', { name: 'generate_image', args: JSON.stringify({ prompt: 'A lighthouse at noon', size: '1024x1536' }) });
+    await lazy('lazy-edit', { name: 'edit_image', args: { path: 'photos/dog.png', prompt: 'Make it rain' } });
+    for (const title of ['A lighthouse at night', 'A lighthouse at noon']) {
+      const making = preview(page, title);
+      await expect(making).toHaveClass(/is-making/);
+      await expect(making.getByRole('status')).toContainText('Making a picture');
+      expect(await shapeOf(making.locator('.image-preview-frame')), title).toBeCloseTo(2 / 3, 1);
+    }
+    const editing = preview(page, 'Make it rain');
+    await expect(editing.getByRole('status')).toContainText('Editing a picture');
+    await expect(editing.locator('.image-preview-before')).toHaveAttribute('src', /photos%2Fdog\.png/);
+    await expect.poll(() => shapeOf(editing.locator('.image-preview-frame'))).toBeCloseTo(2, 1);
+  });
+
   test('a picture of another shape than was asked for takes its own shape when it arrives', async ({ page }) => {
     await open(page);
     const editing = preview(page, 'The dog in the snow');
