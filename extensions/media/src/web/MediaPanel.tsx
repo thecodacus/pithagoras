@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { portal, t } from "../portal";
 import { ImagesAddon, VideosAddon } from "./MediaAddons";
 
@@ -12,12 +12,19 @@ export function MediaPanel() {
   portal.locale.use();
   const { ui } = portal;
   const [error, setError] = useState<string | null>(null);
+  const banner = useRef<HTMLDivElement>(null);
+  // A refused save is said at the top of the page, which a long form has scrolled away from: it is brought into view when it comes.
+  useEffect(() => {
+    if (error) banner.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
   return (
     <>
       {error && (
-        <ui.ErrorBanner className="mb-4" onClose={() => setError(null)}>
-          {error}
-        </ui.ErrorBanner>
+        <div ref={banner}>
+          <ui.ErrorBanner className="mb-4" onClose={() => setError(null)}>
+            {error}
+          </ui.ErrorBanner>
+        </div>
       )}
       <ImagesAddon onError={setError} />
       <VideosAddon onError={setError} />

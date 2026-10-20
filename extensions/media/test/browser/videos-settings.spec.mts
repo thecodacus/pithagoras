@@ -190,6 +190,20 @@ test('Escape over the video endpoint that was typed in asks first, and over one 
   await expect(settings(page)).toBeHidden();
 });
 
+test('a save the portal refuses is said at the top of the page, which is brought into view from the section that was saved', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 500 });
+  await portal(page);
+  await page.route('**/api/x/pithagoras-media/settings/videos', (route) =>
+    route.request().method() === 'PUT' ? route.fulfill({ status: 400, json: { error: 'The address must be an http or https URL' } }) : route.fallback(),
+  );
+  await page.goto('/settings/x/pithagoras-media');
+  await videoPanel(page).getByLabel('API address').fill('localhost:1234');
+  await save(page).click();
+  const banner = settings(page).getByRole('alert');
+  await expect(banner).toHaveText('The address must be an http or https URL');
+  await expect(banner).toBeInViewport();
+});
+
 test('the search of Settings finds the video endpoint and lights it up', async ({ page }) => {
   await portal(page);
   await page.goto('/settings/general');
