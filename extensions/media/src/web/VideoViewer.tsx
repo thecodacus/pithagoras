@@ -208,7 +208,8 @@ export function VideoViewer({
             <div className="absolute inset-0 grid place-items-center px-2 sm:px-14" onClick={closeOnBlank}>
               {offered && !copy ? (
                 <div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
-                  <LuFileVideo aria-hidden className="h-10 w-10 text-fg-subtle" />
+                  {/* One class for both sides: a height and a width class of that size, in this extension's stylesheet, would win over the smaller sizes the portal's buttons (`ui.classes`) take on a wide screen. */}
+                  <LuFileVideo aria-hidden className="size-10 text-fg-subtle" />
                   <p className="text-sm text-fg">{t("Its format is {format}, which a browser cannot play here.", { format: video.format!.label })}</p>
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     <a href={video.src} download={video.fileName ?? ""} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm text-black transition hover:opacity-90">
