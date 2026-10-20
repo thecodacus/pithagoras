@@ -284,17 +284,13 @@ export function BrowserPage({ onOpenSession }: { onOpenSession: (id: string) => 
           </section>
         )}
 
-        {/* The list is the guard's, for every tool that drives a browser: it is edited in Settings → Guard, and only said here. */}
+        {/* The list is the guard's, for every tool that says where it goes: it is edited in Settings → Guard, and only said here. */}
         <section className="mb-6">
           <div className="mb-1.5 flex items-center gap-2">
             <LuShieldCheck className="h-3.5 w-3.5 text-fg-faint" />
             <h3 className="text-sm font-medium text-fg">{t("Where it may go")}</h3>
           </div>
-          <p className="text-[11px] text-fg-faint">
-            {status.allowlist.trim()
-              ? tx("Only to the domains listed in {place}, which holds for every tool that drives a browser.", { place: guardLink })
-              : tx("Anywhere, while the list in {place} is empty. It holds for every tool that drives a browser.", { place: guardLink })}
-          </p>
+          <p className="text-[11px] text-fg-faint">{tx("The sites the browser may reach are the list in {place}, which holds for every tool that says where it goes. An empty list means any site.", { place: guardLink })}</p>
         </section>
 
         <section>

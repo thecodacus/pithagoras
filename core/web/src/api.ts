@@ -834,7 +834,7 @@ export const api = {
   setGuardRoutine: (id: string, exempt: string[]) =>
     json<{ id: string; exempt: string[] }>(`/api/guard/routines/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ exempt }) }),
   revokeApproval: (id: string) => json<{ ok: true }>(`/api/guard/approvals/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  /** Where a tool that drives a browser may go: one domain per line, empty for anywhere. */
+  /** The sites the agent's tools may reach: one domain per line, empty for any site. */
   setGuardAllowlist: (domains: string) =>
     json<{ allowlist: string }>("/api/guard/allowlist", { method: "PUT", body: JSON.stringify({ domains }) }),
   untrustResult: (sessionId: string, id: string) =>
@@ -1768,7 +1768,7 @@ export interface GuardState {
   /** The MCP servers, and whether each is counted as the person's own; the browser's never is. */
   servers: { name: string; trusted: boolean; browser: boolean }[];
   routines: { id: string; name: string; exempt: string[] }[];
-  /** Where a tool that drives a browser may go, one domain per line; empty for anywhere. */
+  /** The sites the agent's tools may reach, one domain per line; empty for any site. */
   allowlist: string;
   approvals: { id: string; sessionId: string; chat: string | null; tool: string; subject: string; expiresAt: string }[];
   trusted: { sessionId: string; chat: string | null; results: { id: string; tool?: string; signals?: string[]; excerpt?: string }[] }[];

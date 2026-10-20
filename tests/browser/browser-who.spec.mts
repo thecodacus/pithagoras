@@ -53,14 +53,10 @@ test('with the browser on by default too, a routine given it lists the page, whe
 });
 
 test('where it may go is said on the page, and changed in Settings → Guard, the one place it is edited', async ({ page }) => {
-  await portal(page, { configured: true, allowlist: '' });
+  await portal(page, { configured: true });
   await page.goto('/browser');
-  await expect(page.getByText(/^Anywhere, while the list in/)).toBeVisible();
+  await expect(page.getByText(/^The sites the browser may reach are the list in .* An empty list means any site\.$/)).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Where it may go' })).toHaveCount(0);
-  await page.unroute('**/api/**');
-  await portal(page, { configured: true, allowlist: 'github.com' });
-  await page.goto('/browser');
-  await expect(page.getByText(/^Only to the domains listed in/)).toBeVisible();
   await page.getByRole('link', { name: 'Settings → Guard' }).click();
   await expect(page).toHaveURL(/\/settings\/guard$/);
 });

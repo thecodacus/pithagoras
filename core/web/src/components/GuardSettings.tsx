@@ -66,7 +66,7 @@ function StatusRow({ label, value, warn, tab, onOpen }: { label: string; value: 
 /**
  * Settings → Guard: what the guard holds the agent to, and the little of it that is a switch. A routine may be let
  * do what a rule after a suspected injection holds back, one rule at a time; an MCP server may be counted as the
- * person's own; where a tool that drives a browser may go is a list; what was allowed once, an approval not yet
+ * person's own; the sites the agent's tools may reach are a list; what was allowed once, an approval not yet
  * spent or a flagged result that was trusted, may be taken back. The rest is shown with its reason. Each switch is
  * shown at once and saved, as the tool switches are; changes made while another saves are saved too, and one the
  * server refuses is put back by itself. The list is saved with its button.
@@ -249,10 +249,7 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
         )}
       </Section>
 
-      <Section
-        title={t("Where a browser may go")}
-        hint={t("For every tool that drives a browser: the portal's own browser tools, a Playwright MCP server, and an extension's that says it drives one. It holds in every conversation that may drive a browser.")}
-      >
+      <Section title={t("Sites the agent's tools may reach")} hint={t("One list for every tool that says where it goes, and for the browser tools an MCP server brings.")}>
         <AllowlistEditor initial={state.allowlist} onSaved={(allowlist) => setState((s) => (s ? { ...s, allowlist } : s))} onError={onError} />
       </Section>
 
@@ -352,8 +349,8 @@ export function GuardSettings({ onError, onOpen }: { onError: (message: string) 
 }
 
 /**
- * The domains a tool that drives a browser may be pointed at, one to a line, saved with its button. What was typed and
- * not saved is asked about before Settings closes, and is not replaced when the page is read again.
+ * The domains the agent's tools may be pointed at, one to a line, saved with its button. What was typed and not saved
+ * is asked about before Settings closes, and is not replaced when the page is read again.
  */
 function AllowlistEditor({ initial, onSaved, onError }: { initial: string; onSaved: (allowlist: string) => void; onError: (message: string) => void }) {
   const [text, setText] = useState(initial);
@@ -384,14 +381,14 @@ function AllowlistEditor({ initial, onSaved, onError }: { initial: string; onSav
   return (
     <div>
       <p className="mb-2 text-xs text-fg-faint">
-        {tx("One domain per line. {pattern} covers its subdomains. Leave it empty for no restriction — the per-session switch is the gate, and a list nobody filled in should not quietly block everything.", { pattern: <span className="font-mono">*.example.com</span> })}
+        {tx("One domain per line; {pattern} covers its subdomains. An empty list means any site: a list nobody filled in should not quietly block everything.", { pattern: <span className="font-mono">*.example.com</span> })}
       </p>
       <textarea
         rows={4}
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={"*.google.com\ngithub.com"}
-        aria-label={t("Where a browser may go")}
+        aria-label={t("Sites the agent's tools may reach")}
         spellCheck={false}
         className={codeAreaCls}
       />
@@ -400,7 +397,7 @@ function AllowlistEditor({ initial, onSaved, onError }: { initial: string; onSav
           {t("Save")}
         </button>
         <p className="min-w-0 flex-1 basis-60 text-xs text-fg-faint">
-          {t("Checked when the agent asks for a URL, and every allowed one is recorded in Audit. A page that redirects itself is not covered — that needs a filtering proxy, which is not built yet.")}
+          {t("Checked when a tool is asked to go to an address, and every address allowed is recorded in Audit. Where an address redirects to is not covered — that needs a filtering proxy, which is not built yet.")}
         </p>
       </div>
     </div>

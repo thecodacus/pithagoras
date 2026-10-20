@@ -28,9 +28,9 @@ test("single sign-on is found on its own page, by what people call it", () => {
   assert.ok(searchSettings("oidc only", SETTINGS_INDEX).some((e) => e.tab === "authentication" && e.title === "OIDC only"));
 });
 
-test("where a browser may go is found in Settings → Guard, by what people call the list", () => {
-  for (const q of ["allowlist", "browser allowlist", "domains", "playwright", "erlaubte domänen"]) {
-    assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "guard" && e.section === "Where a browser may go"), `${q} leads to the guard's list`);
+test("the sites the agent's tools may reach are found in Settings → Guard, by what people call the list", () => {
+  for (const q of ["allowlist", "browser allowlist", "domains", "sites", "playwright", "erlaubte domänen"]) {
+    assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "guard" && e.section === "Sites the agent's tools may reach"), `${q} leads to the guard's list`);
   }
 });
 

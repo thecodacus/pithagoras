@@ -87,11 +87,12 @@ test('a change the server refuses is said, and the page shows what holds', async
   await expect(dialog.getByRole('switch', { name: 'Count jira as your own' })).toHaveAttribute('aria-checked', 'false');
 });
 
-test('where a browser may go is one list for every tool that drives one, saved with its button', async ({ page }) => {
+test("the sites the agent's tools may reach are one list, which says an empty one is any site, saved with its button", async ({ page }) => {
   const { sent, dialog } = await portal(page);
-  await expect(dialog.getByRole('heading', { name: 'Where a browser may go' })).toBeVisible();
-  await expect(dialog.getByText(/a Playwright MCP server/)).toBeVisible();
-  const list = dialog.getByRole('textbox', { name: 'Where a browser may go' });
+  await expect(dialog.getByRole('heading', { name: "Sites the agent's tools may reach" })).toBeVisible();
+  await expect(dialog.getByText(/One list for every tool that says where it goes/)).toBeVisible();
+  await expect(dialog.getByText(/An empty list means any site/)).toBeVisible();
+  const list = dialog.getByRole('textbox', { name: "Sites the agent's tools may reach" });
   const save = dialog.getByRole('button', { name: 'Save', exact: true });
   await expect(list).toHaveValue('github.com');
   await expect(save).toBeDisabled();
@@ -104,7 +105,7 @@ test('where a browser may go is one list for every tool that drives one, saved w
 
 test('a list the server refuses is said, and what was typed stays to be saved again', async ({ page }) => {
   const { dialog } = await portal(page, {}, true);
-  const list = dialog.getByRole('textbox', { name: 'Where a browser may go' });
+  const list = dialog.getByRole('textbox', { name: "Sites the agent's tools may reach" });
   await list.fill('github.com\ndocs.test');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('Not today');
@@ -114,7 +115,7 @@ test('a list the server refuses is said, and what was typed stays to be saved ag
 
 test('a list typed and not saved is asked about before Settings closes, and one saved is not', async ({ page }) => {
   const { dialog } = await portal(page);
-  const list = dialog.getByRole('textbox', { name: 'Where a browser may go' });
+  const list = dialog.getByRole('textbox', { name: "Sites the agent's tools may reach" });
   await list.fill('github.com\ndocs.test');
   await page.keyboard.press('Escape');
   const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
@@ -130,7 +131,7 @@ test('a list typed and not saved is asked about before Settings closes, and one 
 
 test('the page read again shows the list as the server has it now, unless something was typed in it', async ({ page }) => {
   const { dialog, state } = await portal(page, {}, true);
-  const list = dialog.getByRole('textbox', { name: 'Where a browser may go' });
+  const list = dialog.getByRole('textbox', { name: "Sites the agent's tools may reach" });
   const jira = dialog.getByRole('switch', { name: 'Count jira as your own' });
   // Changed somewhere else meanwhile; a switch the server refuses has the page read again.
   Object.assign(state, { allowlist: 'github.com\nnews.test', approvals: [] });

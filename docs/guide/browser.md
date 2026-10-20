@@ -289,11 +289,11 @@ is what the old switch wrote.
 
 ## Where it may go
 
-**Settings → Guard → Where a browser may go** takes one domain per line,
-`*.example.com` for subdomains. Empty means no restriction. It is one list for
-every tool that drives a browser: the portal's own browser tools, a Playwright
-MCP server, and an extension's tool that says it drives one. **Browser → Where it
-may go** says whether the list restricts anything, and links to it.
+**Settings → Guard → Sites the agent's tools may reach** takes one domain per
+line, `*.example.com` for subdomains. An empty list means any site. It is one
+list for every tool that says where it goes (the portal's own browser tools say
+their `url` is) and for the browser tools an MCP server brings, such as a
+Playwright MCP server's. **Browser → Where it may go** says so, and links to it.
 
 ::: danger Read this one together with the section above
 That default was written when the browser was off until somebody turned it on,
