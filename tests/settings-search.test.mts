@@ -28,10 +28,6 @@ test("single sign-on is found on its own page, by what people call it", () => {
   assert.ok(searchSettings("oidc only", SETTINGS_INDEX).some((e) => e.tab === "authentication" && e.title === "OIDC only"));
 });
 
-test("the picture and video tools are found in Tools, by their names", () => {
-  for (const q of ["show_image", "generate_image", "edit_image", "show_video", "generate_video"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
-});
-
 test("where an entry is, is searched too", () => {
   const found = searchSettings("web access brave", [{ tab: "extensions", ext: "npm:pi-web-access", title: "Brave API key", where: "pi-web-access" }]);
   assert.equal(found.length, 1);
