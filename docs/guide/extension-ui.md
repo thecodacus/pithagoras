@@ -744,7 +744,7 @@ restart the portal.
 | `chats.folder(id)` | The folder the chat's pi works in, on this disk |
 | `chats.inFolder(folder)` | The sessions of every kind that work in a folder: tasks, and also routine runs, Agent-page and channel conversations and heartbeats, which `chats.list()` leaves out and which have the package's tools in their pi. One for each agent that has some there (what an agent can reach is the same from each of its sessions; none is removed, and a stored path can be a link an agent made) |
 | `chats.send(chatId, data)`, `chats.onOpen(fn)` | [Telling the pages open on a chat](#telling-the-pages-open-on-a-chat) |
-| `chats.on("started" \| "stopped" \| "deleted", fn)` | A chat's pi started or stopped; the chat was deleted |
+| `chats.on("started" \| "stopped" \| "deleted" \| "finished", fn)` | A chat's pi started or stopped; the chat was deleted; or it is finished: its pi stopped and will not run again, as a routine run in a session of its own once it is over. A pi stopped for being idle is not finished: it starts again with the next message |
 | `chats.onEvent(fn)` | Everything a chat's pi says, as it says it |
 | `chats.tell(chatId, data)` | To the package's own pi extension in a chat (`pithagoras:v1:ui:receive`) |
 | `chats.extend(factory)` | [Tools that share this module's state](#tools-that-share-the-server-half-s-state) |

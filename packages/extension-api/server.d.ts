@@ -18,7 +18,13 @@ export interface Chat {
   status: "idle" | "running" | "error" | "interrupted";
 }
 
-export type ChatLife = "started" | "stopped" | "deleted";
+/**
+ * What happened to a chat's pi: it was `started` or `stopped` (for a reload, for being left idle, or with the
+ * portal); the chat was `deleted`; or it is `finished`: its pi stopped and will not run again, as for a routine
+ * run in a session of its own that is over. One stopped for being idle is not finished: it starts again with the
+ * next message.
+ */
+export type ChatLife = "started" | "stopped" | "deleted" | "finished";
 export type Upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 export type Ran = { code: number | null; stdout: Buffer; stderr: string };
 
@@ -319,7 +325,7 @@ export interface ServerPortal {
     send(chatId: string, data: unknown): void;
     /** What a page that opens a chat is told first: where things stand. Nothing, to tell it nothing. */
     onOpen(handler: (chatId: string) => unknown): void;
-    /** A chat's pi was started or stopped, or the chat was deleted. */
+    /** A chat's pi was started or stopped, the chat was deleted, or it is finished and will not run again (see ChatLife). */
     on(event: ChatLife, handler: (chatId: string) => void): void;
     /** Everything a chat's pi says, as it says it: messages as they stream, tool calls, and what the package's own pi extension sends. */
     onEvent(handler: (chatId: string, event: Record<string, unknown>) => void): void;
