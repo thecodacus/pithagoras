@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createServer, request } from "node:http";
 import test from "node:test";
@@ -169,6 +169,39 @@ test("what installing a package brings with it is worked out from what is instal
     assert.deepEqual(plan, { name: "pi-needs", version: "1.0.0", needs: [{ name: "switched-off", range: "^1.0.0", for: "pi-needs", action: "switch-on", spec: "npm:switched-off", version: "1.0.0" }] });
     assert.equal((await fetch(at("/api/extensions/plan"))).status, 400);
   } finally {
+    delete process.env.NPM_REGISTRY_URL;
+    registry.close();
+  }
+});
+
+test("of two installed under one name, the one switched on is the one a plan finds, as the host does; a folder's is not the portal's", async () => {
+  const wants = { name: "pi-wants", version: "1.0.0", pithagoras: { requires: { "@codacus/notes": "^1.0.0", "from-a-folder": "^1.0.0" } } };
+  const registry = createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url !== "/pi-wants") return res.writeHead(404).end("{}");
+    res.end(JSON.stringify({ name: "pi-wants", "dist-tags": { latest: "1.0.0" }, versions: { "1.0.0": wants } }));
+  });
+  await new Promise((r) => registry.listen(0, "127.0.0.1", r));
+  process.env.NPM_REGISTRY_URL = `http://127.0.0.1:${registry.address().port}`;
+  const settings = path.join(process.env.PI_CODING_AGENT_DIR, "settings.json");
+  const was = readFileSync(settings, "utf8");
+  const switchedOff = (source) => ({ source, extensions: [], skills: [], prompts: [], themes: [] });
+  const needs = async (packages) => {
+    writeFileSync(settings, JSON.stringify({ packages }));
+    return (await (await fetch(at(`/api/extensions/plan?spec=${encodeURIComponent("npm:pi-wants")}`))).json()).needs;
+  };
+  // The one a project brings is not installed for the portal: it is looked for as any other, and is nowhere.
+  const nowhere = { name: "from-a-folder", range: "^1.0.0", for: "pi-wants", action: "missing" };
+  try {
+    // The first switched off, the second (the twin) on: the host runs the twin, and nothing is to be switched on.
+    assert.deepEqual(await needs([switchedOff("npm:@codacus/notes"), "npm:twin"]), [nowhere]);
+    // Both off: the first is the one switched on.
+    assert.deepEqual(await needs([switchedOff("npm:@codacus/notes"), switchedOff("npm:twin")]), [
+      { name: "@codacus/notes", range: "^1.0.0", for: "pi-wants", action: "switch-on", spec: "npm:@codacus/notes", version: "1.0.0" },
+      nowhere,
+    ]);
+  } finally {
+    writeFileSync(settings, was);
     delete process.env.NPM_REGISTRY_URL;
     registry.close();
   }

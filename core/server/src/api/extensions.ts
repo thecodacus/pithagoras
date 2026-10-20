@@ -323,7 +323,8 @@ const clientHalves = async () => (await halves()).clients;
 
 /**
  * The extensions installed for the portal, each by what its package.json says, with whether it is switched on: what an
- * install that requires one finds there (see install-plan.ts). Of two under one name, the first, as `halves` has it.
+ * install that requires one finds there (see install-plan.ts). Of two under one name, the first that is switched on,
+ * as `halves` has it; the first of them where none is, to be switched on.
  */
 async function installedExtensions(): Promise<InstalledExtension[]> {
   const settings = readPiSettings();
@@ -337,16 +338,19 @@ async function installedExtensions(): Promise<InstalledExtension[]> {
     } catch {
       continue;
     }
-    if (typeof meta?.name !== "string" || out.some((ext) => ext.name === meta.name)) continue;
+    if (typeof meta?.name !== "string") continue;
     const entry = listed.find((e) => sourceOf(e) === pkg.spec);
     const requires = requiresOf(meta);
-    out.push({
+    const ext: InstalledExtension = {
       name: meta.name,
       ...(typeof meta.version === "string" ? { version: meta.version } : {}),
       spec: pkg.spec,
       enabled: entry === undefined || !isSwitchedOff(entry),
       ...(requires ? { requires } : {}),
-    });
+    };
+    const at = out.findIndex((other) => other.name === ext.name);
+    if (at === -1) out.push(ext);
+    else if (ext.enabled && !out[at]!.enabled) out[at] = ext;
   }
   return out;
 }

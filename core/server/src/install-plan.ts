@@ -13,11 +13,14 @@ import { requiresOf, takes } from "./extension-ui.js";
  * with what is done for it, each before what needs it.
  *
  * A requirement is installed from the portal's own folder where an extension
- * there goes by its name in a version taken, and otherwise from npm, by its
- * name within the range taken. One that is installed but switched off is
- * switched on. One that is nowhere in a version taken, or is installed in a
- * version not taken, is said, and nothing is done for it: the extension can be
- * installed all the same, and waits for it as the host says.
+ * there goes by its name, and otherwise from npm, by its name within the range
+ * taken. A name the portal ships is never asked of npm: anyone can publish a
+ * package under it there. One that is installed but switched off is switched
+ * on. One that is nowhere in a version taken, or is installed or in the
+ * portal's folder in a version not taken, is said, and nothing is done for it:
+ * the extension can be installed all the same, and waits for it as the host
+ * says. So is a requirement met a second time, by a range that does not take
+ * the version the first left there.
  *
  * What a spec installs is known beforehand for the portal's own folder, and for
  * npm, whose registry has the package.json of every version. A git URL or a
@@ -36,7 +39,8 @@ export interface Need {
   /**
    * `install`: installed by `spec`, from the portal's own folder or npm (`from`). `switch-on`: installed, switched
    * off, and switched on by `spec`. `missing`: nowhere in a version taken, or npm could not be asked (`error`).
-   * `version`: installed in `version`, which is not taken. For the last two nothing is done.
+   * `version`: there in `version`, which is not taken: installed, or, with `from`, the one in the portal's own folder,
+   * or the one installed from npm for what needed it first. For the last two nothing is done.
    */
   action: "install" | "switch-on" | "missing" | "version";
   spec?: string;
@@ -111,13 +115,21 @@ export async function planInstall(spec: string, { installed, folder }: { install
   const needs: Need[] = [];
   // Each once: one needed twice is done the first time, and one that needs itself through others is not looked at again.
   const seen = new Set([root.name]);
+  // The version each will be there in, once what is planned is done, and where it comes from where it is not installed.
+  const left = new Map<string, Pick<Need, "version" | "from">>();
   const visit = async (of: string, requires: Record<string, string> | undefined) => {
     for (const [name, range] of Object.entries(requires ?? {})) {
-      if (seen.has(name)) continue;
-      seen.add(name);
       const need = { name, range, for: of };
+      if (seen.has(name)) {
+        // Met again by another range: the version the first left there may not be one this takes.
+        const was = left.get(name);
+        if (was && !takes(range, was.version)) needs.push({ ...need, action: "version", ...was });
+        continue;
+      }
+      seen.add(name);
       const there = installed.find((ext) => ext.name === name);
       if (there) {
+        left.set(name, there.version ? { version: there.version } : {});
         if (!takes(range, there.version)) {
           needs.push({ ...need, action: "version", ...(there.version ? { version: there.version } : {}) });
           continue;
@@ -126,10 +138,17 @@ export async function planInstall(spec: string, { installed, folder }: { install
         if (!there.enabled) needs.push({ ...need, action: "switch-on", spec: there.spec, ...(there.version ? { version: there.version } : {}) });
         continue;
       }
-      const own = folder.find((ext) => ext.name === name && takes(range, ext.version));
+      // The portal's own by its name, in whatever version: npm is not asked for a name the portal ships.
+      const own = folder.find((ext) => ext.name === name);
       if (own) {
+        const version = own.version ? { version: own.version } : {};
+        if (!takes(range, own.version)) {
+          needs.push({ ...need, action: "version", from: "shipped", ...version });
+          continue;
+        }
+        left.set(name, { from: "shipped", ...version });
         await visit(name, own.requires);
-        needs.push({ ...need, action: "install", spec: own.spec, from: "shipped", ...(own.version ? { version: own.version } : {}) });
+        needs.push({ ...need, action: "install", spec: own.spec, from: "shipped", ...version });
         continue;
       }
       let found: Awaited<ReturnType<typeof onNpm>>;
@@ -143,6 +162,7 @@ export async function planInstall(spec: string, { installed, folder }: { install
         needs.push({ ...need, action: "missing" });
         continue;
       }
+      left.set(name, { from: "npm", version: found.version });
       await visit(name, requiresOf(found.manifest));
       // By the range, not the version found: pi keeps it within the range when it updates it.
       needs.push({ ...need, action: "install", spec: `npm:${name}@${range}`, from: "npm", version: found.version });
