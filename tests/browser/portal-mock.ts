@@ -129,6 +129,8 @@ const settingsBase = ({ path, method }: Ask): Answer => {
   if (path === '/api/routines/report-targets') return { targets: [], default: null };
   if (path === '/api/extensions') return { settingsPath: '/a/settings.json', extensions: [] };
   if (path === '/api/extensions/shipped') return { extensions: [] };
+  // What installing a package brings with it, asked before it is installed: nothing else.
+  if (path === '/api/extensions/plan') return { needs: [] };
   if (path === '/api/tool-names') return { names: {} };
   if (path === '/api/packages/catalog') return { packages: [] };
   if (path === '/api/workspaces') return { root: '/w', workspaces: [] };

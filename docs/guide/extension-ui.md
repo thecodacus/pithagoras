@@ -1425,7 +1425,8 @@ await docker.containers.start("pithagoras-browser");
   it takes (a semver range). Without one of them, or with one in a version it
   does not take, it does not start, and Settings → Extensions says why ("It
   needs pithagoras-docker (^1.0.0), which is not installed, or is switched
-  off"). Nothing is installed for it: the person installs what it needs.
+  off"). Installed from Settings → Extensions, it brings them with it: see
+  [Installing what it requires](#installing-what-it-requires).
 - **`optional`**: the ones it uses when they are there. It starts without them,
   and `use` gives nothing then, or while one is there in a version it does not
   take.
@@ -1447,6 +1448,34 @@ await docker.containers.start("pithagoras-browser");
 
 This is for server halves. A provider's routes are its own, as any extension's
 are: a page asks its own server half, which asks the provider.
+
+#### Installing what it requires
+
+Someone who installs an extension that requires others, from Settings →
+Extensions, is first told what that brings with it, and asked. Each extension it
+requires that is not there as it needs it is listed, with what is done for it:
+
+- one that comes with the portal (its own `extensions` folder) by that name, in
+  a version the range takes, is installed from there;
+- otherwise one on npm by that name, in a version the range takes, is installed
+  from npm by the range (`npm:pithagoras-docker@^1.0.0`), so that an update
+  keeps it within the range;
+- one installed and switched off is switched on;
+- one installed in a version the range does not take, and one found nowhere,
+  are said, and nothing is done for them. The extension can be installed all the
+  same, and waits for them, saying so as above.
+
+What those require is looked at too, each once, and a circle ends. On yes, each
+is installed or switched on before what needs it, the extension last, and the
+page says which it has come to. One that fails stops the rest, and says why.
+With all it requires there, nothing is asked.
+
+This is known beforehand for an extension that comes with the portal and for a
+package on npm, whose registry has the package.json of each version. A git URL
+or a folder of the server's is read only once it is installed: nothing is
+installed with it, and it waits as above until what it requires is there.
+Before anything is installed, Discover says what one that comes with the portal
+requires ("Needs pithagoras-docker").
 
 ## Panels and commands
 
