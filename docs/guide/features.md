@@ -3,13 +3,14 @@
 Four capabilities ship with Pithagoras and are **off** until you switch them on
 in **Settings**: a **subagent tool** and **Understory** as the agent's memory
 under **Add-ons**, and **image generation and editing** and **video generation** under
-**Agent → Media**. A fresh
+**Extension settings → Media**. A fresh
 install has none of them. (The Add-ons page also holds the Docker-based
 [Browser and Voice](/guide/add-ons).) Switching on
 the first two writes them into pi's own configuration — a package, an MCP
 server — so they can also be seen, and undone, from Settings → Extensions and
 Settings → MCP. Switching one off removes it. Image and video generation are
-the portal's own tools and keep their settings in the portal.
+the tools of the [Media](/guide/media) extension, which a portal installs when
+it first starts, and keep their settings in its own store.
 
 The first two are reference implementations behind a seam the portal already
 has, so a third-party equivalent can take their place without changing the
@@ -79,10 +80,11 @@ share pi's event bus with the tool.
 
 ## Image generation
 
-**Settings → Agent → Media**, **Image model.** The image endpoint, and the switches for
+**Settings → Extension settings → Media**, **Image model.** The image endpoint, and the switches for
 **Image generation**, **Image editing**, **Several pictures per edit** and **Stable Diffusion extra settings**. The section opens and
 closes, with the first two switches always in view; the editing endpoint and the last two switches are groups in it
-(**Editing endpoint**, **More options**). It was a tab of Settings → Add-ons before; nothing stored changed with the move.
+(**Editing endpoint**, **More options**). It was a tab of Settings → Add-ons once, and **Settings → Agent → Media** until
+Media became an extension; what was set there is carried over.
 
 The two switches, **Image generation** and **Image editing**, are the general switches of the
 feature: they decide whether it exists. Switched on, with an address, the [Media page](/guide/media)
@@ -143,22 +145,23 @@ with a title, as `show_image`'s does, so the chat draws the picture, in a previe
 that holds its place while it is made (see
 [Sessions](/guide/sessions#pictures-the-agent-makes)) and opens in the
 [viewer](/guide/sessions#looking-at-a-picture) on a click, and voice mode opens
-the Pictures window on it. The portal marks its own calls when they start, and
-the page draws a call as that preview only with the mark: another extension's
-tool of the same name, which pi may keep in the portal's place, has no such mark
-and stays a plain tool card while it runs or fails, with what it gave under it. A failure — nothing configured, the endpoint's error, a reply that is
+the Pictures window on it. The preview is Media's card for a call of
+`generate_image`, and it goes by the tool's name, as every extension's card
+does: another extension's tool of the same name is drawn with it too while
+Media is installed. A failure — nothing configured, the endpoint's error, a reply that is
 no picture — is an error result the agent sees and can pass on, never a
 silent success.
 
 The tool is a tool like the others: it can be switched off for a chat, a project
-or everywhere in the tool menus and Settings → Tools, where it sits in one **Media**
-group with `show_image` and `edit_image` (and the video tools), and then the model does not
+or everywhere in the tool menus and Settings → Tools, where it sits in Media's
+group, `pithagoras-media`, with `show_image` and `edit_image` (and the video tools), and then the model does not
 have it and the voice instructions say nothing of it either. Its name is
 `generate_image`, which an image extension you installed may use too. pi keeps
-the first tool of a name it loads, and the portal's loads last, so then the
-extension's tool is the one the model has, the portal's is left unused, and the
-voice instructions do not mention it. Switch that extension off to use the
-add-on's tool.
+the first tool of a name it loads, and Media's tools, which its server half
+registers, load after those of pi's own packages, so then the other
+extension's tool is the one the model has, Media's is left unused, and the
+voice instructions do not mention it. Switch that extension off to use
+Media's tool.
 
 Only the primary user's conversations can have the agent make a picture: like
 any tool that is not a plain read, it is refused in a conversation with a
@@ -224,8 +227,8 @@ translated.
 
 `edit_image(path, prompt, title?)` reads the picture at `path` (relative to the
 chat's folder, or absolute inside it), asks for the change, saves the result and
-shows it. Its answer is the same as `generate_image`'s — the new picture's path,
-a title and the mark only the portal's tools set — so the page treats it alike. A
+shows it. Its answer is the same as `generate_image`'s — the new picture's path
+and a title — so the page treats it alike. A
 failure — switched off since, a path that is no picture of the folder, the
 endpoint's error, an answer that is no picture — is an error result the agent
 sees and can pass on.
@@ -296,13 +299,13 @@ What was decided for it:
 The same rules as for generation apply to who may use it: the primary user's
 conversations only, unless a [tool rule](/people/rules) allows it, and each edit
 can cost money at a hosted endpoint. The tool is a tool like the others and can
-be switched off in the tool menus and Settings → Tools, in the same **Media** group; an extension's tool of
+be switched off in the tool menus and Settings → Tools, in the same group; another extension's tool of
 the name `edit_image` is the one pi keeps, as for `generate_image`.
 
 | | |
 | --- | --- |
-| Stored as | The portal's own settings (`image_generation`), not pi's `settings.json`, which the Advanced tab shows in full. |
-| API | [`/api/features/images`](/reference/api#opt-in-features) |
+| Stored as | Media's own store (`image_generation` in its `media.db`), not pi's `settings.json`, which the Advanced tab shows in full. |
+| API | [`/api/x/pithagoras-media/settings/images`](/reference/api#media) |
 
 ### Several pictures
 
@@ -391,7 +394,7 @@ What was decided for it:
 
 ## Video generation
 
-**Settings → Agent → Media**, **Video model.** The video endpoint and the switch for **Video generation**. It is
+**Settings → Extension settings → Media**, **Video model.** The video endpoint and the switch for **Video generation**. It is
 built on the same pattern as [image generation](#image-generation), and takes the same trouble not to assume
 one server or model: the address, the model and the key are yours.
 
@@ -400,8 +403,8 @@ tools: `generate_video`, in which the agent describes a video (or gives a pictur
 model you set up makes it, and it plays in the chat; and `show_video`, which plays a video that is in the chat's
 folder. Switched off, or without an address, there are no such tools at all, and the page says in its form
 that it is not set up, with a link here. Whether a chat's agent actually has them is answered only in the
-**tool lists** (Settings → Agent → Tools, a project's Tools, the tools control of a chat), where they sit in the
-**Media** group, with the picture tools. The switch here does not decide it, and the Media page does not
+**tool lists** (Settings → Agent → Tools, a project's Tools, the tools control of a chat), where they sit in
+Media's group, `pithagoras-media`, with the picture tools. The switch here does not decide it, and the Media page does not
 look at those lists.
 
 While it is on and has an address the sidebar has a [Media](/guide/media) page, with a form to make videos and a
@@ -447,9 +450,8 @@ picture in the chat's folder, which is the first frame of the video; it is read 
 and a picture outside the folder is refused. `lastFrame` is a picture to end the video on, read and checked in the same way; it goes only to a server that says it takes one, and the call fails with the reason where it does not. Whether the clip really ends on it depends on the model, which some ignore without saying so, and the tool's description tells the agent so, so that it reports the picture as asked for and not as reached. A picture only attached to a message is not in the folder, and the tool's
 description says so. The call waits for the video and stopping the chat stops the wait.
 
-Its answer is the video's path and a title, with the mark only the portal's tool sets (`portalVideo`), and the chat plays the
-video only with that mark: another extension's `generate_video`, which pi may keep in the portal's place, stays a plain tool
-card. `show_video(path, title?)` plays a WebM or an MP4 of the chat's folder by what its bytes say, and nothing else. Voice mode
+Its answer is the video's path and a title, and the chat plays the video in Media's card for the call, which goes by the
+tool's name: another extension's `generate_video` is drawn with it too while Media is installed. `show_video(path, title?)` plays a WebM or an MP4 of the chat's folder by what its bytes say, and nothing else. Voice mode
 shows no videos: while the model has `generate_video`, the voice instructions say that a video is not shown in a spoken
 conversation, only in the chat, and tell it to make one only when asked.
 

@@ -25,7 +25,7 @@ The id after the name is who the platform says is asking. A name is whatever
 somebody called themselves, and one can be changed to look like somebody else's;
 the id cannot.
 
-For `edit_image` the action is the path of each picture, one to a line, in the
+For [Media](/guide/media)'s `edit_image` the action is the path of each picture, one to a line, in the
 order of the call (a single picture is just its path), and the agent is told
 exactly which when the call is refused. The prompt is not part of what is
 approved. **Always allow** then writes one rule for each picture, since a rule is

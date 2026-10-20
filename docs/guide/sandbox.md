@@ -72,10 +72,12 @@ group of the folder it is made in, and is writable by that group where the folde
 Under a read & write rule that is `pi-sandbox`, so the agent can edit it; in an
 agent's own folder it is that agent's. It is not left to root, as it was.
 
-The portal's own tools that read a file the agent names, as root, read it only
-where the agent could read it itself: `show_image`, `show_video`, `edit_image`,
-the frames `generate_video` starts and ends a clip with, and a picture or a clip
-a call gives that a channel sends on. A picture under a no-access rule is
+The tools that read a file the agent names, as root, read it only where the
+agent could read it itself: [Media](/guide/media)'s `show_image`, `show_video`,
+`edit_image` and the frames `generate_video` starts and ends a clip with, which
+read through the checks the portal gives every extension
+([A chat's folder](/guide/extension-ui#a-chat-s-folder)), and a picture or a
+clip a call gives that a channel sends on. A picture under a no-access rule is
 refused to the agent, as `cat` would refuse it; you still see it in Files.
 
 What the portal puts in the agent's prompt it reads the same way: the agent's

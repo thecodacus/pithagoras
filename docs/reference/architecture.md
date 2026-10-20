@@ -79,7 +79,6 @@ stray file would attach the wrong conversation.
 | `sessions` | Title, workspace, status, per-session model and effort, pinned, pi session file, and the channel or routine it belongs to |
 | `events` | Append-only log, one row per event, indexed by `(session_id, seq)` |
 | `message_versions` | The earlier versions of an edited message, and what followed them |
-| `canvases` | A session's canvases, with their revision |
 | `agents` | Each agent's name, home, avatar, voice and heartbeat schedule |
 | `activity` | The notes an agent's heartbeat left, and whether they have been read |
 | `channels` | Configured channels and their credentials, and the agent each talks as |
@@ -92,8 +91,6 @@ stray file would attach the wrong conversation.
 | `settings` | Portal-wide overrides, and the small things the portal remembers (the tools it has seen, the browser switch, the model's context windows) |
 | `project_tools` | A project's tool switches |
 | `open_subagents` | The subagents still running in a session |
-| `images` | The pictures of the [Media page](/guide/media), and what each was made from |
-| `videos` | The clips of the [Media page](/guide/media): the page's own, the agent's and those found in its folders, and what each was asked for |
 | `voice_presets` | The saved voices |
 | `signed_out` | Logins that were ended early, until they would have expired anyway |
 
@@ -108,10 +105,15 @@ transaction, showing an Upgrading page meanwhile. See
 
 Not everything goes through pi. The agent's own browser tools (`browser/tools.ts`)
 drive the Chromium over its debugging port from inside the portal, not as an MCP
-server, and the image tools (`generate_image`, `edit_image`, `show_image`) and
-the video tools (`generate_video`, `show_video`) are registered by the portal the same way. The Files, Git and terminal panels talk to the
-session's folder directly (`core/server/src/workspace-files.ts`, `git.ts`, a pty per
-terminal). Managed add-ons — Browser, Voice, Understory — are Docker containers
+server, and an extension's server half registers its tools the same way, in the
+portal's process, as [Media](/guide/media)'s does its picture tools
+(`generate_image`, `edit_image`, `show_image`) and video tools
+(`generate_video`, `show_video`).
+Files, Git and the terminal are extensions too, whose server halves work in the
+session's folder through what the portal gives every extension
+([Building an extension](/guide/extension-ui)): `portal.files`
+(`core/server/src/workspace-files.ts`) and `portal.git` (`git.ts`); the
+terminal runs a pty for each terminal itself. Managed add-ons — Browser, Voice, Understory — are Docker containers
 the portal starts through the socket; voice shares the portal's network
 namespace so its services need no published ports. Opt-in pi extensions the
 portal ships (`extensions/`, the subagent tool) are installed as local pi

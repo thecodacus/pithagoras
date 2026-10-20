@@ -84,9 +84,10 @@ Up to eight go with one message; remove one with its ×. They are kept if you
 end voice mode before speaking, and are there again when you turn it back on.
 The model has to take images; if it does not, the chat says so.
 
-**The agent showing you a picture.** The agent has a `show_image` tool: it saves
-a chart, a diagram or a screenshot in the chat's folder and calls it, and a
-**Pictures** window opens on it, like the browser and terminal do. A picture
+**The agent showing you a picture.** With [Media](/guide/media) installed, the
+agent has a `show_image` tool: it saves a chart, a diagram or a screenshot in
+the chat's folder and calls it, and a **Pictures** window opens on it, like the
+browser and terminal do. A picture
 any other tool [gives](/guide/extension-ui#files-a-tool-gives) is there too. Tap the
 picture to see it at full size, use the arrows to go back through earlier ones,
 or open it in a new tab. Outside voice mode the picture appears in the chat. With
@@ -534,9 +535,12 @@ updates.
 The rules for how the agent talks — one short spoken sentence before a task's
 tools, then now and then a short line of what it found or is trying next while
 it works (not one per tool call), plain
-text without Markdown, long reports in a canvas, pictures through `show_image`,
-the `(laugh)` / `(sigh)` cues — are a block of text that is part of the rule
-above. **Settings → Add-ons → Voice → Speaking instructions** shows the text in
+text without Markdown, the `(laugh)` / `(sigh)` cues — are a block of text that
+is part of the rule above. What a tool says of itself for a spoken turn follows
+that block while the chat has the tool, and is not part of the text: long
+reports in a canvas while it has the canvas tools, pictures through
+`show_image` while it has [Media](/guide/media)'s.
+**Settings → Add-ons → Voice → Speaking instructions** shows the text in
 use and lets you change it: shorter or longer replies, another tone, no
 announcing before tools. Save, and it applies from the next spoken message,
 also in conversations that are already open; typed messages keep the prompt they

@@ -121,6 +121,107 @@ Dusk and Warm were extensions of their own (`pithagoras-theme-dusk` and `pithago
 
 Reload the portal's open tabs after the upgrade. A tab that was open before it still runs the old page, which does not know the pack's themes and gives up the Dusk or Warm choice the first time it asks the server for the extensions.
 
+## Media is an extension
+
+Media is the `pithagoras-media` extension now, installed on the first start
+like Canvases and Files, with a store of its own. The page, its settings, the
+agent's picture and video tools and their cards in the chat do what they did,
+under new names and addresses:
+
+- **The page** is at `/x/pithagoras-media/media`, in the sidebar's
+  **Extensions** group, listed while an image or a video endpoint is set up.
+  `/media`, `/images` and `/videos` are gone; a link to one of them needs the
+  new address.
+- **The settings** are Media's page in Settings, under **Extension settings**,
+  at `/settings/x/pithagoras-media`, where **Settings → Agent → Media** was.
+  `/settings/media` is gone. What was set there, the keys included, is carried
+  over.
+- **The tools** are the extension's, in its group, `pithagoras-media`, in the
+  tool lists, where the **Media** group was. A lazy mark on the Media group, or
+  a name given to it, moves to the new group; a tool switched on or off by its
+  name, for a chat, a project, an agent or a routine, stays as it was.
+- **`show_image` comes with Media.** It is no longer the portal's own: with
+  Media switched off or removed the agent has no `show_image`, and the voice
+  rule no longer tells it to show pictures with it.
+- **The routes moved:** what was `/api/images…`, `/api/videos…`,
+  `/api/features/images` and `/api/features/videos` is now under
+  `/api/x/pithagoras-media/…` (`/images…`, `/videos…`, `/settings/images` and
+  `/settings/videos`, see [Media's routes](/reference/api#media)), answered the
+  same way. `GET /api/features` no longer has `images`, and
+  `GET /api/features/flags` no longer has `images` and `videos`: Media's
+  `GET /api/x/pithagoras-media/state` says the same. A script that used the old
+  addresses needs the new ones.
+
+What the portal kept of Media is handed over, not lost. The first start after
+the upgrade, which raises the schema to 7, moves it out of the portal into
+`handoff/media` in the data folder, a folder only the portal can read:
+
+- the gallery's rows, each with the folder of its chat (`images.json`,
+  `videos.json`), and the settings of the image and the video endpoint
+  (`settings.json`);
+- the page's own pictures, the files the rows name in `images/`
+  (`files/images/`), and its clips, all of `videos/` (`files/videos/`);
+- the small copies of pictures, the posters and the playable copies of clips,
+  `image-thumbs/`, `video-posters/` and `video-copies/` (`cache/`).
+
+It then drops the `images` and `videos` tables and the two settings from its
+database. The files are moved, not copied, so the hand-off needs no room of
+its own. The pictures sent with the chats' messages, in a folder for each chat
+in `images/`, stay where they were: that is all `images/` holds now. A start on
+which the hand-off cannot be finished keeps the tables and the settings, says
+so in the log, and goes on with it on the next start.
+
+Media takes it up when it starts: it moves the hand-off into its own folder and
+everything into its place there, with the same ids and file names, and says in
+the log how many pictures and videos it took up. `extension-data/pithagoras-media/`
+then holds `media.db` (the gallery's rows and the settings), `images/`,
+`videos/`, `image-thumbs/`, `video-posters/` and `video-copies/`. A portal that
+runs with `PORTAL_DEFAULT_EXTENSIONS=off` does not install Media: the hand-off
+waits, nothing of it lost, until Media is installed from Settings →
+Extensions → Discover → Comes with Pithagoras. Removing Media later keeps its
+folder, and Media installed again has all of it.
+
+From a checkout, `npm run build` installs Media's own packages, better-sqlite3
+and sharp, in `extensions/media` the first time; sharp, which makes the small
+copies, is no longer one of the server's. The posters and the playable copies
+still need an `ffmpeg`, found as before (`FFMPEG_PATH`).
+
+### Going back to a version before it
+
+The backup the upgrade made in `backups/` (`portal-v6-….db` from the version
+before) has the gallery's rows and the settings as they were, but not Media's
+files. Put the backup back as under [Going back](#going-back), then, before you
+start the older version, move the files back to where it looks for them. In
+the data folder, with the portal stopped:
+
+```sh
+cd /path/to/data
+for d in images videos image-thumbs video-posters video-copies; do
+  mkdir -p "$d" && mv extension-data/pithagoras-media/"$d"/* "$d"/
+done
+```
+
+In a container, the volume is found as for [a damaged database](#a-damaged-database):
+
+```sh
+docker stop pithagoras
+DATA=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' pithagoras)
+
+docker run --rm -v "$DATA:/data" alpine sh -c \
+  'cd /data && for d in images videos image-thumbs video-posters video-copies; do mkdir -p "$d" && mv extension-data/pithagoras-media/"$d"/* "$d"/; done'
+```
+
+Where Media has nothing in one of these folders, `mv` says there is no such
+file, which does no harm. Where Media never took the hand-off up, the files are
+in `handoff/media` instead: move what is in its `files/images` and
+`files/videos` to `images/` and `videos/`, and what is in each folder of its
+`cache` to the folder of the same name, in the same way.
+
+What Media made after the upgrade is not in the backup. The older version finds
+the agent's pictures and clips of that time again in the chats' folders, as
+found ones, without what they were asked for, and does not list the ones made
+on the page, whose files are left in `images/` and `videos/`.
+
 ## Upgrading from the first release
 
 What the first start after an install of version 0.1.0, or of any build made before this one, shows and needs:
@@ -160,5 +261,7 @@ Run a release rather than `latest`, so that going back is changing one value. Ea
 3. Start the previous version:
    - Portainer: set `PITHAGORAS_VERSION` to the release before.
    - Built from source: `docker tag pithagoras-portal:previous pithagoras-portal:latest`, then `docker compose up -d --no-build portal`.
+
+Going back to a version from before Media was an extension also needs Media's files moved back before step 3: see [Media is an extension](#going-back-to-a-version-before-it).
 
 From this version on, an older version does not start on a newer database: it stops at the page described above, because a newer version may have renamed or dropped columns, not only added them. Versions before this one open it anyway and run against it, so put the backup back before you start one of them. The backup from `backups/` is the database as it was before the newer version changed it, which is why going back means putting it back.

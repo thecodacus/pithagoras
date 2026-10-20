@@ -38,7 +38,8 @@ browser. It is open until you fold it, and stays open while one of its pages is
 showing. Folded to the rail of icons, the sidebar has one puzzle button instead,
 before the one for Audit, which opens a menu of those pages: the arrow keys
 move, Enter picks one, Esc closes the menu. With no extension page there is no
-group and no button.
+group and no button. [Media](/guide/media) is one of them, listed while an
+image or a video endpoint is set up.
 
 ## Theme
 
@@ -149,12 +150,13 @@ in two places:
   switched off there is not offered to the model at all; the extension stays
   installed and its slash commands keep working. Tools are listed once a
   conversation has run, because that is when pi builds the list of what its
-  extensions registered. The portal's own `generate_image` and `edit_image` are the exception:
-  they are listed as soon as image generation or editing is switched on. A group
-  can be switched off as a whole, and each package can be given a name of your own — *Rename* — for the list. The
-  portal's picture and video tools (`show_image`, `generate_image`, `edit_image`, `generate_video` and
-  `show_video`) share one group, **Media**, in every tool list; an extension's tool of one of those
-  names stays in the group of its extension. The video tools are listed as soon as video generation is switched on.
+  extensions registered. The tools an extension's server half [offers](/guide/extension-ui#tools-that-follow-the-settings)
+  are the exception: [Media](/guide/media)'s `generate_image` and `edit_image` are listed as soon as
+  image generation or editing is switched on, and its video tools as soon as video generation is. A group
+  can be switched off as a whole, and each package can be given a name of your own — *Rename* — for the list.
+  Media's picture and video tools (`show_image`, `generate_image`, `edit_image`, `generate_video` and
+  `show_video`) are one group in every tool list, its package's, `pithagoras-media`, as any extension's
+  tools are in the group of its package.
 - **Projects → Tools** on a project's row sets what every chat in that project starts
   with, against the portal-wide default; see [Projects](/guide/projects#tools).
 - **Tools** on an agent's page sets what every chat in its home and every run it does on
