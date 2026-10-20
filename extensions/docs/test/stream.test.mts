@@ -150,6 +150,8 @@ async function portal(folder: string | Record<string, string>, { pingMs, pollMs 
     close: async () => {
       for (const abort of aborts) abort.abort();
       await stop();
+      // close() leaves a connection open that fetch made and has not sent a request on yet.
+      server.closeAllConnections();
       server.close();
     },
     /** The stop alone, for a test of what it does to a stream. */

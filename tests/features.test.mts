@@ -346,7 +346,10 @@ test("Understory thinking with the chat's model: the chat whose memory tool runs
     assert.equal(refused.status, 502);
     assert.match((await refused.json()).error.message, /speaks anthropic-messages, not OpenAI chat completions/);
   } finally {
+    // close() leaves a connection open that is still answering: the test does not wait for the end of the stream it asked for last but one.
+    upstream.closeAllConnections();
     upstream.close();
+    portal.closeAllConnections();
     portal.close();
   }
 

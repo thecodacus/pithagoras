@@ -93,6 +93,8 @@ async function portal(folders: Record<string, string>, data = DATA) {
     close: async () => {
       for (const abort of aborts) abort.abort();
       await stop();
+      // close() leaves a connection open that fetch made and has not sent a request on yet.
+      server.closeAllConnections();
       server.close();
     },
   };
