@@ -22,7 +22,7 @@ const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:
  * A picture over the whole page, fitted to the screen, on a calm backdrop.
  *
  * It takes a list of pictures and the one to start at, and knows nothing of
- * where they come from: the chat opens it, and the Media page the same way.
+ * where they come from: the chat opens it, and an extension's page the same way (`ui.ImageViewer`).
  *
  * - A dialog: labelled, with the keyboard kept inside it (Tab goes round), the
  *   page behind it not scrollable, and focus given back to the picture it

@@ -27,7 +27,7 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { setNavigate, startExtensions } from "./extensions/loader";
+import { setLocation, setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { useSlot } from "./extensions/slots";
@@ -41,13 +41,12 @@ const RoutinesPage = lazyComponent(() => import("./components/RoutinesPage"), "R
 const AuditPage = lazyComponent(() => import("./components/AuditPanel"), "AuditPage");
 const BrowserPage = lazyComponent(() => import("./components/BrowserPage"), "BrowserPage");
 const MemoryPage = lazyComponent(() => import("./components/MemoryPage"), "MemoryPage");
-const MediaPage = lazyComponent(() => import("./components/MediaPage"), "MediaPage");
 const ExtensionPage = lazyComponent(() => import("./components/ExtensionPage"), "ExtensionPage");
 const ConfigModal = lazyComponent(() => import("./components/ConfigModal"), "ConfigModal");
 const SetupAssistant = lazyComponent(() => import("./components/SetupAssistant"), "SetupAssistant");
 
-// Legacy routes still resolve — old links stay valid: "session" and "global" were the defaults, "password" and "sso" had a tab each before they were both on Authentication, and so did the pictures and the videos before there was one tab for both.
-const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general", password: "authentication", sso: "authentication", images: "media", videos: "media" };
+// Legacy routes still resolve — old links stay valid: "session" and "global" were the defaults, and "password" and "sso" had a tab each before they were both on Authentication.
+const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general", password: "authentication", sso: "authentication" };
 
 export default function App() {
   // Everything under here is drawn again in a language chosen (see i18n.ts).
@@ -137,30 +136,21 @@ export default function App() {
       <Route path="/routines" element={<Shell view="routines" />} />
       <Route path="/browser" element={<Shell view="browser" />} />
       <Route path="/memory" element={<Shell view="memory" />} />
-      <Route path="/media" element={<Shell view="media" />} />
-      {/* Where the pictures and the videos were while each had a page: old links and bookmarks. */}
-      <Route path="/images" element={<MediaRedirect show="images" />} />
-      <Route path="/videos" element={<MediaRedirect show="videos" />} />
       <Route path="/audit" element={<Shell view="audit" />} />
       {/* A page an extension brought: /x/<extension>/<page id>, and an extension's name may have a slash in it. */}
       <Route path="/x/*" element={<Shell view="extension" />} />
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
       <Route path="/s/:sessionId/settings/:tab" element={<Shell settings />} />
+      {/* An extension's page in Settings, over a chat or not: settings/x/<extension>. */}
+      <Route path="/s/:sessionId/settings/x/*" element={<Shell settings />} />
       <Route path="/settings" element={<Shell settings />} />
       <Route path="/settings/:tab" element={<Shell settings />} />
+      <Route path="/settings/x/*" element={<Shell settings />} />
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );
-}
-
-/** The gallery of one kind that was a page of its own, as one of the two kinds of the Media page, with the filters it had. */
-function MediaRedirect({ show }: { show: "images" | "videos" }) {
-  const { search } = useLocation();
-  const params = new URLSearchParams(search);
-  params.set("show", show);
-  return <Navigate to={{ pathname: "/media", search: `?${params}` }} replace />;
 }
 
 /** Once per page load, not once per page: the Shell is drawn again on every route. */
@@ -171,15 +161,19 @@ function Shell({
   view = "chat",
 }: {
   settings?: boolean;
-  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit" | "extension";
+  view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "audit" | "extension";
 }) {
-  const { sessionId, tab, "*": extensionPage = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
+  // What follows /x/ in the address: `<extension>/<page id>` of a page an extension brought, or `<extension>` of its page in Settings.
+  const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
   const navigate = useNavigate();
+  const { pathname, search } = useLocation();
   // What the installed extensions draw in the portal: see extensions/loader.ts.
   useEffect(() => {
     setNavigate(navigate);
     startExtensions();
   }, [navigate]);
+  // Before anything is painted at the new address: a page of an extension's that keeps what it shows in its address reads it there.
+  useLayoutEffect(() => setLocation(pathname, search), [pathname, search]);
   const pages = useSlot("nav.page");
   const [mobileNav, setMobileNav] = useState(false);
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
@@ -225,19 +219,14 @@ function Shell({
   const [hasBrowser, setHasBrowser] = useState(false);
   // Whether Understory is the agent's memory, which is when its page is in the sidebar.
   const [hasMemory, setHasMemory] = useState(false);
-  // Likewise whether image generation or video generation is on and has an address, which is when the Media page is.
-  const [hasMedia, setHasMedia] = useState(false);
   useEffect(() => {
     const ask = () =>
       api
         .featureFlags()
-        .then((f) => {
-          setHasMemory(f.understory?.enabled === true);
-          setHasMedia(f.images?.enabled === true || f.videos?.enabled === true);
-        })
+        .then((f) => setHasMemory(f.understory?.enabled === true))
         .catch(() => {});
     ask();
-    // Said by Settings when it switches Understory (Add-ons), the images or the videos (Agent → Media), so the sidebar follows at once.
+    // Said by Settings when it switches Understory (Add-ons), so the sidebar follows at once.
     window.addEventListener("features-changed", ask);
     return () => window.removeEventListener("features-changed", ask);
   }, []);
@@ -724,10 +713,9 @@ function Shell({
         sessions={sessions}
         executor={executor}
         activeId={sessionId ?? null}
-        view={view === "extension" ? `x/${extensionPage}` : view}
+        view={view === "extension" ? `x/${extensionPart}` : view}
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
-        hasMedia={hasMedia}
         places={places}
         onNavigate={onNavigate}
         onOpenFolder={onOpenFolder}
@@ -745,7 +733,7 @@ function Shell({
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
-          <span className="truncate text-sm text-fg">{(view === "extension" && pages.find((p) => p.key === extensionPage)?.title) || active?.title || "Pithagoras"}</span>
+          <span className="truncate text-sm text-fg">{(view === "extension" && pages.find((p) => p.key === extensionPart)?.title) || active?.title || "Pithagoras"}</span>
         </header>
         <UpdateNotice onDetails={openUpdate} />
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
@@ -791,12 +779,10 @@ function Shell({
           <BrowserPage onOpenSession={(id) => navigate(`/s/${id}`)} />
         ) : view === "memory" ? (
           <MemoryPage />
-        ) : view === "media" ? (
-          <MediaPage />
         ) : view === "audit" ? (
           <AuditPage />
         ) : view === "extension" ? (
-          <ExtensionPage entryKey={extensionPage} />
+          <ExtensionPage entryKey={extensionPart} />
         ) : active ? (
           <Chat
             session={active}
@@ -890,6 +876,7 @@ function Shell({
         {settings && (
           <ConfigModal
             initialTab={LEGACY_TABS[tab ?? ""] ?? (tab && isTab(tab) ? tab : "general")}
+            extension={extensionPart || undefined}
             onClose={closeSettings}
             onSetup={setUpModel}
           />

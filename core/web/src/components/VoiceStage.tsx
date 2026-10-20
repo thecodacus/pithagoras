@@ -135,7 +135,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const activity = useRef(browserActivity);
   const [shown, setShown] = useState(false);
   const picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
-  // Pictures the agent showed with show_image or made with generate_image or edit_image. A new one opens the window on it.
+  // Pictures the agent's calls gave (see file-outputs.ts): one shown, or one made. A new one opens the window on it.
   const pictures = useMemo(() => shownPictures(toolEvents), [toolEvents]);
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);
@@ -158,7 +158,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const picker = useRef<HTMLInputElement>(null);
   // The windows the installed extensions brought (the `voice.window` slot), by their entry's key: those still there.
   const windowEntries = useSlot("voice.window");
-  // The tools whose extension draws a tile of their own for a call's card here (`chat.tool`'s `tile`).
+  // The tools whose extension draws a tile of their own for a call's card here, or says what the card says (`chat.tool`'s `tile` and `describe`).
   const toolEntries = useSlot("chat.tool");
   const [broughtOpen, setBroughtOpen] = useState<readonly string[]>([]);
   // Every one opened in this chat's voice mode: one kept loaded stays from then on.
@@ -533,13 +533,16 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
       const Tile = entry.tile;
       return <ErrorBoundary resetKey={`${entry.key}:${view.callId}`} fallback={() => null}><Tile call={view} chat={chat} /></ErrorBoundary>;
     }} opens={(view) => { const entry = windowFor(view); return entry && titleOf(entry); }} words={(view) => {
-      const entry = windowFor(view);
-      try {
-        return entry?.describe?.(view, chat);
-      } catch (e) {
-        console.error(`[extensions] ${entry?.extension} failed on describing a call:`, e);
-        return undefined;
+      // The entry of the call's tool says it first, and a window that is for the call where that says nothing.
+      for (const entry of [toolEntries.find((e) => e.tool === view.name), windowFor(view)]) {
+        try {
+          const said = entry?.describe?.(view, chat);
+          if (said) return said;
+        } catch (e) {
+          console.error(`[extensions] ${entry?.extension} failed on describing a call:`, e);
+        }
       }
+      return undefined;
     }} />
     <div className="voice-presence">
       {/* With push-to-talk on, the orb can be held as well as the microphone button: it is the big target on a phone. */}

@@ -12,7 +12,6 @@ export const TAB_IDS = [
   "tools",
   "sandbox",
   "guard",
-  "media",
   "skills",
   "mcp",
   "extensions",

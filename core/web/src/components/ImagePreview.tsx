@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { LuImage, LuImageOff, LuPlay, LuVideo, LuVideoOff } from "react-icons/lu";
 import { fancy } from "../motion";
-import { shapeOf } from "../picture-call";
 import { formatElapsed } from "../transcript";
 import { t } from "../i18n";
 
 export type PreviewState = "making" | "done" | "failed";
+
+/**
+ * Narrowest and widest a preview is drawn: past that a picture is shown whole in a
+ * frame of this shape, not cropped, so that no frame is a sliver.
+ */
+const NARROWEST = 0.4;
+const WIDEST = 3;
+
+/** Width over height for a frame, from the sizes in pixels of a picture or a request. */
+export function shapeOf(width: number, height: number): number | undefined {
+  if (!(width > 0) || !(height > 0)) return undefined;
+  return Math.min(WIDEST, Math.max(NARROWEST, width / height));
+}
 
 interface ImagePreviewProps {
   state: PreviewState;
@@ -61,8 +73,8 @@ interface ImagePreviewProps {
  *
  * Only a picture that was watched being made arrives with a transition: one
  * drawn from the history just is there, and costs nothing while it is not.
- * It knows nothing of chats or tools, so that the Media page can use it as
- * well; what goes in `actions` and around it is the caller's.
+ * It knows nothing of chats or tools, so that an extension's page can use it
+ * as well (`ui.ImagePreview`); what goes in `actions` and around it is the caller's.
  */
 export function ImagePreview({ state, kind = "picture", video, detail, edit = false, src, before, ratio, title, reason, elapsed, pictureId, onOpen, compact = false, actions }: ImagePreviewProps) {
   const clip = kind === "video";

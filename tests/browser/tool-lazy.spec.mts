@@ -257,3 +257,17 @@ test('an off tool whose mark is fixed is not told to switch it on to change the 
   await page.getByRole('button', { name: /^pi-web-access/ }).click();
   await expect(page.getByRole('button', { name: 'Lazy web_search' })).toBeEnabled();
 });
+
+test('Escape in the name field of a tool group cancels the rename, and does not close Settings', async ({ page }) => {
+  await portal(page);
+  await page.getByRole('button', { name: /^Rename pi-web-access/ }).click();
+  const field = page.getByRole('textbox', { name: /^Name for pi-web-access/ });
+  await field.fill('Search');
+  await field.press('Escape');
+  await expect(field).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  // Nothing was renamed, and the next Escape is the dialog's own.
+  await expect(page.getByRole('button', { name: /^pi-web-access/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+});

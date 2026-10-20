@@ -28,22 +28,8 @@ test("single sign-on is found on its own page, by what people call it", () => {
   assert.ok(searchSettings("oidc only", SETTINGS_INDEX).some((e) => e.tab === "authentication" && e.title === "OIDC only"));
 });
 
-test("the picture tools are found in Tools, the image endpoint on the Media tab", () => {
-  for (const q of ["show_image", "generate_image", "edit_image"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
-  for (const q of ["image generation", "image editing", "bildgenerierung"]) {
-    const found = searchSettings(q, SETTINGS_INDEX);
-    assert.ok(found.length && found.every((e) => e.tab === "media" && e.section === "Image model"), `${q} leads to the image model of Media`);
-  }
-});
-
-test("the video tools are found in Tools, the video endpoint on the Media tab", () => {
-  for (const q of ["show_video", "generate_video"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
-  for (const q of ["video generation", "videogenerierung", "frame rate"]) {
-    const found = searchSettings(q, SETTINGS_INDEX);
-    assert.ok(found.length && found.every((e) => e.tab === "media" && e.section === "Video model"), `${q} leads to the video model of Media`);
-  }
-  // The server both models can be are named by the same word: the video model, and the picture settings only that server reads.
-  assert.deepEqual(searchSettings("stable-diffusion.cpp", SETTINGS_INDEX).map((e) => `${e.section}: ${e.title}`).sort(), ["More options: Stable Diffusion extra settings", "Video model: Video generation"]);
+test("the picture and video tools are found in Tools, by their names", () => {
+  for (const q of ["show_image", "generate_image", "edit_image", "show_video", "generate_video"]) assert.ok(searchSettings(q, SETTINGS_INDEX).some((e) => e.tab === "tools"), `${q} leads to Tools`);
 });
 
 test("where an entry is, is searched too", () => {
@@ -113,10 +99,4 @@ test("fetched again after a change, a fetch that started before it does not answ
   assert.equal(await after, "after the save");
   await before;
   assert.equal(peek("d"), "after the save");
-});
-
-test("the groups inside the Media sections are found by what is in them, and lead to their own heading", () => {
-  const where = (q: string) => searchSettings(q, SETTINGS_INDEX).filter((e) => e.tab === "media").map((e) => e.section);
-  assert.deepEqual(where("maximum picture size"), ["Editing endpoint"]);
-  assert.equal(where("several pictures")[0], "More options", "the setting itself comes before the editing that also mentions it");
 });

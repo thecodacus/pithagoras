@@ -6,10 +6,8 @@ import { copyText } from "../clipboard";
 import { sentPictureId } from "../chat-pictures";
 import { splitContext } from "../context-blocks";
 import { msg, t, tp, useLanguage } from "../i18n";
-import { isPictureCall } from "../picture-call";
 import { ToolView } from "../extensions/ToolView";
 import type { Chat } from "../extensions/slots";
-import { isVideoCall } from "../video-call";
 import { isEnter, isEscape } from "../shortcuts";
 import type { Item, SentImage } from "../transcript";
 import { assistantText } from "../voice";
@@ -17,8 +15,6 @@ import { CommandLine } from "./CommandLine";
 import { PictureButton } from "./ChatPictures";
 import { CompactionMarker, ThinkingBlock, ToolCall } from "./ChatActivity";
 import { Markdown, type MarkdownProps } from "./Markdown";
-import { PictureCall } from "./PictureCall";
-import { VideoCall } from "./VideoCall";
 import { CallFiles } from "./CallFiles";
 import { QuestionRecord } from "./QuestionCard";
 import { ReplyStatsLine } from "./ReplyStats";
@@ -130,7 +126,6 @@ export const TranscriptRow = memo(function TranscriptRow({
   seqs,
   switching,
   sessionId,
-  folder,
   chat,
   mermaid,
   mermaidOptions,
@@ -154,7 +149,6 @@ export const TranscriptRow = memo(function TranscriptRow({
   sessionId: string;
   /** The chat the row is in, for what an extension draws in it. */
   chat?: Chat;
-  folder: string;
   mermaid: DiagramPlugin | null;
   mermaidOptions: MarkdownProps["mermaid"];
   /** The subagent this tool call started, if it did. */
@@ -397,22 +391,6 @@ export const TranscriptRow = memo(function TranscriptRow({
     );
   }
   if (item.kind === "tool") {
-    // The portal's picture tools are a preview of the picture, not a tool card.
-    if (isPictureCall(item)) {
-      return (
-        <div data-key={item.id} className={`tool-row${enter}`}>
-          <PictureCall item={item} sessionId={sessionId} folder={folder} onOpen={act.openPicture} />
-        </div>
-      );
-    }
-    // The portal's generate_video is the clip itself, in its player.
-    if (isVideoCall(item)) {
-      return (
-        <div data-key={item.id} className={`tool-row${enter}`}>
-          <VideoCall item={item} sessionId={sessionId} />
-        </div>
-      );
-    }
     return (
       <div data-key={item.id} className={`tool-row${enter}`}>
       {/* The card for it with the files the call gave, or what an extension draws for its own tool: see extensions/ToolView.tsx. */}
