@@ -112,8 +112,18 @@ function parseList(output: string): { spec: string; path?: string; scope?: strin
  * off the settings object (`const { llamaServerUrl } = settings`). So the keys
  * are recovered from the source, which is a heuristic: it can miss a key built
  * dynamically, and the UI says so rather than implying this list is complete.
+ *
+ * Only a pi extension reads them. A package whose manifest names none (`"pi": {}`,
+ * a portal extension's halves alone) reads none, whatever its own code calls a
+ * `settings` of its own: a picture's settings are not pi's.
  */
 function detectSettingKeys(pkgPath: string): string[] {
+  try {
+    const { pi } = JSON.parse(readFileSync(path.join(pkgPath, "package.json"), "utf8"));
+    if (pi && typeof pi === "object" && !(Array.isArray(pi.extensions) && pi.extensions.length)) return [];
+  } catch {
+    // No package.json, or not one that can be read: a folder of code, looked through as it is.
+  }
   const keys = new Set<string>();
   const SKIP = new Set(["length", "constructor", "default", "prototype"]);
 
