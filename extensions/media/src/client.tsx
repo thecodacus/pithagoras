@@ -74,7 +74,7 @@ export default function media(given: Portal) {
     icon: LuImages,
     useShown,
     component: () => (
-      <Suspense fallback={null}>
+      <Suspense fallback={<div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">{t("Loading…")}</div>}>
         <Page />
       </Suspense>
     ),
@@ -97,7 +97,7 @@ export default function media(given: Portal) {
       },
     ],
     component: () => (
-      <Suspense fallback={null}>
+      <Suspense fallback={<p className="text-sm text-fg-subtle">{t("Loading…")}</p>}>
         <Settings />
       </Suspense>
     ),
