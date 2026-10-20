@@ -37,7 +37,7 @@ async function portal(page: Page, overrides: Record<string, unknown> = {}, refus
     }
   }, { settings: true });
   await page.goto('/settings/guard');
-  return { sent, dialog: page.getByRole('dialog', { name: 'Settings' }) };
+  return { sent, state, dialog: page.getByRole('dialog', { name: 'Settings' }) };
 }
 
 test('the Guard tab sits beside Sandbox and shows the rules, the state of what it hangs on, and what is always on', async ({ page }) => {
@@ -108,6 +108,41 @@ test('a list the server refuses is said, and what was typed stays to be saved ag
   await list.fill('github.com\ndocs.test');
   await dialog.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('Not today');
+  await expect(list).toHaveValue('github.com\ndocs.test');
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+});
+
+test('a list typed and not saved is asked about before Settings closes, and one saved is not', async ({ page }) => {
+  const { dialog } = await portal(page);
+  const list = dialog.getByRole('textbox', { name: 'Where a browser may go' });
+  await list.fill('github.com\ndocs.test');
+  await page.keyboard.press('Escape');
+  const ask = page.getByRole('alertdialog', { name: 'Discard your changes?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(list).toHaveValue('github.com\ndocs.test');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+});
+
+test('the page read again shows the list as the server has it now, unless something was typed in it', async ({ page }) => {
+  const { dialog, state } = await portal(page, {}, true);
+  const list = dialog.getByRole('textbox', { name: 'Where a browser may go' });
+  const jira = dialog.getByRole('switch', { name: 'Count jira as your own' });
+  // Changed somewhere else meanwhile; a switch the server refuses has the page read again.
+  Object.assign(state, { allowlist: 'github.com\nnews.test', approvals: [] });
+  await jira.click();
+  await expect(dialog.getByText('No approval is waiting to be spent.')).toBeVisible();
+  await expect(list).toHaveValue('github.com\nnews.test');
+  await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+
+  await list.fill('github.com\ndocs.test');
+  Object.assign(state, { allowlist: 'example.com', trusted: [] });
+  await jira.click();
+  await expect(dialog.getByText('Nothing flagged has been trusted.')).toBeVisible();
   await expect(list).toHaveValue('github.com\ndocs.test');
   await expect(dialog.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
 });

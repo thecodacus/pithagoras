@@ -2,8 +2,8 @@ import { type Page } from '@playwright/test';
 import { test, expect, mockPortal } from './portal-mock';
 
 /**
- * The Browser page's "Who may drive it": the default, and the chats and routines that have it otherwise, each said
- * on or off. And the sidebar lists the page for a routine given the browser where the default does not have it.
+ * The Browser page's "Who may drive it": the default, the chats that have it otherwise, each said on or off, and the
+ * routines whose own switch gives their runs the browser. And the sidebar lists the page for a routine given it.
  */
 async function portal(page: Page, overrides: Record<string, unknown>) {
   await mockPortal(page, ({ path, method }) => {
@@ -18,18 +18,18 @@ async function portal(page: Page, overrides: Record<string, unknown>) {
   });
 }
 
-test('the chats and routines that differ from the default are each said on or off', async ({ page }) => {
+test('the chats that differ from the default and the routines given the browser are each said on or off', async ({ page }) => {
   await portal(page, {
     configured: true,
     sessions: [{ id: 's1', title: 'Shopping', kind: 'task', allowed: false }],
-    routines: [{ slug: 'nightly', name: 'Nightly digest', allowed: false }],
+    routines: [{ slug: 'nightly', name: 'Nightly digest', allowed: true }],
   });
   await page.goto('/browser');
   await expect(page.getByText(/^Every conversation, unless its own tools say otherwise/)).toBeVisible();
   const shopping = page.getByRole('button', { name: /Shopping/ });
   await expect(shopping).toContainText('off');
   const nightly = page.getByRole('listitem').filter({ hasText: 'Nightly digest' });
-  await expect(nightly).toContainText('off');
+  await expect(nightly).toContainText('on');
   await expect(nightly).toContainText('routine');
 });
 
@@ -41,8 +41,12 @@ test('with the browser off by default, a routine that has it is said on, and the
   await expect(page.getByRole('navigation', { name: 'Destinations' }).getByText('Browser', { exact: true }).first()).toBeAttached();
 });
 
-test('a routine that keeps the browser off is no reason to list the page, where nothing is set up', async ({ page }) => {
-  await portal(page, { routines: [{ slug: 'nightly', name: 'Nightly digest', allowed: false }] });
+test('with the browser on by default too, a routine given it lists the page, where nothing else is set up; with none, it is not listed', async ({ page }) => {
+  await portal(page, { routines: [{ slug: 'nightly', name: 'Nightly digest', allowed: true }] });
+  await page.goto('/');
+  await expect(page.getByRole('navigation', { name: 'Destinations' }).getByText('Browser', { exact: true }).first()).toBeAttached();
+  await page.unroute('**/api/**');
+  await portal(page, {});
   const asked = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/browser');
   await page.goto('/');
   await asked;
