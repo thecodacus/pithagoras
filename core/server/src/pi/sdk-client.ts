@@ -9,8 +9,10 @@ import { crossModelThinkingExtension } from "./cross-model-thinking.js";
 import { BROWSER_READING_RULE, BROWSER_SCREENSHOT_RULE } from "./browser-mcp-rules.js";
 import { browserTools } from "../browser/tools.js";
 import { bundledPath } from "../bundled.js";
+import { type AgentUse, baseDir, readBytes } from "../workspace-files.js";
+import { agentOf } from "../agents.js";
 import { EventEmitter } from "node:events";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { DraftStore, PiClient, PiCommand, PiState, PiStats, PiTool, PromptTaken } from "./types.js";
@@ -103,26 +105,84 @@ export function loadTheme(
 const piTheme = () => (globalThis as Record<symbol, unknown>)[THEME_KEY];
 
 /**
+ * A file of the agent's in the folder `from`, as text, or nothing.
+ *
+ * Read from a descriptor opened without following a link, and only where the
+ * agents `as` names could read it themselves (see AgentUse in workspace-files.ts).
+ * With the sandbox on the portal reads as root, and the agent can leave a link
+ * in its home in place of MEMORY.md that leads to another agent's files or to
+ * the portal's own: what it leads to would be handed to the agent as its own.
+ * A file that is not there, is a link or is closed to the agent is nothing, as
+ * an unreadable one always was: the session should still start. Nobody named,
+ * with the sandbox on, is a refusal, as it is there. With `head` 0 nothing is
+ * read: what is answered is only that there is one.
+ */
+function readOwn(from: string, name: string, as: AgentUse, head?: number): string | undefined {
+  try {
+    return readBytes(baseDir(from), name, { direct: true, likeParent: true, ...as, head }).bytes.toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** A file read for the chat `chat`: as its agent, as the sandbox runs it. */
+const forChat = (chat: string | undefined): AgentUse => ({ chats: chat ? [chat] : [] });
+
+/**
+ * Whom the agent's files in `from` are read as for the chat `chat`, working in
+ * `cwd`: the chat's agent, where they are in the chat's folder. A chat in a
+ * project linked to an agent reads them in that agent's home, which the
+ * sandbox closes to every other agent, the one the project's chats run as
+ * among them: there they are read as the agent whose home it is, which is the
+ * one that can leave a link or a file there.
+ */
+const readerOf = (cwd: string, from: string, chat: string | undefined): AgentUse => {
+  if (from === cwd) return forChat(chat);
+  const owner = agentOf(from);
+  return { agents: owner ? [owner.id] : [] };
+};
+
+/**
  * Files pi should treat as context on top of the ones it finds itself.
  *
  * Only picked up where they exist, so a task workspace is unaffected and the
  * agent's home directory gets its character, its user and its memory without
  * anything being generated. Who may see which of them is settled in
- * context-files.ts, which the guard reads as well.
+ * context-files.ts, which the guard reads as well. Read for the chat `chat`
+ * (see readerOf).
  */
-export function extraContextFiles(cwd: string, role?: string): { path: string; content: string }[] {
+export function extraContextFiles(cwd: string, role?: string, chat?: string): { path: string; content: string }[] {
   const out: { path: string; content: string }[] = [];
   const from = filesIn(cwd);
   if (!from) return out;
+  const as = readerOf(cwd, from, chat);
   for (const name of filesFor(cwd, role)) {
-    const file = path.join(from, name);
-    try {
-      if (existsSync(file)) out.push({ path: file, content: readFileSync(file, "utf8") });
-    } catch {
-      // Unreadable is the same as absent here; the session should still start.
-    }
+    const content = readOwn(from, name, as);
+    if (content !== undefined) out.push({ path: path.join(from, name), content });
   }
   return out;
+}
+
+/**
+ * pi's own context files (AGENTS.md or CLAUDE.md, the first one a folder has,
+ * from the chat's folder up to `/`), held to what the agent's files are.
+ *
+ * pi reads them by their path, following links, as the portal's user, and the
+ * agent can leave a link as AGENTS.md in a folder it writes in that leads to
+ * another agent's files or to /root/.ssh. So each is read again as readOwn
+ * reads, and what is handed on is that text, not pi's: one that is a link now,
+ * or is closed to the agent of `chat`, is dropped. The one in pi's agent folder
+ * is the portal's own, which no agent can write and the sandbox closes to all
+ * of them: it stays as pi read it.
+ */
+export function agentsFilesFor(files: { path: string; content: string }[], agentDir: string, chat?: string): { path: string; content: string }[] {
+  const portals = path.resolve(agentDir);
+  return files.flatMap((file) => {
+    if (path.dirname(file.path) === portals) return [file];
+    const content = readOwn(path.dirname(file.path), path.basename(file.path), forChat(chat));
+    // Without a byte order mark, as pi hands on what it read.
+    return content === undefined ? [] : [{ ...file, content: content.replace(/^\uFEFF/, "") }];
+  });
 }
 
 /**
@@ -133,16 +193,12 @@ export function extraContextFiles(cwd: string, role?: string): { path: string; c
  * material, and the model read its own identity as notes about a third party.
  * One line at system level is enough to change what they are.
  */
-export function ownFiles(cwd: string, role?: string): string[] {
+export function ownFiles(cwd: string, role?: string, chat?: string): string[] {
   const from = filesIn(cwd);
   if (!from) return [];
-  const present = filesFor(cwd, role).filter((name) => {
-    try {
-      return existsSync(path.join(from, name));
-    } catch {
-      return false;
-    }
-  });
+  // The ones that are handed over: a link, or a file closed to the agent, is not named either.
+  const as = readerOf(cwd, from, chat);
+  const present = filesFor(cwd, role).filter((name) => readOwn(from, name, as, 0) !== undefined);
   // In a project the files are not in the working directory: they are the agent's the project works with.
   const where = from === cwd ? "in your working directory" : "of the agent this project works with";
   return present.length
@@ -431,8 +487,8 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     lazySets?: string[];
     /** The portal's session id, for tools that record against it. */
     sessionId?: string;
-    /** False lets a run act on what it read — see guardExtension. */
-    enforceTaint?: boolean;
+    /** The taint rules a run may act against after it read something untrusted, read at each call — see guardExtension. */
+    exemptNow?: () => ReadonlySet<string>;
     /** Read at each tool call, so a change takes effect without a restart. */
     browserNow?: () => { allowed: boolean; allowlist: string[] };
     /** What this chat's subagents run on, asked when one starts: see subagent-protocol.ts. */
@@ -487,7 +543,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
             opts.sessionDir,
             opts.whoNow ?? (() => ({ role: "primary" })),
             opts.sessionId,
-            opts.enforceTaint !== false,
+            opts.exemptNow ?? (() => new Set()),
             opts.browserNow ?? (() => ({ allowed: false, allowlist: [] })),
             opts.cwd,
             [path.join(pi.getAgentDir(), "skills"), ...(builtinSkills ? [builtinSkills] : [])],
@@ -546,9 +602,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // — so the agent's own files would be invisible to it. Rather than
         // generating an AGENTS.md from them and keeping it in sync, they are
         // handed to pi as context files directly. Nothing to regenerate, and an
-        // edit is live for the next session that starts.
+        // edit is live for the next session that starts. Both halves are read
+        // as the chat's agent could read them: see readOwn.
         agentsFilesOverride: (base: { agentsFiles: any[] }) => ({
-          agentsFiles: [...base.agentsFiles, ...extraContextFiles(opts.cwd, opts.role)],
+          agentsFiles: [...agentsFilesFor(base.agentsFiles, pi.getAgentDir(), opts.sessionId), ...extraContextFiles(opts.cwd, opts.role, opts.sessionId)],
         }),
         // Content alone is not enough. Handed over as plain context files, pi
         // presents them as reference material and the model answers "who are
@@ -560,7 +617,7 @@ export class SdkPiClient extends EventEmitter implements PiClient {
         // asked each time the prompt is built, so a switch reaches a reloaded chat.
         // A conversation with anyone else had no memory to replace.
       }, audioRule, () => [
-        ...ownFiles(opts.cwd, opts.role),
+        ...ownFiles(opts.cwd, opts.role, opts.sessionId),
         // Where its own skills go: only for the person it works for; a look or a colleague does not write them.
         ...(skillsOf && (!opts.role || opts.role === "primary") && !opts.heartbeatAgent ? [skillsLine(skillsOf)] : []),
         ...((!opts.role || opts.role === "primary") && understoryAt(opts.cwd) ? [UNDERSTORY_RULE] : []),

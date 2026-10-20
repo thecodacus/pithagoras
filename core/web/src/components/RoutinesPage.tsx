@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Select } from "./Select";
 import {
   LuBot,
@@ -594,7 +595,6 @@ function RoutineDetail({
   const [runAt, setRunAt] = useState(toLocalInput(r.runAt));
   const [instructions, setInstructions] = useState(r.instructions);
   const [fresh, setFresh] = useState(r.freshSession);
-  const [guard, setGuard] = useState(r.guard);
   const [workspace, setWorkspace] = useState(r.workspace ?? "");
   // "" = inherit the portal default, "off" = stay quiet, else "channel\u0000target".
   const [report, setReport] = useState(reportValue(r));
@@ -611,10 +611,10 @@ function RoutineDetail({
     (mode === "repeats" ? schedule !== from.schedule : toLocalInput(from.runAt) !== runAt) ||
     instructions !== from.instructions ||
     fresh !== from.freshSession ||
-    guard !== from.guard ||
     workspace !== (from.workspace ?? "") ||
     report !== reportValue(from);
   const dirty = differs(r);
+  const navigate = useNavigate();
 
   const fill = (from: Routine) => {
     setName(from.name);
@@ -623,13 +623,12 @@ function RoutineDetail({
     setRunAt(toLocalInput(from.runAt));
     setInstructions(from.instructions);
     setFresh(from.freshSession);
-    setGuard(from.guard);
     setWorkspace(from.workspace ?? "");
     setReport(reportValue(from));
   };
   // The fields as they are now, for a save that finishes after more was typed.
-  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, guard, workspace, report });
-  live.current = { name, mode, schedule, runAt, instructions, fresh, guard, workspace, report };
+  const live = useRef({ name, mode, schedule, runAt, instructions, fresh, workspace, report });
+  live.current = { name, mode, schedule, runAt, instructions, fresh, workspace, report };
 
   // What the form was last filled from: the fields are filled again from the routine
   // for another routine, after this form's own save (see the Save button), or when
@@ -760,21 +759,35 @@ function RoutineDetail({
           <SwitchTrack on={fresh} />
         </button>
 
-        <button
-          type="button"
-          role="switch"
-          aria-checked={guard}
-          onClick={() => setGuard(!guard)}
-          className="flex w-full items-center gap-3 rounded-lg px-1 py-1.5 text-left transition hover:bg-fg/5"
-        >
+        {/* The rules one at a time are Settings → Guard's: what it says here is what holds for this routine. */}
+        <div className="flex w-full items-center gap-3 px-1 py-1.5">
           <div className="min-w-0 flex-1">
             <p className="text-sm text-fg">{t("Injection guard")}</p>
             <p className="text-[11px] text-fg-subtle">
-              {t("On: after reading anything untrusted — logs fetched over the network, a web page, mail — this run cannot push, write onto PATH, upload or read credentials. Turn it off for work that reads those things and then has to act on them. Content is still labelled as untrusted, and anything it does that the rules would have stopped is recorded in Audit.")}
+              {r.exempt.length === 0
+                ? t("Every rule holds after a run reads something that looks like a prompt injection.")
+                : t("Off for this routine: {rules}. What they would have stopped is recorded in Audit.", { rules: r.exempt.join(", ") })}
             </p>
           </div>
-          <SwitchTrack on={guard} />
-        </button>
+          <Link
+            to={`/settings/guard?routine=${encodeURIComponent(r.id)}`}
+            className="shrink-0 text-xs text-accent hover:underline"
+            aria-label={t("Change the guard's rules for {routine}", { routine: r.name })}
+            onClick={(e) => {
+              // Settings takes the place of this page: what is typed and not saved is asked about first.
+              if (!dirty) return;
+              e.preventDefault();
+              void confirmDialog({
+                title: t("Leave without saving?"),
+                message: t("What you changed in this routine and did not save is lost."),
+                confirmLabel: t("Leave"),
+                danger: true,
+              }).then((leave) => leave && navigate(`/settings/guard?routine=${encodeURIComponent(r.id)}`));
+            }}
+          >
+            {t("Change")}
+          </Link>
+        </div>
 
         {/* Not a label: it would pass a click on the hint to the Select's button. */}
         <div className="block pt-1">
@@ -875,7 +888,6 @@ function RoutineDetail({
                   : { schedule: "", runAt: new Date(runAt).toISOString() }),
                 instructions,
                 freshSession: fresh,
-                guard,
                 // Only when it changed: a place that has gone would refuse the save.
                 ...(workspace !== (r.workspace ?? "") ? { workspace: workspace || null } : {}),
                 ...reportPatch(report),

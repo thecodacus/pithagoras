@@ -85,7 +85,7 @@ test("the guard refuses it before anything could allow it, and an MCP script whi
   mcpFile({ mcpServers: { jira: { command: "j", directTools: true, excludeTools: ["admin.delete"] }, web: { command: "w" } } });
   let off = new Set(["jira_create_issue"]);
   const h = {};
-  guardExtension("t", () => ({ role: "primary" }), "s", true, () => ({ allowed: true, allowlist: [] }), undefined, [], () => off)({ on: (k, f) => (h[k] = f) });
+  guardExtension("t", () => ({ role: "primary" }), "s", () => new Set(), () => ({ allowed: true, allowlist: [] }), undefined, [], () => off)({ on: (k, f) => (h[k] = f) });
   const refused = h.tool_call({ toolName: "mcp", input: { tool: "jira_create_issue", args: {} } });
   assert.equal(refused?.block, true);
   assert.match(refused.reason, /switched off in this conversation/);

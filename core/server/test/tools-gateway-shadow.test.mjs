@@ -121,7 +121,7 @@ test("the guard trusts a tool called tools only when told it is the gateway", ()
   const input = { action: "search" };
   const guard = (...extra) => {
     const h = {};
-    guardExtension("t", () => ({ role: "colleague", key: "priya" }), "shadow-unit", true, () => ({ allowed: false, allowlist: [] }), undefined, [], () => new Set(), ...extra)({ on: (k, f) => (h[k] = f) });
+    guardExtension("t", () => ({ role: "colleague", key: "priya" }), "shadow-unit", () => new Set(), () => ({ allowed: false, allowlist: [] }), undefined, [], () => new Set(), ...extra)({ on: (k, f) => (h[k] = f) });
     return h;
   };
   assert.equal(guard().tool_call({ toolName: "tools", toolCallId: "1", input })?.block, true, "by default it is any tool's");

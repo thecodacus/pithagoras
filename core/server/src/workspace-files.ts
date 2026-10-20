@@ -347,26 +347,26 @@ export interface AgentAccess {
   groups: number[];
 }
 
-let agentAccessOf: (chats: readonly string[]) => AgentAccess[] | undefined = () => undefined;
+let agentAccessOf: (chats: readonly string[], agents: readonly string[]) => AgentAccess[] | undefined = () => undefined;
 
 /**
- * Tells who the agents of some chats are: the portal sets it where the sandbox is (extension-host.ts), from each chat's own stored workspace
- * (what the sandbox runs its agent by), never from a path that the agent could lead somewhere else. Nothing where there is no sandbox; it
- * throws for a chat it does not know.
+ * Tells who the agents of some chats are, and who some agents are by their ids: the portal sets it where the sandbox is (extension-host.ts),
+ * from each chat's own stored workspace (what the sandbox runs its agent by), never from a path that the agent could lead somewhere else.
+ * Nothing where there is no sandbox; it throws for a chat or an agent it does not know.
  */
-export function setAgentAccess(resolve: (chats: readonly string[]) => AgentAccess[] | undefined): void {
+export function setAgentAccess(resolve: (chats: readonly string[], agents: readonly string[]) => AgentAccess[] | undefined): void {
   agentAccessOf = resolve;
 }
 
 /**
- * The agents of `chats` (the chats that work in a folder: all of them must be able to use what is read or changed there for them), or
- * nothing where there is no sandbox. Who they are not being known, or no chat being named, is a refusal: what is not known to be open to
- * the agent is closed, and the agent is not taken from a path.
+ * The agents of `chats` (the chats that work in a folder: all of them must be able to use what is read or changed there for them) and the
+ * agents named by `ids`, or nothing where there is no sandbox. Who they are not being known, or no chat and no agent being named, is a
+ * refusal: what is not known to be open to the agent is closed, and the agent is not taken from a path.
  */
-function agentsOf(chats: readonly string[]): AgentAccess[] | undefined {
+function agentsOf(chats: readonly string[], ids: readonly string[]): AgentAccess[] | undefined {
   let agents: AgentAccess[] | undefined;
   try {
-    agents = agentAccessOf(chats);
+    agents = agentAccessOf(chats, ids);
   } catch {
     throw new FileError("invalid", "Who the agent is here could not be told, so the folder is left alone");
   }
@@ -387,10 +387,12 @@ const READ_FILE = 0o4;
 interface Use {
   need: number;
   chats: readonly string[];
+  agents: readonly string[];
 }
 
-/** What a call that took `likeParent` is held to: `need` of the folder, for `options.chats`. Nothing where it was not asked for. */
-const using = (options: AgentUse, need: number): Use | undefined => (options.likeParent ? { need, chats: options.chats ?? [] } : undefined);
+/** What a call that took `likeParent` is held to: `need` of the folder, for `options.chats` and `options.agents`. Nothing where it was not asked for. */
+const using = (options: AgentUse, need: number): Use | undefined =>
+  options.likeParent ? { need, chats: options.chats ?? [], agents: options.agents ?? [] } : undefined;
 
 /**
  * Whether `agent` may do `need` (a mask of 4 read, 2 write, 1 search or run) to something with this owner and mode, as the kernel decides it:
@@ -443,7 +445,7 @@ function holdFolder(base: string, dir: string, use?: Use): Held {
   const below = pathBelow(base, dir);
   if (below === undefined) throw new FileError("invalid", "That path leads outside the folder");
   // The agents first: who they are not being known is a refusal before anything is opened.
-  const agents = use ? agentsOf(use.chats) : undefined;
+  const agents = use ? agentsOf(use.chats, use.agents) : undefined;
   // What is asked of the folder is told from its own descriptor: not of one looked at by its path before.
   const closed = (fd: number, need: number) => {
     if (agents && !mayAll(fstatSync(fd), agents, need)) throw new FileError("invalid", CLOSED_FOLDER);
@@ -546,7 +548,7 @@ export interface AgentUse {
   /**
    * For what the portal reads or writes as root in a folder that an agent can write next to, and so rename things into (a folder the sandbox
    * closed to the agent, moved to the name of one the portal reads for it, would be handed to it): the folder, and the file, must be something
-   * the agents of `chats` could use themselves. That is told as the kernel would for the user and groups the sandbox runs each as (setAgentAccess):
+   * the agents of `chats`, and those of `agents`, could use themselves. That is told as the kernel would for the user and groups the sandbox runs each as (setAgentAccess):
    * every folder of the path from `/` down to the folder must be one they may search (the sandbox closes a subtree by its top folder only, and
    * `base` is reached through the folders above it), and the folder itself, as it is held, one they may read and search for what is read in it,
    * write in and search for what is changed, both for a folder that is held to. A file must be one they may read, and in a sticky folder what is
@@ -556,9 +558,15 @@ export interface AgentUse {
   /**
    * The chats whose agents work in the folder, every one of which must be able to use it (what is read for one is handed to the others). The agent
    * is not taken from the path: a folder can be led elsewhere by a link, and the sandbox runs a chat's agent by the workspace stored for it. No chat
-   * named is a refusal, with the sandbox on.
+   * named, and no agent, is a refusal, with the sandbox on.
    */
   chats?: readonly string[];
+  /**
+   * Agents by their ids, held to as the agents of `chats` are: for a file of an agent's own that the portal hands to a chat that runs as
+   * another agent. A chat in a project linked to an agent carries that agent's files, read from its home, which the sandbox closes to every
+   * other agent, the one the project's chats run as among them: they are read as the agent whose home it is, the one that can write there.
+   */
+  agents?: readonly string[];
 }
 
 /** What opens a file for reading, beyond the checks every path gets. */

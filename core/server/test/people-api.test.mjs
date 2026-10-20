@@ -99,7 +99,7 @@ test("a rule for one person is allowed for anybody whatever their role, applies 
   const rules = listed.body.rules;
   const guard = (role, key) => {
     const h = {};
-    guardExtension("t", () => ({ role, key }), "s", true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (h[k] = f) });
+    guardExtension("t", () => ({ role, key }), "s", () => new Set(), () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (h[k] = f) });
     return h;
   };
   const rule = rules.find((r) => r.role === "guest" && r.person_key === "tg:priya");

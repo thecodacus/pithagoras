@@ -74,7 +74,7 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 test('the "Run at" field follows the theme, and is not forced to the dark colour scheme', async ({ page }) => {
-  const routine = { id: 'r1', slug: 'once', name: 'Once', enabled: true, schedule: '', runAt: '2026-10-10T10:00', mode: 'once', done: false, instructions: 'Say hello', freshSession: true, guard: true, browser: false, workspace: null, reportChannel: null, reportTarget: null, lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '' };
+  const routine = { id: 'r1', slug: 'once', name: 'Once', enabled: true, schedule: '', runAt: '2026-10-10T10:00', mode: 'once', done: false, instructions: 'Say hello', freshSession: true, guard: true, exempt: [], browser: false, workspace: null, reportChannel: null, reportTarget: null, lastReportAt: null, lastRun: null, lastStatus: null, lastOutput: null, lastMs: null, nextRun: null, createdAt: '' };
   await mockPortal(page, ({ path: p, method }) => {
     if (method !== 'GET') return;
     if (p === '/api/routines') return { routines: [routine] };

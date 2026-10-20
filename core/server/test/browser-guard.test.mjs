@@ -11,10 +11,11 @@ const { addToolRule, deleteToolRule, listAudit, listToolRules, useGrant } = awai
 const { recordApproval } = await import("../dist/approvals.js");
 const { agentsRoot, createAgent, deleteAgent } = await import("../dist/agents.js");
 const { bundledPath } = await import("../dist/bundled.js");
+const { GUARD_RULE_NAMES } = await import("../dist/pi/guard-rule-names.js");
 
 const guard = () => {
   const h = {};
-  guardExtension("t", () => ({ role: "primary" }), "s", true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (h[k] = f) });
+  guardExtension("t", () => ({ role: "primary" }), "s", () => new Set(), () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (h[k] = f) });
   return h;
 };
 /** What a page, a mail or a server might carry that tries to instruct the agent. */
@@ -54,9 +55,9 @@ test("the paragraph the short envelope leaves out is a guideline of the browser 
 mock.method(console, "warn", () => {});
 
 /** A guard as a session of this role has it, its handlers by name. */
-function guardAs({ role = "primary", key, enforce = true, browser = { allowed: true, allowlist: [] }, workspace, session = "s", skills = [] } = {}) {
+function guardAs({ role = "primary", key, exempt = [], browser = { allowed: true, allowlist: [] }, workspace, session = "s", skills = [] } = {}) {
   const h = {};
-  guardExtension("t", () => ({ role, key }), session, enforce, () => browser, workspace, skills)({ on: (k, f) => (h[k] = f) });
+  guardExtension("t", () => ({ role, key }), session, () => new Set(exempt), () => browser, workspace, skills)({ on: (k, f) => (h[k] = f) });
   return h;
 }
 const call = (h, toolName, input = {}) => h.tool_call({ toolName, input });
@@ -183,7 +184,7 @@ test("a push and an upload are held in the forms a model writes them: options be
 });
 
 test("where the taint rules are off, the same calls run and are recorded as exempt", () => {
-  const h = tainted({ enforce: false });
+  const h = tainted({ exempt: GUARD_RULE_NAMES });
   assert.equal(call(h, "bash", { command: "git push" }), undefined);
   assert.equal(lastAudit().kind, "allowed-by-exemption");
   assert.match(lastAudit().reason, /^publish /);
@@ -469,7 +470,7 @@ test("a one-off approval is not spent on a call that the taint refuses after all
     assert.equal(approvalCannotHelp("bash", action, workspace), undefined, "and one that is not named");
   }
   // Where the rules are off for the work, nothing is refused after an approval, so nothing is held back.
-  const exempt = tainted({ role: "colleague", key: "priya", workspace, session: "grant-exempt", enforce: false });
+  const exempt = tainted({ role: "colleague", key: "priya", workspace, session: "grant-exempt", exempt: GUARD_RULE_NAMES });
   recordApproval(asked(action), { id: "grant-exempt" }, true, false);
   assert.equal(approvalCannotHelp("bash", action, workspace, "grant-exempt"), undefined);
   assert.equal(call(exempt, "bash", { command: action }), undefined);

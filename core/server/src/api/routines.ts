@@ -1,5 +1,6 @@
 import express, { type Router } from "express";
-import { getDb, getDefaultReportTo, listRoutineSessions, setDefaultReportTo, setRoutineBrowser } from "../db.js";
+import { forgetRoutineExemptions, getDb, getDefaultReportTo, listRoutineSessions, routineExemptions, setDefaultReportTo, setRoutineBrowser, setRoutineExemptions } from "../db.js";
+import { GUARD_RULE_NAMES } from "../pi/guard-rule-names.js";
 import { channelSupervisor } from "../channels/supervisor.js";
 import { unscopeKey } from "../agent.js";
 import { isValidSlug, slugify } from "../slug.js";
@@ -28,6 +29,8 @@ const toApi = (row: RoutineRow) => ({
   instructions: row.instructions,
   freshSession: Boolean(row.fresh_session),
   guard: row.guard === 1,
+  /** The guard's rules its runs are exempt from, by name: set on the Guard page. */
+  exempt: [...routineExemptions(row.slug)],
   browser: row.browser === 1,
   /** Where its runs happen: null for Home, else a project's directory. */
   workspace: row.workspace ?? null,
@@ -109,7 +112,10 @@ export function switchOffRoutines(all: { id: string; name: string; enabled: bool
 export function removeRoutines(all: { id: string; name: string }[]): string[] {
   const del = getDb().prepare("DELETE FROM routines WHERE id = ?");
   getDb().transaction(() => {
-    for (const r of all) del.run(r.id);
+    for (const r of all) {
+      del.run(r.id);
+      forgetRoutineExemptions(r.id);
+    }
   })();
   return all.map((r) => r.name);
 }
@@ -235,10 +241,6 @@ export function routinesRouter(toolsChanged: (slug: string) => void = () => {}):
       sets.push("instructions = ?");
       values.push(instructions.trim());
     }
-    if (typeof req.body?.guard === "boolean") {
-      sets.push("guard = ?");
-      values.push(req.body.guard ? 1 : 0);
-    }
     if ("reportChannel" in (req.body ?? {})) {
       const report = readReport(req.body);
       sets.push("report_channel = ?", "report_target = ?");
@@ -264,6 +266,11 @@ export function routinesRouter(toolsChanged: (slug: string) => void = () => {}):
       getDb().prepare(`UPDATE routines SET ${sets.join(", ")} WHERE id = ?`).run(...values, row.id);
       routineSupervisor.refreshSchedules([row.id]);
     }
+    // The old one switch for the guard's rules: on puts every rule back; off takes every rule off a routine that holds
+    // to all of them, and leaves one exempt from some as it is, since off is what is read back for it (see toApi): the
+    // rules one by one are the Guard page's.
+    if (req.body?.guard === true) setRoutineExemptions(row.id, []);
+    else if (req.body?.guard === false && routineExemptions(row.slug).size === 0) setRoutineExemptions(row.id, GUARD_RULE_NAMES);
     // Its tools' lists as well, which are what a run goes by: the switch alone would answer 200 and change nothing.
     if (typeof req.body?.browser === "boolean") {
       const slug = rowById(row.id)!.slug;
@@ -279,6 +286,7 @@ export function routinesRouter(toolsChanged: (slug: string) => void = () => {}):
     // Its sessions are left alone: they are the record of what it did, and
     // deleting the schedule is not the same as wanting that gone.
     getDb().prepare("DELETE FROM routines WHERE id = ?").run(row.id);
+    forgetRoutineExemptions(row.id);
     res.json({ ok: true, keptSessions: listRoutineSessions(row.slug).length });
   });
 

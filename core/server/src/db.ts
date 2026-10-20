@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
 import { UNDERSTORY } from "./features.js";
+import { GUARD_RULE_NAMES } from "./pi/guard-rule-names.js";
 import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
@@ -1485,6 +1486,29 @@ export function trustResult(sessionId: string, id: string): void {
   putSetting(trustedKey(sessionId), JSON.stringify([...trustedResults(sessionId), id]));
 }
 
+/** Takes a trusted result back. False when it was not trusted. */
+export function untrustResult(sessionId: string, id: string): boolean {
+  const had = trustedResults(sessionId);
+  if (!had.has(id)) return false;
+  const left = [...had].filter((one) => one !== id);
+  putSetting(trustedKey(sessionId), left.length ? JSON.stringify(left) : "");
+  return true;
+}
+
+/** Every conversation's trusted results, by the conversation: what the Guard page lists, to take back. */
+export function allTrustedResults(): { sessionId: string; ids: string[] }[] {
+  const prefix = trustedKey("");
+  const rows = getDb().prepare("SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?").all(prefix.length, prefix) as { key: string; value: string }[];
+  return rows.flatMap(({ key, value }) => {
+    try {
+      const ids = JSON.parse(value);
+      return Array.isArray(ids) && ids.length ? [{ sessionId: key.slice(prefix.length), ids: ids.filter((id): id is string => typeof id === "string") }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 /**
  * The speaking instructions saved with the voice settings; empty where the
  * built-in ones are used. They live in the same JSON as the rest of them.
@@ -1784,6 +1808,31 @@ export function useGrant(sessionId: string, tool: string, subject: string): bool
   return true;
 }
 
+/** An approval that is still good: not spent, not run out. */
+export interface OpenGrant {
+  id: string;
+  session_id: string;
+  tool: string;
+  subject: string;
+  created_at: string;
+  expires_at: string;
+}
+
+/** The approvals that are still good, the newest first: what the Guard page lists, to revoke. */
+export function openGrants(): OpenGrant[] {
+  return getDb()
+    .prepare("SELECT id, session_id, tool, subject, created_at, expires_at FROM grants WHERE used_at IS NULL AND expires_at > ? ORDER BY created_at DESC")
+    .all(new Date().toISOString()) as OpenGrant[];
+}
+
+/** Takes an approval back before it is spent: it is marked used, as one that was, so it never is. What it was; undefined when there was none to take. */
+export function revokeGrant(id: string): OpenGrant | undefined {
+  const open = openGrants().find((grant) => grant.id === id);
+  if (!open) return undefined;
+  getDb().prepare("UPDATE grants SET used_at = ? WHERE id = ? AND used_at IS NULL").run(new Date().toISOString(), id);
+  return open;
+}
+
 export interface AuditRow {
   id: number;
   at: string;
@@ -1848,13 +1897,44 @@ export function clearAudit(through?: number): number {
   })();
 }
 
-/** Does this routine's runs get the guard's blocking rules? Unknown means yes. */
-export function routineGuards(slug: string | null | undefined): boolean {
-  if (!slug) return true;
-  const row = getDb().prepare("SELECT guard FROM routines WHERE slug = ?").get(slug) as
-    | { guard: number }
-    | undefined;
-  return row ? row.guard === 1 : true;
+/** Where a routine's exemptions from the guard's rules are kept, by its id (a slug can be renamed): see routineExemptions. */
+const exemptionsKey = (routineId: string) => `routine_guard_off:${routineId}`;
+
+/**
+ * The guard's rules (GUARD_RULE_NAMES) a routine's runs are exempt from: what the person switched off for it on the
+ * Guard page, read at each call so that a change holds for a run that is going. A routine from before that page,
+ * whose one switch was off, is exempt from all of them. An unknown routine, and every other session, from none.
+ */
+export function routineExemptions(slug: string | null | undefined): Set<string> {
+  if (!slug) return new Set();
+  const row = getDb().prepare("SELECT id, guard FROM routines WHERE slug = ?").get(slug) as { id: string; guard: number } | undefined;
+  if (!row) return new Set();
+  const stored = getSetting(exemptionsKey(row.id));
+  if (stored === undefined) return new Set(row.guard === 1 ? [] : GUARD_RULE_NAMES);
+  try {
+    const names = JSON.parse(stored);
+    return new Set(Array.isArray(names) ? names.filter((name): name is string => (GUARD_RULE_NAMES as readonly string[]).includes(name)) : []);
+  } catch {
+    // Not readable is not a reason to let anything through.
+    return new Set();
+  }
+}
+
+/**
+ * Sets the rules a routine is exempt from, by name, and its one old switch with them: on (1) while it is exempt from
+ * none, so that what reads only that sees the routine as it is. Names that are no rule are dropped.
+ */
+export function setRoutineExemptions(routineId: string, names: readonly string[]): void {
+  const exempt = GUARD_RULE_NAMES.filter((name) => names.includes(name));
+  getDb().transaction(() => {
+    getDb().prepare("UPDATE routines SET guard = ? WHERE id = ?").run(exempt.length ? 0 : 1, routineId);
+    putSetting(exemptionsKey(routineId), JSON.stringify(exempt));
+  })();
+}
+
+/** Forgets a routine's exemptions, with the routine. */
+export function forgetRoutineExemptions(routineId: string): void {
+  putSetting(exemptionsKey(routineId), "");
 }
 
 /**

@@ -27,6 +27,9 @@ const KIND: Record<string, { label: string; icon: JSX.Element; tone: string }> =
   cleared: { label: msg("Log cleared"), icon: <LuTrash2 className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
   flagged: { label: msg("Suspected injection"), icon: <LuShieldAlert className="h-3.5 w-3.5" />, tone: "text-warn" },
   trusted: { label: msg("You trusted"), icon: <LuShieldCheck className="h-3.5 w-3.5" />, tone: "text-ok" },
+  "allowed-by-exemption": { label: msg("Allowed: routine exempt"), icon: <LuShield className="h-3.5 w-3.5" />, tone: "text-warn" },
+  untrusted: { label: msg("You took trust back"), icon: <LuShieldAlert className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
+  revoked: { label: msg("Approval taken back"), icon: <LuKeyRound className="h-3.5 w-3.5" />, tone: "text-fg-muted" },
 };
 
 const FILTERS = [

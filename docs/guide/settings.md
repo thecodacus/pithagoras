@@ -74,6 +74,12 @@ that, a session asking for a local model silently started on pi's fallback.
 
 ## Tools, Skills and MCP
 
+**Guard**, beside **Sandbox**, is the [guard](/guide/security)'s page: the rules that hold after a suspected
+injection, each routine's exemptions from them (one switch per rule), which MCP servers count as your own and are
+not marked as outside content (the portal's own memory server until you say otherwise; the browser never), the
+approvals not yet spent and the flagged results you trusted, each of which can be taken back, and what is always on.
+Each change is saved as it is made.
+
 **Tools** sets which tools every conversation starts with, see
 [The interface](/guide/interface#tools). **Skills** lists, creates, imports and
 switches the agent's procedures, see [Skills](/guide/skills). **MCP** manages MCP servers, see

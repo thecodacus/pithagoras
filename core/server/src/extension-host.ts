@@ -55,24 +55,21 @@ export { folderFiles };
 /**
  * Who the agents of some chats are, for what `files.*` is asked with `likeParent`: the user and groups the sandbox runs each as (`asAgent`,
  * exec.ts), for the agent the sandbox runs the chat by: from the workspace stored for the chat, as sandbox/tools.ts has it, never from the path the
- * folder leads to now, which an agent can lead elsewhere with a link (into another agent's home, say). Nothing while the sandbox is off: the agent
- * is the portal's own user then. A chat that is not known throws, which is a refusal. Whether the sandbox is on and who an agent is are a few
- * processes (`getent`) and a listing asks for each file: they are kept for a second. That is of the sandbox and its agents, not of any folder.
+ * folder leads to now, which an agent can lead elsewhere with a link (into another agent's home, say). And who the agents named by their ids are,
+ * for what core reads of an agent's own (see AgentUse). Nothing while the sandbox is off: the agent is the portal's own user then. A chat or an
+ * agent that is not known throws, which is a refusal. Whether the sandbox is on and who an agent is are a few processes (`getent`) and a listing
+ * asks for each file: they are kept for a second. That is of the sandbox and its agents, not of any folder.
  */
 let sandboxIsOn = { at: 0, on: false };
 const agentAccess = new Map<string, { at: number; access: AgentAccess }>();
-setAgentAccess((chats) => {
+setAgentAccess((chats, ids) => {
   const now = Date.now();
   if (now - sandboxIsOn.at > 1000) sandboxIsOn = { at: now, on: sandboxOn() };
   if (!sandboxIsOn.on) return undefined;
   const found = new Map<number, AgentAccess>();
   // The agents are read once for all the chats named, not for each: a call may name many.
   const agents = listAgents();
-  let first: ReturnType<typeof defaultAgent> | undefined;
-  for (const id of chats) {
-    const row = getSession(id);
-    if (!row) throw new Error("No such chat");
-    const agent = agentOf(row.workspace, agents) ?? (first ??= defaultAgent());
+  const add = (agent: ReturnType<typeof defaultAgent>) => {
     let known = agentAccess.get(agent.id);
     if (!known || now - known.at > 1000) {
       const who = identityOf(agent, sandboxSupport());
@@ -80,6 +77,17 @@ setAgentAccess((chats) => {
       agentAccess.set(agent.id, known);
     }
     found.set(known.access.uid, known.access);
+  };
+  let first: ReturnType<typeof defaultAgent> | undefined;
+  for (const id of chats) {
+    const row = getSession(id);
+    if (!row) throw new Error("No such chat");
+    add(agentOf(row.workspace, agents) ?? (first ??= defaultAgent()));
+  }
+  for (const id of ids) {
+    const agent = agents.find((a) => a.id === id);
+    if (!agent) throw new Error("No such agent");
+    add(agent);
   }
   return [...found.values()];
 });

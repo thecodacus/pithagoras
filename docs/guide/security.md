@@ -137,8 +137,15 @@ appeared.
 
 A refusal is logged in [Audit](/guide/sessions#audit) and the agent is told to
 say it was refused rather than to find another route. A [routine](/guide/routines#the-injection-guard)
-can have the blocking turned off for itself; what the rules would have stopped is
-then recorded instead.
+can be let off a rule, one at a time, in **Settings → Guard**; what that rule would
+have stopped is then recorded instead. Nothing else can be: chats, channels and
+heartbeats keep every rule.
+
+**Settings → Guard** shows all of this in one place: the rules and what each holds
+back, how the sandbox, the primary user and the place approvals are asked for stand,
+each routine's exemptions, which MCP servers count as your own, the approvals not
+yet spent (with **Revoke**), the flagged results you trusted (with **Un-trust**, which
+holds their chat back again), and what is always on and why.
 
 ## What this does not do
 

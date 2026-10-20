@@ -51,7 +51,8 @@ the portal's, `/data/sandbox/mcp`.
 The folder's skills, in `.pi/skills` and in `.agents/skills` up to the root of
 its repository, are still loaded: a skill is text the model reads, and what it
 says to run, the agent runs with its own tools, inside the sandbox. The folder's
-`AGENTS.md` is read as before. A `.pi/SYSTEM.md` or `APPEND_SYSTEM.md` in it is
+`AGENTS.md` is read as before, unless it is a link or the agent could not read
+it (see [below](#paths)). A `.pi/SYSTEM.md` or `APPEND_SYSTEM.md` in it is
 not, as pi leaves those out of an untrusted project too.
 
 ## Paths
@@ -76,6 +77,16 @@ where the agent could read it itself: `show_image`, `show_video`, `edit_image`,
 the frames `generate_video` starts and ends a clip with, and a picture or a clip
 a call gives that a channel sends on. A picture under a no-access rule is
 refused to the agent, as `cat` would refuse it; you still see it in Files.
+
+What the portal puts in the agent's prompt it reads the same way: the agent's
+`SOUL.md`, `PrimaryUser.md`, `MEMORY.md` and `TEAM.md`, the `AGENTS.md` or
+`CLAUDE.md` pi finds from the chat's folder up, and the `WATCH.md` a heartbeat
+look is asked. One that is a link is left out, wherever it leads, and so is one
+the agent could not read itself: a link the agent leaves in its home in place of
+`MEMORY.md` does not put another agent's files, or the portal's own, in its
+prompt. In a project linked to an agent, that agent's files are read as the
+agent whose home they are in. The `AGENTS.md` in pi's own folder
+(`/data/home/.pi/agent`) is yours, and is read as it is.
 
 A path no rule names keeps the permissions it has. For most of the system that
 means readable and not changeable. The agents' homes and their `HOME` folders

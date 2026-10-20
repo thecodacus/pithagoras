@@ -21,7 +21,7 @@ export const root = process.env.WORKSPACE_ROOT;
 export const folder = scratch("loaded-folders-");
 export const guardAs = (role, workspace) => {
   const h = {};
-  guardExtension("t", () => ({ role, key: "priya" }), "s", true, () => ({ allowed: false, allowlist: [] }), workspace)({ on: (k, f) => (h[k] = f) });
+  guardExtension("t", () => ({ role, key: "priya" }), "s", () => new Set(), () => ({ allowed: false, allowlist: [] }), workspace)({ on: (k, f) => (h[k] = f) });
   return h;
 };
 /** Whether a write by this guard is refused as one that reaches what is loaded; a write the rules allow is undefined. */

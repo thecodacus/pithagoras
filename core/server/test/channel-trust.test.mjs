@@ -169,7 +169,7 @@ test("a guest's question to the primary user reaches their chat, and is not a no
   setDefaultReportTo({ channel: "tg", target: "report" });
   // The guard of the primary user's own conversation, as pi has it running.
   const guard = {};
-  guardExtension("t", () => ({ role: "primary", key: "tg:owner" }), "owners-chat", true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
+  guardExtension("t", () => ({ role: "primary", key: "tg:owner" }), "owners-chat", () => new Set(), () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
   const schedule = () => guard.tool_call({ toolName: "routine_create", input: { name: "morning" } });
   const ask = (question) => {
     let tool;
@@ -305,7 +305,7 @@ test("a question is not put to the primary user for an approval that could not m
     // And what the conversation has read since: once a result looked like a prompt injection, it refuses a push, an upload,
     // a subagent or a schedule after an approval as before it.
     const guard = {};
-    guardExtension("t", () => ({ role: "colleague", key: "tg:kim" }), "kim-chat", true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
+    guardExtension("t", () => ({ role: "colleague", key: "tg:kim" }), "kim-chat", () => new Set(), () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
     const push = { question: "Kim wants to publish.", actionTool: "bash", action: "git push origin release" };
     await tool.execute("call", push);
     assert.equal(spoken.length, 1, "while it has read nothing, it is put");
@@ -454,7 +454,7 @@ test("a conversation begun on the Agent page is the owner's however many people 
   // The guard, as pi has it running in each of them.
   const guarded = (id) => {
     const guard = {};
-    guardExtension("t", () => ({ role: sessions.speakerRole(id), key: sessions.speakerKey(id) }), id, true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
+    guardExtension("t", () => ({ role: sessions.speakerRole(id), key: sessions.speakerKey(id) }), id, () => new Set(), () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
     return guard.tool_call({ toolName: "bash", input: { command: "ls" } });
   };
   assert.equal(guarded(page.id), undefined, "a command runs in the owner's own chat");
@@ -590,7 +590,7 @@ test("an approval makes the action run in the conversation that asked: neither t
   const action = "git push origin release";
   const calls = [];
   const guard = {};
-  guardExtension("t", () => ({ role: sessions.speakerRole(asking.id), key: sessions.speakerKey(asking.id) }), asking.id, true, () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
+  guardExtension("t", () => ({ role: sessions.speakerRole(asking.id), key: sessions.speakerKey(asking.id) }), asking.id, () => new Set(), () => ({ allowed: true, allowlist: [] }))({ on: (k, f) => (guard[k] = f) });
   const push = () => (guard.tool_call({ toolName: "bash", input: { command: action } })?.block ? "refused" : "ran");
   // As the resume has it: the prompt is built (which taints the conversation if a note is waiting for it) and accepted, and the agent then makes its call twice.
   sessions.ask = async (id, build) => {
