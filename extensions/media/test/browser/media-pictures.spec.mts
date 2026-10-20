@@ -1261,6 +1261,8 @@ test.describe('on a touch screen', () => {
     const hit = cell(page, 'Beta').locator('.gallery-check-hit');
     // No hover to wait for, and at least the 44 pixels a finger needs.
     await expect.poll(() => hit.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+    // Measured once the page is in: it comes in with the portal's entrance for a page, which moves it by a fraction of a pixel meanwhile.
+    await page.locator('.extension-page').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     const size = (await hit.boundingBox())!;
     expect(size.width).toBeGreaterThanOrEqual(44);
     expect(size.height).toBeGreaterThanOrEqual(44);
