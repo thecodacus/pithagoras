@@ -341,7 +341,7 @@ test("what the portal left for an extension when an upgrade took something out o
   assert.equal(leaveHandoff("notes", () => assert.fail("filled again")), "there");
 
   const taken = portal.handoffs.take("notes");
-  assert.equal(taken, path.join(portal.dataDir(), "handoff", "notes"));
+  assert.equal(taken, path.join(portal.dataDir(), "handoff-notes"));
   assert.equal(existsSync(left), false, "moved, not copied");
   assert.equal(readFileSync(path.join(taken, "files", "first.txt"), "utf8"), "moved before");
   assert.equal(readFileSync(path.join(taken, "rows.json"), "utf8"), '{"rows":[1]}');
@@ -350,7 +350,7 @@ test("what the portal left for an extension when an upgrade took something out o
   portal.handoffs.done("notes");
   assert.equal(existsSync(taken), false);
   assert.equal(portal.handoffs.take("notes"), undefined, "nothing left: nothing to take");
-  assert.equal(existsSync(path.join(portal.dataDir(), "handoff", "notes")), false);
+  assert.equal(existsSync(path.join(portal.dataDir(), "handoff-notes")), false);
   // A name is one part of a path, never a step out of the folder.
   for (const name of ["..", ".notes.partial", "../notes", "Notes", "a/b", "", "x".repeat(65), undefined]) {
     assert.throws(() => portal.handoffs.take(name), /is not a hand-off's name/, String(name));

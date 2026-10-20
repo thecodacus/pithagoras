@@ -60,21 +60,23 @@ export function leaveHandoff(name: string, fill: (dir: string) => void): "left" 
   return "left";
 }
 
+/** Where a hand-off taken into the folder `into` is, until it has been read. */
+const takenIn = (into: string, name: string): string => path.join(into, `handoff-${named(name)}`);
+
 /**
- * What was left under `name`, moved into `into` (`<into>/handoff/<name>`), and its path; nothing when nothing was. One
+ * What was left under `name`, moved into `into` (`<into>/handoff-<name>`), and its path; nothing when nothing was. One
  * taken before is where it was put, until `handoffDone`.
  */
 export function takeHandoff(name: string, into: string): string | undefined {
-  const taken = path.join(into, "handoff", named(name));
+  const taken = takenIn(into, name);
   if (existsSync(taken)) return taken;
   const left = path.join(handoffRoot(), name);
   if (!existsSync(left)) return undefined;
-  mkdirSync(path.dirname(taken), { recursive: true, mode: 0o700 });
   moveTo(left, taken);
   return taken;
 }
 
 /** What `takeHandoff` moved into `into`, removed: it has been read. */
 export function handoffDone(name: string, into: string): void {
-  rmSync(path.join(into, "handoff", named(name)), { recursive: true, force: true });
+  rmSync(takenIn(into, name), { recursive: true, force: true });
 }
