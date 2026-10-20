@@ -149,7 +149,8 @@ with it either way.
 | `t(text, vars?)`, `locale` | [Its texts in other languages](#other-languages) |
 | `theme` | [Themes](#themes): add one, switch to one, follow the one in effect |
 | `ui` | [The portal's building blocks](#looking-like-the-portal) |
-| `navigate(path)` | Goes to a page of the portal: `/s/<chat id>`, `/x/<package>/<page id>` |
+| `navigate(path, options?)` | Goes to a page of the portal: `/s/<chat id>`, `/x/<package>/<page id>`, `/settings/x/<package>`. With `{ replace: true }`, in the place of the page shown in the browser's history, not as a step of its own |
+| `useLocation()` | A hook: the page's address, `{ path, search }`, drawn again when it changes, Back and Forward included ([a page that keeps what it shows in its address](#a-page)) |
 | `extension`, `version` | The package's name; the version of this interface, `1` |
 
 ### Components
@@ -258,9 +259,13 @@ prefix of your own: the stylesheet is the page's.
 | `RowsSkeleton`, `SkeletonGroup` | Placeholders while something loads |
 | `ErrorBoundary`, `PartFailed` | A part that fails to draw, failing alone |
 | `StatusDot` | A chat's state as a dot |
-| `ToolLink`, `ImagePreview` | A link on a call's card; a picture as the conversation shows one a tool makes ([a tool's call](#a-tool-s-call)) |
+| `ToolLink`, `ImagePreview` | A link on a call's card; a picture as the conversation shows one a tool makes ([a tool's call](#a-tool-s-call)), which `pictureId` marks for a viewer's `anchor` to find |
+| `ImageViewer` | The portal's picture viewer, over the page: the `pictures` to step through, each `{ id, src, alt, caption?, fileName?, from? }` (`from` the `id` of the picture it was edited from), opened at `startId`, with zoom, Open in a new tab and Download. `actions(picture)` are more buttons beside Close for the picture shown, and `anchor(id)` the element focus goes back to when it closes |
+| `Modal` | A dialog over the page, as the portal's own (`title`, `subtitle?`, `footer?`, `wide?`): Escape and a click beside it close it, after asking when `unsaved` says something typed in it is not saved |
+| `DetailsGroup` | A group of settings that folds, as Settings' own: its `title`, and a `summary` of what is set in it while it is folded. Settings' search opens it when what it finds is in it |
+| `useUnsavedDraft(unsaved)` | A hook: this part of a dialog (a page in Settings, a `Modal`) holds something typed and not saved, so closing the dialog asks first |
 | `confirm(options)` | A question asked over the page; resolves true for yes |
-| `classes` | The look of the portal's fields and buttons as class names: `input`, `inputSmall`, `codeArea`, `button`, `primary`, `primarySmall`, `ghost` |
+| `classes` | The look of the portal's fields and buttons as class names: `input`, `inputSmall`, `codeArea`, `button`, `primary`, `primarySmall`, `ghost`, and `viewerButton` and `iconButton`, the buttons over a picture and in a viewer's head (`aria-pressed` is drawn as chosen) |
 | `copyText(text)` | Copies, over plain HTTP as well |
 | `asksBeforeDeleting()` | Whether the person wants to be asked before something is deleted (Settings → This browser): ask first when it is true |
 | `storage.local`, `storage.session` | The browser's storage, which never throws |
@@ -280,8 +285,15 @@ you register inside an element marked with your package's name
 (`data-extension`, laid out as if it were not there), and the build scopes each
 utility to it. The portal's utilities go by the same names, and yours, coming
 after them, would otherwise win over its own on every page (a `.flex` over an
-`md:hidden`). tailwindcss and postcss are then the extension's to install,
-beside esbuild.
+`md:hidden`). What you draw through React's `createPortal` (a viewer over the
+whole page, say) is not inside that element, so put it in one of your own, for
+your utilities to reach it:
+
+```tsx
+createPortal(<div data-extension={portal.extension} style={{ display: "contents" }}>{viewer}</div>, document.body);
+```
+
+tailwindcss and postcss are then the extension's to install, beside esbuild.
 
 ## Slots
 
@@ -293,14 +305,14 @@ puts it before entries with a higher one, or none.
 | --- | --- | --- | --- |
 | `chat.panel` | Beside the conversation, docked, floated and sized like Files and Git | `title`, `icon?`, `header?`, `actions?`, `useButton?`, `name?` | `chat`, `channel`, `panels`, `close()`, `panel` |
 | `chat.header.action` | The chat's header, before the panels' buttons | | `chat`, `channel`, `panels` |
-| `chat.tool` | A call of one tool in the conversation, in place of the portal's card | `tool` (its name), `tile?` (drawn small on its card in voice mode) | `chat`, `channel`, `panels`, `call`, `card` |
+| `chat.tool` | A call of one tool in the conversation, in place of the portal's card | `tool` (its name), `tile?` (drawn small on its card in voice mode), `describe?` (what that card says of it) | `chat`, `channel`, `panels`, `call`, `card` |
 | `chat.tool.action` | On the portal's card of a call, under what it returned, when the card is opened | `tool?` (a name or a pattern; every call without it) | `call`, `cut`, `panels` |
 | `chat.composer.above` | Above the message box | | `chat`, `channel`, `panels` |
 | `chat.overlay` | Over the chat, placed by you | | `chat`, `channel`, `panels` |
 | `chat.background` | Nowhere: there while the chat is on screen, drawing nothing | | `chat`, `channel`, `panels` |
 | `voice.window` | A window in voice mode, placed and sized like the portal's own | `title`, `icon?`, `place?`, `maximizable?`, `keepLoaded?`, `useAutoOpen?`, `opensFor?`, `describe?` | `chat`, `channel`, `panels`, `close()`, `opened`, `maximized`, `maximize()`, `restore()` |
 | `nav.page` | A page at `/x/<package>/<id>`, with an entry in the sidebar | `title`, `icon?`, `useShown?` | |
-| `settings.page` | Your package's page in Settings, above the fields the portal found for it | `search`: what Settings' search finds on it, each `{ title, section?, words? }`, `section` being the heading it goes to | |
+| `settings.page` | Your package's page in Settings, at `/settings/x/<package>`, above the fields the portal found for it | `title?` and `icon?`: its entry in Settings' list, in place of the package's name and the mark every extension has; `search`: what Settings' search finds on it, each `{ title, section?, words? }`, `section` being the heading it goes to | |
 
 `chat` is `{ id, title, workspace }`. `channel` reaches
 [your pi extension in that chat](#talking-to-your-pi-extension). `panels` is
@@ -391,11 +403,21 @@ function PictureCall({ call, compact }) {
   const elapsed = call.since && Math.floor((Date.now() - call.since) / 1000);
   return h(portal.ui.ImagePreview, { state, file: picture, title: String(call.input.prompt ?? ""), elapsed, reason: call.interrupted ? "Interrupted" : call.output, compact });
 }
-portal.slots.register("chat.tool", { id: "picture", tool: "make_picture", component: PictureCall, tile: (props) => h(PictureCall, { ...props, compact: true }) });
+portal.slots.register("chat.tool", {
+  id: "picture",
+  tool: "make_picture",
+  component: PictureCall,
+  tile: (props) => h(PictureCall, { ...props, compact: true }),
+  describe: (call) => ({ label: portal.t("Making a picture"), detail: String(call.input.prompt ?? "") }),
+});
 ```
 
 `tile` is drawn small on the call's card in voice mode, in place of the mark
-that says how it stands (`ui.ImagePreview` takes `compact` for that size).
+that says how it stands (`ui.ImagePreview` takes `compact` for that size), and
+`describe(call, chat)` is what that card says of the call, `{ label, detail? }`,
+in place of the portal's words for a tool it does not know ("Using make
+picture"). Media's cards say "Making a picture" and what it is of. A card with
+nothing of its own to draw but those words can return `card` as it is.
 
 ### An action on a call's card
 
@@ -440,7 +462,9 @@ behaves beside the portal's own windows:
   elsewhere.
 - `describe(call, chat)`: what the card of such a call says, `{ label, detail? }`,
   in place of the portal's words for a tool it does not know ("Using canvas
-  write"): Canvases' cards say "Writing in a document" and its title.
+  write"): Canvases' cards say "Writing in a document" and its title. The
+  `describe` of the tool's own [`chat.tool` entry](#a-tool-s-call), where it has
+  one, is asked first.
 - `maximizable`: its head gets a Maximize button, as the browser's has. The
   window then fills the stage, over the other windows and above the dock,
   until it is restored: by its button, by Escape, by being minimized, or by
@@ -499,6 +523,27 @@ one for Audit, that opens a menu of the pages. With no page, there is neither.
 whether the entry is listed now. Use it for a page whose service is not set
 up, as the browser's page is not listed before there is a browser. Until it
 returns `true` the entry is not listed; the page is at its address either way.
+
+A page that keeps what it shows in its address (a filter, so that a link keeps
+it and Back goes through it) reads the address with `portal.useLocation()`,
+which draws it again whenever the address changes, Back and Forward included,
+and changes it with `portal.navigate`. Each change is then a step in the
+browser's history; one that should not be, such as taking out a part of the
+address that has been read, is made with `{ replace: true }`:
+
+```js
+function Gallery() {
+  const { path, search } = portal.useLocation();
+  const show = new URLSearchParams(search).get("show") ?? "all";
+  const choose = (next) => portal.navigate(next === "all" ? path : `${path}?show=${next}`);
+  // …
+}
+```
+
+[Media](/guide/media)'s page, at `/x/pithagoras-media/media`, keeps its
+gallery's filters so. Your package's page in Settings is at
+`/settings/x/<package>`, and `portal.navigate("/settings/x/<package>")` opens
+Settings there, from a page that says something is not set up.
 
 ### A part that only listens
 
@@ -703,9 +748,10 @@ restart the portal.
 | `sandbox.personEnv()` | The portal's environment for a process the person starts, such as a shell of their own: without the mark the agent's processes carry, so it is not listed as a job the agent left running |
 | `files.inside(base, rel)` | A path checked to be inside a folder |
 | `files.list`, `read`, `readBytes`, `write`, `create`, `rename`, `unsaved`, `remove`, `removeFile`, `renameFile`, `makeFolder`, `folder`, `identity`, `sweepTemp`, `open` | [A chat's folder](#a-chat-s-folder), read and changed with the portal's own checks |
-| `folders.list()`, `folders.allowed(path)`, `folders.on("removed", fn)` | [The folders the agents work in](#the-folders-the-agents-work-in), and when the portal deletes one |
+| `folders.list()`, `folders.allowed(path)`, `folders.label(path)`, `folders.on("removed", fn)` | [The folders the agents work in](#the-folders-the-agents-work-in), what one is called, and when the portal deletes one |
 | `git.at(folder)` | [git and gh in a folder](#git-in-a-chat-s-folder), run as the portal runs its own |
-| `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal |
+| `dataDir()` | [A folder of the package's own in the portal's data folder](#where-it-keeps-things), closed to everyone but the portal, by its real path |
+| `handoffs.take(name)`, `handoffs.done(name)` | [What an upgrade left](#what-an-upgrade-left-for-it) when something the portal did itself became an extension's |
 | `provide(factory)`, `extensions.use(name)` | [Building on another extension](#building-on-another-extension): what it gives the extensions that build on it, and what one it builds on gives it |
 | `log(text)`, `extension`, `executor`, `version` | A line in the portal's log; the package's name; how pi is run here; `1` |
 
@@ -777,7 +823,50 @@ that is (a folder can be moved, or deleted and made again).
 const store = path.join(portal.dataDir(), folderId);   // the portal's alone: nobody else can read or change it
 ```
 
-[Documents](/guide/documents#where-the-history-is-kept) keeps its history there.
+It is given by its real path, whether or not the data folder is reached
+through a link, so it can be the `base` of [`portal.files`](#a-chat-s-folder)
+as a chat's folder is: `files.open(portal.dataDir(), "images/a1b2c3.png")`
+opens a file of it with the same checks, to send with
+[`http.send`](#sending-a-file).
+
+[Documents](/guide/documents#where-the-history-is-kept) keeps its history there,
+and [Media](/guide/media) its store, `media.db`, the pictures and clips made on
+its page, and the small copies its galleries show.
+
+#### What an upgrade left for it
+
+When something the portal did itself becomes an extension's, the upgrade that
+takes it out of the portal leaves what it had (its records, its settings, its
+files) in the portal's data folder, under a name for what it was (`media`), for
+whichever extension takes it up. Nothing of it is lost while none does: an
+extension can be installed long after the upgrade, or never, and what was left
+waits for it.
+
+`portal.handoffs.take(name)` moves what was left under `name` into the
+package's own folder, `<dataDir>/handoff/<name>`, and gives that folder's path;
+nothing when nothing was left. The first package that asks has it, whole. It
+stays there until `handoffs.done(name)` removes it, so a start that stopped
+half way through reading it (the portal stopped, a disk was full) is given it
+again by the next `take`. Read it so that reading it twice does no harm: move
+in a file only where it is not there yet, put in a record only where one of its
+id is not, and say `done` once all of it is in your own store.
+
+```js
+const dir = portal.handoffs.take("media");
+if (dir) {
+  const { rows } = JSON.parse(fs.readFileSync(path.join(dir, "images.json"), "utf8"));
+  const put = db.prepare("INSERT OR IGNORE INTO images (id, path, prompt) VALUES (?, ?, ?)");
+  db.transaction(() => rows.forEach((r) => put.run(r.id, r.path, r.prompt)))();   // a row that is there is left as it is
+  portal.handoffs.done("media");
+}
+```
+
+What is in it, and in what format, is said by the portal's upgrade that left
+it. A name is small letters, digits, dots, dashes and underscores, from a
+letter or a digit, at most 64. [Media](/guide/media) takes `media`, which
+schema 7 left when Media became an extension: its rows, its settings, the
+pictures and clips of its page and the copies made of them
+(`extensions/media/src/server/handoff.ts` reads it).
 
 ### A chat's folder
 
@@ -1040,6 +1129,13 @@ through these. `folders.allowed(path)` says whether a folder, by its real
 path, is one of the kind they work in, the only kind to serve what they made
 from.
 
+`folders.label(folder)` is what the person calls a folder, by its real path,
+whether or not `list` has it now: `{ name, home? }`, its agent's name for an
+agent's home (`home` for the first), its place under the workspace root for a
+folder inside it, and its last part otherwise. It is for a folder something
+was kept for after the last chat in it went: Media's gallery names the folder
+of a deleted chat's pictures so.
+
 `folders.on("removed", (folder) => …)` is told when the portal deletes one: a
 project with its folder, or an agent with its home. `folder` is where it really
 was, as `list` named it, for what was kept of it to go too.
@@ -1141,14 +1237,15 @@ chat whose pi runs in the portal's own process (the host executor, where
 pi.registerTool({ name: "docker_run", /* … */ offByDefault: true });
 ```
 
-A tool that works on files the person approves (edit_image's pictures) says
-which of its parameters hold them, as `approvalFiles`: names of parameters it
-declares as text or a list of text. The guard then approves a call for each of
-those files and for nothing else of it: a rule for a folder allows the call
-when it allows every file, and the action asked for is each file's path, one
-to a line. Every other tool is approved on its command, its path or its
-arguments whole, whatever a call of it carries, and a command, a tool server's
-tools and the `tools` tool never are on files.
+A tool that works on files the person approves (the pictures of Media's
+`edit_image`) says which of its parameters hold them, as `approvalFiles`: names
+of parameters it declares as text or a list of text (`edit_image` names `path`
+and `paths`, one picture or a list as its settings say). The guard then
+approves a call for each of those files and for nothing else of it: a rule for
+a folder allows the call when it allows every file, and the action asked for is
+each file's path, one to a line. Every other tool is approved on its command,
+its path or its arguments whole, whatever a call of it carries, and a command,
+a tool server's tools and the `tools` tool never are on files.
 
 ```js
 pi.registerTool({ name: "merge_pdfs", parameters: { type: "object", properties: { inputs: { type: "array", items: { type: "string" } }, title: { type: "string" } } }, approvalFiles: ["inputs"], /* … */ });
@@ -1173,6 +1270,12 @@ portal.chats.extend((pi) => {
 // Once the person has saved the settings:
 await portal.chats.reload();
 ```
+
+Media's tools are built this way (`extensions/media/src/server/pi/tools.ts`):
+`show_image` is always there, `generate_image` and `edit_image` while their
+endpoint is set up, and `generate_video` and `show_video` while video
+generation is; a save of its settings that changes which there are, or the
+shape of `edit_image`, reloads the idle chats.
 
 ### Files a tool gives
 
@@ -1578,9 +1681,10 @@ portal can be removed without a spec of the portal's failing.
 
 ## What the portal's own apps use
 
-The terminal, Git, Files and Canvases are extensions (`extensions/terminal`,
-`extensions/git`, `extensions/files`, `extensions/canvas`). This is what each
-of them takes from the portal, and what gives the same to an extension:
+The terminal, Git, Files, Canvases and Media are extensions
+(`extensions/terminal`, `extensions/git`, `extensions/files`,
+`extensions/canvas`, `extensions/media`). This is what each of them takes from
+the portal, and what gives the same to an extension:
 
 | The portal's app uses | An extension has |
 | --- | --- |
@@ -1605,7 +1709,17 @@ of them takes from the portal, and what gives the same to an extension:
 | A window in voice mode, at the side, opening itself when the agent runs a command and when its card is tapped | `voice.window` with `place`, `useAutoOpen`, `opensFor` |
 | A document written live as the model writes the call, only for a call that will run | `chats.onEvent`, `chats.offers` |
 | A document drawn as the model writes the call, before the tool runs and saves it | `calls` and `call(callId)` in `portal.chats.use` |
-| Its tools' cards in voice mode saying what they do, and its tools telling a spoken turn to keep it short | `describe` on its `voice.window`; `voiceGuidelines` on its tools |
+| Its tools' cards in voice mode saying what they do, and its tools telling a spoken turn to keep it short | `describe` on its `voice.window` or on its `chat.tool` entries; `voiceGuidelines` on its tools |
+| The picture a tool is making, small on its card in voice mode | `tile` on its `chat.tool`, drawing `ui.ImagePreview` with `compact` |
+| Tools that are there only while their endpoint is set up, listed in Settings → Tools before a chat has had them | `tools.offer`, and `chats.reload()` once a save changes them |
+| A tool whose pictures the person approves one by one | `approvalFiles` |
+| A store of its own, a database and files the agents cannot reach, and native packages (better-sqlite3, sharp) | `dataDir()`, and the dependencies in its own `package.json` and lock |
+| What the portal kept of it before it was an extension | `portal.handoffs` |
+| Pictures and clips sent from its own folder, as the portal sends its own | `files.open(dataDir(), …)`, `http.send` |
+| A deleted chat's pictures kept as its folder's, named as the person calls the folder; a deleted project's gone with it | `chats.on("deleted")`, `folders.label`, `folders.on("removed")` |
+| A gallery whose filters are in its address, so that a link keeps them and Back goes through them | `portal.useLocation()`, `portal.navigate(path, { replace })` |
+| The portal's picture viewer, a dialog, and the buttons over a picture | `ui.ImageViewer`, `ui.Modal`, `ui.classes.viewerButton` and `iconButton` |
+| A viewer of its own over the whole page, styled with its utilities | `createPortal` into an element with its `data-extension` |
 | "Delete this document?" only for someone who wants to be asked | `ui.asksBeforeDeleting()` |
 | "Open in the agent terminal" on the card of a shell call | `chat.tool.action` |
 | A key in voice mode (T for the terminal) | `portal.shortcuts.register` |
@@ -1613,6 +1727,7 @@ of them takes from the portal, and what gives the same to an extension:
 | The running tray's jobs opening its Jobs tab, and the jobs themselves | The `jobs.show` command; `background` in `portal.chats.use` |
 | An emulator fetched only when its tab is opened | `ui.lazy` |
 | A page in the sidebar; a page in Settings | `nav.page`, `settings.page` |
+| Its page in Settings with its own name and mark, groups that fold, a question before what was typed is lost, and links to it from its page | `title` and `icon` on its `settings.page`, `ui.DetailsGroup`, `ui.useUnsavedDraft`, `portal.navigate("/settings/x/<package>")` |
 | A window in voice mode that can fill the stage, with a page in it that is not loaded again each time | `maximizable`, `keepLoaded` and `restore()` on its `voice.window` |
 | A page in the sidebar only once its service is set up | `useShown` on its `nav.page` |
 | A slash command | `pi.registerCommand` in the pi extension, and the channel for what it does in the page |
@@ -1667,3 +1782,34 @@ is the one written in TypeScript and JSX:
   into its own stylesheet.
 - `src/server.ts` is its routes, keyed by chat, and `src/git.ts` what each
   runs, through `portal.git.at`.
+
+`extensions/media`, [Media](/guide/media), is the one with a store and packages
+of its own, and the agent's tools that follow its settings:
+
+- `src/server.ts` is its server half. Its tools (`src/server/pi/tools.ts`) are
+  registered with `chats.extend` and said to the portal with `tools.offer`, as
+  its settings make them there, and a save that changes them reloads the idle
+  chats with `chats.reload()` (`src/server/api/settings.ts`). `show_image`,
+  `generate_image`, `edit_image` and `generate_video` say what a spoken turn
+  needs of them in `voiceGuidelines`, and `edit_image` names its pictures in
+  `approvalFiles`.
+  Its routes are at `/api/x/pithagoras-media/…`, and send pictures and clips
+  with `http.send`.
+- `src/server/store.ts` is its store, `media.db` in `dataDir()`, kept with
+  better-sqlite3, beside the pictures and clips of its page and the small
+  copies sharp makes of them. Both packages are its own dependencies, in its
+  `package.json` and its lock, installed in its folder (a native package is not
+  bundled).
+- `src/server/handoff.ts` takes up what the portal kept of Media before it was
+  an extension, the hand-off `media` (`portal.handoffs`).
+- `src/client.tsx` registers the Media page (`nav.page`, at
+  `/x/pithagoras-media/media`, listed while an endpoint is set up), which
+  keeps its gallery's filters in its address with `portal.useLocation()` and
+  `portal.navigate`; its page in Settings (`settings.page` with its own `title`
+  and `icon`, at `/settings/x/pithagoras-media`); and its tools' cards in the
+  chat (`chat.tool`, with a `tile` for the picture tools and `describe` on all
+  five).
+- `src/web/` is the page, the cards and the settings, drawn with
+  `ui.ImagePreview`, `ui.ImageViewer`, `ui.Modal` and `ui.DetailsGroup`, and a
+  video viewer of its own put over the page with `createPortal`.
+- `src/de.ts` is its German.
