@@ -86,20 +86,29 @@ const FROM_PIPE = ["-protocol_whitelist", "pipe", "-threads", "1", "-i", "pipe:0
 function run(args: string[], fd: number, size: number, ms: number, keep: number, stopped: AbortSignal): Promise<{ code: number | null; signal: NodeJS.Signals | null; said: string }> {
   return new Promise((resolve, reject) => {
     const [file, argv] = command(args);
-    const child = spawn(file, argv, { stdio: ["pipe", "ignore", "pipe"], signal: stopped, killSignal: "SIGKILL" });
+    const child = spawn(file, argv, { stdio: ["pipe", "ignore", "pipe"] });
     let said = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), ms);
+    // Killed as the time is up, and so when Media stops: either way it is answered for once it has gone, and what it
+    // wrote is let go of by then (Windows removes no file a process still has open).
+    const kill = () => child.kill("SIGKILL");
+    const timer = setTimeout(kill, ms);
+    stopped.addEventListener("abort", kill);
+    if (stopped.aborted) kill();
+    const done = () => {
+      clearTimeout(timer);
+      stopped.removeEventListener("abort", kill);
+    };
     child.stdin.on("error", () => {});
-    feed(fd, size, child.stdin).catch(() => child.kill("SIGKILL"));
+    feed(fd, size, child.stdin).catch(kill);
     child.stderr.on("data", (chunk: Buffer) => {
       if (said.length < keep) said += chunk.toString("utf8");
     });
     child.on("error", (e) => {
-      clearTimeout(timer);
+      done();
       reject(e);
     });
     child.on("close", (code, signal) => {
-      clearTimeout(timer);
+      done();
       resolve({ code, signal, said });
     });
   });

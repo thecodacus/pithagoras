@@ -135,28 +135,36 @@ export async function feed(fd: number, size: number, into: NodeJS.WritableStream
 /** The first frame of the open clip, as a PNG, from ffmpeg, which is killed when `stopped` is aborted. */
 function firstFrame(fd: number, size: number, stopped: AbortSignal): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn(tool(), ["-v", "error", "-protocol_whitelist", "pipe", "-i", "pipe:0", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"], signal: stopped, killSignal: "SIGKILL" });
+    const child = spawn(tool(), ["-v", "error", "-protocol_whitelist", "pipe", "-i", "pipe:0", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
     const out: Buffer[] = [];
     let total = 0;
     let errors = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), FRAME_MS);
+    // Killed as the time is up, and so when Media stops: either way it is answered for once it has gone.
+    const kill = () => child.kill("SIGKILL");
+    const timer = setTimeout(kill, FRAME_MS);
+    stopped.addEventListener("abort", kill);
+    if (stopped.aborted) kill();
+    const done = () => {
+      clearTimeout(timer);
+      stopped.removeEventListener("abort", kill);
+    };
     // ffmpeg stops reading once it has its frame: what it leaves unread is not an error.
     child.stdin.on("error", () => {});
-    feed(fd, size, child.stdin).catch(() => child.kill("SIGKILL"));
+    feed(fd, size, child.stdin).catch(kill);
     child.stdout.on("data", (chunk: Buffer) => {
       total += chunk.length;
-      if (total > MAX_FRAME_BYTES) child.kill("SIGKILL");
+      if (total > MAX_FRAME_BYTES) kill();
       else out.push(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => {
       if (errors.length < 2000) errors += chunk.toString("utf8");
     });
     child.on("error", (e) => {
-      clearTimeout(timer);
+      done();
       reject(e);
     });
     child.on("close", (code, signal) => {
-      clearTimeout(timer);
+      done();
       if (code === 0 && total > 0 && total <= MAX_FRAME_BYTES) return resolve(Buffer.concat(out));
       const why = errors.trim().split("\n").pop() || `ffmpeg ended with ${code ?? signal}`;
       // Ended by itself, with no frame: the clip's. Ended by a signal (the time, the size of a frame, a file that could not be read) it may be any other.
