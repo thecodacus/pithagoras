@@ -27,7 +27,7 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { setLocation, setNavigate, startExtensions } from "./extensions/loader";
+import { locationChanged, setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { titleOf, useSlot } from "./extensions/slots";
@@ -173,7 +173,7 @@ function Shell({
     startExtensions();
   }, [navigate]);
   // Before anything is painted at the new address: a page of an extension's that keeps what it shows in its address reads it there.
-  useLayoutEffect(() => setLocation(pathname, search), [pathname, search]);
+  useLayoutEffect(() => locationChanged(), [pathname, search]);
   const pages = useSlot("nav.page");
   // The extension's page shown, which the phone's top bar names as the sidebar does: in the language in effect.
   const extensionPage = view === "extension" ? pages.find((p) => p.key === extensionPart) : undefined;

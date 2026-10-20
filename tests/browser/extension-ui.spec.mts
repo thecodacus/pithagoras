@@ -643,6 +643,21 @@ test.describe('an extension with a page of pictures and a page in Settings', () 
     await expect(address).toHaveText('/x/test-album/album');
   });
 
+  test('its page reads its own address from the first time it is drawn, opened from another page or by Back', async ({ page }) => {
+    await album(page);
+    await page.goto('/x/test-album/album?show=marked');
+    const first = page.getByTestId('album-first-address');
+    await expect(first).toHaveText('/x/test-album/album?show=marked');
+    await sidebar(page).getByRole('button', { name: 'Sessions' }).click();
+    await expect(first).toHaveCount(0);
+    await page.goBack();
+    await expect(first).toHaveText('/x/test-album/album?show=marked');
+    await sidebar(page).getByRole('button', { name: 'Sessions' }).click();
+    await expect(first).toHaveCount(0);
+    await sidebar(page).getByRole('button', { name: 'Album' }).click();
+    await expect(first).toHaveText('/x/test-album/album');
+  });
+
   test("its pictures open in the portal's viewer, with a button of its own beside the viewer's, and the one shown last has the focus back", async ({ page }) => {
     await album(page);
     await page.goto('/x/test-album/album');
