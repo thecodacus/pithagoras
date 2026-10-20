@@ -25,8 +25,8 @@ is what there is to install, in three parts: **Comes with Pithagoras**, **Find
 packages** and **Install by name**.
 
 **Comes with Pithagoras** lists the extensions shipped with the portal itself
-(a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents) and
-[Docker for extensions](/guide/docker)), each installed from the portal's own folder with one click.
+(a pack of seven themes, the terminal, Git, Files, Canvases, [Media](/guide/media), [Documents](/guide/documents),
+[Docker for extensions](/guide/docker) and [Kanban](/guide/kanban)), each installed from the portal's own folder with one click.
 
 **Find packages** searches the npm registry for packages published for pi — by
 keyword, with a separate search for packages that bring a model provider — and

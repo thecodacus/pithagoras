@@ -457,6 +457,29 @@ The endpoint's address, key and model are the settings' (see [above](#media)).
 | `DELETE …/videos/:id` | Takes the video away, file and all, from the page's own folder, a chat's or the folder it was found in; a file that is gone already counts as deleted, but a chat's folder that cannot be reached is an error (404) and the video stays in the list |
 | `POST …/videos/delete` | `{ ids }` (at most 200) — the same for several: `{ deleted, failed: [{ id, error }] }`, each as asked and what could not be said for each |
 
+## Kanban
+
+The [Kanban](/guide/kanban) extension's routes (`extensions/kanban`), while it is
+installed. A board is `{ id, name, description, version, created, updated, columns, cards }`: `columns` left to right,
+each `{ id, name }`, and `cards` in their order, each `{ id, title, description, labels, assignee, due, column, archived,
+created, updated, activity }`, a column's cards being those with its id, top first. `version` changes with every write. A
+change answers with the board as it is after it, and is put down in a card's activity as the person's. A refusal is 400
+(`code: "invalid"`), 404 (`missing`) or 409 (`conflict`), with `error` saying why.
+
+| | |
+| --- | --- |
+| `GET /api/x/pithagoras-kanban/boards?have=` | `{ version, boards }`, each board `{ id, name, description, version, updated, columns: [{ id, name, cards }], archived }` with the number of cards in each column and archived. With `have`, the list's `version` the caller has: `{ version, unchanged: true }` while it is that |
+| `POST …/boards` | `{ name, description?, columns? }` — a new board, with the columns named or To do, In progress and Done. 409 for a name another board has, capitals aside |
+| `GET …/boards/:board?have=` | The board; with `have`, the version the caller has, `{ version, unchanged: true }` while it is that |
+| `PATCH …/boards/:board` · `DELETE` | `{ name?, description? }`; delete it, with its cards: `{ deleted }` |
+| `POST …/boards/:board/columns` | `{ name, index? }` — a column, at the end or at `index` |
+| `PATCH …/columns/:column` · `POST …/columns/:column/move` · `DELETE …/columns/:column?to=` | `{ name }`; `{ index }`; take it away: one with cards, archived ones included, only with `to`, the column they go to (409 otherwise) |
+| `POST …/boards/:board/cards` | `{ title, column?, index?, description?, labels?, assignee?, due? }` — a card, at the bottom of `column` (the first column without one) or at `index` among its cards that are not archived. `due` is `YYYY-MM-DD` |
+| `PATCH …/cards/:card` · `DELETE` | Any of `title`, `description`, `labels`, `assignee`, `due` (`null` or `""` for none); delete it |
+| `POST …/cards/:card/move` | `{ column, index? }` |
+| `POST …/cards/:card/archive` · `…/restore` · `…/notes` | Archive it; restore it to the bottom of its column; `{ text }`, a note in its activity |
+| `GET …/chats/:chat/board` | `{ board }`: the id of the board the chat's agent last worked on with a kanban tool, or `null` |
+
 ## Channels
 
 | | |
