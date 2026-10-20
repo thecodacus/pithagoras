@@ -2957,9 +2957,9 @@ export function forgetPackageTools(spec: string): void {
  * its name (`browser_staging_click` is not the tool of `browser`) and that
  * needs the longer name to still be there; `after` is what is left. The
  * adapter's own tools and those of the portal's inline extensions are the ones
- * a server's name can claim without being its, and they stay. The defaults and exceptions
- * somebody set for the tools are kept, as for any tool that is not loaded: a
- * server that comes back gets them back.
+ * a server's name can claim without being its, and they stay. The defaults and
+ * exceptions somebody set for the tools are kept, as for any tool that is not
+ * loaded: a server that comes back gets them back.
  */
 export function mcpServersRemoved(before: string[], after: string[]): void {
   const removed = before.filter((name) => !after.includes(name));
