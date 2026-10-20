@@ -123,13 +123,6 @@ export function describeCall(payload: any, folder: string): ToolCall {
   if (name === "grep") return { label: t("Searching for “{pattern}”", { pattern: flat(text(input.pattern), 40) }), detail: flat([text(input.path), text(input.glob)].filter(Boolean).join(" · ")) };
   if (name === "find") return { label: t("Looking for “{pattern}”", { pattern: flat(text(input.pattern), 40) }), detail: flat(text(input.path)) };
   if (name === "ls") return { label: t("Listing {folder}", { folder: path ? base(path) : t("the folder") }), detail: "" };
-  // No target here: whether the call has a picture to show is known from its end (see VoiceToolActivity), and a tool of this name that an extension brings has none of the portal's. The same for edit_image.
-  if (name === "generate_image") return { label: t("Making a picture"), detail: flat(text(input.title) || text(input.prompt)) };
-  if (name === "edit_image") return { label: t("Editing a picture"), detail: flat(text(input.title) || text(input.prompt)) };
-  if (name === "show_image") return { label: t("Showing a picture"), detail: flat(text(input.title) || text(input.path)), target: "pictures" };
-  // Clips play in the chat, not in the picture window of voice mode: no target.
-  if (name === "generate_video") return { label: t("Making a video"), detail: flat(text(input.title) || text(input.prompt)) };
-  if (name === "show_video") return { label: t("Showing a video"), detail: flat(text(input.title) || text(input.path)) };
   if (name === "ask_question") return { label: t("Asking you a question"), detail: flat(text(input.title) || text((input.questions as { question?: unknown }[] | undefined)?.[0]?.question)) };
   if (/^browser[_.]/.test(name)) return browser(name.replace(/^browser[_.]/, ""), input);
   if (typeof input.tool === "string" && /browser/.test(input.tool)) return browser(input.tool, input);

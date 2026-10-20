@@ -244,10 +244,6 @@ if (phase === 'files') {
       { name: 'web_search', source: 'pi-web-access', description: 'Search the web', enabled: !off.includes('web_search'), defaultOn: true },
       { name: 'web_fetch', source: 'pi-web-access', enabled: !off.includes('web_fetch'), defaultOn: true },
       { name: 'bash', source: 'builtin', enabled: true, defaultOn: true },
-      // The portal's picture tools, each registered by an extension of its own.
-      { name: 'show_image', source: 'pictures', inline: true, enabled: !off.includes('show_image'), defaultOn: true },
-      { name: 'generate_image', source: 'image-generation', inline: true, enabled: true, defaultOn: true },
-      { name: 'edit_image', source: 'image-editing', inline: true, enabled: true, defaultOn: true },
     ] };
   });
 }

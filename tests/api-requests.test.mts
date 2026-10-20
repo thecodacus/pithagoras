@@ -57,13 +57,11 @@ test('a file sent from this computer is as much a request: a gone login is heard
   answer(reply(502, '<h1>Bad Gateway</h1>'));
   await assert.rejects(api.uploadFile('s1', '', file), (e: any) => e instanceof ApiError && e.message === 'Could not upload notes.txt (502)');
   answer(reply(413, '{"error":"File too large"}'));
-  await assert.rejects(api.uploadPicture(file), (e: any) => e instanceof ApiError && e.status === 413 && e.message === 'File too large');
+  await assert.rejects(api.uploadFile('s1', '', file), (e: any) => e instanceof ApiError && e.status === 413 && e.message === 'File too large');
   answer(new TypeError('Load failed'));
-  await assert.rejects(api.uploadPicture(file), (e: any) => e.message === 'Cannot reach the portal');
+  await assert.rejects(api.uploadFile('s1', '', file), (e: any) => e.message === 'Cannot reach the portal');
   answer(reply(200, '{"path":"notes.txt","size":1}'));
   assert.deepEqual(await api.uploadFile('s1', '', file), { path: 'notes.txt', size: 1 });
   assert.equal(seen.at(-1)!.url, '/api/sessions/s1/upload?path=&name=notes.txt');
-  answer(reply(200, '{"picture":{"id":"p"}}'));
-  assert.deepEqual(await api.uploadPicture(file), { id: 'p' });
   assert.equal(SIGNED_OUT, 'pithagoras:signed-out');
 });

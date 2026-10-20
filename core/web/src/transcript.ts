@@ -3,9 +3,7 @@ import { unwrapCall } from "./tool-activity";
 import { argsSummary } from "./tool-args";
 import { toolArgsOf, toolNameOf } from "./tool-payload";
 import { msg, t } from "./i18n";
-import { GENERATED_PICTURE_MARK } from "../../server/src/generated-picture";
-import { GENERATED_VIDEO_MARK } from "../../server/src/generated-video";
-import { shownFiles, type FileKind, type ShownFile } from "../../server/src/file-outputs";
+import { shownFiles, type ShownFile } from "../../server/src/file-outputs";
 import type { AgentQuestion } from "./components/QuestionCard";
 
 /** A picture that went with a message, by the name the server keeps it under. */
@@ -21,9 +19,6 @@ const sentImages = (raw: unknown): SentImage[] | undefined => {
 };
 
 export type { ShownFile } from "../../server/src/file-outputs";
-
-/** The first file of a kind a call gave the person, if it gave one. */
-export const fileOf = (item: { files?: ShownFile[] }, kind: FileKind): ShownFile | undefined => item.files?.find((file) => file.kind === kind);
 
 /**
  * What answering took, for the line under a reply: the prompt it read and the
@@ -115,12 +110,8 @@ export type Item =
       detail?: string;
       /** The files the call gave the person, as its end says (see file-outputs.ts). */
       files?: ShownFile[];
-      /** The seq of the end that gave `files`: what versions their URLs, so that every place that draws one asks for the same one (see PictureCall). */
+      /** The seq of the end that gave `files`: what versions their URLs, so that every place that draws one asks for the same one (see CallFiles). */
       filesSeq?: number;
-      /** A call of the portal's own generate_image or edit_image, as its start says (see generated-picture.ts), not of a tool of that name an extension brings. */
-      portalPicture?: true;
-      /** A call of the portal's own generate_video, as its start says (see generated-video.ts), not of a tool of that name an extension brings. */
-      portalVideo?: true;
       args?: unknown;
       output?: string;
       /** How many lines `output` had before it was cut to its end. */
@@ -523,8 +514,6 @@ export function buildTranscript(events: PortalEvent[], options: { ended?: boolea
           name: toolNameOf(p, "tool"),
           status: "running",
           detail: summarizeToolInput(p),
-          ...(p[GENERATED_PICTURE_MARK] === true ? { portalPicture: true as const } : {}),
-          ...(p[GENERATED_VIDEO_MARK] === true ? { portalVideo: true as const } : {}),
           ...(args !== undefined ? { args } : {}),
           ...(ev.at !== undefined ? { since: ev.at } : {}),
         });

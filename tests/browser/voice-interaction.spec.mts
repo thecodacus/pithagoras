@@ -50,63 +50,18 @@ test('a picture goes with what is said next, and the agent can show one back', a
   expect(failures).toEqual([]);
 });
 
-test('a picture the agent had generated is drawn in the chat as a preview, and in the voice picture window', async ({ page }) => {
-  const failures: string[] = [];
-  page.on('pageerror', e => failures.push(e.message));
-  const asked: string[] = [];
-  await page.route('**/api/sessions/test/picture?**', route => { asked.push(new URL(route.request().url()).searchParams.get('path') ?? ''); return route.fulfill({ body: png, contentType: 'image/png' }); });
-  await page.goto('/tests/voice.html');
-  // In the chat: the picture in its preview, fetched from the chat's folder like one that was shown.
-  await page.getByRole('button', { name: 'Generate picture' }).click();
-  const thumbnail = page.getByTestId('workspace').getByRole('img', { name: 'A lighthouse at dusk' });
-  await expect(thumbnail).toBeVisible();
-  await expect.poll(() => asked).toContain('generated-images/image-20261001-101500-a1b2c3.png');
-  // In place of the tool card, with the call under Details.
-  await expect(page.getByTestId('workspace').getByRole('button', { name: 'Details' })).toBeVisible();
-  await expect(page.getByTestId('workspace').getByRole('button', { name: /^generate_image/ })).toHaveCount(0);
-
-  // In voice mode: the picture window opens on the next one, and keeps the earlier.
-  await page.getByRole('button', { name: 'Turn on hands-free voice' }).click();
-  await expect(page.getByRole('button', { name: 'End voice mode' })).toBeVisible({ timeout: 25000 });
-  await page.getByRole('button', { name: 'Generate picture' }).click();
-  const window = page.getByRole('region', { name: 'Pictures' });
-  await expect(window.getByRole('img', { name: 'A lighthouse at dusk' })).toBeVisible();
-  await expect(window).toContainText('A lighthouse at dusk');
-  await expect(window).toContainText('2 / 2');
-  expect(failures).toEqual([]);
-});
-
-test("in voice mode a card for generate_image leads to the pictures only when the portal's tool made one", async ({ page }) => {
+test("a card is the same element from its call's start to its end, only a button once the call has given a picture", async ({ page }) => {
   await start(page);
-  // An extension's tool of that name: its card says what it does and opens nothing, whatever pictures there are.
-  // A picture shown before is there to be opened wrongly; its window is put away.
-  await page.getByRole('button', { name: 'Show picture' }).click();
-  await page.getByRole('region', { name: 'Pictures' }).getByRole('button', { name: 'Minimize pictures' }).click();
-  await page.getByRole('button', { name: "Call an extension's generate_image" }).click();
-  const theirs = page.locator('.voice-tool-float', { hasText: 'A cat on a sofa' });
-  await expect(theirs).toContainText('Making a picture');
-  expect(await theirs.evaluate(card => card.tagName)).toBe('DIV');
-  await expect(page.getByRole('button', { name: /Making a picture/ })).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Pictures' })).toHaveCount(0);
-
-  // The portal's own, once its picture is there: tapping the card shows it.
-  await page.getByRole('button', { name: 'Generate picture' }).click();
-  const ours = page.getByRole('button', { name: /Making a picture/ });
-  await expect(ours).toHaveAttribute('title', 'Show the picture');
-});
-
-test("a generate_image card is the same element from its start to its end, only a button once its picture is there", async ({ page }) => {
-  await start(page);
-  // The real order: the call starts, the model works, and some time later the picture arrives.
-  await page.getByRole('button', { name: 'Start generating a picture' }).click();
-  const card = page.locator('.voice-tool-float', { hasText: 'A foggy harbour at first light' });
-  await expect(card).toContainText('Making a picture');
+  // The real order: the call starts, the tool works, and some time later the picture arrives.
+  await page.getByRole('button', { name: 'Start a chart' }).click();
+  const card = page.locator('.voice-tool-float', { hasText: 'A chart of the sales, month by month' });
+  await expect(card).toContainText('Using plot sales');
   await expect(card).not.toHaveAttribute('role', 'button');
   await expect(card).not.toHaveAttribute('title', /.+/);
   // The element is marked, so that a new one drawn in its place would be told by not having the mark.
   await card.evaluate(element => { element.setAttribute('data-first-element', 'yes'); });
 
-  await page.getByRole('button', { name: 'Finish generating the picture' }).click();
+  await page.getByRole('button', { name: 'Finish the chart' }).click();
   await expect(card).toHaveAttribute('role', 'button');
   await expect(card).toHaveAttribute('title', 'Show the picture');
   await expect(card).toHaveAttribute('data-first-element', 'yes');
@@ -115,7 +70,7 @@ test("a generate_image card is the same element from its start to its end, only 
   await page.getByRole('region', { name: 'Pictures' }).getByRole('button', { name: 'Minimize pictures' }).click();
   await card.focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('region', { name: 'Pictures' }).getByRole('img', { name: 'A foggy harbour' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Pictures' }).getByRole('img', { name: 'Sales by month' })).toBeVisible();
 });
 
 test('a file dropped on the voice stage is taken there once, not again by the chat behind it', async ({ page }) => {

@@ -14,7 +14,6 @@ import {
   LuGlobe,
   LuBrain,
   LuChevronRight,
-  LuImages,
   LuMessagesSquare,
   LuPlus,
   LuPuzzle,
@@ -60,7 +59,6 @@ export const Sidebar = memo(function Sidebar({
   view,
   hasBrowser,
   hasMemory = false,
-  hasMedia = false,
   places,
   onSelect,
   onNewChat,
@@ -81,8 +79,6 @@ export const Sidebar = memo(function Sidebar({
   hasBrowser: boolean;
   /** Understory is the agent's memory: its page is there to read. */
   hasMemory?: boolean;
-  /** Image or video generation is on and has an address: the Media page is there to make pictures and videos in and to look through them. */
-  hasMedia?: boolean;
   /** Where Home and the projects are, to list the chats by folder: undefined until known, null if they could not be. */
   places?: Places | null;
   onSelect: (id: string) => void;
@@ -213,8 +209,6 @@ export const Sidebar = memo(function Sidebar({
     ...(hasBrowser ? [{ to: "browser" as const, icon: <LuGlobe />, label: t("Browser") }] : []),
     // Likewise: only while Understory holds the agent's memory.
     ...(hasMemory ? [{ to: "memory" as const, icon: <LuBrain />, label: t("Memory") }] : []),
-    // And only while there is an endpoint to make pictures or videos with.
-    ...(hasMedia ? [{ to: "media" as const, icon: <LuImages />, label: t("Media") }] : []),
   ];
   // Last of the destinations, after the extensions' group.
   const audit = { to: "audit" as const, icon: <LuShield />, label: t("Audit") };
@@ -402,7 +396,7 @@ const GroupLabel = ({ children }: { children: ReactNode }) => (
 );
 
 /** A page of the portal's, or one an extension brought: `x/<extension>/<page id>`. */
-type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit" | `x/${string}`;
+type Destination = "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "audit" | `x/${string}`;
 
 function RailButton({
   icon,

@@ -55,25 +55,14 @@
 /* In a tile there is room for the mark only: the card says the rest. */
 .image-preview.is-compact .image-preview-failed { position: absolute; inset: 0; align-items: center; justify-content: center; padding: 0; }
 
-/* Under the picture: what it is of, and the way to the call it came from. */
+/* Under the picture: what it is of, and what the caller puts beside it. */
 .image-preview-caption { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 5px; font-size: 12px; color: rgb(var(--fg-subtle)); }
 .image-preview-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.picture-call-more { flex-shrink: 0; display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: 12px; color: rgb(var(--fg-muted)); transition: background .2s, color .2s; }
-.picture-call-more:hover { background: rgb(var(--fg) / .05); color: rgb(var(--fg)); }
-.picture-call-more svg { width: 12px; height: 12px; transition: transform .3s var(--ease-out); }
-.picture-call-more[aria-expanded="true"] svg { transform: rotate(90deg); }
-/* In the middle of the column, as the chat's other pictures are, in every state: where the wait is, the picture comes, and a failure says so. */
-.picture-call > .image-preview { margin-inline: auto; }
-.picture-call .chat-tool-body { margin-left: 0; }
-.picture-call .chat-tool-body > .chat-tool-name { align-self: flex-start; max-width: 100%; color: rgb(var(--fg-subtle)); }
-@media (prefers-reduced-motion: reduce) { .picture-call-more, .picture-call-more svg { transition: none; } }
 
-/* A clip in the chat, played where the agent put it: as wide as a picture's frame at most, whole in its player. */
-.video-call-player { margin: 2px auto 4px; width: min(100%, 36rem); }
+/* A clip in the chat (ChatVideo), whole in its player. */
 .chat-video { display: block; width: 100%; max-height: 20rem; border: 1px solid rgb(var(--line)); border-radius: 8px; background: #000; }
 .chat-picture .chat-video { width: auto; max-width: 100%; }
 .chat-video-gone { padding: 11px 13px; border: 1px dashed rgb(var(--line)); border-radius: 8px; font-size: 12.5px; color: rgb(var(--fg-muted)); }
-.video-call .image-preview-caption { margin-top: 5px; }
 
 /* A file a call gave that is no picture or clip: its name, to save it. */
 .chat-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 8px 12px; border: 1px solid rgb(var(--line)); border-radius: 8px; background: rgb(var(--raised) / .6); font-size: 12.5px; color: rgb(var(--fg)); transition: border-color .18s, background .18s; }

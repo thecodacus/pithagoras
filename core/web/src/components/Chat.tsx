@@ -1955,7 +1955,6 @@ export function Chat({
               switching={switching !== null}
               sessionId={session.id}
               chat={chat}
-              folder={session.workspace}
               mermaid={mermaid}
               mermaidOptions={mermaidOptions}
               agent={item.kind === "tool" ? agentFor(item.callId)?.id : undefined}

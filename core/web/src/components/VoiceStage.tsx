@@ -135,7 +135,7 @@ export function VoiceStage({ sessionId, folder, workPhase, title, phase, startin
   const activity = useRef(browserActivity);
   const [shown, setShown] = useState(false);
   const picturesWindow = useRef<HTMLElement>(null), conversationWindow = useRef<HTMLElement>(null);
-  // Pictures the agent showed with show_image or made with generate_image or edit_image. A new one opens the window on it.
+  // Pictures the agent's calls gave (see file-outputs.ts): one shown, or one made. A new one opens the window on it.
   const pictures = useMemo(() => shownPictures(toolEvents), [toolEvents]);
   const picturesSeen = useRef(pictures.at(-1)?.seq ?? 0);
   const [picturesShown, setPicturesShown] = useState(false), [pictureIndex, setPictureIndex] = useState(0);

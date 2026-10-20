@@ -17,7 +17,7 @@ async function portal(page: Page, opts: { agent?: string; understory?: boolean; 
   ];
   await mockPortal(page, async ({ path: p, method, json }) => {
     if (p === '/api/sessions') return { sessions: [], executor: 'host' };
-    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: !!opts.understory }, images: { enabled: false } };
+    if (p === '/api/features/flags') return { subagent: { enabled: false }, understory: { enabled: !!opts.understory } };
     if (p === '/api/projects' && method === 'POST') {
       made.push(json());
       return { name: 'fresh', path: '/w/fresh', isGit: false, hasInstructions: false };
