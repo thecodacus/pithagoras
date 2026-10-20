@@ -661,6 +661,31 @@ test.describe('an extension with a page of pictures and a page in Settings', () 
     await expect(first).toHaveText('/x/test-album/album');
   });
 
+  test('its page keeps its own address while the next page is fetched, drawn again meanwhile and going from there', async ({ page }) => {
+    await album(page);
+    await page.goto('/x/test-album/album');
+    const address = page.getByTestId('album-address');
+    await expect(address).toHaveText('/x/test-album/album');
+    // The Sessions page is fetched when it is first gone to; until it is there, the album stays on screen.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let asked!: () => void;
+    const fetching = new Promise<void>((resolve) => (asked = resolve));
+    await page.route(/\/components\/SessionsPage\.tsx/, async (route) => {
+      asked();
+      await held;
+      await route.continue();
+    });
+    await sidebar(page).getByRole('button', { name: 'Sessions' }).click();
+    await fetching;
+    await page.getByRole('button', { name: 'Start the slideshow' }).click();
+    await page.getByRole('button', { name: 'Close the slideshow' }).click();
+    await expect(address).toHaveText('/x/test-album/album');
+    await page.getByRole('button', { name: 'Marked' }).click();
+    await expect(page).toHaveURL(/\/x\/test-album\/album\?show=marked$/);
+    release();
+  });
+
   test("a part of its own over the page goes as the portal's dialogs do, as a picture of itself that its stylesheet still reaches", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('animations', 'on'));
     await album(page);
@@ -743,6 +768,22 @@ test.describe('an extension with a page of pictures and a page in Settings', () 
     await expect(page).toHaveURL(/\/s\/a$/);
     await page.goto('/settings/x/test-nothing');
     await expect(dialog).toContainText('That extension is no longer installed.');
+  });
+
+  test('opened at its address, its entry in the rail is the one chosen while what is installed is still being asked for', async ({ page }) => {
+    await page.addInitScript((spec) => localStorage.setItem('pithagoras.settings.extension-rail', JSON.stringify([{ spec, name: 'test-album' }])), ALBUM.spec);
+    await album(page);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/extensions', async (route) => {
+      await held;
+      await route.fallback();
+    });
+    await page.goto('/settings/x/test-album');
+    const entry = page.getByRole('dialog', { name: 'Settings' }).getByRole('navigation').getByRole('button', { name: 'Album', exact: true });
+    await expect(entry).toHaveAttribute('aria-current', 'page');
+    release();
+    await expect(entry).toHaveAttribute('aria-current', 'page');
   });
 
   test('installed twice, each copy has its page in Settings: by the rail, by Configure in Extensions and by a search, and its address opens the first', async ({ page }) => {

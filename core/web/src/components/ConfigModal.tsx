@@ -210,6 +210,8 @@ export const ConfigModal = memo(function ConfigModal({
   // Opened at its address, the page is that of the first package of the name.
   const activeExt =
     nav.kind === "ext" ? extensions.find((e) => ("spec" in nav ? e.spec === nav.spec : e.name === nav.name)) : undefined;
+  // Its entry in the rail: while the list is still asked for, one of the entries drawn from last time's, by the name.
+  const railSpec = nav.kind !== "ext" ? undefined : "spec" in nav ? nav.spec : (activeExt ?? configurable.find((e) => e.name === nav.name))?.spec;
   // By the spec once it is known: a page opened at its address and then chosen in the rail is not drawn anew.
   const section = nav.kind === "tab" ? nav.id : activeExt?.spec ?? ("spec" in nav ? nav.spec : nav.name);
   useEffect(() => setError(null), [section]);
@@ -320,7 +322,7 @@ export const ConfigModal = memo(function ConfigModal({
                 <RailItem
                   key={e.spec}
                   {...railEntry(e.name, settingsPages)}
-                  active={nav.kind === "ext" && ("spec" in nav ? nav.spec : activeExt?.spec) === e.spec}
+                  active={railSpec === e.spec}
                   onClick={() => setNav({ kind: "ext", spec: e.spec })}
                 />
               ))}

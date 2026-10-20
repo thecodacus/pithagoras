@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useSyncExternalStore } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
 import { api, ApiError, EXTENSIONS_CHANGED, json, type ExtensionUi } from "../api";
@@ -61,29 +61,15 @@ export function setNavigate(navigate: (path: string, options?: { replace?: boole
   go = navigate;
 }
 
-/** The page's address, as last read: what `portal.useLocation` gives. Replaced when it changes, never changed in place. */
-let here = { path: window.location.pathname, search: window.location.search };
-const hereWatchers = new Set<() => void>();
 /**
- * The address as the browser has it. The router has written it there before it draws the page it leads to,
- * so a part drawn for the first time at a new address reads that address, and not the one the app last told.
+ * The page's address as the app's router has it, which the app gives everything it draws: what `portal.useLocation`
+ * gives. Read from React, not from the browser's address bar: a part drawn first at a new address has that address
+ * from its first draw, and a page still on screen while the next one is fetched keeps its own until it goes.
  */
-function currentHere(): { path: string; search: string } {
-  const { pathname, search } = window.location;
-  if (here.path !== pathname || here.search !== search) here = { path: pathname, search };
-  return here;
-}
-/** Told by the app on every change of address, Back and Forward among them: what is drawn already reads it again. */
-export function locationChanged(): void {
-  for (const watcher of [...hereWatchers]) watcher();
-}
-function watchHere(watcher: () => void) {
-  hereWatchers.add(watcher);
-  return () => void hereWatchers.delete(watcher);
-}
-/** The hook behind `portal.useLocation`. */
+export const Here = createContext<{ path: string; search: string } | null>(null);
+/** The hook behind `portal.useLocation`. Where nothing gives it (a test page of an extension's, outside the app), the browser's address. */
 function useHere(): { path: string; search: string } {
-  return useSyncExternalStore(watchHere, currentHere);
+  return useContext(Here) ?? { path: window.location.pathname, search: window.location.search };
 }
 
 const quietly = (fn: () => void) => {

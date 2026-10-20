@@ -1,7 +1,7 @@
 import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvents, resetLiveEvents } from "./live-events";
 import { fillFrom } from "./editor-fills";
-import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, SIGNED_OUT, type PortalEvent, type Session, type SessionStatus, type SingleSignOn } from "./api";
 import { DialogFailed, ErrorBoundary } from "./components/ErrorBoundary";
@@ -27,7 +27,7 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { locationChanged, setNavigate, startExtensions } from "./extensions/loader";
+import { Here, setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { titleOf, useSlot } from "./extensions/slots";
@@ -172,8 +172,8 @@ function Shell({
     setNavigate(navigate);
     startExtensions();
   }, [navigate]);
-  // Before anything is painted at the new address: a page of an extension's that keeps what it shows in its address reads it there.
-  useLayoutEffect(() => locationChanged(), [pathname, search]);
+  // What a page of an extension's that keeps what it shows in its address reads it from (portal.useLocation).
+  const here = useMemo(() => ({ path: pathname, search }), [pathname, search]);
   const pages = useSlot("nav.page");
   // The extension's page shown, which the phone's top bar names as the sidebar does: in the language in effect.
   const extensionPage = view === "extension" ? pages.find((p) => p.key === extensionPart) : undefined;
@@ -699,6 +699,7 @@ function Shell({
   });
 
   return (
+    <Here.Provider value={here}>
     <div data-fits-keyboard className="flex h-[calc(100dvh-var(--keyboard,0px))] min-h-0 overflow-hidden bg-canvas">
       {mobileNav && <button aria-label={t("Dismiss navigation")} onClick={() => setMobileNav(false)} className="ui-backdrop fixed inset-0 z-40 bg-black/50 md:hidden" />}
       <div
@@ -897,6 +898,7 @@ function Shell({
       </Suspense>
       </ErrorBoundary>
     </div>
+    </Here.Provider>
   );
 }
 
