@@ -26,7 +26,7 @@ export const CODEMODE_TOOLS = [`+${CODEMODE_TOOL}`];
  * The extension, or undefined where this pi has none.
  *
  * Scripts get no `models`: with it they could run the session's image models
- * directly, past the portal's own picture tools and the switches and settings
+ * directly, past the tools that make pictures and the switches and settings
  * that hold those. A script reaches a model only through a tool. Replaceable,
  * as pi's own built-in one is: an installed extension with a `codemode` tool of
  * its own is loaded in its place rather than beside it with a conflict.

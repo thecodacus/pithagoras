@@ -1,21 +1,17 @@
 import Database from "better-sqlite3";
 import { inTurnWithSettings, piSetting, readPiSettings, readProjectPiSettings } from "./pi-settings.js";
 import { packageIndex, packageKey, packageLabel, toolAvailability } from "./extension-switch.js";
-import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE, imageEditingReady, imageGenerationReady } from "./image-generation.js";
-import { GENERATE_VIDEO_SOURCE, GENERATE_VIDEO_TOOL, SHOW_VIDEO_SOURCE, SHOW_VIDEO_TOOL, videoGenerationReady } from "./video-generation.js";
 import { UNDERSTORY } from "./features.js";
-import { BUILT_IN_SET, MEDIA_SET, PI_BUILT_IN_TOOLS, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
+import { BUILT_IN_SET, PI_BUILT_IN_TOOLS, PORTAL_BROWSER_TOOLS, browserTool, defaultsFor, lazyToolEntry, mcpServerOf, toolEnabled, toolSetOf } from "./tool-policy.js";
 import { projectOf } from "./workspaces.js";
 import { browserServers, dropMcpCache, mcpAdapter, mcpCachePath, mcpConfigPath, mcpServerNames, onMcpWritten, readMcpCache, readMcpFile, readableMcpConfig, serversAndBrowsers } from "./api/mcp.js";
 import { mcpCatalogue, mcpDirect, mcpOffer, unlisted, type McpOffer } from "./mcp-offer.js";
-import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { isWithinText } from "./within.js";
 import { baseDir, fitBytes, makeFolder, saveNewFile } from "./workspace-files.js";
 import { agentHome, agentHomePath, homeAgentName } from "./agent-home.js";
 import { DATA_DIR } from "./data-dir.js";
-import { removeThumbs } from "./image-thumbs.js";
-import { removePosters } from "./video-posters.js";
 import { EXECUTOR_KIND } from "./executor-kind.js";
 import { RUNS_AS_PRIMARY } from "./pi/runs-as-primary.js";
 import { CODEMODE_TOOL } from "./pi/codemode.js";
@@ -943,32 +939,12 @@ export const deleteSession = (id: string): void => getDb().transaction(() => rem
 
 function removeSession(id: string): void {
   const d = getDb();
-  const folder = (d.prepare("SELECT workspace FROM sessions WHERE id = ?").get(id) as { workspace: string } | undefined)?.workspace;
   d.prepare("DELETE FROM events WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM message_versions WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM sessions WHERE id = ?").run(id);
   setSessionSubagentModel(id, null);
   d.prepare("DELETE FROM open_subagents WHERE session_id = ?").run(id);
   d.prepare("DELETE FROM settings WHERE key = ?").run(trustedKey(id));
-  // The pictures stay in the chat's folder, which is not the chat's to take away, and so they stay in the gallery, as pictures of that folder with what they were asked for.
-  // Nothing else may name the folder once the chat is gone, so it is kept with them (see image-gallery.ts).
-  let real: string | undefined;
-  try {
-    real = folder ? realpathSync(folder) : undefined;
-  } catch {
-    // A folder that cannot be reached is not one to keep pictures of: there is nothing to find them in.
-  }
-  if (real) d.prepare("UPDATE OR IGNORE images SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
-  // What is left is what could not be kept, and what was made of it no longer names it.
-  d.prepare("UPDATE images SET source_id = NULL WHERE source_id IN (SELECT id FROM images WHERE session_id = ?)").run(id);
-  const left = (d.prepare("SELECT id FROM images WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
-  d.prepare("DELETE FROM images WHERE session_id = ?").run(id);
-  removeThumbs(left);
-  // The same for its clips (see video-gallery.ts).
-  if (real) d.prepare("UPDATE OR IGNORE videos SET origin = 'folder', folder = ?, session_id = NULL WHERE session_id = ?").run(real, id);
-  const leftClips = (d.prepare("SELECT id FROM videos WHERE session_id = ?").all(id) as { id: string }[]).map((row) => row.id);
-  d.prepare("DELETE FROM videos WHERE session_id = ?").run(id);
-  removePosters(leftClips);
 }
 
 /**
@@ -2575,7 +2551,7 @@ export function lazySetLabels(names: Iterable<string>): string[] {
   for (const tool of knownTools()) {
     if (!wanted.has(tool.name)) continue;
     const set = toolSetOf(tool, servers);
-    labels.add(given[set] ?? (set === MEDIA_SET ? "media" : set));
+    labels.add(given[set] ?? set);
   }
   return [...labels].sort();
 }
@@ -2724,16 +2700,6 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   // is not there to be switched: listing it was the list saying otherwise.
   const { offers } = view;
   const catalogue = mcpCatalogueIn(view, user, project);
-  // The portal's own tools belong to no package, so the packages cannot say
-  // that one is not offered: image generation and image editing say so
-  // themselves, while they are off.
-  // Only their own tools, which are known by being inline, as no label can say: an
-  // extension of the same name is loaded whatever the add-on says, and a file
-  // called image-generation.ts has the label the portal's factory has.
-  const images = imageGenerationReady();
-  const editing = imageEditingReady();
-  // The video tools, which exist while video generation is on: the same, for the same reasons.
-  const videos = videoGenerationReady();
   const known = [...view.known().values()];
   // Every MCP server's tools, from the adapter's cache, whether a chat has had them one by one or not: a server is a
   // group like any other, whole or tool by tool. A tool a chat reported is listed as it reported it.
@@ -2748,62 +2714,16 @@ export function shownTools(folder?: string, view: McpView = mcpView()): (Omit<Kn
   const fromHalves: KnownTool[] = [...halves].flatMap(([source, tools]) =>
     tools.filter((t) => !listed.has(t.name)).map((t) => ({ name: t.name, source, package: null, inline: true, ...(t.description ? { description: t.description } : {}) })),
   );
-  const available = [...remembered, ...fromHalves];
-  return [...available, ...notYetSeen(available, images, editing, videos)]
-    // The portal's own by its label as well: a server half's tool of one of these names is inline too, and is its own.
-    .filter((tool) => images || !(tool.name === GENERATE_IMAGE_TOOL && tool.inline && pictureSource(tool.name) === tool.source))
-    .filter((tool) => editing || !(tool.name === EDIT_IMAGE_TOOL && tool.inline && pictureSource(tool.name) === tool.source))
-    .filter((tool) => videos || !((tool.name === GENERATE_VIDEO_TOOL || tool.name === SHOW_VIDEO_TOOL) && tool.inline && pictureSource(tool.name) === tool.source))
-    .flatMap((known) => {
-      const offer = offers(known);
-      if (unlisted(offer)) return [];
-      const { package: _package, inline: _inline, ...tool } = known;
-      return [{
-        ...tool,
-        ...(portalOwned(known) ? { inline: true as const } : {}),
-        ...(offer === "cached" ? { cached: true as const } : {}),
-      }];
-    });
-}
-
-/**
- * The portal's own tools that a setting just made, for the lists to show before any chat has reported them.
- *
- * What the lists show is what a chat once registered, and one that is open while the add-on is switched on
- * registers the tool after a reload without telling anyone. The tool is the portal's, so the lists know it
- * without waiting; a tool of the same name that a chat has reported, an extension's included while its package is on, is kept as it is.
- */
-function notYetSeen(available: KnownTool[], images: boolean, editing: boolean, videos: boolean): KnownTool[] {
-  // Of the tools that can be loaded: an extension's of the same name in a package that is switched off is not, and the portal's is then the one chats have.
-  const seen = new Set(available.map((tool) => tool.name));
-  const wanted: [string, string, boolean][] = [
-    [GENERATE_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, images],
-    [EDIT_IMAGE_TOOL, EDIT_IMAGE_SOURCE, editing],
-    [GENERATE_VIDEO_TOOL, GENERATE_VIDEO_SOURCE, videos],
-    [SHOW_VIDEO_TOOL, SHOW_VIDEO_SOURCE, videos],
-  ];
-  return wanted.filter(([name, , ready]) => ready && !seen.has(name)).map(([name, source]) => ({ name, source, package: null, inline: true }));
-}
-
-/** What the portal files its own picture and video tools under, by name. Read when asked: image-generation.ts and video-generation.ts import this module. */
-const pictureSource = (name: string): string | undefined =>
-  ({
-    show_image: SHOW_IMAGE_SOURCE,
-    [GENERATE_IMAGE_TOOL]: GENERATE_IMAGE_SOURCE,
-    [EDIT_IMAGE_TOOL]: EDIT_IMAGE_SOURCE,
-    [GENERATE_VIDEO_TOOL]: GENERATE_VIDEO_SOURCE,
-    [SHOW_VIDEO_TOOL]: SHOW_VIDEO_SOURCE,
-  } as Record<string, string>)[name];
-
-/**
- * Whether the portal registered this tool itself, for the pages to group its picture tools apart from an extension's of the same name.
- *
- * An entry remembered before `inline` was recorded has no mark at all, so a picture tool of no package,
- * filed under the label the portal files it under, counts too. A report always carries the mark, `false`
- * for an extension's tool, so a loose file called image-generation.ts is never taken for the portal's.
- */
-export function portalOwned(tool: KnownTool): boolean {
-  return tool.inline === true || (tool.inline === undefined && typeof tool.package !== "string" && pictureSource(tool.name) === tool.source);
+  return [...remembered, ...fromHalves].flatMap((known) => {
+    const offer = offers(known);
+    if (unlisted(offer)) return [];
+    const { package: _package, inline, ...tool } = known;
+    return [{
+      ...tool,
+      ...(inline ? { inline: true as const } : {}),
+      ...(offer === "cached" ? { cached: true as const } : {}),
+    }];
+  });
 }
 
 /** The keys of the packages pi's settings list, or undefined when they cannot be read. */

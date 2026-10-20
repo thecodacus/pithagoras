@@ -223,37 +223,6 @@ test("an agent speaks with a voice of its own, or the one in the voice settings"
   assert.equal((await call("PUT", "/api/agents/nobody/voice", { voice: "" })).status, 404);
 });
 
-test("the pictures of a deleted agent's chats stay with a kept folder, and go with a deleted one, its routine runs' too", async () => {
-  const bot = (await call("POST", "/api/agents", { name: "Gallery Bot" })).body;
-  const chat = (await call("POST", "/api/sessions", { agent: bot.id })).body;
-  // A routine's run keeps its session when its agent is deleted, as a deleted agent's routines keep theirs.
-  const db = new Database(path.join(home, "portal.db"));
-  db.prepare("INSERT INTO sessions (id, title, workspace, executor, kind, routine_slug) VALUES ('run-1', 'A run', ?, 'host', 'routine', 'nightly')").run(bot.home);
-  mkdirSync(path.join(bot.home, "generated-images"), { recursive: true });
-  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
-  for (const [session, name, prompt] of [[chat.id, "image-20260102-120000-aaaaaa.png", "a lake"], ["run-1", "image-20260102-130000-bbbbbb.png", "a hill"]]) {
-    writeFileSync(path.join(bot.home, "generated-images", name), png);
-    db.prepare("INSERT INTO images (id, origin, session_id, path, kind, prompt, bytes, created_at) VALUES (?, 'chat', ?, ?, 'generated', ?, 72, ?)")
-      .run(name.slice(-10, -4) + "000000", session, `generated-images/${name}`, prompt, Date.now());
-  }
-  db.close();
-  const listed = async () => (await call("GET", "/api/images?limit=100")).body.pictures.filter((p) => ["a lake", "a hill"].includes(p.prompt));
-  assert.deepEqual((await listed()).map((p) => p.prompt).sort(), ["a hill", "a lake"]);
-
-  // Its folder kept: the pictures stay, as pictures of that folder with what they were asked for.
-  assert.equal((await call("DELETE", `/api/agents/${bot.id}`)).status, 200);
-  const kept = await listed();
-  assert.deepEqual(kept.map((p) => [p.prompt, p.folder?.name ?? p.chat?.title]).sort(), [["a hill", "A run"], ["a lake", "gallery-bot"]]);
-  // And the agent made again under the name has them, named after it.
-  assert.equal((await call("POST", "/api/agents", { name: "Gallery Bot" })).body.id, bot.id);
-  assert.deepEqual((await listed()).find((p) => p.prompt === "a lake").folder, { name: "Gallery Bot", home: false });
-
-  // Its folder deleted: the files are gone, and so are all of them, the run's too.
-  assert.equal((await call("DELETE", `/api/agents/${bot.id}?folder=delete`)).status, 200);
-  assert.ok(!existsSync(bot.home));
-  assert.deepEqual(await listed(), []);
-});
-
 test("a deleted agent's routines are switched off with its folder kept, and gone with it deleted, so a new agent of that name does not run them", async () => {
   const made = (await call("POST", "/api/agents", { name: "Scout" })).body;
   const routine = await call("POST", "/api/routines", { name: "scout daily", schedule: "@daily", instructions: "Look around.", workspace: made.home });

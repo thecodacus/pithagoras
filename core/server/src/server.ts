@@ -98,10 +98,6 @@ import { filesRouter } from "./api/files.js";
 import { holdsWork, unsavedRefusal, unsavedWork } from "./git.js";
 import { skillsRouter } from "./api/skills.js";
 import { featuresRouter } from "./api/features.js";
-import { imagesRouter } from "./api/images.js";
-import { forgetPicturesIn } from "./image-gallery.js";
-import { videosRouter } from "./api/videos.js";
-import { forgetVideosIn } from "./video-gallery.js";
 import { memoryRouter } from "./api/memory.js";
 import { memoryLlmRouter } from "./memory-llm.js";
 import { modelLevels, modelRuntime, providersRouter } from "./api/providers.js";
@@ -167,13 +163,11 @@ const promptJson = express.json({ limit: `${Math.ceil((MAX_IMAGES * MAX_IMAGE_BY
 // An upload is the file itself, streamed to disk by its route, whatever type
 // the browser gave it — a .json file must not be read as a request.
 const UPLOAD_ROUTE = /^\/api\/sessions\/[^/]+\/upload$/;
-// An edit on the Media page may carry a mask, a picture: its route reads its own, after the login too.
-const IMAGE_EDIT_ROUTE = "/api/images/edit";
 const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => {
   // Understory's requests for a model carry whole conversations: its route reads its own.
   // An extension's routes read their own as well, each as it needs: see extension-host.ts.
-  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path === IMAGE_EDIT_ROUTE || req.path.startsWith("/understory-llm/") || req.path.startsWith("/api/x/")) return next();
+  if (UPLOAD_ROUTE.test(req.path) || PROMPT_ROUTE.test(req.path) || req.path.startsWith("/understory-llm/") || req.path.startsWith("/api/x/")) return next();
   smallJson(req, res, next);
 });
 app.use(cookieParser());
@@ -847,9 +841,6 @@ app.delete("/api/projects/:name", async (req, res) => {
       // Where it really is, while it is there to say: what the server halves were told of it is that.
       const gone = realPath(project.path) ?? project.path;
       deleteProjectFolder(WORKSPACE_ROOT, project.name);
-      // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
-      forgetPicturesIn(project.path);
-      forgetVideosIn(project.path);
       folderRemoved(gone);
       clearProjectTools(project.name);
       clearProjectAgent(project.name);
@@ -909,12 +900,8 @@ app.delete("/api/agents/:id", async (req, res) => {
       clearAgentTools(agent.id);
       // The projects that worked with it are blank slates again.
       releaseProjectsOf(agent.id);
-      // The pictures of every chat that worked there, the routine runs the folder's removal leaves behind too: no file of them is left to show.
-      if (req.query.folder === "delete") {
-        forgetPicturesIn(agent.home);
-        forgetVideosIn(agent.home);
-        folderRemoved(home);
-      }
+      // Its folder, where it went with it: the server halves are told, as of a project's.
+      if (req.query.folder === "delete") folderRemoved(home);
       deleteNotesOf(agent.id);
       // With its folder they have nowhere left to run, and an agent made under the
       // same name must not take them over. Kept with the folder, they stay, switched off.
@@ -1760,8 +1747,6 @@ app.get("/api/sessions/:id/commands", async (req, res) => {
 app.use("/api", packagesRouter());
 app.use("/api", extensionsRouter());
 app.use("/api", featuresRouter());
-app.use("/api", imagesRouter());
-app.use("/api", videosRouter());
 app.use("/api", memoryRouter());
 app.use("/api", channelsRouter());
 app.use("/api", agentsRouter());

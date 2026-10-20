@@ -8,7 +8,7 @@ import { FileError, baseDir, uploadTarget, openDownload, openPicture } from "../
 
 /**
  * What the portal itself serves of a chat's folder: a picture or a clip to be
- * drawn in the page (the conversation, show_image, show_video, Canvases), a
+ * drawn in the page (the conversation, a tool's call, Canvases), a
  * file a call gave the person to download, and a file put there from the
  * message box. Browsing and changing the folder is
  * an extension's (Files'), with the same checks through `portal.files`.
@@ -133,10 +133,10 @@ export function filesRouter(): Router {
 
   /**
    * A picture in the folder, drawn in the page rather than downloaded: for the
-   * conversation, an extension that shows one (Files, a canvas), and what the agent puts in front of
-   * the person with show_image. Only what its bytes say is a picture is sent,
-   * with that type, and under a policy that would stop it running anything
-   * even if a browser disagreed.
+   * conversation, an extension that shows one (Files, a canvas), and what a
+   * tool's call puts in front of the person. Only what its bytes say is a
+   * picture is sent, with that type, and under a policy that would stop it
+   * running anything even if a browser disagreed.
    */
   router.get("/sessions/:id/picture", (req, res) => {
     const base = folderOf(req.params.id, res);
@@ -153,9 +153,9 @@ export function filesRouter(): Router {
   });
 
   /**
-   * A clip in the folder, played in the page rather than downloaded: for what the agent makes with
-   * generate_video and puts in front of the person with show_video. Only what its bytes say is a WebM or
-   * an MP4 is sent, with that type and under the same policy as a picture, and in parts where the player asks.
+   * A clip in the folder, played in the page rather than downloaded: for what a tool's call puts in front of the
+   * person. Only what its bytes say is a WebM or an MP4 is sent, with that type and under the same policy as a
+   * picture, and in parts where the player asks.
    */
   router.get("/sessions/:id/video", (req, res) => {
     const base = folderOf(req.params.id, res);

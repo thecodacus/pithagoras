@@ -7,8 +7,6 @@ import { inProcessHome, scratch } from "./server-harness.mjs";
 const home = inProcessHome("pithagoras-images-");
 
 const { parseImages, decodeBase64, saveImages, imagePath, loadImages, MAX_IMAGE_BYTES } = await import("../dist/prompt-images.js");
-const { parseEdit } = await import("../dist/api/images.js");
-const { MAX_PICTURE_BYTES } = await import("../dist/workspace-files.js");
 const { createSession, eventsSince } = await import("../dist/db.js");
 const { sessions, IMAGE_ROOT } = await import("../dist/session-manager.js");
 
@@ -32,7 +30,7 @@ test("what is not a picture, or too big, or too many, is refused", () => {
   assert.deepEqual(parseImages(undefined), []);
 });
 
-test("a picture that arrives as text is read by one set of rules, whether it is pasted, a mask, or what an endpoint sent", () => {
+test("a picture that arrives as text is read by one set of rules, however it is written", () => {
   // Wrapped base64, as some tools write it.
   const wrapped = PNG.replace(/(.{20})/g, "$1\r\n");
   assert.equal(parseImages([{ data: wrapped }])[0].data, PNG);
@@ -47,7 +45,7 @@ test("a picture that arrives as text is read by one set of rules, whether it is 
     magic.copy(bytes);
     return bytes.toString("base64");
   };
-  // Only short values are compared below: a failure that printed a 25 MB picture would take gigabytes to say so.
+  // Only short values are compared below: a failure that printed a 5 MB picture would take megabytes to say so.
   const outcome = (fn) => {
     try {
       const got = fn();
@@ -59,13 +57,6 @@ test("a picture that arrives as text is read by one set of rules, whether it is 
   assert.equal(outcome(() => parseImages([{ data: sized(MAX_IMAGE_BYTES) }])), "1 pictures");
   assert.equal(outcome(() => parseImages([{ data: sized(MAX_IMAGE_BYTES + 1) }])), "Picture 1 is over 5 MB");
   assert.equal(decodeBase64(sized(MAX_IMAGE_BYTES + 1), MAX_IMAGE_BYTES).error, "large");
-
-  // The same for the mask of an edit.
-  const edit = (mask) => parseEdit({ prompt: "p", sources: ["0123456789ab"], mask });
-  assert.deepEqual(edit(wrapped).mask, Buffer.from(PNG, "base64"));
-  assert.equal(edit("not base64!"), "The mask is not base64");
-  // One byte over what an edit takes, 25 MB: the one big fixture of the test.
-  assert.equal(outcome(() => edit(sized(MAX_PICTURE_BYTES + 1))), "The mask is over 25 MB");
 });
 
 test("only names made here lead to a file, and only in that chat's folder", () => {

@@ -1,12 +1,3 @@
-import { showImageTool } from "./show-image-tool.js";
-import { GENERATE_IMAGE_VOICE_LINE, GenerateImageTool } from "./generate-image-tool.js";
-import { EDIT_IMAGE_VOICE_LINE, EditImageTool } from "./edit-image-tool.js";
-import { EDIT_IMAGE_SOURCE, EDIT_IMAGE_TOOL, GENERATE_IMAGE_SOURCE, GENERATE_IMAGE_TOOL, SHOW_IMAGE_SOURCE } from "../image-generation.js";
-import { GENERATE_VIDEO_VOICE_LINE, GenerateVideoTool } from "./generate-video-tool.js";
-import { showVideoTool } from "./show-video-tool.js";
-import { GENERATE_VIDEO_SOURCE, GENERATE_VIDEO_TOOL, SHOW_VIDEO_SOURCE } from "../video-generation.js";
-import { GENERATED_VIDEO_MARK } from "../generated-video.js";
-import { GENERATED_PICTURE_MARK } from "../generated-picture.js";
 import { acceptPrompt } from "./accept-prompt.js";
 import { AUDIO_MESSAGE_PREFIX, AudioRule, VoiceFirstTurn, audioMessage, spokenIn } from "./voice-first.js";
 import { sandboxTools } from "../sandbox/tools.js";
@@ -474,23 +465,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
     // Whether the MCP adapter registered a tool, from what the session knows of it once there is one: see untrustedResult.
     let fromAdapter: (name: string) => boolean = () => false;
     const gateway = new ToolsGateway(opts.lazySets);
-    // Whether the model has the tool is settled when pi loads it and by the tool switches: the rule says
-    // so only while it has — and it is the portal's, not an extension's of the same name that pi keeps.
-    const imageTool = opts.sessionId ? new GenerateImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
-    const editTool = opts.sessionId ? new EditImageTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
-    const videoTool = opts.sessionId ? new GenerateVideoTool(opts.cwd, () => resourceLoader?.getExtensions?.().extensions ?? [], opts.sessionId) : undefined;
     // What the tools that are on ask to be told in a spoken turn, whoever registered them: `voiceGuidelines` on a
     // tool, as pi's own promptGuidelines are for every turn. Asked once the session is there (below).
     let toolVoiceLines: () => string[] = () => [];
-    const audioRule = new AudioRule(getVoiceInstructions, () =>
-      [
-        imageTool?.registered() && !switchedOff().has(GENERATE_IMAGE_TOOL) ? GENERATE_IMAGE_VOICE_LINE : "",
-        editTool?.registered() && !switchedOff().has(EDIT_IMAGE_TOOL) ? EDIT_IMAGE_VOICE_LINE : "",
-        videoTool?.registered() && !switchedOff().has(GENERATE_VIDEO_TOOL) ? GENERATE_VIDEO_VOICE_LINE : "",
-        ...toolVoiceLines(),
-      ].filter(Boolean).join(" "),
-      voiceSpeaks,
-    );
+    const audioRule = new AudioRule(getVoiceInstructions, () => toolVoiceLines().filter(Boolean).join(" "), voiceSpeaks);
     // Code mode, active from the start and switched like any other tool: off by default (see codemode.ts).
     const codemode = codemodeExtension(pi);
     try {
@@ -523,15 +501,6 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       ];
       // While the sandbox is on, pi's own tools do what they do to the system as the sandbox user: see sandbox/.
       factories.push({ name: "sandbox", factory: await sandboxTools(pi, opts.cwd) });
-      // How the agent puts a picture on the screen.
-      if (opts.sessionId) factories.push({ name: SHOW_IMAGE_SOURCE, factory: showImageTool(opts.cwd, opts.sessionId) });
-      // Registers nothing while the add-on is off or has no address: see GenerateImageTool.
-      if (imageTool) factories.push({ name: GENERATE_IMAGE_SOURCE, factory: imageTool.extension });
-      // The same for editing, with its own switch.
-      if (editTool) factories.push({ name: EDIT_IMAGE_SOURCE, factory: editTool.extension });
-      // And for video: the tool that makes a clip, and the one that shows a clip that is in the folder. Both register nothing while the add-on is off or has no address.
-      if (videoTool) factories.push({ name: GENERATE_VIDEO_SOURCE, factory: videoTool.extension });
-      if (opts.sessionId) factories.push({ name: SHOW_VIDEO_SOURCE, factory: showVideoTool(opts.cwd, opts.sessionId) });
       if (opts.routineTools)
         factories.push({ name: "routines", factory: routineTools(opts.sessionId) });
       if (opts.questions) factories.push({ name: ASK_QUESTION_SOURCE, factory: askQuestionTool(questionWaitMs) });
@@ -697,15 +666,10 @@ export class SdkPiClient extends EventEmitter implements PiClient {
       const ending = event?.type === "tool_execution_end";
       const called = starting && event.toolName === GATEWAY_TOOL && !gateway.taken() ? calledThrough(event.args)?.name : undefined;
       if (called) lazyCalls.set(String(event.toolCallId), called);
-      // The start of a call of the portal's own picture tools says so: the page draws the preview of a picture for those from then on, and never for the tool of that name an extension may bring, which pi keeps instead. Only here is it known which of the two it is; the end says only which files the call gave, as any call's does.
-      const tool = called ?? event?.toolName;
-      const own = starting && ((tool === GENERATE_IMAGE_TOOL && imageTool?.registered()) || (tool === EDIT_IMAGE_TOOL && editTool?.registered()));
-      // The same for the portal's generate_video, with a mark of its own.
-      const ownVideo = starting && tool === GENERATE_VIDEO_TOOL && videoTool?.registered();
       // The end of a call carries no arguments, so it is told again there which tool was called.
       const was = ending ? lazyCalls.get(String(event.toolCallId)) : undefined;
       if (ending) lazyCalls.delete(String(event.toolCallId));
-      client.forward(own ? { ...event, [GENERATED_PICTURE_MARK]: true } : ownVideo ? { ...event, [GENERATED_VIDEO_MARK]: true } : was ? { ...event, [CALLED_TOOL_KEY]: was } : event);
+      client.forward(was ? { ...event, [CALLED_TOOL_KEY]: was } : event);
     });
     // Replace the placeholder now that we have the real unsubscribe.
     (client as any).unsubscribe = typeof unsub === "function" ? unsub : () => {};
@@ -1802,9 +1766,9 @@ export class SdkPiClient extends EventEmitter implements PiClient {
 
   /**
    * The rule as the tools are now, after a reload or a tool switch: what it
-   * says of a tool that came or went, such as image generation, holds from the
-   * next message of any kind, not only from the next spoken one. A conversation
-   * that has no rule has nothing to correct.
+   * says of a tool that came or went, such as one that follows its settings,
+   * holds from the next message of any kind, not only from the next spoken
+   * one. A conversation that has no rule has nothing to correct.
    */
   private sayAudioRuleAgain(): void {
     const rule = this.audioRule;
