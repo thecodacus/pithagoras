@@ -15,8 +15,7 @@ writeFileSync(
 const {
   adoptBrowserGrants,
   browserAllowed,
-  browserByDefault,
-  browserExceptions,
+  browserPolicy,
   createSession,
   getDb,
   getSession,
@@ -25,7 +24,11 @@ const {
   setSessionTools,
   setToolDefaultsOff,
   toolDefaultsOff,
+  toolsDifferWith,
 } = await import("../dist/db.js");
+/** What the Browser page is told: whether a conversation that has said nothing has the browser, and those that differ. */
+const browserByDefault = () => toolsDifferWith(browserPolicy()).byDefault;
+const browserExceptions = () => toolsDifferWith(browserPolicy()).chats;
 
 const BROWSER = ["browser_browser_click", "browser_browser_navigate"];
 const seen = () => [

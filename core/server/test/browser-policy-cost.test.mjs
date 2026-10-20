@@ -63,13 +63,13 @@ test("the MCP file is read once to tell which servers are the browser", () => {
 
 test("the conversations that differ from the browser default are found from one read of the file and of the settings", () => {
   // What each conversation would answer asked on its own: the answer to hold the pass against.
-  const byDefault = db.browserByDefault();
+  const byDefault = db.toolsDifferWith(db.browserPolicy()).byDefault;
   const rows = getDb().prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all();
   const expected = rows.filter((row) => db.browserAllowed(row) !== byDefault).map((row) => row.id).sort();
   assert.ok(expected.length > 10 && expected.length < rows.length, `${expected.length} of ${rows.length}`);
 
-  const { result, counts } = counting(() => db.browserExceptions());
-  assert.deepEqual(result.map((row) => row.id).sort(), expected);
+  const { result, counts } = counting(() => db.toolsDifferWith(db.browserPolicy()));
+  assert.deepEqual(result.chats.map((row) => row.id).sort(), expected);
   assert.ok(counts.mcp <= 2, `${counts.mcp} reads of the MCP file`);
   assert.ok(counts.settings <= 4, `${counts.settings} reads of the settings table`);
 });

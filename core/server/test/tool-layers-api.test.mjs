@@ -143,9 +143,9 @@ test("the Browser page lists the chats an agent's switches give the browser", as
   const agent = await json("/api/agents", "POST", { name: "Surfer" });
   db.setToolDefaultsOff(["web_fetch", "browser_navigate", "browser_click"]);
   db.createSession({ id: "surfer-chat", title: "Surfing", workspace: agent.home, executor: "host" });
-  assert.ok(!db.browserExceptions().some((row) => row.id === "surfer-chat"));
+  assert.ok(!db.toolsDifferWith(db.browserPolicy()).chats.some((row) => row.id === "surfer-chat"));
   db.setAgentTools(agent.id, { off: [], on: ["browser_navigate"] });
-  assert.ok(db.browserExceptions().some((row) => row.id === "surfer-chat"));
+  assert.ok(db.toolsDifferWith(db.browserPolicy()).chats.some((row) => row.id === "surfer-chat"));
   db.setToolDefaultsOff(["web_fetch"]);
 });
 

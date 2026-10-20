@@ -10,8 +10,10 @@ const home = inProcessHome("pithagoras-fresh-");
 const mcp = path.join(process.env.PI_CODING_AGENT_DIR, "mcp.json");
 writeFileSync(mcp, JSON.stringify({ mcpServers: { browser: {} } }));
 
-const { browserAllowed, browserByDefault, createSession, getDb, getSession, rememberTools, toolDefaultsOff } =
+const { browserAllowed, browserPolicy, createSession, getDb, getSession, rememberTools, toolDefaultsOff, toolsDifferWith } =
   await import("../dist/db.js");
+/** Whether a conversation that has said nothing about the browser has it, as the Browser page is told. */
+const browserByDefault = () => toolsDifferWith(browserPolicy()).byDefault;
 
 createSession({ id: "first", title: "first", workspace: home, executor: "host" });
 

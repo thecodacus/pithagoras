@@ -2048,7 +2048,8 @@ function browserAdoptionPending(): boolean {
  * The `sessions.browser` column is what that second place was. It is still
  * read, and not to be dropped: here while no browser tool has been seen (see
  * `browserColumnDecides`, which a container deployment always is), by
- * `adoptBrowserGrants` to carry the grants over, and by `browserExceptions`.
+ * `adoptBrowserGrants` to carry the grants over, and where the conversations
+ * that differ from the default are listed (see chatsDifferingWith).
  */
 export function browserAllowed(session: SessionRow): boolean {
   return toolsOnWith(session, browserPolicy());
@@ -2175,19 +2176,6 @@ export function browserConfigured(): boolean {
 }
 
 /**
- * The conversations that disagree with the default about the browser.
- *
- * Every one that says anything about tools, and every one that holds the old
- * grant, is asked — not those whose switches happen to mention the word
- * `browser`, which is not what a server is called when it is called something
- * else, and misses the column where that is still the only record.
- */
-export function browserExceptions(): SessionRow[] {
-  const policy = browserPolicy();
-  return chatsDifferingWith(policy, toolsByDefaultWith(policy));
-}
-
-/**
  * Where some tools are not what the default says: whether a conversation that has never said anything about them
  * has any of them on, the chats that have them otherwise, and the routines whose own settings give their runs
  * another answer than a routine that sets nothing would have, each with that answer. What `portal.tools.exceptions`
@@ -2213,7 +2201,14 @@ export function toolsDifferWith(policy: ToolsPolicy): ToolsDiffer {
   return { byDefault, chats: chatsDifferingWith(policy, byDefault), routines: routinesDifferingWith(policy) };
 }
 
-/** The conversations whose answer for the policy's tools is not `byDefault`: see browserExceptions. */
+/**
+ * The conversations whose answer for the policy's tools is not `byDefault`.
+ *
+ * Every one that says anything about tools, and every one that holds the old
+ * browser grant, is asked — not those whose switches happen to mention the word
+ * `browser`, which is not what a server is called when it is called something
+ * else, and misses the column where that is still the only record.
+ */
 function chatsDifferingWith(policy: ToolsPolicy, byDefault: boolean): SessionRow[] {
   const rows = getDb()
     .prepare(
@@ -2264,11 +2259,6 @@ function routinesDifferingWith(policy: ToolsPolicy): { slug: string; name: strin
     const otherwise = policy.names.some((name) => toolEnabled(name, unsaidOff, { off: [], on: [] }));
     return allowed === otherwise ? [] : [{ slug: row.slug, name: row.name, allowed }];
   });
-}
-
-/** Is the browser on for a conversation that has never said anything about it? */
-export function browserByDefault(): boolean {
-  return toolsByDefaultWith(browserPolicy());
 }
 
 /** Whether any of the policy's tools is on for a conversation that has never said anything about them. */

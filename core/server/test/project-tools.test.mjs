@@ -171,7 +171,7 @@ test("the browser follows the project: its tools off there take the browser with
   assert.equal(db.browserAllowed(inAlpha), false);
   assert.equal(db.browserAllowed(inBeta), true);
   // Listed with the conversations that differ from the default, though it never said anything itself.
-  const differ = db.browserExceptions().map((s) => s.id);
+  const differ = db.toolsDifferWith(db.browserPolicy()).chats.map((s) => s.id);
   assert.ok(differ.includes(inAlpha.id));
   assert.ok(!differ.includes(inBeta.id));
   // A chat that switched it back on is the exception to its project.

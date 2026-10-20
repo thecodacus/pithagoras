@@ -54,8 +54,9 @@ test("the browser's tools differ where the Browser page has always said they do,
   for (const off of [[], BROWSER]) {
     db.setToolDefaultsOff(off);
     const asked = db.toolExceptions(db.seenBrowserTools());
-    assert.equal(asked.byDefault, db.browserByDefault(), `default off: ${off.join(", ")}`);
-    assert.deepEqual(ids(asked.chats), ids(db.browserExceptions()), `default off: ${off.join(", ")}`);
+    const page = db.toolsDifferWith(db.browserPolicy());
+    assert.equal(asked.byDefault, page.byDefault, `default off: ${off.join(", ")}`);
+    assert.deepEqual(ids(asked.chats), ids(page.chats), `default off: ${off.join(", ")}`);
   }
   db.setToolDefaultsOff([]);
   assert.deepEqual(ids(db.toolExceptions(BROWSER).chats), ["browser-off", "in-alpha"]);

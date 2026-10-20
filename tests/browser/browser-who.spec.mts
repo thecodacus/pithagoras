@@ -18,7 +18,7 @@ async function portal(page: Page, overrides: Record<string, unknown>) {
   });
 }
 
-test('the chats that differ from the default and the routines given the browser are each said on or off', async ({ page }) => {
+test('the chats that differ from the default are each said on or off, and the routines given the browser are listed', async ({ page }) => {
   await portal(page, {
     configured: true,
     sessions: [{ id: 's1', title: 'Shopping', kind: 'task', allowed: false }],
@@ -28,16 +28,14 @@ test('the chats that differ from the default and the routines given the browser 
   await expect(page.getByText(/^Every conversation, unless its own tools say otherwise/)).toBeVisible();
   const shopping = page.getByRole('button', { name: /Shopping/ });
   await expect(shopping).toContainText('off');
-  const nightly = page.getByRole('listitem').filter({ hasText: 'Nightly digest' });
-  await expect(nightly).toContainText('on');
-  await expect(nightly).toContainText('routine');
+  await expect(page.getByRole('listitem').filter({ hasText: 'Nightly digest' })).toContainText('routine');
 });
 
-test('with the browser off by default, a routine that has it is said on, and the sidebar lists the page for it', async ({ page }) => {
+test('with the browser off by default, a routine that has it is listed, and the sidebar lists the page for it', async ({ page }) => {
   await portal(page, { byDefault: false, routines: [{ slug: 'shop', name: 'Shop check', allowed: true }] });
   await page.goto('/browser');
   await expect(page.getByText(/^No conversation, unless its own tools say otherwise/)).toBeVisible();
-  await expect(page.getByRole('listitem').filter({ hasText: 'Shop check' })).toContainText('on');
+  await expect(page.getByRole('listitem').filter({ hasText: 'Shop check' })).toContainText('routine');
   await expect(page.getByRole('navigation', { name: 'Destinations' }).getByText('Browser', { exact: true }).first()).toBeAttached();
 });
 

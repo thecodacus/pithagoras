@@ -1720,8 +1720,7 @@ export interface BrowserStatus {
   byDefault: boolean;
   /** Only the conversations that disagree with that — see "Who may drive it". */
   sessions: { id: string; title: string; kind: string; allowed: boolean }[];
-  /** And the routines whose own switch or tools give their runs another answer than a routine that sets nothing, with that answer. */
-  routines: { slug: string; name: string; allowed: boolean }[];
+  routines: { slug: string; name: string }[];
 }
 
 /** A skill an agent wrote for itself, in its home's skills folder. */

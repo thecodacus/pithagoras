@@ -20,8 +20,10 @@ writeFileSync(
   })
 );
 
-const { browserAllowed, browserByDefault, createSession, getSession, rememberTools, setSessionTools } =
+const { browserAllowed, browserPolicy, createSession, getSession, rememberTools, setSessionTools, toolsDifferWith } =
   await import("../dist/db.js");
+/** Whether a conversation that has said nothing about the browser has it, as the Browser page is told. */
+const browserByDefault = () => toolsDifferWith(browserPolicy()).byDefault;
 const { browserServers, findConnection } = await import("../dist/api/mcp.js");
 
 createSession({ id: "c1", title: "c", workspace: home, executor: "host" });
