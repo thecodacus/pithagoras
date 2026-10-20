@@ -27,7 +27,7 @@ import { reconcile } from "./reconcile";
 import { useStable } from "./use-stable";
 import { useDialogFocus } from "./dialog-focus";
 import { t, useLanguage } from "./i18n";
-import { setNavigate, startExtensions } from "./extensions/loader";
+import { setLocation, setNavigate, startExtensions } from "./extensions/loader";
 import { extensionMessage } from "./extensions/channel";
 import { serverPush, setChatOnScreen } from "./extensions/server-feed";
 import { useSlot } from "./extensions/slots";
@@ -147,8 +147,11 @@ export default function App() {
       <Route path="/s/:sessionId" element={<Shell />} />
       <Route path="/s/:sessionId/settings" element={<Shell settings />} />
       <Route path="/s/:sessionId/settings/:tab" element={<Shell settings />} />
+      {/* An extension's page in Settings, over a chat or not: settings/x/<extension>. */}
+      <Route path="/s/:sessionId/settings/x/*" element={<Shell settings />} />
       <Route path="/settings" element={<Shell settings />} />
       <Route path="/settings/:tab" element={<Shell settings />} />
+      <Route path="/settings/x/*" element={<Shell settings />} />
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
@@ -173,13 +176,17 @@ function Shell({
   settings?: boolean;
   view?: "chat" | "sessions" | "projects" | "agents" | "routines" | "browser" | "memory" | "media" | "audit" | "extension";
 }) {
-  const { sessionId, tab, "*": extensionPage = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
+  // What follows /x/ in the address: `<extension>/<page id>` of a page an extension brought, or `<extension>` of its page in Settings.
+  const { sessionId, tab, "*": extensionPart = "" } = useParams<{ sessionId?: string; tab?: string; "*"?: string }>();
   const navigate = useNavigate();
+  const { pathname, search } = useLocation();
   // What the installed extensions draw in the portal: see extensions/loader.ts.
   useEffect(() => {
     setNavigate(navigate);
     startExtensions();
   }, [navigate]);
+  // Before anything is painted at the new address: a page of an extension's that keeps what it shows in its address reads it there.
+  useLayoutEffect(() => setLocation(pathname, search), [pathname, search]);
   const pages = useSlot("nav.page");
   const [mobileNav, setMobileNav] = useState(false);
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
@@ -724,7 +731,7 @@ function Shell({
         sessions={sessions}
         executor={executor}
         activeId={sessionId ?? null}
-        view={view === "extension" ? `x/${extensionPage}` : view}
+        view={view === "extension" ? `x/${extensionPart}` : view}
         hasBrowser={hasBrowser}
         hasMemory={hasMemory}
         hasMedia={hasMedia}
@@ -745,7 +752,7 @@ function Shell({
             would only repeat its title; in voice mode that header is gone. */}
         <header className="app-mobile-bar flex shrink-0 items-center gap-3 border-b border-line px-3 py-2 md:hidden">
           <button type="button" aria-label={t("Open navigation")} aria-expanded={mobileNav} aria-controls="mobile-navigation" onClick={() => setMobileNav(true)} className="rounded-lg p-2 text-fg hover:bg-fg/10"><LuMenu size={20}/></button>
-          <span className="truncate text-sm text-fg">{(view === "extension" && pages.find((p) => p.key === extensionPage)?.title) || active?.title || "Pithagoras"}</span>
+          <span className="truncate text-sm text-fg">{(view === "extension" && pages.find((p) => p.key === extensionPart)?.title) || active?.title || "Pithagoras"}</span>
         </header>
         <UpdateNotice onDetails={openUpdate} />
         {error && <ErrorBanner className="mx-4 mt-2" onClose={() => setError(null)}>{error}</ErrorBanner>}
@@ -796,7 +803,7 @@ function Shell({
         ) : view === "audit" ? (
           <AuditPage />
         ) : view === "extension" ? (
-          <ExtensionPage entryKey={extensionPage} />
+          <ExtensionPage entryKey={extensionPart} />
         ) : active ? (
           <Chat
             session={active}
@@ -890,6 +897,7 @@ function Shell({
         {settings && (
           <ConfigModal
             initialTab={LEGACY_TABS[tab ?? ""] ?? (tab && isTab(tab) ? tab : "general")}
+            extension={extensionPart || undefined}
             onClose={closeSettings}
             onSetup={setUpModel}
           />

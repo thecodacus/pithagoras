@@ -55,10 +55,28 @@ let settled = false;
 const watchers = new Set<() => void>();
 const changed = () => { for (const watcher of [...watchers]) watcher(); };
 
-let go: (path: string) => void = () => {};
+let go: (path: string, options?: { replace?: boolean }) => void = () => {};
 /** How `portal.navigate` goes somewhere: the app's own router, once it is there. */
-export function setNavigate(navigate: (path: string) => void): void {
+export function setNavigate(navigate: (path: string, options?: { replace?: boolean }) => void): void {
   go = navigate;
+}
+
+/** The page's address, as the app's router last said it: what `portal.useLocation` gives. Replaced when it changes, never changed in place. */
+let here = { path: window.location.pathname, search: window.location.search };
+const hereWatchers = new Set<() => void>();
+/** Where the app's router is now: told by the app on every change of address, Back and Forward among them. */
+export function setLocation(path: string, search: string): void {
+  if (here.path === path && here.search === search) return;
+  here = { path, search };
+  for (const watcher of [...hereWatchers]) watcher();
+}
+function watchHere(watcher: () => void) {
+  hereWatchers.add(watcher);
+  return () => void hereWatchers.delete(watcher);
+}
+/** The hook behind `portal.useLocation`. */
+function useHere(): { path: string; search: string } {
+  return useSyncExternalStore(watchHere, () => here);
 }
 
 const quietly = (fn: () => void) => {
@@ -146,7 +164,8 @@ async function activate(ext: ExtensionUi, told: Promise<void>[]): Promise<void> 
       extension: ext.name,
       React,
       slots: { register: (slot, entry) => kept(register(ext.name, slot, entry)) },
-      navigate: (path) => go(path),
+      navigate: (path, options) => go(path, options),
+      useLocation: useHere,
       ui,
       api: {
         json,

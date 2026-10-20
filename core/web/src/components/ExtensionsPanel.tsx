@@ -112,7 +112,7 @@ export function ExtensionsPanel({
   onRetry: () => unknown;
   onError: (e: string) => void;
   onRefresh: () => Promise<ExtensionInfo[]>;
-  onConfigure: (spec: string) => void;
+  onConfigure: (name: string) => void;
 }) {
   const id = useId();
   const [view, setView] = useState<View>("installed");
@@ -303,7 +303,7 @@ export function ExtensionsPanel({
                           <span title={ext.spec} className="min-w-0 truncate font-mono text-[10px] text-fg-faint">{ext.spec}</span>
                           <span className="ml-auto flex shrink-0 items-center gap-1">
                             {configurable && (
-                              <button onClick={() => onConfigure(ext.spec)} className="rounded-lg px-2 py-1 text-[11px] text-accent transition hover:bg-accent/10">
+                              <button onClick={() => onConfigure(ext.name)} className="rounded-lg px-2 py-1 text-[11px] text-accent transition hover:bg-accent/10">
                                 {ext.settings.length > 0 ? t("Configure ({n})", { n: ext.settings.length }) : t("Configure")} ›
                               </button>
                             )}

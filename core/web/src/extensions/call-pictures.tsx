@@ -9,10 +9,13 @@ import { ImagePreview } from "../components/ImagePreview";
  */
 export const viewerIds = new WeakMap<CallFile, string>();
 
-/** `ui.ImagePreview`: the portal's preview, opening the chat's viewer for a picture a call gave. */
-export const CallImagePreview: Ui["ImagePreview"] = ({ file, onOpen, src, ...props }) => {
+/**
+ * `ui.ImagePreview`: the portal's preview, opening the chat's viewer for a picture a call gave. Marked for a viewer
+ * to find it by the chat viewer's id for that picture, or else by the `pictureId` the extension gave.
+ */
+export const CallImagePreview: Ui["ImagePreview"] = ({ file, onOpen, src, pictureId, ...props }) => {
   const own = useId();
-  const id = (file && viewerIds.get(file)) ?? own;
+  const id = (file && viewerIds.get(file)) ?? pictureId ?? own;
   const open = file?.open ?? onOpen;
   return <ImagePreview {...props} src={src ?? file?.url} pictureId={open ? id : undefined} onOpen={open ? () => open() : undefined} />;
 };

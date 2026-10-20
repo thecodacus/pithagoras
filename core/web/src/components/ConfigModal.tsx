@@ -70,7 +70,7 @@ import { effortLabel } from "../effort";
 import { modelTraits } from "../model-traits";
 import { languageChoice, languages, msg, setLanguage, t, tp, tx, useLanguage, type LanguageChoice } from "../i18n";
 import { ErrorBoundary, PartFailed } from "./ErrorBoundary";
-import { useSlot } from "../extensions/slots";
+import { useSlot, type Registered } from "../extensions/slots";
 import { translate } from "../extensions/strings";
 import { SkeletonGroup } from "./Skeleton";
 import { useFlash } from "../use-flash";
@@ -84,8 +84,8 @@ import { useFlash } from "../use-flash";
  */
 const OWN_LAYOUT = new Set<Tab>(["extensions", "logs", "advanced"]);
 
-/** Either a fixed tab or one extension's own configuration page. */
-type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; spec: string };
+/** Either a fixed tab or one extension's own configuration page, by its package's name, as its address names it (/settings/x/<name>). */
+type Nav = { kind: "tab"; id: Tab } | { kind: "ext"; name: string };
 
 type TabDef = { id: Tab; label: string; icon: ReactNode; hint: string };
 
@@ -146,17 +146,33 @@ function railSnapshot(): { spec: string; name: string }[] {
   }
 }
 
+/**
+ * An extension's page as Settings' rail lists it: the title and the icon its own page gives (`settings.page`), in
+ * place of its package's name and the mark every extension has.
+ */
+function railEntry(name: string, pages: readonly Registered<"settings.page">[]): { label: string; icon: ReactNode } {
+  const page = pages.find((p) => p.extension === name);
+  return {
+    label: page?.title ? translate(name, page.title) : name,
+    // An extension's icon is a bare <svg>, sized as the portal's own icons size themselves: by the text beside them.
+    icon: page?.icon ? <span className="contents [&>svg]:h-[1em] [&>svg]:w-[1em]"><page.icon /></span> : <LuPuzzle />,
+  };
+}
+
 export const ConfigModal = memo(function ConfigModal({
   onClose,
   initialTab = "general",
+  extension,
   onSetup,
 }: {
   onClose: () => void;
   initialTab?: Tab;
+  /** An extension's page to open on in place of a tab, by its package's name. */
+  extension?: string;
   /** Opens the setup assistant in its place. */
   onSetup?: () => void;
 }) {
-  const [nav, setNav] = useState<Nav>({ kind: "tab", id: TABS.some((t) => t.id === initialTab) ? initialTab : "general" });
+  const [nav, setNav] = useState<Nav>(extension ? { kind: "ext", name: extension } : { kind: "tab", id: TABS.some((t) => t.id === initialTab) ? initialTab : "general" });
   const [error, setError] = useState<string | null>(null);
   const banner = useRef<HTMLDivElement>(null);
   /** A section a search went to, to scroll to once its page has drawn it. */
@@ -178,7 +194,7 @@ export const ConfigModal = memo(function ConfigModal({
   useEffect(() => {
     if (error) banner.current?.scrollIntoView({ block: "nearest" });
   }, [error]);
-  const section = nav.kind === "tab" ? nav.id : nav.spec;
+  const section = nav.kind === "tab" ? nav.id : nav.name;
   useEffect(() => setError(null), [section]);
 
   // A package has a page here when the portal found settings it reads, or when it brought a page of its own.
@@ -191,7 +207,7 @@ export const ConfigModal = memo(function ConfigModal({
     local.set(RAIL_KEY, JSON.stringify(configurable.map((e) => ({ spec: e.spec, name: e.name }))));
   }, [exts.value]);
   const activeExt =
-    nav.kind === "ext" ? extensions.find((e) => e.spec === nav.spec) : undefined;
+    nav.kind === "ext" ? extensions.find((e) => e.name === nav.name) : undefined;
   // The extension pages rise in when they arrive late; drawn from what was
   // kept, they are simply there. Once in, a refresh does not replay it.
   // Not over names already drawn from the snapshot: they would rise a second time.
@@ -217,26 +233,29 @@ export const ConfigModal = memo(function ConfigModal({
       words: `${e.words ?? ""} ${e.title} ${e.section ?? ""}`,
       where: label(e.tab),
     }));
-    const own = extensions.flatMap((x) => [
-      { tab: "extensions", ext: x.spec, title: x.name, words: `${x.description ?? ""} extension settings`, where: t("Extension settings") },
-      ...x.settings.map((st) => ({ tab: "extensions", ext: x.spec, section: t("Settings"), title: humanKey(st.key), words: `${st.key} ${x.name}`, where: x.name })),
-      // What the extension's own page says is on it, in the words the page shows, and in English too.
-      ...settingsPages.filter((page) => page.extension === x.name).flatMap((page) =>
-        (page.search ?? []).map((found) => ({
-          tab: "extensions",
-          ext: x.spec,
-          title: translate(x.name, found.title),
-          ...(found.section ? { section: translate(x.name, found.section) } : {}),
-          words: `${found.words ?? ""} ${found.title} ${found.section ?? ""}`,
-          where: x.name,
-        })),
-      ),
-    ]);
+    const own = extensions.flatMap((x) => {
+      const { label } = railEntry(x.name, settingsPages);
+      return [
+        { tab: "extensions", ext: x.name, title: label, words: `${x.name} ${x.description ?? ""} extension settings`, where: t("Extension settings") },
+        ...x.settings.map((st) => ({ tab: "extensions", ext: x.name, section: t("Settings"), title: humanKey(st.key), words: `${st.key} ${x.name}`, where: label })),
+        // What the extension's own page says is on it, in the words the page shows, and in English too.
+        ...settingsPages.filter((page) => page.extension === x.name).flatMap((page) =>
+          (page.search ?? []).map((found) => ({
+            tab: "extensions",
+            ext: x.name,
+            title: translate(x.name, found.title),
+            ...(found.section ? { section: translate(x.name, found.section) } : {}),
+            words: `${found.words ?? ""} ${found.title} ${found.section ?? ""}`,
+            where: label,
+          })),
+        ),
+      ];
+    });
     return [...fixed, ...own];
   }, [extensions, settingsPages, lang]);
 
   const go = (entry: SettingEntry) => {
-    setNav(entry.ext ? { kind: "ext", spec: entry.ext } : { kind: "tab", id: entry.tab as Tab });
+    setNav(entry.ext ? { kind: "ext", name: entry.ext } : { kind: "tab", id: entry.tab as Tab });
     if (entry.section) setTarget({ section: entry.section, n: Date.now() });
   };
 
@@ -269,8 +288,8 @@ export const ConfigModal = memo(function ConfigModal({
       title={t("Settings")}
       subtitle={t("Applies to the whole portal")}
       onClose={onClose}
-      startInRail={initialTab === "general"}
-      section={nav.kind === "tab" ? t(TABS.find((x) => x.id === nav.id)?.label ?? "") : activeExt?.name}
+      startInRail={!extension && initialTab === "general"}
+      section={nav.kind === "tab" ? t(TABS.find((x) => x.id === nav.id)?.label ?? "") : activeExt && railEntry(activeExt.name, settingsPages).label}
       rail={
         <SettingsSearch index={index} onPick={go}>
         <div className="space-y-4">
@@ -295,10 +314,9 @@ export const ConfigModal = memo(function ConfigModal({
               {configurable.map((e) => (
                 <RailItem
                   key={e.spec}
-                  icon={<LuPuzzle />}
-                  label={e.name}
-                  active={nav.kind === "ext" && nav.spec === e.spec}
-                  onClick={() => setNav({ kind: "ext", spec: e.spec })}
+                  {...railEntry(e.name, settingsPages)}
+                  active={nav.kind === "ext" && nav.name === e.name}
+                  onClick={() => setNav({ kind: "ext", name: e.name })}
                 />
               ))}
             </RailGroup>
@@ -333,7 +351,7 @@ export const ConfigModal = memo(function ConfigModal({
           onRetry={exts.reload}
           onError={setError}
           onRefresh={loadExtensions}
-          onConfigure={(spec) => setNav({ kind: "ext", spec })}
+          onConfigure={(name) => setNav({ kind: "ext", name })}
         />
       )}
       {nav.kind === "tab" && nav.id === "shortcuts" && <KeyboardShortcuts />}
